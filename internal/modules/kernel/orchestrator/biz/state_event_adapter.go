@@ -110,9 +110,9 @@ func (r runEventRepository) Update(ctx context.Context, item *runmodel.Run) erro
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, updateRunCommandFromModel(item))
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID)
-	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandStoreRuntimeStateRecord, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, storeRuntimeStateRecordCommandFromModel(item))
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandStoreRuntimeStateRecord, "run", string(item.ID), item.WorkspaceID, item.ID)
+	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandStoreRuntimeStateRecord)
 	return err
 }
 
@@ -374,11 +374,11 @@ func createRunCommandFromModel(item *runmodel.Run) runevents.CreateRunCommand {
 	}
 }
 
-func updateRunCommandFromModel(item *runmodel.Run) runevents.UpdateRunCommand {
+func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) runevents.StoreRuntimeStateRecordCommand {
 	if item == nil {
-		return runevents.UpdateRunCommand{}
+		return runevents.StoreRuntimeStateRecordCommand{}
 	}
-	ret := runevents.UpdateRunCommand{
+	ret := runevents.StoreRuntimeStateRecordCommand{
 		RunID:        item.ID,
 		WorkspaceID:  item.WorkspaceID,
 		RuntimeState: cloneRuntimeStateRecord(item.RuntimeState),

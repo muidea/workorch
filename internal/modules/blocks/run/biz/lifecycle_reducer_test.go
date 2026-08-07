@@ -15,8 +15,8 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func terminalDeliveryTestCommand(identity runtimecontract.RuntimeTerminalDeliveryIdentity, causationID string) runevents.ApplyRuntimeTerminalDeliveryCommand {
-	return runevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{
+func terminalDeliveryTestCommand(identity runtimecontract.RuntimeTerminalDeliveryIdentity, causationID string) runevents.RuntimeTerminalDeliveryFact {
+	return runevents.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryIdentity: identity,
 		SourceOwner:                     "kernel/orchestrator",
 		CausationID:                     causationID,
@@ -111,9 +111,9 @@ func TestReduceActivateRunTerminalIsNoop(t *testing.T) {
 	}
 }
 
-func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64, actualSchema uint32) runevents.ApplyRuntimeStateIncompatibleFactCommand {
+func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64, actualSchema uint32) runevents.RuntimeStateIncompatibleFact {
 	stateRef := runevents.RuntimeStateRef(workspaceID, runID, revision)
-	return runevents.ApplyRuntimeStateIncompatibleFactCommand{
+	return runevents.RuntimeStateIncompatibleFact{
 		WorkspaceID:            workspaceID,
 		RunID:                  runID,
 		SourceOwner:            "kernel/orchestrator",
@@ -181,7 +181,7 @@ func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 	}
 	ctx := context.Background()
 	response, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunFactRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		schemaIncompatibleFact("ws-1", "run-1", 4, 2),
 	))
 	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
@@ -197,14 +197,14 @@ func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
 		RuntimeState:     &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceResolutions: []runtimecontract.RuntimeGovernanceResolutionRecord{{ResolutionID: "res-1", TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
 	}
-	_, err := reduceContinuationEligible(current, runevents.ApplyRuntimeContinuationEligibleCommand{
+	_, err := reduceContinuationEligible(current, runevents.RuntimeContinuationEligibleFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "cause-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", ResolutionID: "res-1", TicketID: "ticket-other",
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
 	}
-	tr, err := reduceContinuationEligible(current, runevents.ApplyRuntimeContinuationEligibleCommand{
+	tr, err := reduceContinuationEligible(current, runevents.RuntimeContinuationEligibleFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "cause-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", ResolutionID: "res-1", TicketID: "ticket-1",
 	})
@@ -221,7 +221,7 @@ func TestReduceGovernanceWaitDuplicateIsNoop(t *testing.T) {
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
 		RuntimeState:     &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceRequests: []runtimecontract.RuntimeGovernanceRequestRecord{{TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
 	}
-	tr, err := reduceGovernanceWait(current, runevents.ApplyRuntimeGovernanceWaitCommand{
+	tr, err := reduceGovernanceWait(current, runevents.RuntimeGovernanceWaitFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "cause-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", BlockingTicketID: "ticket-1",
 	})
@@ -377,8 +377,8 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunStateChanged) })
 
 	_, err := biz.executeCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandUpdate, "test", runevents.CommandDestination, magicevent.NewHeader(), context.Background(),
-		runevents.UpdateRunCommand{
+		runevents.TopicRunCommandStoreRuntimeStateRecord, "test", runevents.CommandDestination, magicevent.NewHeader(), context.Background(),
+		runevents.StoreRuntimeStateRecordCommand{
 			RunID: seed.ID, WorkspaceID: seed.WorkspaceID,
 		},
 	))
@@ -391,7 +391,7 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	// UpdateRunCommand intentionally has no State/blocker/failure/lineage fields;
+	// StoreRuntimeStateRecordCommand intentionally has no State/blocker/failure/lineage fields;
 	// this is the regression assertion that generic persistence cannot express an
 	// SM-1 transition.
 }
@@ -428,7 +428,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	}, runevents.StoreRuntimeStateRecordCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil {
 		t.Fatalf("Runtime aggregate update: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	}, runevents.StoreRuntimeStateRecordCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch ||
 		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
 		t.Fatalf("aggregate revision race result=%+v err=%v", result.RuntimeStateUpdate, err)
@@ -511,7 +511,7 @@ func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 	ctx := context.Background()
 
 	term, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyTerminalDelivery, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunFactTerminalDelivery, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		terminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"),
 	))
 	if err != nil || !term.Transitioned || term.Run.State != common.RunStateCompleted {
@@ -527,8 +527,8 @@ func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 	}
 
 	wait, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyGovernanceWait, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		runevents.ApplyRuntimeGovernanceWaitCommand{
+		runevents.TopicRunFactGovernanceWait, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.RuntimeGovernanceWaitFact{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 			CausationID: "cause-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", BlockingTicketID: "ticket-1",
 		},
@@ -544,7 +544,7 @@ func TestLifecycleHandlerStaleTerminalDoesNotChangeRun(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyTerminalDelivery, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunFactTerminalDelivery, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		terminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-stale", AuthoritySnapshotID: "auth-stale", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-stale"),
 	))
 	if !errors.Is(err, common.ErrConflict) {

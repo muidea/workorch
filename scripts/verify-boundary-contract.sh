@@ -207,6 +207,46 @@ for path in "${workspace_scope_bindings[@]}"; do
   fi
 done
 
+# Resource lifecycle reducers are owner-private implementation details.  A
+# production EventHub handler must translate a validated intent/fact into the
+# owner's private event dispatcher before selecting a reducer or persistence
+# path. Tests may call the reducer directly to exercise transition tables.
+owner_private_reducer_matches="$({
+  source_matches 'applyLifecycleLocked\(' internal/modules/blocks/run/biz |
+    grep -v -F -- 'internal/modules/blocks/run/biz/lifecycle_internal_event.go' |
+    grep -v -E -- 'func \(m \*Biz\) applyLifecycleLocked\(' || true
+  source_matches '(applyTerminalDelivery|applyRunProjection|releaseFreshActivationRunSlot)\(' internal/modules/blocks/workspace/biz |
+    grep -v -F -- 'internal/modules/blocks/workspace/biz/lifecycle_internal_event.go' |
+    grep -v -E -- 'func \(m \*Biz\) (applyTerminalDelivery|applyRunProjection|releaseFreshActivationRunSlot)\(' || true
+  source_matches 'applyTerminalDelivery\(' internal/modules/blocks/result/biz |
+    grep -v -F -- 'internal/modules/blocks/result/biz/lifecycle_internal_event.go' |
+    grep -v -E -- 'func \(m \*Biz\) applyTerminalDelivery\(' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$owner_private_reducer_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: owner lifecycle reducer bypasses its private
+internal-event dispatcher.
+
+$owner_private_reducer_matches
+EOF
+  exit 1
+fi
+
+# Lifecycle transport names must describe immutable facts, not an instruction
+# to apply a caller-selected state. Runtime aggregate persistence likewise uses
+# the narrow opaque record command rather than a generic Run update surface.
+legacy_lifecycle_contract_matches="$(source_matches 'ApplyRuntime(GovernanceWait|ContinuationEligible|TerminalDelivery|StateIncompatible)|ApplyRunProjectionFact|ReleaseFreshActivationRunSlotFact|Topic(Run|Workspace|Result)CommandApply|TopicRunCommandUpdate|UpdateRunCommand' internal || true)"
+if [[ -n "$legacy_lifecycle_contract_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: legacy apply/update lifecycle contract returned.
+Use immutable owner facts and StoreRuntimeStateRecordCommand without aliases,
+dual topics, or forwarding bridges.
+
+$legacy_lifecycle_contract_matches
+EOF
+  exit 1
+fi
+
 matches="$(
   find internal/initiators -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- 'basebiz\.Base|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true
@@ -1169,7 +1209,7 @@ if grep -q -E -- "$forbidden_workspace_update_fields" <<<"$workspace_update_body
 fi
 
 forbidden_run_update_fields='(^|[[:space:]])(State|BlockingTicketID|BlockingApprovalID|FailureReason|StartedAt|EndedAt|Lineage|Priority)([[:space:]]|$)'
-run_update_body="$(struct_body internal/modules/blocks/run/pkg/events/messages.go UpdateRunCommand)"
+run_update_body="$(struct_body internal/modules/blocks/run/pkg/events/messages.go StoreRuntimeStateRecordCommand)"
 if grep -q -E -- "$forbidden_run_update_fields" <<<"$run_update_body"; then
   echo "boundary contract violation: generic Run update exposes SM-1 lifecycle fields" >&2
   exit 1
@@ -1189,7 +1229,7 @@ if grep -q -E -- "$forbidden_approval_update_fields" <<<"$approval_update_body";
 	 exit 1
 fi
 
-result_terminal_body="$(struct_body internal/modules/blocks/result/pkg/events/lifecycle_messages.go ApplyRuntimeTerminalDeliveryCommand)"
+result_terminal_body="$(struct_body internal/modules/blocks/result/pkg/events/lifecycle_messages.go RuntimeTerminalDeliveryFact)"
 if grep -q -E -- '(^|[[:space:]])Result[[:space:]]+\*' <<<"$result_terminal_body"; then
   echo "boundary contract violation: Result terminal command carries a mutable Result model" >&2
   exit 1
@@ -1206,12 +1246,12 @@ for owner in result workspace; do
     exit 1
   fi
 done
-if ! grep -q -F -- 'TopicRunCommandApplyTerminalDelivery' internal/modules/blocks/run/pkg/events/topics.go ||
-   ! grep -q -F -- 'TopicResultCommandApplyTerminalDelivery' internal/modules/blocks/result/pkg/events/topics.go ||
-   ! grep -q -F -- 'TopicWorkspaceCommandApplyTerminalDelivery' internal/modules/blocks/workspace/pkg/events/topics.go ||
-   ! grep -q -F -- 'runevents.TopicRunCommandApplyTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go ||
-   ! grep -q -F -- 'resultevents.TopicResultCommandApplyTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go ||
-   ! grep -q -F -- 'workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go; then
+if ! grep -q -F -- 'TopicRunFactTerminalDelivery' internal/modules/blocks/run/pkg/events/topics.go ||
+   ! grep -q -F -- 'TopicResultFactTerminalDelivery' internal/modules/blocks/result/pkg/events/topics.go ||
+   ! grep -q -F -- 'TopicWorkspaceFactTerminalDelivery' internal/modules/blocks/workspace/pkg/events/topics.go ||
+   ! grep -q -F -- 'runevents.TopicRunFactTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go ||
+   ! grep -q -F -- 'resultevents.TopicResultFactTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go ||
+   ! grep -q -F -- 'workspaceevents.TopicWorkspaceFactTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go; then
   echo "boundary contract violation: Runtime terminal delivery is not expressed through Run/Result/Workspace owner contracts" >&2
   exit 1
 fi
@@ -1529,7 +1569,7 @@ if grep -q -E -- '(RequestID|Status)[[:space:]]+string' <<<"$llm_candidate_model
   exit 1
 fi
 for terminal_owner in run workspace result; do
-  terminal_delivery_shape="$(sed -n '/^type ApplyRuntimeTerminalDeliveryCommand struct {/,/^}/p' "internal/modules/blocks/${terminal_owner}/pkg/events/lifecycle_messages.go")"
+  terminal_delivery_shape="$(sed -n '/^type RuntimeTerminalDeliveryFact struct {/,/^}/p' "internal/modules/blocks/${terminal_owner}/pkg/events/lifecycle_messages.go")"
   if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryFact' <<<"$terminal_delivery_shape" ||
      grep -q -E -- 'FailureReason[[:space:]]+string' <<<"$terminal_delivery_shape"; then
     echo "boundary contract violation: ${terminal_owner} terminal delivery must carry one canonical immutable fact without a parallel failure reason" >&2

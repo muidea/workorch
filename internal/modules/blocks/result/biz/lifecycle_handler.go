@@ -14,7 +14,7 @@ import (
 )
 
 func (m *Biz) lifecycleTopics() []string {
-	return []string{resultevents.TopicResultCommandApplyTerminalDelivery}
+	return []string{resultevents.TopicResultFactTerminalDelivery}
 }
 
 func (m *Biz) handleLifecycleCommand(ev magicevent.Event, result magicevent.Result) {
@@ -42,17 +42,24 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (resultevents.ResultL
 	if m == nil || m.service == nil {
 		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	if ev.ID() != resultevents.TopicResultCommandApplyTerminalDelivery {
+	if ev.ID() != resultevents.TopicResultFactTerminalDelivery {
 		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	cmd, ok := ev.Data().(resultevents.ApplyRuntimeTerminalDeliveryCommand)
+	cmd, ok := ev.Data().(resultevents.RuntimeTerminalDeliveryFact)
 	if !ok || ev.Source() != "kernel/orchestrator" {
 		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	return m.applyTerminalDelivery(ev.Context(), cmd)
+	boundCtx, err := resultCommandContext(ev.Context(), cmd.WorkspaceID)
+	if err != nil {
+		return resultevents.ResultLifecycleCommandResult{}, err
+	}
+	return m.submitLifecycleInternalEvent(boundCtx, lifecycleInternalEvent{
+		Kind:             lifecycleInternalEventTerminalDeliveryObserved,
+		TerminalDelivery: &cmd,
+	})
 }
 
-func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.ApplyRuntimeTerminalDeliveryCommand) (resultevents.ResultLifecycleCommandResult, error) {
+func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.RuntimeTerminalDeliveryFact) (resultevents.ResultLifecycleCommandResult, error) {
 	if err := cmd.Validate(); err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
@@ -151,7 +158,7 @@ func sameTerminalDeliveryIdentity(left, right *runtimecontract.RuntimeTerminalDe
 
 func resultTerminalDeliveryAck(
 	item *resultmodel.Result,
-	cmd resultevents.ApplyRuntimeTerminalDeliveryCommand,
+	cmd resultevents.RuntimeTerminalDeliveryFact,
 	state runtimecontract.RuntimeDeliveryAcknowledgedState,
 ) *runtimecontract.RuntimeDeliveryAcknowledgement {
 	if item == nil {

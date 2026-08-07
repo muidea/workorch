@@ -195,7 +195,7 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 		RuntimeStateSchemaVersion: 2,
 		RuntimeStateRef:           "runtime-state/ws-schema-unsupported/run-schema-unsupported/11",
 	}
-	var received *runevents.ApplyRuntimeStateIncompatibleFactCommand
+	var received *runevents.RuntimeStateIncompatibleFact
 	observer.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
 			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{Items: []runevents.RuntimeRecoveryInventoryItem{item}}, nil)
@@ -217,8 +217,8 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 			result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: true}, nil)
 		}
 	})
-	observer.Subscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(runevents.ApplyRuntimeStateIncompatibleFactCommand)
+	observer.Subscribe(runevents.TopicRunFactRuntimeStateIncompatible, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(runevents.RuntimeStateIncompatibleFact)
 		if !ok {
 			if result != nil {
 				result.Set(nil, nil)
@@ -235,7 +235,7 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 		observer.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
 		observer.Unsubscribe(runevents.TopicRunCommandRuntimeStateRecord)
 		observer.Unsubscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness)
-		observer.Unsubscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible)
+		observer.Unsubscribe(runevents.TopicRunFactRuntimeStateIncompatible)
 		deps.CommandHub.Terminate(context.Background())
 	})
 

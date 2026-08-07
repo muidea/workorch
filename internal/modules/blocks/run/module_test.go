@@ -284,7 +284,7 @@ func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 	}
 	commandDone := make(chan error, 1)
 	go func() {
-		_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandUpdate, runevents.UpdateRunCommand{
+		_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandStoreRuntimeStateRecord, runevents.StoreRuntimeStateRecordCommand{
 			RunID: run.ID, WorkspaceID: run.WorkspaceID,
 		})
 		commandDone <- err
@@ -530,7 +530,7 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 		}
 	})
 
-	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandUpdate, runevents.UpdateRunCommand{
+	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandStoreRuntimeStateRecord, runevents.StoreRuntimeStateRecordCommand{
 		RunID: runID,
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
@@ -591,17 +591,17 @@ func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 		State:        common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z",
 	}
 	revision := current.RuntimeState.StateRevision
-	valid := runevents.UpdateRunCommand{RunID: current.ID, WorkspaceID: current.WorkspaceID, RuntimeState: current.RuntimeState, ExpectedRuntimeStateRevision: &revision}
+	valid := runevents.StoreRuntimeStateRecordCommand{RunID: current.ID, WorkspaceID: current.WorkspaceID, RuntimeState: current.RuntimeState, ExpectedRuntimeStateRevision: &revision}
 	if err := runbiz.ValidateRunUpdate(current, valid); err != nil {
 		t.Fatalf("valid Runtime update rejected: %v", err)
 	}
 
 	tests := []struct {
 		name   string
-		mutate func(*runevents.UpdateRunCommand)
+		mutate func(*runevents.StoreRuntimeStateRecordCommand)
 	}{
-		{name: "runtime state removal", mutate: func(cmd *runevents.UpdateRunCommand) { cmd.RuntimeState = nil }},
-		{name: "state definition drift", mutate: func(cmd *runevents.UpdateRunCommand) {
+		{name: "runtime state removal", mutate: func(cmd *runevents.StoreRuntimeStateRecordCommand) { cmd.RuntimeState = nil }},
+		{name: "state definition drift", mutate: func(cmd *runevents.StoreRuntimeStateRecordCommand) {
 			cloned := cmd.RuntimeState.Clone()
 			cloned.Definition.Revision = "definition-other"
 			cmd.RuntimeState = &cloned
@@ -644,7 +644,7 @@ func TestRuntimeStateUpdateRejectsNonOrchestratorSource(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = module.Stop(ctx) })
 	revision := state.StateRevision
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, "application/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.UpdateRunCommand{
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandStoreRuntimeStateRecord, "application/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.StoreRuntimeStateRecordCommand{
 		RunID: "run-source", WorkspaceID: "ws-source", RuntimeState: &state, ExpectedRuntimeStateRevision: &revision,
 	})
 	response := hub.Send(event)

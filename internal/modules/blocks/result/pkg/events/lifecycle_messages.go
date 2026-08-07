@@ -54,20 +54,20 @@ func (m ResultMaterial) Validate() error {
 	return nil
 }
 
-// ApplyRuntimeTerminalDeliveryCommand is an SM-4 terminal delivery request for
+// RuntimeTerminalDeliveryFact is an immutable SM-4 terminal delivery fact for
 // the Result owner. The payload carries sealed terminal identity and immutable
 // outcome material; Result Biz decides accepted/rejected.
-type ApplyRuntimeTerminalDeliveryCommand struct {
+type RuntimeTerminalDeliveryFact struct {
 	runtimecontract.RuntimeTerminalDeliveryFact
 	Material ResultMaterial
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
+func (c RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
 	c.RuntimeTerminalDeliveryFact = c.RuntimeTerminalDeliveryFact.Normalized()
 	return c
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
+func (c RuntimeTerminalDeliveryFact) Validate() error {
 	c = c.Normalized()
 	if c.SourceOwner != "kernel/orchestrator" {
 		return fmt.Errorf("%w: result terminal delivery requires workspace, run and source", common.ErrInvalidArgument)
@@ -84,7 +84,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	return nil
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
+func (c RuntimeTerminalDeliveryFact) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
 	return c.Normalized().RuntimeTerminalDeliveryFact.Identity()
 }
 

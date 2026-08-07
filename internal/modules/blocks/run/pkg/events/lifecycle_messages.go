@@ -118,12 +118,12 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 // continue are Run-private internal events; external ingress can only submit
 // the WorkspaceExecutionIntentCommand owned by blocks/workspace.
 
-// ApplyRuntimeGovernanceWaitCommand is an immutable Orchestrator fact that a
+// RuntimeGovernanceWaitFact is an immutable Orchestrator fact that a
 // governance wait was recorded in SM-2. Run owner may transition
 // active|pending -> blocked_decision|blocked_approval.
 //
 // Exactly one of BlockingTicketID / BlockingApprovalID must be set.
-type ApplyRuntimeGovernanceWaitCommand struct {
+type RuntimeGovernanceWaitFact struct {
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
 	SourceOwner         string // must be kernel/orchestrator
@@ -136,7 +136,7 @@ type ApplyRuntimeGovernanceWaitCommand struct {
 	BlockingApprovalID  common.ApprovalID
 }
 
-func (c ApplyRuntimeGovernanceWaitCommand) Normalized() ApplyRuntimeGovernanceWaitCommand {
+func (c RuntimeGovernanceWaitFact) Normalized() RuntimeGovernanceWaitFact {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
 	c.AuthoritySnapshotID = strings.TrimSpace(c.AuthoritySnapshotID)
@@ -146,7 +146,7 @@ func (c ApplyRuntimeGovernanceWaitCommand) Normalized() ApplyRuntimeGovernanceWa
 	return c
 }
 
-func (c ApplyRuntimeGovernanceWaitCommand) Validate() error {
+func (c RuntimeGovernanceWaitFact) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" {
 		return fmt.Errorf("%w: governance wait requires workspace and run", common.ErrInvalidArgument)
@@ -163,10 +163,10 @@ func (c ApplyRuntimeGovernanceWaitCommand) Validate() error {
 	return nil
 }
 
-// ApplyRuntimeContinuationEligibleCommand is an immutable Orchestrator fact
+// RuntimeContinuationEligibleFact is an immutable Orchestrator fact
 // that SM-2 governance evidence is committed and the Run may leave blocked_*.
 // Run owner validates binding before blocked_* -> active.
-type ApplyRuntimeContinuationEligibleCommand struct {
+type RuntimeContinuationEligibleFact struct {
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
 	SourceOwner         string
@@ -180,7 +180,7 @@ type ApplyRuntimeContinuationEligibleCommand struct {
 	ApprovalID          common.ApprovalID
 }
 
-func (c ApplyRuntimeContinuationEligibleCommand) Normalized() ApplyRuntimeContinuationEligibleCommand {
+func (c RuntimeContinuationEligibleFact) Normalized() RuntimeContinuationEligibleFact {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
 	c.AuthoritySnapshotID = strings.TrimSpace(c.AuthoritySnapshotID)
@@ -190,7 +190,7 @@ func (c ApplyRuntimeContinuationEligibleCommand) Normalized() ApplyRuntimeContin
 	return c
 }
 
-func (c ApplyRuntimeContinuationEligibleCommand) Validate() error {
+func (c RuntimeContinuationEligibleFact) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" {
 		return fmt.Errorf("%w: continuation eligible requires workspace and run", common.ErrInvalidArgument)
@@ -205,19 +205,19 @@ func (c ApplyRuntimeContinuationEligibleCommand) Validate() error {
 	return nil
 }
 
-// ApplyRuntimeTerminalDeliveryCommand is an SM-4 terminal delivery request.
+// RuntimeTerminalDeliveryFact is an immutable SM-4 terminal delivery fact.
 // Run owner may transition active|blocked_* -> completed|failed|cancelled|superseded
 // only when identity matches the sealed terminal. It never carries an arbitrary
 // caller-chosen State beyond the sealed action / administrative kind.
-type ApplyRuntimeTerminalDeliveryCommand struct {
+type RuntimeTerminalDeliveryFact struct {
 	runtimecontract.RuntimeTerminalDeliveryFact
 }
 
-// ApplyRuntimeStateIncompatibleFactCommand is an immutable SM-4 observation
+// RuntimeStateIncompatibleFact is an immutable SM-4 observation
 // that an existing opaque Runtime state cannot be read by this binary. It
 // carries no requested Run state: Run owner converts it to its private SM-1
 // lifecycle event and persists fresh_activation_required itself.
-type ApplyRuntimeStateIncompatibleFactCommand struct {
+type RuntimeStateIncompatibleFact struct {
 	WorkspaceID            common.WorkspaceID
 	RunID                  common.RunID
 	SourceOwner            string
@@ -228,7 +228,7 @@ type ApplyRuntimeStateIncompatibleFactCommand struct {
 	Feedback               runtimecontract.RuntimeFeedback
 }
 
-func (c ApplyRuntimeStateIncompatibleFactCommand) Normalized() ApplyRuntimeStateIncompatibleFactCommand {
+func (c RuntimeStateIncompatibleFact) Normalized() RuntimeStateIncompatibleFact {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
 	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
@@ -236,7 +236,7 @@ func (c ApplyRuntimeStateIncompatibleFactCommand) Normalized() ApplyRuntimeState
 	return c
 }
 
-func (c ApplyRuntimeStateIncompatibleFactCommand) Validate() error {
+func (c RuntimeStateIncompatibleFact) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" || c.RuntimeStateRef == "" {
 		return fmt.Errorf("%w: runtime state incompatibility fact requires scope, source, causation and state reference", common.ErrInvalidArgument)
@@ -254,12 +254,12 @@ func (c ApplyRuntimeStateIncompatibleFactCommand) Validate() error {
 	return nil
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
+func (c RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
 	c.RuntimeTerminalDeliveryFact = c.RuntimeTerminalDeliveryFact.Normalized()
 	return c
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
+func (c RuntimeTerminalDeliveryFact) Validate() error {
 	c = c.Normalized()
 	if c.SourceOwner != runtimeLifecycleSourceOwner {
 		return fmt.Errorf("%w: terminal delivery requires workspace, run, source owner and causation", common.ErrInvalidArgument)
@@ -270,7 +270,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	return nil
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
+func (c RuntimeTerminalDeliveryFact) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
 	return c.Normalized().RuntimeTerminalDeliveryFact.Identity()
 }
 

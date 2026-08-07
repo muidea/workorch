@@ -8,15 +8,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestApplyRunProjectionFactCommandValidate(t *testing.T) {
-	cmd := ApplyRunProjectionFactCommand{
+func TestRunProjectionFactValidate(t *testing.T) {
+	cmd := RunProjectionFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/1",
 		RunState: common.RunStateActive, RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1",
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid projection: %v", err)
 	}
-	preRuntime := ApplyRunProjectionFactCommand{
+	preRuntime := RunProjectionFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0",
 		RunState: common.RunStateActive,
 	}
@@ -48,8 +48,8 @@ func TestWorkspaceExecutionIntentResultUsesTypedAdmissionWithoutInventedRun(t *t
 	}
 }
 
-func TestReleaseFreshActivationRunSlotFactCommandValidate(t *testing.T) {
-	cmd := ReleaseFreshActivationRunSlotFactCommand{
+func TestFreshActivationRunSlotReleaseFactValidate(t *testing.T) {
+	cmd := FreshActivationRunSlotReleaseFact{
 		WorkspaceID:                        "ws-1",
 		RunID:                              "run-1",
 		SourceOwner:                        "blocks/run",
@@ -69,14 +69,14 @@ func TestReleaseFreshActivationRunSlotFactCommandValidate(t *testing.T) {
 	}
 }
 
-func TestWorkspaceApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
-	cmd := ApplyRuntimeTerminalDeliveryCommand{
+func TestWorkspaceRuntimeTerminalDeliveryFactValidate(t *testing.T) {
+	cmd := RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1"},
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid terminal: %v", err)
 	}
-	if err := (ApplyRuntimeTerminalDeliveryCommand{}).Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+	if err := (RuntimeTerminalDeliveryFact{}).Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty terminal err = %v", err)
 	}
 }

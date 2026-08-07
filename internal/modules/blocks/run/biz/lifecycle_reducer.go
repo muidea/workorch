@@ -80,7 +80,7 @@ func reduceActivateRun(current *runmodel.Run, cmd activateRunFact) (lifecycleTra
 	}, nil
 }
 
-func reduceGovernanceWait(current *runmodel.Run, cmd runevents.ApplyRuntimeGovernanceWaitCommand) (lifecycleTransition, error) {
+func reduceGovernanceWait(current *runmodel.Run, cmd runevents.RuntimeGovernanceWaitFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
 	}
@@ -126,7 +126,7 @@ func reduceGovernanceWait(current *runmodel.Run, cmd runevents.ApplyRuntimeGover
 	}, nil
 }
 
-func reduceContinuationEligible(current *runmodel.Run, cmd runevents.ApplyRuntimeContinuationEligibleCommand) (lifecycleTransition, error) {
+func reduceContinuationEligible(current *runmodel.Run, cmd runevents.RuntimeContinuationEligibleFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
 	}
@@ -177,7 +177,7 @@ func reduceContinuationEligible(current *runmodel.Run, cmd runevents.ApplyRuntim
 // observation into Run-owned administrative state. The Runtime aggregate stays
 // opaque: only its stored ref/version are compared and no authority, dispatch,
 // governance, or delivery value is decoded here.
-func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.ApplyRuntimeStateIncompatibleFactCommand) (lifecycleTransition, error) {
+func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.RuntimeStateIncompatibleFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
 	}
@@ -220,7 +220,7 @@ func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.ApplyRu
 	}, nil
 }
 
-func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.ApplyRuntimeTerminalDeliveryCommand) (lifecycleTransition, error) {
+func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.RuntimeTerminalDeliveryFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
 	}
@@ -265,7 +265,7 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.ApplyRuntimeTer
 	}, nil
 }
 
-func terminalTargetFromCommand(cmd runevents.ApplyRuntimeTerminalDeliveryCommand) (common.RunState, string, error) {
+func terminalTargetFromCommand(cmd runevents.RuntimeTerminalDeliveryFact) (common.RunState, string, error) {
 	cmd = cmd.Normalized()
 	switch cmd.Outcome.Kind {
 	case runtimecontract.TerminalOutcomeKindCancelled:
@@ -281,7 +281,7 @@ func terminalTargetFromCommand(cmd runevents.ApplyRuntimeTerminalDeliveryCommand
 	}
 }
 
-func validateSealedTerminalIdentity(current *runmodel.Run, cmd runevents.ApplyRuntimeTerminalDeliveryCommand) error {
+func validateSealedTerminalIdentity(current *runmodel.Run, cmd runevents.RuntimeTerminalDeliveryFact) error {
 	cmd = cmd.Normalized()
 	if current.RuntimeBootstrap == nil || current.RuntimeState == nil {
 		return fmt.Errorf("%w: sealed terminal delivery requires a typed runtime aggregate", common.ErrConflict)

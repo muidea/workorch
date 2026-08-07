@@ -70,12 +70,12 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 // Workspace owner alone mutates ActiveRunID / Workspace.State. Inputs are
 // immutable facts about a Run; they never carry a caller-chosen target state.
 
-// ApplyRunProjectionFactCommand asks Workspace to converge its projection from
+// RunProjectionFact asks Workspace to converge its projection from
 // an already-persisted Run state fact (active/blocked).
 //
 // Publisher: blocks/run (via RunStateChanged observation) or Orchestrator only
 // as a typed fact forwarder — never as a model update with target State.
-type ApplyRunProjectionFactCommand struct {
+type RunProjectionFact struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	SourceOwner string
@@ -88,14 +88,14 @@ type ApplyRunProjectionFactCommand struct {
 	RuntimeStateRef      string
 }
 
-func (c ApplyRunProjectionFactCommand) Normalized() ApplyRunProjectionFactCommand {
+func (c RunProjectionFact) Normalized() RunProjectionFact {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
 	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
 	return c
 }
 
-func (c ApplyRunProjectionFactCommand) Validate() error {
+func (c RunProjectionFact) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
 		return fmt.Errorf("%w: run projection fact requires Run owner scope and causation", common.ErrInvalidArgument)
@@ -124,11 +124,11 @@ func (c ApplyRunProjectionFactCommand) Validate() error {
 	return nil
 }
 
-// ReleaseFreshActivationRunSlotFactCommand carries a persisted Run owner's
+// FreshActivationRunSlotReleaseFact carries a persisted Run owner's
 // administrative fact for an aggregate schema the current binary cannot
 // drive. It deliberately cannot name a desired Workspace state. Workspace
 // releases only a matching ActiveRunID and leaves the old Run unchanged.
-type ReleaseFreshActivationRunSlotFactCommand struct {
+type FreshActivationRunSlotReleaseFact struct {
 	WorkspaceID                        common.WorkspaceID
 	RunID                              common.RunID
 	SourceOwner                        string
@@ -140,14 +140,14 @@ type ReleaseFreshActivationRunSlotFactCommand struct {
 	SupportedRuntimeStateSchemaVersion uint32
 }
 
-func (c ReleaseFreshActivationRunSlotFactCommand) Normalized() ReleaseFreshActivationRunSlotFactCommand {
+func (c FreshActivationRunSlotReleaseFact) Normalized() FreshActivationRunSlotReleaseFact {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
 	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
 	return c
 }
 
-func (c ReleaseFreshActivationRunSlotFactCommand) Validate() error {
+func (c FreshActivationRunSlotReleaseFact) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
 		return fmt.Errorf("%w: fresh activation release fact requires Run owner scope and causation", common.ErrInvalidArgument)
@@ -165,18 +165,18 @@ func (c ReleaseFreshActivationRunSlotFactCommand) Validate() error {
 	return nil
 }
 
-// ApplyRuntimeTerminalDeliveryCommand asks Workspace to release ActiveRun for a
+// RuntimeTerminalDeliveryFact asks Workspace to release ActiveRun for a
 // sealed terminal delivery. Workspace never invents a new terminal.
-type ApplyRuntimeTerminalDeliveryCommand struct {
+type RuntimeTerminalDeliveryFact struct {
 	runtimecontract.RuntimeTerminalDeliveryFact
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
+func (c RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
 	c.RuntimeTerminalDeliveryFact = c.RuntimeTerminalDeliveryFact.Normalized()
 	return c
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
+func (c RuntimeTerminalDeliveryFact) Validate() error {
 	c = c.Normalized()
 	if c.SourceOwner != "kernel/orchestrator" {
 		return fmt.Errorf("%w: workspace terminal delivery requires workspace, run, source and causation", common.ErrInvalidArgument)
@@ -187,7 +187,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	return nil
 }
 
-func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
+func (c RuntimeTerminalDeliveryFact) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
 	return c.Normalized().RuntimeTerminalDeliveryFact.Identity()
 }
 

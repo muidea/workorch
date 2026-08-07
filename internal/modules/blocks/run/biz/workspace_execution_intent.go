@@ -114,9 +114,10 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 		m.publishContinuationRequested(ctx, current, "workspace-execution/resume/"+cmd.RequestID)
 		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted), nil
 	case common.RunStatePending:
-		transition, err := m.applyLifecycleLocked(ctx, cmd.WorkspaceID, current.ID, func(run *runmodel.Run) (lifecycleTransition, error) {
-			return reduceActivateRun(run, activateRunFact{WorkspaceID: cmd.WorkspaceID, RunID: current.ID, CausationID: "workspace-execution/resume/" + cmd.RequestID, ReconciliationRequestID: cmd.RequestID})
-		}, nil)
+		transition, err := m.applyRunActivation(ctx, activateRunFact{
+			WorkspaceID: cmd.WorkspaceID, RunID: current.ID,
+			CausationID: "workspace-execution/resume/" + cmd.RequestID, ReconciliationRequestID: cmd.RequestID,
+		})
 		if err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}

@@ -151,7 +151,7 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 		if data.RequiresFreshActivation() {
 			return
 		}
-		cmd := workspaceevents.ApplyRunProjectionFactCommand{
+		cmd := workspaceevents.RunProjectionFact{
 			WorkspaceID:          data.WorkspaceID,
 			RunID:                data.RunID,
 			SourceOwner:          runevents.CommandDestination,
@@ -163,7 +163,10 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 		// RunStateChanged is already an immutable cross-owner fact. Convert it
 		// directly into the Workspace owner's private reducer input instead of
 		// exposing a second public write command back to this owner.
-		_, _ = m.applyRunProjection(ev.Context(), cmd)
+		_, _ = m.submitWorkspaceLifecycleInternalEvent(ev.Context(), workspaceLifecycleInternalEvent{
+			Kind:          workspaceLifecycleInternalEventRunProjectionObserved,
+			RunProjection: &cmd,
+		})
 	}
 }
 

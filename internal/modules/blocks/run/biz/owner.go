@@ -100,7 +100,7 @@ func (m *Biz) Start() error {
 		runevents.TopicRunCommandGetRuntimeCheckpoint,
 		runevents.TopicRunCommandListCheckpointsByRun,
 		runevents.TopicRunCommandPurgeRuntimeResources,
-		runevents.TopicRunCommandUpdate,
+		runevents.TopicRunCommandStoreRuntimeStateRecord,
 		runevents.TopicRunCommandDelete,
 	}
 	for _, topic := range regularTopics {
@@ -399,7 +399,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		workspaceID = cmd.WorkspaceID
 	case runevents.PurgeRuntimeResourcesCommand:
 		workspaceID = cmd.WorkspaceID
-	case runevents.UpdateRunCommand:
+	case runevents.StoreRuntimeStateRecordCommand:
 		workspaceID = cmd.WorkspaceID
 	case runevents.DeleteRunCommand:
 		workspaceID = cmd.WorkspaceID
@@ -550,8 +550,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		}
 		deleted, err := purgeRunRuntimeResources(ctx, m.steps, m.checkpoints, cmd.RunID)
 		return runevents.RunCommandResult{DeletedCount: deleted}, err
-	case runevents.TopicRunCommandUpdate:
-		cmd, ok := data.(runevents.UpdateRunCommand)
+	case runevents.TopicRunCommandStoreRuntimeStateRecord:
+		cmd, ok := data.(runevents.StoreRuntimeStateRecordCommand)
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
@@ -598,7 +598,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 // case rebase the opaque RuntimeState write on the latest Run record; only an
 // aggregate revision mismatch is a semantic conflict that returns to the
 // Orchestrator SM-4 recovery owner.
-func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runevents.UpdateRunCommand) (runevents.RunCommandResult, error) {
+func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) (runevents.RunCommandResult, error) {
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
 		if current == nil {
@@ -713,7 +713,7 @@ func (m *Biz) validateRunReadScope(ctx context.Context, runID common.RunID, work
 	return err
 }
 
-func runFromUpdateCommand(current *runmodel.Run, cmd runevents.UpdateRunCommand) *runmodel.Run {
+func runFromUpdateCommand(current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) *runmodel.Run {
 	if current == nil {
 		return nil
 	}
@@ -723,7 +723,7 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runevents.UpdateRunCommand)
 	return &item
 }
 
-func validateRunUpdate(current *runmodel.Run, cmd runevents.UpdateRunCommand) error {
+func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) error {
 	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
 		return common.ErrConflict
 	}
@@ -755,7 +755,7 @@ func runUsesRuntime(run *runmodel.Run) bool {
 
 // ValidateRunUpdate exposes the Run owner's SM-1 persistence invariant for
 // focused contract tests; it does not alter owner state.
-func ValidateRunUpdate(current *runmodel.Run, cmd runevents.UpdateRunCommand) error {
+func ValidateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) error {
 	return validateRunUpdate(current, cmd)
 }
 

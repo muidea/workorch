@@ -38,6 +38,6 @@ const (
 	// workspace execution request. Workspace owns active-run slot selection and
 	// turns this immutable intent into a Run-owner command; callers cannot name
 	// a lifecycle target or mutate the slot themselves.
-	TopicWorkspaceCommandExecutionIntent       = "/workspace/command/execution-intent"
-	TopicWorkspaceCommandApplyTerminalDelivery = "/workspace/command/apply-terminal-delivery"
+	TopicWorkspaceCommandExecutionIntent = "/workspace/command/execution-intent"
+	TopicWorkspaceFactTerminalDelivery   = "/workspace/fact/terminal-delivery"
 )

@@ -13,7 +13,7 @@ import (
 // aggregate beyond the revision already supplied by the persistence boundary.
 func runtimeStateUpdateOutcome(
 	current *runmodel.Run,
-	cmd runevents.UpdateRunCommand,
+	cmd runevents.StoreRuntimeStateRecordCommand,
 	category runtimecontract.RuntimeFeedbackCategory,
 	observedRevision uint64,
 	cause error,

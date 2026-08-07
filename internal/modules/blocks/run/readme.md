@@ -24,7 +24,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
 - 常规 Run command subscription 完成后，Run owner 发布一次 `TopicRunRuntimeCommandsReady` process-lifecycle
   fact。该 fact 不携带 workspace/run，也不迁移 SM-1；它只释放 Orchestrator 已同步完成 inventory/load 的
-  owner-local startup recovery actions。这样 recovery 不依赖 `Weight()`，且不会在 `UpdateRunCommand` 尚未注册时
+  owner-local startup recovery actions。这样 recovery 不依赖 `Weight()`，且不会在 `StoreRuntimeStateRecordCommand` 尚未注册时
   由 BackgroundRoutine 提前驱动。
 
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `blocks/run/pkg/events` 定义具体 command 与 `RunCommandResult`；所有返回实体在离开 owner 前显式深拷贝。
@@ -35,7 +35,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   revision，并返回唯一的 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或 `owner_transient`
   typed fact。只有 expected/observed aggregate revision 实际不匹配才是 CAS；Run 对无关物理 record write 自行
   rebase。Run 不解释其中的 facts、authority、candidate、dispatch、evidence 或 governance ledger。
-- `UpdateRunCommand` 不是完整 Run entity replacement；它只允许 `kernel/orchestrator` 提交 opaque
+- `StoreRuntimeStateRecordCommand` 不是完整 Run entity replacement；它只允许 `kernel/orchestrator` 提交 opaque
   `RuntimeStateRecord` 与 expected aggregate revision。Run owner 必须在进入 CAS 前验证 EventHub source，其他 caller
   即使构造出合法 record 也必须被拒绝。
 - Run 创建合同可携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、ordered focus queue 与 prerequisite requirements；bootstrap 在 RuntimeState 初始化前保持不可变。
@@ -45,7 +45,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   CAS 持久化并发布 `RunStateChangedData`。Orchestrator 只能消费该通知触发 drive，不能投影 Run lifecycle。
   Runtime Resume 只携带 workspace/run scope，不接受 loaded Run 或上下文 patch。
 - Orchestrator 发现不支持的 persisted Runtime schema 时，只能发送带 scope、opaque state ref、actual/supported
-  schema 和 safe original diagnostic 的 `ApplyRuntimeStateIncompatibleFactCommand`。Run reducer 将它持久化为
+  schema 和 safe original diagnostic 的 `RuntimeStateIncompatibleFact`。Run reducer 将它持久化为
   `fresh_activation_required`；该 Run 的 `ContinueRun` 返回 typed non-resumable disposition，既不发 continuation
   fact，也不触发 drive。只有用户显式 fresh activation/restart 才可创建 current-schema Run。
 - governed blocker 必须携带对应 DecisionTicket 或 Approval 的 workspace/run scope。

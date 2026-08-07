@@ -24,10 +24,10 @@ const runtimeLifecycleFactSource = "kernel/orchestrator"
 
 func (m *Biz) lifecycleTopics() []string {
 	return []string{
-		runevents.TopicRunCommandApplyGovernanceWait,
-		runevents.TopicRunCommandApplyContinuationEligible,
-		runevents.TopicRunCommandApplyTerminalDelivery,
-		runevents.TopicRunCommandApplyRuntimeStateIncompatible,
+		runevents.TopicRunFactGovernanceWait,
+		runevents.TopicRunFactContinuationEligible,
+		runevents.TopicRunFactTerminalDelivery,
+		runevents.TopicRunFactRuntimeStateIncompatible,
 	}
 }
 
@@ -63,77 +63,79 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	var (
 		workspaceID common.WorkspaceID
 		runID       common.RunID
-		reduce      func(*runmodel.Run) (lifecycleTransition, error)
-		deliveryCmd *runevents.ApplyRuntimeTerminalDeliveryCommand
+		internal    lifecycleInternalEvent
+		boundCtx    = ctx
 	)
 	switch topic {
-	case runevents.TopicRunCommandApplyGovernanceWait:
-		cmd, ok := data.(runevents.ApplyRuntimeGovernanceWaitCommand)
+	case runevents.TopicRunFactGovernanceWait:
+		cmd, ok := data.(runevents.RuntimeGovernanceWaitFact)
 		if !ok || ev.Source() != runtimeLifecycleFactSource {
 			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
-		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceGovernanceWait(current, cmd)
-		}
-	case runevents.TopicRunCommandApplyContinuationEligible:
-		cmd, ok := data.(runevents.ApplyRuntimeContinuationEligibleCommand)
-		if !ok || ev.Source() != runtimeLifecycleFactSource {
-			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceContinuationEligible(current, cmd)
-		}
-	case runevents.TopicRunCommandApplyTerminalDelivery:
-		cmd, ok := data.(runevents.ApplyRuntimeTerminalDeliveryCommand)
-		if !ok || ev.Source() != runtimeLifecycleFactSource {
-			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+		var err error
+		boundCtx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return runevents.RunLifecycleCommandResult{}, err
 		}
 		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
 		cmdCopy := cmd
-		deliveryCmd = &cmdCopy
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceTerminalDelivery(current, cmd)
-		}
-	case runevents.TopicRunCommandApplyRuntimeStateIncompatible:
-		cmd, ok := data.(runevents.ApplyRuntimeStateIncompatibleFactCommand)
+		internal = lifecycleInternalEvent{Kind: lifecycleInternalEventGovernanceWaitObserved, WorkspaceID: workspaceID, RunID: runID, GovernanceWait: &cmdCopy}
+	case runevents.TopicRunFactContinuationEligible:
+		cmd, ok := data.(runevents.RuntimeContinuationEligibleFact)
 		if !ok || ev.Source() != runtimeLifecycleFactSource {
 			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
-		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceRuntimeStateIncompatible(current, cmd)
+		var err error
+		boundCtx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return runevents.RunLifecycleCommandResult{}, err
 		}
+		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
+		cmdCopy := cmd
+		internal = lifecycleInternalEvent{Kind: lifecycleInternalEventContinuationEligibleObserved, WorkspaceID: workspaceID, RunID: runID, ContinuationEligible: &cmdCopy}
+	case runevents.TopicRunFactTerminalDelivery:
+		cmd, ok := data.(runevents.RuntimeTerminalDeliveryFact)
+		if !ok || ev.Source() != runtimeLifecycleFactSource {
+			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+		}
+		var err error
+		boundCtx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return runevents.RunLifecycleCommandResult{}, err
+		}
+		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
+		cmdCopy := cmd
+		internal = lifecycleInternalEvent{Kind: lifecycleInternalEventTerminalDeliveryObserved, WorkspaceID: workspaceID, RunID: runID, TerminalDelivery: &cmdCopy}
+	case runevents.TopicRunFactRuntimeStateIncompatible:
+		cmd, ok := data.(runevents.RuntimeStateIncompatibleFact)
+		if !ok || ev.Source() != runtimeLifecycleFactSource {
+			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+		}
+		var err error
+		boundCtx, err = common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return runevents.RunLifecycleCommandResult{}, err
+		}
+		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
+		cmdCopy := cmd
+		internal = lifecycleInternalEvent{Kind: lifecycleInternalEventStateIncompatibleObserved, WorkspaceID: workspaceID, RunID: runID, StateIncompatible: &cmdCopy}
 	default:
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	if workspaceID == "" || runID == "" || reduce == nil {
+	if workspaceID == "" || runID == "" || internal.Kind == "" {
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	var scopeErr error
-	ctx, scopeErr = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
-	if scopeErr != nil {
-		return runevents.RunLifecycleCommandResult{}, scopeErr
-	}
-	response, err := m.applyLifecycleLocked(ctx, workspaceID, runID, reduce, deliveryCmd)
-	if err != nil {
-		return response, err
-	}
-	return response, nil
+	return m.submitLifecycleInternalEvent(boundCtx, internal)
 }
 
 func (m *Biz) applyRunActivation(ctx context.Context, fact activateRunFact) (runevents.RunLifecycleCommandResult, error) {
 	if m == nil || fact.validate() != nil {
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	bound, err := common.BindRuntimeWorkspaceContext(ctx, fact.WorkspaceID)
-	if err != nil {
-		return runevents.RunLifecycleCommandResult{}, err
-	}
-	return m.applyLifecycleLocked(bound, fact.WorkspaceID, fact.RunID, func(current *runmodel.Run) (lifecycleTransition, error) {
-		return reduceActivateRun(current, fact)
-	}, nil)
+	factCopy := fact
+	return m.submitLifecycleInternalEvent(ctx, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventActivationObserved, WorkspaceID: fact.WorkspaceID, RunID: fact.RunID, Activation: &factCopy,
+	})
 }
 
 func (m *Biz) applyLifecycleLocked(
@@ -141,7 +143,7 @@ func (m *Biz) applyLifecycleLocked(
 	workspaceID common.WorkspaceID,
 	runID common.RunID,
 	reduce func(*runmodel.Run) (lifecycleTransition, error),
-	deliveryCmd *runevents.ApplyRuntimeTerminalDeliveryCommand,
+	deliveryCmd *runevents.RuntimeTerminalDeliveryFact,
 ) (runevents.RunLifecycleCommandResult, error) {
 	// A CAS conflict is never permission to derive a new authority. Re-read the
 	// same owner record and reduce the same immutable input; a duplicate
@@ -199,7 +201,7 @@ func runtimeActivationDispositionForRun(run *runmodel.Run) runtimecontract.Runti
 
 func runTerminalDeliveryAck(
 	run *runmodel.Run,
-	cmd runevents.ApplyRuntimeTerminalDeliveryCommand,
+	cmd runevents.RuntimeTerminalDeliveryFact,
 	state runtimecontract.RuntimeDeliveryAcknowledgedState,
 ) *runtimecontract.RuntimeDeliveryAcknowledgement {
 	if run == nil {

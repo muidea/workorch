@@ -26,7 +26,7 @@ type CreateRunCommand struct {
 	Priority            int
 }
 
-type UpdateRunCommand struct {
+type StoreRuntimeStateRecordCommand struct {
 	RunID                        common.RunID
 	WorkspaceID                  common.WorkspaceID
 	RuntimeState                 *runtimecontract.RuntimeStateRecord
@@ -397,13 +397,13 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GetRuntimeCheckpointCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetRuntimeCheckpoint).MessageContract(),
 		eventcontract.CommandTopic[ListRuntimeCheckpointsByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListCheckpointsByRun).MessageContract(),
 		eventcontract.CommandTopic[PurgeRuntimeResourcesCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPurgeRuntimeResources).MessageContract(),
-		eventcontract.CommandTopic[UpdateRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandUpdate).MessageContract(),
+		eventcontract.CommandTopic[StoreRuntimeStateRecordCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandStoreRuntimeStateRecord).MessageContract(),
 		eventcontract.CommandTopic[DeleteRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandWorkspaceExecutionIntent).MessageContract(),
-		eventcontract.CommandTopic[ApplyRuntimeGovernanceWaitCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyGovernanceWait).MessageContract(),
-		eventcontract.CommandTopic[ApplyRuntimeContinuationEligibleCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyContinuationEligible).MessageContract(),
-		eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyTerminalDelivery).MessageContract(),
-		eventcontract.CommandTopic[ApplyRuntimeStateIncompatibleFactCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyRuntimeStateIncompatible).MessageContract(),
+		eventcontract.CommandTopic[RuntimeGovernanceWaitFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactGovernanceWait).MessageContract(),
+		eventcontract.CommandTopic[RuntimeContinuationEligibleFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactContinuationEligible).MessageContract(),
+		eventcontract.CommandTopic[RuntimeTerminalDeliveryFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactTerminalDelivery).MessageContract(),
+		eventcontract.CommandTopic[RuntimeStateIncompatibleFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactRuntimeStateIncompatible).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicRunCreated,

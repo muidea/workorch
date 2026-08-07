@@ -20,7 +20,7 @@ type workspaceProjectionTransition struct {
 	Diagnostic       string
 }
 
-func reduceRunProjectionFact(current *workspacemodel.Workspace, cmd workspaceevents.ApplyRunProjectionFactCommand) (workspaceProjectionTransition, error) {
+func reduceRunProjectionFact(current *workspacemodel.Workspace, cmd workspaceevents.RunProjectionFact) (workspaceProjectionTransition, error) {
 	if current == nil {
 		return workspaceProjectionTransition{}, common.ErrInvalidArgument
 	}
@@ -55,7 +55,7 @@ func reduceRunProjectionFact(current *workspacemodel.Workspace, cmd workspaceeve
 // reduceFreshActivationRunSlotFact is intentionally narrow: a persisted
 // non-resumable Run fact may release only its own slot. It does not terminally
 // deliver the Run, infer a successor, or alter the old Run's lifecycle.
-func reduceFreshActivationRunSlotFact(current *workspacemodel.Workspace, cmd workspaceevents.ReleaseFreshActivationRunSlotFactCommand) (workspaceProjectionTransition, error) {
+func reduceFreshActivationRunSlotFact(current *workspacemodel.Workspace, cmd workspaceevents.FreshActivationRunSlotReleaseFact) (workspaceProjectionTransition, error) {
 	if current == nil {
 		return workspaceProjectionTransition{}, common.ErrInvalidArgument
 	}
@@ -80,7 +80,7 @@ func reduceFreshActivationRunSlotFact(current *workspacemodel.Workspace, cmd wor
 	}, nil
 }
 
-func reduceWorkspaceTerminalDelivery(current *workspacemodel.Workspace, cmd workspaceevents.ApplyRuntimeTerminalDeliveryCommand) (workspaceProjectionTransition, error) {
+func reduceWorkspaceTerminalDelivery(current *workspacemodel.Workspace, cmd workspaceevents.RuntimeTerminalDeliveryFact) (workspaceProjectionTransition, error) {
 	if current == nil {
 		return workspaceProjectionTransition{}, common.ErrInvalidArgument
 	}
@@ -131,7 +131,7 @@ func workspaceStateForRunState(state common.RunState) common.WorkspaceState {
 	}
 }
 
-func workspaceStateForTerminal(cmd workspaceevents.ApplyRuntimeTerminalDeliveryCommand) common.WorkspaceState {
+func workspaceStateForTerminal(cmd workspaceevents.RuntimeTerminalDeliveryFact) common.WorkspaceState {
 	cmd = cmd.Normalized()
 	if cmd.Outcome.Kind == runtimecontract.TerminalOutcomeKindSuperseded {
 		return common.WorkspaceStateSuperseded

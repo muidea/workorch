@@ -311,9 +311,9 @@ func sendResultCommand[Command any](t *testing.T, ctx context.Context, hub magic
 	return typed
 }
 
-func sendResultLifecycleCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command resultevents.ApplyRuntimeTerminalDeliveryCommand) resultevents.ResultLifecycleCommandResult {
+func sendResultLifecycleCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command resultevents.RuntimeTerminalDeliveryFact) resultevents.ResultLifecycleCommandResult {
 	t.Helper()
-	ev := magicevent.NewEventWithContext(resultevents.TopicResultCommandApplyTerminalDelivery, "kernel/orchestrator", resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ev := magicevent.NewEventWithContext(resultevents.TopicResultFactTerminalDelivery, "kernel/orchestrator", resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := hub.Send(ev)
 	if result == nil || result.Error() != nil {
 		t.Fatalf("send terminal delivery error: %v", result)
@@ -329,8 +329,8 @@ func sendResultLifecycleCommand(t *testing.T, ctx context.Context, hub magiceven
 	return typed
 }
 
-func terminalDeliveryCommand(item *resultmodel.Result, kind runtimecontract.TerminalOutcomeKind, deliveryID string) resultevents.ApplyRuntimeTerminalDeliveryCommand {
-	return resultevents.ApplyRuntimeTerminalDeliveryCommand{
+func terminalDeliveryCommand(item *resultmodel.Result, kind runtimecontract.TerminalOutcomeKind, deliveryID string) resultevents.RuntimeTerminalDeliveryFact {
+	return resultevents.RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
 			WorkspaceID: item.WorkspaceID, RunID: item.RunID, TerminalDeliveryID: deliveryID,
 			AuthoritySnapshotID: "authority-" + deliveryID, DefinitionRevision: "definition-" + deliveryID,

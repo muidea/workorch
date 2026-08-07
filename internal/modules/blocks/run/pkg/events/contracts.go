@@ -33,13 +33,13 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("run", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicRunCommandCreate,
 		TopicRunCommandPurgeRuntimeResources,
-		TopicRunCommandUpdate,
+		TopicRunCommandStoreRuntimeStateRecord,
 		TopicRunCommandDelete,
 		TopicRunCommandWorkspaceExecutionIntent,
-		TopicRunCommandApplyGovernanceWait,
-		TopicRunCommandApplyContinuationEligible,
-		TopicRunCommandApplyTerminalDelivery,
-		TopicRunCommandApplyRuntimeStateIncompatible,
+		TopicRunFactGovernanceWait,
+		TopicRunFactContinuationEligible,
+		TopicRunFactTerminalDelivery,
+		TopicRunFactRuntimeStateIncompatible,
 	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
 		TopicRunCreated, TopicRunStarted, TopicRunBlockedOnDecision, TopicRunBlockedOnApproval,
@@ -51,10 +51,10 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandGetRuntimeCheckpoint, TopicRunCommandListCheckpointsByRun,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
-		TopicRunCommandCreate, TopicRunCommandUpdate,
+		TopicRunCommandCreate, TopicRunCommandStoreRuntimeStateRecord,
 		TopicRunCommandDelete, TopicRunCommandWorkspaceExecutionIntent,
-		TopicRunCommandApplyGovernanceWait, TopicRunCommandApplyContinuationEligible,
-		TopicRunCommandApplyTerminalDelivery, TopicRunCommandApplyRuntimeStateIncompatible,
+		TopicRunFactGovernanceWait, TopicRunFactContinuationEligible,
+		TopicRunFactTerminalDelivery, TopicRunFactRuntimeStateIncompatible,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandPurgeRuntimeResources)
 	return ret

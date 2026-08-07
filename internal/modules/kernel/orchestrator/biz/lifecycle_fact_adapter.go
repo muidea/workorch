@@ -32,7 +32,7 @@ func (m *Biz) applyRunGovernanceWait(
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	cmd := runevents.ApplyRuntimeGovernanceWaitCommand{
+	cmd := runevents.RuntimeGovernanceWaitFact{
 		WorkspaceID:         workspaceID,
 		RunID:               runID,
 		SourceOwner:         orchestratorLifecycleSource,
@@ -48,15 +48,15 @@ func (m *Biz) applyRunGovernanceWait(
 		return err
 	}
 	event := magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyGovernanceWait,
+		runevents.TopicRunFactGovernanceWait,
 		ModuleID,
 		runevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyGovernanceWait, "run", string(runID), workspaceID, runID)
-	response, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyGovernanceWait)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactGovernanceWait, "run", string(runID), workspaceID, runID)
+	response, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunFactGovernanceWait)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (m *Biz) applyRunContinuationEligible(
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	cmd := runevents.ApplyRuntimeContinuationEligibleCommand{
+	cmd := runevents.RuntimeContinuationEligibleFact{
 		WorkspaceID:         workspaceID,
 		RunID:               runID,
 		SourceOwner:         orchestratorLifecycleSource,
@@ -97,15 +97,15 @@ func (m *Biz) applyRunContinuationEligible(
 		return err
 	}
 	event := magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyContinuationEligible,
+		runevents.TopicRunFactContinuationEligible,
 		ModuleID,
 		runevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyContinuationEligible, "run", string(runID), workspaceID, runID)
-	response, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyContinuationEligible)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactContinuationEligible, "run", string(runID), workspaceID, runID)
+	response, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunFactContinuationEligible)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func (m *Biz) applyRunRuntimeStateIncompatible(
 			ObservedRevision: item.RuntimeStateRef,
 		},
 	}
-	cmd := runevents.ApplyRuntimeStateIncompatibleFactCommand{
+	cmd := runevents.RuntimeStateIncompatibleFact{
 		WorkspaceID:            item.WorkspaceID,
 		RunID:                  item.RunID,
 		SourceOwner:            ModuleID,
@@ -154,15 +154,15 @@ func (m *Biz) applyRunRuntimeStateIncompatible(
 		return err
 	}
 	event := magicevent.NewEventWithContext(
-		runevents.TopicRunCommandApplyRuntimeStateIncompatible,
+		runevents.TopicRunFactRuntimeStateIncompatible,
 		ModuleID,
 		runevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyRuntimeStateIncompatible, "run", string(item.RunID), item.WorkspaceID, item.RunID)
-	_, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyRuntimeStateIncompatible)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactRuntimeStateIncompatible, "run", string(item.RunID), item.WorkspaceID, item.RunID)
+	_, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunFactRuntimeStateIncompatible)
 	return err
 }
 

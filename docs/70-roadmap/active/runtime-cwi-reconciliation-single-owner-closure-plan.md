@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-06
+Last Updated: 2026-08-07
 
 > 2026-08-06 live revision: 本文件以下新增的“Live P0 收口”章节优先于此前已完成项的描述。
 > 最新 fresh deployed 验证发现 Semantic Planning 仍有一条旁路直接获取 owner operation admissibility，绕过
@@ -743,7 +743,7 @@ capability owner 执行并返回 receipt
   ↓
 Orchestrator private event 提交 SM-4 evidence/recovery
   ↓
-Orchestrator 发 typed lifecycle command
+Orchestrator 发布 immutable lifecycle fact
   ↓
 Run owner 内部事件完成 SM-1
 ```
@@ -832,8 +832,9 @@ recovery、validation、complete/failed。任何 owner result 不得包含或驱
 
 **落点：** `internal/modules/blocks/run`、Orchestrator→Run typed command、application activation adapter
 
-Run owner 只处理 Start/Block/Complete/Fail 等自身内部事件。Orchestrator 必须通过 typed lifecycle command 请求迁移；Git、LLM、
-File、Shell 或 projection 不得直接发 Run state transition。
+Run owner 只处理 Start/Block/Complete/Fail 等自身内部事件。Orchestrator 只能投递不可变 lifecycle fact；Run owner
+校验 scope/identity 后转换为自己的 private internal event，再由 SM-1 reducer 迁移。Git、LLM、File、Shell 或 projection
+不得直接发 Run state transition。
 
 ### 11.6 合同归一红线
 
@@ -910,3 +911,206 @@ activation bootstrap sealed
 
 任一环节缺失都只能标记为当前阶段 blocked/failed，并输出 owner、state revision、event revision、prerequisite ID、binding、
 dispatch ID 和原始 diagnostic；不能以服务 ready、projection ready、catalog fresh 或单元测试通过替代完整 live 正向证据。
+
+## 12. 单 Owner 状态机与跨组件合同最终收口（R4）
+
+本节是对前述 P0 队列的边界归一补充。它不新增状态机，也不改变
+[`runtime-stage-contract.md`](../../00-core/runtime-stage-contract.md) 的状态语义；当本节与旧的
+`Apply...` 命名或“跨组件请求迁移”描述冲突时，以本节为准。
+
+### 12.1 唯一 owner 矩阵
+
+| 状态机/资源 | 唯一 owner | 允许迁移入口 | 其它组件只能提供 |
+| --- | --- | --- | --- |
+| SM-1 Run lifecycle | `internal/modules/blocks/run` | Run Biz private lifecycle event | activation/continuation/lifecycle fact |
+| SM-2 authority/focus convergence | `internal/modules/kernel/orchestrator` | Orchestrator private internal event | definition、owner observation、evidence fact |
+| SM-3 candidate/sealed-dispatch | `internal/modules/kernel/orchestrator` | Orchestrator private candidate/dispatch event | LLM candidate、feasibility、operation receipt |
+| SM-4 drive/recovery/delivery | `internal/modules/kernel/orchestrator` | Orchestrator private drive/recovery/delivery event | owner acknowledgement、process/recovery trigger |
+| Workspace lifecycle/projection | `internal/modules/blocks/workspace` | Workspace Biz private lifecycle event | Run state fact、terminal delivery fact |
+| Result lifecycle | `internal/modules/blocks/result` | Result Biz private lifecycle event | terminal material/fact |
+
+SM-2、SM-3、SM-4 可以继续由同一个 Orchestrator owner 持有，但必须使用分离的 internal-event kind、reducer 和 CAS
+边界。不能为了“拆组件”把三个状态机拆到不同 Module；那会重新制造跨 owner 状态迁移和共享可变状态。
+
+### 12.2 唯一执行链
+
+所有 activation、resume、restart、recovery 和 semantic planning 必须收敛到：
+
+```text
+Activation 编译 minimal RuntimeBootstrap
+  -> Run owner 接收 activation/continuation intent
+  -> SM-1 owner-local transition + RunStateChanged fact
+  -> Orchestrator SM-4 drive
+  -> 唯一 prerequisite dispatcher
+  -> SM-2 private event 提交 capability/admissibility facts
+  -> SM-3 semantic-plan / operations request
+  -> SM-2 seal authority/binding
+  -> sealed dispatch
+  -> capability owner 执行并返回 typed receipt
+  -> SM-4 private event 提交 evidence/recovery
+  -> Orchestrator 发布 immutable terminal delivery fact
+  -> Result -> Workspace -> Run 各自 owner-local transition
+```
+
+禁止任何组件根据 projection、LLM 文本、错误 message、旧 Run 状态或工作区猜测结果，直接触发另一个状态机迁移。
+
+### 12.3 外部合同只能表达 intent、fact 或 acknowledgement
+
+跨 owner EventHub 合同必须唯一属于以下三类：
+
+| 类型 | 含义 | 禁止内容 |
+| --- | --- | --- |
+| Intent | 调用方请求做某事 | 目标状态、next action、retry、terminal |
+| Fact | producer 已观察到某事实 | 接收方 reducer 指令、覆盖 credit、推导状态 |
+| Acknowledgement | owner 已处理一个封存 identity | 新 authority、动作选择、跨 owner 写入 |
+
+以下命名和形态已经直接迁移为最终合同，不再新增 `Apply`/通用 update 同类合同：
+
+```text
+RuntimeGovernanceWaitFact
+RuntimeContinuationEligibleFact
+RuntimeTerminalDeliveryFact
+RunProjectionFact
+StoreRuntimeStateRecordCommand（仅保存 opaque Runtime aggregate）
+```
+
+目标形态为 `...Observed`/`...Fact` typed contract。接收 owner 的处理顺序必须是：
+
+```text
+typed EventHub fact
+  -> scope / identity / revision 校验
+  -> owner private internal event
+  -> owner reducer
+  -> owner CAS
+  -> owner notification / acknowledgement
+```
+
+跨组件合同不得携带 `TargetState`、`NextAction`、`ConvergenceState`、`FocusState`、`DispatchState`、`CoverageCredit`、
+`TerminalDecision` 或完整可变 owner entity。Run 保存 Runtime aggregate 时是唯一例外，但该字段必须保持 opaque，Run
+只能按 opaque ref/revision 做 CAS，不解释 SM-2/3/4 内容。
+
+### 12.4 组件收口范围
+
+#### 必须改造状态入口的核心组件
+
+1. `internal/modules/kernel/orchestrator`
+   - 保持唯一 `submitRuntimeInternalEvent` 和 single transition coordinator；
+   - SM-2/3/4 不得互相直接调用 reducer；
+   - SM-3 只提交 candidate/request/receipt fact，SM-2 决定 correction、focus、evidence 或 terminal；
+   - SM-4 只恢复已持久化 ledger，不重建 authority，不修改其他 owner state。
+2. `internal/modules/blocks/run`
+   - 外部 lifecycle fact 先转换为 Run private event；
+   - Runtime state write 使用专用 `StoreRuntimeStateRecordCommand`；
+   - Run 是 SM-1 唯一迁移 owner，不能解析 Runtime aggregate。
+3. `internal/modules/blocks/workspace`
+   - Run projection、fresh activation slot release、terminal delivery 全部走 Workspace private event；
+   - Workspace 自己推导 `Workspace.State` 和 `ActiveRunID`，不接受 Orchestrator target state。
+4. `internal/modules/blocks/result`
+   - terminal material 只作为事实；
+   - Result owner 自己推导 accepted/rejected 并保存 delivery fence；
+   - 不参与 SM-2/3/4 决策。
+
+#### 必须做合同核对、不得拥有 Runtime 状态机的组件
+
+```text
+blocks/llm
+blocks/file
+blocks/git
+blocks/shell
+blocks/mcp
+blocks/mcpregistry
+blocks/web
+blocks/ssh
+blocks/decision
+blocks/approval
+application/workorchd
+services/workorch
+eventstream / projection / TUI / Web console
+```
+
+这些组件只能定义或消费自身 owner 的 concrete typed topic、Command、Result、receipt 和 read model，不得写 SM-1～SM-4，
+不得根据 LLM 文本或 projection 选择 Runtime action。
+
+`internal/pkg/workorchruntimecontract` 只保留 DTO、identity、normalize、validate、clone、hash 和纯 evaluator helper，
+不得增加状态迁移、CAS、EventHub、timer、retry 或 owner adapter。
+
+### 12.5 当前 live 证据与收口含义
+
+最近 fresh deployed 的 `run-018` 已出现：
+
+```text
+semantic_plan_invalid
+  -> semantic_plan_correction_required
+  -> semantic_provider_transport_exhausted
+  -> SM-2 terminal failure
+  -> SM-4 terminal delivery
+  -> Result -> Workspace -> Run owner delivery
+```
+
+其中 LLM 返回的非法 JSON（例如首字符不是 JSON 文档）必须保持为 `semantic_plan_invalid` 原始诊断；provider transport
+失败必须作为独立 typed request outcome。两者不能由错误字符串互相覆盖，也不能由 LLM 直接设置 Run failed。当前 run
+已能正确终止并完成 delivery，说明 owner-local terminal 路径工作；但尚未产生 candidate、dispatch、receipt 或 durable
+state-change，不能标记为正向完成。
+
+因此本节收口的 live 门禁必须同时验证：
+
+1. semantic rejection 和 provider transport outcome 在 SM-3 ledger 中保持独立；
+2. correction 只由 SM-3/SM-2 private event 产生，不能由 LLM 或 Run owner 产生；
+3. terminal 只由 SM-2 seal，SM-4 只负责 delivery；
+4. Result、Workspace、Run 依次以 owner-local event 完成各自迁移；
+5. 一个 workspace 的 failure、retry 或 terminal 不会改变另一个 workspace 的状态。
+
+### 12.6 R4 代码收口顺序
+
+| 阶段 | 组件 | 收口内容 | 必须验证 |
+| --- | --- | --- | --- |
+| R4-1 | Orchestrator | 固化 SM-2/3/4 internal dispatcher、禁止跨 reducer 直调 | transition、scope、CAS、duplicate、restart |
+| R4-2 | Run | lifecycle fact -> Run private event；opaque Runtime CAS 合同收窄 | active/blocked/terminal、stale、response-loss |
+| R4-3 | Workspace | Run/terminal fact -> Workspace private event | active-run slot、fresh restart、旧 Run 不释放新 Run |
+| R4-4 | Result | terminal fact -> Result private event | accepted/rejected、delivery fence、create race |
+| R4-5 | LLM + capability blocks | 仅返回 typed feedback/receipt，拆分 semantic rejection 与 transport failure | invalid JSON、timeout、owner transient、receipt matching |
+| R4-6 | application/TUI/Web/projection | 清除隐式推进、目标状态 patch 和 projection 驱动 | read-only、intent-only、SSE 重放不推进 |
+| R4-7 | contracts | `Apply...` 迁移语义改为 `...Observed`/`...Fact`，清理 alias/dual subscribe | owner/topic/shape AST scan |
+| R4-8 | live matrix | 双 workspace 并发、fresh/resume/restart、empty/initialized Git、semantic invalid/timeout/recovery | candidate -> dispatch -> receipt -> evidence -> state_change |
+
+当前代码收口状态（2026-08-07）：
+
+- R4-1 已完成：`RuntimeController.ApplyInternalEvent` 在 reducer/CAS 前强制校验 exhaustive owner-private metadata；
+- R4-2 已完成：Run activation、governance wait、continuation、terminal、schema incompatible 全部先进入 Run private lifecycle event；
+  pending resume 原有的 `applyLifecycleLocked` 直调旁路已清除；
+- R4-3 已完成：Workspace 的 Run projection、fresh activation slot release、terminal delivery 全部先进入 Workspace private lifecycle event；
+- R4-4 已完成：Result terminal delivery 先进入 Result private lifecycle event，再由 owner 构造状态并持久化；
+- R4-5/R4-6 已完成代码审计并保留现有 typed feedback、transport/rejection 分离和 presentation read-only 回归；
+- `verify-boundary-contract` 已增加 Run/Workspace/Result 生产 reducer 绕过扫描，测试代码可直接验证 reducer table，生产代码不允许绕过；
+- R4-7 已完成：Run/Workspace/Result lifecycle transport 统一改为 immutable `...Fact` 与 `/fact/` topic；
+  `UpdateRunCommand` 已直接切换为只保存 opaque aggregate 的 `StoreRuntimeStateRecordCommand`，旧类型、旧 topic、alias、
+  dual subscribe 与 forwarding bridge 均已清零；boundary verifier 会拒绝其重新出现；
+- R4-8 必须在包含本轮代码的 fresh deployed 实例上完成，不能由本地测试代替。
+
+### 12.7 R4 完成判定
+
+R4 只有在下列条件全部满足后才能关闭：
+
+- 四个 Runtime 状态机各自只有一个 owner；
+- Workspace、Result 的资源状态也只能由各自 owner-local event 迁移；
+- EventHub 不再携带接收方目标状态或 reducer 指令；
+- Orchestrator 不直接写 Run/Workspace/Result lifecycle；
+- Run 不解析 Runtime aggregate；
+- LLM/capability owner 不选择 action、retry、coverage 或 terminal；
+- projection、TUI、Web、eventstream 不触发状态迁移；
+- duplicate、stale、CAS conflict、restart、response-loss、budget guard 和双 workspace 并发测试通过；
+- fresh deployed live 至少观察到：
+
+```text
+SM-2 committed revision
+  -> candidateAttemptCount > 0
+  -> sealed dispatch
+  -> capability receipt
+  -> accepted evidence
+  -> SM-4 progress
+  -> Run owner lifecycle fact/event
+  -> durable state_change
+```
+
+在此之前，服务 ready、projection ready、catalog fresh、LLM 请求成功或 terminal delivery 成功都只能作为局部健康证据，
+不能替代 Runtime 正向收敛证明。

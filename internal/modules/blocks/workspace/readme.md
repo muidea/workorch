@@ -23,7 +23,7 @@
   `ConvergenceState`、RuntimeAction、focus、repair 或 error message 重新裁决；delivery feedback 保留 stable
   category 与完整安全 original diagnostic。
 - 对已经持久化为 `fresh_activation_required` 的 Run，Workspace 还可消费带 Run owner scope、opaque runtime ref/
-  revision 与 actual/supported schema 的 `ReleaseFreshActivationRunSlotFactCommand`。该 reducer 只在
+  revision 与 actual/supported schema 的 `FreshActivationRunSlotReleaseFact`。该 reducer 只在
   `ActiveRunID == RunID` 时清空自身 slot 并保持 Workspace 可激活；空 slot 与迟到旧 fact 都是 no-op，绝不能清空
   新 Run。它不改变旧 Run state、不产生 terminal delivery，也不读取 Runtime aggregate。普通 Run notification
   绝不能自动释放该 slot；只有用户明确 restart 的 application forwarder 可以同步提交同一 typed fact。

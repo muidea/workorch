@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -110,6 +111,13 @@ type RuntimeInternalEventResult struct {
 func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
 	if c == nil || c.repository == nil || event.WorkspaceID == "" || event.RunID == "" {
 		return RuntimeInternalEventResult{}, common.ErrInvalidArgument
+	}
+	// Every mutation must enter through the owner-private SM-2/SM-3/SM-4
+	// vocabulary. Keep this guard at the dispatcher boundary, before any
+	// reducer or repository work, so a newly added event cannot silently become
+	// a cross-machine transition merely because it was added to a switch below.
+	if metadata, ok := runtimeInternalFactMetadata(event.Kind); !ok || metadata.TransitionTarget != eventcontract.TransitionTargetReceiverOwnerPrivate {
+		return RuntimeInternalEventResult{}, fmt.Errorf("%w: runtime internal event %q is not classified as an owner-private transition", common.ErrInvalidArgument, event.Kind)
 	}
 	result := RuntimeInternalEventResult{}
 	switch event.Kind {

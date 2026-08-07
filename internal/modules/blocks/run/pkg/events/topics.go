@@ -37,15 +37,15 @@ const (
 	TopicRunCommandGetRuntimeCheckpoint        = "/run/command/get-runtime-checkpoint"
 	TopicRunCommandListCheckpointsByRun        = "/run/command/list-runtime-checkpoints-by-run"
 	TopicRunCommandPurgeRuntimeResources       = "/run/command/purge-runtime-resources"
-	TopicRunCommandUpdate                      = "/run/command/update"
+	TopicRunCommandStoreRuntimeStateRecord     = "/run/command/store-runtime-state-record"
 	TopicRunCommandDelete                      = "/run/command/delete"
 
 	// RUNTIME-SMO owner-local lifecycle commands. External inputs never carry a
 	// target RunState; only Run Biz may migrate SM-1.
-	TopicRunCommandApplyGovernanceWait           = "/run/command/apply-governance-wait"
-	TopicRunCommandApplyContinuationEligible     = "/run/command/apply-continuation-eligible"
-	TopicRunCommandApplyTerminalDelivery         = "/run/command/apply-terminal-delivery"
-	TopicRunCommandApplyRuntimeStateIncompatible = "/run/command/apply-runtime-state-incompatible"
+	TopicRunFactGovernanceWait           = "/run/fact/governance-wait"
+	TopicRunFactContinuationEligible     = "/run/fact/continuation-eligible"
+	TopicRunFactTerminalDelivery         = "/run/fact/terminal-delivery"
+	TopicRunFactRuntimeStateIncompatible = "/run/fact/runtime-state-incompatible"
 	// TopicRunCommandWorkspaceExecutionIntent receives a Workspace-owner
 	// selection/authorization fact. Run alone decides the resulting SM-1 work.
 	TopicRunCommandWorkspaceExecutionIntent = "/run/command/workspace-execution-intent"

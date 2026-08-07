@@ -8,8 +8,8 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestResultApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
-	cmd := ApplyRuntimeTerminalDeliveryCommand{
+func TestResultRuntimeTerminalDeliveryFactValidate(t *testing.T) {
+	cmd := RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1"},
 		Material:                    ResultMaterial{ID: "ws-1/run-1/result/dod-assessment", WorkspaceID: "ws-1", RunID: "run-1", GoalID: "goal-1", DoDID: "dod-1", Summary: "done"},
 	}

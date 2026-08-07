@@ -9,7 +9,7 @@
 - Result 的 get/list/delete 与 Artifact 的 list/delete 由 `blocks/result/pkg/events` 定义具体 command 和
   `ResultCommandResult`；没有生产调用方的单项 Artifact get 合同不保留；
   query result 在离开 owner 前必须显式深拷贝，调用方不能取得 repository entity 的共享可变引用。
-- Runtime Result 的唯一写入口是 typed `ApplyRuntimeTerminalDeliveryCommand`。调用方只提交 sealed terminal material，
+- Runtime Result 的唯一写入口是 typed `RuntimeTerminalDeliveryFact`。调用方只提交 sealed terminal material，
   Result owner 在自身 reducer 中派生 Result identity、state、时间戳和 delivery fence；不存在接收完整 Result/Artifact
   entity 的 generic create/update command。
 - Result owner 持久化 terminal delivery 后单点发布 `ResultChangedData`；topic 按 accepted/rejected 状态选择。

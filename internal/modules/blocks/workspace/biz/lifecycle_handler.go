@@ -15,7 +15,7 @@ import (
 
 func (m *Biz) lifecycleTopics() []string {
 	return []string{
-		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery,
+		workspaceevents.TopicWorkspaceFactTerminalDelivery,
 	}
 }
 
@@ -41,18 +41,25 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
-	case workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery:
-		cmd, ok := ev.Data().(workspaceevents.ApplyRuntimeTerminalDeliveryCommand)
+	case workspaceevents.TopicWorkspaceFactTerminalDelivery:
+		cmd, ok := ev.Data().(workspaceevents.RuntimeTerminalDeliveryFact)
 		if !ok || ev.Source() != "kernel/orchestrator" {
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
-		return m.applyTerminalDelivery(ctx, cmd)
+		boundCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+		}
+		return m.submitWorkspaceLifecycleInternalEvent(boundCtx, workspaceLifecycleInternalEvent{
+			Kind:             workspaceLifecycleInternalEventTerminalDeliveryObserved,
+			TerminalDelivery: &cmd,
+		})
 	default:
 		return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
 }
 
-func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceevents.ReleaseFreshActivationRunSlotFactCommand) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
+func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceevents.FreshActivationRunSlotReleaseFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 		if err != nil {
@@ -78,7 +85,7 @@ func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceev
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
 
-func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyRunProjectionFactCommand) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
+func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.RunProjectionFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 		if err != nil {
@@ -104,7 +111,7 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyR
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
 
-func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.ApplyRuntimeTerminalDeliveryCommand) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
+func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.RuntimeTerminalDeliveryFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 		if err != nil {
@@ -138,7 +145,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.App
 
 func workspaceTerminalDeliveryAck(
 	ws *workspacemodel.Workspace,
-	cmd workspaceevents.ApplyRuntimeTerminalDeliveryCommand,
+	cmd workspaceevents.RuntimeTerminalDeliveryFact,
 	state runtimecontract.RuntimeDeliveryAcknowledgedState,
 ) *runtimecontract.RuntimeDeliveryAcknowledgement {
 	if ws == nil {

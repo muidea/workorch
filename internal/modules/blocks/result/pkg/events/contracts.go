@@ -20,9 +20,9 @@ func Contracts() []eventcontract.Contract {
 	)...)
 	ret = append(ret, eventcontract.Build("result", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicResultCommandDelete,
-		TopicResultCommandApplyTerminalDelivery,
+		TopicResultFactTerminalDelivery,
 		TopicArtifactCommandDelete,
 	)...)
-	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicResultCommandApplyTerminalDelivery)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicResultFactTerminalDelivery)
 	return ret
 }
