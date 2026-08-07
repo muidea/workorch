@@ -74,6 +74,34 @@ func TestRuntimeCandidateRequestContentChunkRejectsConflictingReplay(t *testing.
 	}
 }
 
+func TestRuntimeCandidateRequestContentDoesNotCrossBatchOrRunLineage(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewArtifactContinuationRepository()
+	first := runtimeAggregate(t, 1)
+	second := runtimeAggregate(t, 2)
+	firstLogical := "candidate-request-run-1-batch-0"
+	secondLogical := "candidate-request-run-2-batch-0"
+	if _, err := persistRuntimeCandidateRequestContentChunk(ctx, repo, first, firstLogical, 1, "candidate-call-1", []byte(`{"operations":[`), false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := persistRuntimeCandidateRequestContentChunk(ctx, repo, second, secondLogical, 1, "candidate-call-2", []byte(`{"operations":[`), false); err != nil {
+		t.Fatal(err)
+	}
+	firstID := runtimecontract.StableRuntimeCandidateRequestContentID(firstLogical)
+	_, firstContent, err := repo.GetChunk(ctx, firstID, 1)
+	if err != nil || firstContent != `{"operations":[` {
+		t.Fatalf("first lineage content = %q err=%v", firstContent, err)
+	}
+	secondID := runtimecontract.StableRuntimeCandidateRequestContentID(secondLogical)
+	_, secondContent, err := repo.GetChunk(ctx, secondID, 1)
+	if err != nil || secondContent != `{"operations":[` {
+		t.Fatalf("second lineage content = %q err=%v", secondContent, err)
+	}
+	if runtimecontract.StableRuntimeCandidateRequestContentID(firstLogical) == runtimecontract.StableRuntimeCandidateRequestContentID(secondLogical) {
+		t.Fatal("content continuation IDs crossed run/batch lineage")
+	}
+}
+
 func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *testing.T) {
 	ctx := context.Background()
 	contents := memory.NewArtifactContinuationRepository()

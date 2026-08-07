@@ -393,7 +393,14 @@ func (c *RuntimeController) mergeSemanticPlanBatchFeasibilities(ctx context.Cont
 			return false, nil
 		}
 		if ledger.FeasibilitySetHash != "" {
-			return false, fmt.Errorf("%w: conflicting merged semantic feasibility", common.ErrConflict)
+			if ledger.ActiveBatchID != "" || len(ledger.BatchFeasibilityResults) != len(ledger.Batches) {
+				return false, fmt.Errorf("%w: conflicting merged semantic feasibility", common.ErrConflict)
+			}
+			for _, batch := range ledger.Batches {
+				if batch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted {
+					return false, fmt.Errorf("%w: merged semantic feasibility has incomplete batch", common.ErrConflict)
+				}
+			}
 		}
 		ledger.Feasibilities = append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), values...)
 		ledger.FeasibilitySetHash = hash

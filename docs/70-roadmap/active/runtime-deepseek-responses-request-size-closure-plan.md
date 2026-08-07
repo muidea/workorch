@@ -419,9 +419,9 @@ WorkOrch provider timeout：120s～180s
    private batch-compilation/advance event、batch document 分片字段、full-manifest merge helper 及单 batch
    feasibility 完整性校验 helper、batch feasibility result DTO/identity、ledger 有序 slice 及全量 feasibility merge
    helper 已实现；feasibility 分批驱动已接入，owner facts 只在当前 batch 工作集内累积并按 batch result 归档。
-4. batch document CAS 后 replay、merged document CAS 后 replay、batch correction 保持 active lineage、跨部署
-   batch-size 变化时按已完成 coverage offset 恢复、accepted active batch feasibility identity/stale gate 已补齐；
-   batch document hash 与 batch state 的绑定也已补齐；restart 新 lineage、fragment CAS 前后和最终 merge CAS 前后的
-   完整回归矩阵尚未补齐。
+4. batch document CAS 后 replay、merged document CAS 后 replay、最终多 batch feasibility merge CAS response-loss、batch correction
+   保持 active lineage、跨部署 batch-size 变化时按已完成 coverage offset 恢复、accepted active batch feasibility identity/stale gate
+   已补齐；batch document hash 与 batch state 的绑定、merge 前 incomplete-batch rejection、restart/new-run 与 fragment content
+   隔离组合也已补齐。剩余仅为真实部署实例上的 restart/live 故障验证。
 5. 运行实例仍需重新部署并确认 provider timeout、stream、8K 阶段预算和 typed body-idle outcome 生效。
 6. fresh live 尚未证明 ordered batches 最终形成完整 binding→receipt→evidence 链。

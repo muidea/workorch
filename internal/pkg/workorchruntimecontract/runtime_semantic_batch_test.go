@@ -124,3 +124,18 @@ func TestMergeRuntimeSemanticPlanBatchFeasibilityResultsRejectsMissingBatch(t *t
 		t.Fatal("feasibility merge accepted missing batch result")
 	}
 }
+
+func TestMergeRuntimeSemanticPlanBatchFeasibilityResultsRejectsIncompleteBatch(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	proposal := semanticContractTestProposal("cwi-001")
+	order := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-001"}}
+	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-0", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, CoverageOrder: order.CoverageOrder, Proposals: []RuntimeSemanticProofProposal{proposal}}
+	batch := RuntimeSemanticPlanBatch{BatchID: "batch-0", ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageOrderHash: StableRuntimeSemanticPlanCoverageOrderHash(order), Sequence: 0, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, RequestLogicalID: "request-1", DocumentHash: StableRuntimeSemanticPlanDocumentHash(document), State: RuntimeSemanticPlanBatchDocumentComplete}
+	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+	feasibility := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: "catalog-1", Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "revision-1"}
+	result := RuntimeSemanticPlanBatchFeasibilityResult{BatchID: batch.BatchID, BatchHash: batch.Hash, DocumentHash: StableRuntimeSemanticPlanDocumentHash(document), Feasibilities: []RuntimeSemanticProofFeasibility{feasibility}}
+	result.Hash = StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
+	if _, err := MergeRuntimeSemanticPlanBatchFeasibilityResults(manifest, document, []RuntimeSemanticPlanBatch{batch}, []RuntimeSemanticPlanBatchFeasibilityResult{result}); err == nil {
+		t.Fatal("feasibility merge accepted a batch that was not accepted")
+	}
+}
