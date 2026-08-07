@@ -630,14 +630,12 @@ func TestReadyzNativeRouteDoesNotExposeEventHub(t *testing.T) {
 		}
 		return nil
 	}
-	if err := state.workspaceProjection.RebuildAll(context.Background()); err != nil {
-		t.Fatalf("rebuild workspace projection baseline: %v", err)
-	}
+	handler := newMuxWithState(state)
 	waitForReconciledWorkspaceProjection(t, state)
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 
-	newMuxWithState(state).ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -656,14 +654,12 @@ func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 		Detail:         "owner command returned an explicit failure",
 		Recoverability: schedulerRecoverabilityManualRetry,
 	})
-	if err := state.workspaceProjection.RebuildAll(context.Background()); err != nil {
-		t.Fatalf("rebuild workspace projection baseline: %v", err)
-	}
+	handler := newMuxWithState(state)
 	waitForReconciledWorkspaceProjection(t, state)
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
-	newMuxWithState(state).ServeHTTP(rec, req)
+	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

@@ -52,38 +52,83 @@ def _prompt_sections(content: str) -> dict[str, str]:
     return sections
 
 
+def _leading_json_object(body: str, section_id: str) -> dict[str, Any]:
+    try:
+        value, _ = json.JSONDecoder().raw_decode((body or "").lstrip())
+    except json.JSONDecodeError as error:
+        raise MockContractError(f"invalid {section_id} JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise MockContractError(f"{section_id} must start with a JSON object")
+    return value
+
+
 def _current_authority(content: str) -> tuple[dict[str, Any], dict[str, Any], str]:
     sections = _prompt_sections(content)
     body = sections.get("C3.runtime-authority")
     if not body:
         raise MockContractError("missing C3.runtime-authority")
-    try:
-        authority = json.loads(body)
-    except json.JSONDecodeError as error:
-        raise MockContractError(f"invalid C3.runtime-authority JSON: {error}") from error
+    authority = _leading_json_object(body, "C3.runtime-authority")
     context = _object(authority, "context", "Context")
     if not isinstance(context, dict):
         raise MockContractError("C3.runtime-authority has no context")
     return authority, context, sections.get("C4.execution-tail", "")
 
 
-def _semantic_authority(content: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _semantic_authority(content: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     body = _prompt_sections(content).get("C3.semantic-authority")
     if not body:
         raise MockContractError("missing C3.semantic-authority")
-    try:
-        authority = json.loads(body)
-    except json.JSONDecodeError as error:
-        raise MockContractError(f"invalid C3.semantic-authority JSON: {error}") from error
+    authority = _leading_json_object(body, "C3.semantic-authority")
     manifest = _object(authority, "manifest", "Manifest")
     seed = _object(authority, "definitionSeed", "DefinitionSeed")
     if not isinstance(manifest, dict) or not isinstance(seed, dict):
         raise MockContractError("C3 semantic authority has no manifest or definition seed")
-    return manifest, seed
+    return authority, manifest, seed
 
 
 def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[str, Any]:
-    manifest, seed = _semantic_authority(user_content)
+    authority, manifest, seed = _semantic_authority(user_content)
+    plan_step = _object(authority, "planStep", "PlanStep")
+    schema = _object(authority, "schema", "Schema") or {}
+    properties = _object(schema, "properties", "Properties") or {}
+    order_schema = _object(properties, "coverageOrder", "CoverageOrder") or {}
+    order_items = _object(order_schema, "items", "Items") or {}
+    coverage_order = _unique(_strings(_object(order_items, "enum", "Enum")))
+    if not coverage_order:
+        coverage_order = _unique([
+            _object(item, "id", "ID") or ""
+            for item in _object(manifest, "coverageItems", "CoverageItems") or []
+            if isinstance(item, dict)
+        ])
+    if not coverage_order:
+        raise MockContractError("semantic request has no bounded coverage order")
+    document = {
+        "documentKind": "semantic_plan",
+        "schemaVersion": "workorch.runtime_semantic_plan_document",
+        "manifestHash": _object(manifest, "hash", "Hash"),
+        "definitionSeedHash": _object(manifest, "definitionSeedHash", "DefinitionSeedHash") or _object(seed, "hash", "Hash"),
+        "planStep": plan_step,
+        "coverageOrder": coverage_order,
+        "proposals": [],
+    }
+    if plan_step == "coverage_order":
+        return document
+    if plan_step != "proof_batch":
+        raise MockContractError(f"semantic request has invalid plan step {plan_step!r}")
+    batch_id = _object(authority, "batchId", "BatchID")
+    batch_sequence = _object(authority, "batchSequence", "BatchSequence")
+    batch_coverage = _unique(_strings(_object(authority, "batchCoverageWorkItemIds", "BatchCoverageWorkItemIDs")))
+    if not isinstance(batch_id, str) or not batch_id or not isinstance(batch_sequence, int) or isinstance(batch_sequence, bool) or not batch_coverage:
+        raise MockContractError("semantic proof batch has incomplete identity")
+    if any(coverage_id not in coverage_order for coverage_id in batch_coverage):
+        raise MockContractError("semantic proof batch is outside bounded coverage order")
+    manifest_coverage = _unique([
+        _object(item, "id", "ID") or ""
+        for item in _object(manifest, "coverageItems", "CoverageItems") or []
+        if isinstance(item, dict)
+    ])
+    if set(manifest_coverage) != set(batch_coverage):
+        raise MockContractError("semantic proof manifest does not match bounded batch coverage")
     catalog = None
     for candidate in _object(manifest, "ownerCatalogs", "OwnerCatalogs") or []:
         if isinstance(candidate, dict) and _object(candidate, "ownerModuleId", "OwnerModuleID") == "blocks/mcp":
@@ -99,12 +144,8 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
     recipes = [recipe for recipe in recipes if recipe.startswith(expected_prefix)]
     if len(recipes) != 1:
         raise MockContractError("semantic MCP catalog does not contain one verifier tool recipe")
-    coverage_items = _object(manifest, "coverageItems", "CoverageItems") or []
     proposals = []
-    for item in coverage_items:
-        coverage_id = _object(item, "id", "ID") if isinstance(item, dict) else None
-        if not isinstance(coverage_id, str) or not coverage_id:
-            raise MockContractError("semantic MCP coverage item has no identity")
+    for coverage_id in batch_coverage:
         proposals.append({
             "coverageWorkItemId": coverage_id,
             "ownerModuleId": "blocks/mcp",
@@ -116,13 +157,11 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
             "requiredCheckRefs": [recipes[0]],
             "declarationRef": f"mock-semantic/{coverage_id}",
         })
-    return {
-        "documentKind": "semantic_plan",
-        "schemaVersion": "workorch.runtime_semantic_plan_document",
-        "manifestHash": _object(manifest, "hash", "Hash"),
-        "definitionSeedHash": _object(seed, "hash", "Hash"),
-        "proposals": proposals,
-    }
+    document["batchId"] = batch_id
+    document["batchSequence"] = batch_sequence
+    document["batchCoverageWorkItemIds"] = batch_coverage
+    document["proposals"] = proposals
+    return document
 
 
 def _current_focus(context: dict[str, Any]) -> tuple[str, list[str], list[dict[str, Any]]]:
@@ -280,8 +319,20 @@ def _authority(state: str, binding_refs: list[str] | None = None) -> dict[str, A
 
 
 def self_test() -> None:
+    order_manifest = {
+        "Hash": "manifest-order", "DefinitionSeedHash": "seed-test",
+        "CoverageItems": [{"ID": "cwi-first"}, {"ID": "cwi-test"}],
+    }
+    order = semantic_plan_payload(_prompt(("C3.semantic-authority", {
+        "Manifest": order_manifest, "DefinitionSeed": {"Hash": "seed-test"},
+        "Schema": {"properties": {"coverageOrder": {"items": {"enum": ["cwi-first", "cwi-test"]}}}},
+        "PlanStep": "coverage_order",
+    })), "mcp-test")
+    if order.get("coverageOrder") != ["cwi-first", "cwi-test"] or order.get("proposals") != []:
+        raise AssertionError(f"MCP semantic order was not bounded: {order}")
+
     semantic_manifest = {
-        "Hash": "manifest-test", "CoverageItems": [{"ID": "cwi-test"}],
+        "Hash": "manifest-test", "DefinitionSeedHash": "seed-test", "CoverageItems": [{"ID": "cwi-test"}],
         "OwnerCatalogs": [{
             "OwnerModuleID": "blocks/mcp", "SelectorRefs": ["mcp-test"],
             "ValidationRecipeRefs": ["mcp/tool_call/mcp-test/repo.summary"],
@@ -289,8 +340,11 @@ def self_test() -> None:
     }
     semantic = semantic_plan_payload(_prompt(("C3.semantic-authority", {
         "Manifest": semantic_manifest, "DefinitionSeed": {"Hash": "seed-test"},
+        "Schema": {"properties": {"coverageOrder": {"items": {"enum": ["cwi-first", "cwi-test"]}}}},
+        "PlanStep": "proof_batch", "BatchID": "batch-test", "BatchSequence": 1,
+        "BatchCoverageWorkItemIDs": ["cwi-test"],
     })), "mcp-test")
-    if semantic["proposals"][0].get("validationRecipeId") != "mcp/tool_call/mcp-test/repo.summary":
+    if semantic.get("batchCoverageWorkItemIds") != ["cwi-test"] or semantic["proposals"][0].get("validationRecipeId") != "mcp/tool_call/mcp-test/repo.summary":
         raise AssertionError(f"MCP semantic plan lost owner recipe identity: {semantic}")
 
     validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")

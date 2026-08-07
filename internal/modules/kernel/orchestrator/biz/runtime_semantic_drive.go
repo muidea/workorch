@@ -52,7 +52,8 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningOrderAccepted:
-		ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, "")
+		batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
+		ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
@@ -418,7 +419,8 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 
 func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
 	ledger := aggregate.SemanticPlanning.Clone()
-	if ledger.Manifest == nil || ledger.Document == nil {
+	feasibilityDocument, found := runtimeSemanticActiveFeasibilityDocument(ledger)
+	if ledger.Manifest == nil || !found {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_feasibility_context_invalid", "semantic feasibility has no persisted manifest or document", nil)
 	}
 	for _, fact := range ledger.Feasibilities {
@@ -448,7 +450,7 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 	for _, fact := range ledger.Feasibilities {
 		observed[fact.CoverageWorkItemID] = struct{}{}
 	}
-	for _, proposal := range ledger.Document.Proposals {
+	for _, proposal := range feasibilityDocument.Proposals {
 		if _, done := observed[proposal.CoverageWorkItemID]; done {
 			continue
 		}
@@ -459,6 +461,16 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 	})
 	return sealed.Aggregate, err
+}
+
+func runtimeSemanticActiveFeasibilityDocument(ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtimecontract.RuntimeSemanticPlanDocument, bool) {
+	if ledger.ActiveBatchID != "" {
+		return runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
+	}
+	if ledger.Document == nil {
+		return runtimecontract.RuntimeSemanticPlanDocument{}, false
+	}
+	return ledger.Document.Clone(), true
 }
 
 func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtime.RuntimeAggregate, proposal runtimecontract.RuntimeSemanticProofProposal) (runtime.RuntimeAggregate, error) {

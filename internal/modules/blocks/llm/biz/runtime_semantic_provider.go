@@ -24,7 +24,7 @@ type runtimeSemanticAuthorityProjection struct {
 	OutputInstruction string                                  `json:"outputInstruction"`
 	PlanStep          runtimecontract.RuntimeSemanticPlanStep `json:"planStep"`
 	BatchID           string                                  `json:"batchId,omitempty"`
-	BatchSequence     int                                     `json:"batchSequence,omitempty"`
+	BatchSequence     *int                                    `json:"batchSequence,omitempty"`
 	BatchCoverageIDs  []common.CoverageWorkItemID             `json:"batchCoverageWorkItemIds,omitempty"`
 }
 
@@ -139,10 +139,15 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	} else if context.BatchID != "" {
 		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=proof_batch and proposals only for the supplied batch coverage IDs. Do not add, omit, reorder, or claim coverage outside the batch."
 	}
+	var batchSequence *int
+	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && context.BatchID != "" {
+		value := context.BatchSequence
+		batchSequence = &value
+	}
 	authorityJSON, err := json.Marshal(runtimeSemanticAuthorityProjection{
 		WorkspaceID: string(context.WorkspaceID), RunID: string(context.RunID),
 		DefinitionSeed: runtimeSemanticDefinitionSeedForProvider(context.DefinitionSeed), Manifest: runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs), Schema: json.RawMessage(promptSchema),
-		OutputInstruction: outputInstruction, PlanStep: context.PlanStep, BatchID: context.BatchID, BatchSequence: context.BatchSequence, BatchCoverageIDs: context.BatchCoverageWorkItemIDs,
+		OutputInstruction: outputInstruction, PlanStep: context.PlanStep, BatchID: context.BatchID, BatchSequence: batchSequence, BatchCoverageIDs: context.BatchCoverageWorkItemIDs,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err

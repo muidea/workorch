@@ -92,7 +92,7 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	request.SemanticContext.DefinitionSeed = seed
 	request.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
 	request.SemanticContext.BatchID = "batch-1"
-	request.SemanticContext.BatchSequence = 1
+	request.SemanticContext.BatchSequence = 0
 	request.SemanticContext.BatchCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-001"}
 	request.SemanticManifest.CoverageItems = items
 	request.SemanticManifest.DefinitionSeedHash = seed.Hash
@@ -106,7 +106,7 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	if strings.Contains(authority, second.TargetText) || strings.Contains(sliceProjection, "cwi-002") || strings.Contains(authority, `"CoverageItems"`) || strings.Contains(authority, `"Slices"`) {
 		t.Fatalf("proof batch leaked unrelated/full definition context: authority=%s slices=%s", authority, sliceProjection)
 	}
-	if !strings.Contains(authority, `"batchId":"batch-1"`) || !strings.Contains(authority, `"coverageItems":[{"ID":"cwi-001"`) || !strings.Contains(providerRequest.Schema, `"planStep":{"const":"proof_batch"}`) {
+	if !strings.Contains(authority, `"batchId":"batch-1"`) || !strings.Contains(authority, `"batchSequence":0`) || !strings.Contains(authority, `"coverageItems":[{"ID":"cwi-001"`) || !strings.Contains(providerRequest.Schema, `"planStep":{"const":"proof_batch"}`) {
 		t.Fatalf("proof batch lost current authority: schema=%s authority=%s", providerRequest.Schema, authority)
 	}
 }

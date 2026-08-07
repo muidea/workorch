@@ -26,6 +26,30 @@ func TestRuntimeSemanticPrerequisitePathUsesCapabilityStateBeforeAdmissibility(t
 	}
 }
 
+func TestRuntimeSemanticActiveFeasibilityDocumentUsesBoundedBatch(t *testing.T) {
+	order := runtimecontract.RuntimeSemanticPlanDocument{
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	proof := runtimecontract.RuntimeSemanticPlanDocument{
+		PlanStep:                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:                  "batch-001",
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		CoverageOrder:            []common.CoverageWorkItemID{"cwi-001"},
+		Proposals: []runtimecontract.RuntimeSemanticProofProposal{{
+			CoverageWorkItemID: "cwi-001",
+		}},
+	}
+	document, found := runtimeSemanticActiveFeasibilityDocument(runtimecontract.RuntimeSemanticPlanningLedger{
+		Document:       &order,
+		ActiveBatchID:  proof.BatchID,
+		BatchDocuments: []runtimecontract.RuntimeSemanticPlanDocument{proof},
+	})
+	if !found || document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || len(document.Proposals) != 1 || document.Proposals[0].CoverageWorkItemID != "cwi-001" {
+		t.Fatalf("active feasibility document = %+v found=%t, want bounded proof batch", document, found)
+	}
+}
+
 func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -65,17 +89,11 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 		}
 		requestCount++
 		item := command.SemanticManifest.CoverageItems[0]
-		proposal := runtimecontract.RuntimeSemanticProofProposal{
-			CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileEdit,
-			Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
-			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-			DeclarationRef: "semantic/test-cwi",
-		}
 		document := runtimecontract.RuntimeSemanticPlanDocument{
 			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 			ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
+			PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
 			CoverageOrder: []common.CoverageWorkItemID{item.ID},
-			Proposals:     []runtimecontract.RuntimeSemanticProofProposal{proposal},
 		}
 		payload, encodeErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 		if encodeErr != nil {
@@ -99,8 +117,15 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evaluated.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProposalAccepted || evaluated.SemanticPlanning.Document == nil || requestCount != 1 || len(evaluated.CandidateAttempts) != 0 || evaluated.ActiveDispatch != nil {
+	if evaluated.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted || evaluated.SemanticPlanning.Document == nil || requestCount != 1 || len(evaluated.CandidateAttempts) != 0 || evaluated.ActiveDispatch != nil {
 		t.Fatalf("semantic document crossed into operation authority: ledger=%+v requests=%d", evaluated.SemanticPlanning, requestCount)
+	}
+	batched, err := module.driveRuntimeSemanticPlanning(ctx, evaluated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batched.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || len(batched.CandidateRequestSessions) != 2 || batched.SemanticPlanning.LogicalRequestID == started.SemanticPlanning.LogicalRequestID || requestCount != 1 {
+		t.Fatalf("semantic proof batch did not receive a distinct persisted request session: ledger=%+v sessions=%+v requests=%d", batched.SemanticPlanning, batched.CandidateRequestSessions, requestCount)
 	}
 }
 

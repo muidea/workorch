@@ -358,7 +358,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "verify-model",
                     "object": "model",
                     "owned_by": "verify",
-                    "operations": ["chat_completions", "embeddings"],
+                    "operations": ["responses", "embeddings"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -433,13 +433,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(encoded)
             return
-        if self.path != "/v1/chat/completions":
+        if self.path != "/v1/responses":
             self.send_response(404)
             self.end_headers()
             return
         size = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(size))
-        user_content = "\n".join(str(item.get("content", "")) for item in payload.get("messages") or [])
+        user_content = str(payload.get("input", ""))
         try:
             server_id = os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify")
             if "### C3.semantic-authority" in user_content:
@@ -447,6 +447,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 decision = decision_payload(user_content, server_id)
         except MockContractError as error:
+            print(f"mock contract rejected request: {error}", flush=True)
             encoded = json.dumps({"error": {"message": f"mock contract: {error}"}}).encode("utf-8")
             self.send_response(422)
             self.send_header("Content-Type", "application/json")
@@ -454,12 +455,32 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(encoded)
             return
+        content = json.dumps(decision, separators=(",", ":"))
+        if payload.get("stream"):
+            events = [
+                {"type": "response.output_text.delta", "delta": content},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [],
+                        "usage": {"input_tokens": 256, "output_tokens": 128, "total_tokens": 384},
+                    },
+                },
+            ]
+            encoded = "".join("data: " + json.dumps(item, separators=(",", ":")) + "\n\n" for item in events).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         response = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps(decision, separators=(",", ":"))
-                }
-            }]
+            "status": "completed",
+            "output_text": content,
+            "output": [],
+            "usage": {"input_tokens": 256, "output_tokens": 128, "total_tokens": 384},
         }
         encoded = json.dumps(response).encode("utf-8")
         self.send_response(200)
@@ -653,39 +674,13 @@ update = {
         "maxCatalogResponseBytes": 1048576,
         "maxCatalogModels": 1000,
         "modelOverrides": {
-            "verify-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
-            "gpt-4o": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
+            "verify-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["responses", "embeddings"]},
         },
     },
-    "defaultChat": {"providerID": "verify", "modelID": "verify-model"},
-    "defaultEmbedding": {"providerID": "verify", "modelID": "verify-model"},
+    "defaultChat": {"providerID": "ai-proxy", "modelID": "verify-model"},
+    "defaultEmbedding": {"providerID": "ai-proxy", "modelID": "verify-model"},
     "budget": original["budget"],
-    "customProviders": {
-        "verify": {
-            "provider": "compatible",
-            "apiSurface": "openai_compatible_http",
-            "baseURL": mock_base_url,
-            "apiKey": "verify-secret",
-            "timeout": "60s",
-            "models": {
-                "verify-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                },
-                "verify-stream-native-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                },
-                "verify-stream-estimated-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                },
-            },
-        }
-    },
+    "customProviders": {},
 }
 with open(update_path, "w", encoding="utf-8") as handle:
     json.dump(update, handle, separators=(",", ":"))
@@ -761,7 +756,7 @@ grep '工作空间验收资料' "$TMP_DIR/mcp-resource-capabilities-derived.json
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
 grep '验收提示词' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
 put_json "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
-  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","enabled":true,"approvalPolicy":"operator","status":"active"}' \
+  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","enabled":true,"approvalPolicy":"operator"}' \
   "$TMP_DIR/mcp-capability-updated.json"
 grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
 grep '"effectScope": "none"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
