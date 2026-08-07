@@ -41,6 +41,19 @@ type ProviderHTTPStatusError struct {
 	Body       string
 }
 
+// ProviderOutputLimitError is a typed, non-transport completion outcome. The
+// provider has returned a valid prefix and explicitly stopped because the
+// output token budget was reached; callers must retain Payload and continue
+// the same logical request rather than retrying the full request.
+type ProviderOutputLimitError struct {
+	Payload []byte
+	Usage   *llmaudit.ProviderUsage
+}
+
+func (e *ProviderOutputLimitError) Error() string {
+	return "llm provider response incomplete: max_output_tokens"
+}
+
 func (e *ProviderHTTPStatusError) Error() string {
 	if e == nil {
 		return "llm provider http status error"
@@ -232,6 +245,9 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, decoded.Error.Summary())
 	}
 	content := providerCompletionContent(request, decoded.Content())
+	if decoded.Status == "incomplete" && decoded.IncompleteDetails.Reason == "max_output_tokens" {
+		return llmmodels.ProviderCompletionResult{Payload: []byte(content), Usage: decoded.Usage.ProviderUsage()}, &ProviderOutputLimitError{Payload: []byte(content), Usage: decoded.Usage.ProviderUsage()}
+	}
 	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: first choice content is empty", common.ErrInvalidArgument)
 	}
@@ -311,7 +327,8 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		content, usage, err = readChatCompletionStream(resp.Body, emit)
 	}
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		content = providerCompletionContent(request, content)
+		return llmmodels.ProviderCompletionResult{Payload: []byte(content), Usage: usage}, err
 	}
 	content = providerCompletionContent(request, content)
 	if strings.TrimSpace(content) == "" {
@@ -462,10 +479,16 @@ type responsesTextFormat struct {
 }
 
 type responsesResponse struct {
-	Output     []responsesOutputItem `json:"output"`
-	OutputText string                `json:"output_text"`
-	Usage      responsesUsage        `json:"usage"`
-	Error      *chatCompletionError  `json:"error,omitempty"`
+	Status            string                     `json:"status,omitempty"`
+	IncompleteDetails responsesIncompleteDetails `json:"incomplete_details,omitempty"`
+	Output            []responsesOutputItem      `json:"output"`
+	OutputText        string                     `json:"output_text"`
+	Usage             responsesUsage             `json:"usage"`
+	Error             *chatCompletionError       `json:"error,omitempty"`
+}
+
+type responsesIncompleteDetails struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 type responsesOutputItem struct {
@@ -1129,10 +1152,11 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 			return "", nil, err
 		}
 		var event struct {
-			Type     string               `json:"type"`
-			Delta    string               `json:"delta,omitempty"`
-			Response *responsesResponse   `json:"response,omitempty"`
-			Error    *chatCompletionError `json:"error,omitempty"`
+			Type              string                     `json:"type"`
+			Delta             string                     `json:"delta,omitempty"`
+			Response          *responsesResponse         `json:"response,omitempty"`
+			IncompleteDetails responsesIncompleteDetails `json:"incomplete_details,omitempty"`
+			Error             *chatCompletionError       `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			return "", nil, fmt.Errorf("%w: invalid responses stream event: %v", common.ErrInvalidArgument, err)
@@ -1163,6 +1187,19 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 					return "", nil, err
 				}
 			}
+		}
+		if event.Type == "response.incomplete" {
+			reason := event.IncompleteDetails.Reason
+			if event.Response != nil {
+				if reason == "" {
+					reason = event.Response.IncompleteDetails.Reason
+				}
+			}
+			if reason == "max_output_tokens" {
+				payload := []byte(builder.String())
+				return builder.String(), usage, &ProviderOutputLimitError{Payload: payload, Usage: usage}
+			}
+			return builder.String(), usage, fmt.Errorf("%w: llm provider stream incomplete: %s", common.ErrInvalidArgument, reason)
 		}
 	}
 	if err := scanner.Err(); err != nil {

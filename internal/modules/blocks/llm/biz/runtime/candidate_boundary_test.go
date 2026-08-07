@@ -217,6 +217,24 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	}
 }
 
+func TestRequestCandidateConvertsProviderOutputLimitErrorWithPayloadToContinuationFragment(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Payload: []byte(`{"operations":[`), ReachedProviderLimit: true,
+			Status: llmmodels.RuntimeCandidateStatusFailed,
+			Audit:  &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusFailed, ProviderSubmitted: true},
+		}, errors.New("llm provider response incomplete: max_output_tokens")
+	})
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err != nil {
+		t.Fatalf("output-limit fragment returned error: %v", err)
+	}
+	if response.OutputFragment == nil || !response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[` {
+		t.Fatalf("output-limit response = %+v", response.OutputFragment)
+	}
+}
+
 func TestRequestCandidateClassifiesMidTokenEOFAsOutputFragmentWithoutProviderLimit(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {

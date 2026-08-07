@@ -337,6 +337,29 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	completion, err := m.completeProviderWithSealedCeiling(ctx, *ceiling, providerRequest)
 	completedAt := time.Now().UTC()
 	if err != nil {
+		var limitErr *ProviderOutputLimitError
+		if errors.As(err, &limitErr) && len(completion.Payload) != 0 {
+			if budgetSnapshot != nil {
+				budgetSnapshot.ProviderSubmitted = true
+				if completion.Usage != nil {
+					budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
+				}
+			}
+			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), len(completion.Payload))
+			if budgetSnapshot != nil {
+				audit.RequestBytes = budgetSnapshot.ActualBytes
+			}
+			usage := completion.Usage
+			if usage != nil {
+				cloned := *usage
+				usage = &cloned
+			}
+			return llmmodels.RuntimeCandidateGenerationResult{
+				RequestID: requestID, Payload: append([]byte(nil), completion.Payload...), Usage: usage,
+				Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
+				FailureClass: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), FailureReason: limitErr.Error(), ReachedProviderLimit: true,
+			}, err
+		}
 		stale := providerCeilingConfigurationStale(request, err)
 		// Provider may have been contacted; mark submitted when the sealed path reached Complete.
 		// completeProviderWithSealedCeiling only returns after client construction; treat as submitted

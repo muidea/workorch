@@ -40,6 +40,10 @@ type RuntimeCandidateGenerationResult struct {
 	FailureClass string `json:"failureClass,omitempty"`
 	// FailureReason is a redacted human-readable failure summary.
 	FailureReason string `json:"failureReason,omitempty"`
+	// ReachedProviderLimit indicates that the provider returned a bounded,
+	// usable prefix but stopped at its output limit. Payload must be preserved
+	// so the Runtime owner can continue the same logical document.
+	ReachedProviderLimit bool `json:"reachedProviderLimit,omitempty"`
 	// PrerequisiteStale is present only when the LLM owner has confirmed that
 	// a persisted prerequisite observation no longer represents the sealed
 	// provider target. It is not a provider failure and cannot produce a

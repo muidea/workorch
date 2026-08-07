@@ -30,6 +30,16 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	}
 	generation, err := provider.GenerateCandidate(ctx, request)
 	if err != nil {
+		if generation.ReachedProviderLimit && len(generation.Payload) != 0 {
+			fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: true}
+			if validateErr := fragment.Validate(); validateErr != nil {
+				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid provider output-limit fragment: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
+			}
+			return llmmodels.RuntimeCandidateResponse{
+				Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
+				Audit: generation.Audit, Usage: generation.Usage, OutputFragment: &fragment,
+			}, nil
+		}
 		if stale := generation.PrerequisiteStale; stale != nil {
 			staleCopy := stale.Normalized()
 			if validateErr := staleCopy.Validate(); validateErr != nil {

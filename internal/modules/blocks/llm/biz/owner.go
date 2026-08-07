@@ -835,7 +835,7 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 		completion, err = provider.Complete(ctx, request)
 	}
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return completion, err
 	}
 	request.ContextBudget.ProviderSubmitted = true
 	if completion.Usage != nil {

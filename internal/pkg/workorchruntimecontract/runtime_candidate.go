@@ -158,6 +158,7 @@ const (
 	RuntimeCandidateFailureClassProviderTransient      RuntimeCandidateFailureClass = "provider_transient"
 	RuntimeCandidateFailureClassProviderAuthentication RuntimeCandidateFailureClass = "provider_authentication"
 	RuntimeCandidateFailureClassProviderConfiguration  RuntimeCandidateFailureClass = "provider_configuration"
+	RuntimeCandidateFailureClassProviderProtocol       RuntimeCandidateFailureClass = "provider_protocol"
 	RuntimeCandidateFailureClassInternal               RuntimeCandidateFailureClass = "internal"
 )
 

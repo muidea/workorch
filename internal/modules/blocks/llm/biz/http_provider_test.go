@@ -659,6 +659,27 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderResponsesOutputLimitPreservesPartialPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"operations\\\":[\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":19960,\"output_tokens\":8192,\"total_tokens\":28152}}}\n\n"))
+	}))
+	defer server.Close()
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", APIKey: "secret", Model: "test-model", Timeout: 5 * time.Second, Capabilities: llmmodels.ProviderCapabilities{Responses: true, Streaming: true}})
+	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+	var limitErr *ProviderOutputLimitError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("error = %v, want typed output limit", err)
+	}
+	if string(result.Payload) != `{"operations":[` || len(limitErr.Payload) == 0 {
+		t.Fatalf("partial payload result=%q error=%q", result.Payload, limitErr.Payload)
+	}
+	if result.Usage == nil || result.Usage.OutputTokens != 8192 {
+		t.Fatalf("usage = %+v, want preserved usage", result.Usage)
+	}
+}
+
 func TestHTTPProviderStreamCompleteRejectsProviderErrorEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
