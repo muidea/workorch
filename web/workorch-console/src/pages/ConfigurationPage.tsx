@@ -33,6 +33,36 @@ function configNumberText(value: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '-';
 }
 
+const maxAIProxyTimeoutMillis = 10 * 60 * 1000;
+
+function goDurationMillis(raw: string | undefined): number | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const parts = Array.from(value.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)/g));
+  if (parts.length === 0 || parts.map((part) => part[0]).join('') !== value) return undefined;
+  const unitMillis: Record<string, number> = {
+    ns: 1e-6,
+    us: 1e-3,
+    'µs': 1e-3,
+    ms: 1,
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000
+  };
+  return parts.reduce((total, part) => total + Number(part[1]) * unitMillis[part[2]], 0);
+}
+
+function validateAIProxyTimeout(_: unknown, raw: string | undefined) {
+  const timeoutMillis = goDurationMillis(raw);
+  if (timeoutMillis === undefined || timeoutMillis <= 0) {
+    return Promise.reject(new Error('请输入正数 Go duration，例如 180s 或 3m'));
+  }
+  if (timeoutMillis > maxAIProxyTimeoutMillis) {
+    return Promise.reject(new Error('请求超时不得超过 10m'));
+  }
+  return Promise.resolve();
+}
+
 export function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
@@ -435,7 +465,7 @@ export function ConfigurationPage() {
                 className="workorch-section"
                 extra={(
                   <Space>
-                    <Button onClick={() => void refreshCatalog()} loading={catalogRefreshing}>刷新模型</Button>
+                    <Button onClick={() => void llmForm.validateFields([['aiProxy', 'timeout']]).then(() => refreshCatalog())} loading={catalogRefreshing}>刷新模型</Button>
                     <Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>
                   </Space>
                 )}
@@ -455,7 +485,7 @@ export function ConfigurationPage() {
                       <Form.Item name="clearAIProxyApiKey" valuePropName="checked">
                         <Checkbox>显式清空 ai-proxy API 密钥</Checkbox>
                       </Form.Item>
-                      <Form.Item name={['aiProxy', 'timeout']} label="请求超时">
+                      <Form.Item name={['aiProxy', 'timeout']} label="请求超时" rules={[{ validator: validateAIProxyTimeout }]} extra="默认 180s，最大 10m；应大于 ai-proxy body-idle timeout 并小于 Runtime 恢复预算。">
                         <Input placeholder="180s" />
                       </Form.Item>
                       <Form.Item

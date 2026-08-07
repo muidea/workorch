@@ -443,6 +443,27 @@ func TestValidateLLMConfigRejectsReservedCustomProviderID(t *testing.T) {
 	}
 }
 
+func TestValidateLLMConfigRejectsAIProxyTimeoutAboveSharedCeiling(t *testing.T) {
+	cfg := DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
+	cfg.AIProxy.Timeout = "1800s"
+	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4o"}
+	err := ValidateLLMConfig(cfg)
+	if err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ValidateLLMConfig error = %v, want timeout ceiling rejection", err)
+	}
+	if !strings.Contains(err.Error(), `llm.aiProxy.timeout "1800s" must not exceed 10m`) {
+		t.Fatalf("ValidateLLMConfig error = %v, want actual timeout and ceiling", err)
+	}
+}
+
+func TestDefaultAIProxyTimeoutUsesSharedDefault(t *testing.T) {
+	cfg := DefaultAIProxyProviderConfig()
+	if cfg.Timeout != DefaultAIProxyTimeout {
+		t.Fatalf("default ai-proxy timeout = %q, want %q", cfg.Timeout, DefaultAIProxyTimeout)
+	}
+}
+
 func TestValidateLLMConfigRejectsPartialAIProxyOverride(t *testing.T) {
 	cfg := DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"

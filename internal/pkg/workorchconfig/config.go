@@ -86,6 +86,14 @@ type LLMOutputRuntimeConfig struct {
 // built-in ai-proxy endpoint.
 const BuiltinAIProxyProviderID = runtimecontract.BuiltinAIProxyProviderID
 
+// AI-proxy request timeout is bounded so a provider call cannot outlive the
+// runtime recovery budget. Keep the default and ceiling in the config owner so
+// CLI, HTTP and startup validation share one contract.
+const (
+	DefaultAIProxyTimeout = "180s"
+	MaxAIProxyTimeout     = 10 * time.Minute
+)
+
 // Known LLM operations for custom provider model declarations.
 const (
 	LLMOperationChatCompletions = "chat_completions"
@@ -192,7 +200,7 @@ func (c ProviderModelTargetConfig) ToRuntimeTarget() runtimecontract.ProviderMod
 
 func DefaultAIProxyProviderConfig() AIProxyProviderConfig {
 	return AIProxyProviderConfig{
-		Timeout:                 "180s",
+		Timeout:                 DefaultAIProxyTimeout,
 		CatalogRequestTimeout:   "5s",
 		CatalogTTL:              "5m",
 		CatalogMaxStaleAge:      "24h",
@@ -648,8 +656,8 @@ func validateAIProxyProviderConfig(cfg AIProxyProviderConfig) error {
 	if err != nil {
 		return err
 	}
-	if timeout > 10*time.Minute {
-		return fmt.Errorf("%w: llm.aiProxy.timeout must not exceed 10m", common.ErrInvalidArgument)
+	if timeout > MaxAIProxyTimeout {
+		return fmt.Errorf("%w: llm.aiProxy.timeout %q must not exceed %s", common.ErrInvalidArgument, strings.TrimSpace(cfg.Timeout), MaxAIProxyTimeout)
 	}
 	catalogTimeout, err := parsePositiveDuration("llm.aiProxy.catalogRequestTimeout", cfg.CatalogRequestTimeout)
 	if err != nil {
