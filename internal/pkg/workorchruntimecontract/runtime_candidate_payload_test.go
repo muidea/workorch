@@ -63,6 +63,24 @@ func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *t
 	}
 }
 
+func TestInspectRuntimeCandidateDocumentFramingSeparatesNonJSONFromIncompleteJSON(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		payload []byte
+		want    RuntimeCandidateDocumentDisposition
+	}{
+		"complete":       {payload: []byte(`{"operations":[]}`), want: RuntimeCandidateDocumentComplete},
+		"incomplete":     {payload: []byte(`{"operations":[`), want: RuntimeCandidateDocumentIncomplete},
+		"empty":          {payload: []byte(" \n\t"), want: RuntimeCandidateDocumentEmpty},
+		"provider prose": {payload: []byte("The user wants a semantic plan."), want: RuntimeCandidateDocumentInvalid},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := InspectRuntimeCandidateDocumentFraming(testCase.payload); got != testCase.want {
+				t.Fatalf("document disposition = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.T) {
 	candidate, err := DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[

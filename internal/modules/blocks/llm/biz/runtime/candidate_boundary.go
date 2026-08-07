@@ -31,6 +31,15 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	generation, err := provider.GenerateCandidate(ctx, request)
 	if err != nil {
 		if generation.ReachedProviderLimit && len(generation.Payload) != 0 {
+			switch inspectProviderCandidateDocumentFraming(generation.Payload) {
+			case runtimecontract.RuntimeCandidateDocumentInvalid:
+				return llmmodels.RuntimeCandidateResponse{}, providerFinalOutputInvalidError(generation)
+			case runtimecontract.RuntimeCandidateDocumentComplete:
+				return llmmodels.RuntimeCandidateResponse{
+					Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
+					DocumentContent: append([]byte(nil), generation.Payload...), Audit: generation.Audit, Usage: generation.Usage,
+				}, nil
+			}
 			fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: true}
 			if validateErr := fragment.Validate(); validateErr != nil {
 				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid provider output-limit fragment: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
@@ -39,6 +48,17 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 				Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 				Audit: generation.Audit, Usage: generation.Usage, OutputFragment: &fragment,
 			}, nil
+		}
+		if generation.ReachedProviderLimit {
+			return llmmodels.RuntimeCandidateResponse{}, candidateRequestErrorWithIdentity(
+				CandidateFailureClassProvider,
+				"provider_final_output_missing",
+				"provider-final-output-missing",
+				fmt.Errorf("provider reached its output limit without final output text"),
+				generation.Audit,
+				generation.RequestID,
+				generation.Status,
+			)
 		}
 		if stale := generation.PrerequisiteStale; stale != nil {
 			staleCopy := stale.Normalized()
@@ -75,7 +95,9 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		}
 		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage}, nil
 	}
-	switch runtimecontract.InspectRuntimeCandidateDocumentFraming(generation.Payload) {
+	switch inspectProviderCandidateDocumentFraming(generation.Payload) {
+	case runtimecontract.RuntimeCandidateDocumentInvalid:
+		return llmmodels.RuntimeCandidateResponse{}, providerFinalOutputInvalidError(generation)
 	case runtimecontract.RuntimeCandidateDocumentIncomplete:
 		// EOF is structural evidence that the first document is incomplete.
 		// Provider output-limit telemetry is retained only as audit metadata;
@@ -99,6 +121,26 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		Audit:           generation.Audit,
 		Usage:           generation.Usage,
 	}, nil
+}
+
+func inspectProviderCandidateDocumentFraming(payload []byte) runtimecontract.RuntimeCandidateDocumentDisposition {
+	normalized, _ := runtimecontract.NormalizeRuntimeCandidatePayloadDocument(payload)
+	return runtimecontract.InspectRuntimeCandidateDocumentFraming(normalized)
+}
+
+// providerFinalOutputInvalidError keeps a provider-declared final output that
+// is not JSON out of SM-3 correction and continuation. The raw text remains
+// provider-owned and is deliberately not copied into cross-owner feedback.
+func providerFinalOutputInvalidError(generation llmmodels.RuntimeCandidateGenerationResult) error {
+	return candidateRequestErrorWithIdentity(
+		CandidateFailureClassProvider,
+		"provider_final_output_invalid",
+		"provider-final-output-invalid",
+		fmt.Errorf("provider final output is not a JSON document"),
+		generation.Audit,
+		generation.RequestID,
+		generation.Status,
+	)
 }
 
 func providerFailureIdentity(err error) (string, string) {
@@ -166,7 +208,14 @@ func CandidateFailureFromError(err error) runtimecontract.RuntimeCandidateFailur
 	case CandidateFailureClassProviderTransient:
 		failure.Reason = "provider request failed transiently"
 	case CandidateFailureClassProvider:
-		failure.Reason = "provider response failed"
+		switch failure.Code {
+		case "provider_final_output_invalid":
+			failure.Reason = "provider final output is not a JSON document"
+		case "provider_final_output_missing":
+			failure.Reason = "provider produced no final output text"
+		default:
+			failure.Reason = "provider response failed"
+		}
 	case CandidateFailureClassSchema, CandidateFailureClassContract:
 		failure.Reason = "candidate document rejected by typed contract"
 	default:

@@ -680,6 +680,42 @@ func TestHTTPProviderResponsesOutputLimitPreservesPartialPayload(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderResponsesStreamSeparatesReasoningFromFinalOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"The user wants a semantic plan.\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"documentKind\\\":\\\"semantic_plan\\\"}\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
+	}))
+	defer server.Close()
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", Model: "test-model", Timeout: 5 * time.Second, Capabilities: llmmodels.ProviderCapabilities{Responses: true, Streaming: true}})
+	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+	if err != nil {
+		t.Fatalf("stream complete: %v", err)
+	}
+	if string(result.Payload) != `{"documentKind":"semantic_plan"}` {
+		t.Fatalf("payload = %q, want final output_text only", result.Payload)
+	}
+}
+
+func TestHTTPProviderResponsesOutputLimitDoesNotExposeReasoningAsPartialPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"The user wants a semantic plan.\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"total_tokens\":28}}}\n\n"))
+	}))
+	defer server.Close()
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", Model: "test-model", Timeout: 5 * time.Second, Capabilities: llmmodels.ProviderCapabilities{Responses: true, Streaming: true}})
+	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+	var limitErr *ProviderOutputLimitError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("error = %v, want typed output limit", err)
+	}
+	if len(result.Payload) != 0 || len(limitErr.Payload) != 0 {
+		t.Fatalf("reasoning leaked into partial payload: result=%q error=%q", result.Payload, limitErr.Payload)
+	}
+}
+
 func TestHTTPProviderStreamCompleteRejectsProviderErrorEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -514,7 +514,7 @@ func (r responsesResponse) Content() string {
 	var b strings.Builder
 	for _, item := range r.Output {
 		for _, content := range item.Content {
-			if strings.TrimSpace(content.Text) != "" {
+			if content.Type == "output_text" && strings.TrimSpace(content.Text) != "" {
 				b.WriteString(content.Text)
 			}
 		}
@@ -1154,6 +1154,7 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 		var event struct {
 			Type              string                     `json:"type"`
 			Delta             string                     `json:"delta,omitempty"`
+			Text              string                     `json:"text,omitempty"`
 			Response          *responsesResponse         `json:"response,omitempty"`
 			IncompleteDetails responsesIncompleteDetails `json:"incomplete_details,omitempty"`
 			Error             *chatCompletionError       `json:"error,omitempty"`
@@ -1169,7 +1170,10 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 				usage = parsed
 			}
 		}
-		if event.Delta != "" {
+		// Responses interleaves reasoning, summaries and final output. Only the
+		// output_text channel is a provider-declared final document channel;
+		// reasoning is neither candidate content nor a continuation prefix.
+		if event.Type == "response.output_text.delta" && event.Delta != "" {
 			if err := guard.observeDelta(event.Delta); err != nil {
 				return "", nil, err
 			}
@@ -1180,7 +1184,32 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 				}
 			}
 		}
+		if event.Type == "response.output_text.done" && event.Text != "" && builder.Len() == 0 {
+			if err := guard.observeDelta(event.Text); err != nil {
+				return "", nil, err
+			}
+			builder.WriteString(event.Text)
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: event.Text}); err != nil {
+					return "", nil, err
+				}
+			}
+		}
 		if event.Type == "response.completed" {
+			if builder.Len() == 0 && event.Response != nil {
+				content := event.Response.Content()
+				if content != "" {
+					if err := guard.observeDelta(content); err != nil {
+						return "", nil, err
+					}
+					builder.WriteString(content)
+					if emit != nil {
+						if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: content}); err != nil {
+							return "", nil, err
+						}
+					}
+				}
+			}
 			completed = true
 			if emit != nil {
 				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {

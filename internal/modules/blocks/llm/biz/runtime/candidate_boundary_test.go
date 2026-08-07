@@ -196,6 +196,39 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 	}
 }
 
+func TestRequestCandidateClassifiesProviderProseAsProtocolOutcome(t *testing.T) {
+	request := semanticBoundaryRequest(t)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return generationResult([]byte("The user wants me to generate a semantic plan."), nil)
+	})
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("provider prose was forwarded as a semantic document")
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Class != CandidateFailureClassProvider || failure.Code != "provider_final_output_invalid" || failure.Signature != "provider-final-output-invalid" || failure.Reason != "provider final output is not a JSON document" {
+		t.Fatalf("provider prose failure = %+v", failure)
+	}
+	if len(response.DocumentContent) != 0 || response.OutputFragment != nil {
+		t.Fatalf("provider prose leaked into candidate response: %+v", response)
+	}
+}
+
+func TestRequestCandidatePreservesExactOuterJSONFenceForSM3Normalization(t *testing.T) {
+	request := semanticBoundaryRequest(t)
+	payload := []byte("```json\n{\"documentKind\":\"semantic_plan\"}\n```")
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return generationResult(payload, nil)
+	})
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err != nil {
+		t.Fatalf("exact JSON fence was rejected by provider boundary: %v", err)
+	}
+	if string(response.DocumentContent) != string(payload) {
+		t.Fatalf("provider boundary changed raw fenced document: %q", response.DocumentContent)
+	}
+}
+
 func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
@@ -232,6 +265,44 @@ func TestRequestCandidateConvertsProviderOutputLimitErrorWithPayloadToContinuati
 	}
 	if response.OutputFragment == nil || !response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[` {
 		t.Fatalf("output-limit response = %+v", response.OutputFragment)
+	}
+}
+
+func TestRequestCandidateDoesNotContinueOutputLimitProviderProse(t *testing.T) {
+	request := semanticBoundaryRequest(t)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Payload: []byte("The user wants me to generate a semantic plan."), ReachedProviderLimit: true,
+			Status: llmmodels.RuntimeCandidateStatusFailed,
+			Audit:  &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusFailed, ProviderSubmitted: true},
+		}, errors.New("llm provider response incomplete: max_output_tokens")
+	})
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("output-limit provider prose became a continuation fragment")
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Code != "provider_final_output_invalid" || response.OutputFragment != nil {
+		t.Fatalf("output-limit provider prose result: response=%+v failure=%+v", response, failure)
+	}
+}
+
+func TestRequestCandidateClassifiesOutputLimitWithoutFinalText(t *testing.T) {
+	request := semanticBoundaryRequest(t)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			ReachedProviderLimit: true,
+			Status:               llmmodels.RuntimeCandidateStatusFailed,
+			Audit:                &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusFailed, ProviderSubmitted: true},
+		}, errors.New("llm provider response incomplete: max_output_tokens")
+	})
+	response, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("reasoning-only output limit was accepted")
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Code != "provider_final_output_missing" || failure.Reason != "provider produced no final output text" || response.OutputFragment != nil {
+		t.Fatalf("missing final output result: response=%+v failure=%+v", response, failure)
 	}
 }
 

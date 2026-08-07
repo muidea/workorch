@@ -7,8 +7,9 @@ Type: closure-plan
 Last Updated: 2026-08-07
 
 > 2026-08-07 live revision: prerequisite dispatcher、owner-private state transition 和 lifecycle fact 合同已完成代码收口。
-> 最新 fresh deployed `run-019` 已按预期完成 semantic rejection、bounded provider transport recovery 和 terminal delivery，
-> 但尚未进入 candidate/dispatch/receipt/state_change，因此 Runtime 仍不得标记为 live_closed。
+> 最新 fresh deployed `run-023` 暴露了 Responses reasoning/final-output 边界缺口：provider 说明文本被当作 semantic-plan
+> 文档并进入 correction/continuation。该缺口已按 LLM owner typed provider outcome 收口，但仍需 fresh deployed live 证明
+> order/batch/feasibility/seal/candidate/dispatch/receipt/state_change，因此 Runtime 不得标记为 live_closed。
 
 ## 1. 范围与唯一目标
 
@@ -909,25 +910,30 @@ eventstream / projection / TUI / Web console
 
 ### 12.5 当前 live 证据与收口含义
 
-最近 fresh deployed 的 `run-019` 已出现：
+最近 fresh deployed 的 `run-023` 已出现：
 
 ```text
-semantic_plan_invalid
-  -> semantic_plan_correction_required
-  -> semantic_provider_transport_exhausted
+provider final output begins with explanatory prose
+  -> incorrectly classified as semantic_plan_invalid
+  -> incorrectly entered semantic_plan_correction_required / continuation
   -> SM-2 terminal failure
   -> SM-4 terminal delivery
   -> Result -> Workspace -> Run owner delivery
 ```
 
-其中 LLM 返回的非法 JSON（例如首字符不是 JSON 文档）必须保持为 `semantic_plan_invalid` 原始诊断；provider transport
-失败必须作为独立 typed request outcome。两者不能由错误字符串互相覆盖，也不能由 LLM 直接设置 Run failed。`run-019`
-已正确终止并完成 Result/Workspace/Run delivery，说明 owner-local terminal 路径工作；但尚未产生 candidate、dispatch、
-receipt 或 durable state-change，不能标记为正向完成。
+收口后的唯一分类规则是：Responses reasoning/summary 事件不进入候选文档；只有 provider-declared final `output_text`
+可以成为 document。final channel 中完整、合法 JSON 的字段/schema/admission 缺陷仍是 `semantic_plan_invalid`，由 SM-3
+执行 bounded correction；final channel 中首个 JSON 值本身无效，或 provider 到达输出上限但没有 final text，则由 LLM
+owner 返回 `provider_final_output_invalid | provider_final_output_missing` typed provider-request feedback，不创建 semantic
+attempt 或 continuation。禁止通过截取第一个 `{`、删除说明前缀、关键词识别或放宽 strict decoder 修复。原始 provider
+body 不跨 owner、不持久化；安全的 code、signature、message、响应字节和 usage audit 必须保留。
+
+`run-023` 已正确终止并完成 Result/Workspace/Run delivery，说明 owner-local terminal 路径工作；但尚未产生 candidate、
+dispatch、receipt 或 durable state-change，不能标记为正向完成。
 
 因此本节收口的 live 门禁必须同时验证：
 
-1. semantic rejection 和 provider transport outcome 在 SM-3 ledger 中保持独立；
+1. semantic rejection、provider protocol outcome 和 provider transport outcome 在 SM-3 ledger 中保持独立；
 2. correction 只由 SM-3/SM-2 private event 产生，不能由 LLM 或 Run owner 产生；
 3. terminal 只由 SM-2 seal，SM-4 只负责 delivery；
 4. Result、Workspace、Run 依次以 owner-local event 完成各自迁移；
@@ -1088,5 +1094,9 @@ SM-2 commit
   hash、batch identity 和 owner catalog authority 保持不变。
 - 已补充 schema narrowing、proof batch projection、batch identity 和 unrelated coverage 不泄漏回归测试；相关 package
   `go test`、`go vet`、`gofmt` 和 `git diff --check` 已通过。
+- Responses adapter 已只接受 `response.output_text` 作为 final document channel；reasoning/summary delta 不再进入 candidate
+  payload。owner-neutral framing 已区分 incomplete JSON、complete JSON 与 non-JSON final output；LLM owner 将 non-JSON 或
+  reasoning-only output limit 转为 `provider_final_output_invalid | provider_final_output_missing`，不再触发 semantic
+  correction 或 continuation，strict SM-3 decoder 保持不变。
 - 仍未关闭的门禁：fresh deployed live 必须证明多 batch 从 order 到 proposal、feasibility、SM-2 seal、candidate、dispatch、
   receipt、evidence 和 durable state change 的完整链路；本地测试不能替代该证据。

@@ -20,6 +20,9 @@ const (
 	RuntimeCandidateDocumentComplete   RuntimeCandidateDocumentDisposition = "complete_document"
 	RuntimeCandidateDocumentIncomplete RuntimeCandidateDocumentDisposition = "incomplete_document"
 	RuntimeCandidateDocumentEmpty      RuntimeCandidateDocumentDisposition = "empty_document"
+	// RuntimeCandidateDocumentInvalid is a non-JSON provider body. It is a
+	// provider-output protocol outcome, not a semantic candidate rejection.
+	RuntimeCandidateDocumentInvalid RuntimeCandidateDocumentDisposition = "invalid_document"
 )
 
 // RuntimeCandidatePayloadIncompleteError means the JSON decoder reached the
@@ -70,9 +73,10 @@ func RuntimeCandidateDocumentDispositionForError(err error) RuntimeCandidateDocu
 }
 
 // InspectRuntimeCandidateDocumentFraming classifies provider bytes without
-// decoding a Runtime candidate. A complete but malformed/schema-invalid JSON
-// value is still complete: SM-3 must persist and adjudicate it. Only a blank
-// body or a first JSON value cut off at EOF changes the request-session path.
+// decoding a Runtime candidate. A syntactically complete JSON value remains a
+// complete document even when its schema is invalid: SM-3 must persist and
+// adjudicate it. A non-JSON body is a provider protocol outcome; only a first
+// JSON value cut off at EOF is eligible for output continuation.
 func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocumentDisposition {
 	if len(bytes.TrimSpace(payload)) == 0 {
 		return RuntimeCandidateDocumentEmpty
@@ -82,6 +86,10 @@ func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocu
 	if err := decoder.Decode(&value); err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			return RuntimeCandidateDocumentIncomplete
+		}
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			return RuntimeCandidateDocumentInvalid
 		}
 		return RuntimeCandidateDocumentComplete
 	}

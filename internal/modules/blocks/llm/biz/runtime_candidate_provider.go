@@ -338,7 +338,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	completedAt := time.Now().UTC()
 	if err != nil {
 		var limitErr *ProviderOutputLimitError
-		if errors.As(err, &limitErr) && len(completion.Payload) != 0 {
+		if errors.As(err, &limitErr) {
 			if budgetSnapshot != nil {
 				budgetSnapshot.ProviderSubmitted = true
 				if completion.Usage != nil {
