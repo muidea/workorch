@@ -265,6 +265,80 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	return string(encoded), err
 }
 
+// RuntimeSemanticPlanJSONSchemaForRequest narrows the sealed manifest schema
+// to one provider transaction. The full manifest remains the authority used by
+// the evaluator; this projection only prevents an order or proof-batch request
+// from authorizing fields and coverage outside its current step.
+func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifest, step RuntimeSemanticPlanStep, batchID string, batchSequence int, batchCoverageIDs []common.CoverageWorkItemID) (string, error) {
+	full, err := RuntimeSemanticPlanJSONSchema(manifest)
+	if err != nil || step == "" {
+		return full, err
+	}
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(full), &schema); err != nil {
+		return "", err
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("runtime semantic schema properties are missing")
+	}
+	properties["planStep"] = map[string]any{"const": string(step)}
+	switch step {
+	case RuntimeSemanticPlanStepCoverageOrder:
+		schema["required"] = []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"}
+		delete(properties, "batchId")
+		delete(properties, "batchSequence")
+		delete(properties, "batchCoverageWorkItemIds")
+		properties["proposals"] = map[string]any{"type": "array", "maxItems": 0}
+	case RuntimeSemanticPlanStepProofBatch:
+		batchID = strings.TrimSpace(batchID)
+		batchCoverageIDs = normalizeOrderedCoverageWorkItemIDs(batchCoverageIDs)
+		// A normalized legacy/full semantic request has proof_batch as its
+		// default step but no batch identity. Keep the full sealed schema for
+		// that shape; production bounded batches always carry both values.
+		if batchID == "" && len(batchCoverageIDs) == 0 {
+			return full, nil
+		}
+		if batchID == "" || batchSequence < 0 || len(batchCoverageIDs) == 0 {
+			return "", fmt.Errorf("runtime semantic proof-batch schema requires batch identity and coverage")
+		}
+		manifestIDs := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
+		for _, item := range manifest.CoverageItems {
+			manifestIDs[item.ID] = struct{}{}
+		}
+		coverageIDs := make([]string, 0, len(batchCoverageIDs))
+		for _, id := range batchCoverageIDs {
+			if _, found := manifestIDs[id]; !found {
+				return "", fmt.Errorf("runtime semantic proof-batch coverage %q is outside manifest", id)
+			}
+			coverageIDs = append(coverageIDs, string(id))
+		}
+		properties["batchId"] = map[string]any{"const": batchID}
+		properties["batchSequence"] = map[string]any{"const": batchSequence}
+		properties["batchCoverageWorkItemIds"] = map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "uniqueItems": true, "items": map[string]any{"type": "string", "enum": coverageIDs}}
+		schema["required"] = []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "batchId", "batchSequence", "batchCoverageWorkItemIds", "coverageOrder", "proposals"}
+		proposals, ok := properties["proposals"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("runtime semantic proof-batch schema proposals are missing")
+		}
+		proposals["minItems"] = len(coverageIDs)
+		proposals["maxItems"] = len(coverageIDs)
+		items, ok := proposals["items"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("runtime semantic proof-batch schema proposal items are missing")
+		}
+		itemProperties, ok := items["properties"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("runtime semantic proof-batch schema proposal properties are missing")
+		}
+		itemProperties["coverageWorkItemId"] = map[string]any{"type": "string", "enum": coverageIDs}
+	default:
+		return "", fmt.Errorf("runtime semantic plan has invalid request step %q", step)
+	}
+	encoded, err := json.Marshal(schema)
+	return string(encoded), err
+}
+
 func stringArraySchema() map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 }

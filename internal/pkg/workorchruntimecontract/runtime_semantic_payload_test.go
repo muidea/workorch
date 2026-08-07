@@ -1,12 +1,41 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-2", SourceScope: "dodItem", SourceID: "dod-002", TargetText: "second", Order: 2})
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	orderSchema, err := RuntimeSemanticPlanJSONSchemaForRequest(manifest, RuntimeSemanticPlanStepCoverageOrder, "", 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(orderSchema, `"operationKind"`) || !strings.Contains(orderSchema, `"planStep":{"const":"coverage_order"}`) || !strings.Contains(orderSchema, `"maxItems":0`) {
+		t.Fatalf("coverage-order schema was not narrowed: %s", orderSchema)
+	}
+	proofSchema, err := RuntimeSemanticPlanJSONSchemaForRequest(manifest, RuntimeSemanticPlanStepProofBatch, "batch-1", 1, []common.CoverageWorkItemID{"cwi-002"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(proofSchema), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	properties := decoded["properties"].(map[string]any)
+	proposals := properties["proposals"].(map[string]any)
+	proposalProperties := proposals["items"].(map[string]any)["properties"].(map[string]any)
+	coverageEnum := proposalProperties["coverageWorkItemId"].(map[string]any)["enum"].([]any)
+	if len(coverageEnum) != 1 || coverageEnum[0] != "cwi-002" || proposals["minItems"] != float64(1) || properties["batchId"].(map[string]any)["const"] != "batch-1" {
+		t.Fatalf("proof-batch schema did not bind exact batch: %s", proofSchema)
+	}
+}
 
 func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	manifest := semanticContractTestManifest(t)

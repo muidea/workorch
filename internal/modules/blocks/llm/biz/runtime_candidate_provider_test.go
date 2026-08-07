@@ -80,6 +80,37 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	}
 }
 
+func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	second := runtimecontract.RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-2", SourceScope: "dodItem", SourceID: "dod-002", TargetText: "unrelated second requirement", Order: 2}
+	items := append(append([]runtimecontract.RuntimeCoverageItem(nil), request.SemanticContext.DefinitionSeed.CoverageItems...), second)
+	slices := append(append([]runtimecontract.RuntimeAcceptanceSlice(nil), request.SemanticContext.DefinitionSeed.Slices...), runtimecontract.RuntimeAcceptanceSlice{ID: "slice-2", Title: "Second", Priority: 2, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-002"}})
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(request.SemanticContext.Definition, request.SemanticContext.Activation, items, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SemanticContext.DefinitionSeed = seed
+	request.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	request.SemanticContext.BatchID = "batch-1"
+	request.SemanticContext.BatchSequence = 1
+	request.SemanticContext.BatchCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-001"}
+	request.SemanticManifest.CoverageItems = items
+	request.SemanticManifest.DefinitionSeedHash = seed.Hash
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	providerRequest, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := providerRequest.PromptContext.Sections[3].Content
+	sliceProjection := providerRequest.PromptContext.Sections[5].Content
+	if strings.Contains(authority, second.TargetText) || strings.Contains(sliceProjection, "cwi-002") || strings.Contains(authority, `"CoverageItems"`) || strings.Contains(authority, `"Slices"`) {
+		t.Fatalf("proof batch leaked unrelated/full definition context: authority=%s slices=%s", authority, sliceProjection)
+	}
+	if !strings.Contains(authority, `"batchId":"batch-1"`) || !strings.Contains(authority, `"coverageItems":[{"ID":"cwi-001"`) || !strings.Contains(providerRequest.Schema, `"planStep":{"const":"proof_batch"}`) {
+		t.Fatalf("proof batch lost current authority: schema=%s authority=%s", providerRequest.Schema, authority)
+	}
+}
+
 func TestRuntimeSemanticPlanProviderRejectsMixedDocumentFields(t *testing.T) {
 	request := runtimeSemanticProviderTestRequest(t)
 	request.DefinitionContext = request.SemanticContext.Definition

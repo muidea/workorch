@@ -987,3 +987,106 @@ SM-2 committed revision
 
 在此之前，服务 ready、projection ready、catalog fresh、LLM 请求成功或 terminal delivery 成功都只能作为局部健康证据，
 不能替代 Runtime 正向收敛证明。
+
+### 12.8 状态机单 Owner 与分步 CWI 归一收口（2026-08-07）
+
+本节是 R4 后续代码收口的统一执行口径。任何旧文档、旧合同或实现若允许跨组件直接修改状态机，均以本节为准并应清理。
+
+#### 12.8.1 唯一状态机 Owner
+
+| 状态机 | 唯一 Owner | 允许迁移的入口 | 非 Owner 允许提供的内容 |
+| --- | --- | --- | --- |
+| SM-1 Run lifecycle | `internal/modules/blocks/run` | Run Biz private lifecycle event | typed lifecycle command/fact |
+| SM-2 authority/focus | `internal/modules/kernel/orchestrator` | Orchestrator private reducer event | Definition、focus prerequisite、owner feasibility fact |
+| SM-3 candidate/sealed dispatch | `internal/modules/kernel/orchestrator` | Orchestrator private reducer event | LLM document/fragment、capability receipt |
+| SM-4 drive/recovery/projection delivery | `internal/modules/kernel/orchestrator` | Orchestrator private reducer event | owner result、delivery observation |
+
+SM-2、SM-3、SM-4 虽由同一 Orchestrator 组件拥有，但必须保留独立的 reducer entry、状态字段和校验表；不得把它们
+暴露成跨组件可调用的状态转换 API。Orchestrator 不得直接写 Run、Workspace、Result lifecycle；Run、Workspace、Result
+owner 也不得直接写 Runtime aggregate。
+
+#### 12.8.2 跨 Owner 合同唯一形态
+
+跨组件交互只允许三种 typed 合同：
+
+1. `Command`：请求接收 Owner 执行一个明确动作；
+2. `Fact/Result`：接收 Owner 观察到的事实或处理结果；
+3. `Receipt/Evidence`：接收 Owner 已经持久化或执行的可验证结果。
+
+合同中禁止携带 `NextAction`、`StagePacket`、`ExecutionContextPatch`、目标状态、retry/terminal 指令、`map[string]any`
+或跨 Owner repository/service。接收 Owner 必须先校验 scope、owner、revision、identity 和 stale/duplicate，再由自己的
+private event 触发状态迁移。
+
+#### 12.8.3 组件责任边界
+
+| 组件 | 只负责 | 明确禁止 |
+| --- | --- | --- |
+| `blocks/run` | Run aggregate CAS 与 SM-1 lifecycle | 修改 SM-2/3/4、解析 Runtime action |
+| `blocks/workspace` | Workspace、Goal、DoD、template/profile 与 Definition seed | 解释 Goal/DoD、选择 focus/CWI/action |
+| `kernel/orchestrator` | SM-2/3/4 reducer、semantic order/batch、candidate、dispatch、evidence | 直接写资源 owner lifecycle |
+| `blocks/llm` | semantic-plan/operations document、fragment、provider audit/feedback | 保存 batch/focus、选择 action、修改 coverage |
+| File/Git/Shell/MCP/Web/SSH | catalog、admissibility、feasibility、sealed operation receipt | 修改 Runtime 状态或自行授予 coverage credit |
+| application/workorchd、TUI/Web、eventstream/projection | intent、query、只读投影和展示 | reducer、目标状态 patch、由 projection 推进执行 |
+
+#### 12.8.4 Goal/DoD 较大时的分步处理
+
+完整 Goal/DoD 仍作为 Definition seed 保留，不能按文本截断后让 LLM 猜测语义；但业务处理必须分为：
+
+```text
+完整 Definition seed
+  -> semantic-plan 生成 coverageOrder（业务优先级/依赖由 LLM 提出）
+  -> Orchestrator 按 sealed order 创建 bounded proof batch
+  -> 当前 batch 的 proposal
+  -> 当前 batch 的 owner feasibility
+  -> SM-2 seal
+  -> 下一个 batch
+```
+
+约束如下：
+
+- 不得按 `Order` 数值、目录顺序或 map 遍历机械排序 CWI；
+- LLM 只能提出 `coverageOrder`，不能选择下一个 batch、扩展 batch 或修改依赖；
+- 当前 batch 未完成前不得请求下一 batch、全量 feasibility 或 SM-2 seal；
+- `resume` 只恢复当前 Run 的 active batch；
+- `restart` 创建新的 workspace-wide lineage 和新的第一个 batch；
+- batch continuation 只能补齐同一 batch，不得扩大 coverage set；
+- full manifest 可以保留 workspace 全量 CWI 作为权威，但 provider-facing request 必须只渲染当前 batch 所需的
+  authority、owner contract 和 bounded evidence；
+- `text.format.schema` 与 C3 `outputContract.schema` 不得重复携带同一份大 schema，需归一为单一结构化输出权威加引用；
+- C4/C5 只携带当前 focus 的有界诊断和引用，不得发送完整历史证据或无关 CWI 正文。
+
+#### 12.8.5 统一收口顺序
+
+1. 扫描并清零跨组件 Runtime/Run/Workspace/Result reducer 直调和 repository 写入；
+2. 为每个 Owner 固定 private event → validate → CAS reducer 入口；
+3. 将 owner 结果统一为 typed fact/receipt，删除 action/status/retry 平行字段；
+4. 固化 semantic order → bounded batch → feasibility → SM-2 seal 主线；
+5. 归一 provider request 的 schema、operation contract、C3 authority 和 C4/C5 动态上下文，控制单次请求大小；
+6. 补齐 duplicate、stale、CAS、restart/resume、response-loss、budget、双 workspace 并发测试；
+7. 使用 fresh deployed live 验证完整链路：
+
+```text
+SM-2 commit
+  -> candidate
+  -> sealed dispatch
+  -> capability receipt
+  -> evidence
+  -> SM-4 progress/recovery
+  -> Run lifecycle fact/event
+  -> durable state change
+```
+
+任何只修复单个 provider 错误、单个 topic、单个 reducer 分支但未通过上述 owner、batch、request-size 和 live 链路门禁的
+修改，都不能标记为本计划完成。
+
+#### 12.8.6 本轮代码收口进度
+
+- `internal/pkg/workorchruntimecontract` 已增加按 `coverage_order` / `proof_batch` 绑定的 provider schema 投影；完整
+  manifest 仍由 Orchestrator evaluator 使用，provider schema 不再同时允许两个 plan step 或 proof batch 外的 proposal。
+- `internal/modules/blocks/llm/biz/runtime_semantic_provider.go` 已将 Definition seed、manifest、acceptance slice 渲染为
+  provider-facing 最小投影：order request 不带 owner catalog，proof batch 只带当前 batch coverage/slice；manifest hash、seed
+  hash、batch identity 和 owner catalog authority 保持不变。
+- 已补充 schema narrowing、proof batch projection、batch identity 和 unrelated coverage 不泄漏回归测试；相关 package
+  `go test`、`go vet`、`gofmt` 和 `git diff --check` 已通过。
+- 仍未关闭的门禁：fresh deployed live 必须证明多 batch 从 order 到 proposal、feasibility、SM-2 seal、candidate、dispatch、
+  receipt、evidence 和 durable state change 的完整链路；本地测试不能替代该证据。

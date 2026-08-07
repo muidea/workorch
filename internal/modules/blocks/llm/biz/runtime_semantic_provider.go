@@ -16,15 +16,47 @@ type runtimeSemanticCapabilityProjection struct {
 }
 
 type runtimeSemanticAuthorityProjection struct {
-	WorkspaceID       string                                      `json:"workspaceId"`
-	RunID             string                                      `json:"runId"`
-	DefinitionSeed    runtimecontract.RuntimeDefinitionSeed       `json:"definitionSeed"`
-	Manifest          runtimecontract.RuntimeSemanticPlanManifest `json:"manifest"`
-	Schema            json.RawMessage                             `json:"schema"`
-	OutputInstruction string                                      `json:"outputInstruction"`
-	PlanStep          runtimecontract.RuntimeSemanticPlanStep     `json:"planStep"`
-	BatchID           string                                      `json:"batchId,omitempty"`
-	BatchCoverageIDs  []common.CoverageWorkItemID                 `json:"batchCoverageWorkItemIds,omitempty"`
+	WorkspaceID       string                                  `json:"workspaceId"`
+	RunID             string                                  `json:"runId"`
+	DefinitionSeed    runtimeSemanticDefinitionSeedProjection `json:"definitionSeed"`
+	Manifest          runtimeSemanticManifestProjection       `json:"manifest"`
+	Schema            json.RawMessage                         `json:"schema"`
+	OutputInstruction string                                  `json:"outputInstruction"`
+	PlanStep          runtimecontract.RuntimeSemanticPlanStep `json:"planStep"`
+	BatchID           string                                  `json:"batchId,omitempty"`
+	BatchSequence     int                                     `json:"batchSequence,omitempty"`
+	BatchCoverageIDs  []common.CoverageWorkItemID             `json:"batchCoverageWorkItemIds,omitempty"`
+}
+
+type runtimeSemanticDefinitionSeedProjection struct {
+	SchemaVersion      string `json:"schemaVersion"`
+	Hash               string `json:"hash"`
+	DefinitionRevision string `json:"definitionRevision"`
+	PolicyHash         string `json:"policyHash"`
+}
+
+type runtimeSemanticManifestProjection struct {
+	SchemaVersion             string                                          `json:"schemaVersion"`
+	Hash                      string                                          `json:"hash"`
+	DefinitionRevision        string                                          `json:"definitionRevision"`
+	DefinitionSeedHash        string                                          `json:"definitionSeedHash"`
+	OperationContractRevision string                                          `json:"operationContractRevision"`
+	CoverageItems             []runtimecontract.RuntimeCoverageItem           `json:"coverageItems"`
+	AllowedOwnerModuleIDs     []string                                        `json:"allowedOwnerModuleIds,omitempty"`
+	AllowedOperationKinds     []string                                        `json:"allowedOperationKinds,omitempty"`
+	AllowedTargetPolicies     []runtimecontract.RuntimeOperationTargetPolicy  `json:"allowedTargetPolicies,omitempty"`
+	OwnerCatalogs             []runtimecontract.RuntimeOperationAdmissibility `json:"ownerCatalogs,omitempty"`
+}
+
+type runtimeSemanticSliceProjection struct {
+	ID                    string                      `json:"id"`
+	Title                 string                      `json:"title,omitempty"`
+	Scope                 string                      `json:"scope,omitempty"`
+	Priority              int                         `json:"priority,omitempty"`
+	CoverageWorkItemIDs   []common.CoverageWorkItemID `json:"coverageWorkItemIds"`
+	RequiredEvidenceKinds []string                    `json:"requiredEvidenceKinds,omitempty"`
+	CompletionPolicy      string                      `json:"completionPolicy,omitempty"`
+	ResultPolicy          string                      `json:"resultPolicy,omitempty"`
 }
 
 type runtimeSemanticDiagnosticProjection struct {
@@ -82,7 +114,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if err := ceiling.Target.Validate(); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan provider ceiling target invalid: %w", err)
 	}
-	schema, err := runtimecontract.RuntimeSemanticPlanJSONSchema(manifest)
+	schema, err := runtimecontract.RuntimeSemanticPlanJSONSchemaForRequest(manifest, context.PlanStep, context.BatchID, context.BatchSequence, context.BatchCoverageWorkItemIDs)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -109,8 +141,8 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	}
 	authorityJSON, err := json.Marshal(runtimeSemanticAuthorityProjection{
 		WorkspaceID: string(context.WorkspaceID), RunID: string(context.RunID),
-		DefinitionSeed: context.DefinitionSeed, Manifest: manifest, Schema: json.RawMessage(promptSchema),
-		OutputInstruction: outputInstruction, PlanStep: context.PlanStep, BatchID: context.BatchID, BatchCoverageIDs: context.BatchCoverageWorkItemIDs,
+		DefinitionSeed: runtimeSemanticDefinitionSeedForProvider(context.DefinitionSeed), Manifest: runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs), Schema: json.RawMessage(promptSchema),
+		OutputInstruction: outputInstruction, PlanStep: context.PlanStep, BatchID: context.BatchID, BatchSequence: context.BatchSequence, BatchCoverageIDs: context.BatchCoverageWorkItemIDs,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -122,7 +154,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	slicesJSON, err := json.Marshal(context.DefinitionSeed.Slices)
+	slicesJSON, err := json.Marshal(runtimeSemanticSlicesForProvider(context.DefinitionSeed.Slices, context.PlanStep, context.BatchCoverageWorkItemIDs))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -186,6 +218,71 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		return providerRequest, fmt.Errorf("runtime semantic plan request exceeds provider ceiling: %d > %d", len(payload), ceiling.MaxBytes)
 	}
 	return providerRequest, nil
+}
+
+func runtimeSemanticDefinitionSeedForProvider(seed runtimecontract.RuntimeDefinitionSeed) runtimeSemanticDefinitionSeedProjection {
+	seed = seed.Normalized()
+	return runtimeSemanticDefinitionSeedProjection{
+		SchemaVersion: seed.SchemaVersion, Hash: seed.Hash,
+		DefinitionRevision: seed.DefinitionRevision, PolicyHash: seed.PolicyHash,
+	}
+}
+
+func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemanticPlanManifest, step runtimecontract.RuntimeSemanticPlanStep, batchCoverageIDs []common.CoverageWorkItemID) runtimeSemanticManifestProjection {
+	manifest = manifest.Normalized()
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(batchCoverageIDs))
+	for _, id := range batchCoverageIDs {
+		selected[id] = struct{}{}
+	}
+	items := make([]runtimecontract.RuntimeCoverageItem, 0, len(manifest.CoverageItems))
+	for _, item := range manifest.CoverageItems {
+		if step == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+			if _, found := selected[item.ID]; !found {
+				continue
+			}
+		}
+		items = append(items, item)
+	}
+	projection := runtimeSemanticManifestProjection{
+		SchemaVersion: manifest.SchemaVersion, Hash: manifest.Hash,
+		DefinitionRevision: manifest.DefinitionRevision, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		OperationContractRevision: manifest.OperationContractRevision, CoverageItems: items,
+	}
+	if step != runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		projection.AllowedOwnerModuleIDs = append([]string(nil), manifest.AllowedOwnerModuleIDs...)
+		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
+		projection.AllowedTargetPolicies = append([]runtimecontract.RuntimeOperationTargetPolicy(nil), manifest.AllowedTargetPolicies...)
+		projection.OwnerCatalogs = append([]runtimecontract.RuntimeOperationAdmissibility(nil), manifest.OwnerCatalogs...)
+	}
+	return projection
+}
+
+func runtimeSemanticSlicesForProvider(slices []runtimecontract.RuntimeAcceptanceSlice, step runtimecontract.RuntimeSemanticPlanStep, batchCoverageIDs []common.CoverageWorkItemID) []runtimeSemanticSliceProjection {
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(batchCoverageIDs))
+	for _, id := range batchCoverageIDs {
+		selected[id] = struct{}{}
+	}
+	ret := make([]runtimeSemanticSliceProjection, 0, len(slices))
+	for _, value := range runtimecontract.NormalizeRuntimeAcceptanceSlices(slices) {
+		coverageIDs := append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...)
+		if step == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+			coverageIDs = coverageIDs[:0]
+			for _, id := range value.CoverageWorkItemIDs {
+				if _, found := selected[id]; found {
+					coverageIDs = append(coverageIDs, id)
+				}
+			}
+			if len(coverageIDs) == 0 {
+				continue
+			}
+		}
+		ret = append(ret, runtimeSemanticSliceProjection{
+			ID: value.ID, Title: value.Title, Scope: value.Scope, Priority: value.Priority,
+			CoverageWorkItemIDs: coverageIDs, RequiredEvidenceKinds: append([]string(nil), value.RequiredEvidenceKinds...),
+			CompletionPolicy: value.CompletionPolicy, ResultPolicy: value.ResultPolicy,
+		})
+	}
+	return ret
 }
 
 // compactSemanticPlanPromptSchema removes prose-only JSON Schema metadata from
