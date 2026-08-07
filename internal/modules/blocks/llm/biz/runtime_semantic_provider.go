@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -21,6 +22,9 @@ type runtimeSemanticAuthorityProjection struct {
 	Manifest          runtimecontract.RuntimeSemanticPlanManifest `json:"manifest"`
 	Schema            json.RawMessage                             `json:"schema"`
 	OutputInstruction string                                      `json:"outputInstruction"`
+	PlanStep          runtimecontract.RuntimeSemanticPlanStep     `json:"planStep"`
+	BatchID           string                                      `json:"batchId,omitempty"`
+	BatchCoverageIDs  []common.CoverageWorkItemID                 `json:"batchCoverageWorkItemIds,omitempty"`
 }
 
 type runtimeSemanticDiagnosticProjection struct {
@@ -97,10 +101,16 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		return llmmodels.ProviderRequest{}, err
 	}
 	promptSchema := compactSemanticPlanPromptSchema([]byte(schema))
+	outputInstruction := "Return exactly one compact semantic_plan JSON document. Propose one bounded proof declaration for every manifest coverage item. Omit optional arrays and fields when empty; do not repeat prose, descriptions, or markdown. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results."
+	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=coverage_order and a complete coverageOrder. Do not return proposals or any operation, target, recipe, feasibility, action, credit, terminal, retry, governance, receipt, or markdown field."
+	} else if context.BatchID != "" {
+		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=proof_batch and proposals only for the supplied batch coverage IDs. Do not add, omit, reorder, or claim coverage outside the batch."
+	}
 	authorityJSON, err := json.Marshal(runtimeSemanticAuthorityProjection{
 		WorkspaceID: string(context.WorkspaceID), RunID: string(context.RunID),
 		DefinitionSeed: context.DefinitionSeed, Manifest: manifest, Schema: json.RawMessage(promptSchema),
-		OutputInstruction: "Return exactly one compact semantic_plan JSON document. Propose one bounded proof declaration for every manifest coverage item. Omit optional arrays and fields when empty; do not repeat prose, descriptions, or markdown. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results.",
+		OutputInstruction: outputInstruction, PlanStep: context.PlanStep, BatchID: context.BatchID, BatchCoverageIDs: context.BatchCoverageWorkItemIDs,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err

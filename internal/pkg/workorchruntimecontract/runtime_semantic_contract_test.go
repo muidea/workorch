@@ -137,6 +137,48 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticPlanCoverageOrderMustRespectDependencies(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.CoverageItems = []RuntimeCoverageItem{
+		{ID: "cwi-001", SliceID: "slice-1", SourceScope: "test", SourceID: "one"},
+		{ID: "cwi-002", SliceID: "slice-1", SourceScope: "test", SourceID: "two", ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-001"}}},
+	}
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-002", "cwi-001"},
+		Proposals:     []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001"), semanticContractTestProposal("cwi-002")},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err == nil {
+		t.Fatal("coverage order violating dependency was accepted")
+	}
+}
+
+func TestRuntimeSemanticPlanBatchDocumentMayCoverOnlyDeclaredBatch(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-1", SourceScope: "test", SourceID: "two"})
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, CoverageOrder: []common.CoverageWorkItemID{"cwi-001", "cwi-002"},
+		Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("partial batch document rejected: %v", err)
+	}
+}
+
+func TestRuntimeSemanticCoverageOrderStepHasNoProofProposals(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("coverage-order step rejected: %v", err)
+	}
+}
+
 func TestRuntimeSemanticFeasibilityRetainsOwnerDiagnosticWithoutSelectingAction(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")

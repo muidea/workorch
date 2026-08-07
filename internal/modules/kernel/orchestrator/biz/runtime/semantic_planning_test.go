@@ -101,6 +101,116 @@ func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempoten
 	}
 }
 
+func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
+	controller, repository, aggregate := newSemanticPlanningController(t)
+	manifest, order, feasibility := semanticPlanningFixture(t, aggregate)
+	proposal := order.Proposals[0]
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
+	order.Proposals = nil
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply := func(event RuntimeInternalEvent) {
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, err := controller.ApplyInternalEvent(context.Background(), event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "batch-prefix", LogicalRequestID: "order-request"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, order, 0, "batch-request", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = result
+	proof := order.Clone()
+	proof.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	proof.Proposals = []runtimecontract.RuntimeSemanticProofProposal{proposal}
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
+	revision := aggregate.StateRevision
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
+	if aggregate.StateRevision != revision || repository.saves == 0 {
+		t.Fatalf("replayed batch document changed durable state: revision=%d saves=%d", aggregate.StateRevision, repository.saves)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility})
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	batchResult := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: accepted.BatchID, BatchHash: accepted.Hash,
+		DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(proof),
+		Feasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility},
+	}
+	batchResult.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchResult)
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, SemanticPlanBatchFeasibilityResult: &batchResult})
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanBatchDocuments(manifest, order, []runtimecontract.RuntimeSemanticPlanDocument{proof})
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
+	mergeRevision := aggregate.StateRevision
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
+	if aggregate.StateRevision != mergeRevision {
+		t.Fatal("replayed merged semantic document changed durable state")
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged, SemanticPlanMergedFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(aggregate.Facts.ReconciliationContract.Bindings) != 1 {
+		t.Fatalf("batch replay recovery did not reach atomic semantic seal: %+v", aggregate.SemanticPlanning)
+	}
+}
+
+func TestRuntimeSemanticBatchCorrectionKeepsBatchLineage(t *testing.T) {
+	controller, _, aggregate := newSemanticPlanningController(t)
+	manifest, order, _ := semanticPlanningFixture(t, aggregate)
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
+	order.Proposals = nil
+	apply := func(event RuntimeInternalEvent) {
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, err := controller.ApplyInternalEvent(context.Background(), event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "batch-correction-prefix", LogicalRequestID: "order-request"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, order, 0, "batch-request", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		OriginalClass: "semantic_plan", OriginalCode: "invalid_json", OriginalMessage: "batch document was malformed",
+		Signature: "semantic-plan/batch/invalid-json",
+	}
+	correctionHash := runtimecontract.StableRuntimeSemanticPlanCorrectionHash(diagnostic)
+	corrected, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", correctionHash, diagnostic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || corrected.SemanticPlanning.ActiveBatchID != batch.BatchID || corrected.SemanticPlanning.Attempt != 1 {
+		t.Fatalf("batch correction lost active lineage: %+v", corrected.SemanticPlanning)
+	}
+}
+
 func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, document, _ := semanticPlanningFixture(t, aggregate)

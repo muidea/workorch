@@ -8,6 +8,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -73,7 +74,8 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 		document := runtimecontract.RuntimeSemanticPlanDocument{
 			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 			ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
-			Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal},
+			CoverageOrder: []common.CoverageWorkItemID{item.ID},
+			Proposals:     []runtimecontract.RuntimeSemanticProofProposal{proposal},
 		}
 		payload, encodeErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 		if encodeErr != nil {

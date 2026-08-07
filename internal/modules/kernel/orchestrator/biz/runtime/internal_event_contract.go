@@ -42,6 +42,12 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		metadata.StateMachine = eventcontract.StateMachineSM2
 
 	case RuntimeInternalEventSemanticPlanRequestStarted,
+		RuntimeInternalEventSemanticPlanBatchCompiled,
+		RuntimeInternalEventSemanticPlanBatchAdvanced,
+		RuntimeInternalEventSemanticPlanBatchFeasibilityObserved,
+		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
+		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
+		RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged,
 		RuntimeInternalEventSemanticPlanEvaluated,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,

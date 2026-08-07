@@ -51,6 +51,12 @@ func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
 
 func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRuntimePolicy {
 	defaults := workorchconfig.DefaultLLMOutputRuntimeConfig()
+	if policy.SemanticPlanMaxOutputTokens <= 0 {
+		policy.SemanticPlanMaxOutputTokens = defaults.SemanticPlanMaxOutputTokens
+	}
+	if policy.CandidateMaxOutputTokens <= 0 {
+		policy.CandidateMaxOutputTokens = defaults.CandidateMaxOutputTokens
+	}
 	if policy.MaxPatchContentBytes <= 0 {
 		policy.MaxPatchContentBytes = defaults.MaxPatchContentBytes
 	}

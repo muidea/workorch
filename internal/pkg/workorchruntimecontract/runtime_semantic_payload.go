@@ -10,17 +10,22 @@ import (
 )
 
 var (
-	runtimeSemanticTopLevelFields = []string{"definitionSeedHash", "documentKind", "manifestHash", "proposals", "schemaVersion"}
+	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "documentKind", "manifestHash", "planStep", "proposals", "schemaVersion"}
 	runtimeSemanticProposalFields = []string{"artifactRefs", "coverageWorkItemId", "declarationRef", "metricConstraints", "operationKind", "operationVariantId", "ownerModuleId", "requiredCheckRefs", "requiredEffectScopes", "requiredEvidenceKinds", "target", "validationRecipeId"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRef"}
 )
 
 type runtimeSemanticPlanPayload struct {
-	DocumentKind       RuntimeProviderDocumentKind      `json:"documentKind"`
-	SchemaVersion      string                           `json:"schemaVersion"`
-	ManifestHash       string                           `json:"manifestHash"`
-	DefinitionSeedHash string                           `json:"definitionSeedHash"`
-	Proposals          []runtimeSemanticProposalPayload `json:"proposals"`
+	DocumentKind             RuntimeProviderDocumentKind      `json:"documentKind"`
+	SchemaVersion            string                           `json:"schemaVersion"`
+	ManifestHash             string                           `json:"manifestHash"`
+	DefinitionSeedHash       string                           `json:"definitionSeedHash"`
+	PlanStep                 RuntimeSemanticPlanStep          `json:"planStep,omitempty"`
+	BatchID                  string                           `json:"batchId,omitempty"`
+	BatchSequence            int                              `json:"batchSequence,omitempty"`
+	BatchCoverageWorkItemIDs []common.CoverageWorkItemID      `json:"batchCoverageWorkItemIds,omitempty"`
+	CoverageOrder            []common.CoverageWorkItemID      `json:"coverageOrder"`
+	Proposals                []runtimeSemanticProposalPayload `json:"proposals"`
 }
 
 type runtimeSemanticProposalPayload struct {
@@ -70,9 +75,15 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 	if wire.DocumentKind != RuntimeProviderDocumentSemanticPlan {
 		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.documentKind", Actual: string(wire.DocumentKind), Allowed: []string{string(RuntimeProviderDocumentSemanticPlan)}, Cause: fmt.Errorf("runtime semantic document kind is invalid")}
 	}
+	if len(wire.CoverageOrder) == 0 {
+		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.coverageOrder", Actual: "missing_or_empty", Allowed: []string{"complete ordered CWI list"}, Cause: fmt.Errorf("runtime semantic plan must include provider-authored coverage order")}
+	}
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: wire.SchemaVersion, ManifestHash: wire.ManifestHash, DefinitionSeedHash: wire.DefinitionSeedHash,
-		Proposals: make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
+		BatchID: wire.BatchID, BatchSequence: wire.BatchSequence, BatchCoverageWorkItemIDs: wire.BatchCoverageWorkItemIDs,
+		PlanStep:      wire.PlanStep,
+		CoverageOrder: wire.CoverageOrder,
+		Proposals:     make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
 	}
 	for _, value := range wire.Proposals {
 		document.Proposals = append(document.Proposals, RuntimeSemanticProofProposal{
@@ -106,7 +117,10 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 	wire := runtimeSemanticPlanPayload{
 		DocumentKind: RuntimeProviderDocumentSemanticPlan, SchemaVersion: document.SchemaVersion,
 		ManifestHash: document.ManifestHash, DefinitionSeedHash: document.DefinitionSeedHash,
-		Proposals: make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
+		BatchID: document.BatchID, BatchSequence: document.BatchSequence, BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
+		PlanStep:      document.PlanStep,
+		CoverageOrder: append([]common.CoverageWorkItemID(nil), document.CoverageOrder...),
+		Proposals:     make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
 	}
 	for _, value := range document.Proposals {
 		wire.Proposals = append(wire.Proposals, runtimeSemanticProposalPayload{
@@ -130,7 +144,7 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: strings.TrimSpace(err.Error()), Allowed: runtimeSemanticTopLevelFields, Cause: err}
 	}
-	if err := validateRuntimeSemanticObjectFields("$", envelope, runtimeSemanticTopLevelFields, []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "proposals"}); err != nil {
+	if err := validateRuntimeSemanticObjectFields("$", envelope, runtimeSemanticTopLevelFields, []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"}); err != nil {
 		return err
 	}
 	var proposals []json.RawMessage
@@ -216,13 +230,18 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	recipeIDs = normalizeStrings(recipeIDs)
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
-		"required": []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "proposals"},
+		"required": []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"},
 		"properties": map[string]any{
-			"documentKind":       map[string]any{"const": string(RuntimeProviderDocumentSemanticPlan)},
-			"schemaVersion":      map[string]any{"const": RuntimeSemanticPlanDocumentSchemaCurrent},
-			"manifestHash":       map[string]any{"const": manifest.Hash},
-			"definitionSeedHash": map[string]any{"const": manifest.DefinitionSeedHash},
-			"proposals": map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "items": map[string]any{
+			"documentKind":             map[string]any{"const": string(RuntimeProviderDocumentSemanticPlan)},
+			"schemaVersion":            map[string]any{"const": RuntimeSemanticPlanDocumentSchemaCurrent},
+			"manifestHash":             map[string]any{"const": manifest.Hash},
+			"definitionSeedHash":       map[string]any{"const": manifest.DefinitionSeedHash},
+			"planStep":                 map[string]any{"enum": []string{string(RuntimeSemanticPlanStepCoverageOrder), string(RuntimeSemanticPlanStepProofBatch)}},
+			"batchId":                  map[string]any{"type": "string"},
+			"batchSequence":            map[string]any{"type": "integer", "minimum": 0},
+			"batchCoverageWorkItemIds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": coverageIDs}},
+			"coverageOrder":            map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "items": map[string]any{"type": "string", "enum": coverageIDs}},
+			"proposals": map[string]any{"type": "array", "minItems": 0, "maxItems": len(coverageIDs), "items": map[string]any{
 				"type": "object", "additionalProperties": false,
 				"required": []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "requiredEffectScopes", "declarationRef"},
 				"properties": map[string]any{

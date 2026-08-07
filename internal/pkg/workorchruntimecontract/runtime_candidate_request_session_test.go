@@ -59,6 +59,16 @@ func TestRuntimeCandidateRequestIdentityIsTotalAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestRuntimeCandidateRequestSessionIDIsRunScoped(t *testing.T) {
+	tx := AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"}
+	first := StableRuntimeCandidateRequestSessionID(RuntimeProviderDocumentSemanticPlan, "ws-1", "run-1", tx, "prefix", "manifest", "batch-0")
+	secondRun := StableRuntimeCandidateRequestSessionID(RuntimeProviderDocumentSemanticPlan, "ws-1", "run-2", tx, "prefix", "manifest", "batch-0")
+	secondBatch := StableRuntimeCandidateRequestSessionID(RuntimeProviderDocumentSemanticPlan, "ws-1", "run-1", tx, "prefix", "manifest", "batch-1")
+	if first == "" || first == secondRun || first == secondBatch {
+		t.Fatalf("candidate request session identity is not scoped to run/batch lineage: %q %q %q", first, secondRun, secondBatch)
+	}
+}
+
 func TestRuntimeCandidateOutputContinuationPreservesRawTail(t *testing.T) {
 	request := RuntimeCandidateOutputContinuationRequest{ID: "candidate-request-content-1", Sequence: 2, PreviousChunkTail: "}\n  "}
 	if err := request.Validate(); err != nil {

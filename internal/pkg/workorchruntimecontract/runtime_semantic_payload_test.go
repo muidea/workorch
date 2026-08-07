@@ -12,7 +12,7 @@ func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageOrder: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
 	}
 	payload, err := EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 
 func TestRuntimeSemanticPlanPayloadRejectsUnknownMissingAndWrongKind(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	base := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
+	base := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","coverageOrder":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
 	tests := []struct {
 		name    string
 		payload string

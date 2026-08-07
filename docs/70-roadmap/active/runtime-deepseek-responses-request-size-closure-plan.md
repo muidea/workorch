@@ -4,7 +4,7 @@ Status: active
 
 Type: implementation closure plan
 
-Last Updated: 2026-08-06
+Last Updated: 2026-08-07
 
 ## 1. 核对结论
 
@@ -144,6 +144,218 @@ stream：优先 true
 
 以上是阶段预算目标，不是 provider capability；最终值必须写入 sealed ceiling 并进入审计。
 
+## 3.1 CWI 计划排序（由 LLM 提出、由 Orchestrator 校验）
+
+CWI 的业务执行顺序不能由 `Order`、目录顺序、map 遍历或其它数值字段机械推导。排序本身是
+semantic-plan 的一个显式步骤：LLM 在 `coverageOrder` 中提出完整的 CWI 顺序，说明依赖和交付优先级的
+组合判断；它不是 authority，也不能改变 manifest 中的 CWI 集合、owner、operation、target 或 recipe。
+
+Orchestrator 只做合同校验：
+
+1. `coverageOrder` 必须是 full manifest CWI 的恰好一次排列，不得遗漏、重复或引入未知 CWI。
+2. `ReopenDependencies` 必须满足依赖项先于被依赖项；循环依赖仍由 Definition seed 校验拒绝。
+3. 只有通过上述校验的顺序才可由 SM-2 private event 封存并用于 batch 切分；校验失败只能形成
+   semantic-plan correction，不能直接 dispatch 或由 Orchestrator 自行重排。
+4. order 的 hash 绑定 semantic-plan document/batch lineage，用于 stale/duplicate/restart 检测；不写入
+   activation manifest，也不把 source order 当成执行权威。
+
+`internal/pkg/workorchruntimecontract` 只保存 `coverageOrder` DTO、排列校验和 hash helper；不选择顺序。
+focus、batch 和 correction 仍由 Orchestrator SM-2 内部事件负责。
+
+## 3.2 Semantic-plan Batch 合同
+
+Full manifest 仍然包含 workspace 全部 CWI；batch 只是对 full manifest 的有序、持久化子集，不是新的 authority。
+
+### Batch DTO
+
+```text
+RuntimeSemanticPlanBatch {
+  batchId
+  manifestHash
+  definitionSeedHash
+  sequence
+  coverageWorkItemIds
+  pendingCoverageWorkItemIds
+  requestLogicalId
+  documentHash
+  dependencyBarrierRefs
+  state
+}
+```
+
+Batch 状态固定为：
+
+```text
+pending → requesting → document_complete → feasibility_pending
+         → feasibility_complete → accepted
+```
+
+失败状态为 `failed`；失败 batch 不得被静默跳过。
+
+### Document 规则
+
+`RuntimeSemanticPlanDocument` 增加 `batchId`、`batchSequence` 和 batch coverage identity。Provider 返回的
+document 只需覆盖当前 batch，但必须满足：
+
+- `manifestHash` 和 `definitionSeedHash` 与 full manifest 一致；
+- proposal 只能属于当前 batch CWI；
+- 当前 batch 每个 CWI 恰好一个 proposal；
+- batch 内 owner、operation、target、recipe 仍由 full manifest 校验；
+- batch document 未完成前不能请求 owner feasibility。
+
+全部 batch 完成后，Orchestrator 在 owner-local reducer 中合并 document：
+
+```text
+ordered batch documents
+→ reject duplicate CWI
+→ verify sequence/order/dependency barriers
+→ verify full manifest coverage
+→ compute merged document hash
+→ request complete feasibility set
+→ SM-2 seal binding/reconciliation
+```
+
+在 merged document 和完整 feasibility set 形成前，禁止 dispatch、evidence credit 和 terminal。
+
+### Batch 选择
+
+初始建议：`semanticPlanBatchMaxItems = 4..8`。选择顺序为：
+
+1. 当前 active focus；
+2. 同一 acceptance slice；
+3. 依赖已满足的 CWI；
+4. 依已校验并封存的 provider-authored `coverageOrder` 取连续项目；
+5. 达到 batch item 或 output budget 即停止。
+
+LLM 不得选择下一个 batch、修改 batch 顺序、增加 CWI 或改变 dependency。
+
+### Ledger 字段
+
+`RuntimeSemanticPlanningLedger` 增加：
+
+```text
+Batches
+ActiveBatchID
+NextBatchSequence
+PendingCoverageIDs
+CompletedBatchIDs
+BatchDocuments
+MergedDocument
+MergedDocumentHash
+```
+
+所有字段只能由 Orchestrator private internal event + 单次 CAS 修改。`blocks/llm` 不得保存 batch 状态。
+
+### Continuation 与 Batch 的区别
+
+Continuation 只补齐同一 batch 的截断响应，必须保持相同：
+
+```text
+batchId / logicalRequestId / manifestHash / coverageWorkItemIds
+```
+
+下一个 batch 必须新建 `batchId`、logical request 和 sequence，不能用 continuation 扩大 coverage set。
+
+### Resume/Restart/Crash
+
+- `resume`：恢复 active batch；优先继续已有 fragment，再继续 document/feasibility；完成后创建下一个 batch。
+- `restart`：新 Run、新 full manifest、新 batch lineage；不继承 predecessor 的 semantic credit。
+- provider 已提交但 outcome 未知：不得重复提交同一 logical request。
+- fragment 已持久化：只允许继续同一 batch continuation。
+- batch document 已完成：不得再次请求 LLM，直接恢复 feasibility 或下一个 batch。
+- definition、catalog、provider ceiling 或 order hash 改变：当前 batch 失效，创建新 lineage。
+
+## 3.3 Semantic planning 主流程迁移方案
+
+本节是后续代码迁移的唯一执行顺序。迁移期间不得在单个阶段增加旁路 retry、旁路 feasibility、自动
+replan 或跨 owner 状态写入。
+
+### 3.3.1 新增并固化的 ledger phase
+
+SM-3/SM-2 仍由 Orchestrator owner 管理，phase 只允许由 private internal event + 单次 CAS 迁移：
+
+```text
+semantic_contract_required
+  → coverage_order_request_open
+  → coverage_order_accepted
+  → proof_batch_request_open
+  → proof_batch_document_accepted
+  → proof_batch_feasibility_pending
+  → proof_batch_feasibility_complete
+  → next proof_batch_request_open OR merged semantic_feasibility_required
+  → semantic_feasibility_sealed
+```
+
+已有 `semantic_plan_requested`、`semantic_plan_correction_required` 只用于当前 step 的 provider
+request session；不得把 order step 与 proof batch 混在同一个 logical request 中。
+
+### 3.3.2 Order step
+
+1. fresh activation 只创建 full manifest 和 order request session。
+2. request context 的 `planStep=coverage_order`，provider 只能返回完整 `coverageOrder`，不得返回 proposal。
+3. Orchestrator 解码并校验完整排列、依赖先后、manifest/seed identity，然后通过 private event 封存 order document。
+4. provider 返回 malformed、遗漏、重复或反向依赖时，只进入既有 semantic correction budget；不得由 Orchestrator
+   自行排序修正。
+5. order document 的 `DocumentHash`、`CoverageOrderHash` 和 manifest hash 写入 ledger lineage。
+
+### 3.3.3 Proof batch request
+
+1. order accepted 后，Orchestrator 使用 `CompileRuntimeSemanticPlanBatch` 生成 batch；业务顺序完全来自
+   provider-authored order。
+2. 每个 batch 创建新的 `batchId`、`sequence`、`requestLogicalId`；continuation 只能复用同一 batch identity。
+3. request context 携带 `planStep=proof_batch`、batch coverage IDs、batch identity；LLM 只能返回当前 batch
+   proposals。
+4. batch document 完成后通过 `SemanticPlanBatchDocumentObserved` 持久化，并迁移 batch 到
+   `document_complete`；不重复请求同一个完整 document。
+5. 当前 batch 未完成前禁止创建下一个 batch、请求 feasibility 或进入 seal。
+
+### 3.3.4 Feasibility fan-out
+
+1. `document_complete` 只由 Orchestrator 创建 owner feasibility 请求，capability owner 返回 typed facts。
+2. 每个 batch 的 facts 通过 `SemanticPlanBatchFeasibilityObserved` 持久化；重复 exact result 幂等，冲突 result 拒绝。
+3. batch facts 未完整覆盖当前 batch proposal 时保持 `feasibility_pending`，不得降级为普通 repair。
+4. 当前 batch feasibility complete 后迁移 batch 为 `accepted`；若仍有 pending coverage，创建下一个 batch。
+
+### 3.3.5 Full merge 与 seal
+
+1. 所有 batch document 完成后调用 `MergeRuntimeSemanticPlanBatchDocuments`，通过 private merge event 保存
+   `MergedDocument/MergedDocumentHash`。
+2. 所有 batch feasibility result 完成后调用 `MergeRuntimeSemanticPlanBatchFeasibilityResults`，通过 private
+   merge event 保存完整 `Feasibilities/FeasibilitySetHash`。
+3. 只有 merged document 和完整 feasibility set 同时存在，才允许进入既有 `semantic_feasibility_required`
+   和 SM-2 binding seal；任何单 batch result 都不能直接 seal。
+4. seal 后才允许 operation candidate、dispatch、receipt/evidence；SM-1 lifecycle 不参与 semantic next-step 选择。
+
+### 3.3.6 Request session 与恢复
+
+| 场景 | 处理规则 |
+| --- | --- |
+| order request 已提交但 outcome 未知 | 不重放；恢复同一 logical request，等待 durable outcome |
+| order document 已持久化 | 不重复请求 LLM，直接进入 order accepted |
+| batch document 已持久化 | 不重复请求该 batch，直接进入 feasibility |
+| batch feasibility 已部分持久化 | 只请求缺失 owner fact，保留已有结果 |
+| batch 完成后 crash | 从 batch state 和 ledger 恢复下一个 batch 或 merge |
+| definition/catalog/provider ceiling/order hash 漂移 | 旧 lineage 失效，创建新 request lineage |
+| resume | 恢复当前 run 的 active batch/session |
+| restart | 新 run、新 manifest、新 order request，不继承 semantic credit |
+
+### 3.3.7 实施顺序
+
+1. 先增加 phase/ledger identity 及迁移不变量测试。
+2. 再接 order request context 和 order accepted private event。
+3. 接 proof batch request session 和 batch state transitions。
+4. 接 batch document/feasibility event 与恢复分支。
+5. 接 full merge 与现有 feasibility seal gate。
+6. 最后删除旧的“一次 full manifest 直接生成 proposals”主路径，并运行 live 验证。
+
+### 3.3.8 禁止事项
+
+- 不得用 `CoverageItem.Order`、目录顺序、map 遍历顺序替代 LLM `coverageOrder`。
+- 不得让 LLM 选择下一个 batch、修改 batch sequence 或扩展 coverage set。
+- 不得让 File/Git/Shell/MCP 等 capability owner 写 semantic ledger。
+- 不得在 batch 未完成时调用全量 feasibility 或生成 sealed binding。
+- 不得为恢复增加第二套 request session、第二套 document hash 或第二套 coverage authority。
+
 ## 4. 超时顺序
 
 必须满足：
@@ -177,7 +389,12 @@ WorkOrch provider timeout：120s～180s
 8. restart/resume 同一 request session；
 9. restart 新建 workspace_full batch；
 10. stable prefix hash 不漂移；
-11. 全量测试、vet、fmt-check 和部署实例验证。
+11. dependency graph cycle/reverse-order rejection；
+12. provider-authored `coverageOrder`/hash 在重复编译与 restart 后稳定；
+13. batch CWI 重复、遗漏、跨 batch 越权 rejection；
+14. batch document complete 后 crash，restart 不重复调用 LLM；
+15. 全部 batch 未完成时禁止 SM-2 seal/dispatch；
+16. 全量测试、vet、fmt-check 和部署实例验证。
 
 ## 6. 完成判定
 
@@ -187,15 +404,24 @@ WorkOrch provider timeout：120s～180s
 - 单次请求在代理 body-idle timeout 内稳定获得首个响应块或明确错误；
 - provider timeout 不再使用 1800s 这类无界等待配置；
 - continuation、retry、batch 和 failure outcome 均可从持久化 aggregate 恢复；
+- provider-authored CWI order、dependency barriers 和 batch sequence 可重算且 hash 稳定；
+- batch 合并后恰好覆盖 full manifest 全部 CWI，无重复、遗漏或越权；
 - SM-1/SM-2/SM-3/SM-4 owner 边界没有被跨组件修改破坏；
 - live run 至少完成一个 state-changing CWI，并产生 typed receipt/evidence 链。
 
 ## 7. 当前明确遗留项
 
-1. LLM block 尚未执行阶段级 semantic-plan 输出预算；
-2. Orchestrator 尚未将 47 个 CWI 拆为受控 batch；
-3. 运行实例 provider timeout 为 `1800s`，与设计目标不符；
-4. semantic-plan 仍在 prompt 中携带完整 schema 和 owner catalog；
-5. semantic-plan 默认使用 `stream=false`；
-6. live interaction 尚未形成 candidate/evidence，run-013 仍停留在 `semantic_plan_requested`。
-
+1. phase vocabulary、request context `planStep`/batch identity、provider instruction、order-first request、proof-batch
+   request-session、document → feasibility handoff、多 batch 循环和最终 seal gate 均已接入。
+2. `RuntimeSemanticPlanningLedger` 已持久化 order/batch/document merge 基础字段及 batch documents；drive 会在 batch
+   完成后归档 owner facts、创建下一 batch，或执行 document/feasibility merge 后进入既有 atomic seal。
+3. batch DTO、状态校验、`planStep`、order/document identity、按已封存 order 编译 batch 的纯 helper、Orchestrator
+   private batch-compilation/advance event、batch document 分片字段、full-manifest merge helper 及单 batch
+   feasibility 完整性校验 helper、batch feasibility result DTO/identity、ledger 有序 slice 及全量 feasibility merge
+   helper 已实现；feasibility 分批驱动已接入，owner facts 只在当前 batch 工作集内累积并按 batch result 归档。
+4. batch document CAS 后 replay、merged document CAS 后 replay、batch correction 保持 active lineage、跨部署
+   batch-size 变化时按已完成 coverage offset 恢复、accepted active batch feasibility identity/stale gate 已补齐；
+   batch document hash 与 batch state 的绑定也已补齐；restart 新 lineage、fragment CAS 前后和最终 merge CAS 前后的
+   完整回归矩阵尚未补齐。
+5. 运行实例仍需重新部署并确认 provider timeout、stream、8K 阶段预算和 typed body-idle outcome 生效。
+6. fresh live 尚未证明 ordered batches 最终形成完整 binding→receipt→evidence 链。

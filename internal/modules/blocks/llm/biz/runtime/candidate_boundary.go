@@ -45,11 +45,12 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		if failureClass == "" {
 			failureClass = CandidateFailureClassProvider
 		}
+		code, signature := providerFailureIdentity(err)
 		return llmmodels.RuntimeCandidateResponse{
 			Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 			Audit: generation.Audit,
 			Usage: generation.Usage,
-		}, candidateRequestError(failureClass, err, generation.Audit, generation.RequestID, generation.Status)
+		}, candidateRequestErrorWithIdentity(failureClass, code, signature, err, generation.Audit, generation.RequestID, generation.Status)
 	}
 	// A suffix request intentionally uses raw text output rather than the
 	// structured JSON response mode. Its bytes are owned and sequenced by the
@@ -88,6 +89,20 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		Audit:           generation.Audit,
 		Usage:           generation.Usage,
 	}, nil
+}
+
+func providerFailureIdentity(err error) (string, string) {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(message, "body idle timeout"):
+		return "provider_body_idle_timeout", "provider-body-idle-timeout"
+	case strings.Contains(message, "provider request timeout") || strings.Contains(message, "context deadline exceeded"):
+		return "provider_transport_timeout", "provider-transport-timeout"
+	case strings.Contains(message, "empty response"):
+		return "provider_empty_response", "provider-empty-response"
+	default:
+		return "provider_request_failed", "provider-request-failed"
+	}
 }
 
 type CandidateRequestError struct {

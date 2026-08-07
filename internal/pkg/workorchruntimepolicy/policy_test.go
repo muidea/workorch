@@ -9,6 +9,8 @@ import (
 
 func TestLLMOutputRuntimePolicySharesConfigShapeWithoutSharingSemantics(t *testing.T) {
 	cfg := workorchconfig.LLMOutputRuntimeConfig{
+		SemanticPlanMaxOutputTokens:        201,
+		CandidateMaxOutputTokens:           202,
 		MaxPatchContentBytes:               101,
 		MaxGraphBytes:                      102,
 		MaxGraphFileWrites:                 103,

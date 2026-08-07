@@ -280,7 +280,7 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 	}
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		switch aggregate.SemanticPlanning.Phase {
-		case runtimecontract.RuntimeSemanticPlanningRequired, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
+		case runtimecontract.RuntimeSemanticPlanningRequired, runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired, runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen, runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted:
 			return nil
 		default:
 			return fmt.Errorf("%w: current semantic phase does not accept a provider request", common.ErrConflict)

@@ -621,6 +621,12 @@ func (m *Biz) requestRuntimeCandidateDocument(
 			if recordErr != nil {
 				return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, recordErr
 			}
+			if providerFailure.Code == "provider_body_idle_timeout" {
+				failed, failureErr := m.runtimeRecordFailure(ctx, updated, runtimecontract.FailureFact{
+					Class: runtimecontract.FailureClassProviderTransient, Code: "provider_body_idle_timeout", Signature: "provider-body-idle-timeout", Message: strings.TrimSpace(providerFailure.Reason),
+				})
+				return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
+			}
 			recovered, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(ctx, updated, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
 			if budgetErr != nil {
 				return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, budgetErr

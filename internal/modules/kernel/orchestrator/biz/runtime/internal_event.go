@@ -29,14 +29,20 @@ type RuntimeInternalEvent struct {
 	ActivationDefinition   *runtimecontract.RuntimeDefinitionContext
 	ActivationRequirements []runtimecontract.RuntimeRequirement
 
-	ReconciliationRequest     *runtimecontract.RuntimeCWIReconciliationRequest
-	ReconciliationBatch       *runtimecontract.RuntimeCWIReconciliationBatch
-	SemanticManifest          *runtimecontract.RuntimeSemanticPlanManifest
-	SemanticDocument          *runtimecontract.RuntimeSemanticPlanDocument
-	SemanticFeasibility       *runtimecontract.RuntimeSemanticProofFeasibility
-	SemanticDiagnostic        *runtimecontract.RuntimeOriginalDiagnostic
-	SemanticBatchID           string
-	SemanticRefreshGeneration int
+	ReconciliationRequest              *runtimecontract.RuntimeCWIReconciliationRequest
+	ReconciliationBatch                *runtimecontract.RuntimeCWIReconciliationBatch
+	SemanticManifest                   *runtimecontract.RuntimeSemanticPlanManifest
+	SemanticDocument                   *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticPlanBatch                  *runtimecontract.RuntimeSemanticPlanBatch
+	SemanticPlanBatchNextState         runtimecontract.RuntimeSemanticPlanBatchState
+	SemanticPlanBatchFeasibilityResult *runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult
+	SemanticPlanBatchDocument          *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticPlanMergedDocument         *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticPlanMergedFeasibilities    []runtimecontract.RuntimeSemanticProofFeasibility
+	SemanticFeasibility                *runtimecontract.RuntimeSemanticProofFeasibility
+	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
+	SemanticBatchID                    string
+	SemanticRefreshGeneration          int
 
 	PrerequisiteResult  *PrerequisiteResult
 	Stale               *runtimecontract.RuntimePrerequisiteStale
@@ -218,6 +224,45 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, session, err := c.ensureCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.DocumentKind, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash)
 		result.Aggregate = aggregate
 		result.CandidateSession = session
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchCompiled:
+		if event.SemanticPlanBatch == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.compileSemanticPlanBatch(ctx, event.WorkspaceID, event.RunID, *event.SemanticPlanBatch)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchAdvanced:
+		if event.SemanticPlanBatch == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.advanceSemanticPlanBatch(ctx, event.WorkspaceID, event.RunID, *event.SemanticPlanBatch, event.SemanticPlanBatchNextState)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchFeasibilityObserved:
+		if event.SemanticPlanBatchFeasibilityResult == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.observeSemanticPlanBatchFeasibility(ctx, event.WorkspaceID, event.RunID, *event.SemanticPlanBatchFeasibilityResult)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchDocumentObserved:
+		if event.SemanticPlanBatchDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.observeSemanticPlanBatchDocument(ctx, event.WorkspaceID, event.RunID, *event.SemanticPlanBatchDocument)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchDocumentsMerged:
+		if event.SemanticPlanMergedDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.mergeSemanticPlanBatchDocuments(ctx, event.WorkspaceID, event.RunID, *event.SemanticPlanMergedDocument)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged:
+		aggregate, err := c.mergeSemanticPlanBatchFeasibilities(ctx, event.WorkspaceID, event.RunID, event.SemanticPlanMergedFeasibilities)
+		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestSubmitted:
 		aggregate, err := c.markCandidateRequestSubmitted(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.Sequence, event.PhysicalCallID)
