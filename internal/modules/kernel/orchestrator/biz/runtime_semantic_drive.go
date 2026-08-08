@@ -182,13 +182,18 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		semanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
 	} else if ledger.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || (ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && ledger.ActiveBatchID != "") {
 		semanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+		batchFound := false
 		for _, batch := range ledger.Batches {
 			if batch.BatchID == ledger.ActiveBatchID {
+				batchFound = true
 				semanticContext.BatchID = batch.BatchID
 				semanticContext.BatchSequence = batch.Sequence
 				semanticContext.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
 				break
 			}
+		}
+		if !batchFound || semanticContext.BatchID == "" || len(semanticContext.BatchCoverageWorkItemIDs) == 0 {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_batch_identity_missing", "proof-batch request has no persisted active batch identity and coverage", nil)
 		}
 	}
 	var previous *runtimecontract.RuntimeOriginalDiagnostic

@@ -257,6 +257,7 @@ Exact names may reuse current internal-event constants, but no new EventHub topi
 
 | Component | Required change | Must continue to own only |
 | --- | --- | --- |
+| `internal/initiators/workorchruntime` | repository provider/factory only; no Runtime drive, EventHub or policy export | repository construction and persistence wiring |
 | `application/workorchd` | submit one Workspace execution intent; remove restart phase assumptions | bootstrap compilation and protocol ingress |
 | `blocks/workspace` | validate current selection; release slot only through private lifecycle event | Workspace state, definition selection, `ActiveRunID` |
 | `blocks/run` | persist predecessor replacement intent; create successor only after final delivery | SM-1, lineage, opaque Runtime aggregate storage |
@@ -268,6 +269,17 @@ Exact names may reuse current internal-event constants, but no new EventHub topi
 | projection/eventstream/TUI/Web | display replacement/recovery/semantic phase facts | read models and user intent only |
 
 No component may receive another owner's service, repository, reducer, mutable model, or state callback.
+
+Registered component paths covered by this matrix are:
+`internal/initiators/workorchruntime`, `internal/modules/application/workorchd`,
+`internal/modules/blocks/approval`, `internal/modules/blocks/decision`,
+`internal/modules/blocks/eventstream`, `internal/modules/blocks/file`, `internal/modules/blocks/git`,
+`internal/modules/blocks/llm`, `internal/modules/blocks/mcp`, `internal/modules/blocks/mcpregistry`,
+`internal/modules/blocks/memory`, `internal/modules/blocks/result`, `internal/modules/blocks/run`,
+`internal/modules/blocks/shell`, `internal/modules/blocks/skill`, `internal/modules/blocks/soul`,
+`internal/modules/blocks/ssh`, `internal/modules/blocks/web`, `internal/modules/blocks/workspace`,
+`internal/modules/kernel/governance`, `internal/modules/kernel/orchestrator`, and
+`internal/modules/kernel/system`.
 
 ## 8. Contract And File Migration
 

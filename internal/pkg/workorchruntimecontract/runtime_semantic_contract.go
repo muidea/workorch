@@ -345,8 +345,10 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 	if c.PlanStep != RuntimeSemanticPlanStepCoverageOrder && c.PlanStep != RuntimeSemanticPlanStepProofBatch {
 		return fmt.Errorf("runtime semantic request context has invalid plan step %q", c.PlanStep)
 	}
-	if c.PlanStep == RuntimeSemanticPlanStepProofBatch && (len(c.BatchCoverageWorkItemIDs) > 0 && c.BatchID == "") {
-		return fmt.Errorf("proof-batch request context requires batch identity")
+	if c.PlanStep == RuntimeSemanticPlanStepProofBatch {
+		if c.BatchID == "" || len(c.BatchCoverageWorkItemIDs) == 0 {
+			return fmt.Errorf("proof-batch request context requires batch identity and coverage")
+		}
 	}
 	if manifest.WorkspaceID != c.WorkspaceID || manifest.RunID != c.RunID || manifest.DefinitionRevision != c.Definition.Revision ||
 		manifest.DefinitionSeedHash != c.DefinitionSeed.Hash || c.DefinitionSeed.DefinitionRevision != c.Definition.Revision ||

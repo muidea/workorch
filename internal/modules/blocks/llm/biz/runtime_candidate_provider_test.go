@@ -157,6 +157,8 @@ func runtimeSemanticProviderTestRequest(t *testing.T) llmmodels.RuntimeCandidate
 	}
 	context := runtimecontract.RuntimeSemanticPlanRequestContext{
 		WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Activation: activation, ProviderCeiling: ceiling,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 	}
 	if err := context.Validate(manifest); err != nil {
 		t.Fatal(err)

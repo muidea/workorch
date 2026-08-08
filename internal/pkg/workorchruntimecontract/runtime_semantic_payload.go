@@ -293,12 +293,6 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 	case RuntimeSemanticPlanStepProofBatch:
 		batchID = strings.TrimSpace(batchID)
 		batchCoverageIDs = normalizeOrderedCoverageWorkItemIDs(batchCoverageIDs)
-		// A normalized legacy/full semantic request has proof_batch as its
-		// default step but no batch identity. Keep the full sealed schema for
-		// that shape; production bounded batches always carry both values.
-		if batchID == "" && len(batchCoverageIDs) == 0 {
-			return full, nil
-		}
 		if batchID == "" || batchSequence < 0 || len(batchCoverageIDs) == 0 {
 			return "", fmt.Errorf("runtime semantic proof-batch schema requires batch identity and coverage")
 		}
