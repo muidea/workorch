@@ -93,6 +93,24 @@ func TestRuntimeAdapterProbeRejectsMissingGoTestTargetWithoutStartingProcess(t *
 	}
 }
 
+func TestRuntimeAdapterManagedValidationAdmissibilityPublishesOwnerSelector(t *testing.T) {
+	workspace := t.TempDir()
+	inventory, err := NewRuntimeAdapter().AcquireRuntimeOperationAdmissibility(
+		workspace,
+		"admissibility-shell-selector",
+		[]string{runtimemodel.RuntimeBlockKindManagedValidationSession},
+	)
+	if err != nil {
+		t.Fatalf("AcquireRuntimeOperationAdmissibility: %v", err)
+	}
+	if !reflect.DeepEqual(inventory.SelectorRefs, []string{"workspace-validation-target"}) {
+		t.Fatalf("selector refs = %+v, want workspace-validation-target", inventory.SelectorRefs)
+	}
+	if err := inventory.Validate(); err != nil {
+		t.Fatalf("inventory validation: %v", err)
+	}
+}
+
 func TestRuntimeAdapterProbeDoesNotTreatWorkspaceDirectoryMTimeAsAdmissibilityStale(t *testing.T) {
 	workspace := t.TempDir()
 	adapter := NewRuntimeAdapter()

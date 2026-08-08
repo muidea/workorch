@@ -1360,7 +1360,7 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 			return fmt.Errorf("runtime semantic feasibility set hash does not match observations")
 		}
 		feasibilityDocument := l.Document
-		if l.ActiveBatchID != "" {
+		if l.FeasibilityBatchID != "" && l.ActiveBatchID != "" {
 			for idx := range l.BatchDocuments {
 				if l.BatchDocuments[idx].BatchID == l.ActiveBatchID {
 					value := l.BatchDocuments[idx].Clone()
@@ -1444,14 +1444,35 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 		if l.DocumentHash != StableRuntimeSemanticPlanDocumentHash(*l.Document) {
 			return fmt.Errorf("failed runtime semantic planning document hash does not match contents")
 		}
-		if l.FeasibilityBatchID != "" && l.FeasibilityBatchID != StableRuntimeSemanticFeasibilityBatchID(*l.Manifest, *l.Document) {
+		// During a proof-batch owner probe the canonical ledger document remains
+		// the coverage-order document while the active batch document is stored
+		// separately.  A typed owner rejection can therefore legitimately leave
+		// FeasibilityBatchID bound to that active batch.  Validate the same
+		// document that the feasibility dispatcher used instead of treating the
+		// failure transition as an internal contract defect.
+		feasibilityDocument := l.Document
+		hasFeasibilityDocument := true
+		if l.FeasibilityBatchID != "" && l.ActiveBatchID != "" {
+			hasFeasibilityDocument = false
+			for idx := range l.BatchDocuments {
+				if l.BatchDocuments[idx].BatchID == l.ActiveBatchID {
+					value := l.BatchDocuments[idx].Clone()
+					feasibilityDocument = &value
+					hasFeasibilityDocument = true
+					break
+				}
+			}
+		}
+		if hasFeasibilityDocument && l.FeasibilityBatchID != "" && l.FeasibilityBatchID != StableRuntimeSemanticFeasibilityBatchID(*l.Manifest, *feasibilityDocument) {
 			return fmt.Errorf("failed runtime semantic feasibility batch identity does not match document")
 		}
 		if l.FeasibilitySetHash != StableRuntimeSemanticFeasibilitySetHash(l.Feasibilities) {
 			return fmt.Errorf("failed runtime semantic feasibility set hash does not match observations")
 		}
-		if err := validateRuntimeSemanticFeasibilitySet(*l.Manifest, *l.Document, l.Feasibilities, false); err != nil {
-			return err
+		if hasFeasibilityDocument {
+			if err := validateRuntimeSemanticFeasibilitySet(*l.Manifest, *feasibilityDocument, l.Feasibilities, false); err != nil {
+				return err
+			}
 		}
 	default:
 		return fmt.Errorf("runtime semantic planning ledger has invalid phase %q", l.Phase)

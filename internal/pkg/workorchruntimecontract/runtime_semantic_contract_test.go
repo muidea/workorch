@@ -229,6 +229,68 @@ func TestRuntimeSemanticPlanningLedgerRequiredShapeIsStrict(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	seed := RuntimeDefinitionSeed{
+		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: manifest.DefinitionRevision,
+		PolicyHash: "policy-1", CoverageItems: manifest.CoverageItems,
+		Slices: []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}},
+	}
+	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	proposal := semanticContractTestProposal("cwi-001")
+	batch, err := CompileRuntimeSemanticPlanBatch(manifest, order, 0, "request-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchRequesting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: batch.BatchID, BatchSequence: batch.Sequence, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchDocumentComplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.DocumentHash = StableRuntimeSemanticPlanDocumentHash(document)
+	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+	feasibility := RuntimeSemanticProofFeasibility{
+		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
+		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
+		CatalogSnapshotID: "catalog-1", Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
+		OriginalDiagnostic: semanticContractTestDiagnostic(),
+	}
+	if err := feasibility.ValidateForProposal(manifest, proposal); err != nil {
+		t.Fatal(err)
+	}
+	ledger := RuntimeSemanticPlanningLedger{
+		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningFailed,
+		DefinitionSeed: seed, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
+		Document: &order, DocumentHash: StableRuntimeSemanticPlanDocumentHash(order), ActiveBatchID: batch.BatchID,
+		BatchDocuments: []RuntimeSemanticPlanDocument{document}, Batches: []RuntimeSemanticPlanBatch{batch},
+		FeasibilityBatchID: StableRuntimeSemanticFeasibilityBatchID(manifest, document),
+		Feasibilities:      []RuntimeSemanticProofFeasibility{feasibility},
+		FeasibilitySetHash: StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{feasibility}),
+		Failure:            semanticContractTestDiagnostic(),
+	}
+	if err := ledger.Validate(); err != nil {
+		t.Fatalf("failed active-batch ledger rejected: %v", err)
+	}
+}
+
 func TestRuntimeSemanticManifestAndProposalHashesCoverAuthorityInputs(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	changedManifest := manifest.Clone()
@@ -258,6 +320,19 @@ func TestRuntimeSemanticProposalRejectsOwnerKindMismatch(t *testing.T) {
 	proposal.OwnerModuleID = RuntimeModuleShell
 	if err := proposal.Validate(); err == nil || !strings.Contains(err.Error(), "does not belong") {
 		t.Fatalf("owner-kind mismatch error = %v", err)
+	}
+}
+
+func TestRuntimeSemanticProposalTargetRefsExcludeProspectiveIdentity(t *testing.T) {
+	proposal := semanticContractTestProposal("cwi-001")
+	proposal.Target = RuntimeOperationTargetAuthorization{
+		Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		OwnerSelectorRefs:         []string{"workspace-validation-target"},
+		ProspectiveTargetRef:      "go-test-memory-usage",
+		ProspectiveConstraintRefs: []string{"bounded-timeout"},
+	}
+	if refs := RuntimeSemanticProposalTargetRefs(proposal); len(refs) != 0 {
+		t.Fatalf("prospective target was treated as existing target refs: %+v", refs)
 	}
 }
 

@@ -258,6 +258,9 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	if !ok || admissibility.Acquisition.Admissibility.AcquisitionBinding != capability.Snapshot.AcquisitionBinding {
 		t.Fatalf("bound admissibility = %#v", admissibilityData)
 	}
+	if got := admissibility.Acquisition.Admissibility.SelectorRefs; len(got) != 1 || got[0] != gitWorkspaceRepositorySelector {
+		t.Fatalf("Git semantic selector refs = %+v, want %q", got, gitWorkspaceRepositorySelector)
+	}
 
 	operationName := "status"
 	observation := gitAdmissibilityObservation(admissibilityCommand.PrerequisiteID, admissibility.Acquisition.Admissibility, capability.Snapshot.WorkspaceTreeRevision)

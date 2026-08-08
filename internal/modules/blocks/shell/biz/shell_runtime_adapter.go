@@ -32,6 +32,8 @@ type RuntimeAdapter struct {
 	envAllowlist map[string]struct{}
 }
 
+const shellValidationTargetSelector = "workspace-validation-target"
+
 func NewRuntimeAdapter() *RuntimeAdapter {
 	return &RuntimeAdapter{
 		timeout: DefaultCommandTimeout,
@@ -94,6 +96,12 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		// turns a preceding File effect into a false candidate failure. Shell's
 		// inventory is instead bound to its own stable execution policy.
 		ObservedRevision: a.runtimeAdmissibilityPolicyRevision(),
+	}
+	for _, kind := range operationKinds {
+		if runtimemodel.CanonicalRuntimeBlockKind(kind) == runtimemodel.RuntimeBlockKindManagedValidationSession {
+			inventory.SelectorRefs = []string{shellValidationTargetSelector}
+			break
+		}
 	}
 	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {

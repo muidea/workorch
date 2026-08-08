@@ -206,9 +206,11 @@ func RuntimeSemanticProposalTargetRefs(proposal RuntimeSemanticProofProposal) []
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		return append([]string(nil), target.OwnerScopeTargetRefs...)
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if target.ProspectiveTargetRef != "" {
-			return []string{target.ProspectiveTargetRef}
-		}
+		// A prospective target is an owner-authorized recipe/selector identity,
+		// not an already-existing workspace path.  Feasibility observations must
+		// therefore not reinterpret it as a declared file target and require it
+		// to exist before the owner can execute the sealed operation.
+		return nil
 	}
 	return nil
 }

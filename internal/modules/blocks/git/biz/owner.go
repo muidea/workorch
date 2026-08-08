@@ -23,6 +23,12 @@ const ModuleID = modulecommon.ModuleID
 const StepKindRead = modulecommon.StepKindRead
 const StepKindWrite = modulecommon.StepKindWrite
 
+// gitWorkspaceRepositorySelector is the stable owner selector used by
+// semantic-plan proposals. Git operations act on the repository owned by the
+// workspace; they must not leave target scope empty or force the LLM to invent
+// a path-like target for repository state.
+const gitWorkspaceRepositorySelector = "workspace-repository"
+
 type Biz struct {
 	basebiz.Base
 	runtimeAdapter     *RuntimeAdapter
@@ -312,7 +318,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		ModuleID,
 		command.RequiredKinds,
 		nil,
-		nil,
+		[]string{gitWorkspaceRepositorySelector},
 		[]string{"repository-state-snapshot:" + snapshot.SnapshotID, "owner-execution-policy"},
 		snapshot.ObservedRevision,
 		binding,
