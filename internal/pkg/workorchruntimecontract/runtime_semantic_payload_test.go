@@ -38,6 +38,15 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if len(coverageEnum) != 1 || coverageEnum[0] != "cwi-002" || proposals["minItems"] != float64(1) || properties["batchId"].(map[string]any)["const"] != "batch-1" {
 		t.Fatalf("proof-batch schema did not bind exact batch: %s", proofSchema)
 	}
+	for _, field := range []string{"requiredEvidenceKinds", "requiredEffectScopes"} {
+		constraint := proposalProperties[field].(map[string]any)
+		if constraint["minItems"] != float64(1) || constraint["uniqueItems"] != true {
+			t.Fatalf("%s schema permits an empty or duplicate required set: %v", field, constraint)
+		}
+	}
+	if proposalProperties["declarationRef"].(map[string]any)["minLength"] != float64(1) {
+		t.Fatalf("declarationRef schema permits an empty value: %v", proposalProperties["declarationRef"])
+	}
 }
 
 func TestRuntimeSemanticPlanRequestSchemaRejectsUnscopedProofBatch(t *testing.T) {
@@ -108,6 +117,24 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedDependencyOrderViolation(t *tes
 	violation := diagnostic.SemanticViolations[0]
 	if violation.RequiredBeforeID != "cwi-000" || violation.RequiredAfterID != "cwi-001" || violation.ActualBeforePosition != 1 || violation.ActualAfterPosition != 0 {
 		t.Fatalf("typed dependency violation = %+v", violation)
+	}
+}
+
+func TestRuntimeSemanticPlanPayloadPreservesTypedEmptyEffectViolation(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":[],"declarationRef":"dod/cwi-001"}]}`
+	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredEffectScopes" || diagnostic.Actual != "empty_array" || len(diagnostic.SemanticViolations) != 1 {
+		t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
+	}
+	violation := diagnostic.SemanticViolations[0]
+	if violation.Kind != RuntimeSemanticContractViolationProposalConstraint || violation.CoverageWorkItemID != "cwi-001" ||
+		violation.ProposalIndex != 0 || violation.Rule != RuntimeSemanticConstraintNonEmpty || len(violation.Required) != 1 {
+		t.Fatalf("typed proposal violation = %+v", violation)
+	}
+	if err := violation.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
 	}
 }
 

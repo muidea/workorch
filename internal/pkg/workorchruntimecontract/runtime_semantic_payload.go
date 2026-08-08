@@ -112,6 +112,14 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				Cause:              err,
 			}
 		}
+		var proposalConstraint *RuntimeSemanticProposalViolationError
+		if errors.As(err, &proposalConstraint) {
+			violation := proposalConstraint.Violation()
+			return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{
+				Path: violation.Path, Actual: violation.Actual, Allowed: append([]string(nil), violation.Allowed...),
+				Required: append([]string(nil), violation.Required...), SemanticViolations: []RuntimeSemanticContractViolation{violation}, Cause: err,
+			}
+		}
 		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.proposals", Actual: "contract_violation", Allowed: runtimeSemanticProposalFields, Cause: err}
 	}
 	return document, nil
@@ -291,13 +299,33 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 						"ownerScopeTargetRefs": stringEnumArraySchema(targetRefs), "ownerSelectorRefs": stringEnumArraySchema(selectorRefs),
 						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "enum": targetRefs},
 					}},
-					"requiredEvidenceKinds": stringArraySchema(), "requiredEffectScopes": stringArraySchema(),
+					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
+					"requiredEffectScopes": stringEnumArraySchemaWithMinimum([]string{
+						string(RuntimeEffectNone), string(RuntimeEffectEphemeralSession), string(RuntimeEffectGovernanceOnly),
+						string(RuntimeEffectWorkspaceDurable), string(RuntimeEffectRemoteDurable), string(RuntimeEffectUnknown),
+					}, 1),
 					"validationRecipeId": map[string]any{"type": "string", "enum": recipeIDs}, "requiredCheckRefs": stringArraySchema(),
-					"metricConstraints": stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string"},
+					"metricConstraints": stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string", "minLength": 1},
 				},
 			}},
 		},
 	}
+	// Conditional constraints are kept beside the canonical proposal schema so
+	// validation-only proofs cannot omit their recipe/check facts while state
+	// change proofs remain free of validation-only requirements.
+	proposalItems := schema["properties"].(map[string]any)["proposals"].(map[string]any)["items"].(map[string]any)
+	proposalItems["allOf"] = []any{map[string]any{
+		"if": map[string]any{"properties": map[string]any{
+			"requiredEvidenceKinds": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}},
+		}},
+		"then": map[string]any{
+			"required": []string{"validationRecipeId", "requiredCheckRefs"},
+			"properties": map[string]any{
+				"validationRecipeId": map[string]any{"type": "string", "minLength": 1, "enum": recipeIDs},
+				"requiredCheckRefs":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+			},
+		},
+	}}
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err
 }
@@ -377,4 +405,11 @@ func stringArraySchema() map[string]any {
 
 func stringEnumArraySchema(values []string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": normalizeStrings(values)}}
+}
+
+func stringEnumArraySchemaWithMinimum(values []string, minimum int) map[string]any {
+	schema := stringEnumArraySchema(values)
+	schema["minItems"] = minimum
+	schema["uniqueItems"] = true
+	return schema
 }

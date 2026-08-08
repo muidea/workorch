@@ -712,20 +712,35 @@ func validateSemanticPlanCorrectionScope(ledger runtimecontract.RuntimeSemanticP
 	if directive.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
 		return nil
 	}
-	if len(directive.Violations) != 1 || directive.Violations[0].Kind != runtimecontract.RuntimeSemanticContractViolationProofBatchDocument {
-		return fmt.Errorf("%w: proof-batch correction requires one bounded document violation", common.ErrConflict)
+	if len(directive.Violations) == 0 {
+		return fmt.Errorf("%w: proof-batch correction requires bounded violations", common.ErrConflict)
 	}
 	for _, batch := range ledger.Batches {
 		if batch.BatchID != ledger.ActiveBatchID {
 			continue
 		}
-		required := directive.Violations[0].RequiredCoverageWorkItemIDs
-		if len(required) != len(batch.CoverageWorkItemIDs) {
-			return fmt.Errorf("%w: proof-batch correction coverage differs from active batch", common.ErrConflict)
+		batchCoverage := make(map[common.CoverageWorkItemID]struct{}, len(batch.CoverageWorkItemIDs))
+		for _, id := range batch.CoverageWorkItemIDs {
+			batchCoverage[id] = struct{}{}
 		}
-		for idx := range required {
-			if required[idx] != batch.CoverageWorkItemIDs[idx] {
-				return fmt.Errorf("%w: proof-batch correction coverage differs from active batch", common.ErrConflict)
+		for _, violation := range directive.Violations {
+			switch violation.Kind {
+			case runtimecontract.RuntimeSemanticContractViolationProofBatchDocument:
+				required := violation.RequiredCoverageWorkItemIDs
+				if len(required) != len(batch.CoverageWorkItemIDs) {
+					return fmt.Errorf("%w: proof-batch correction coverage differs from active batch", common.ErrConflict)
+				}
+				for idx := range required {
+					if required[idx] != batch.CoverageWorkItemIDs[idx] {
+						return fmt.Errorf("%w: proof-batch correction coverage differs from active batch", common.ErrConflict)
+					}
+				}
+			case runtimecontract.RuntimeSemanticContractViolationProposalConstraint:
+				if _, found := batchCoverage[violation.CoverageWorkItemID]; !found {
+					return fmt.Errorf("%w: proposal correction coverage is outside active batch", common.ErrConflict)
+				}
+			default:
+				return fmt.Errorf("%w: proof-batch correction has unsupported violation", common.ErrConflict)
 			}
 		}
 		return nil

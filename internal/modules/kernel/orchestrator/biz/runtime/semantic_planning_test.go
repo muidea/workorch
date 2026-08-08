@@ -289,6 +289,30 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 	}
 }
 
+func TestRuntimeSemanticPlanningBindsProposalCorrectionToActiveBatch(t *testing.T) {
+	ledger := runtimecontract.RuntimeSemanticPlanningLedger{
+		ActiveBatchID: "batch-1",
+		Batches: []runtimecontract.RuntimeSemanticPlanBatch{{
+			BatchID: "batch-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		}},
+	}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		Violations: []runtimecontract.RuntimeSemanticContractViolation{{
+			Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].requiredEffectScopes",
+			CoverageWorkItemID: "cwi-001", ProposalIndex: 0, Rule: runtimecontract.RuntimeSemanticConstraintNonEmpty,
+			Actual: "empty_array", Required: []string{"at least one effect scope"},
+		}},
+	}
+	if err := validateSemanticPlanCorrectionScope(ledger, directive); err != nil {
+		t.Fatal(err)
+	}
+	directive.Violations[0].CoverageWorkItemID = "cwi-outside"
+	if err := validateSemanticPlanCorrectionScope(ledger, directive); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("out-of-batch proposal correction error = %v", err)
+	}
+}
+
 func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, document, _ := semanticPlanningFixture(t, aggregate)

@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -472,6 +473,30 @@ type RuntimeSemanticProofProposal struct {
 	DeclarationRef        string
 }
 
+// RuntimeSemanticProposalConstraintError is the pure proposal-contract fact
+// shared by admission and provider correction. It carries no retry decision.
+type RuntimeSemanticProposalConstraintError struct {
+	Field    string
+	Rule     RuntimeSemanticConstraintRule
+	Actual   string
+	Required []string
+	Allowed  []string
+}
+
+func (e *RuntimeSemanticProposalConstraintError) Error() string {
+	if e == nil {
+		return "runtime semantic proposal violates its contract"
+	}
+	if e.Field == "ownerModuleId" && e.Rule == RuntimeSemanticConstraintRelational {
+		return "runtime semantic proposal operation does not belong to owner"
+	}
+	return fmt.Sprintf("runtime semantic proposal field %q violates %s", e.Field, e.Rule)
+}
+
+func runtimeSemanticProposalConstraint(field string, rule RuntimeSemanticConstraintRule, actual string, required, allowed []string) error {
+	return &RuntimeSemanticProposalConstraintError{Field: field, Rule: rule, Actual: actual, Required: required, Allowed: allowed}
+}
+
 func (p RuntimeSemanticProofProposal) Normalized() RuntimeSemanticProofProposal {
 	p.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(p.CoverageWorkItemID)))
 	p.OwnerModuleID = strings.TrimSpace(p.OwnerModuleID)
@@ -501,12 +526,28 @@ func (p RuntimeSemanticProofProposal) Clone() RuntimeSemanticProofProposal {
 
 func (p RuntimeSemanticProofProposal) Validate() error {
 	p = p.Normalized()
-	if p.CoverageWorkItemID == "" || p.OwnerModuleID == "" || p.OperationKind == "" || len(p.RequiredEvidenceKinds) == 0 || len(p.RequiredEffectScopes) == 0 || p.DeclarationRef == "" {
-		return fmt.Errorf("runtime semantic proposal requires coverage, owner, operation, evidence, effect and declaration")
+	for _, value := range []struct {
+		field string
+		value string
+	}{
+		{"coverageWorkItemId", string(p.CoverageWorkItemID)},
+		{"ownerModuleId", p.OwnerModuleID},
+		{"operationKind", p.OperationKind},
+		{"declarationRef", p.DeclarationRef},
+	} {
+		if value.value == "" {
+			return runtimeSemanticProposalConstraint(value.field, RuntimeSemanticConstraintNonEmpty, "empty", []string{"non-empty string"}, nil)
+		}
+	}
+	if len(p.RequiredEvidenceKinds) == 0 {
+		return runtimeSemanticProposalConstraint("requiredEvidenceKinds", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one evidence kind"}, nil)
+	}
+	if len(p.RequiredEffectScopes) == 0 {
+		return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one effect scope"}, nil)
 	}
 	descriptor, found := RuntimeOperationDescriptorForKind(p.OperationKind)
 	if !found || descriptor.OwnerModuleID != p.OwnerModuleID {
-		return fmt.Errorf("runtime semantic proposal operation %q does not belong to owner %q", p.OperationKind, p.OwnerModuleID)
+		return runtimeSemanticProposalConstraint("ownerModuleId", RuntimeSemanticConstraintRelational, p.OwnerModuleID, []string{descriptor.OwnerModuleID + " owns " + p.OperationKind}, nil)
 	}
 	if err := validateRuntimeSemanticProposalTarget(p.Target); err != nil {
 		return err
@@ -515,14 +556,17 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 		switch kind {
 		case EvidenceKindStateChange:
 			if !runtimeSemanticHasDurableEffect(p.RequiredEffectScopes) {
-				return fmt.Errorf("runtime semantic state-change proposal requires a durable effect")
+				return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintRelational, strings.Join(RuntimeEffectScopesAsStrings(p.RequiredEffectScopes), ","), []string{"durable effect for state_change"}, nil)
 			}
 		case EvidenceKindValidation:
-			if p.ValidationRecipeID == "" || len(p.RequiredCheckRefs) == 0 {
-				return fmt.Errorf("runtime semantic validation proposal requires recipe and checks")
+			if p.ValidationRecipeID == "" {
+				return runtimeSemanticProposalConstraint("validationRecipeId", RuntimeSemanticConstraintRequired, "empty", []string{"non-empty recipe for validation"}, nil)
+			}
+			if len(p.RequiredCheckRefs) == 0 {
+				return runtimeSemanticProposalConstraint("requiredCheckRefs", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one check for validation"}, nil)
 			}
 		default:
-			return fmt.Errorf("runtime semantic proposal has unsupported evidence kind %q", kind)
+			return runtimeSemanticProposalConstraint("requiredEvidenceKinds", RuntimeSemanticConstraintAllowedValue, kind, nil, []string{EvidenceKindStateChange, EvidenceKindValidation})
 		}
 	}
 	return nil
@@ -644,8 +688,16 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 		policies[policy] = struct{}{}
 	}
 	seen := make(map[common.CoverageWorkItemID]struct{}, len(d.Proposals))
-	for _, proposal := range d.Proposals {
+	for proposalIndex, proposal := range d.Proposals {
 		if err := proposal.Validate(); err != nil {
+			var constraint *RuntimeSemanticProposalConstraintError
+			if errors.As(err, &constraint) {
+				return &RuntimeSemanticProposalViolationError{ViolationFact: RuntimeSemanticContractViolation{
+					Kind: RuntimeSemanticContractViolationProposalConstraint, Path: fmt.Sprintf("$.proposals[%d].%s", proposalIndex, constraint.Field),
+					CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalIndex: proposalIndex, Rule: constraint.Rule,
+					Actual: constraint.Actual, Required: append([]string(nil), constraint.Required...), Allowed: append([]string(nil), constraint.Allowed...),
+				}, Cause: err}
+			}
 			return err
 		}
 		if _, found := items[proposal.CoverageWorkItemID]; !found {

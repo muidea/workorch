@@ -16,6 +16,16 @@ type RuntimeSemanticContractViolationKind string
 const (
 	RuntimeSemanticContractViolationDependencyOrder    RuntimeSemanticContractViolationKind = "dependency_order"
 	RuntimeSemanticContractViolationProofBatchDocument RuntimeSemanticContractViolationKind = "proof_batch_document"
+	RuntimeSemanticContractViolationProposalConstraint RuntimeSemanticContractViolationKind = "proposal_constraint"
+)
+
+type RuntimeSemanticConstraintRule string
+
+const (
+	RuntimeSemanticConstraintRequired     RuntimeSemanticConstraintRule = "required"
+	RuntimeSemanticConstraintNonEmpty     RuntimeSemanticConstraintRule = "non_empty"
+	RuntimeSemanticConstraintAllowedValue RuntimeSemanticConstraintRule = "allowed_value"
+	RuntimeSemanticConstraintRelational   RuntimeSemanticConstraintRule = "relational"
 )
 
 // RuntimeSemanticContractViolation is a factual, provider-safe semantic
@@ -28,6 +38,40 @@ type RuntimeSemanticContractViolation struct {
 	ActualBeforePosition        int                                  `json:"actualBeforePosition"`
 	ActualAfterPosition         int                                  `json:"actualAfterPosition"`
 	RequiredCoverageWorkItemIDs []common.CoverageWorkItemID          `json:"requiredCoverageWorkItemIds,omitempty"`
+	CoverageWorkItemID          common.CoverageWorkItemID            `json:"coverageWorkItemId,omitempty"`
+	ProposalIndex               int                                  `json:"proposalIndex"`
+	Rule                        RuntimeSemanticConstraintRule        `json:"rule,omitempty"`
+	Actual                      string                               `json:"actual,omitempty"`
+	Required                    []string                             `json:"required,omitempty"`
+	Allowed                     []string                             `json:"allowed,omitempty"`
+}
+
+// RuntimeSemanticProposalViolationError preserves one exact proposal failure
+// across the pure document validator and strict payload decoder.
+type RuntimeSemanticProposalViolationError struct {
+	ViolationFact RuntimeSemanticContractViolation
+	Cause         error
+}
+
+func (e *RuntimeSemanticProposalViolationError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "runtime semantic proposal violates its contract"
+	}
+	return e.Cause.Error()
+}
+
+func (e *RuntimeSemanticProposalViolationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *RuntimeSemanticProposalViolationError) Violation() RuntimeSemanticContractViolation {
+	if e == nil {
+		return RuntimeSemanticContractViolation{}
+	}
+	return e.ViolationFact.Normalized()
 }
 
 func (v RuntimeSemanticContractViolation) Normalized() RuntimeSemanticContractViolation {
@@ -36,6 +80,11 @@ func (v RuntimeSemanticContractViolation) Normalized() RuntimeSemanticContractVi
 	v.RequiredBeforeID = common.CoverageWorkItemID(strings.TrimSpace(string(v.RequiredBeforeID)))
 	v.RequiredAfterID = common.CoverageWorkItemID(strings.TrimSpace(string(v.RequiredAfterID)))
 	v.RequiredCoverageWorkItemIDs = normalizeOrderedCoverageWorkItemIDs(v.RequiredCoverageWorkItemIDs)
+	v.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(v.CoverageWorkItemID)))
+	v.Rule = RuntimeSemanticConstraintRule(strings.TrimSpace(string(v.Rule)))
+	v.Actual = strings.TrimSpace(v.Actual)
+	v.Required = normalizeStrings(v.Required)
+	v.Allowed = normalizeStrings(v.Allowed)
 	return v
 }
 
@@ -56,6 +105,22 @@ func (v RuntimeSemanticContractViolation) Validate() error {
 		if !strings.HasPrefix(v.Path, "$") || v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) == 0 {
 			return fmt.Errorf("runtime semantic proof-batch violation requires a field path and exact batch coverage")
 		}
+	case RuntimeSemanticContractViolationProposalConstraint:
+		if !strings.HasPrefix(v.Path, "$.proposals[") || v.CoverageWorkItemID == "" || v.ProposalIndex < 0 ||
+			v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) != 0 {
+			return fmt.Errorf("runtime semantic proposal violation requires proposal identity and field path")
+		}
+		switch v.Rule {
+		case RuntimeSemanticConstraintRequired, RuntimeSemanticConstraintNonEmpty, RuntimeSemanticConstraintAllowedValue, RuntimeSemanticConstraintRelational:
+		default:
+			return fmt.Errorf("runtime semantic proposal violation requires a supported rule")
+		}
+		if (v.Rule == RuntimeSemanticConstraintRequired || v.Rule == RuntimeSemanticConstraintNonEmpty || v.Rule == RuntimeSemanticConstraintRelational) && len(v.Required) == 0 {
+			return fmt.Errorf("runtime semantic proposal violation requires exact required values")
+		}
+		if v.Rule == RuntimeSemanticConstraintAllowedValue && len(v.Allowed) == 0 {
+			return fmt.Errorf("runtime semantic proposal violation requires allowed values")
+		}
 	default:
 		return fmt.Errorf("runtime semantic violation requires a supported kind")
 	}
@@ -70,12 +135,16 @@ func (v RuntimeSemanticContractViolation) ValidateAgainstManifest(manifest Runti
 	if err := manifest.Validate(); err != nil {
 		return err
 	}
-	if v.Kind == RuntimeSemanticContractViolationProofBatchDocument {
+	if v.Kind == RuntimeSemanticContractViolationProofBatchDocument || v.Kind == RuntimeSemanticContractViolationProposalConstraint {
 		known := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
 		for _, item := range manifest.CoverageItems {
 			known[item.ID] = struct{}{}
 		}
-		for _, id := range v.RequiredCoverageWorkItemIDs {
+		ids := v.RequiredCoverageWorkItemIDs
+		if v.Kind == RuntimeSemanticContractViolationProposalConstraint {
+			ids = []common.CoverageWorkItemID{v.CoverageWorkItemID}
+		}
+		for _, id := range ids {
 			if _, found := known[id]; !found {
 				return fmt.Errorf("runtime semantic proof-batch violation coverage %q is outside manifest", id)
 			}
@@ -102,6 +171,8 @@ func cloneRuntimeSemanticContractViolations(values []RuntimeSemanticContractViol
 	ret := append([]RuntimeSemanticContractViolation(nil), values...)
 	for idx := range ret {
 		ret[idx].RequiredCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), values[idx].RequiredCoverageWorkItemIDs...)
+		ret[idx].Required = append([]string(nil), values[idx].Required...)
+		ret[idx].Allowed = append([]string(nil), values[idx].Allowed...)
 	}
 	return ret
 }
@@ -196,6 +267,10 @@ func (d RuntimeSemanticCorrectionDirective) ValidateAgainst(manifest RuntimeSema
 			if d.PlanStep != RuntimeSemanticPlanStepProofBatch {
 				return fmt.Errorf("runtime semantic proof-batch correction is outside proof-batch step")
 			}
+		case RuntimeSemanticContractViolationProposalConstraint:
+			if d.PlanStep != RuntimeSemanticPlanStepProofBatch {
+				return fmt.Errorf("runtime semantic proposal correction is outside proof-batch step")
+			}
 		}
 		if !runtimeSemanticContractViolationEqual(d.Violations[idx], canonicalRejection.SemanticViolations[idx]) {
 			return fmt.Errorf("runtime semantic correction directive violation %d differs from rejection", idx)
@@ -227,6 +302,12 @@ func StableRuntimeSemanticCorrectionDirectiveHash(directive RuntimeSemanticCorre
 		for _, id := range violation.RequiredCoverageWorkItemIDs {
 			writeHashString(h, string(id))
 		}
+		writeHashString(h, string(violation.CoverageWorkItemID))
+		writeHashString(h, fmt.Sprintf("%d", violation.ProposalIndex))
+		writeHashString(h, string(violation.Rule))
+		writeHashString(h, violation.Actual)
+		writeHashStrings(h, violation.Required)
+		writeHashStrings(h, violation.Allowed)
 	}
 	return "runtime-semantic-correction-directive-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -236,7 +317,9 @@ func runtimeSemanticContractViolationEqual(left, right RuntimeSemanticContractVi
 	right = right.Normalized()
 	if left.Kind != right.Kind || left.Path != right.Path || left.RequiredBeforeID != right.RequiredBeforeID ||
 		left.RequiredAfterID != right.RequiredAfterID || left.ActualBeforePosition != right.ActualBeforePosition ||
-		left.ActualAfterPosition != right.ActualAfterPosition || len(left.RequiredCoverageWorkItemIDs) != len(right.RequiredCoverageWorkItemIDs) {
+		left.ActualAfterPosition != right.ActualAfterPosition || left.CoverageWorkItemID != right.CoverageWorkItemID ||
+		left.ProposalIndex != right.ProposalIndex || left.Rule != right.Rule || left.Actual != right.Actual ||
+		len(left.RequiredCoverageWorkItemIDs) != len(right.RequiredCoverageWorkItemIDs) || !sameStrings(left.Required, right.Required) || !sameStrings(left.Allowed, right.Allowed) {
 		return false
 	}
 	for idx := range left.RequiredCoverageWorkItemIDs {

@@ -100,6 +100,27 @@ attempt 1. The private reducer independently verifies that binding before CAS. P
 Definition identity through the Workspace owner contract used by Run activation. These changes affect SM-3 and the
 read-only SM-4 projection delivery surface; they do not give the LLM or projection transition authority.
 
+### 2.6 Empty Proposal Constraint Counterexample And Code Closure
+
+Fresh deployed `run-031` proved that coverage-order correction and exact proof-batch scoping now work: attempt 1
+repaired `cwi-046 -> cwi-043`, and the first proof batch contained only `cwi-046`, `cwi-043`, `cwi-001`, and
+`cwi-002`. The batch nevertheless failed twice because proposals returned an empty required set, including:
+
+```json
+"requiredEffectScopes": []
+```
+
+The provider schema required the field but permitted an empty array, while admission required at least one effect.
+Admission then collapsed the failure to `$.proposals`, so attempt 1 received only batch membership and could not repair
+the exact CWI field. This was one logical proposal contract implemented independently by schema, validator, and
+correction synthesis.
+
+The code closure makes required evidence/effect arrays non-empty and enum-bounded in the provider schema and preserves
+an exact `proposal_constraint` fact through admission. The fact includes authoritative CWI ID, diagnostic proposal
+index, exact JSON path, rule, actual value, and required/allowed values. SM-3 accepts that fact only when its CWI belongs
+to the active sealed batch, then persists it in the existing attempt-1 correction directive. LLM remains a fact
+producer/renderer; no additional state machine, authority owner, EventHub transition, or retry was added.
+
 ## 3. Non-Negotiable Ownership Rules
 
 1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
@@ -370,8 +391,9 @@ remains open.
 | RSO-6 | code_closed | Seal semantic correction through SM-3 private events and Runtime CAS | dependency and exact-active-batch correction, duplicate, stale, restart and exhaustion tests pass |
 | RSO-7 | code_closed | Carry/render the sealed directive through the LLM owner boundary | preflight/request identity, detach and C0-C4 stability tests pass |
 | RSO-8 | code_closed | Remove projection outcome re-adjudication and unify activity | combined Definition identity plus terminal/definition-drift/canonical activity tests pass |
-| RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix after the latest proof-batch closure | fmt/vet/full/boundary, affected-package race and managed CI pass |
+| RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix after the latest proposal-constraint closure | fmt/vet/full tests, affected-package race, boundary contract and managed `verify-ci-mvp-file` pass |
 | RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete semantic-to-effect event/audit lineage |
+| RSO-11 | code_closed | Unify empty required-set schema/admission/correction behavior | exact effect/evidence schema bounds, typed CWI field violation, active-batch and hash/clone tests |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-6 precedes RSO-7; RSO-8 may be implemented after RSO-5 in
 parallel only if it does not change Runtime authority. RSO-9 follows all code changes. RSO-10 cannot be replaced by mock
@@ -394,9 +416,9 @@ provider proof.
   manifest CWI that is outside the active batch.
 - Projection compares the Run Definition identity with the canonical combined Goal/DoD identity from the Workspace
   owner contract rather than an individual definition revision.
-- For the latest delta, `make fmt-check`, `make vet`, `make verify-boundary-contract`, `go test ./... -count=1`, the
-  affected-package race matrix, and managed `verify-ci-mvp-file` pass. The Shell and MCP mock providers now follow the
-  same minimal proof-batch wire and explicitly assert that `coverageOrder` is absent.
+- For the proposal-constraint delta, `make fmt-check`, `make vet`, `make verify-boundary-contract`,
+  `go test ./... -count=1`, the affected-package race matrix, and managed `verify-ci-mvp-file` all pass. The managed
+  artifacts were retained under `.ci-artifacts/managed-workorch-local` for inspection.
 
 ## 11. Verification Matrix
 

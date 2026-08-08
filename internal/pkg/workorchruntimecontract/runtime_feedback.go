@@ -602,6 +602,12 @@ func writeRuntimeSemanticContractViolationsHash(writer hashStringWriter, values 
 		for _, id := range value.RequiredCoverageWorkItemIDs {
 			writeHashString(writer, string(id))
 		}
+		writeHashString(writer, string(value.CoverageWorkItemID))
+		writeHashString(writer, fmt.Sprintf("%d", value.ProposalIndex))
+		writeHashString(writer, string(value.Rule))
+		writeHashString(writer, value.Actual)
+		writeHashStrings(writer, value.Required)
+		writeHashStrings(writer, value.Allowed)
 	}
 }
 
