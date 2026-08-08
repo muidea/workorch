@@ -127,14 +127,15 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime live 验收：R3-E3 fresh LSP Bridge semantic matrix。** single-owner lifecycle、minimal bootstrap、
-   受约束 semantic-plan document、owner feasibility、SM-2 逐 CWI seal、`resume=current_run`、
-   `restart=workspace_full`、空 workspace prospective target、crash/concurrency 与 CPU guard 已完成代码及 deployed
-   闭环。普通用户只提供 Goal/DoD/template/directory，不填写 Runtime JSON。当前只剩 fresh LSP Bridge 的逐 CWI
-   binding-matched proof；所有状态仍只由 owner-local event/reducer 变更。详见
-   [R3 active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
-2. **回归基线**：immutable binding、strict candidate、receipt match、replay/CAS 与双 workspace
-   regressions 必须持续通过。
+1. **必需 Runtime 单 owner 代码与 live 收口：RSO-1～RSO-10。** 最新 deployed `run-025` 证明 owner-local
+   terminal delivery 基线有效，同时重新打开两个合同缺口：restart successor 在 predecessor Workspace release 前创建；
+   semantic correction 改变 plan step，output-limit recovery 又拼接 escaped raw suffix。必须先完成 predecessor-owned
+   replacement intent、SM-4 release-before-create、sealed expected-document 与 whole-document recovery，再执行 fresh LSP
+   Bridge 的 order/batch/feasibility/seal/dispatch/receipt/evidence positive matrix。普通用户仍只提供
+   Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
+   [RSO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
+2. **回归基线**：immutable binding、strict candidate、receipt match、owner-local terminal delivery、replay/CAS 与双
+   workspace regressions 必须持续通过；历史 managed/deployed 绿灯不能覆盖最新 persisted event-order 反例。
 3. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
 

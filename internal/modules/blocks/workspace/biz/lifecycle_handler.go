@@ -59,32 +59,6 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 	}
 }
 
-func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceevents.FreshActivationRunSlotReleaseFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
-	for attempt := 0; attempt < 3; attempt++ {
-		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
-		}
-		transition, err := reduceFreshActivationRunSlotFact(current, cmd)
-		if err != nil {
-			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
-		}
-		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(current), Transitioned: false}, nil
-		}
-		next := applyWorkspaceProjection(current, transition)
-		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
-			if errors.Is(err, common.ErrConflict) {
-				continue
-			}
-			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
-		}
-		m.publishWorkspaceUpdated(ctx, next)
-		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(next), Transitioned: true}, nil
-	}
-	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
-}
-
 func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.RunProjectionFact) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)

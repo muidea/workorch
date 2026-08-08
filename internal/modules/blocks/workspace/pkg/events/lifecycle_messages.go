@@ -124,47 +124,6 @@ func (c RunProjectionFact) Validate() error {
 	return nil
 }
 
-// FreshActivationRunSlotReleaseFact carries a persisted Run owner's
-// administrative fact for an aggregate schema the current binary cannot
-// drive. It deliberately cannot name a desired Workspace state. Workspace
-// releases only a matching ActiveRunID and leaves the old Run unchanged.
-type FreshActivationRunSlotReleaseFact struct {
-	WorkspaceID                        common.WorkspaceID
-	RunID                              common.RunID
-	SourceOwner                        string
-	CausationID                        string
-	RuntimeStateRevision               uint64
-	RuntimeStateRef                    string
-	RuntimeActivationDisposition       runtimecontract.RuntimeActivationDisposition
-	ActualRuntimeStateSchemaVersion    uint32
-	SupportedRuntimeStateSchemaVersion uint32
-}
-
-func (c FreshActivationRunSlotReleaseFact) Normalized() FreshActivationRunSlotReleaseFact {
-	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
-	c.CausationID = strings.TrimSpace(c.CausationID)
-	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
-	return c
-}
-
-func (c FreshActivationRunSlotReleaseFact) Validate() error {
-	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
-		return fmt.Errorf("%w: fresh activation release fact requires Run owner scope and causation", common.ErrInvalidArgument)
-	}
-	if c.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return fmt.Errorf("%w: fresh activation release requires non-resumable Run disposition", common.ErrInvalidArgument)
-	}
-	if c.RuntimeStateRevision == 0 || c.RuntimeStateRef == "" ||
-		c.ActualRuntimeStateSchemaVersion == 0 || c.SupportedRuntimeStateSchemaVersion == 0 {
-		return fmt.Errorf("%w: fresh activation release requires persisted runtime identity and schema versions", common.ErrInvalidArgument)
-	}
-	if c.ActualRuntimeStateSchemaVersion == c.SupportedRuntimeStateSchemaVersion {
-		return fmt.Errorf("%w: fresh activation release requires incompatible runtime schema", common.ErrInvalidArgument)
-	}
-	return nil
-}
-
 // RuntimeTerminalDeliveryFact asks Workspace to release ActiveRun for a
 // sealed terminal delivery. Workspace never invents a new terminal.
 type RuntimeTerminalDeliveryFact struct {

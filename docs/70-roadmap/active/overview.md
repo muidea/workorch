@@ -16,7 +16,7 @@ Last Updated: 2026-08-08
 | --- | --- |
 | Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
-| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（仅 R3-E3）**；Runtime-sensitive owner 合同回迁、单 mutation surface、全仓 race 与 fresh managed deployed matrix 已闭环；剩余 fresh LSP Bridge 逐 CWI 验收，见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
+| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-10）**；最新 live 重新打开 restart successor ordering 与 authority document continuation/correction 合同。Owner-local terminal delivery 基线有效，但必须完成 release-before-create、complete-document recovery 与 fresh LSP positive convergence，见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
 | Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
@@ -25,22 +25,15 @@ Last Updated: 2026-08-08
 
 ## Residual Mandatory Work
 
-当前 Runtime CWI 主线仅剩 **fresh LSP Bridge deployed semantic matrix**；同时新增独立的 **workspace reasoning effort
-single-owner closure**，它不改变 CWI 或四状态机 action 权威。22 组件 EventHub 合同归一及其全链
-验证已经完成并归档，且未新增或修改 Runtime 状态机。CWI semantic contract
-自动编译、deployed reconciliation、空 workspace prospective target、resume/restart/drift/crash/concurrency 与 CPU guard 已形成
-基线。capability execute、LLM provider、Runtime capability acquisition、operation admissibility/feasibility、semantic-proof
-feasibility、CWI reconciliation、File target/manifest/repair-surface、Git capability-state 与 Decision governance-request 合同
-均已回迁接收 owner；Run/Result/Workspace lifecycle、feedback/diagnostic 与 controller mutation surface 也已闭环。
-R3-F1～F5 已完成 Runtime-sensitive scope 的代码与全链验收；生产 lane caller 显式使用唯一接收 owner `Contracts()`，禁止跨 owner inventory 聚合，
-fresh managed artifact 为 `/tmp/workorch-r3-f5-managed-20260803c`。剩余仅为 fresh LSP live。
-LSP live 必须继续由受约束 semantic-plan document + owner feasibility 形成 proposal，并仅由 SM-2 seal；合同迁移必须由
-接收 owner 定义 concrete EventHub contract，原始诊断不得被 stable category/摘要覆盖。
+当前 Runtime CWI 主线有两项代码级强制缺口和一项 live 门禁：restart 必须在 predecessor 的 Workspace release
+acknowledgement 后才创建 successor；Runtime authority document 必须改为单次完整文档和同一 sealed request 的有界完整
+重试，不再拼接 LLM raw suffix；完成后再执行 fresh LSP Bridge positive convergence。此前 22 组件 EventHub 合同回迁、
+owner-local terminal delivery、typed diagnostic、single mutation surface、managed verifier 与 reasoning selection 仍是回归基线，
+但不能覆盖最新 persisted aggregate/event-order 反例。
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
-| R3 | single-owner semantic contract + CWI reconciliation + contract consolidation | minimal bootstrap；SM-3 typed document；SM-2 seal；`resume=current_run`、`restart=workspace_full`；接收 owner EventHub 合同；private internal event；canonical feedback/original diagnostic；LSP Bridge 逐 CWI验收 | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| RDS | DeepSeek Responses 请求规模与超时收口 | text-only Responses、semantic-plan 分批、阶段级输出预算、continuation、stream、provider timeout 顺序与错误分类 | [active plan](runtime-deepseek-responses-request-size-closure-plan.md) |
+| RSO | restart ordering + complete authority document + single-owner CWI convergence | predecessor-owned replacement intent；SM-4 `Result -> Workspace -> Run`；release-before-create；sealed expected-document contract；whole-document recovery；order/batch/feasibility/seal/dispatch/evidence live | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | WRE | Workspace reasoning effort deployed proof | 代码收口完成；验证 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection与双 workspace隔离 | [active plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 可补一次 `patch apply + validation + DoD closeout` deployed live；不阻塞 Runtime 收口 | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
@@ -61,7 +54,6 @@ LSP live 必须继续由受约束 semantic-plan document + owner feasibility 形
 6. 清理失效内容：禁止的 主链术语、重复 audit、假活跃 Status 不得继续占用 active。
 7. 旧 `RUNTIME-SMO-R2` 与 `OPS-1` 均已归 archive；其中 OPS-1 只是假定存在 production maintenance command
    的历史记录，不能作为维护窗口任务。
-8. C12、slice/focus 分离、activation recommendation、semantic contract 自动编译、普通用户 raw contract JSON 删除、
-   R3-E2 deployed matrix 与 Runtime-sensitive R3-F 合同回迁已收口；current R3 只剩 fresh LSP Bridge 逐 CWI semantic
-   matrix。260 个 EventHub Topic 审计基线已由归档 EC 记录关闭并由现行门禁维持。
-   不得以 ticket、手工 overlay、budget/decoder 放宽、合同 alias/forwarder 或历史绿灯绕过 R3-E3。
+8. C12、slice/focus 分离、普通用户 raw contract JSON 删除、owner contract 回迁与 managed matrix 仍是有效基线；
+   restart release-before-create 和 authority complete-document recovery 已由最新 live 重新打开。不得以 ticket、手工
+   overlay、budget/decoder 放宽、字符串清理、合同 alias/forwarder 或历史绿灯绕过 RSO。

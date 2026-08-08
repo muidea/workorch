@@ -146,23 +146,6 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if err := runResult.Validate(); err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Run execution intent result: %v", common.ErrConflict, err)
 	}
-	if runResult.FreshActivationRelease != nil {
-		fact := runResult.FreshActivationRelease
-		release := workspaceevents.FreshActivationRunSlotReleaseFact{
-			WorkspaceID: fact.WorkspaceID, RunID: fact.RunID, SourceOwner: runevents.CommandDestination,
-			CausationID: fact.CausationID, RuntimeStateRevision: fact.RuntimeStateRevision, RuntimeStateRef: fact.RuntimeStateRef,
-			RuntimeActivationDisposition:       fact.RuntimeActivationDisposition,
-			ActualRuntimeStateSchemaVersion:    fact.ActualRuntimeStateSchemaVersion,
-			SupportedRuntimeStateSchemaVersion: fact.SupportedRuntimeStateSchemaVersion,
-		}
-		_, err := m.submitWorkspaceLifecycleInternalEvent(ctx, workspaceLifecycleInternalEvent{
-			Kind:                   workspaceLifecycleInternalEventFreshActivationReleaseObserved,
-			FreshActivationRelease: &release,
-		})
-		if err != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err
-		}
-	}
 	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
 }
 

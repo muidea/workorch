@@ -125,7 +125,16 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	if workspaceID == "" || runID == "" || internal.Kind == "" {
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	return m.submitLifecycleInternalEvent(boundCtx, internal)
+	response, err := m.submitLifecycleInternalEvent(boundCtx, internal)
+	if err != nil {
+		return runevents.RunLifecycleCommandResult{}, err
+	}
+	if internal.TerminalDelivery != nil && internal.TerminalDelivery.Outcome.Kind == runtimecontract.TerminalOutcomeKindSuperseded && response.Run != nil && response.Run.ReplacementIntent != nil {
+		if _, err := m.materializeReplacementAfterTerminalDelivery(boundCtx, response.Run, internal.TerminalDelivery.TerminalDeliveryID); err != nil {
+			return runevents.RunLifecycleCommandResult{}, err
+		}
+	}
+	return response, nil
 }
 
 func (m *Biz) applyRunActivation(ctx context.Context, fact activateRunFact) (runevents.RunLifecycleCommandResult, error) {

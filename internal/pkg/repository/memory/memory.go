@@ -2409,9 +2409,13 @@ func compactStepSummary(item *run.Step) *run.Step {
 
 func cloneRun(item *run.Run) *run.Run {
 	cloned := *item
-	if item.ReplacementTerminationIntent != nil {
-		intent := *item.ReplacementTerminationIntent
-		cloned.ReplacementTerminationIntent = &intent
+	if item.ReplacementIntent != nil {
+		intent := *item.ReplacementIntent
+		if item.ReplacementIntent.Bootstrap != nil {
+			bootstrap := item.ReplacementIntent.Bootstrap.Clone()
+			intent.Bootstrap = &bootstrap
+		}
+		cloned.ReplacementIntent = &intent
 	}
 	if item.RuntimeBootstrap != nil {
 		bootstrap := item.RuntimeBootstrap.Clone()

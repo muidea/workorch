@@ -139,7 +139,8 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   metric/artifact。缺 binding 或 hash drift 禁止进入 operation provider/dispatch。
 - LLM EventHub command/result 与 LLM owner 内部 request/response 使用强制 `DocumentKind=semantic_plan|operations`。
   两种 document 的 manifest/context/rejection 字段严格互斥，result 回显 exact kind；semantic plan 与 operations 共用
-  provider transport、continuation、C0～C5 cache plan 和 audit，不存在空 kind fallback 或第二套 provider client。
+  provider transport、sealed expected-document、whole-document recovery、C0～C5 cache plan 和 audit，不存在 raw suffix
+  authority 拼接、空 kind fallback 或第二套 provider client。
 - semantic ledger 只允许通过八个 Orchestrator private event/reducer entry 迁移：required、request started、plan
   evaluated、feasibility required/observed、correction required、sealed、failed。它持久化 attempt 0/1、stable prefix、
   logical request、correction、document、owner batch/set 与 seal lineage；duplicate 不写 CAS，scope/seed/request/batch
@@ -233,7 +234,12 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   Run 三段 SM-4 delivery 只携带同一 sealed `TerminalOutcome`；禁止另传 `FailureReason` 覆盖 code/summary，Run owner 仅在
   private reducer 中从 outcome 派生自身持久化展示原因。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
-- provider request session（logical request ID、physical-call/fragment sequence、transport outcome）先于 candidate attempt 随 aggregate 持久化；未形成完整 candidate document 时不得创建/失败 attempt。complete rejection 先保存原始 diagnostic，再由 SM-3 owner-local reducer 决定 final 或唯一 correction；只有 persisted `correctable_once` result 可在相同 transaction、manifest 和 stable prefix 下开启 attempt 1，attempt 1 再次 complete rejection 形成 `candidate_retry_exhausted`，不能创建第三次请求或无信息 governance ticket。
+- provider request session（logical request ID、expected-document identity、physical-call recovery generation、transport
+  outcome）先于 candidate attempt 随 aggregate 持久化；未形成单次完整 candidate document 时不得创建/失败 attempt。
+  EOF/output limit 只能重提同一 expected document，不能拼接 raw output。complete rejection 先保存原始 diagnostic，再由
+  SM-3 owner-local reducer 决定 final 或唯一 same-step correction；只有 persisted `correctable_once` result 可在相同
+  transaction、manifest 和 stable prefix 下开启 attempt 1，attempt 1 再次 complete rejection 形成
+  `candidate_retry_exhausted`，不能创建第三次请求或无信息 governance ticket。
 - candidate retry 预算按稳定且显式持久化的 `AuthorityContractID` 计算；identity 绑定 workspace/run、完整 `AuthoritySnapshotID`、focus、canonical convergence state、definition/evidence revision 与 requiredOutput hash。派生 action 不参与 identity。缺失或不匹配该字段属于 current-schema invariant violation；同一 contract 超过 attempt 0/1 必须 fail-fast，禁止再次请求 provider。
 - complete schema/contract failure 只记录统一 evaluator 生成的原始 typed rejection；correction/final 由 SM-3 internal event 决定。owner feasibility 的
   `stale`、`prerequisite_required`、`infeasible` 必须作为独立 internal event 交给 SM-2，绝不进入

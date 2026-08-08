@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-07-29
+Last Updated: 2026-08-08
 
 ## Purpose
 
@@ -12,7 +12,7 @@ Last Updated: 2026-07-29
 Runtime 的唯一 provider transaction 管道使用显式 `DocumentKind`：operation document 的上下文来自 typed
 `RuntimeCandidateContext`（persisted facts + authority transaction），semantic-plan document 的上下文来自 typed
 `RuntimeSemanticPlanRequestContext`（Definition seed + sealed semantic manifest）。两种 document 的字段互斥，均复用
-同一 transport、request session、continuation、cache plan 与 audit，见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
+同一 transport、request session、whole-document recovery、cache plan 与 audit，见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
 
 ## Runtime Binding
 
@@ -88,7 +88,8 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 每次 request 应可追溯：
 
 - `logicalRequestId`（同一 sealed authority 的 request session identity）与每次 HTTP 调用独立的 `physicalCallId`；
-- continuation 的 `sequence`、fragment hash/bytes、document disposition 与 `providerSubmitted`；
+- whole-document recovery 的 generation、expected-document hash、response hash/bytes、document disposition 与
+  `providerSubmitted`；
 - `stablePrefixHash`
 - `workspaceDefinitionHash`
 - `capabilityContractHash`
@@ -100,10 +101,11 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 
 审计字段名可保留历史 `stageBundleHash` 标识，但其语义是 **focus / requiredOutput bundle**，不是 禁止的 StagePacket / NextAction。
 
-完整 document 前的 fragment、timeout、401/403、5xx 与提交结果未知都属于 request-session audit，不能被
-记录为 candidate attempt。continuation suffix 仅携带上一片段的受限 tail/sequence，C0～C3 与同一 sealed
-transaction 的 stable prefix 不得因此漂移；raw fragment、provider body、credential 和 endpoint 不得进入
-审计或下一次普通 candidate context。
+不完整 document、output limit、timeout、401/403、5xx 与提交结果未知都属于 request-session audit，不能被
+记录为 candidate attempt。恢复必须以新的 physical call 重提同一 sealed expected-document，并保持 C0～C3、transaction、
+batch identity 与 stable prefix 不变；不得把前一次 raw output 或其 suffix 放入下一次 prompt，也不得跨 physical call
+拼接 authority document。raw output、provider body、credential 和 endpoint 不得进入跨 owner diagnostic 或下一次
+candidate context。
 
 attempt 1 只能改变 C4 中的 provider-safe `CandidateRejection + Orchestrator-sealed CorrectionDirective`。manifest hash、C0～C3 section hash、
 authority transaction 与 stable prefix 必须与 attempt 0 相同；若 correction 需要改变 operation authorization、

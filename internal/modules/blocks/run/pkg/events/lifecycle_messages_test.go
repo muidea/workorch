@@ -25,28 +25,6 @@ func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 	}
 }
 
-func TestWorkspaceExecutionIntentResultRequiresCompleteFreshActivationReleaseFact(t *testing.T) {
-	result := WorkspaceExecutionIntentResult{
-		RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
-			WorkspaceID: "ws-1", RunID: "run-2", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
-			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
-			Reason:  runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement,
-		},
-	}
-	if err := result.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("missing release fact err = %v", err)
-	}
-	result.FreshActivationRelease = &FreshActivationReleaseFact{
-		WorkspaceID: "ws-1", RunID: "run-1", CausationID: "run-state/run-1/7/fresh_activation_required",
-		RuntimeStateRevision: 7, RuntimeStateRef: "runtime-state/ws-1/run-1/7",
-		RuntimeActivationDisposition:    runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-		ActualRuntimeStateSchemaVersion: 1, SupportedRuntimeStateSchemaVersion: 2,
-	}
-	if err := result.Validate(); err != nil {
-		t.Fatalf("valid release fact: %v", err)
-	}
-}
-
 func TestRuntimeGovernanceWaitFactValidate(t *testing.T) {
 	cmd := RuntimeGovernanceWaitFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",

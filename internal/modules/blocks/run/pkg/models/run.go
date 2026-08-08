@@ -7,40 +7,56 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type ReplacementTerminationIntentState string
+type ReplacementIntentState string
 
 const (
-	ReplacementTerminationIntentPending      ReplacementTerminationIntentState = "pending"
-	ReplacementTerminationIntentAcknowledged ReplacementTerminationIntentState = "acknowledged"
+	ReplacementIntentPending          ReplacementIntentState = "pending"
+	ReplacementIntentSuccessorCreated ReplacementIntentState = "successor_created"
+	ReplacementIntentCompleted        ReplacementIntentState = "completed"
 )
 
-// ReplacementTerminationIntent is Run-owned durable delivery state for the
-// supersede request that must leave the Workspace -> Run synchronous command
-// lane before it can enter Orchestrator SM-4. It records delivery progress but
-// never selects an Orchestrator or predecessor lifecycle state.
-type ReplacementTerminationIntent struct {
+// ReplacementIntent is the predecessor Run's durable restart intent. It
+// contains immutable successor activation input and delivery progress, but no
+// Workspace target state or Orchestrator reducer instruction.
+type ReplacementIntent struct {
 	RequestID            string
-	PredecessorRunID     common.RunID
+	WorkspaceID          common.WorkspaceID
+	GoalID               common.GoalID
+	DoDID                common.DoDID
+	DefinitionRevision   string
+	Bootstrap            *runtimecontract.RuntimeBootstrap
+	Priority             int
+	ReconciliationScope  runtimecontract.RuntimeCWIReconciliationScope
 	Kind                 runtimecontract.RuntimeTerminationKind
 	Reason               string
-	State                ReplacementTerminationIntentState
+	State                ReplacementIntentState
 	AttemptCount         uint64
 	LastAttemptAt        string
 	LastError            string
 	TerminalDeliveryID   string
 	RuntimeStateRevision uint64
+	SuccessorRunID       common.RunID
 	AcknowledgedAt       string
 }
 
-func (i ReplacementTerminationIntent) ValidFor(successor *Run) bool {
-	if successor == nil || strings.TrimSpace(i.RequestID) == "" || i.PredecessorRunID == "" || i.PredecessorRunID == successor.ID || !runtimecontract.ValidRuntimeTerminationKind(i.Kind) || strings.TrimSpace(i.Reason) == "" {
+func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
+	if predecessor == nil || strings.TrimSpace(i.RequestID) == "" || i.WorkspaceID == "" || i.WorkspaceID != predecessor.WorkspaceID || i.GoalID == "" || i.DoDID == "" || strings.TrimSpace(i.DefinitionRevision) == "" || i.Bootstrap == nil || !runtimecontract.ValidRuntimeTerminationKind(i.Kind) || strings.TrimSpace(i.Reason) == "" {
+		return false
+	}
+	if i.Kind != runtimecontract.RuntimeTerminationSuperseded || i.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull {
+		return false
+	}
+	definition := i.Bootstrap.Definition.Normalized()
+	if definition.GoalID != i.GoalID || definition.DoDID != i.DoDID || definition.Revision != i.DefinitionRevision {
 		return false
 	}
 	switch i.State {
-	case ReplacementTerminationIntentPending:
-		return strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
-	case ReplacementTerminationIntentAcknowledged:
-		return strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) != ""
+	case ReplacementIntentPending:
+		return i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+	case ReplacementIntentSuccessorCreated:
+		return i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+	case ReplacementIntentCompleted:
+		return i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) != ""
 	default:
 		return false
 	}
@@ -62,10 +78,10 @@ type Run struct {
 	// Runtime replacement activation. It is owned by Run and is never used
 	// as an authority/coverage/dispatch value.
 	ActivationRequestID string
-	// ReplacementTerminationIntent is persisted atomically with a restart
-	// successor. A Run-owned background sender changes only this delivery
-	// ledger after Orchestrator returns a concrete SM-4 acknowledgement.
-	ReplacementTerminationIntent *ReplacementTerminationIntent
+	// ReplacementIntent is persisted on the predecessor before SM-4 starts.
+	// The successor is materialized only after the final Run delivery proves
+	// that Result and Workspace acknowledgements were already persisted.
+	ReplacementIntent *ReplacementIntent
 	// ReconciliationRequestID is a Run-owner continuation identity.  It is
 	// emitted with the pending->active state fact so Orchestrator cannot lose a
 	// resume reconciliation when the ordinary state notification races it.
@@ -111,9 +127,13 @@ func CloneRun(item *Run) *Run {
 		state := item.RuntimeState.Clone()
 		cloned.RuntimeState = &state
 	}
-	if item.ReplacementTerminationIntent != nil {
-		intent := *item.ReplacementTerminationIntent
-		cloned.ReplacementTerminationIntent = &intent
+	if item.ReplacementIntent != nil {
+		intent := *item.ReplacementIntent
+		if item.ReplacementIntent.Bootstrap != nil {
+			bootstrap := item.ReplacementIntent.Bootstrap.Clone()
+			intent.Bootstrap = &bootstrap
+		}
+		cloned.ReplacementIntent = &intent
 	}
 	cloned.RuntimeActivationStatus = item.RuntimeActivationStatus.Clone()
 	if item.TerminalDelivery != nil {

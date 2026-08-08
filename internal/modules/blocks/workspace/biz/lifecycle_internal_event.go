@@ -10,16 +10,14 @@ import (
 type workspaceLifecycleInternalEventKind string
 
 const (
-	workspaceLifecycleInternalEventTerminalDeliveryObserved       workspaceLifecycleInternalEventKind = "terminal_delivery_observed"
-	workspaceLifecycleInternalEventRunProjectionObserved          workspaceLifecycleInternalEventKind = "run_projection_observed"
-	workspaceLifecycleInternalEventFreshActivationReleaseObserved workspaceLifecycleInternalEventKind = "fresh_activation_release_observed"
+	workspaceLifecycleInternalEventTerminalDeliveryObserved workspaceLifecycleInternalEventKind = "terminal_delivery_observed"
+	workspaceLifecycleInternalEventRunProjectionObserved    workspaceLifecycleInternalEventKind = "run_projection_observed"
 )
 
 type workspaceLifecycleInternalEvent struct {
-	Kind                   workspaceLifecycleInternalEventKind
-	TerminalDelivery       *workspaceevents.RuntimeTerminalDeliveryFact
-	RunProjection          *workspaceevents.RunProjectionFact
-	FreshActivationRelease *workspaceevents.FreshActivationRunSlotReleaseFact
+	Kind             workspaceLifecycleInternalEventKind
+	TerminalDelivery *workspaceevents.RuntimeTerminalDeliveryFact
+	RunProjection    *workspaceevents.RunProjectionFact
 }
 
 // submitWorkspaceLifecycleInternalEvent is the only owner-local dispatcher
@@ -32,20 +30,15 @@ func (m *Biz) submitWorkspaceLifecycleInternalEvent(ctx context.Context, event w
 	}
 	switch event.Kind {
 	case workspaceLifecycleInternalEventTerminalDeliveryObserved:
-		if event.TerminalDelivery == nil || event.RunProjection != nil || event.FreshActivationRelease != nil {
+		if event.TerminalDelivery == nil || event.RunProjection != nil {
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		return m.applyTerminalDelivery(ctx, *event.TerminalDelivery)
 	case workspaceLifecycleInternalEventRunProjectionObserved:
-		if event.RunProjection == nil || event.TerminalDelivery != nil || event.FreshActivationRelease != nil {
+		if event.RunProjection == nil || event.TerminalDelivery != nil {
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		return m.applyRunProjection(ctx, *event.RunProjection)
-	case workspaceLifecycleInternalEventFreshActivationReleaseObserved:
-		if event.FreshActivationRelease == nil || event.TerminalDelivery != nil || event.RunProjection != nil {
-			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		return m.releaseFreshActivationRunSlot(ctx, *event.FreshActivationRelease)
 	default:
 		return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 	}

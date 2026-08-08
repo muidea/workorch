@@ -113,7 +113,6 @@ func (m *Biz) Start() error {
 	}
 	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceExecutionIntent, m.handleWorkspaceExecutionIntent)
 	m.topics = append(m.topics, runevents.TopicRunCommandWorkspaceExecutionIntent)
-	m.SubscribeMatchedFunc(ModuleID+"/replacement-activation", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleReplacementPredecessorState)
 	m.started = true
 	m.commandMu.Unlock()
 	// A crash may occur after the replacement successor is persisted but before
@@ -355,7 +354,6 @@ func (m *Biz) Stop(ctx context.Context) error {
 	for idx := len(topics) - 1; idx >= 0; idx-- {
 		m.UnsubscribeFunc(topics[idx])
 	}
-	m.UnsubscribeMatchedFunc(ModuleID+"/replacement-activation", runevents.TopicRunStateChanged)
 	m.commandMu.Lock()
 	m.Service = nil
 	m.commandMu.Unlock()

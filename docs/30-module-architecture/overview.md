@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-08-08
 
 ## Purpose
 
@@ -23,7 +23,8 @@ Last Updated: 2026-07-14
 
 生产主链仅为 **Runtime**：
 
-- application 构造 typed `RuntimeBootstrap` 并创建 Run
+- application 构造 typed `RuntimeBootstrap` 并提交 owner intent；Run owner 通过 SM-1 private event 创建/迁移 Run，
+  restart successor 只能在 SM-4 已持久化 Workspace release acknowledgement 后创建
 - Orchestrator `DriveRuntime` 作为唯一同步推进合同
 - reducer → authority transaction → prerequisite | candidate → sealed dispatch → operation evidence → governance wait / terminal
 

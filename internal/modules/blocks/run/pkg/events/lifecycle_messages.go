@@ -70,40 +70,11 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 // expose a desired state or let an ingress component infer one.
 type WorkspaceExecutionIntentResult struct {
 	runtimecontract.RuntimeExecutionIntentAdmission
-	FreshActivationRelease *FreshActivationReleaseFact
-}
-
-type FreshActivationReleaseFact struct {
-	WorkspaceID                        common.WorkspaceID
-	RunID                              common.RunID
-	CausationID                        string
-	RuntimeStateRevision               uint64
-	RuntimeStateRef                    string
-	RuntimeActivationDisposition       runtimecontract.RuntimeActivationDisposition
-	ActualRuntimeStateSchemaVersion    uint32
-	SupportedRuntimeStateSchemaVersion uint32
-}
-
-func (f FreshActivationReleaseFact) Validate() error {
-	if f.WorkspaceID == "" || f.RunID == "" || strings.TrimSpace(f.CausationID) == "" || f.RuntimeStateRevision == 0 || strings.TrimSpace(f.RuntimeStateRef) == "" || f.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return fmt.Errorf("%w: fresh activation release requires persisted predecessor identity", common.ErrInvalidArgument)
-	}
-	return nil
 }
 
 func (r WorkspaceExecutionIntentResult) Validate() error {
 	if err := r.RuntimeExecutionIntentAdmission.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-	}
-	if r.FreshActivationRelease != nil {
-		if r.Kind != runtimecontract.RuntimeExecutionIntentRestart || r.Reason != runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement {
-			return fmt.Errorf("%w: fresh activation release does not match replacement admission", common.ErrInvalidArgument)
-		}
-		if err := r.FreshActivationRelease.Validate(); err != nil {
-			return err
-		}
-	} else if r.Reason == runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement {
-		return fmt.Errorf("%w: fresh activation replacement requires release fact", common.ErrInvalidArgument)
 	}
 	return nil
 }

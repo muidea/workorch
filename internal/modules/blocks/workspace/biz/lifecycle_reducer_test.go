@@ -85,45 +85,6 @@ func TestReduceRunProjectionFactDoesNotStealOtherLiveRun(t *testing.T) {
 	}
 }
 
-func freshActivationSlotReleaseFact(runID common.RunID) workspaceevents.FreshActivationRunSlotReleaseFact {
-	return workspaceevents.FreshActivationRunSlotReleaseFact{
-		WorkspaceID:                        "ws-1",
-		RunID:                              runID,
-		SourceOwner:                        "blocks/run",
-		CausationID:                        "run-state/" + string(runID) + "/7/fresh_activation_required",
-		RuntimeStateRevision:               7,
-		RuntimeStateRef:                    "runtime-state/ws-1/" + string(runID) + "/7",
-		RuntimeActivationDisposition:       runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-		ActualRuntimeStateSchemaVersion:    2,
-		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-	}
-}
-
-func TestReduceFreshActivationRunSlotFactReleasesOnlyMatchingActiveRun(t *testing.T) {
-	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: "run-old"}
-	tr, err := reduceFreshActivationRunSlotFact(current, freshActivationSlotReleaseFact("run-old"))
-	if err != nil || tr.Noop || !tr.ClearActive || tr.State != common.WorkspaceStateActive {
-		t.Fatalf("transition=%+v err=%v", tr, err)
-	}
-	next := applyWorkspaceProjection(current, tr)
-	if next.ActiveRunID != "" || next.State != common.WorkspaceStateActive {
-		t.Fatalf("released workspace=%+v", next)
-	}
-
-	duplicate, err := reduceFreshActivationRunSlotFact(next, freshActivationSlotReleaseFact("run-old"))
-	if err != nil || !duplicate.Noop {
-		t.Fatalf("duplicate=%+v err=%v", duplicate, err)
-	}
-}
-
-func TestReduceFreshActivationRunSlotFactCannotReleaseNewerRun(t *testing.T) {
-	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-new"}
-	tr, err := reduceFreshActivationRunSlotFact(current, freshActivationSlotReleaseFact("run-old"))
-	if err != nil || !tr.Noop || tr.ClearActive {
-		t.Fatalf("stale transition=%+v err=%v", tr, err)
-	}
-}
-
 func TestWorkspaceFreshActivationNotificationDoesNotReleaseSlotWithoutExplicitRestart(t *testing.T) {
 	biz, workspaces := newWorkspaceLifecycleBiz(t)
 	ctx := context.Background()
@@ -218,27 +179,6 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 	))
 	if err != nil || again.Transitioned {
 		t.Fatalf("repeated release=%+v err=%v", again, err)
-	}
-}
-
-func TestWorkspaceLifecycleHandlerReleasesMatchingFreshActivationRunSlot(t *testing.T) {
-	biz, workspaces := newWorkspaceLifecycleBiz(t)
-	ctx := context.Background()
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-old"}); err != nil {
-		t.Fatal(err)
-	}
-	released, err := biz.releaseFreshActivationRunSlot(ctx, freshActivationSlotReleaseFact("run-old"))
-	if err != nil || !released.Transitioned || released.Workspace.ActiveRunID != "" || released.Workspace.State != common.WorkspaceStateActive {
-		t.Fatalf("fresh release=%+v err=%v", released, err)
-	}
-	// A delayed old fact is harmless after another owner-local projection has
-	// assigned the slot to a newer Run.
-	if err := workspaces.Update(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-new", Revision: released.Workspace.Revision}); err != nil {
-		t.Fatalf("seed new active run: %v", err)
-	}
-	stale, err := biz.releaseFreshActivationRunSlot(ctx, freshActivationSlotReleaseFact("run-old"))
-	if err != nil || stale.Transitioned || stale.Workspace.ActiveRunID != "run-new" {
-		t.Fatalf("stale fresh release=%+v err=%v", stale, err)
 	}
 }
 

@@ -48,27 +48,6 @@ func TestWorkspaceExecutionIntentResultUsesTypedAdmissionWithoutInventedRun(t *t
 	}
 }
 
-func TestFreshActivationRunSlotReleaseFactValidate(t *testing.T) {
-	cmd := FreshActivationRunSlotReleaseFact{
-		WorkspaceID:                        "ws-1",
-		RunID:                              "run-1",
-		SourceOwner:                        "blocks/run",
-		CausationID:                        "run-state/run-1/7/fresh_activation_required",
-		RuntimeStateRevision:               7,
-		RuntimeStateRef:                    "runtime-state/ws-1/run-1/7",
-		RuntimeActivationDisposition:       runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-		ActualRuntimeStateSchemaVersion:    2,
-		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-	}
-	if err := cmd.Validate(); err != nil {
-		t.Fatalf("valid fresh activation release: %v", err)
-	}
-	cmd.RuntimeActivationDisposition = ""
-	if err := cmd.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("missing disposition err=%v", err)
-	}
-}
-
 func TestWorkspaceRuntimeTerminalDeliveryFactValidate(t *testing.T) {
 	cmd := RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1"},

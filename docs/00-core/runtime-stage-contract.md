@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-31
+Last Updated: 2026-08-08
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -94,11 +94,11 @@ typed RuntimeBootstrap
   -> Result owner -> Workspace owner -> Run owner owner-local delivery transitions
 ```
 
-1. Application 只构造 typed `RuntimeBootstrap` 并向 Run owner 提交 scoped activation / continuation intent；
-   不指定 Run、Workspace 或 Result 的目标状态。唯一的行政例外是用户明确 fresh activation/restart 时，application
-   可同步转发已持久化的 Run-owned `fresh_activation_required` fact 给 Workspace owner；Workspace 仅在
-   `ActiveRunID` 精确匹配时自行释放 slot，随后 application 才创建新的 current-schema Run。该转发不终态化、
-   迁移、supersede 或读取旧 aggregate。
+1. Application 只构造 typed `RuntimeBootstrap` 并向 Workspace/Run owner 提交 scoped activation / continuation intent；
+   不指定 Run、Workspace 或 Result 的目标状态。用户明确 restart 时，Run owner 先在 predecessor 上持久化 immutable
+   replacement intent；SM-4 再按 `Result -> Workspace -> Run` 投递 administrative terminal fact。Workspace 仅在
+   `ActiveRunID` 精确匹配时通过内部事件释放 slot；Run owner 只有收到该顺序的最终 Run delivery 后，才能通过内部事件
+   幂等创建并激活 current-schema successor。Application、Workspace 和 Orchestrator 均不得提前创建 successor。
 2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime aggregate；其中 aggregate 是
    Orchestrator 的不透明持久化负载。其语义 CAS 只比较 `RuntimeState.StateRevision`，不得以完整 Run 模型
    revision（SM-1/lifecycle 或其他 Run 字段）阻断 SM-2/SM-3/SM-4 的保存。
@@ -274,8 +274,8 @@ provider dependency/governance 在进入 candidate pipeline 前单独处理。�
 
 | 结果 | 来源 | 状态机行为 |
 | --- | --- | --- |
-| `request_recoverable` | fragment、EOF、timeout、429/5xx、未完成 document | request-session 有界恢复；不创建 attempt |
-| `request_terminal` | provider authentication/configuration/protocol/submission unknown、continuation exhausted 或 prerequisite stale | 先持久化 safe original diagnostic；转为 SM-3 internal event，再按 typed dependency、freshness 或 terminal 合同处理；不创建 attempt |
+| `request_recoverable` | EOF、output limit、timeout、429/5xx、未完成 document | 同一 sealed expected-document 的 whole-document 有界恢复；不创建 attempt、不拼接 raw suffix |
+| `request_terminal` | provider authentication/configuration/protocol/submission unknown、request recovery exhausted 或 prerequisite stale | 先持久化 safe original diagnostic；转为 SM-3 internal event，再按 typed dependency、freshness 或 terminal 合同处理；不创建 attempt |
 | `candidate_rejection` | CandidateEvaluator 的 complete typed rejection | 先持久化 original diagnostic；由 SM-3 owner-local reducer 决定唯一 correction 或 typed terminal |
 | `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由 SM-2 退休 prerequisite、取得新 authority 或形成 typed terminal；零 correction attempt |
 | `accepted` | evaluator 接受且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
@@ -298,8 +298,9 @@ active -> completed | failed | cancelled | superseded
 - terminal 不可变。继续未完成工作只能由产品层显式创建新的 typed activation / Run，并保存
   predecessor lineage；不允许自动 successor。
 - `fresh_activation_required` 是 Run owner 对不可读 opaque aggregate 的非终态行政结果。普通 Resume 只返回
-  non-resumable fact，不可 drive；用户明确 restart 时，Workspace owner 可消费该 fact 并仅释放匹配 slot，之后才
-  创建独立的 current-schema activation。旧 Run 保持原记录，不得执行 schema migration、termination 或 successor link。
+  non-resumable fact，不可 drive；用户明确 restart 时，它只作为 Run-owned replacement/administrative termination 的
+  原因，仍复用 SM-4 `Result -> Workspace -> Run` delivery。Workspace release 前不存在 successor；旧 aggregate 不执行
+  schema migration，新 successor 由 Run owner 从 persisted replacement intent 创建并保存 lineage。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化
   `RuntimeTerminationRecord`。
@@ -373,9 +374,10 @@ sealed authority + preflight ready
   -> claimed operation -> owner receipt -> evidence commit -> close dispatch
 ```
 
-- request session 必须先绑定 transaction、definition/evidence revision、required-output hash、
-  stable-prefix hash 和 logical request identity。fragment、EOF、timeout、429/5xx、401/403 与未知提交
-  走 session/provider recovery，不消耗 candidate 或 repair budget。
+- request session 必须先绑定 transaction、definition/evidence revision、required-output hash、expected-document
+  identity、stable-prefix hash 和 logical request identity。EOF、output limit、timeout、429/5xx、401/403 与未知提交
+  走 session/provider recovery，不消耗 candidate 或 repair budget。恢复只能重新请求同一有界完整 document；历史 raw
+  output 只作 owner audit，不得拼接成 authority document。
 - 只有完整 document 才可创建 candidate attempt。attempt 0/1 必须使用同一 transaction 与 stable prefix；
   第二次完整 schema/contract rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一

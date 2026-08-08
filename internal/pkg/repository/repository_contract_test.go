@@ -1661,10 +1661,10 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 		ID:          common.RunID("run-contract"),
 		WorkspaceID: common.WorkspaceID("ws-contract"),
 		State:       common.RunStatePending,
-		ReplacementTerminationIntent: &runmodel.ReplacementTerminationIntent{
-			RequestID: "request-contract", PredecessorRunID: "run-predecessor",
+		ReplacementIntent: &runmodel.ReplacementIntent{
+			RequestID: "request-contract", WorkspaceID: "ws-contract", GoalID: "goal-contract", DoDID: "dod-contract", DefinitionRevision: "def-contract", Bootstrap: &orchestratormodel.RuntimeBootstrap{},
 			Kind: orchestratormodel.RuntimeTerminationSuperseded, Reason: "contract clone",
-			State: runmodel.ReplacementTerminationIntentPending,
+			State: runmodel.ReplacementIntentPending,
 		},
 	}
 	if err := repo.Create(ctx, item); err != nil {
@@ -1678,13 +1678,13 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	got.ReplacementTerminationIntent.LastError = "mutated clone"
+	got.ReplacementIntent.LastError = "mutated clone"
 	unchanged, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get unchanged run: %v", err)
 	}
-	if unchanged.ReplacementTerminationIntent == nil || unchanged.ReplacementTerminationIntent.LastError != "" {
-		t.Fatalf("repository leaked replacement intent pointer: %+v", unchanged.ReplacementTerminationIntent)
+	if unchanged.ReplacementIntent == nil || unchanged.ReplacementIntent.LastError != "" {
+		t.Fatalf("repository leaked replacement intent pointer: %+v", unchanged.ReplacementIntent)
 	}
 	got.State = common.RunStateCompleted
 	if err := repo.Update(ctx, got); err != nil {

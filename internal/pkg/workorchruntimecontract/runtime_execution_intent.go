@@ -47,7 +47,6 @@ const (
 	RuntimeExecutionIntentReasonRunNotResumable                RuntimeExecutionIntentReason = "run_not_resumable"
 	RuntimeExecutionIntentReasonDuplicateRestart               RuntimeExecutionIntentReason = "duplicate_restart"
 	RuntimeExecutionIntentReasonNewRunActivated                RuntimeExecutionIntentReason = "new_run_activated"
-	RuntimeExecutionIntentReasonFreshActivationReplacement     RuntimeExecutionIntentReason = "fresh_activation_replacement"
 	RuntimeExecutionIntentReasonPredecessorSupersedeRequested  RuntimeExecutionIntentReason = "predecessor_supersede_requested"
 )
 
@@ -92,8 +91,7 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 		switch reason {
 		case RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
 			RuntimeExecutionIntentReasonPendingRunActivated,
-			RuntimeExecutionIntentReasonNewRunActivated,
-			RuntimeExecutionIntentReasonFreshActivationReplacement:
+			RuntimeExecutionIntentReasonNewRunActivated:
 			valid = true
 		}
 	case RuntimeExecutionIntentReplacementPending:
@@ -147,8 +145,6 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "duplicate restart request"
 	case RuntimeExecutionIntentReasonNewRunActivated:
 		return "new Workspace Run activated"
-	case RuntimeExecutionIntentReasonFreshActivationReplacement:
-		return "fresh activation replacement created"
 	case RuntimeExecutionIntentReasonPredecessorSupersedeRequested:
 		return "predecessor supersede requested"
 	default:

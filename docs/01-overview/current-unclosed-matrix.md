@@ -26,7 +26,7 @@ is regression evidence, not active work.
 
 ## Residual Mandatory Work
 
-### A. Runtime 单 owner semantic contract 与 CWI reconciliation（R3，active）
+### A. Runtime 单 owner semantic contract 与 CWI reconciliation（RSO，active）
 
 presentation slice 与 semantic focus 分离、完整 preflight、resume/restart reconciliation、activation recommendation，
 以及 Goal/DoD + selected template/profile + owner facts → semantic proposal → owner feasibility → SM-2 seal 已完成代码基线。
@@ -37,16 +37,17 @@ resume/restart/drift、superseded predecessor 隔离、crash/concurrency 与 CPU
 审计确认 capability execute 与 LLM provider EventHub contract 曾由 Orchestrator 代接收 owner 定义；当前 File、Shell、Git、
 MCP、SSH、Web execute、LLM provider ceiling/preflight/request、八个 owner 的 Runtime capability acquisition、六个 owner 的 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 owner 的 CWI reconciliation query、File target snapshot/selection/manifest/repair-surface query，
 以及 Git capability-state acquisition、Decision governance-request 合同已直接回迁各自 `blocks/*/pkg/events` 并由 boundary verifier 固化；Run/Result/Workspace lifecycle 合同审计也已确认由各自 owner 定义并消费。
-owner observation/failure/diagnostic、EventHub 接收 owner 归属与 Orchestrator private mutation surface 已完成 R3-F1～F5
-代码及全链验收；controller 只公开唯一 internal-event mutation dispatcher 和两个 scoped read，所有 lane caller 只传唯一
-接收 owner `Contracts()`，生产合同聚合与 owner/topic 错配由 AST 门禁拒绝。当前强制遗留仅为 fresh LSP Bridge 逐 CWI
-binding-matched semantic matrix。
+owner observation/failure/diagnostic、EventHub 接收 owner 归属与 Orchestrator private mutation surface 已形成回归基线；
+controller 只公开唯一 internal-event mutation dispatcher 和 scoped read，所有 lane caller 只传唯一接收 owner
+`Contracts()`。最新 `run-025` 与 revision 367～385 事件链重新打开两个代码级缺口：restart 在 predecessor Workspace
+release 前创建 successor；semantic correction 改变 plan step，且 output-limit recovery 拼接了 escaped raw suffix。当前必须
+先完成 release-before-create 与 complete-document recovery，再执行 fresh LSP Bridge binding-matched positive matrix。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
 
-- `/run restart` 以最小 Definition seed 创建 new Run；SM-3 请求受约束 semantic-plan document，owner 返回
-  feasibility，只有 SM-2 internal event 能 seal binding/reconciliation contract；
+- `/run restart` 先在 predecessor Run 持久化 replacement intent，经 SM-4 `Result -> Workspace -> Run` 完成释放后，
+  Run owner 才幂等创建 new Run；new Run 以最小 Definition seed 进入 semantic planning；
 - `/run resume` 复核 current non-terminal Run 已 sealed 的 Definition/CWI/binding，不重新 semantic planning；
 - validation/behavior CWI 保持单 CWI focus 与独立 binding/proof；slice 只表达展示和排序；
 - template/profile 只声明可复用 capability/selector/recipe family 与质量门禁，不写用户 workspace 的业务答案；
@@ -58,6 +59,8 @@ binding-matched semantic matrix。
   original diagnostic；
 - Orchestrator 只保留 `ApplyInternalEvent` mutation dispatcher 与唯一 aggregate CAS boundary，删除薄 wrapper 和第二 mutation API；
 - 非 current schema 只产生 `fresh_activation_required`，不参与执行。
+- semantic-plan 与 operations authority 只接受单次完整 JSON；output limit/EOF 进入同一 sealed expected-document 的有界
+  whole-document recovery，不拼接 raw suffix，也不消耗 semantic correction attempt。
 
 唯一实施队列见
 [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
@@ -101,11 +104,11 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
   authority：只有 sealed binding + owner receipt 才能关闭 CWI，LLM/raw check 不得越权。
 - **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、receipt、
   binding-derived CWI credit、single-owner lifecycle/outcome/SM-4 producer trust 与 terminal delivery均为 R3 回归基线；
-  当前 active 缺口是 minimal bootstrap 后的自动 semantic-plan/owner-feasibility/SM-2 seal 事务、普通产品入口收拢与
-  deployed semantic matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
+  当前 active 缺口是 restart successor ordering、expected-document/correction/recovery 合同，以及其后的 deployed semantic
+  positive matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace
   reasoning effort 实施顺序由 WRE active plan 定义，archive 不得推导新实现约束。
-- **Active roadmap**：R3 当前仅剩 E3 live；WRE 是独立必需收口项，用于 workspace reasoning capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **Active roadmap**：RSO 当前包含 restart ordering、complete-document recovery 与 fresh LSP live；WRE 是独立必需收口项，用于 workspace reasoning capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

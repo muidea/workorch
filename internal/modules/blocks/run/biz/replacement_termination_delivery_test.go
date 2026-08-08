@@ -60,16 +60,16 @@ func TestReplacementTerminationDeliveryPersistsConcreteAcknowledgement(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	intent := stored.ReplacementTerminationIntent
-	if intent == nil || intent.State != runmodel.ReplacementTerminationIntentAcknowledged || intent.AttemptCount != 1 || intent.TerminalDeliveryID != "terminal-1" || intent.RuntimeStateRevision != 9 || intent.AcknowledgedAt == "" || intent.LastError != "" {
+	intent := stored.ReplacementIntent
+	if intent == nil || intent.State != runmodel.ReplacementIntentCompleted || intent.AttemptCount != 1 || intent.TerminalDeliveryID != "terminal-1" || intent.RuntimeStateRevision != 9 || intent.AcknowledgedAt == "" || intent.LastError != "" {
 		t.Fatalf("acknowledged intent = %+v", intent)
 	}
 	if err := biz.deliverReplacementTermination(successor.WorkspaceID, successor.ID); err != nil {
 		t.Fatalf("idempotent acknowledged delivery: %v", err)
 	}
 	stored, _ = runs.GetByWorkspaceID(ctx, successor.WorkspaceID, successor.ID)
-	if stored.ReplacementTerminationIntent.AttemptCount != 1 {
-		t.Fatalf("acknowledged intent was redelivered: %+v", stored.ReplacementTerminationIntent)
+	if stored.ReplacementIntent.AttemptCount != 1 {
+		t.Fatalf("acknowledged intent was redelivered: %+v", stored.ReplacementIntent)
 	}
 }
 
@@ -118,15 +118,15 @@ func TestReplacementTerminationStartupRecoveryKeepsWorkspaceScope(t *testing.T) 
 	for _, workspaceID := range []common.WorkspaceID{"ws-recovery-a", "ws-recovery-b"} {
 		deadline := time.Now().Add(2 * time.Second)
 		for {
-			item, err := runs.GetByWorkspaceID(ctx, workspaceID, "run-002")
+			item, err := runs.GetByWorkspaceID(ctx, workspaceID, "run-001")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if item.ReplacementTerminationIntent.State == runmodel.ReplacementTerminationIntentAcknowledged {
+			if item.ReplacementIntent.State == runmodel.ReplacementIntentCompleted {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("workspace %s intent not acknowledged: %+v", workspaceID, item.ReplacementTerminationIntent)
+				t.Fatalf("workspace %s intent not acknowledged: %+v", workspaceID, item.ReplacementIntent)
 			}
 			time.Sleep(time.Millisecond)
 		}
@@ -139,6 +139,9 @@ func TestReplacementTerminationDeliveryRejectsWrongResultAndKeepsPendingEvidence
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
 	successor := replacementTerminationTestRun("ws-wrong-result", "run-002", "run-001", "request-wrong")
+	successor.ReplacementIntent.State = runmodel.ReplacementIntentPending
+	successor.ReplacementIntent.SuccessorRunID = ""
+	successor.ReplacementIntent.TerminalDeliveryID = ""
 	if err := runs.Create(ctx, successor); err != nil {
 		t.Fatal(err)
 	}
@@ -155,22 +158,23 @@ func TestReplacementTerminationDeliveryRejectsWrongResultAndKeepsPendingEvidence
 		t.Fatal("wrong termination result was accepted")
 	}
 	stored, _ := runs.GetByWorkspaceID(ctx, successor.WorkspaceID, successor.ID)
-	intent := stored.ReplacementTerminationIntent
-	if intent == nil || intent.State != runmodel.ReplacementTerminationIntentPending || intent.AttemptCount != 1 || !strings.Contains(intent.LastError, "invalid Runtime termination acknowledgement") {
+	intent := stored.ReplacementIntent
+	if intent == nil || intent.State != runmodel.ReplacementIntentPending || intent.AttemptCount != 1 || !strings.Contains(intent.LastError, "invalid Runtime termination acknowledgement") {
 		t.Fatalf("pending failure evidence = %+v", intent)
 	}
 }
 
 func replacementTerminationTestRun(workspaceID common.WorkspaceID, successorRunID, predecessorRunID common.RunID, requestID string) *runmodel.Run {
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "def-1"}}
 	item := &runmodel.Run{
-		ID: successorRunID, WorkspaceID: workspaceID, State: common.RunStatePending,
-		ActivationRequestID: requestID,
-		Lineage:             runmodel.RunLineage{PredecessorRunID: predecessorRunID, LineageState: "active"},
+		ID: predecessorRunID, WorkspaceID: workspaceID, State: common.RunStateActive,
+		Lineage: runmodel.RunLineage{SuccessorRunID: successorRunID, LineageState: "active"},
 	}
-	item.ReplacementTerminationIntent = &runmodel.ReplacementTerminationIntent{
-		RequestID: "workspace-execution/restart/" + requestID, PredecessorRunID: predecessorRunID,
+	item.ReplacementIntent = &runmodel.ReplacementIntent{
+		RequestID: requestID, WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", Bootstrap: &bootstrap,
 		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "workspace execution restart/" + requestID,
-		State: runmodel.ReplacementTerminationIntentPending,
+		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+		State:               runmodel.ReplacementIntentSuccessorCreated, SuccessorRunID: successorRunID, TerminalDeliveryID: "terminal-before-ack",
 	}
 	return item
 }
