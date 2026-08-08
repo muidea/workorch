@@ -100,10 +100,10 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command ll
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return llmevents.RequestRuntimeCandidateResult{}, common.ErrInvalidArgument
 	}
-	if err := validateRuntimeCandidateCommand(command); err != nil {
+	if err := command.RequestIdentity.Validate(); err != nil {
 		return llmevents.RequestRuntimeCandidateResult{}, err
 	}
-	if err := command.RequestIdentity.Validate(); err != nil {
+	if err := validateRuntimeCandidateCommand(command); err != nil {
 		return llmevents.RequestRuntimeCandidateResult{}, err
 	}
 	if ctx == nil {
@@ -142,8 +142,15 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command ll
 	if !runtimecontract.SameRuntimeCandidateRequestIdentity(response.RequestIdentity, command.RequestIdentity) {
 		return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate result identity does not match request")
 	}
+	wantExpectedHash := ""
+	if command.ExpectedDocument != nil {
+		wantExpectedHash = command.ExpectedDocument.Normalized().Hash
+	}
+	if strings.TrimSpace(response.ExpectedDocumentHash) != wantExpectedHash {
+		return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate result expected-document identity does not match request")
+	}
 	if response.Stale != nil {
-		if len(response.DocumentContent) != 0 || response.OutputFragment != nil {
+		if len(response.DocumentContent) != 0 || response.DocumentOutcome != nil {
 			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned stale together with provider document content")
 		}
 		if response.Feedback != nil {
@@ -157,7 +164,7 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command ll
 		return response, nil
 	}
 	if response.Feedback != nil {
-		if response.OutputFragment != nil {
+		if response.DocumentOutcome != nil {
 			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with provider feedback")
 		}
 		if len(response.DocumentContent) != 0 {
@@ -168,21 +175,26 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command ll
 		}
 		return response, nil
 	}
-	if response.OutputFragment != nil {
-		if len(response.DocumentContent) != 0 {
-			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an output fragment together with a complete candidate document")
+	if response.DocumentOutcome != nil {
+		outcome := response.DocumentOutcome.Normalized()
+		if err := outcome.Validate(); err != nil {
+			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid provider document outcome: %w", err)
 		}
-		if err := response.OutputFragment.Validate(); err != nil {
-			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate output fragment: %w", err)
+		if outcome.ExpectedDocumentHash != wantExpectedHash {
+			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned a provider document outcome for another expected document")
 		}
-		// An initial fragment is selected by the typed decoder's structural
-		// incomplete-document outcome. ReachedProviderLimit is audit telemetry,
-		// not a state-machine gate: a mid-token EOF must continue exactly like a
-		// token-limit EOF.
+		switch outcome.Disposition {
+		case runtimecontract.RuntimeProviderDocumentComplete:
+			if len(response.DocumentContent) == 0 || outcome.ResponseHash != runtimecontract.StableRuntimeProviderResponseHash(response.DocumentContent) || outcome.ResponseBytes != int64(len(response.DocumentContent)) {
+				return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned complete-document outcome with mismatched content")
+			}
+		case runtimecontract.RuntimeProviderDocumentIncomplete, runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
+			if len(response.DocumentContent) != 0 {
+				return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block leaked non-complete provider output content")
+			}
+		}
+		response.DocumentOutcome = &outcome
 		return response, nil
-	}
-	if command.OutputContinuation != nil {
-		return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate output continuation returned neither a fragment nor a failure")
 	}
 	// A complete document is the authoritative C4 handoff. Semantic decode and
 	// candidate admission are exclusively owned by SM-3 after persistence.
@@ -330,9 +342,18 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 	if err := validateRuntimeCandidatePreflightCommand(preflight); err != nil {
 		return err
 	}
-	if command.OutputContinuation != nil {
-		if err := command.OutputContinuation.Validate(); err != nil {
-			return err
+	if command.ExpectedDocument == nil {
+		return fmt.Errorf("runtime candidate command requires expected document")
+	}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		expected := command.ExpectedDocument.Normalized()
+		if err := expected.Validate(); err != nil || expected.LogicalRequestID != command.RequestIdentity.LogicalRequestID || expected.DocumentKind != command.DocumentKind || expected.ManifestHash != command.SemanticManifest.Hash || expected.StablePrefixHash != command.StablePrefixHash {
+			return fmt.Errorf("semantic runtime candidate command has invalid expected document")
+		}
+	} else {
+		expected := command.ExpectedDocument.Normalized()
+		if err := expected.Validate(); err != nil || expected.LogicalRequestID != command.RequestIdentity.LogicalRequestID || expected.DocumentKind != command.DocumentKind || expected.ManifestHash != command.CandidateManifest.Hash || expected.StablePrefixHash != command.StablePrefixHash || expected.CorrectionAttempt != command.CandidateAttempt {
+			return fmt.Errorf("operations runtime candidate command has invalid expected document")
 		}
 	}
 	return nil

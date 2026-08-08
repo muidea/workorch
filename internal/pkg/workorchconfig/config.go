@@ -76,8 +76,7 @@ type LLMOutputRuntimeConfig struct {
 	MaxGraphFileWrites                 int `json:"maxGraphFileWrites" toml:"maxGraphFileWrites"`
 	SchemaInvalidLargePreviewThreshold int `json:"schemaInvalidLargePreviewThreshold" toml:"schemaInvalidLargePreviewThreshold"`
 	MaxArtifactChunkBytes              int `json:"maxArtifactChunkBytes" toml:"maxArtifactChunkBytes"`
-	PreviousChunkTailBytes             int `json:"previousChunkTailBytes" toml:"previousChunkTailBytes"`
-	MaxChunkRetryAttempts              int `json:"maxChunkRetryAttempts" toml:"maxChunkRetryAttempts"`
+	MaxDocumentRecoveryAttempts        int `json:"maxDocumentRecoveryAttempts" toml:"maxDocumentRecoveryAttempts"`
 	MaxArtifactPlanAttempts            int `json:"maxArtifactPlanAttempts" toml:"maxArtifactPlanAttempts"`
 	MaxArtifactReplanAttempts          int `json:"maxArtifactReplanAttempts" toml:"maxArtifactReplanAttempts"`
 }
@@ -369,8 +368,7 @@ func DefaultLLMOutputRuntimeConfig() LLMOutputRuntimeConfig {
 		MaxGraphFileWrites:                 3,
 		SchemaInvalidLargePreviewThreshold: 32768,
 		MaxArtifactChunkBytes:              16384,
-		PreviousChunkTailBytes:             300,
-		MaxChunkRetryAttempts:              3,
+		MaxDocumentRecoveryAttempts:        3,
 		MaxArtifactPlanAttempts:            2,
 		MaxArtifactReplanAttempts:          2,
 	}
@@ -390,8 +388,7 @@ func NormalizeLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) (LLMOutputRunti
 	applyDefault(&cfg.MaxGraphFileWrites, defaults.MaxGraphFileWrites)
 	applyDefault(&cfg.SchemaInvalidLargePreviewThreshold, defaults.SchemaInvalidLargePreviewThreshold)
 	applyDefault(&cfg.MaxArtifactChunkBytes, defaults.MaxArtifactChunkBytes)
-	applyDefault(&cfg.PreviousChunkTailBytes, defaults.PreviousChunkTailBytes)
-	applyDefault(&cfg.MaxChunkRetryAttempts, defaults.MaxChunkRetryAttempts)
+	applyDefault(&cfg.MaxDocumentRecoveryAttempts, defaults.MaxDocumentRecoveryAttempts)
 	applyDefault(&cfg.MaxArtifactPlanAttempts, defaults.MaxArtifactPlanAttempts)
 	applyDefault(&cfg.MaxArtifactReplanAttempts, defaults.MaxArtifactReplanAttempts)
 	if err := validateLLMOutputRuntimeConfig(cfg); err != nil {
@@ -413,8 +410,7 @@ func LLMOutputRuntimeConfigValues(cfg LLMOutputRuntimeConfig) map[string]any {
 		"maxGraphFileWrites":                 normalized.MaxGraphFileWrites,
 		"schemaInvalidLargePreviewThreshold": normalized.SchemaInvalidLargePreviewThreshold,
 		"maxArtifactChunkBytes":              normalized.MaxArtifactChunkBytes,
-		"previousChunkTailBytes":             normalized.PreviousChunkTailBytes,
-		"maxChunkRetryAttempts":              normalized.MaxChunkRetryAttempts,
+		"maxDocumentRecoveryAttempts":        normalized.MaxDocumentRecoveryAttempts,
 		"maxArtifactPlanAttempts":            normalized.MaxArtifactPlanAttempts,
 		"maxArtifactReplanAttempts":          normalized.MaxArtifactReplanAttempts,
 	}
@@ -842,8 +838,7 @@ func validateLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) error {
 		{"maxGraphFileWrites", cfg.MaxGraphFileWrites},
 		{"schemaInvalidLargePreviewThreshold", cfg.SchemaInvalidLargePreviewThreshold},
 		{"maxArtifactChunkBytes", cfg.MaxArtifactChunkBytes},
-		{"previousChunkTailBytes", cfg.PreviousChunkTailBytes},
-		{"maxChunkRetryAttempts", cfg.MaxChunkRetryAttempts},
+		{"maxDocumentRecoveryAttempts", cfg.MaxDocumentRecoveryAttempts},
 		{"maxArtifactPlanAttempts", cfg.MaxArtifactPlanAttempts},
 		{"maxArtifactReplanAttempts", cfg.MaxArtifactReplanAttempts},
 	} {
@@ -856,9 +851,6 @@ func validateLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) error {
 	}
 	if cfg.SchemaInvalidLargePreviewThreshold > cfg.MaxGraphBytes {
 		return fmt.Errorf("%w: runtime.llmOutput.schemaInvalidLargePreviewThreshold must not exceed maxGraphBytes", common.ErrInvalidArgument)
-	}
-	if cfg.PreviousChunkTailBytes > cfg.MaxArtifactChunkBytes {
-		return fmt.Errorf("%w: runtime.llmOutput.previousChunkTailBytes must not exceed maxArtifactChunkBytes", common.ErrInvalidArgument)
 	}
 	return nil
 }

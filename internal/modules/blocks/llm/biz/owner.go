@@ -219,6 +219,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	response, err := llmruntime.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
 		DocumentKind:              command.DocumentKind,
 		RequestIdentity:           command.RequestIdentity,
+		ExpectedDocument:          command.ExpectedDocument,
 		Decision:                  command.Decision,
 		Transaction:               command.Transaction,
 		CandidateAttempt:          command.CandidateAttempt,
@@ -230,7 +231,6 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		SemanticManifest:          command.SemanticManifest,
 		SemanticContext:           command.SemanticContext,
 		PreviousSemanticRejection: command.PreviousSemanticRejection,
-		OutputContinuation:        command.OutputContinuation,
 	})
 	// Always attempt to persist sealed request audit when generation produced one.
 	// Audit may also ride on CandidateRequestError for failed provider calls.
@@ -253,12 +253,11 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		if stale := llmruntime.CandidatePrerequisiteStaleFromError(err); stale != nil {
 			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 			result.Set(llmevents.RequestRuntimeCandidateResult{
-				Transaction:     command.Transaction,
-				DocumentKind:    command.DocumentKind,
-				RequestIdentity: command.RequestIdentity,
-				Stale:           stale,
-				Audit:           providerRequestAuditView(audit),
-				Usage:           usage,
+				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+				Stale:                stale,
+				Audit:                providerRequestAuditView(audit),
+				Usage:                usage,
 			}, nil)
 			return
 		}
@@ -270,12 +269,11 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 			return
 		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{
-			Transaction:     command.Transaction,
-			DocumentKind:    command.DocumentKind,
-			RequestIdentity: command.RequestIdentity,
-			Feedback:        &feedback,
-			Audit:           providerRequestAuditView(audit),
-			Usage:           usage,
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			Feedback:             &feedback,
+			Audit:                providerRequestAuditView(audit),
+			Usage:                usage,
 		}, nil)
 		return
 	}
@@ -283,15 +281,28 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		status = llmmodels.RuntimeCandidateStatusCompleted
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
+	var documentOutcome *runtimecontract.RuntimeProviderDocumentOutcome
+	if response.DocumentOutcome != nil {
+		value := response.DocumentOutcome.Normalized()
+		documentOutcome = &value
+	}
 	result.Set(llmevents.RequestRuntimeCandidateResult{
-		Transaction:     response.Transaction,
-		DocumentKind:    response.DocumentKind,
-		RequestIdentity: command.RequestIdentity,
-		DocumentContent: append([]byte(nil), response.DocumentContent...),
-		OutputFragment:  response.OutputFragment,
-		Audit:           providerRequestAuditView(audit),
-		Usage:           usage,
+		Transaction:          response.Transaction,
+		DocumentKind:         response.DocumentKind,
+		RequestIdentity:      command.RequestIdentity,
+		ExpectedDocumentHash: response.ExpectedDocumentHash,
+		DocumentContent:      append([]byte(nil), response.DocumentContent...),
+		DocumentOutcome:      documentOutcome,
+		Audit:                providerRequestAuditView(audit),
+		Usage:                usage,
 	}, nil)
+}
+
+func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocumentContract) string {
+	if expected == nil {
+		return ""
+	}
+	return expected.Normalized().Hash
 }
 
 func runtimeProviderRequestFeedback(command llmevents.RequestRuntimeCandidateCommand, failure runtimecontract.RuntimeCandidateFailure) (runtimecontract.RuntimeFeedback, error) {

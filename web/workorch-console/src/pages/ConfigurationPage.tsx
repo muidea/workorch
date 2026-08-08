@@ -446,8 +446,7 @@ export function ConfigurationPage() {
                       { key: 'maxGraphFileWrites', label: 'Graph 写入节点数', children: configNumberText(llmOutput?.maxGraphFileWrites) },
                       { key: 'schemaInvalidLargePreviewThreshold', label: '大预览降级阈值', children: configNumberText(llmOutput?.schemaInvalidLargePreviewThreshold) },
                       { key: 'maxArtifactChunkBytes', label: 'Artifact Chunk 字节', children: configNumberText(llmOutput?.maxArtifactChunkBytes) },
-                      { key: 'previousChunkTailBytes', label: '上一 Chunk 尾部字节', children: configNumberText(llmOutput?.previousChunkTailBytes) },
-                      { key: 'maxChunkRetryAttempts', label: 'Chunk 重试次数', children: configNumberText(llmOutput?.maxChunkRetryAttempts) },
+                      { key: 'maxDocumentRecoveryAttempts', label: '完整文档恢复次数', children: configNumberText(llmOutput?.maxDocumentRecoveryAttempts) },
                       { key: 'maxArtifactPlanAttempts', label: 'Artifact Plan 尝试次数', children: configNumberText(llmOutput?.maxArtifactPlanAttempts) },
                       { key: 'maxArtifactReplanAttempts', label: 'Artifact Replan 次数', children: configNumberText(llmOutput?.maxArtifactReplanAttempts) }
                     ]}

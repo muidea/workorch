@@ -15,7 +15,7 @@ type ArtifactContinuation struct {
 	TargetRef     string                        `json:"targetRef"`
 	Operation     string                        `json:"operation,omitempty"`
 	OutputMode    string                        `json:"outputMode,omitempty"`
-	// Candidate output continuations are an Orchestrator-owned SM-3 subprotocol.
+	// Artifact chunking is audit/storage metadata and cannot select Runtime recovery.
 	// These fields bind stored raw chunks to their sealed authority contract;
 	// artifact storage never becomes a second action authority.
 	AuthorityTransaction AuthorityTransaction             `json:"authorityTransaction,omitempty"`

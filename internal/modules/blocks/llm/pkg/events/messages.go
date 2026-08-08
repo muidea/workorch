@@ -130,6 +130,7 @@ type RequestRuntimeCandidateCommand struct {
 	RunID                     common.RunID
 	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
 	RequestIdentity           runtimecontract.RuntimeCandidateRequestIdentity
+	ExpectedDocument          *runtimecontract.RuntimeExpectedDocumentContract
 	Decision                  runtimecontract.RuntimeDecision
 	Transaction               runtimecontract.AuthorityTransaction
 	CandidateAttempt          int
@@ -141,7 +142,6 @@ type RequestRuntimeCandidateCommand struct {
 	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
 	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
 	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
-	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
 type PreflightRuntimeCandidateCommand struct {
@@ -169,15 +169,16 @@ type PreflightRuntimeCandidateResult struct {
 }
 
 type RequestRuntimeCandidateResult struct {
-	Transaction     runtimecontract.AuthorityTransaction
-	DocumentKind    runtimecontract.RuntimeProviderDocumentKind
-	RequestIdentity runtimecontract.RuntimeCandidateRequestIdentity
-	DocumentContent []byte
-	Feedback        *runtimecontract.RuntimeFeedback
-	Stale           *runtimecontract.RuntimePrerequisiteStale
-	Audit           *runtimecontract.ProviderRequestAuditView
-	Usage           *llmaudit.ProviderUsage
-	OutputFragment  *runtimecontract.RuntimeCandidateOutputFragment
+	Transaction          runtimecontract.AuthorityTransaction
+	DocumentKind         runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity      runtimecontract.RuntimeCandidateRequestIdentity
+	ExpectedDocumentHash string
+	DocumentContent      []byte
+	DocumentOutcome      *runtimecontract.RuntimeProviderDocumentOutcome
+	Feedback             *runtimecontract.RuntimeFeedback
+	Stale                *runtimecontract.RuntimePrerequisiteStale
+	Audit                *runtimecontract.ProviderRequestAuditView
+	Usage                *llmaudit.ProviderUsage
 }
 
 type ProviderCompletionData struct {

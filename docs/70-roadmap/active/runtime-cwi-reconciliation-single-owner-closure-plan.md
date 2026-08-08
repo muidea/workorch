@@ -57,7 +57,7 @@ The successor was created before predecessor terminal delivery released the Work
 delayed correctly, but early creation violates the required release-before-create contract and can leave an orphan
 pending successor if predecessor delivery fails.
 
-#### Semantic correction and output continuation
+#### Semantic correction and whole-document recovery
 
 The first request returned a complete `coverage_order` document. SM-3 correctly rejected it because it violated the
 sealed dependency `cwi-046 -> cwi-043`.
@@ -345,10 +345,10 @@ open.
 | RSO-2 | code_closed | Move restart replacement intent to predecessor Run and add owner-private transitions | predecessor CAS, conflict, clone, pre-terminal absence and duplicate materialization tests |
 | RSO-3 | in_progress | Route predecessor termination through one SM-4 delivery and create successor only after Workspace ack | current-schema final Run delivery materializes one successor; schema-incompatible persisted delivery remains open |
 | RSO-4 | in_progress | Remove fresh-activation release bypass and successor-owned termination intent | production symbols/imports removed; unified fresh restart test depends on RSO-3 schema-incompatible delivery |
-| RSO-5 | in_progress | Add sealed expected-document contract and typed provider disposition | pure value validation/hash/order-sensitive clone tests pass; EventHub round-trip remains open |
-| RSO-6 | pending | Remove raw suffix assembly from semantic and operations authority documents | boundary tests and forbidden-symbol scan |
-| RSO-7 | pending | Implement whole-document bounded request recovery in SM-4 | output-limit, timeout, duplicate, crash/restart tests |
-| RSO-8 | pending | Enforce same-step correction and persisted proof-batch identity | wrong-step/missing-batch/out-of-batch tests |
+| RSO-5 | code_closed | Add sealed expected-document contract and typed provider disposition | pure value validation/hash/order-sensitive clone and EventHub boundary round-trip tests pass |
+| RSO-6 | code_closed | Remove raw suffix assembly from semantic and operations authority documents | partial bytes no longer cross the LLM boundary; raw suffix functions/types/config removed; forbidden-symbol scan is clean |
+| RSO-7 | code_closed | Implement whole-document bounded request recovery in SM-4 | persisted incomplete fact, duplicate/conflict, whole-document restart, expected-identity stability and exhaustion-without-attempt tests pass |
+| RSO-8 | code_closed | Enforce same-step correction and persisted proof-batch identity | expected-document session + EventHub hash fence; empty-step, first-batch sequence, correction-step/batch and request-order tests pass |
 | RSO-9 | pending | Re-run binding/feasibility/seal/dispatch/evidence regression matrix | focused, full, race, boundary, managed checks |
 | RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete live event/audit chain |
 

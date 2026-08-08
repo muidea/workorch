@@ -176,18 +176,18 @@ func (o RuntimeValidationObservation) Clone() RuntimeValidationObservation {
 type FailureClass string
 
 const (
-	FailureClassBuildFailure                 FailureClass = "build_failure"
-	FailureClassCoverageAssessmentIncomplete FailureClass = "coverage_assessment_incomplete"
-	FailureClassGovernanceDependency         FailureClass = "governance_dependency"
-	FailureClassRuntimeContractMisalignment  FailureClass = "runtime_internal_contract_misalignment"
-	FailureClassExecutionFailure             FailureClass = "execution_failure"
-	FailureClassNoProgressExhausted          FailureClass = "no_progress_exhausted"
-	FailureClassCandidateExhausted           FailureClass = "candidate_retry_exhausted"
-	FailureClassCandidateOutputExhausted     FailureClass = "candidate_output_continuation_exhausted"
-	FailureClassProviderProtocol             FailureClass = "provider_protocol_failure"
-	FailureClassProviderSubmissionUnknown    FailureClass = "provider_submission_unknown"
-	FailureClassPrerequisiteRefreshExhausted FailureClass = "prerequisite_refresh_exhausted"
-	FailureClassGovernanceRejected           FailureClass = "governance_rejected"
+	FailureClassBuildFailure                       FailureClass = "build_failure"
+	FailureClassCoverageAssessmentIncomplete       FailureClass = "coverage_assessment_incomplete"
+	FailureClassGovernanceDependency               FailureClass = "governance_dependency"
+	FailureClassRuntimeContractMisalignment        FailureClass = "runtime_internal_contract_misalignment"
+	FailureClassExecutionFailure                   FailureClass = "execution_failure"
+	FailureClassNoProgressExhausted                FailureClass = "no_progress_exhausted"
+	FailureClassCandidateExhausted                 FailureClass = "candidate_retry_exhausted"
+	FailureClassCandidateDocumentRecoveryExhausted FailureClass = "candidate_document_recovery_exhausted"
+	FailureClassProviderProtocol                   FailureClass = "provider_protocol_failure"
+	FailureClassProviderSubmissionUnknown          FailureClass = "provider_submission_unknown"
+	FailureClassPrerequisiteRefreshExhausted       FailureClass = "prerequisite_refresh_exhausted"
+	FailureClassGovernanceRejected                 FailureClass = "governance_rejected"
 )
 
 type RuntimeOperationExecutionStatus string

@@ -80,7 +80,7 @@ func (c RuntimeExpectedDocumentContract) Validate() error {
 				return common.ErrInvalidArgument
 			}
 		case RuntimeSemanticPlanStepProofBatch:
-			if c.BatchID == "" || c.BatchSequence <= 0 || len(c.BatchCoverageWorkItemIDs) == 0 || c.CoverageOrderHash == "" {
+			if c.BatchID == "" || c.BatchSequence < 0 || len(c.BatchCoverageWorkItemIDs) == 0 || c.CoverageOrderHash == "" {
 				return common.ErrInvalidArgument
 			}
 			seen := make(map[common.CoverageWorkItemID]struct{}, len(c.BatchCoverageWorkItemIDs))
@@ -175,4 +175,12 @@ func (o RuntimeProviderDocumentOutcome) Validate() error {
 		return common.ErrInvalidArgument
 	}
 	return nil
+}
+
+func StableRuntimeProviderResponseHash(content []byte) string {
+	if len(content) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(content)
+	return "provider-response-" + hex.EncodeToString(sum[:])[:20]
 }

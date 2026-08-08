@@ -56,68 +56,6 @@ func loadOrCreateRuntimeCandidateRequestContent(ctx context.Context, repo reposi
 	return value, nil
 }
 
-// persistRuntimeCandidateRequestContentChunk durably writes opaque raw bytes
-// before C3 records their metadata in the request-session ledger. Replays are
-// accepted only for byte-identical content and the same physical call.
-func persistRuntimeCandidateRequestContentChunk(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte, reachedProviderLimit bool) (runtimecontract.RuntimeCandidateRequestFragment, error) {
-	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID}).Validate(); err != nil || len(content) == 0 {
-		return runtimecontract.RuntimeCandidateRequestFragment{}, common.ErrInvalidArgument
-	}
-	continuation, err := loadOrCreateRuntimeCandidateRequestContent(ctx, repo, aggregate, logicalRequestID)
-	if err != nil {
-		return runtimecontract.RuntimeCandidateRequestFragment{}, err
-	}
-	contentString := string(content)
-	hash := runtimeCandidateOutputHash(contentString)
-	if existing, existingContent, getErr := repo.GetChunk(ctx, continuation.ID, sequence); getErr == nil {
-		if existing.ContentHash != hash || existingContent != contentString || len(existing.LLMCallRefs) != 1 || existing.LLMCallRefs[0] != physicalCallID {
-			return runtimecontract.RuntimeCandidateRequestFragment{}, fmt.Errorf("%w: candidate request content chunk conflicts at sequence %d", common.ErrConflict, sequence)
-		}
-		return runtimecontract.RuntimeCandidateRequestFragment{Sequence: sequence, ContentHash: hash, Bytes: int64(len(content)), ReachedProviderLimit: reachedProviderLimit, PhysicalCallID: physicalCallID}, nil
-	} else if !errors.Is(getErr, common.ErrNotFound) {
-		return runtimecontract.RuntimeCandidateRequestFragment{}, getErr
-	}
-	if err := repo.SaveChunk(ctx, &runtimecontract.ArtifactContinuationChunk{
-		ContinuationID: continuation.ID, Sequence: sequence, ArtifactID: continuation.ArtifactID, TargetRef: continuation.TargetRef,
-		ContentHash: hash, Bytes: int64(len(content)), LLMCallRefs: []string{physicalCallID}, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-	}, contentString); err != nil {
-		return runtimecontract.RuntimeCandidateRequestFragment{}, err
-	}
-	return runtimecontract.RuntimeCandidateRequestFragment{Sequence: sequence, ContentHash: hash, Bytes: int64(len(content)), ReachedProviderLimit: reachedProviderLimit, PhysicalCallID: physicalCallID}, nil
-}
-
-// persistAndRecordRuntimeCandidateRequestFragment is the C3 bridge between
-// opaque content storage and the aggregate-owned session ledger. Content must
-// be durable before the controller CAS makes its hash/sequence visible. This
-// helper intentionally does not submit a provider request, allocate a
-// candidate attempt, alter a recovery budget, or create a dispatch.
-func (m *Biz) persistAndRecordRuntimeCandidateRequestFragment(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte, reachedProviderLimit bool) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestFragment, error) {
-	if m == nil || m.runtimeController == nil || m.evidence.ArtifactContinuations == nil {
-		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestFragment{}, common.ErrInvalidArgument
-	}
-	fragment, err := persistRuntimeCandidateRequestContentChunk(
-		ctx,
-		m.evidence.ArtifactContinuations,
-		aggregate,
-		logicalRequestID,
-		sequence,
-		physicalCallID,
-		content,
-		reachedProviderLimit,
-	)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestFragment{}, err
-	}
-	updatedEvent, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidateRequestFragmentObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		LogicalRequestID: logicalRequestID, RequestFragment: &fragment,
-	})
-	if err != nil {
-		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestFragment{}, err
-	}
-	return updatedEvent.Aggregate, fragment, nil
-}
-
 // persistRuntimeCandidateRequestDocument stores a complete raw document before
 // the request-session controller marks it complete. It is intentionally not a
 // candidate record: decoder/admission consume it only in C5 after C4 has
@@ -201,6 +139,9 @@ func (m *Biz) markRuntimeCandidateRequestContentFailed(ctx context.Context, aggr
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
 	content, err := repository.Get(ctx, id)
 	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
 	var sessionTransaction runtimecontract.AuthorityTransaction
@@ -247,8 +188,8 @@ func loadRuntimeCandidateRequestDocument(ctx context.Context, repo repository.Ar
 // loadCompletedRuntimeCandidateRequestDocument is the only C3/C5 read path
 // for a raw request document. A chunk being durable is insufficient: the
 // aggregate must first have committed document_complete for the exact logical
-// session. This keeps a CAS-precrash fragment or an abandoned suffix out of
-// the decoder/admission path.
+// session. This keeps an uncommitted or abandoned provider response out of the
+// decoder/admission path.
 func loadCompletedRuntimeCandidateRequestDocument(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string) ([]byte, error) {
 	for _, session := range aggregate.CandidateRequestSessions {
 		if session.LogicalRequestID != logicalRequestID {
@@ -260,99 +201,4 @@ func loadCompletedRuntimeCandidateRequestDocument(ctx context.Context, repo repo
 		return loadRuntimeCandidateRequestDocument(ctx, repo, logicalRequestID)
 	}
 	return nil, fmt.Errorf("%w: runtime candidate request session not found", common.ErrNotFound)
-}
-
-// assembleRuntimeCandidateRequestFragments reconstructs bytes exclusively from
-// fragment metadata already committed in the request session. It is used only
-// to decide whether a suffix made the document structurally complete; it does
-// not advance session state, allocate an attempt, or accept a candidate.
-func assembleRuntimeCandidateRequestFragments(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string) ([]byte, error) {
-	if repo == nil || strings.TrimSpace(logicalRequestID) == "" {
-		return nil, common.ErrInvalidArgument
-	}
-	var session *runtimecontract.RuntimeCandidateRequestSession
-	for idx := range aggregate.CandidateRequestSessions {
-		if aggregate.CandidateRequestSessions[idx].LogicalRequestID == logicalRequestID {
-			value := aggregate.CandidateRequestSessions[idx].Clone()
-			session = &value
-			break
-		}
-	}
-	if session == nil || len(session.Fragments) == 0 {
-		return nil, fmt.Errorf("%w: runtime candidate request has no committed fragments", common.ErrNotFound)
-	}
-	contentID := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
-	var builder strings.Builder
-	for _, fragment := range session.Fragments {
-		chunk, content, err := repo.GetChunk(ctx, contentID, fragment.Sequence)
-		if err != nil {
-			return nil, err
-		}
-		if chunk.ContentHash != fragment.ContentHash || chunk.Bytes != fragment.Bytes || runtimeCandidateOutputHash(content) != fragment.ContentHash || int64(len(content)) != fragment.Bytes || len(chunk.LLMCallRefs) != 1 || chunk.LLMCallRefs[0] != fragment.PhysicalCallID {
-			return nil, fmt.Errorf("%w: runtime candidate request chunk does not match committed session metadata", common.ErrConflict)
-		}
-		builder.WriteString(content)
-	}
-	return []byte(builder.String()), nil
-}
-
-// prepareRuntimeCandidateRequestContinuation derives the next physical call
-// only from a committed continuation-pending session and its opaque chunks.
-// It neither sends the request nor changes aggregate state. C4 will call it
-// after persisting MarkSubmitted; keeping it here makes sequence/tail recovery
-// deterministic without turning ArtifactContinuation into a second state
-// machine.
-func prepareRuntimeCandidateRequestContinuation(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string, tailBytes int) (runtimecontract.RuntimeCandidateOutputContinuationRequest, string, error) {
-	if repo == nil || strings.TrimSpace(logicalRequestID) == "" || tailBytes <= 0 {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", common.ErrInvalidArgument
-	}
-	var session *runtimecontract.RuntimeCandidateRequestSession
-	for idx := range aggregate.CandidateRequestSessions {
-		if aggregate.CandidateRequestSessions[idx].LogicalRequestID == logicalRequestID {
-			value := aggregate.CandidateRequestSessions[idx].Clone()
-			session = &value
-			break
-		}
-	}
-	if session == nil {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", fmt.Errorf("%w: runtime candidate request session not found", common.ErrNotFound)
-	}
-	if err := session.Validate(); err != nil {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", err
-	}
-	if (session.State != runtimecontract.RuntimeCandidateRequestSessionContinuationPending &&
-		session.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending) || len(session.Fragments) == 0 {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", fmt.Errorf("%w: runtime candidate request does not have a committed continuation", common.ErrConflict)
-	}
-	contentID := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
-	lastSequence := session.NextSequence - 1
-	var lastContent string
-	for _, fragment := range session.Fragments {
-		chunk, content, err := repo.GetChunk(ctx, contentID, fragment.Sequence)
-		if err != nil {
-			return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", err
-		}
-		if chunk.ContentHash != fragment.ContentHash || chunk.Bytes != fragment.Bytes || runtimeCandidateOutputHash(content) != fragment.ContentHash || len(content) != int(fragment.Bytes) || len(chunk.LLMCallRefs) != 1 || chunk.LLMCallRefs[0] != fragment.PhysicalCallID {
-			return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", fmt.Errorf("%w: runtime candidate request chunk does not match committed session metadata", common.ErrConflict)
-		}
-		if fragment.Sequence == lastSequence {
-			lastContent = content
-		}
-	}
-	if lastContent == "" {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", fmt.Errorf("%w: runtime candidate request last continuation chunk is absent", common.ErrConflict)
-	}
-	request := runtimecontract.RuntimeCandidateOutputContinuationRequest{
-		ID:                contentID,
-		Sequence:          session.NextSequence,
-		PreviousChunkTail: runtimeCandidateOutputTail(lastContent, tailBytes),
-	}
-	if err := request.Validate(); err != nil {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", err
-	}
-	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, session.NextSequence)
-	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: session.NextSequence, PhysicalCallID: physicalCallID}).Validate(); err != nil {
-		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", err
-	}
-	return request, physicalCallID, nil
 }

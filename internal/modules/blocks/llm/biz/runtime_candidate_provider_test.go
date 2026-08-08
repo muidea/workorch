@@ -642,7 +642,7 @@ func TestRuntimeCandidateExecutionTailOnlyRendersProviderSafeFacts(t *testing.T)
 		}},
 		Activation: runtimecontract.RuntimeActivationContext{Continuation: runtimecontract.RuntimeContinuationContext{}},
 	}
-	tail := buildRuntimeCandidateExecutionTailProjection(context, 0, nil, nil, runtimecontract.RuntimeCandidateContractManifest{})
+	tail := buildRuntimeCandidateExecutionTailProjection(context, 0, nil, runtimecontract.RuntimeCandidateContractManifest{})
 	encoded, err := json.Marshal(tail)
 	if err != nil {
 		t.Fatal(err)

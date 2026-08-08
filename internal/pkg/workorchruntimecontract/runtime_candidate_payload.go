@@ -76,7 +76,7 @@ func RuntimeCandidateDocumentDispositionForError(err error) RuntimeCandidateDocu
 // decoding a Runtime candidate. A syntactically complete JSON value remains a
 // complete document even when its schema is invalid: SM-3 must persist and
 // adjudicate it. A non-JSON body is a provider protocol outcome; only a first
-// JSON value cut off at EOF is eligible for output continuation.
+// JSON value cut off at EOF is eligible for whole-document recovery.
 func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocumentDisposition {
 	if len(bytes.TrimSpace(payload)) == 0 {
 		return RuntimeCandidateDocumentEmpty
@@ -94,7 +94,7 @@ func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocu
 		return RuntimeCandidateDocumentComplete
 	}
 	// Once the first value is complete, trailing bytes are a completed
-	// document defect for the SM-3 evaluator, never an output continuation.
+	// document defect for the SM-3 evaluator, never request recovery.
 	return RuntimeCandidateDocumentComplete
 }
 

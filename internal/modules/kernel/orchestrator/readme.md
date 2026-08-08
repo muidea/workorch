@@ -103,7 +103,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - LLM owner 的 `RequestRuntimeCandidateResult` 只返回 provider-request domain 的 `RuntimeFeedback`，稳定类别仅允许
   authentication/configuration/transient/protocol；它不得跨 EventHub 返回 `RuntimeCandidateFailure` 或完整文档的
   schema/contract 裁决。Orchestrator adapter 必须先穷举校验 scope、authority、owner、category/class 与
-  document/fragment/stale 互斥关系，再在 SM-3 owner-private 边界重建内部 failure fact。
+  typed document disposition/content/feedback/stale 互斥关系，再在 SM-3 owner-private 边界重建内部 failure fact。
+  `incomplete_document` 只提交 SM-4 owner-private request-recovery fact；下一 physical call 必须从头请求同一 sealed
+  expected document，禁止跨 owner 携带 partial bytes、拼接 raw suffix 或消耗 candidate correction budget。
   provider request 的 request ID/status 只保存在 sealed `ProviderRequestAuditView`，EventHub Result 不再重复携带未消费的
   `RequestID/Status`。
 - LLM request preflight 同样只返回 `provider_preflight` domain 的 `RuntimeFeedback`，稳定类别仅为

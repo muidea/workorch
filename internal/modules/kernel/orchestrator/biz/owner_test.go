@@ -359,7 +359,7 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	bootstrap := runtimeBootstrap()
-	bootstrap.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 2, TailBytes: 64}
+	bootstrap.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
 	runs := memoryrepo.NewRunRepository()
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-semantic-pending", WorkspaceID: "ws-semantic-pending",
@@ -412,9 +412,15 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requestCount++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+			Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash,
+			ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte(`{"proposals":[`)), ResponseBytes: int64(len(`{"proposals":[`)),
+			Code: "max_output_tokens", Signature: "provider-output-limit",
+		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`{"proposals":[`), ReachedProviderLimit: true},
+			ExpectedDocumentHash: command.ExpectedDocument.Hash,
+			DocumentOutcome:      &outcome,
 		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })

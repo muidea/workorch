@@ -26,6 +26,12 @@ func TestRuntimeExpectedDocumentContractValidatesOperationsAndSemanticBatch(t *t
 	if err := batch.Validate(); err != nil {
 		t.Fatalf("semantic batch contract: %v", err)
 	}
+	firstBatch := batch
+	firstBatch.BatchSequence = 0
+	firstBatch.Hash = StableRuntimeExpectedDocumentHash(firstBatch)
+	if err := firstBatch.Validate(); err != nil {
+		t.Fatalf("first semantic batch contract: %v", err)
+	}
 	wrongStep := batch
 	wrongStep.PlanStep = RuntimeSemanticPlanStepCoverageOrder
 	wrongStep.Hash = StableRuntimeExpectedDocumentHash(wrongStep)

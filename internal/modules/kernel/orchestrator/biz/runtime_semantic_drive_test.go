@@ -50,6 +50,34 @@ func TestRuntimeSemanticActiveFeasibilityDocumentUsesBoundedBatch(t *testing.T) 
 	}
 }
 
+func TestRuntimeSemanticCorrectionExpectedDocumentKeepsPlanStepAndBatch(t *testing.T) {
+	aggregate := runtimeAggregate(t, 1)
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-1"}
+	aggregate.SemanticPlanning.Manifest = &manifest
+	aggregate.SemanticPlanning.Attempt = 1
+
+	coverageExpected, err := runtimeSemanticExpectedDocumentForLedger(aggregate, aggregate.SemanticPlanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverageExpected.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || coverageExpected.CorrectionAttempt != 1 || coverageExpected.BatchID != "" {
+		t.Fatalf("coverage-order correction expected document = %+v", coverageExpected)
+	}
+
+	batch := runtimecontract.RuntimeSemanticPlanBatch{
+		BatchID: "batch-0", Sequence: 0, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, CoverageOrderHash: "order-1",
+	}
+	aggregate.SemanticPlanning.ActiveBatchID = batch.BatchID
+	aggregate.SemanticPlanning.Batches = []runtimecontract.RuntimeSemanticPlanBatch{batch}
+	batchExpected, err := runtimeSemanticExpectedDocumentForLedger(aggregate, aggregate.SemanticPlanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batchExpected.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || batchExpected.CorrectionAttempt != 1 || batchExpected.BatchID != batch.BatchID || batchExpected.BatchSequence != 0 || len(batchExpected.BatchCoverageWorkItemIDs) != 1 || batchExpected.BatchCoverageWorkItemIDs[0] != "cwi-v2" {
+		t.Fatalf("proof-batch correction expected document = %+v", batchExpected)
+	}
+}
+
 func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -92,8 +120,26 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 		document := runtimecontract.RuntimeSemanticPlanDocument{
 			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 			ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
-			PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
-			CoverageOrder: []common.CoverageWorkItemID{item.ID},
+			PlanStep: command.SemanticContext.PlanStep, CoverageOrder: []common.CoverageWorkItemID{item.ID},
+		}
+		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+			if len(repository.aggregate.CandidateRequestSessions) != 2 {
+				t.Errorf("proof-batch provider call preceded persisted expected-document session: %+v", repository.aggregate.CandidateRequestSessions)
+				return
+			}
+			document.BatchID = command.SemanticContext.BatchID
+			document.BatchSequence = command.SemanticContext.BatchSequence
+			document.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), command.SemanticContext.BatchCoverageWorkItemIDs...)
+			document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{{
+				CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				OperationKind: runtimecontract.StepKindFileEdit,
+				Target: runtimecontract.RuntimeOperationTargetAuthorization{
+					Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
+				},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+				DeclarationRef:        "semantic/session-test",
+			}}
 		}
 		payload, encodeErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 		if encodeErr != nil {
@@ -101,7 +147,8 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 			return
 		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{
-			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, DocumentContent: payload,
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: command.ExpectedDocument.Hash, DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload), DocumentContent: payload,
 		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -124,8 +171,15 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 	if err != nil {
 		t.Fatal(err)
 	}
-	if batched.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || len(batched.CandidateRequestSessions) != 2 || batched.SemanticPlanning.LogicalRequestID == started.SemanticPlanning.LogicalRequestID || requestCount != 1 {
-		t.Fatalf("semantic proof batch did not receive a distinct persisted request session: ledger=%+v sessions=%+v requests=%d", batched.SemanticPlanning, batched.CandidateRequestSessions, requestCount)
+	if batched.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || len(batched.CandidateRequestSessions) != 1 || batched.SemanticPlanning.LogicalRequestID == started.SemanticPlanning.LogicalRequestID || requestCount != 1 {
+		t.Fatalf("semantic proof batch was not persisted before request-session creation: ledger=%+v sessions=%+v requests=%d", batched.SemanticPlanning, batched.CandidateRequestSessions, requestCount)
+	}
+	proofObserved, err := module.driveRuntimeSemanticPlanning(ctx, batched)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || len(proofObserved.CandidateRequestSessions) != 2 || requestCount != 2 {
+		t.Fatalf("semantic proof batch did not use a distinct persisted expected-document session: ledger=%+v sessions=%+v requests=%d", proofObserved.SemanticPlanning, proofObserved.CandidateRequestSessions, requestCount)
 	}
 }
 
@@ -162,6 +216,7 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: command.ExpectedDocument.Hash,
 			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "semantic_provider_protocol_invalid",
 				Signature: "semantic-provider-protocol-invalid", Reason: "provider returned an invalid semantic envelope",
@@ -249,7 +304,10 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal},
 	}
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	aggregate, session, err := runtimeTestControllerEnsureCandidateRequest(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "")
+	expected := runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, 0)
+	expected.MaxOutputTokens = 4096
+	expected.MaxRecoveryAttempts = 1
+	aggregate, session, err := runtimeTestControllerEnsureCandidateRequestWithExpected(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stablePrefixHash, manifest.Hash, "", expected)
 	if err != nil {
 		t.Fatal(err)
 	}

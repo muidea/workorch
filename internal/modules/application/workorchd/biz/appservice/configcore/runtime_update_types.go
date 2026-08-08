@@ -17,8 +17,7 @@ type UpdateRuntimeLLMOutputConfiguration struct {
 	MaxGraphFileWrites                 *int `json:"maxGraphFileWrites,omitempty"`
 	SchemaInvalidLargePreviewThreshold *int `json:"schemaInvalidLargePreviewThreshold,omitempty"`
 	MaxArtifactChunkBytes              *int `json:"maxArtifactChunkBytes,omitempty"`
-	PreviousChunkTailBytes             *int `json:"previousChunkTailBytes,omitempty"`
-	MaxChunkRetryAttempts              *int `json:"maxChunkRetryAttempts,omitempty"`
+	MaxDocumentRecoveryAttempts        *int `json:"maxDocumentRecoveryAttempts,omitempty"`
 	MaxArtifactPlanAttempts            *int `json:"maxArtifactPlanAttempts,omitempty"`
 	MaxArtifactReplanAttempts          *int `json:"maxArtifactReplanAttempts,omitempty"`
 }

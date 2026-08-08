@@ -51,15 +51,16 @@ type RuntimeInternalEvent struct {
 	FailureFact         *runtimecontract.FailureFact
 	CloseActiveDispatch bool
 
-	StablePrefixHash string
-	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
-	ManifestHash     string
-	CorrectionHash   string
-	LogicalRequestID string
-	Sequence         int
-	PhysicalCallID   string
-	RequestFragment  *runtimecontract.RuntimeCandidateRequestFragment
-	RequestOutcome   *runtimecontract.RuntimeCandidateRequestOutcome
+	StablePrefixHash        string
+	DocumentKind            runtimecontract.RuntimeProviderDocumentKind
+	ManifestHash            string
+	CorrectionHash          string
+	LogicalRequestID        string
+	Sequence                int
+	PhysicalCallID          string
+	RequestOutcome          *runtimecontract.RuntimeCandidateRequestOutcome
+	ProviderDocumentOutcome *runtimecontract.RuntimeProviderDocumentOutcome
+	ExpectedDocument        *runtimecontract.RuntimeExpectedDocumentContract
 
 	Attempt                   int
 	Manifest                  *runtimecontract.RuntimeCandidateContractManifest
@@ -229,7 +230,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestEnsured:
-		aggregate, session, err := c.ensureCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.DocumentKind, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash)
+		aggregate, session, err := c.ensureCandidateRequestSessionWithExpected(ctx, event.WorkspaceID, event.RunID, event.DocumentKind, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash, event.ExpectedDocument)
 		result.Aggregate = aggregate
 		result.CandidateSession = session
 		return result, err
@@ -276,18 +277,18 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, err := c.markCandidateRequestSubmitted(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.Sequence, event.PhysicalCallID)
 		result.Aggregate = aggregate
 		return result, err
-	case RuntimeInternalEventCandidateRequestFragmentObserved:
-		if event.RequestFragment == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.recordCandidateRequestFragment(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.RequestFragment)
-		result.Aggregate = aggregate
-		return result, err
 	case RuntimeInternalEventCandidateRequestOutcomeObserved:
 		if event.RequestOutcome == nil {
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.recordCandidateRequestTransportOutcome(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.PhysicalCallID, *event.RequestOutcome)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestRecoveryRequired:
+		if event.ProviderDocumentOutcome == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.recordCandidateRequestRecoveryRequired(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.PhysicalCallID, *event.ProviderDocumentOutcome)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateDocumentObserved:

@@ -100,8 +100,7 @@ maxGraphBytes = 32768
 maxGraphFileWrites = 3
 schemaInvalidLargePreviewThreshold = 4096
 maxArtifactChunkBytes = 4096
-previousChunkTailBytes = 256
-maxChunkRetryAttempts = 2
+maxDocumentRecoveryAttempts = 2
 maxArtifactPlanAttempts = 2
 maxArtifactReplanAttempts = 2
 

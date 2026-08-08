@@ -32,25 +32,32 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-1"); err != nil {
 		t.Fatal(err)
 	}
-	fragment := runtimecontract.RuntimeCandidateRequestFragment{Sequence: 1, ContentHash: "fragment-1", Bytes: 17, PhysicalCallID: "physical-1"}
-	continued, err := controller.recordCandidateRequestFragment(ctx, "ws-1", "run-1", session.LogicalRequestID, fragment)
+	partial := []byte(`{"operations":[`)
+	outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
+		Code: "provider_output_incomplete", Signature: "provider-output-incomplete",
+	}
+	continued, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", outcome)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(continued.CandidateAttempts) != 0 || continued.Facts.Repair.RepairAttempts != 0 || continued.ActiveDispatch != nil {
-		t.Fatalf("fragment consumed candidate/repair/dispatch state: %+v", continued)
+		t.Fatalf("incomplete outcome consumed candidate/repair/dispatch state: %+v", continued)
 	}
 	stored := continued.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionContinuationPending || stored.NextSequence != 2 || len(stored.Fragments) != 1 || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete {
-		t.Fatalf("continued session = %+v", stored)
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || stored.NextSequence != 2 || stored.IncompleteOutcomes != 1 || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete || stored.LastDocumentOutcome == nil {
+		t.Fatalf("recovery session = %+v", stored)
 	}
-	duplicateFragment, err := controller.recordCandidateRequestFragment(ctx, "ws-1", "run-1", session.LogicalRequestID, fragment)
-	if err != nil || duplicateFragment.StateRevision != continued.StateRevision {
-		t.Fatalf("duplicate fragment = %+v err=%v", duplicateFragment, err)
+	duplicateOutcome, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", outcome)
+	if err != nil || duplicateOutcome.StateRevision != continued.StateRevision {
+		t.Fatalf("duplicate incomplete outcome = %+v err=%v", duplicateOutcome, err)
 	}
-	_, err = controller.recordCandidateRequestFragment(ctx, "ws-1", "run-1", session.LogicalRequestID, runtimecontract.RuntimeCandidateRequestFragment{Sequence: 1, ContentHash: "different-fragment", Bytes: 17, PhysicalCallID: "physical-1"})
+	conflict := outcome
+	conflict.ResponseHash = runtimecontract.StableRuntimeProviderResponseHash([]byte("different"))
+	_, err = controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", conflict)
 	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("conflicting fragment err = %v, want conflict", err)
+		t.Fatalf("conflicting incomplete outcome err = %v, want conflict", err)
 	}
 
 	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-2"); err != nil {
@@ -64,8 +71,8 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete || len(completed.CandidateAttempts) != 0 {
 		t.Fatalf("complete document session = %+v aggregate=%+v", stored, completed)
 	}
-	if _, err := controller.recordCandidateRequestFragment(ctx, "ws-1", "run-1", session.LogicalRequestID, runtimecontract.RuntimeCandidateRequestFragment{Sequence: 2, ContentHash: "fragment-2", Bytes: 1, PhysicalCallID: "physical-2"}); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("fragment after complete err = %v, want conflict", err)
+	if _, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-2", outcome); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("incomplete outcome after complete err = %v, want conflict", err)
 	}
 }
 
@@ -224,7 +231,7 @@ func TestRuntimeCandidateRequestSessionTransportAndTerminalOutcomesAreAttemptFre
 	}
 }
 
-func TestRuntimeCandidateRequestSessionContinuationExhaustedTerminalIsAttemptFree(t *testing.T) {
+func TestRuntimeCandidateRequestSessionDocumentRecoveryExhaustedTerminalIsAttemptFree(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{aggregate: ptrRuntimeAggregate(stateChangeAggregate(t))}
 	controller, err := NewRuntimeController(repository)
@@ -238,13 +245,18 @@ func TestRuntimeCandidateRequestSessionContinuationExhaustedTerminalIsAttemptFre
 	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-1"); err != nil {
 		t.Fatal(err)
 	}
-	fragment := runtimecontract.RuntimeCandidateRequestFragment{Sequence: 1, ContentHash: "fragment-1", Bytes: 17, PhysicalCallID: "physical-1"}
-	if _, err := controller.recordCandidateRequestFragment(ctx, "ws-1", "run-1", session.LogicalRequestID, fragment); err != nil {
+	partial := []byte(`{"operations":[`)
+	documentOutcome := runtimecontract.RuntimeProviderDocumentOutcome{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
+		Code: "provider_output_incomplete", Signature: "provider-output-incomplete",
+	}
+	if _, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", documentOutcome); err != nil {
 		t.Fatal(err)
 	}
 	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
-		Class: runtimecontract.RuntimeCandidateRequestOutcomeContinuationExhausted,
-		Code:  "candidate_output_continuation_exhausted", Signature: "candidate-output-continuation-exhausted",
+		Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted,
+		Code:  "candidate_document_recovery_exhausted", Signature: "candidate-document-recovery-exhausted",
 	}
 	terminal, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, outcome)
 	if err != nil {
@@ -252,13 +264,13 @@ func TestRuntimeCandidateRequestSessionContinuationExhaustedTerminalIsAttemptFre
 	}
 	stored := terminal.CandidateRequestSessions[0]
 	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome != outcome ||
-		len(stored.Fragments) != 1 || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
+		stored.IncompleteOutcomes != 1 || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
 		terminal.Facts.Repair.RepairAttempts != 0 {
-		t.Fatalf("continuation exhaustion terminal aggregate = %+v", terminal)
+		t.Fatalf("document recovery exhaustion terminal aggregate = %+v", terminal)
 	}
 	duplicate, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, outcome)
 	if err != nil || duplicate.StateRevision != terminal.StateRevision {
-		t.Fatalf("duplicate continuation exhaustion terminal = %+v err=%v", duplicate, err)
+		t.Fatalf("duplicate document recovery exhaustion terminal = %+v err=%v", duplicate, err)
 	}
 }
 

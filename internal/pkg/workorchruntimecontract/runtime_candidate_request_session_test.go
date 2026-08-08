@@ -69,12 +69,8 @@ func TestRuntimeCandidateRequestSessionIDIsRunScoped(t *testing.T) {
 	}
 }
 
-func TestRuntimeCandidateOutputContinuationPreservesRawTail(t *testing.T) {
-	request := RuntimeCandidateOutputContinuationRequest{ID: "candidate-request-content-1", Sequence: 2, PreviousChunkTail: "}\n  "}
-	if err := request.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if normalized := request.Normalized(); normalized.PreviousChunkTail != request.PreviousChunkTail {
-		t.Fatalf("continuation tail was rewritten: %q", normalized.PreviousChunkTail)
+func TestRuntimeCandidateDocumentRecoveryPolicyRejectsNegativeBudget(t *testing.T) {
+	if err := (RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: -1}).Validate(); err == nil {
+		t.Fatal("negative document recovery budget was accepted")
 	}
 }

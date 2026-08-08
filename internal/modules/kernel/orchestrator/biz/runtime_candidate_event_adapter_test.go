@@ -81,8 +81,27 @@ func TestRequestRuntimeCandidatePreservesSemanticDocumentKindAcrossEventHub(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
+	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || response.ExpectedDocumentHash != command.ExpectedDocument.Hash || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
 		t.Fatalf("semantic response=%+v providerCalls=%d", response, providerCalls)
+	}
+}
+
+func TestRequestRuntimeCandidateRejectsExpectedDocumentHashDrift(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(4)
+	defer hub.Terminate(ctx)
+	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: "expected-document-other", DocumentContent: []byte(`{"documentKind":"semantic_plan"}`),
+		}, nil)
+	})
+	defer observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
+	_, err := RequestRuntimeCandidate(ctx, hub, eventSemanticCandidateCommand(t))
+	if err == nil || !strings.Contains(err.Error(), "expected-document identity") {
+		t.Fatalf("expected-document hash drift error = %v", err)
 	}
 }
 
@@ -115,12 +134,24 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 		ProviderCeiling: &runtimecontract.ProviderCeiling{Selection: runtimecontract.ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 		PlanStep:        runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
-	return llmevents.RequestRuntimeCandidateCommand{
+	command := llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		RequestIdentity:  runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "semantic-request-1", Sequence: 1, PhysicalCallID: "semantic-call-1"},
 		StablePrefixHash: runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
 		SemanticManifest: manifest, SemanticContext: context,
 	}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  command.DocumentKind, PlanStep: context.PlanStep,
+		ManifestHash: manifest.Hash, DefinitionSeedHash: seed.Hash,
+		LogicalRequestID: command.RequestIdentity.LogicalRequestID, StablePrefixHash: command.StablePrefixHash,
+		BatchID: context.BatchID, BatchSequence: context.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), context.BatchCoverageWorkItemIDs...), CoverageOrderHash: "order-1",
+		MaxOutputTokens: 2048, MaxRecoveryAttempts: 2,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	command.ExpectedDocument = &expected
+	return command
 }
 
 func candidateManifestForEventRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
@@ -130,6 +161,19 @@ func candidateManifestForEventRequest(t *testing.T, decision runtimecontract.Run
 		t.Fatal(err)
 	}
 	return manifest
+}
+
+func withOperationsExpectedDocument(t *testing.T, command llmevents.RequestRuntimeCandidateCommand) llmevents.RequestRuntimeCandidateCommand {
+	t.Helper()
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  command.DocumentKind, ManifestHash: command.CandidateManifest.Hash,
+		LogicalRequestID: command.RequestIdentity.LogicalRequestID, CorrectionAttempt: command.CandidateAttempt,
+		StablePrefixHash: command.StablePrefixHash, MaxOutputTokens: 8192, MaxRecoveryAttempts: 2,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	command.ExpectedDocument = &expected
+	return command
 }
 
 func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
@@ -152,13 +196,13 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	}
 	defer llm.Stop(ctx)
 	decision := sealedCandidateTestDecision(t)
-	response, err := RequestRuntimeCandidate(ctx, hub, llmevents.RequestRuntimeCandidateCommand{
+	response, err := RequestRuntimeCandidate(ctx, hub, withOperationsExpectedDocument(t, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-provider-failure", Sequence: 1, PhysicalCallID: "candidate-call-provider-failure"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,13 +276,13 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 	}
 	defer llm.Stop(ctx)
 	decision := sealedCandidateTestDecision(t)
-	response, err := RequestRuntimeCandidate(ctx, hub, llmevents.RequestRuntimeCandidateCommand{
+	response, err := RequestRuntimeCandidate(ctx, hub, withOperationsExpectedDocument(t, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-complete-schema", Sequence: 1, PhysicalCallID: "candidate-call-complete-schema"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,13 +326,13 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 	}
 	defer llm.Stop(ctx)
 	decision := sealedCandidateTestDecision(t)
-	response, err := RequestRuntimeCandidate(ctx, hub, llmevents.RequestRuntimeCandidateCommand{
+	response, err := RequestRuntimeCandidate(ctx, hub, withOperationsExpectedDocument(t, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-stale", Sequence: 1, PhysicalCallID: "candidate-call-stale"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,6 +372,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 	}
+	base = withOperationsExpectedDocument(t, base)
 	first, err := RequestRuntimeCandidate(ctx, hub, base)
 	if err != nil {
 		t.Fatal(err)
@@ -349,6 +394,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 			Path: "$.unexpected", Actual: "unexpected", Allowed: []string{"operations"}, Forbidden: []string{"unexpected"},
 		},
 	}
+	retry = withOperationsExpectedDocument(t, retry)
 	second, err := RequestRuntimeCandidate(ctx, hub, retry)
 	if err != nil {
 		t.Fatal(err)
@@ -635,13 +681,13 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	context := candidateContextForDecision(decision)
 	context.Activation = activation
 	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, activation.MCPCapabilities)
-	response, err := RequestRuntimeCandidate(ctx, hub, llmevents.RequestRuntimeCandidateCommand{
+	response, err := RequestRuntimeCandidate(ctx, hub, withOperationsExpectedDocument(t, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-mcp", Sequence: 1, PhysicalCallID: "candidate-call-mcp"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-mcp",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindManagedValidationSession}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, context), CandidateContext: context,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -690,12 +736,13 @@ func TestRequestRuntimeCandidateRejectsDivergentSealedContextBeforeEventHub(t *t
 	candidateContext.RequiredState = runtimecontract.ConvergenceStateNeedValidation
 	hub := magicevent.NewHub(1)
 	defer hub.Terminate(context.Background())
-	_, err := RequestRuntimeCandidate(context.Background(), hub, llmevents.RequestRuntimeCandidateCommand{
+	_, err := RequestRuntimeCandidate(context.Background(), hub, withOperationsExpectedDocument(t, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-		WorkspaceID:  "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
+		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-divergent", Sequence: 1, PhysicalCallID: "candidate-call-divergent"},
+		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContext), CandidateContext: candidateContext,
-	})
+	}))
 	if err == nil || !strings.Contains(err.Error(), "required state") {
 		t.Fatalf("divergent sealed context err = %v", err)
 	}

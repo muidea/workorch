@@ -198,15 +198,14 @@ type runtimeCandidateAuthorityProjection struct {
 // evidence and retry context. It never changes C0-C2 and never carries raw
 // provider payloads.
 type runtimeCandidateExecutionTailProjection struct {
-	Attempt                   int                                                        `json:"candidateAttempt"`
-	Retry                     *runtimeCandidateRetryProjection                           `json:"retry,omitempty"`
-	Failure                   *runtimeCandidateProviderSafeFailureProjection             `json:"failure,omitempty"`
-	AcceptedEvidence          []runtimeCandidateProviderSafeEvidenceProjection           `json:"latestAcceptedEvidence,omitempty"`
-	RejectedEvidence          []runtimeCandidateProviderSafeEvidenceProjection           `json:"latestRejectedEvidence,omitempty"`
-	Assessments               []runtimeCandidateProviderSafeAssessmentProjection         `json:"recentAssessments,omitempty"`
-	RejectedOperationShapes   []runtimeCandidateProviderSafeOperationShapeProjection     `json:"rejectedOperationShapes,omitempty"`
-	NoProgressOperationShapes []runtimeCandidateProviderSafeOperationShapeProjection     `json:"noProgressOperationShapes,omitempty"`
-	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest `json:"outputContinuation,omitempty"`
+	Attempt                   int                                                    `json:"candidateAttempt"`
+	Retry                     *runtimeCandidateRetryProjection                       `json:"retry,omitempty"`
+	Failure                   *runtimeCandidateProviderSafeFailureProjection         `json:"failure,omitempty"`
+	AcceptedEvidence          []runtimeCandidateProviderSafeEvidenceProjection       `json:"latestAcceptedEvidence,omitempty"`
+	RejectedEvidence          []runtimeCandidateProviderSafeEvidenceProjection       `json:"latestRejectedEvidence,omitempty"`
+	Assessments               []runtimeCandidateProviderSafeAssessmentProjection     `json:"recentAssessments,omitempty"`
+	RejectedOperationShapes   []runtimeCandidateProviderSafeOperationShapeProjection `json:"rejectedOperationShapes,omitempty"`
+	NoProgressOperationShapes []runtimeCandidateProviderSafeOperationShapeProjection `json:"noProgressOperationShapes,omitempty"`
 }
 
 // The following C4 values are deliberately narrower than the persisted
@@ -497,9 +496,6 @@ func sealedAuditFromRequest(
 	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		kind = "runtime_semantic_plan"
 	}
-	if request.OutputContinuation != nil {
-		kind += "_output_continuation"
-	}
 	ceiling := runtimeRequestProviderCeiling(request)
 	target := runtimecontract.ProviderModelTarget{}
 	capabilityRevision := ""
@@ -672,7 +668,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, request.OutputContinuation, manifest))
+	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, manifest))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -706,12 +702,6 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 				StablePrefixHash: wantPrefix, RenderedStablePrefixHash: wantPrefix,
 			},
 		},
-	}
-	if request.OutputContinuation != nil {
-		providerRequest.Kind = "runtime_candidate_output_continuation"
-		providerRequest.Schema = ""
-		providerRequest.RawTextOutput = true
-		providerRequest.PromptContext.Sections[4].Content = string(executionTailJSON) + "\n\nReturn only the exact next bytes of the candidate JSON document after outputContinuation.previousChunkTail. Do not repeat the tail, do not start a new JSON object, and do not use markdown."
 	}
 	attachProviderCachePlan(&providerRequest)
 	if providerRequest.ContextBudget.CachePlan != nil {
@@ -879,7 +869,6 @@ func buildRuntimeCandidateExecutionTailProjection(
 	context runtimecontract.RuntimeCandidateContext,
 	attempt int,
 	previousFailure *runtimecontract.RuntimeCandidateFailure,
-	outputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 ) runtimeCandidateExecutionTailProjection {
 	context = context.Normalized()
@@ -892,7 +881,6 @@ func buildRuntimeCandidateExecutionTailProjection(
 		Assessments:               runtimeProviderSafeAssessments(latestRuntimeAssessments(context.Assessments)),
 		RejectedOperationShapes:   runtimeProviderSafeOperationShapes(context.RejectedOperationShapes),
 		NoProgressOperationShapes: runtimeProviderSafeOperationShapes(context.NoProgressOperationShapes),
-		OutputContinuation:        outputContinuation,
 	}
 }
 

@@ -42,8 +42,7 @@ export type RuntimeLLMOutputConfiguration = {
   maxGraphFileWrites?: number;
   schemaInvalidLargePreviewThreshold?: number;
   maxArtifactChunkBytes?: number;
-  previousChunkTailBytes?: number;
-  maxChunkRetryAttempts?: number;
+  maxDocumentRecoveryAttempts?: number;
   maxArtifactPlanAttempts?: number;
   maxArtifactReplanAttempts?: number;
 };

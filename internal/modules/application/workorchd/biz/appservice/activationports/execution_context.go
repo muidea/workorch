@@ -137,9 +137,8 @@ func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract ma
 		llmOutput := configuration.Runtime.LLMOutput
 		executionContract["semanticPlanMaxOutputTokens"] = llmOutput.SemanticPlanMaxOutputTokens
 		executionContract["candidateMaxOutputTokens"] = llmOutput.CandidateMaxOutputTokens
-		executionContract["candidateOutputContinuation"] = map[string]any{
-			"maxChunks": configuration.Runtime.LLMOutput.MaxChunkRetryAttempts,
-			"tailBytes": configuration.Runtime.LLMOutput.PreviousChunkTailBytes,
+		executionContract["candidateDocumentRecovery"] = map[string]any{
+			"maxAttempts": configuration.Runtime.LLMOutput.MaxDocumentRecoveryAttempts,
 		}
 	}
 	return nil

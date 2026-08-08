@@ -68,13 +68,25 @@ func (m *Biz) runtimeOwnerFeasibility(ctx context.Context, aggregate runtime.Run
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeEnsureCandidateRequest(ctx context.Context, aggregate runtime.RuntimeAggregate, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DocumentKind: documentKind, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
+func (m *Biz) runtimeEnsureCandidateRequestWithExpected(ctx context.Context, aggregate runtime.RuntimeAggregate, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected runtimecontract.RuntimeExpectedDocumentContract) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		DocumentKind: documentKind, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash, ExpectedDocument: &expected,
+	})
 	return result.Aggregate, result.CandidateSession, err
 }
 
-func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, outcome *runtimecontract.RuntimeCandidateRequestOutcome, fragment *runtimecontract.RuntimeCandidateRequestFragment, stale *runtimecontract.RuntimePrerequisiteStale) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, RequestOutcome: outcome, RequestFragment: fragment, Stale: stale})
+func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, outcome *runtimecontract.RuntimeCandidateRequestOutcome, stale *runtimecontract.RuntimePrerequisiteStale) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, RequestOutcome: outcome, Stale: stale})
+	return result.Aggregate, err
+}
+
+func (m *Biz) runtimeCandidateRequestRecoveryRequired(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:        runtime.RuntimeInternalEventCandidateRequestRecoveryRequired,
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderDocumentOutcome: &outcome,
+	})
 	return result.Aggregate, err
 }
 

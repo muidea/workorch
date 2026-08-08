@@ -16,8 +16,7 @@ func TestLLMOutputRuntimePolicySharesConfigShapeWithoutSharingSemantics(t *testi
 		MaxGraphFileWrites:                 103,
 		SchemaInvalidLargePreviewThreshold: 104,
 		MaxArtifactChunkBytes:              105,
-		PreviousChunkTailBytes:             106,
-		MaxChunkRetryAttempts:              107,
+		MaxDocumentRecoveryAttempts:        107,
 		MaxArtifactPlanAttempts:            108,
 		MaxArtifactReplanAttempts:          109,
 	}
@@ -36,8 +35,7 @@ func TestLLMOutputRuntimePolicySharesConfigShapeWithoutSharingSemantics(t *testi
 		MaxGraphFileWrites:                 -1,
 		SchemaInvalidLargePreviewThreshold: -1,
 		MaxArtifactChunkBytes:              -1,
-		PreviousChunkTailBytes:             -1,
-		MaxChunkRetryAttempts:              -1,
+		MaxDocumentRecoveryAttempts:        -1,
 		MaxArtifactPlanAttempts:            -1,
 		MaxArtifactReplanAttempts:          -1,
 	}

@@ -299,11 +299,8 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	transaction := aggregate.Decision.AuthorityTransaction()
 	requestSession := runtimecontract.RuntimeCandidateRequestSession{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: transaction, StablePrefixHash: "stable-prefix-v2", ManifestHash: "candidate-manifest-v2",
-		State: runtimecontract.RuntimeCandidateRequestSessionContinuationPending, NextSequence: 2,
-		Fragments: []runtimecontract.RuntimeCandidateRequestFragment{{
-			Sequence: 1, ContentHash: "fragment-v1", Bytes: 23, PhysicalCallID: "physical-call-1",
-		}},
-		LastPhysicalCallID: "physical-call-1", ProviderSubmitted: true,
+		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, IncompleteOutcomes: 1,
+		LastPhysicalCallID: "physical-call-1", ProviderSubmitted: false,
 		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
 			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: "candidate_output_incomplete",
 		},
@@ -311,6 +308,19 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	requestSession.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
 		requestSession.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, requestSession.StablePrefixHash, requestSession.ManifestHash, requestSession.CorrectionHash,
 	)
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		ManifestHash: requestSession.ManifestHash, LogicalRequestID: requestSession.LogicalRequestID, StablePrefixHash: requestSession.StablePrefixHash,
+		MaxOutputTokens: 8192, MaxRecoveryAttempts: 2,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	requestSession.ExpectedDocument = &expected
+	documentOutcome := runtimecontract.RuntimeProviderDocumentOutcome{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: expected.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte("partial")), ResponseBytes: 7,
+		Code: "candidate_output_incomplete", Signature: "candidate-output-incomplete",
+	}
+	requestSession.LastDocumentOutcome = &documentOutcome
 	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{requestSession}
 	if current, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil || current.RuntimeBootstrap == nil || !runtimecontract.SameRuntimeBootstrap(*current.RuntimeBootstrap, runtimeBootstrap()) {
 		t.Fatalf("persisted bootstrap mismatch current=%+v err=%v", current, err)
@@ -329,17 +339,17 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	if len(loaded.CandidateRequestSessions) != 1 || !reflect.DeepEqual(loaded.CandidateRequestSessions[0], requestSession) {
 		t.Fatalf("loaded request session = %+v, want %+v", loaded.CandidateRequestSessions, requestSession)
 	}
-	// Record conversion must not retain aliases to the caller's session/
-	// fragment slice. A later controller transition must be a new CAS record.
+	// Record conversion must not retain aliases to the caller's nested session
+	// values. A later controller transition must be a new CAS record.
 	record := runtimeStateRecordFromAggregate(aggregate)
-	record.CandidateRequestSessions[0].Fragments[0].ContentHash = "mutated-record-fragment"
-	if aggregate.CandidateRequestSessions[0].Fragments[0].ContentHash != "fragment-v1" {
-		t.Fatalf("record conversion aliased request-session fragment metadata: %+v", aggregate.CandidateRequestSessions)
+	record.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash = "mutated-record-outcome"
+	if aggregate.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash == "mutated-record-outcome" {
+		t.Fatalf("record conversion aliased request-session document outcome: %+v", aggregate.CandidateRequestSessions)
 	}
 	reloadedFromRecord := runtimeAggregateFromRecord(record)
-	reloadedFromRecord.CandidateRequestSessions[0].Fragments[0].ContentHash = "mutated-aggregate-fragment"
-	if record.CandidateRequestSessions[0].Fragments[0].ContentHash != "mutated-record-fragment" {
-		t.Fatalf("aggregate conversion aliased request-session fragment metadata: %+v", record.CandidateRequestSessions)
+	reloadedFromRecord.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash = "mutated-aggregate-outcome"
+	if record.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash != "mutated-record-outcome" {
+		t.Fatalf("aggregate conversion aliased request-session document outcome: %+v", record.CandidateRequestSessions)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil {
@@ -3201,7 +3211,9 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		if command.CandidateAttempt == 0 {
 			result.Set(llmevents.RequestRuntimeCandidateResult{
 				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-				DocumentContent: []byte(`{"unexpected":true}`),
+				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+				DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"unexpected":true}`)),
+				DocumentContent:      []byte(`{"unexpected":true}`),
 			}, nil)
 			return
 		}
@@ -4015,7 +4027,7 @@ func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidate
 		requests++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	biz := newRuntimeTestOwner()
@@ -4203,8 +4215,10 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{
-				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
-				AcceptanceSlicePolicy:     &policy,
+				OperationContractRevision:   runtimecontract.RuntimeOperationContractRevision(),
+				AcceptanceSlicePolicy:       &policy,
+				SemanticPlanMaxOutputTokens: 8192,
+				CandidateMaxOutputTokens:    8192,
 			},
 		},
 		Focuses: []runtimecontract.CoverageFocus{{

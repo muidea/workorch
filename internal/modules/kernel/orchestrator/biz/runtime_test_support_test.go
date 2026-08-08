@@ -370,6 +370,7 @@ func runtimeCandidateResultForTest(t *testing.T, command llmevents.RequestRuntim
 		// Surface the encode/membership failure as a typed complete rejection.
 		return llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid",
 				Signature: "candidate-contract-invalid", Reason: err.Error(),
@@ -378,8 +379,25 @@ func runtimeCandidateResultForTest(t *testing.T, command llmevents.RequestRuntim
 	}
 	return llmevents.RequestRuntimeCandidateResult{
 		Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-		DocumentContent: document,
+		ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+		DocumentContent:      document,
 	}
+}
+
+func runtimeCompleteDocumentOutcome(expected *runtimecontract.RuntimeExpectedDocumentContract, document []byte) *runtimecontract.RuntimeProviderDocumentOutcome {
+	return &runtimecontract.RuntimeProviderDocumentOutcome{
+		Disposition:          runtimecontract.RuntimeProviderDocumentComplete,
+		ExpectedDocumentHash: runtimeExpectedDocumentHash(expected),
+		ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(document), ResponseBytes: int64(len(document)),
+	}
+}
+
+func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocumentContract) string {
+	if expected == nil {
+		return ""
+	}
+	return expected.Normalized().Hash
 }
 
 // bindRuntimeTestCandidateToManifest builds the current provider wire shape

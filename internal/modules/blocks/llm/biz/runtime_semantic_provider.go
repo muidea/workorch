@@ -75,9 +75,8 @@ type runtimeSemanticDiagnosticProjection struct {
 }
 
 type runtimeSemanticTailProjection struct {
-	Attempt            int                                                        `json:"attempt"`
-	PreviousRejection  *runtimeSemanticDiagnosticProjection                       `json:"previousRejection,omitempty"`
-	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest `json:"outputContinuation,omitempty"`
+	Attempt           int                                  `json:"attempt"`
+	PreviousRejection *runtimeSemanticDiagnosticProjection `json:"previousRejection,omitempty"`
 }
 
 func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
@@ -154,7 +153,6 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	}
 	tailJSON, err := json.Marshal(runtimeSemanticTailProjection{
 		Attempt: request.CandidateAttempt, PreviousRejection: runtimeProviderSafeSemanticDiagnostic(request.PreviousSemanticRejection),
-		OutputContinuation: request.OutputContinuation,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -193,12 +191,6 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		providerRequest.MaxOutputTokens = budget
 		providerRequest.ContextBudget.EffectiveMaxOutputTokens = budget
 		providerRequest.ContextBudget.EstimatedOutputTokens = budget
-	}
-	if request.OutputContinuation != nil {
-		providerRequest.Kind = "runtime_semantic_plan_output_continuation"
-		providerRequest.Schema = ""
-		providerRequest.RawTextOutput = true
-		providerRequest.PromptContext.Sections[4].Content = string(tailJSON) + "\n\nReturn only the exact next bytes of the semantic_plan JSON document after outputContinuation.previousChunkTail. Do not repeat the tail, start a new JSON object, or use markdown."
 	}
 	attachProviderCachePlan(&providerRequest)
 	if providerRequest.ContextBudget.CachePlan != nil {

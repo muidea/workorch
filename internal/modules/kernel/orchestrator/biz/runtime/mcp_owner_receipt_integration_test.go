@@ -313,13 +313,21 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	requestIdentity := runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed", Sequence: 1, PhysicalCallID: "candidate-call-observed"}
+	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,
+		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: stablePrefix,
+		MaxOutputTokens: 8192, MaxRecoveryAttempts: 1,
+	}
+	expectedDocument.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expectedDocument)
 	requestResult := hub.Send(magicevent.NewEventWithContext(
 		llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM,
 		magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{
 			DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 			WorkspaceID:  persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
-			RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed", Sequence: 1, PhysicalCallID: "candidate-call-observed"},
-			Decision:        persisted.Decision, Transaction: persisted.Decision.AuthorityTransaction(), CandidateAttempt: 0,
+			RequestIdentity: requestIdentity, ExpectedDocument: &expectedDocument,
+			Decision: persisted.Decision, Transaction: persisted.Decision.AuthorityTransaction(), CandidateAttempt: 0,
 			StablePrefixHash: stablePrefix, CandidateManifest: manifest, DefinitionContext: persisted.Definition, CandidateContext: candidateContext,
 		},
 	))
@@ -851,7 +859,15 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := hub.Send(magicevent.NewEventWithContext(llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed-seal", Sequence: 1, PhysicalCallID: "candidate-call-observed-seal"}, Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
+	requestIdentity := runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed-seal", Sequence: 1, PhysicalCallID: "candidate-call-observed-seal"}
+	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,
+		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: prefix,
+		MaxOutputTokens: 8192, MaxRecoveryAttempts: 1,
+	}
+	expectedDocument.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expectedDocument)
+	result := hub.Send(magicevent.NewEventWithContext(llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RequestIdentity: requestIdentity, ExpectedDocument: &expectedDocument, Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
 	data, requestErr := result.Get()
 	if requestErr != nil {
 		t.Fatal(requestErr)

@@ -558,8 +558,7 @@ def clean_llm_output(value):
         "maxGraphFileWrites",
         "schemaInvalidLargePreviewThreshold",
         "maxArtifactChunkBytes",
-        "previousChunkTailBytes",
-        "maxChunkRetryAttempts",
+        "maxDocumentRecoveryAttempts",
         "maxArtifactPlanAttempts",
         "maxArtifactReplanAttempts",
     ]

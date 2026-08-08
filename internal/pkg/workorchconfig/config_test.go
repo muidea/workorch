@@ -44,8 +44,7 @@ maxGraphBytes = 16384
 maxGraphFileWrites = 2
 schemaInvalidLargePreviewThreshold = 8192
 maxArtifactChunkBytes = 4096
-previousChunkTailBytes = 128
-maxChunkRetryAttempts = 4
+maxDocumentRecoveryAttempts = 4
 maxArtifactPlanAttempts = 3
 maxArtifactReplanAttempts = 2
 
@@ -135,8 +134,7 @@ maxRepeatedSamePrompt = 1
 		cfg.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
 		cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 8192 ||
 		cfg.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
-		cfg.Runtime.LLMOutput.PreviousChunkTailBytes != 128 ||
-		cfg.Runtime.LLMOutput.MaxChunkRetryAttempts != 4 ||
+		cfg.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 ||
 		cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
 		cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
 		t.Fatalf("runtime llmOutput config = %+v, want configured thresholds", cfg.Runtime.LLMOutput)
@@ -208,8 +206,7 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 		MaxGraphFileWrites:                 2,
 		SchemaInvalidLargePreviewThreshold: 4096,
 		MaxArtifactChunkBytes:              4096,
-		PreviousChunkTailBytes:             256,
-		MaxChunkRetryAttempts:              4,
+		MaxDocumentRecoveryAttempts:        4,
 		MaxArtifactPlanAttempts:            3,
 		MaxArtifactReplanAttempts:          2,
 	}
@@ -290,8 +287,7 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 		next.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
 		next.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 4096 ||
 		next.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
-		next.Runtime.LLMOutput.PreviousChunkTailBytes != 256 ||
-		next.Runtime.LLMOutput.MaxChunkRetryAttempts != 4 ||
+		next.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 ||
 		next.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
 		next.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
 		t.Fatalf("next runtime llmOutput config = %+v, want saved thresholds", next.Runtime.LLMOutput)

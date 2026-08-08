@@ -10,6 +10,16 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func semanticCoverageOrderExpectedDocument(aggregate RuntimeAggregate, manifestHash, stablePrefixHash string) runtimecontract.RuntimeExpectedDocumentContract {
+	return runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		ManifestHash:  manifestHash, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
+		StablePrefixHash: stablePrefixHash, MaxOutputTokens: 4096, MaxRecoveryAttempts: 1,
+	}
+}
+
 type semanticResponseLossRepository struct {
 	RuntimeStateRepository
 	marker string
@@ -375,7 +385,8 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		aggregate = result.Aggregate
 		return aggregate
 	}
-	withSession, session, err := controller.ensureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", manifest.Hash, "")
+	expected := semanticCoverageOrderExpectedDocument(aggregate, manifest.Hash, "semantic-prefix-1")
+	withSession, session, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", manifest.Hash, "", &expected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +528,8 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	if newManifest.Hash == manifest.Hash {
 		t.Fatal("new catalog revision did not change semantic manifest identity")
 	}
-	withNewSession, newSession, err := controller.ensureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, "")
+	newExpected := semanticCoverageOrderExpectedDocument(aggregate, newManifest.Hash, "semantic-prefix-1")
+	withNewSession, newSession, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, "", &newExpected)
 	if err != nil {
 		t.Fatal(err)
 	}

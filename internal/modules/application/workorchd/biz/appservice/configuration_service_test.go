@@ -67,8 +67,7 @@ maxGraphBytes = 16384
 maxGraphFileWrites = 2
 schemaInvalidLargePreviewThreshold = 8192
 maxArtifactChunkBytes = 4096
-previousChunkTailBytes = 128
-maxChunkRetryAttempts = 4
+maxDocumentRecoveryAttempts = 4
 maxArtifactPlanAttempts = 3
 maxArtifactReplanAttempts = 2
 ` + validLLMTOML() + `

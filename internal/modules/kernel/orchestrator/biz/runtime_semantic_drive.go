@@ -39,7 +39,8 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
 		}
 		stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-		ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "")
+		expected := runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, 0)
+		ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "", expected)
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
@@ -53,11 +54,8 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningOrderAccepted:
 		batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
-		ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		return m.compileRuntimeSemanticPlanBatch(ctx, ensured, session.LogicalRequestID, 4)
+		logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
+		return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)
 	case runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted:
@@ -97,11 +95,8 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 		}
 		if len(ledger.PendingCoverageIDs) != 0 {
 			batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
-			ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
-			if err != nil {
-				return runtime.RuntimeAggregate{}, err
-			}
-			return m.compileRuntimeSemanticPlanBatch(ctx, ensured, session.LogicalRequestID, 4)
+			logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
+			return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)
 		}
 		merged, err := m.mergeRuntimeSemanticPlanBatchDocuments(ctx, aggregate)
 		if err != nil {
@@ -150,16 +145,97 @@ func runtimeSemanticPrerequisitesPending(values []runtimecontract.RuntimePrerequ
 	return false
 }
 
+func runtimeSemanticLogicalRequestID(aggregate runtime.RuntimeAggregate, stablePrefixHash, manifestHash, correctionHash string) string {
+	return runtimecontract.StableRuntimeCandidateRequestSessionID(
+		runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Decision.AuthorityTransaction(),
+		stablePrefixHash,
+		manifestHash,
+		correctionHash,
+	)
+}
+
+func runtimeSemanticExpectedDocument(aggregate runtime.RuntimeAggregate, step runtimecontract.RuntimeSemanticPlanStep, batch *runtimecontract.RuntimeSemanticPlanBatch, correctionAttempt int) runtimecontract.RuntimeExpectedDocumentContract {
+	execution := aggregate.Facts.Activation.ExecutionContract.Normalized()
+	maxOutputTokens := execution.SemanticPlanMaxOutputTokens
+	if maxOutputTokens <= 0 && aggregate.Facts.Resources.ProviderCeiling != nil {
+		maxOutputTokens = aggregate.Facts.Resources.ProviderCeiling.EffectiveMaxOutputTokens
+	}
+	maxRecoveryAttempts := execution.CandidateDocumentRecovery.MaxAttempts
+	if maxRecoveryAttempts <= 0 {
+		maxRecoveryAttempts = 1
+	}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		PlanStep:      step, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
+		CorrectionAttempt: correctionAttempt, MaxOutputTokens: maxOutputTokens, MaxRecoveryAttempts: maxRecoveryAttempts,
+	}
+	if batch != nil {
+		expected.BatchID = batch.BatchID
+		expected.BatchSequence = batch.Sequence
+		expected.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+		expected.CoverageOrderHash = batch.CoverageOrderHash
+	}
+	return expected
+}
+
+func runtimeSemanticExpectedDocumentForLedger(aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtimecontract.RuntimeExpectedDocumentContract, error) {
+	if ledger.Manifest == nil {
+		return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("semantic expected document requires a manifest")
+	}
+	if ledger.ActiveBatchID == "" {
+		return runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, ledger.Attempt), nil
+	}
+	for idx := range ledger.Batches {
+		if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
+			batch := ledger.Batches[idx].Clone()
+			return runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepProofBatch, &batch, ledger.Attempt), nil
+		}
+	}
+	return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("semantic expected document has no persisted active batch")
+}
+
+func runtimeSemanticRequestIdentityHash(ledger runtimecontract.RuntimeSemanticPlanningLedger) (string, error) {
+	if ledger.CorrectionHash != "" {
+		return ledger.CorrectionHash, nil
+	}
+	if ledger.ActiveBatchID == "" {
+		return "", nil
+	}
+	for idx := range ledger.Batches {
+		if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
+			return fmt.Sprintf("semantic-proof-batch-%d", ledger.Batches[idx].Sequence), nil
+		}
+	}
+	return "", fmt.Errorf("semantic request identity has no persisted active batch")
+}
+
 func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
 	ledger := aggregate.SemanticPlanning.Clone()
 	if ledger.Manifest == nil || ledger.LogicalRequestID == "" || aggregate.Facts.Resources.ProviderCeiling == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_context_invalid", "semantic request is missing manifest, request identity, or provider ceiling", nil)
 	}
 	manifest := ledger.Manifest.Clone()
-	session, found := runtimeCandidateRequestSession(aggregate, ledger.LogicalRequestID)
-	if !found {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_session_missing", "semantic request session is not persisted", nil)
+	expected, expectedErr := runtimeSemanticExpectedDocumentForLedger(aggregate, ledger)
+	if expectedErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_expected_document_invalid", expectedErr.Error(), nil)
 	}
+	requestIdentityHash, identityErr := runtimeSemanticRequestIdentityHash(ledger)
+	if identityErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_identity_invalid", identityErr.Error(), nil)
+	}
+	ensured, session, ensureErr := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, manifest.Hash, requestIdentityHash, expected)
+	if ensureErr != nil {
+		return runtime.RuntimeAggregate{}, ensureErr
+	}
+	if session.LogicalRequestID != ledger.LogicalRequestID {
+		return m.failRuntimeSemanticContract(ctx, ensured, "semantic_request_session_mismatch", "semantic expected document resolved a different logical request", nil)
+	}
+	aggregate = ensured
+	ledger = aggregate.SemanticPlanning.Clone()
 	if session.ManifestHash != manifest.Hash || session.StablePrefixHash != ledger.StablePrefixHash {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_session_mismatch", "semantic request session identity differs from the planning ledger", nil)
 	}
@@ -173,28 +249,16 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_unknown", "semantic provider submission has no durable outcome", nil)
 	}
 
+	if session.ExpectedDocument == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_expected_document_missing", "semantic request session has no sealed expected document", nil)
+	}
+	expected = session.ExpectedDocument.Clone()
 	semanticContext := runtimecontract.RuntimeSemanticPlanRequestContext{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
 		Activation: aggregate.Facts.Activation, ProviderCeiling: aggregate.Facts.Resources.ProviderCeiling,
-	}
-	if (ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequestOpen || ledger.Phase == runtimecontract.RuntimeSemanticPlanningOrderRequestOpen) && ledger.Document == nil && ledger.Attempt == 0 {
-		semanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
-	} else if ledger.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || (ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && ledger.ActiveBatchID != "") {
-		semanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
-		batchFound := false
-		for _, batch := range ledger.Batches {
-			if batch.BatchID == ledger.ActiveBatchID {
-				batchFound = true
-				semanticContext.BatchID = batch.BatchID
-				semanticContext.BatchSequence = batch.Sequence
-				semanticContext.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
-				break
-			}
-		}
-		if !batchFound || semanticContext.BatchID == "" || len(semanticContext.BatchCoverageWorkItemIDs) == 0 {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_batch_identity_missing", "proof-batch request has no persisted active batch identity and coverage", nil)
-		}
+		PlanStep: expected.PlanStep, BatchID: expected.BatchID, BatchSequence: expected.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
 	}
 	var previous *runtimecontract.RuntimeOriginalDiagnostic
 	if ledger.Attempt == 1 {
@@ -219,16 +283,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 
 	sequence := session.NextSequence
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, sequence)
-	var continuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
-	if len(session.Fragments) != 0 {
-		policy := aggregate.Facts.Activation.ExecutionContract.Normalized().CandidateOutputContinuation
-		request, nextCallID, continuationErr := prepareRuntimeCandidateRequestContinuation(ctx, m.evidence.ArtifactContinuations, aggregate, session.LogicalRequestID, policy.TailBytes)
-		if continuationErr != nil {
-			return runtime.RuntimeAggregate{}, continuationErr
-		}
-		continuation, physicalCallID = &request, nextCallID
-	}
-	submitted, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestSubmitted, session.LogicalRequestID, sequence, physicalCallID, nil, nil, nil)
+	submitted, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestSubmitted, session.LogicalRequestID, sequence, physicalCallID, nil, nil)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -237,43 +292,19 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		RequestIdentity:  runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: session.LogicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID},
+		ExpectedDocument: session.ExpectedDocument,
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
 		SemanticManifest: manifest, SemanticContext: semanticContext,
-		PreviousSemanticRejection: previous, OutputContinuation: continuation,
+		PreviousSemanticRejection: previous,
 	})
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_contract_error", err.Error(), nil)
-	}
-	if response.OutputFragment != nil {
-		updated, _, err := m.persistAndRecordRuntimeCandidateRequestFragment(ctx, aggregate, session.LogicalRequestID, sequence, physicalCallID, response.OutputFragment.Content, response.OutputFragment.ReachedProviderLimit)
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		assembled, err := assembleRuntimeCandidateRequestFragments(ctx, m.evidence.ArtifactContinuations, updated, session.LogicalRequestID)
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		if runtimecontract.InspectRuntimeCandidateDocumentFraming(assembled) == runtimecontract.RuntimeCandidateDocumentIncomplete {
-			persisted, ok := runtimeCandidateRequestSession(updated, session.LogicalRequestID)
-			if !ok {
-				return runtime.RuntimeAggregate{}, fmt.Errorf("semantic request session disappeared after fragment commit")
-			}
-			if len(persisted.Fragments)-1 >= updated.Facts.Activation.ExecutionContract.Normalized().CandidateOutputContinuation.MaxChunks {
-				return m.failRuntimeSemanticContract(ctx, updated, "semantic_output_continuation_exhausted", "semantic document remained incomplete after its sealed continuation budget", nil)
-			}
-			return updated, nil
-		}
-		completed, _, _, err := m.persistAndCompleteRuntimeCandidateRequestDocument(ctx, updated, session.LogicalRequestID, sequence, physicalCallID, assembled)
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		return m.admitRuntimeCompletedSemanticPlanDocument(ctx, completed, session)
 	}
 	if response.Feedback != nil {
 		providerFailure := runtimeProviderRequestFailure(*response.Feedback)
 		if response.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderTransient {
 			outcome := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(providerFailure.Code, "provider_transient"), Signature: firstNonEmptyString(providerFailure.Signature, "provider-transient")}
-			updated, recordErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil, nil)
+			updated, recordErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil)
 			if recordErr != nil {
 				return runtime.RuntimeAggregate{}, recordErr
 			}
@@ -291,8 +322,31 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		}
 		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, nil)
 	}
-	if len(response.DocumentContent) == 0 {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "semantic provider returned no complete document", nil)
+	if response.DocumentOutcome == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_missing", "semantic provider returned no typed document outcome", nil)
+	}
+	switch response.DocumentOutcome.Disposition {
+	case runtimecontract.RuntimeProviderDocumentIncomplete:
+		updated, recoveryErr := m.runtimeCandidateRequestRecoveryRequired(ctx, aggregate, session.LogicalRequestID, physicalCallID, *response.DocumentOutcome)
+		if recoveryErr != nil {
+			return runtime.RuntimeAggregate{}, recoveryErr
+		}
+		persisted, ok := runtimeCandidateRequestSession(updated, session.LogicalRequestID)
+		if !ok {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("semantic request session disappeared after recovery fact")
+		}
+		if persisted.ExpectedDocument == nil || persisted.IncompleteOutcomes > persisted.ExpectedDocument.MaxRecoveryAttempts {
+			return m.failRuntimeSemanticContract(ctx, updated, "semantic_document_recovery_exhausted", "semantic document remained incomplete after its sealed whole-document recovery budget", nil)
+		}
+		return updated, nil
+	case runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
+		return m.failRuntimeSemanticContract(ctx, aggregate, response.DocumentOutcome.Code, "semantic provider did not return one complete authority document", nil)
+	case runtimecontract.RuntimeProviderDocumentComplete:
+		if len(response.DocumentContent) == 0 {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "complete semantic outcome did not carry its document", nil)
+		}
+	default:
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_invalid", "semantic provider returned an unknown document outcome", nil)
 	}
 	completed, _, _, err := m.persistAndCompleteRuntimeCandidateRequestDocument(ctx, aggregate, session.LogicalRequestID, sequence, physicalCallID, response.DocumentContent)
 	if err != nil {
@@ -403,7 +457,14 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_plan_retry_exhausted", diagnostic.OriginalMessage, &diagnostic)
 	}
 	correctionHash := runtimecontract.StableRuntimeSemanticPlanCorrectionHash(diagnostic)
-	ensured, correctionSession, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, correctionHash)
+	if session.ExpectedDocument == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_expected_document_missing", "semantic correction has no sealed expected document", nil)
+	}
+	expected := session.ExpectedDocument.Clone()
+	expected.CorrectionAttempt = 1
+	expected.LogicalRequestID = ""
+	expected.Hash = ""
+	ensured, correctionSession, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, correctionHash, expected)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -537,7 +598,7 @@ func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime
 			session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete &&
 			session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal {
 			outcome := runtimeSemanticRequestTerminalOutcome(code)
-			terminated, terminateErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestTerminated, logicalRequestID, 0, "", &outcome, nil, nil)
+			terminated, terminateErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestTerminated, logicalRequestID, 0, "", &outcome, nil)
 			if terminateErr != nil {
 				return runtime.RuntimeAggregate{}, terminateErr
 			}
@@ -575,8 +636,8 @@ func runtimeSemanticRequestTerminalOutcome(code string) runtimecontract.RuntimeC
 	switch code {
 	case "semantic_provider_submission_unknown":
 		class = runtimecontract.RuntimeCandidateRequestOutcomeProviderSubmissionUnknown
-	case "semantic_output_continuation_exhausted":
-		class = runtimecontract.RuntimeCandidateRequestOutcomeContinuationExhausted
+	case "semantic_document_recovery_exhausted":
+		class = runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted
 	}
 	return runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: class, Code: code, Signature: strings.ReplaceAll(code, "_", "-"),

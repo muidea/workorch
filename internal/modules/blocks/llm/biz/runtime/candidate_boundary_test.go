@@ -44,7 +44,7 @@ func TestRequestCandidatePreservesSemanticDocumentKindThroughSingleBoundary(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
+	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || response.ExpectedDocumentHash != request.ExpectedDocument.Hash || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
 		t.Fatalf("semantic response=%+v providerCalls=%d", response, providerCalls)
 	}
 	request.DocumentKind = ""
@@ -88,7 +88,7 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 		ProviderCeiling: &runtimecontract.ProviderCeiling{Selection: runtimecontract.ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 		PlanStep:        runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
-	return llmmodels.RuntimeCandidateRequest{
+	request := llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{
 			LogicalRequestID: "semantic-request-1", Sequence: 1, PhysicalCallID: "semantic-call-1",
@@ -96,6 +96,18 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 		StablePrefixHash: runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
 		SemanticManifest: manifest, SemanticContext: context,
 	}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  request.DocumentKind, PlanStep: context.PlanStep,
+		ManifestHash: manifest.Hash, DefinitionSeedHash: seed.Hash,
+		LogicalRequestID: request.RequestIdentity.LogicalRequestID, StablePrefixHash: request.StablePrefixHash,
+		BatchID: context.BatchID, BatchSequence: context.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), context.BatchCoverageWorkItemIDs...), CoverageOrderHash: "order-1",
+		MaxOutputTokens: 2048, MaxRecoveryAttempts: 2,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	request.ExpectedDocument = &expected
+	return request
 }
 
 func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
@@ -163,7 +175,7 @@ func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 		return generationResult(payload, nil)
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.OutputFragment != nil || string(response.DocumentContent) != string(payload) {
+	if err != nil || string(response.DocumentContent) != string(payload) {
 		t.Fatalf("complete alias document was not forwarded unchanged: response=%+v err=%v", response, err)
 	}
 }
@@ -190,7 +202,7 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 				return generationResult([]byte(testCase.payload), nil)
 			})
 			response, err := RequestCandidate(context.Background(), provider, request)
-			if err != nil || calls != 1 || response.OutputFragment != nil || string(response.DocumentContent) != testCase.payload {
+			if err != nil || calls != 1 || string(response.DocumentContent) != testCase.payload {
 				t.Fatalf("schema-invalid complete document was not forwarded: calls=%d response=%+v err=%v", calls, response, err)
 			}
 		})
@@ -203,14 +215,10 @@ func TestRequestCandidateClassifiesProviderProseAsProtocolOutcome(t *testing.T) 
 		return generationResult([]byte("The user wants me to generate a semantic plan."), nil)
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err == nil {
-		t.Fatal("provider prose was forwarded as a semantic document")
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentInvalid || response.DocumentOutcome.Code != "provider_final_output_invalid" {
+		t.Fatalf("provider prose outcome: response=%+v err=%v", response, err)
 	}
-	failure := CandidateFailureFromError(err)
-	if failure.Class != CandidateFailureClassProvider || failure.Code != "provider_final_output_invalid" || failure.Signature != "provider-final-output-invalid" || failure.Reason != "provider final output is not a JSON document" {
-		t.Fatalf("provider prose failure = %+v", failure)
-	}
-	if len(response.DocumentContent) != 0 || response.OutputFragment != nil {
+	if len(response.DocumentContent) != 0 {
 		t.Fatalf("provider prose leaked into candidate response: %+v", response)
 	}
 }
@@ -246,8 +254,8 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.OutputFragment == nil || !response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[{"id":"patch-1"` || len(response.DocumentContent) != 0 {
-		t.Fatalf("truncated candidate output fragment = %+v", response.OutputFragment)
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Code != "max_output_tokens" || len(response.DocumentContent) != 0 {
+		t.Fatalf("truncated candidate outcome = %+v", response.DocumentOutcome)
 	}
 }
 
@@ -264,8 +272,8 @@ func TestRequestCandidateConvertsProviderOutputLimitErrorWithPayloadToContinuati
 	if err != nil {
 		t.Fatalf("output-limit fragment returned error: %v", err)
 	}
-	if response.OutputFragment == nil || !response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[` {
-		t.Fatalf("output-limit response = %+v", response.OutputFragment)
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Code != "max_output_tokens" {
+		t.Fatalf("output-limit response = %+v", response.DocumentOutcome)
 	}
 }
 
@@ -279,12 +287,8 @@ func TestRequestCandidateDoesNotContinueOutputLimitProviderProse(t *testing.T) {
 		}, errors.New("llm provider response incomplete: max_output_tokens")
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err == nil {
-		t.Fatal("output-limit provider prose became a continuation fragment")
-	}
-	failure := CandidateFailureFromError(err)
-	if failure.Code != "provider_final_output_invalid" || response.OutputFragment != nil {
-		t.Fatalf("output-limit provider prose result: response=%+v failure=%+v", response, failure)
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentInvalid {
+		t.Fatalf("output-limit provider prose result: response=%+v err=%v", response, err)
 	}
 }
 
@@ -298,16 +302,12 @@ func TestRequestCandidateClassifiesOutputLimitWithoutFinalText(t *testing.T) {
 		}, errors.New("llm provider response incomplete: max_output_tokens")
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err == nil {
-		t.Fatal("reasoning-only output limit was accepted")
-	}
-	failure := CandidateFailureFromError(err)
-	if failure.Code != "provider_final_output_missing" || failure.Reason != "provider produced no final output text" || response.OutputFragment != nil {
-		t.Fatalf("missing final output result: response=%+v failure=%+v", response, failure)
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Code != "provider_final_output_missing" {
+		t.Fatalf("missing final output result: response=%+v err=%v", response, err)
 	}
 }
 
-func TestRequestCandidateClassifiesMidTokenEOFAsOutputFragmentWithoutProviderLimit(t *testing.T) {
+func TestRequestCandidateClassifiesMidTokenEOFAsIncompleteDocumentWithoutProviderLimit(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return llmmodels.RuntimeCandidateGenerationResult{
@@ -319,8 +319,8 @@ func TestRequestCandidateClassifiesMidTokenEOFAsOutputFragmentWithoutProviderLim
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.OutputFragment == nil || response.OutputFragment.ReachedProviderLimit || string(response.OutputFragment.Content) != `{"operations":[{"id":"patch-1"` || len(response.DocumentContent) != 0 {
-		t.Fatalf("mid-token candidate output fragment = %+v", response.OutputFragment)
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Code != "incomplete_json_document" || len(response.DocumentContent) != 0 {
+		t.Fatalf("mid-token candidate outcome = %+v", response.DocumentOutcome)
 	}
 }
 
@@ -333,12 +333,8 @@ func TestRequestCandidateClassifiesEmptySuccessfulBodyAsProviderOutcome(t *testi
 		}, nil
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err == nil {
-		t.Fatal("empty provider body was accepted")
-	}
-	failure := CandidateFailureFromError(err)
-	if failure.Class != CandidateFailureClassProvider || failure.Code != "provider_empty_response" {
-		t.Fatalf("empty provider response failure = %+v", failure)
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Code != "provider_final_output_missing" {
+		t.Fatalf("empty provider response outcome = %+v err=%v", response.DocumentOutcome, err)
 	}
 	if len(response.DocumentContent) != 0 {
 		t.Fatalf("empty provider response leaked complete document = %q", response.DocumentContent)
@@ -542,7 +538,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	if err != nil {
 		t.Fatal(err)
 	}
-	return llmmodels.RuntimeCandidateRequest{
+	request := llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{
 			LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "candidate-call-1",
@@ -551,6 +547,15 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
 		CandidateManifest: manifest, CandidateContext: context,
 	}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  request.DocumentKind, ManifestHash: manifest.Hash,
+		LogicalRequestID: request.RequestIdentity.LogicalRequestID, StablePrefixHash: request.StablePrefixHash,
+		MaxOutputTokens: 8192, MaxRecoveryAttempts: 2,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	request.ExpectedDocument = &expected
+	return request
 }
 
 func candidateRequestCoverageBinding(evidenceKind string) runtimecontract.CoverageEvidenceBinding {

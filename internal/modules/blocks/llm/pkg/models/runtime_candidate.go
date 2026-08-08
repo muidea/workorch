@@ -8,6 +8,7 @@ import (
 type RuntimeCandidateRequest struct {
 	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
 	RequestIdentity           runtimecontract.RuntimeCandidateRequestIdentity
+	ExpectedDocument          *runtimecontract.RuntimeExpectedDocumentContract
 	Decision                  runtimecontract.RuntimeDecision
 	Transaction               runtimecontract.AuthorityTransaction
 	CandidateAttempt          int
@@ -19,7 +20,6 @@ type RuntimeCandidateRequest struct {
 	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
 	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
 	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
-	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
 // RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime candidate
@@ -80,22 +80,25 @@ type ProviderRequestAudit struct {
 // document remains opaque here: only the Orchestrator-owned SM-3 evaluator may
 // decode or admit it after durable persistence.
 type RuntimeCandidateResponse struct {
-	Transaction     runtimecontract.AuthorityTransaction
-	DocumentKind    runtimecontract.RuntimeProviderDocumentKind
-	RequestIdentity runtimecontract.RuntimeCandidateRequestIdentity `json:"requestIdentity"`
+	Transaction          runtimecontract.AuthorityTransaction
+	DocumentKind         runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity      runtimecontract.RuntimeCandidateRequestIdentity `json:"requestIdentity"`
+	ExpectedDocumentHash string                                          `json:"expectedDocumentHash,omitempty"`
 	// DocumentContent carries a complete provider document only across the
 	// synchronous LLM-owner EventHub exchange. It is
 	// intentionally excluded from JSON/audit projection; Orchestrator must
 	// durably store it before any session or candidate transition consumes it.
 	DocumentContent []byte `json:"-"`
+	// DocumentOutcome is the LLM owner's bounded framing observation. It does
+	// not select recovery, correction, admission, or any Runtime transition.
+	DocumentOutcome *runtimecontract.RuntimeProviderDocumentOutcome `json:"documentOutcome,omitempty"`
 	// Audit is present for successful and failed provider requests when generation ran.
 	Audit *ProviderRequestAudit `json:"audit,omitempty"`
 	// Usage is present when the provider reported token usage.
 	Usage *llmaudit.ProviderUsage `json:"usage,omitempty"`
 	// PrerequisiteStale preserves an owner-confirmed pre-candidate freshness
 	// outcome. Orchestrator owns the resulting invalidation and reacquisition.
-	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale       `json:"prerequisiteStale,omitempty"`
-	OutputFragment    *runtimecontract.RuntimeCandidateOutputFragment `json:"outputFragment,omitempty"`
+	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale `json:"prerequisiteStale,omitempty"`
 }
 
 const (

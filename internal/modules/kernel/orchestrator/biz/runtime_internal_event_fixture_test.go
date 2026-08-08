@@ -37,7 +37,23 @@ func (o *Biz) RequestTermination(ctx context.Context, workspaceID common.Workspa
 }
 
 func (o *Biz) EnsureRuntimeCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
-	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
+	aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	attempt := 0
+	if correctionHash != "" {
+		attempt = 1
+	}
+	expected := runtimeOperationsExpectedDocument(aggregate, manifestHash, attempt)
+	if expected.MaxOutputTokens <= 0 {
+		expected.MaxOutputTokens = 8192
+	}
+	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, StablePrefixHash: stablePrefixHash,
+		ManifestHash: manifestHash, CorrectionHash: correctionHash, ExpectedDocument: &expected,
+	})
 	return result.Aggregate, result.CandidateSession, err
 }
 

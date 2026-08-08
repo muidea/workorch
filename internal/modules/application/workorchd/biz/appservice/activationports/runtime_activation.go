@@ -100,9 +100,9 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 		SemanticPlanMaxOutputTokens: runtimeInt(input["semanticPlanMaxOutputTokens"]),
 		CandidateMaxOutputTokens:    runtimeInt(input["candidateMaxOutputTokens"]),
 	}
-	if continuation := runtimeMap(input["candidateOutputContinuation"]); len(continuation) > 0 {
-		ret.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{
-			MaxChunks: runtimeInt(continuation["maxChunks"]), TailBytes: runtimeInt(continuation["tailBytes"]),
+	if recovery := runtimeMap(input["candidateDocumentRecovery"]); len(recovery) > 0 {
+		ret.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{
+			MaxAttempts: runtimeInt(recovery["maxAttempts"]),
 		}
 	}
 	for _, item := range runtimeMapSlice(input["capabilityUsagePolicies"]) {

@@ -428,7 +428,7 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 			return
 		}
 		coverageID := command.Decision.Focus.CoverageWorkItemIDs[0]
-		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity}
+		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument)}
 		var candidate runtimecontract.RuntimeCandidate
 		switch command.Decision.State {
 		case runtimecontract.ConvergenceStateNeedStateChange:
@@ -465,6 +465,7 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 			return
 		}
 		response.DocumentContent = runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
+		response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, response.DocumentContent)
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -652,7 +653,8 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 						t.Errorf("grounded sequence candidate: %v", err)
 						result.Set(llmevents.RequestRuntimeCandidateResult{
 							Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-							Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error()}),
+							ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+							Feedback:             runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error()}),
 						}, nil)
 						return
 					}
@@ -1331,7 +1333,7 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "provider must not be called for unresolved target selection",
 		})}, nil)
 	})
@@ -5665,7 +5667,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		if candidateErr != nil {
 			t.Errorf("candidate for %s/%s: %v", focusID, action, candidateErr)
 			failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: candidateErr.Error()}
-			result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
+			result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
 			return
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
@@ -8365,7 +8367,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		focus := command.Decision.Focus
 		coverageID := focus.CoverageWorkItemIDs[0]
 		target := focus.TargetRefs[0]
-		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity}
+		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument)}
 		var candidate runtimecontract.RuntimeCandidate
 		if focus.ID == "focus-2" && command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange && !providerTransientInjected {
 			providerTransientInjected = true
@@ -8416,6 +8418,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 			return
 		}
 		response.DocumentContent = runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
+		response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, response.DocumentContent)
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -8869,7 +8872,9 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 		requests = append(requests, command)
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			DocumentContent: []byte(`{"unexpected":true}`),
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"unexpected":true}`)),
+			DocumentContent:      []byte(`{"unexpected":true}`),
 		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -8892,12 +8897,12 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	}
 }
 
-func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing.T) {
+func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithCompleteDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	facts := runtimeAggregate(t, 1).Facts
-	facts.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 2, TailBytes: 12}
+	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
 	repository := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(repository)
 	if err != nil {
@@ -8922,14 +8927,19 @@ func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity}
-		if command.OutputContinuation == nil {
-			response.OutputFragment = &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(first), ReachedProviderLimit: true}
-		} else {
-			if command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] || command.StablePrefixHash != prefix {
-				t.Fatalf("continuation command = %+v", command)
+		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument)}
+		if calls == 1 {
+			response.DocumentOutcome = &runtimecontract.RuntimeProviderDocumentOutcome{
+				Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash,
+				ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte(first)), ResponseBytes: int64(len(first)), Code: "max_output_tokens", Signature: "provider-output-limit",
 			}
-			response.OutputFragment = &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(second)}
+		} else {
+			if command.RequestIdentity.Sequence != 2 || command.ExpectedDocument.Hash != response.ExpectedDocumentHash || command.StablePrefixHash != prefix {
+				t.Fatalf("whole-document recovery command = %+v", command)
+			}
+			document := []byte(first + second)
+			response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
+			response.DocumentContent = document
 		}
 		result.Set(response, nil)
 	})
@@ -8939,9 +8949,9 @@ func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing
 		t.Fatal(err)
 	}
 	if calls != 2 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
-		t.Fatalf("candidate output continuation completion = %+v calls=%d", completed, calls)
+		t.Fatalf("candidate document recovery completion = %+v calls=%d", completed, calls)
 	}
-	if len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || completed.CandidateRequestSessions[0].NextSequence != 3 || len(completed.CandidateRequestSessions[0].Fragments) != 2 {
+	if len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || completed.CandidateRequestSessions[0].NextSequence != 2 || completed.CandidateRequestSessions[0].IncompleteOutcomes != 1 {
 		t.Fatalf("persisted C4 request session = %+v", completed.CandidateRequestSessions)
 	}
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(completed.CandidateRequestSessions[0].LogicalRequestID)
@@ -8949,12 +8959,8 @@ func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunks, err := continuations.ListChunks(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if continuation.State != common.ArtifactContinuationStateApplied || !continuation.FinalReceived || len(chunks) != 2 || continuation.AuthorityTransaction != initialized.Decision.AuthorityTransaction() || continuation.ArtifactID != completed.CandidateRequestSessions[0].LogicalRequestID {
-		t.Fatalf("persisted candidate output continuation = %+v", continuation)
+	if continuation.State != common.ArtifactContinuationStateApplied || !continuation.FinalReceived || continuation.AuthorityTransaction != initialized.Decision.AuthorityTransaction() || continuation.ArtifactID != completed.CandidateRequestSessions[0].LogicalRequestID {
+		t.Fatalf("persisted complete candidate document = %+v", continuation)
 	}
 }
 
@@ -8993,7 +8999,9 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			DocumentContent: append([]byte(nil), document...),
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+			DocumentContent:      append([]byte(nil), document...),
 		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -9040,13 +9048,16 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 			}
 			result.Set(llmevents.RequestRuntimeCandidateResult{
 				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-				Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "deadline_exceeded", Signature: "deadline-exceeded", Reason: "provider deadline exceeded"}),
+				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+				Feedback:             runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "deadline_exceeded", Signature: "deadline-exceeded", Reason: "provider deadline exceeded"}),
 			}, nil)
 			return
 		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			DocumentContent: append([]byte(nil), document...),
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+			DocumentContent:      append([]byte(nil), document...),
 		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -9059,12 +9070,12 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 	}
 }
 
-func TestRequestAndSealRuntimeCandidateRestartsFromPersistedOutputChunk(t *testing.T) {
+func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	facts := runtimeAggregate(t, 1).Facts
-	facts.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 2, TailBytes: 12}
+	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 2}
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
 	if err != nil {
@@ -9097,7 +9108,11 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedOutputChunk(t *testi
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
-	pending, _, err := module.persistAndRecordRuntimeCandidateRequestFragment(ctx, submitted, session.LogicalRequestID, 1, firstPhysicalID, []byte(first), true)
+	incomplete := runtimecontract.RuntimeProviderDocumentOutcome{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
+		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte(first)), ResponseBytes: int64(len(first)), Code: "max_output_tokens", Signature: "provider-output-limit",
+	}
+	pending, err := module.runtimeCandidateRequestRecoveryRequired(ctx, submitted, session.LogicalRequestID, firstPhysicalID, incomplete)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9106,10 +9121,11 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedOutputChunk(t *testi
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		if command.OutputContinuation == nil || command.RequestIdentity.Sequence != 2 || command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] {
-			t.Fatalf("restart continuation command = %+v", command)
+		if command.RequestIdentity.Sequence != 2 {
+			t.Fatalf("restart whole-document recovery command = %+v", command)
 		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)}}, nil)
+		document := []byte(first + `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, document), DocumentContent: document}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restarted := newTestBiz(owner, hub, nil)
@@ -9117,7 +9133,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedOutputChunk(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].NextSequence != 3 {
+	if calls != 1 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].NextSequence != 2 || completed.CandidateRequestSessions[0].IncompleteOutcomes != 1 {
 		t.Fatalf("restart continuation completion = %+v calls=%d", completed, calls)
 	}
 }
@@ -9316,9 +9332,12 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "prepared-restart-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
 		}}}}}
+		document := runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			DocumentContent: runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate),
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+			DocumentContent:      document,
 		}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -9557,12 +9576,12 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 	}
 }
 
-func TestRequestAndSealRuntimeCandidateFailsWhenOutputContinuationBudgetExhausted(t *testing.T) {
+func TestRequestAndSealRuntimeCandidateFailsWhenDocumentRecoveryBudgetExhausted(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	facts := runtimeAggregate(t, 1).Facts
-	facts.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 1, TailBytes: 8}
+	facts.Activation.ExecutionContract.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 1}
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
 	if err != nil {
@@ -9585,37 +9604,34 @@ func TestRequestAndSealRuntimeCandidateFailsWhenOutputContinuationBudgetExhauste
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`{"operations":[`), ReachedProviderLimit: true}
-		if command.OutputContinuation != nil {
-			fragment.Content = []byte(`{"id":"op-1"`)
-		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, OutputFragment: &fragment}, nil)
+		partial := []byte(`{"operations":[`)
+		outcome := runtimecontract.RuntimeProviderDocumentOutcome{Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash, ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)), Code: "max_output_tokens", Signature: "provider-output-limit"}
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: &outcome}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	failed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "candidate_output_continuation_exhausted" {
-		t.Fatalf("candidate output continuation exhaustion = %+v", failed.Decision)
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "candidate_document_recovery_exhausted" {
+		t.Fatalf("candidate document recovery exhaustion = %+v", failed.Decision)
 	}
 	if len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil || failed.Facts.Repair.RepairAttempts != 0 || len(failed.GovernanceRequests) != 0 {
-		t.Fatalf("continuation exhaustion must not allocate a candidate/dispatch/repair/governance: %+v", failed)
+		t.Fatalf("document recovery exhaustion must not allocate a candidate/dispatch/repair/governance: %+v", failed)
 	}
 	if len(failed.CandidateRequestSessions) != 1 {
 		t.Fatalf("candidate request sessions = %+v", failed.CandidateRequestSessions)
 	}
 	session := failed.CandidateRequestSessions[0]
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
-		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeContinuationExhausted ||
-		session.LastOutcome.Code != "candidate_output_continuation_exhausted" ||
-		len(session.Fragments) != 2 {
-		t.Fatalf("terminal continuation session = %+v", session)
+		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted ||
+		session.LastOutcome.Code != "candidate_document_recovery_exhausted" || session.IncompleteOutcomes != 2 {
+		t.Fatalf("terminal document recovery session = %+v", session)
 	}
 	id := runtimeCandidateRequestContentID(t, initialized, prefix, 0)
 	continuation, err := continuations.Get(ctx, id)
-	if err != nil || continuation.State != common.ArtifactContinuationStateFailed {
-		t.Fatalf("failed continuation = %+v err=%v", continuation, err)
+	if !errors.Is(err, common.ErrNotFound) || continuation != nil {
+		t.Fatalf("incomplete whole-document recovery persisted raw content = %+v err=%v", continuation, err)
 	}
 	reloaded, err := state.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
@@ -9798,7 +9814,7 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Stale: &stale}, nil)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Stale: &stale}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	invalidated, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "stable-prefix-provider-config", 0)

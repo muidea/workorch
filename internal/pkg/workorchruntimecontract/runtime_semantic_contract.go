@@ -295,9 +295,6 @@ func (c RuntimeSemanticPlanRequestContext) Normalized() RuntimeSemanticPlanReque
 	c.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), c.BatchCoverageWorkItemIDs...)
 	c.Activation = c.Activation.Normalized()
 	c.PlanStep = RuntimeSemanticPlanStep(strings.TrimSpace(string(c.PlanStep)))
-	if c.PlanStep == "" {
-		c.PlanStep = RuntimeSemanticPlanStepProofBatch
-	}
 	c.BatchID = strings.TrimSpace(c.BatchID)
 	if c.BatchSequence < 0 {
 		c.BatchSequence = 0

@@ -72,11 +72,8 @@ func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRun
 	if policy.MaxArtifactChunkBytes <= 0 {
 		policy.MaxArtifactChunkBytes = defaults.MaxArtifactChunkBytes
 	}
-	if policy.PreviousChunkTailBytes <= 0 {
-		policy.PreviousChunkTailBytes = defaults.PreviousChunkTailBytes
-	}
-	if policy.MaxChunkRetryAttempts <= 0 {
-		policy.MaxChunkRetryAttempts = defaults.MaxChunkRetryAttempts
+	if policy.MaxDocumentRecoveryAttempts <= 0 {
+		policy.MaxDocumentRecoveryAttempts = defaults.MaxDocumentRecoveryAttempts
 	}
 	if policy.MaxArtifactPlanAttempts <= 0 {
 		policy.MaxArtifactPlanAttempts = defaults.MaxArtifactPlanAttempts

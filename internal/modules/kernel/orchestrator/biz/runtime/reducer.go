@@ -313,8 +313,8 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_submission_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_retry_exhausted", failure.Message), true, nil
-	case runtimecontract.FailureClassCandidateOutputExhausted:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_output_continuation_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassCandidateDocumentRecoveryExhausted:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_document_recovery_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "prerequisite_refresh_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassNoProgressExhausted:

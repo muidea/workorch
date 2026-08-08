@@ -33,7 +33,35 @@ func runtimeTestControllerRecordFailure(controller *runtime.RuntimeController, c
 }
 
 func runtimeTestControllerEnsureCandidateRequest(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID, DocumentKind: documentKind, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
+	if documentKind != runtimecontract.RuntimeProviderDocumentOperations {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
+	}
+	aggregate, err := controller.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	correctionAttempt := 0
+	if correctionHash != "" {
+		correctionAttempt = 1
+	}
+	expected := runtimeOperationsExpectedDocument(aggregate, manifestHash, correctionAttempt)
+	if expected.MaxOutputTokens <= 0 {
+		expected.MaxOutputTokens = 8192
+	}
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID,
+		DocumentKind: documentKind, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash,
+		CorrectionHash: correctionHash, ExpectedDocument: &expected,
+	})
+	return result.Aggregate, result.CandidateSession, err
+}
+
+func runtimeTestControllerEnsureCandidateRequestWithExpected(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string, expected runtimecontract.RuntimeExpectedDocumentContract) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, StablePrefixHash: stablePrefixHash,
+		ManifestHash: manifestHash, CorrectionHash: correctionHash, ExpectedDocument: &expected,
+	})
 	return result.Aggregate, result.CandidateSession, err
 }
 

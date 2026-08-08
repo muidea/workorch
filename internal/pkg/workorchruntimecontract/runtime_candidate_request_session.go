@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -17,11 +16,11 @@ import (
 type RuntimeCandidateRequestSessionState string
 
 const (
-	RuntimeCandidateRequestSessionPrepared            RuntimeCandidateRequestSessionState = "prepared"
-	RuntimeCandidateRequestSessionContinuationPending RuntimeCandidateRequestSessionState = "continuation_pending"
-	RuntimeCandidateRequestSessionTransportPending    RuntimeCandidateRequestSessionState = "transport_retry_pending"
-	RuntimeCandidateRequestSessionDocumentComplete    RuntimeCandidateRequestSessionState = "document_complete"
-	RuntimeCandidateRequestSessionTerminal            RuntimeCandidateRequestSessionState = "terminal"
+	RuntimeCandidateRequestSessionPrepared         RuntimeCandidateRequestSessionState = "prepared"
+	RuntimeCandidateRequestSessionRecoveryPending  RuntimeCandidateRequestSessionState = "recovery_pending"
+	RuntimeCandidateRequestSessionTransportPending RuntimeCandidateRequestSessionState = "transport_retry_pending"
+	RuntimeCandidateRequestSessionDocumentComplete RuntimeCandidateRequestSessionState = "document_complete"
+	RuntimeCandidateRequestSessionTerminal         RuntimeCandidateRequestSessionState = "terminal"
 )
 
 // RuntimeCandidateRequestOutcomeClass is the last durable provider/session
@@ -39,7 +38,7 @@ const (
 	RuntimeCandidateRequestOutcomeProviderProtocol          RuntimeCandidateRequestOutcomeClass = "provider_protocol"
 	RuntimeCandidateRequestOutcomeProviderSubmissionUnknown RuntimeCandidateRequestOutcomeClass = "provider_submission_unknown"
 	RuntimeCandidateRequestOutcomePrerequisiteStale         RuntimeCandidateRequestOutcomeClass = "prerequisite_stale"
-	RuntimeCandidateRequestOutcomeContinuationExhausted     RuntimeCandidateRequestOutcomeClass = "candidate_output_continuation_exhausted"
+	RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted RuntimeCandidateRequestOutcomeClass = "candidate_document_recovery_exhausted"
 )
 
 // RuntimeCandidateRequestOutcome is bounded audit-safe metadata. It never
@@ -70,7 +69,7 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 		RuntimeCandidateRequestOutcomeProviderProtocol,
 		RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
 		RuntimeCandidateRequestOutcomePrerequisiteStale,
-		RuntimeCandidateRequestOutcomeContinuationExhausted:
+		RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted:
 		if o.Class != RuntimeCandidateRequestOutcomeDocumentComplete && o.Code == "" {
 			return common.ErrInvalidArgument
 		}
@@ -80,47 +79,24 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 	}
 }
 
-// RuntimeCandidateRequestFragment is aggregate-safe metadata for an opaque
-// raw fragment held by the Orchestrator evidence repository. No payload bytes
-// or provider-private text is persisted in RuntimeStateRecord.
-type RuntimeCandidateRequestFragment struct {
-	Sequence             int
-	ContentHash          string
-	Bytes                int64
-	ReachedProviderLimit bool
-	PhysicalCallID       string
-}
-
-func (f RuntimeCandidateRequestFragment) Normalized() RuntimeCandidateRequestFragment {
-	f.ContentHash = strings.TrimSpace(f.ContentHash)
-	f.PhysicalCallID = strings.TrimSpace(f.PhysicalCallID)
-	return f
-}
-
-func (f RuntimeCandidateRequestFragment) Validate() error {
-	f = f.Normalized()
-	if f.Sequence <= 0 || f.ContentHash == "" || f.Bytes <= 0 {
-		return common.ErrInvalidArgument
-	}
-	return nil
-}
-
 // RuntimeCandidateRequestSession is the SM-3 provider request ledger. A
 // correction after a complete candidate rejection creates a distinct session
-// fingerprint; a continuation of one incomplete document keeps the same ID.
+// fingerprint; whole-document recovery keeps the same ID.
 type RuntimeCandidateRequestSession struct {
-	LogicalRequestID   string
-	DocumentKind       RuntimeProviderDocumentKind
-	Transaction        AuthorityTransaction
-	StablePrefixHash   string
-	ManifestHash       string
-	CorrectionHash     string
-	State              RuntimeCandidateRequestSessionState
-	NextSequence       int
-	Fragments          []RuntimeCandidateRequestFragment
-	LastPhysicalCallID string
-	ProviderSubmitted  bool
-	LastOutcome        RuntimeCandidateRequestOutcome
+	LogicalRequestID    string
+	DocumentKind        RuntimeProviderDocumentKind
+	ExpectedDocument    *RuntimeExpectedDocumentContract
+	Transaction         AuthorityTransaction
+	StablePrefixHash    string
+	ManifestHash        string
+	CorrectionHash      string
+	State               RuntimeCandidateRequestSessionState
+	NextSequence        int
+	IncompleteOutcomes  int
+	LastDocumentOutcome *RuntimeProviderDocumentOutcome
+	LastPhysicalCallID  string
+	ProviderSubmitted   bool
+	LastOutcome         RuntimeCandidateRequestOutcome
 }
 
 // RuntimeCandidateRequestIdentity is the canonical identity carried across
@@ -160,37 +136,47 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 	s.State = RuntimeCandidateRequestSessionState(strings.TrimSpace(string(s.State)))
 	s.LastPhysicalCallID = strings.TrimSpace(s.LastPhysicalCallID)
 	s.LastOutcome = s.LastOutcome.Normalized()
-	fragments := make([]RuntimeCandidateRequestFragment, 0, len(s.Fragments))
-	for _, fragment := range s.Fragments {
-		fragments = append(fragments, fragment.Normalized())
+	if s.ExpectedDocument != nil {
+		value := s.ExpectedDocument.Normalized()
+		s.ExpectedDocument = &value
 	}
-	sort.Slice(fragments, func(i, j int) bool { return fragments[i].Sequence < fragments[j].Sequence })
-	s.Fragments = nilIfEmpty(fragments)
+	if s.LastDocumentOutcome != nil {
+		value := s.LastDocumentOutcome.Normalized()
+		s.LastDocumentOutcome = &value
+	}
 	return s
 }
 
 func (s RuntimeCandidateRequestSession) Validate() error {
 	s = s.Normalized()
 	if s.LogicalRequestID == "" || (s.DocumentKind != RuntimeProviderDocumentSemanticPlan && s.DocumentKind != RuntimeProviderDocumentOperations) || s.StablePrefixHash == "" || s.ManifestHash == "" ||
-		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 {
+		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 || s.IncompleteOutcomes < 0 {
 		return common.ErrInvalidArgument
 	}
 	if err := s.LastOutcome.Validate(); err != nil {
 		return err
 	}
+	if s.ExpectedDocument != nil {
+		if err := s.ExpectedDocument.Validate(); err != nil || s.ExpectedDocument.DocumentKind != s.DocumentKind || s.ExpectedDocument.LogicalRequestID != s.LogicalRequestID || s.ExpectedDocument.ManifestHash != s.ManifestHash || s.ExpectedDocument.StablePrefixHash != s.StablePrefixHash {
+			return common.ErrInvalidArgument
+		}
+	}
+	if s.LastDocumentOutcome != nil {
+		if s.ExpectedDocument == nil {
+			return common.ErrInvalidArgument
+		}
+		if err := s.LastDocumentOutcome.Validate(); err != nil || s.LastDocumentOutcome.ExpectedDocumentHash != s.ExpectedDocument.Hash || s.LastDocumentOutcome.Disposition != RuntimeProviderDocumentIncomplete {
+			return common.ErrInvalidArgument
+		}
+	}
 	switch s.State {
-	case RuntimeCandidateRequestSessionPrepared, RuntimeCandidateRequestSessionContinuationPending,
+	case RuntimeCandidateRequestSessionPrepared, RuntimeCandidateRequestSessionRecoveryPending,
 		RuntimeCandidateRequestSessionTransportPending, RuntimeCandidateRequestSessionDocumentComplete,
 		RuntimeCandidateRequestSessionTerminal:
 	default:
 		return common.ErrInvalidArgument
 	}
-	for idx, fragment := range s.Fragments {
-		if err := fragment.Validate(); err != nil || fragment.Sequence != idx+1 {
-			return common.ErrInvalidArgument
-		}
-	}
-	if s.State == RuntimeCandidateRequestSessionContinuationPending && len(s.Fragments) == 0 {
+	if s.State == RuntimeCandidateRequestSessionRecoveryPending && s.IncompleteOutcomes == 0 {
 		return common.ErrInvalidArgument
 	}
 	if s.ProviderSubmitted && s.LastPhysicalCallID == "" {
@@ -198,11 +184,11 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 	}
 	switch s.State {
 	case RuntimeCandidateRequestSessionPrepared:
-		if len(s.Fragments) != 0 || s.LastOutcome.Class != RuntimeCandidateRequestOutcomeNone {
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeNone {
 			return common.ErrInvalidArgument
 		}
-	case RuntimeCandidateRequestSessionContinuationPending:
-		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete {
+	case RuntimeCandidateRequestSessionRecoveryPending:
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete || s.LastDocumentOutcome == nil {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionTransportPending:
@@ -220,12 +206,12 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			RuntimeCandidateRequestOutcomeProviderProtocol,
 			RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
 			RuntimeCandidateRequestOutcomePrerequisiteStale,
-			RuntimeCandidateRequestOutcomeContinuationExhausted:
+			RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted:
 		default:
 			return common.ErrInvalidArgument
 		}
 	}
-	if s.NextSequence != len(s.Fragments)+1 {
+	if s.NextSequence != s.IncompleteOutcomes+1 {
 		return common.ErrInvalidArgument
 	}
 	return nil
@@ -233,7 +219,14 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 
 func (s RuntimeCandidateRequestSession) Clone() RuntimeCandidateRequestSession {
 	s = s.Normalized()
-	s.Fragments = append([]RuntimeCandidateRequestFragment(nil), s.Fragments...)
+	if s.ExpectedDocument != nil {
+		value := s.ExpectedDocument.Clone()
+		s.ExpectedDocument = &value
+	}
+	if s.LastDocumentOutcome != nil {
+		value := s.LastDocumentOutcome.Normalized()
+		s.LastDocumentOutcome = &value
+	}
 	return s
 }
 

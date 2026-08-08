@@ -54,6 +54,45 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	return c.beginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
 }
 
+func (c *RuntimeController) ensureCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+	if documentKind != runtimecontract.RuntimeProviderDocumentOperations || c == nil || c.repository == nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+	}
+	correctionAttempt := 0
+	if correctionHash != "" {
+		correctionAttempt = 1
+	}
+	expected := runtimeTestOperationsExpectedDocument(aggregate, manifestHash, correctionAttempt)
+	return c.ensureCandidateRequestSessionWithExpected(ctx, workspaceID, runID, documentKind, stablePrefixHash, manifestHash, correctionHash, &expected)
+}
+
+func runtimeTestOperationsExpectedDocument(aggregate RuntimeAggregate, manifestHash string, correctionAttempt int) runtimecontract.RuntimeExpectedDocumentContract {
+	execution := aggregate.Facts.Activation.ExecutionContract.Normalized()
+	maxOutputTokens := execution.CandidateMaxOutputTokens
+	if maxOutputTokens <= 0 && aggregate.Facts.Resources.ProviderCeiling != nil {
+		maxOutputTokens = aggregate.Facts.Resources.ProviderCeiling.EffectiveMaxOutputTokens
+	}
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = 8192
+	}
+	maxRecoveryAttempts := execution.CandidateDocumentRecovery.MaxAttempts
+	if maxRecoveryAttempts <= 0 {
+		maxRecoveryAttempts = 1
+	}
+	return runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion:       runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:        runtimecontract.RuntimeProviderDocumentOperations,
+		ManifestHash:        manifestHash,
+		CorrectionAttempt:   correctionAttempt,
+		MaxOutputTokens:     maxOutputTokens,
+		MaxRecoveryAttempts: maxRecoveryAttempts,
+	}
+}
+
 func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
@@ -199,11 +238,16 @@ func bindRuntimeCandidateAttemptForTest(t interface {
 			return
 		}
 	}
+	expected := runtimeTestOperationsExpectedDocument(*aggregate, manifest.Hash, record.Attempt)
+	expected.LogicalRequestID = logicalRequestID
+	expected.StablePrefixHash = record.StablePrefixHash
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
 		LogicalRequestID: logicalRequestID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: record.Transaction, StablePrefixHash: record.StablePrefixHash, ManifestHash: manifest.Hash,
 		CorrectionHash: correctionHash, State: runtimecontract.RuntimeCandidateRequestSessionDocumentComplete, NextSequence: 1,
 		LastPhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1), ProviderSubmitted: true,
-		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete},
+		LastOutcome:      runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete},
+		ExpectedDocument: &expected,
 	})
 	record.ManifestHash = manifest.Hash
 	record.LogicalRequestID = logicalRequestID

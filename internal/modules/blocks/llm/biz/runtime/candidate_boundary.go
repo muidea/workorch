@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -18,7 +19,12 @@ type CandidateProvider interface {
 	GenerateCandidate(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error)
 }
 
-func RequestCandidate(ctx context.Context, provider CandidateProvider, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateResponse, error) {
+func RequestCandidate(ctx context.Context, provider CandidateProvider, request llmmodels.RuntimeCandidateRequest) (response llmmodels.RuntimeCandidateResponse, err error) {
+	defer func() {
+		if request.ExpectedDocument != nil {
+			response.ExpectedDocumentHash = request.ExpectedDocument.Normalized().Hash
+		}
+	}()
 	if provider == nil {
 		return llmmodels.RuntimeCandidateResponse{}, fmt.Errorf("candidate provider is required")
 	}
@@ -30,35 +36,8 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	}
 	generation, err := provider.GenerateCandidate(ctx, request)
 	if err != nil {
-		if generation.ReachedProviderLimit && len(generation.Payload) != 0 {
-			switch inspectProviderCandidateDocumentFraming(generation.Payload) {
-			case runtimecontract.RuntimeCandidateDocumentInvalid:
-				return llmmodels.RuntimeCandidateResponse{}, providerFinalOutputInvalidError(generation)
-			case runtimecontract.RuntimeCandidateDocumentComplete:
-				return llmmodels.RuntimeCandidateResponse{
-					Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
-					DocumentContent: append([]byte(nil), generation.Payload...), Audit: generation.Audit, Usage: generation.Usage,
-				}, nil
-			}
-			fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: true}
-			if validateErr := fragment.Validate(); validateErr != nil {
-				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid provider output-limit fragment: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
-			}
-			return llmmodels.RuntimeCandidateResponse{
-				Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
-				Audit: generation.Audit, Usage: generation.Usage, OutputFragment: &fragment,
-			}, nil
-		}
 		if generation.ReachedProviderLimit {
-			return llmmodels.RuntimeCandidateResponse{}, candidateRequestErrorWithIdentity(
-				CandidateFailureClassProvider,
-				"provider_final_output_missing",
-				"provider-final-output-missing",
-				fmt.Errorf("provider reached its output limit without final output text"),
-				generation.Audit,
-				generation.RequestID,
-				generation.Status,
-			)
+			return providerDocumentResponse(request, generation), nil
 		}
 		if stale := generation.PrerequisiteStale; stale != nil {
 			staleCopy := stale.Normalized()
@@ -82,45 +61,44 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 			Usage: generation.Usage,
 		}, candidateRequestErrorWithIdentity(failureClass, code, signature, err, generation.Audit, generation.RequestID, generation.Status)
 	}
-	// A suffix request intentionally uses raw text output rather than the
-	// structured JSON response mode. Its bytes are owned and sequenced by the
-	// Orchestrator; decode occurs only after the complete document is assembled.
-	if request.OutputContinuation != nil {
-		if err := request.OutputContinuation.Validate(); err != nil {
-			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, err, generation.Audit, generation.RequestID, generation.Status)
-		}
-		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF)}
-		if err := fragment.Validate(); err != nil {
-			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassSchema, err, generation.Audit, generation.RequestID, generation.Status)
-		}
-		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage}, nil
+	return providerDocumentResponse(request, generation), nil
+}
+
+func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generation llmmodels.RuntimeCandidateGenerationResult) llmmodels.RuntimeCandidateResponse {
+	payload := append([]byte(nil), generation.Payload...)
+	disposition := inspectProviderCandidateDocumentFraming(payload)
+	outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+		ExpectedDocumentHash: request.ExpectedDocument.Normalized().Hash,
+		ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(payload),
+		ResponseBytes:        int64(len(payload)),
 	}
-	switch inspectProviderCandidateDocumentFraming(generation.Payload) {
-	case runtimecontract.RuntimeCandidateDocumentInvalid:
-		return llmmodels.RuntimeCandidateResponse{}, providerFinalOutputInvalidError(generation)
+	response := llmmodels.RuntimeCandidateResponse{
+		Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
+		Audit: generation.Audit, Usage: generation.Usage,
+	}
+	switch disposition {
+	case runtimecontract.RuntimeCandidateDocumentComplete:
+		outcome.Disposition = runtimecontract.RuntimeProviderDocumentComplete
+		response.DocumentContent = payload
 	case runtimecontract.RuntimeCandidateDocumentIncomplete:
-		// EOF is structural evidence that the first document is incomplete.
-		// Provider output-limit telemetry is retained only as audit metadata;
-		// a mid-token/network-cut body must follow the same continuation path.
-		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF)}
-		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage}, nil
+		outcome.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
+		outcome.Code = "incomplete_json_document"
+		outcome.Signature = "provider-document-incomplete"
+		if generation.ReachedProviderLimit || candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF) {
+			outcome.Code = "max_output_tokens"
+			outcome.Signature = "provider-output-limit"
+		}
 	case runtimecontract.RuntimeCandidateDocumentEmpty:
-		return llmmodels.RuntimeCandidateResponse{
-			Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
-			Audit: generation.Audit,
-			Usage: generation.Usage,
-		}, candidateRequestErrorWithIdentity(CandidateFailureClassProvider, "provider_empty_response", "provider-empty-response", fmt.Errorf("runtime candidate document is empty"), generation.Audit, generation.RequestID, generation.Status)
+		outcome.Disposition = runtimecontract.RuntimeProviderDocumentEmpty
+		outcome.Code = "provider_final_output_missing"
+		outcome.Signature = "provider-final-output-missing"
+	case runtimecontract.RuntimeCandidateDocumentInvalid:
+		outcome.Disposition = runtimecontract.RuntimeProviderDocumentInvalid
+		outcome.Code = "provider_final_output_invalid"
+		outcome.Signature = "provider-final-output-invalid"
 	}
-	// A complete document is opaque to the LLM owner. The Orchestrator persists
-	// it before its sole SM-3 evaluator performs strict decode and admission.
-	return llmmodels.RuntimeCandidateResponse{
-		Transaction:     request.Transaction,
-		DocumentKind:    request.DocumentKind,
-		RequestIdentity: request.RequestIdentity,
-		DocumentContent: append([]byte(nil), generation.Payload...),
-		Audit:           generation.Audit,
-		Usage:           generation.Usage,
-	}, nil
+	response.DocumentOutcome = &outcome
+	return response
 }
 
 func inspectProviderCandidateDocumentFraming(payload []byte) runtimecontract.RuntimeCandidateDocumentDisposition {
@@ -293,9 +271,20 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 	if strings.TrimSpace(request.StablePrefixHash) == "" {
 		return fmt.Errorf("candidate request requires stable prefix hash")
 	}
-	if request.OutputContinuation != nil {
-		if err := request.OutputContinuation.Validate(); err != nil {
-			return err
+	if request.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations && request.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		return fmt.Errorf("candidate request requires explicit document kind")
+	}
+	if request.ExpectedDocument != nil {
+		expected := request.ExpectedDocument.Normalized()
+		if err := expected.Validate(); err != nil {
+			return fmt.Errorf("candidate expected document: %w", err)
+		}
+		manifestHash := request.CandidateManifest.Hash
+		if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			manifestHash = request.SemanticManifest.Hash
+		}
+		if expected.DocumentKind != request.DocumentKind || expected.LogicalRequestID != request.RequestIdentity.LogicalRequestID || expected.ManifestHash != manifestHash || expected.StablePrefixHash != request.StablePrefixHash {
+			return fmt.Errorf("candidate expected document identity does not match request")
 		}
 	}
 	switch request.DocumentKind {
@@ -317,6 +306,9 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 	}
 	if request.CandidateAttempt == 1 && (request.PreviousFailure == nil || request.PreviousFailure.Class == "" || strings.TrimSpace(request.PreviousFailure.Reason) == "") {
 		return fmt.Errorf("candidate retry requires the previous failure")
+	}
+	if request.ExpectedDocument == nil || request.ExpectedDocument.Normalized().CorrectionAttempt != request.CandidateAttempt {
+		return fmt.Errorf("operations request requires a matching sealed expected document")
 	}
 	if err := request.DefinitionContext.Validate(); err != nil {
 		return err
@@ -356,5 +348,25 @@ func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateReque
 	if err := request.SemanticContext.Validate(request.SemanticManifest); err != nil {
 		return err
 	}
+	if request.ExpectedDocument == nil {
+		return fmt.Errorf("semantic plan request requires a sealed expected document")
+	}
+	expected := request.ExpectedDocument.Normalized()
+	context := request.SemanticContext.Normalized()
+	if expected.PlanStep != context.PlanStep || expected.CorrectionAttempt != request.CandidateAttempt || expected.DefinitionSeedHash != context.DefinitionSeed.Hash || expected.BatchID != context.BatchID || expected.BatchSequence != context.BatchSequence || !sameCoverageWorkItemIDs(expected.BatchCoverageWorkItemIDs, context.BatchCoverageWorkItemIDs) {
+		return fmt.Errorf("semantic expected document does not match request context")
+	}
 	return nil
+}
+
+func sameCoverageWorkItemIDs(left, right []common.CoverageWorkItemID) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
 }

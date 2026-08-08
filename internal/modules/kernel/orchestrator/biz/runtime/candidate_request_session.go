@@ -12,8 +12,8 @@ import (
 // ensureCandidateRequestSession CAS-creates the provider-I/O ledger for one
 // sealed authority transaction. It intentionally allocates no candidate
 // attempt: only a complete document may enter the candidate admission path.
-func (c *RuntimeController) ensureCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" {
+func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected *runtimecontract.RuntimeExpectedDocumentContract) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" || expected == nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
@@ -30,11 +30,22 @@ func (c *RuntimeController) ensureCandidateRequestSession(ctx context.Context, w
 		CorrectionHash: strings.TrimSpace(correctionHash), State: runtimecontract.RuntimeCandidateRequestSessionPrepared, NextSequence: 1,
 	}
 	session.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(documentKind, workspaceID, runID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash)
+	value := expected.Clone()
+	value.SchemaVersion = runtimecontract.RuntimeExpectedDocumentSchemaCurrent
+	value.DocumentKind = documentKind
+	value.ManifestHash = session.ManifestHash
+	value.LogicalRequestID = session.LogicalRequestID
+	value.StablePrefixHash = session.StablePrefixHash
+	value.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(value)
+	if err := value.Validate(); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: invalid expected document contract", common.ErrInvalidArgument)
+	}
+	session.ExpectedDocument = &value
 	if idx, existing, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, session.LogicalRequestID); found {
 		if err := validateCurrentCandidateRequestSession(aggregate, existing); err != nil {
 			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 		}
-		if existing.DocumentKind != session.DocumentKind || existing.StablePrefixHash != session.StablePrefixHash || existing.ManifestHash != session.ManifestHash || existing.CorrectionHash != session.CorrectionHash || existing.Transaction != session.Transaction {
+		if existing.DocumentKind != session.DocumentKind || existing.StablePrefixHash != session.StablePrefixHash || existing.ManifestHash != session.ManifestHash || existing.CorrectionHash != session.CorrectionHash || existing.Transaction != session.Transaction || !sameRuntimeExpectedDocument(existing.ExpectedDocument, session.ExpectedDocument) {
 			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: runtime candidate request session identity conflicts", common.ErrConflict)
 		}
 		return aggregate, aggregate.CandidateRequestSessions[idx].Clone(), nil
@@ -49,6 +60,13 @@ func (c *RuntimeController) ensureCandidateRequestSession(ctx context.Context, w
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
 	return aggregate, session.Clone(), nil
+}
+
+func sameRuntimeExpectedDocument(left, right *runtimecontract.RuntimeExpectedDocumentContract) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Normalized().Hash == right.Normalized().Hash
 }
 
 // markCandidateRequestSubmitted durably records the physical-call identity
@@ -80,64 +98,12 @@ func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, w
 		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request already has an unresolved physical call", common.ErrConflict)
 	}
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionPrepared && session.State != runtimecontract.RuntimeCandidateRequestSessionContinuationPending && session.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending {
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionPrepared && session.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending && session.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session does not accept a physical call", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = true
 	aggregate.CandidateRequestSessions[idx].LastPhysicalCallID = physicalCallID
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// recordCandidateRequestFragment records only metadata for an opaque fragment
-// already committed by the Orchestrator evidence repository. A duplicate hash
-// is idempotent; different content for the same logical sequence is a
-// contract defect and cannot overwrite the persisted request history.
-func (c *RuntimeController) recordCandidateRequestFragment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, fragment runtimecontract.RuntimeCandidateRequestFragment) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	fragment = fragment.Normalized()
-	if err := fragment.Validate(); err != nil || fragment.PhysicalCallID == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	idx, session, err := currentCandidateRequestSession(aggregate, logicalRequestID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	for _, existing := range session.Fragments {
-		if existing.Sequence != fragment.Sequence {
-			continue
-		}
-		if existing == fragment {
-			return aggregate, nil
-		}
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request fragment conflicts at sequence %d", common.ErrConflict, fragment.Sequence)
-	}
-	if session.NextSequence != fragment.Sequence || !session.ProviderSubmitted || session.LastPhysicalCallID != fragment.PhysicalCallID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request fragment does not match the submitted call", common.ErrConflict)
-	}
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionPrepared && session.State != runtimecontract.RuntimeCandidateRequestSessionContinuationPending && session.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session does not accept a fragment", common.ErrConflict)
-	}
-	expectedRevision := aggregate.StateRevision
-	updated := &aggregate.CandidateRequestSessions[idx]
-	updated.Fragments = append(updated.Fragments, fragment)
-	updated.NextSequence++
-	updated.State = runtimecontract.RuntimeCandidateRequestSessionContinuationPending
-	updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: "candidate_output_incomplete"}
-	updated.ProviderSubmitted = false
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -189,6 +155,54 @@ func (c *RuntimeController) recordCandidateRequestTransportOutcome(ctx context.C
 	return aggregate, nil
 }
 
+// recordCandidateRequestRecoveryRequired persists an LLM-owner incomplete
+// document fact as SM-4 recovery authority. The next call starts the same
+// sealed expected document from the beginning; no raw suffix is retained or
+// assembled into Runtime authority.
+func (c *RuntimeController) recordCandidateRequestRecoveryRequired(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	outcome = outcome.Normalized()
+	if err := outcome.Validate(); err != nil || outcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	idx, session, err := currentCandidateRequestSession(aggregate, logicalRequestID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	physicalCallID = strings.TrimSpace(physicalCallID)
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionRecoveryPending && !session.ProviderSubmitted && session.LastPhysicalCallID == physicalCallID && session.LastDocumentOutcome != nil && session.LastDocumentOutcome.Normalized() == outcome {
+		return aggregate, nil
+	}
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionPrepared && session.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending && session.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending {
+		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session does not accept an incomplete provider outcome", common.ErrConflict)
+	}
+	if session.ExpectedDocument == nil || outcome.ExpectedDocumentHash != session.ExpectedDocument.Hash || !session.ProviderSubmitted || session.LastPhysicalCallID != physicalCallID {
+		return RuntimeAggregate{}, fmt.Errorf("%w: incomplete provider document does not match submitted expected document", common.ErrConflict)
+	}
+	expectedRevision := aggregate.StateRevision
+	updated := &aggregate.CandidateRequestSessions[idx]
+	updated.State = runtimecontract.RuntimeCandidateRequestSessionRecoveryPending
+	updated.NextSequence++
+	updated.IncompleteOutcomes++
+	updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: outcome.Code, Signature: outcome.Signature}
+	updated.LastDocumentOutcome = &outcome
+	updated.ProviderSubmitted = false
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
 // completeCandidateRequestDocument commits only the fact that an opaque,
 // complete document is now available in the Orchestrator-owned content store.
 // Candidate attempt allocation remains a separate subsequent transition.
@@ -208,14 +222,7 @@ func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete && session.LastPhysicalCallID == physicalCallID {
 		return aggregate, nil
 	}
-	// A direct complete response is committed while its physical call remains
-	// submitted. A suffix completes only after RecordFragment has durably
-	// advanced the sequence and cleared the unresolved-submit marker. In the
-	// latter case the last fragment's physical call is the sole admissible
-	// completion provenance; no new provider call is invented.
-	fragmentCompletion := session.State == runtimecontract.RuntimeCandidateRequestSessionContinuationPending &&
-		len(session.Fragments) > 0 && !session.ProviderSubmitted && session.LastPhysicalCallID == physicalCallID
-	if (!session.ProviderSubmitted && !fragmentCompletion) || session.LastPhysicalCallID != physicalCallID {
+	if !session.ProviderSubmitted || session.LastPhysicalCallID != physicalCallID {
 		return RuntimeAggregate{}, fmt.Errorf("%w: complete candidate document does not match submitted call", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
@@ -338,7 +345,7 @@ func validateCurrentCandidateRequestSession(aggregate RuntimeAggregate, session 
 		return err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
-	if session.Transaction != transaction || session.LogicalRequestID != runtimecontract.StableRuntimeCandidateRequestSessionID(session.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash) {
+	if session.ExpectedDocument == nil || session.Transaction != transaction || session.LogicalRequestID != runtimecontract.StableRuntimeCandidateRequestSessionID(session.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash) {
 		return fmt.Errorf("%w: runtime candidate request session does not match current authority", common.ErrConflict)
 	}
 	if session.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
@@ -366,7 +373,7 @@ func candidateRequestTerminalOutcome(class runtimecontract.RuntimeCandidateReque
 		runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol,
 		runtimecontract.RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
 		runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
-		runtimecontract.RuntimeCandidateRequestOutcomeContinuationExhausted:
+		runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted:
 		return true
 	default:
 		return false

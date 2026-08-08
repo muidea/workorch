@@ -52,7 +52,6 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,
 		RuntimeInternalEventCandidateRequestSubmitted,
-		RuntimeInternalEventCandidateRequestFragmentObserved,
 		RuntimeInternalEventCandidateRequestOutcomeObserved,
 		RuntimeInternalEventCandidateDocumentObserved,
 		RuntimeInternalEventCandidateRequestStaleObserved,
@@ -72,6 +71,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		metadata.StateMachine = eventcontract.StateMachineSM3
 
 	case RuntimeInternalEventReconciliationRequested,
+		RuntimeInternalEventCandidateRequestRecoveryRequired,
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
@@ -96,8 +96,8 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventFeasibilityObserved,
 		RuntimeInternalEventFailureObserved,
 		RuntimeInternalEventDriveFailureObserved,
-		RuntimeInternalEventCandidateRequestFragmentObserved,
 		RuntimeInternalEventCandidateRequestOutcomeObserved,
+		RuntimeInternalEventCandidateRequestRecoveryRequired,
 		RuntimeInternalEventCandidateDocumentObserved,
 		RuntimeInternalEventCandidateRequestStaleObserved,
 		RuntimeInternalEventCandidateDocumentRejected,

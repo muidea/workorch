@@ -116,6 +116,11 @@ func TestRuntimeSemanticPlanSchemaAndRequestContextAreManifestBound(t *testing.T
 	if err := context.Validate(manifest); err != nil {
 		t.Fatal(err)
 	}
+	implicitStep := context
+	implicitStep.PlanStep = ""
+	if err := implicitStep.Validate(manifest); err == nil || !strings.Contains(err.Error(), "invalid plan step") {
+		t.Fatalf("empty semantic plan step error = %v", err)
+	}
 	stale := manifest
 	stale.DefinitionSeedHash = "stale"
 	stale.Hash = StableRuntimeSemanticPlanManifestHash(stale)
