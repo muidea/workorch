@@ -549,6 +549,17 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 	if !found || descriptor.OwnerModuleID != p.OwnerModuleID {
 		return runtimeSemanticProposalConstraint("ownerModuleId", RuntimeSemanticConstraintRelational, p.OwnerModuleID, []string{descriptor.OwnerModuleID + " owns " + p.OperationKind}, nil)
 	}
+	if p.OperationVariantID != "" {
+		contract, contractFound := RuntimeOperationContractForKind(p.OperationKind)
+		if !contractFound || !runtimeSemanticVariantExists(contract, p.OperationVariantID) {
+			allowed := runtimeSemanticVariantIDs(contract)
+			required := []string{"variant must be in the sealed operation contract"}
+			if !contractFound || len(contract.Variants) == 0 {
+				required = []string{"omit for dynamic operation; use owner recipe/capability identity"}
+			}
+			return runtimeSemanticProposalConstraint("operationVariantId", RuntimeSemanticConstraintAllowedValue, p.OperationVariantID, required, allowed)
+		}
+	}
 	if err := validateRuntimeSemanticProposalTarget(p.Target); err != nil {
 		return err
 	}

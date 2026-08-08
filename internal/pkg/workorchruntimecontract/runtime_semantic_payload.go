@@ -273,6 +273,18 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	selectorRefs = normalizeStrings(selectorRefs)
 	constraintRefs = normalizeStrings(constraintRefs)
 	recipeIDs = normalizeStrings(recipeIDs)
+	if targetRefs == nil {
+		targetRefs = []string{}
+	}
+	if selectorRefs == nil {
+		selectorRefs = []string{}
+	}
+	if constraintRefs == nil {
+		constraintRefs = []string{}
+	}
+	if recipeIDs == nil {
+		recipeIDs = []string{}
+	}
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"required": []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "proposals"},
@@ -304,7 +316,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 						string(RuntimeEffectNone), string(RuntimeEffectEphemeralSession), string(RuntimeEffectGovernanceOnly),
 						string(RuntimeEffectWorkspaceDurable), string(RuntimeEffectRemoteDurable), string(RuntimeEffectUnknown),
 					}, 1),
-					"validationRecipeId": map[string]any{"type": "string", "enum": recipeIDs}, "requiredCheckRefs": stringArraySchema(),
+					"validationRecipeId": stringEnumSchema(recipeIDs), "requiredCheckRefs": stringArraySchema(),
 					"metricConstraints": stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string", "minLength": 1},
 				},
 			}},
@@ -349,11 +361,54 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 		"then": map[string]any{
 			"required": []string{"validationRecipeId", "requiredCheckRefs"},
 			"properties": map[string]any{
-				"validationRecipeId": map[string]any{"type": "string", "minLength": 1, "enum": recipeIDs},
+				"validationRecipeId": stringEnumSchemaWithMinimum(recipeIDs, 1),
 				"requiredCheckRefs":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
 			},
 		},
 	}}
+	// Dynamic capability operations do not have static RuntimeOperationVariant
+	// contracts. Their owner-scoped identity is carried by validationRecipeId
+	// (for MCP tools) or the owner feasibility facts, never by operationVariantId.
+	for _, kind := range []string{StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet, StepKindShellCommand, StepKindFileList, StepKindFileRead, StepKindFileWrite, StepKindFileEdit} {
+		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"operationKind": map[string]any{"const": kind}}},
+			"then": map[string]any{"not": map[string]any{"required": []string{"operationVariantId"}}},
+		})
+	}
+	// Static variants are narrowed to the operation kind's own contract. This
+	// avoids presenting a global variant set that can cross owner boundaries.
+	for _, kind := range manifest.AllowedOperationKinds {
+		contract, found := RuntimeOperationContractForKind(kind)
+		if !found || len(contract.Variants) == 0 {
+			continue
+		}
+		variantIDs := make([]string, 0, len(contract.Variants))
+		for _, variant := range contract.Variants {
+			variantIDs = append(variantIDs, variant.ID)
+		}
+		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"operationKind": map[string]any{"const": kind}}},
+			"then": map[string]any{"properties": map[string]any{"operationVariantId": map[string]any{"type": "string", "enum": normalizeStrings(variantIDs)}}},
+		})
+	}
+	// Every owner receives only its own sealed catalog values. The manifest is
+	// the bounded per-run authority; no process-global registry is introduced.
+	for _, catalog := range manifest.OwnerCatalogs {
+		catalog = catalog.Normalized()
+		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+			"if": map[string]any{"properties": map[string]any{"ownerModuleId": map[string]any{"const": catalog.OwnerModuleID}}},
+			"then": map[string]any{"properties": map[string]any{
+				"operationKind":      map[string]any{"type": "string", "enum": normalizeStrings(catalog.OperationKinds)},
+				"validationRecipeId": stringEnumSchema(catalog.ValidationRecipeRefs),
+				"target": map[string]any{"properties": map[string]any{
+					"exactTargetRefs":           stringEnumArraySchema(catalog.TargetRefs),
+					"ownerScopeTargetRefs":      stringEnumArraySchema(catalog.TargetRefs),
+					"ownerSelectorRefs":         stringEnumArraySchema(catalog.SelectorRefs),
+					"prospectiveConstraintRefs": stringEnumArraySchema(catalog.ConstraintRefs),
+				}},
+			}},
+		})
+	}
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err
 }
@@ -431,8 +486,26 @@ func stringArraySchema() map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 }
 
+func stringEnumSchema(values []string) map[string]any {
+	values = normalizeStrings(values)
+	if values == nil {
+		values = []string{}
+	}
+	return map[string]any{"type": "string", "enum": values}
+}
+
+func stringEnumSchemaWithMinimum(values []string, minimum int) map[string]any {
+	schema := stringEnumSchema(values)
+	schema["minLength"] = minimum
+	return schema
+}
+
 func stringEnumArraySchema(values []string) map[string]any {
-	return map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": normalizeStrings(values)}}
+	values = normalizeStrings(values)
+	if values == nil {
+		values = []string{}
+	}
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": values}}
 }
 
 func stringEnumArraySchemaWithMinimum(values []string, minimum int) map[string]any {

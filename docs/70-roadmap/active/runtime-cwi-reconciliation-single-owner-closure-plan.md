@@ -194,6 +194,21 @@ and terminates or requests the existing prerequisite refresh path; it must not s
 LLM remains a renderer of detached target facts. File/Git/Shell/MCP/Web/SSH remain catalog and feasibility fact owners.
 Only Orchestrator SM-3 may classify target correction and transition the semantic ledger.
 
+### 2.9 Dynamic Capability Identity And Owner-Scoped Schema Closure
+
+Fresh live validation exposed a second contract collision: an MCP tool identity such as
+`mcp/tool_call/mcp-lsp-bridge/lsp_status` was emitted as both `operationVariantId` and `validationRecipeId`.
+MCP tools have no static `RuntimeOperationVariantContract`; the tool/recipe identity belongs to the MCP owner
+catalog. Shell validation recipes likewise remain Shell-owned. A semantic proposal must omit `operationVariantId`
+for dynamic operations and use only the owner-scoped recipe/capability fact.
+
+The request schema and evaluator are now owner/kind-scoped from the sealed manifest. They no longer expose a global
+union of selectors, target refs, constraints, recipes, or static variants. Empty catalog values encode as an empty enum
+array, never JSON `null`; an empty admissibility domain is a bounded catalog gap, not an invitation to guess.
+
+The Orchestrator remains the only component that turns these facts into an SM-3 correction/CAS transition. MCP, Shell,
+File, and Git continue to return typed catalog/feasibility facts only; LLM remains a detached fact renderer.
+
 ## 3. Non-Negotiable Ownership Rules
 
 1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
@@ -473,6 +488,7 @@ remains open.
 | RSO-15 | pending | Fresh deployed positive convergence after RSO-12 through RSO-14 | semantic seal → dispatch → receipt → evidence → CWI close → DoD result |
 | RSO-16 | code_closed | Normalize exact/existing/prospective target policy into one schema/evaluator/correction contract | target policy matrix, finite-allowed-value and empty-catalog tests pass |
 | RSO-17 | pending | Prove target correction and no-ineffective-retry behavior in a fresh deployment | target correction → semantic seal, or bounded catalog-gap terminal with no attempt 2 |
+| RSO-18 | code_closed | Separate dynamic MCP/Shell capability identities from static operation variants and scope schema by owner/kind | dynamic-variant rejection, owner-selector isolation, static-variant and null-enum tests pass |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
@@ -512,6 +528,9 @@ provider proof.
   empty exact/owner-scope fields, enforces the three policy shapes in the request schema, and leaves prospective
   target refs free to name a not-yet-existing resource under sealed selector/constraint facts. RSO-17 remains open
   for fresh deployed target correction and no-ineffective-retry proof.
+- Fresh `run-035` exposed the dynamic MCP variant collision. The local RSO-18 closure now rejects dynamic
+  `operationVariantId`, scopes schema values to each sealed owner catalog, and emits valid empty enums instead of
+  `enum:null`. Live proof must still be rerun after deployment; `run-035` itself is not positive convergence.
 
 ### 10.2 Ordered Code-Closure Steps For RSO-12 Through RSO-15
 
@@ -558,6 +577,13 @@ provider proof.
    - Include sealed target refs/selectors/constraints in provider-safe correction facts.
    - If the owner catalog has no admissible target, classify a bounded catalog gap instead of issuing ineffective retry.
    - Add attempt-0/attempt-1, finite catalog, empty catalog, stale directive, duplicate event, and restart tests.
+9. **Separate dynamic capability identities** in
+   `internal/pkg/workorchruntimecontract/runtime_semantic_payload.go` and
+   `internal/pkg/workorchruntimecontract/runtime_semantic_contract.go`.
+   - MCP/Shell dynamic recipes must not be emitted as `operationVariantId`.
+   - Restrict target, selector, constraint, recipe, and static variant values by sealed owner/kind.
+   - Reject cross-owner selector/recipe facts before owner feasibility dispatch.
+   - Add dynamic-variant, owner-isolation, static-variant, and empty-enum schema tests.
 
 ## 11. Verification Matrix
 

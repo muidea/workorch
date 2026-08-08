@@ -58,6 +58,50 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if _, enumBound := prospectiveTarget["enum"]; enumBound {
 		t.Fatalf("prospective target schema must not require an existing catalog ref: %v", prospectiveTarget)
 	}
+	if strings.Contains(proofSchema, `"enum":null`) {
+		t.Fatalf("semantic schema emitted an invalid null enum: %s", proofSchema)
+	}
+}
+
+func TestRuntimeSemanticPlanRejectsDynamicOperationVariant(t *testing.T) {
+	proposal := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
+		OperationVariantID: "mcp/tool_call/server/tool", Target: RuntimeOperationTargetAuthorization{
+			Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"server"},
+		}, RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+		ValidationRecipeID: "mcp/tool_call/server/tool", RequiredCheckRefs: []string{"configured-mcp-server"}, DeclarationRef: "dod/cwi-001",
+	}
+	var constraint *RuntimeSemanticProposalConstraintError
+	if err := proposal.Validate(); !errors.As(err, &constraint) || constraint.Field != "operationVariantId" {
+		t.Fatalf("dynamic MCP variant error = %v, constraint = %+v", err, constraint)
+	}
+}
+
+func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	mcpCatalog := semanticTestOwnerCatalog("semantic-mcp-catalog", RuntimeModuleMCP, []string{StepKindMCPToolCall})
+	mcpCatalog.SelectorRefs = []string{"mcp-lsp-bridge"}
+	mcpCatalog.ConstraintRefs = []string{"configured-mcp-server"}
+	mcpCatalog.ValidationRecipeRefs = []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}
+	mcpCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(mcpCatalog)
+	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{StepKindShellCommand})
+	shellCatalog.ValidationRecipeRefs = []string{"software-dev-validation-evidence"}
+	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleMCP, RuntimeModuleShell)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindMCPToolCall, StepKindShellCommand)
+	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
+	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog, shellCatalog)
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"shell/command","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["ephemeral_session"],"validationRecipeId":"software-dev-validation-evidence","requiredCheckRefs":["validation-target-must-exist"],"declarationRef":"dod/cwi-001"}]}`
+	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.ownerSelectorRefs" || len(diagnostic.SemanticViolations) != 1 {
+		t.Fatalf("owner-scoped selector diagnostic = %+v err=%v", diagnostic, err)
+	}
+	violation := diagnostic.SemanticViolations[0]
+	if len(violation.Allowed) != 0 || violation.Rule != RuntimeSemanticConstraintAllowedValue {
+		t.Fatalf("owner-scoped selector violation = %+v", violation)
+	}
 }
 
 func TestRuntimeSemanticPlanRequestSchemaRejectsUnscopedProofBatch(t *testing.T) {
