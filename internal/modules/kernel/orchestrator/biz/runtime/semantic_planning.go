@@ -686,6 +686,9 @@ func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, w
 		if err := directive.ValidateAgainst(*ledger.Manifest, rejection); err != nil {
 			return false, err
 		}
+		if err := validateSemanticPlanCorrectionScope(*ledger, directive); err != nil {
+			return false, err
+		}
 		if directive.StablePrefixHash != stablePrefixHash {
 			return false, fmt.Errorf("%w: semantic correction stable prefix is stale", common.ErrConflict)
 		}
@@ -703,6 +706,31 @@ func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, w
 		ledger.Rejections = append(ledger.Rejections, *rejection.CloneOriginal())
 		return true, nil
 	})
+}
+
+func validateSemanticPlanCorrectionScope(ledger runtimecontract.RuntimeSemanticPlanningLedger, directive runtimecontract.RuntimeSemanticCorrectionDirective) error {
+	if directive.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		return nil
+	}
+	if len(directive.Violations) != 1 || directive.Violations[0].Kind != runtimecontract.RuntimeSemanticContractViolationProofBatchDocument {
+		return fmt.Errorf("%w: proof-batch correction requires one bounded document violation", common.ErrConflict)
+	}
+	for _, batch := range ledger.Batches {
+		if batch.BatchID != ledger.ActiveBatchID {
+			continue
+		}
+		required := directive.Violations[0].RequiredCoverageWorkItemIDs
+		if len(required) != len(batch.CoverageWorkItemIDs) {
+			return fmt.Errorf("%w: proof-batch correction coverage differs from active batch", common.ErrConflict)
+		}
+		for idx := range required {
+			if required[idx] != batch.CoverageWorkItemIDs[idx] {
+				return fmt.Errorf("%w: proof-batch correction coverage differs from active batch", common.ErrConflict)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: proof-batch correction has no active batch", common.ErrConflict)
 }
 
 // sealSemanticContract is the SM-2 all-or-nothing authority transition. It

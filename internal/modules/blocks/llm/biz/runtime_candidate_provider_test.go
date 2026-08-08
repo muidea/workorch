@@ -147,6 +147,9 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	if !strings.Contains(authority, `"batchId":"batch-1"`) || !strings.Contains(authority, `"batchSequence":0`) || !strings.Contains(authority, `"coverageItems":[{"ID":"cwi-001"`) || !strings.Contains(providerRequest.Schema, `"planStep":{"const":"proof_batch"}`) {
 		t.Fatalf("proof batch lost current authority: schema=%s authority=%s", providerRequest.Schema, authority)
 	}
+	if strings.Contains(providerRequest.Schema, `"coverageOrder"`) || !strings.Contains(authority, "Do not return coverageOrder") {
+		t.Fatalf("proof batch repeated SM-3 coverage order: schema=%s authority=%s", providerRequest.Schema, authority)
+	}
 }
 
 func TestRuntimeSemanticPlanProviderRejectsMixedDocumentFields(t *testing.T) {

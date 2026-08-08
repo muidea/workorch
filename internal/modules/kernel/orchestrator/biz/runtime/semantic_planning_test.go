@@ -245,6 +245,50 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 	}
 }
 
+func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *testing.T) {
+	controller, _, aggregate := newSemanticPlanningController(t)
+	manifest, order, _ := semanticPlanningFixture(t, aggregate)
+	manifest.CoverageItems = append(manifest.CoverageItems, runtimecontract.RuntimeCoverageItem{
+		ID: "cwi-later", SliceID: "slice-later", SourceScope: "dodItem", SourceID: "dod-later", TargetText: "later item",
+	})
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.ManifestHash = manifest.Hash
+	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID, "cwi-later"}
+	order.Proposals = nil
+	apply := func(event RuntimeInternalEvent) {
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, err := controller.ApplyInternalEvent(context.Background(), event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "batch-scope-prefix", LogicalRequestID: "order-request"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, order, 0, "batch-request", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		OriginalClass: "semantic_plan", OriginalCode: "invalid_document", OriginalMessage: "batch document was invalid",
+		Signature: "semantic-plan/batch/invalid-document", FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "invalid"}},
+		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{
+			Kind: runtimecontract.RuntimeSemanticContractViolationProofBatchDocument, Path: "$.proposals",
+			RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-later"},
+		}},
+	}
+	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
+	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", directive, diagnostic); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("out-of-batch correction error = %v", err)
+	}
+}
+
 func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, document, _ := semanticPlanningFixture(t, aggregate)
@@ -813,8 +857,8 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 		document := runtimecontract.RuntimeSemanticPlanDocument{
 			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 			PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: batch.BatchID, BatchSequence: batch.Sequence,
-			BatchCoverageWorkItemIDs: batch.CoverageWorkItemIDs, CoverageOrder: order.CoverageOrder,
-			Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposals[sequence]},
+			BatchCoverageWorkItemIDs: batch.CoverageWorkItemIDs,
+			Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposals[sequence]},
 		}
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: batch.RequestLogicalID})
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})

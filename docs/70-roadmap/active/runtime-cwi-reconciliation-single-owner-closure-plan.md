@@ -80,6 +80,26 @@ execution, receipt, evidence admission, CWI advance, assessment, or durable work
 complete, so SM-4 whole-document recovery was also not exercised. These paths remain regression/live gates even where
 their code is already closed.
 
+### 2.5 Subsequent Proof-Batch Counterexample And Code Closure
+
+A later deployed run passed coverage ordering and reached the first proof batch, exposing three narrower contract
+defects that supersede the earlier local-green conclusion:
+
+- the proof-batch provider document repeated the complete workspace `coverageOrder` even though SM-3 had already
+  persisted that order; this expanded the response and let a batch document restate global authority;
+- a malformed or structurally rejected attempt-0 proof batch had no typed semantic violation, so SM-3 could not seal a
+  bounded correction and terminalized as `runtime_contract_defect` instead of issuing the sole allowed attempt 1;
+- projection compared the Run owner's combined Goal/DoD Definition revision with one individual DoD revision, so a
+  terminal Run could be displayed as definition-drift active.
+
+The code closure keeps the accepted order only in the persisted order document/batch ledger. Provider-facing
+proof-batch schema and payload now contain only exact batch identity, exact batch CWI membership, and proposals;
+`batchSequence: 0` remains explicit. For an attempt-0 proof-batch rejection, SM-3 derives one typed
+`proof_batch_document` violation from the sealed expected document, binds it to the exact active batch, and permits only
+attempt 1. The private reducer independently verifies that binding before CAS. Projection now computes the same combined
+Definition identity through the Workspace owner contract used by Run activation. These changes affect SM-3 and the
+read-only SM-4 projection delivery surface; they do not give the LLM or projection transition authority.
+
 ## 3. Non-Negotiable Ownership Rules
 
 1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
@@ -345,12 +365,12 @@ remains open.
 | RSO-1 | code_closed | Single-owner core contract, typed owner EventHub boundaries, one Runtime mutation surface | boundary scans and owner contract tests remain green |
 | RSO-2 | code_closed | Predecessor-owned restart intent and release-before-successor sequence | restart crash/duplicate/stale/workspace-isolation tests |
 | RSO-3 | code_closed | Sealed complete-document identity; raw suffix removal; whole-document recovery | provider boundary, recovery, restart, exhaustion tests |
-| RSO-4 | code_closed | Bounded coverage-order/proof-batch requests and same-step identity fencing | batch membership/order/hash and request-size tests |
+| RSO-4 | code_closed | Bounded coverage-order/proof-batch requests and same-step identity fencing | proof wire omits global order; batch membership/sequence/hash and request-size tests |
 | RSO-5 | code_closed | Add and validate `RuntimeSemanticCorrectionDirective` | pure DTO/hash/clone and dependency-delta tests pass |
-| RSO-6 | code_closed | Seal semantic correction through SM-3 private events and Runtime CAS | transition, duplicate, stale, restart, attempt exhaustion tests pass |
+| RSO-6 | code_closed | Seal semantic correction through SM-3 private events and Runtime CAS | dependency and exact-active-batch correction, duplicate, stale, restart and exhaustion tests pass |
 | RSO-7 | code_closed | Carry/render the sealed directive through the LLM owner boundary | preflight/request identity, detach and C0-C4 stability tests pass |
-| RSO-8 | code_closed | Remove projection outcome re-adjudication and unify activity | terminal/definition-drift/canonical activity tests pass |
-| RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix | 2026-08-08 repository gates pass |
+| RSO-8 | code_closed | Remove projection outcome re-adjudication and unify activity | combined Definition identity plus terminal/definition-drift/canonical activity tests pass |
+| RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix after the latest proof-batch closure | fmt/vet/full/boundary, affected-package race and managed CI pass |
 | RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete semantic-to-effect event/audit lineage |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-6 precedes RSO-7; RSO-8 may be implemented after RSO-5 in
@@ -369,9 +389,14 @@ provider proof.
   safe diagnostic without `OriginalMessage`; C0-C3 and the stable prefix remain unchanged.
 - Workspace outcome selects a current-Definition Run by Goal, DoD and Definition revision before applying the
   definition-change fallback. Activity consumes that same canonical outcome.
-- `make fmt-check`, `make vet`, `make console-build`, `make verify-boundary-contract`, `go test ./... -count=1`,
-  `go test -race ./... -count=1`, and the CI-equivalent managed `verify-ci-mvp-file` wrapper all pass. The managed script
-  also now reads Workspace revision in the provider-selection helper that performs the owner CAS.
+- Proof-batch wire documents no longer repeat `coverageOrder`; their zero-based sequence is not erased by `omitempty`.
+  Attempt-0 structural rejection produces a typed exact-batch correction, and the private reducer rejects any valid
+  manifest CWI that is outside the active batch.
+- Projection compares the Run Definition identity with the canonical combined Goal/DoD identity from the Workspace
+  owner contract rather than an individual definition revision.
+- For the latest delta, `make fmt-check`, `make vet`, `make verify-boundary-contract`, `go test ./... -count=1`, the
+  affected-package race matrix, and managed `verify-ci-mvp-file` pass. The Shell and MCP mock providers now follow the
+  same minimal proof-batch wire and explicitly assert that `coverageOrder` is absent.
 
 ## 11. Verification Matrix
 

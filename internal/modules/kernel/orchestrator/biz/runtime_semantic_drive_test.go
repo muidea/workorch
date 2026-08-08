@@ -78,6 +78,27 @@ func TestRuntimeSemanticCorrectionExpectedDocumentKeepsPlanStepAndBatch(t *testi
 	}
 }
 
+func TestRuntimeSemanticCorrectionDiagnosticBindsProofBatchWithoutReclassifyingOrder(t *testing.T) {
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}},
+	}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		PlanStep:                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-002", "cwi-001"},
+	}
+	got := runtimeSemanticCorrectionDiagnostic(diagnostic, expected)
+	if len(got.SemanticViolations) != 1 || got.SemanticViolations[0].Kind != runtimecontract.RuntimeSemanticContractViolationProofBatchDocument ||
+		got.SemanticViolations[0].Path != "$.proposals" || len(got.SemanticViolations[0].RequiredCoverageWorkItemIDs) != 2 ||
+		got.SemanticViolations[0].RequiredCoverageWorkItemIDs[0] != "cwi-002" || got.SemanticViolations[0].RequiredCoverageWorkItemIDs[1] != "cwi-001" {
+		t.Fatalf("proof-batch correction diagnostic = %+v", got)
+	}
+	orderExpected := expected
+	orderExpected.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	if order := runtimeSemanticCorrectionDiagnostic(diagnostic, orderExpected); len(order.SemanticViolations) != 0 {
+		t.Fatalf("coverage-order diagnostic was reclassified as proof batch: %+v", order)
+	}
+}
+
 func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -120,9 +141,11 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 		document := runtimecontract.RuntimeSemanticPlanDocument{
 			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 			ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
-			PlanStep: command.SemanticContext.PlanStep, CoverageOrder: []common.CoverageWorkItemID{item.ID},
+			PlanStep: command.SemanticContext.PlanStep,
 		}
-		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+			document.CoverageOrder = []common.CoverageWorkItemID{item.ID}
+		} else if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 			if len(repository.aggregate.CandidateRequestSessions) != 2 {
 				t.Errorf("proof-batch provider call preceded persisted expected-document session: %+v", repository.aggregate.CandidateRequestSessions)
 				return

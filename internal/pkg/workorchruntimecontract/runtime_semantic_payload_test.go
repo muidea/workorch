@@ -29,6 +29,9 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 		t.Fatal(err)
 	}
 	properties := decoded["properties"].(map[string]any)
+	if _, found := properties["coverageOrder"]; found {
+		t.Fatalf("proof-batch schema repeated SM-3 coverage order: %s", proofSchema)
+	}
 	proposals := properties["proposals"].(map[string]any)
 	proposalProperties := proposals["items"].(map[string]any)["properties"].(map[string]any)
 	coverageEnum := proposalProperties["coverageWorkItemId"].(map[string]any)["enum"].([]any)
@@ -48,7 +51,8 @@ func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageOrder: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
 	}
 	payload, err := EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 	if err != nil {
@@ -61,17 +65,21 @@ func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	if StableRuntimeSemanticPlanDocumentHash(decoded) != StableRuntimeSemanticPlanDocumentHash(document) || !strings.Contains(string(payload), `"documentKind":"semantic_plan"`) {
 		t.Fatalf("semantic round trip changed document: %s", payload)
 	}
+	if !strings.Contains(string(payload), `"batchSequence":0`) || strings.Contains(string(payload), `"coverageOrder"`) {
+		t.Fatalf("proof-batch wire identity was not minimal and complete: %s", payload)
+	}
 }
 
 func TestRuntimeSemanticPlanPayloadRejectsUnknownMissingAndWrongKind(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	base := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","coverageOrder":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
+	base := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
 	tests := []struct {
 		name    string
 		payload string
 		path    string
 	}{
 		{name: "unknown proposal", payload: strings.Replace(base, `"declarationRef":"dod/cwi-001"`, `"declarationRef":"dod/cwi-001","dependsOn":[]`, 1), path: "$.proposals[0].dependsOn"},
+		{name: "repeated global order", payload: strings.Replace(base, `"proposals":`, `"coverageOrder":["cwi-001"],"proposals":`, 1), path: "$.coverageOrder"},
 		{name: "missing target", payload: strings.Replace(base, `"target":{"policy":"exact_target","exactTargetRefs":["main.go"]},`, "", 1), path: "$.proposals[0]"},
 		{name: "wrong kind", payload: strings.Replace(base, `"documentKind":"semantic_plan"`, `"documentKind":"operations"`, 1), path: "$.documentKind"},
 	}

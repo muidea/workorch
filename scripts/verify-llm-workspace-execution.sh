@@ -536,10 +536,10 @@ def semantic_plan_payload(request):
         "manifestHash": object_value(manifest, "hash", "Hash"),
         "definitionSeedHash": object_value(manifest, "definitionSeedHash", "DefinitionSeedHash"),
         "planStep": plan_step,
-        "coverageOrder": coverage_order,
         "proposals": [],
     }
     if plan_step == "coverage_order":
+        document["coverageOrder"] = coverage_order
         return document
     if plan_step != "proof_batch":
         raise ValueError("mock semantic planner received invalid plan step %r" % plan_step)
@@ -596,13 +596,13 @@ def provider_request_parser_self_test():
     if order_document.get("planStep") != "coverage_order" or order_document.get("coverageOrder") != ["cwi-first", "cwi-semantic"] or order_document.get("proposals") != []:
         raise AssertionError("semantic order parser did not produce a bounded order: %r" % order_document)
     semantic_batch = provider_request_from_payload({"messages": [{"role": "user", "content": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 ### C5.acceptance-slices
 [{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["validation"]}]"""}]})
     semantic_document = semantic_plan_payload(semantic_batch)
     proposals = semantic_document.get("proposals") or []
-    if semantic_document.get("planStep") != "proof_batch" or semantic_document.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or len(proposals) != 1 or proposals[0].get("coverageWorkItemId") != "cwi-semantic" or proposals[0].get("validationRecipeId") != "recipe-semantic":
+    if "coverageOrder" in semantic_document or semantic_document.get("planStep") != "proof_batch" or semantic_document.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or len(proposals) != 1 or proposals[0].get("coverageWorkItemId") != "cwi-semantic" or proposals[0].get("validationRecipeId") != "recipe-semantic":
         raise AssertionError("semantic authority parser did not produce a bounded proof batch: %r" % semantic_document)
     probe = provider_request_from_payload({"messages": [{"role": "user", "content": '{"runId":"probe","stepId":"probe"}'}]})
     probe_candidate = decision_payload(probe)

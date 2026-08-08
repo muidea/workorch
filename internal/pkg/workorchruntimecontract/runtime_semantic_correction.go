@@ -13,17 +13,21 @@ const RuntimeSemanticCorrectionDirectiveSchemaCurrent = "workorch.runtime_semant
 
 type RuntimeSemanticContractViolationKind string
 
-const RuntimeSemanticContractViolationDependencyOrder RuntimeSemanticContractViolationKind = "dependency_order"
+const (
+	RuntimeSemanticContractViolationDependencyOrder    RuntimeSemanticContractViolationKind = "dependency_order"
+	RuntimeSemanticContractViolationProofBatchDocument RuntimeSemanticContractViolationKind = "proof_batch_document"
+)
 
 // RuntimeSemanticContractViolation is a factual, provider-safe semantic
 // contract observation. It does not choose correction, retry, or terminal.
 type RuntimeSemanticContractViolation struct {
-	Kind                 RuntimeSemanticContractViolationKind `json:"kind"`
-	Path                 string                               `json:"path"`
-	RequiredBeforeID     common.CoverageWorkItemID            `json:"requiredBeforeId"`
-	RequiredAfterID      common.CoverageWorkItemID            `json:"requiredAfterId"`
-	ActualBeforePosition int                                  `json:"actualBeforePosition"`
-	ActualAfterPosition  int                                  `json:"actualAfterPosition"`
+	Kind                        RuntimeSemanticContractViolationKind `json:"kind"`
+	Path                        string                               `json:"path"`
+	RequiredBeforeID            common.CoverageWorkItemID            `json:"requiredBeforeId"`
+	RequiredAfterID             common.CoverageWorkItemID            `json:"requiredAfterId"`
+	ActualBeforePosition        int                                  `json:"actualBeforePosition"`
+	ActualAfterPosition         int                                  `json:"actualAfterPosition"`
+	RequiredCoverageWorkItemIDs []common.CoverageWorkItemID          `json:"requiredCoverageWorkItemIds,omitempty"`
 }
 
 func (v RuntimeSemanticContractViolation) Normalized() RuntimeSemanticContractViolation {
@@ -31,19 +35,29 @@ func (v RuntimeSemanticContractViolation) Normalized() RuntimeSemanticContractVi
 	v.Path = strings.TrimSpace(v.Path)
 	v.RequiredBeforeID = common.CoverageWorkItemID(strings.TrimSpace(string(v.RequiredBeforeID)))
 	v.RequiredAfterID = common.CoverageWorkItemID(strings.TrimSpace(string(v.RequiredAfterID)))
+	v.RequiredCoverageWorkItemIDs = normalizeOrderedCoverageWorkItemIDs(v.RequiredCoverageWorkItemIDs)
 	return v
 }
 
 func (v RuntimeSemanticContractViolation) Validate() error {
 	v = v.Normalized()
-	if v.Kind != RuntimeSemanticContractViolationDependencyOrder || v.Path != "$.coverageOrder" {
-		return fmt.Errorf("runtime semantic violation requires a supported kind and canonical path")
-	}
-	if v.RequiredBeforeID == "" || v.RequiredAfterID == "" || v.RequiredBeforeID == v.RequiredAfterID {
-		return fmt.Errorf("runtime semantic dependency violation requires distinct coverage ids")
-	}
-	if v.ActualBeforePosition < 0 || v.ActualAfterPosition < 0 || v.ActualBeforePosition < v.ActualAfterPosition {
-		return fmt.Errorf("runtime semantic dependency violation positions do not describe an order violation")
+	switch v.Kind {
+	case RuntimeSemanticContractViolationDependencyOrder:
+		if v.Path != "$.coverageOrder" || len(v.RequiredCoverageWorkItemIDs) != 0 {
+			return fmt.Errorf("runtime semantic dependency violation requires the canonical order path")
+		}
+		if v.RequiredBeforeID == "" || v.RequiredAfterID == "" || v.RequiredBeforeID == v.RequiredAfterID {
+			return fmt.Errorf("runtime semantic dependency violation requires distinct coverage ids")
+		}
+		if v.ActualBeforePosition < 0 || v.ActualAfterPosition < 0 || v.ActualBeforePosition < v.ActualAfterPosition {
+			return fmt.Errorf("runtime semantic dependency violation positions do not describe an order violation")
+		}
+	case RuntimeSemanticContractViolationProofBatchDocument:
+		if !strings.HasPrefix(v.Path, "$") || v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) == 0 {
+			return fmt.Errorf("runtime semantic proof-batch violation requires a field path and exact batch coverage")
+		}
+	default:
+		return fmt.Errorf("runtime semantic violation requires a supported kind")
 	}
 	return nil
 }
@@ -56,16 +70,27 @@ func (v RuntimeSemanticContractViolation) ValidateAgainstManifest(manifest Runti
 	if err := manifest.Validate(); err != nil {
 		return err
 	}
-	for _, item := range manifest.CoverageItems {
-		if item.ID != v.RequiredAfterID {
-			continue
+	if v.Kind == RuntimeSemanticContractViolationProofBatchDocument {
+		known := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
+		for _, item := range manifest.CoverageItems {
+			known[item.ID] = struct{}{}
 		}
-		for _, dependency := range item.ReopenDependencies {
-			if dependency.CoverageWorkItemID == v.RequiredBeforeID {
-				return nil
+		for _, id := range v.RequiredCoverageWorkItemIDs {
+			if _, found := known[id]; !found {
+				return fmt.Errorf("runtime semantic proof-batch violation coverage %q is outside manifest", id)
 			}
 		}
-		break
+		return nil
+	}
+	for _, item := range manifest.CoverageItems {
+		if item.ID == v.RequiredAfterID {
+			for _, dependency := range item.ReopenDependencies {
+				if dependency.CoverageWorkItemID == v.RequiredBeforeID {
+					return nil
+				}
+			}
+			break
+		}
 	}
 	return fmt.Errorf("runtime semantic dependency violation is not sealed by the manifest")
 }
@@ -74,7 +99,11 @@ func cloneRuntimeSemanticContractViolations(values []RuntimeSemanticContractViol
 	if len(values) == 0 {
 		return nil
 	}
-	return append([]RuntimeSemanticContractViolation(nil), values...)
+	ret := append([]RuntimeSemanticContractViolation(nil), values...)
+	for idx := range ret {
+		ret[idx].RequiredCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), values[idx].RequiredCoverageWorkItemIDs...)
+	}
+	return ret
 }
 
 func normalizeRuntimeSemanticContractViolations(values []RuntimeSemanticContractViolation) []RuntimeSemanticContractViolation {
@@ -158,7 +187,17 @@ func (d RuntimeSemanticCorrectionDirective) ValidateAgainst(manifest RuntimeSema
 		return fmt.Errorf("runtime semantic correction directive does not preserve rejection violations")
 	}
 	for idx := range d.Violations {
-		if d.Violations[idx] != canonicalRejection.SemanticViolations[idx] {
+		switch d.Violations[idx].Kind {
+		case RuntimeSemanticContractViolationDependencyOrder:
+			if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
+				return fmt.Errorf("runtime semantic dependency correction is outside coverage-order step")
+			}
+		case RuntimeSemanticContractViolationProofBatchDocument:
+			if d.PlanStep != RuntimeSemanticPlanStepProofBatch {
+				return fmt.Errorf("runtime semantic proof-batch correction is outside proof-batch step")
+			}
+		}
+		if !runtimeSemanticContractViolationEqual(d.Violations[idx], canonicalRejection.SemanticViolations[idx]) {
 			return fmt.Errorf("runtime semantic correction directive violation %d differs from rejection", idx)
 		}
 		if err := d.Violations[idx].ValidateAgainstManifest(manifest); err != nil {
@@ -185,8 +224,27 @@ func StableRuntimeSemanticCorrectionDirectiveHash(directive RuntimeSemanticCorre
 		writeHashString(h, string(violation.RequiredAfterID))
 		writeHashString(h, fmt.Sprintf("%d", violation.ActualBeforePosition))
 		writeHashString(h, fmt.Sprintf("%d", violation.ActualAfterPosition))
+		for _, id := range violation.RequiredCoverageWorkItemIDs {
+			writeHashString(h, string(id))
+		}
 	}
 	return "runtime-semantic-correction-directive-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func runtimeSemanticContractViolationEqual(left, right RuntimeSemanticContractViolation) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	if left.Kind != right.Kind || left.Path != right.Path || left.RequiredBeforeID != right.RequiredBeforeID ||
+		left.RequiredAfterID != right.RequiredAfterID || left.ActualBeforePosition != right.ActualBeforePosition ||
+		left.ActualAfterPosition != right.ActualAfterPosition || len(left.RequiredCoverageWorkItemIDs) != len(right.RequiredCoverageWorkItemIDs) {
+		return false
+	}
+	for idx := range left.RequiredCoverageWorkItemIDs {
+		if left.RequiredCoverageWorkItemIDs[idx] != right.RequiredCoverageWorkItemIDs[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 // RuntimeSemanticDependencyOrderError preserves the typed dependency edge

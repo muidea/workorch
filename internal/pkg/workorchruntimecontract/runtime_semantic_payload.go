@@ -23,9 +23,9 @@ type runtimeSemanticPlanPayload struct {
 	DefinitionSeedHash       string                           `json:"definitionSeedHash"`
 	PlanStep                 RuntimeSemanticPlanStep          `json:"planStep,omitempty"`
 	BatchID                  string                           `json:"batchId,omitempty"`
-	BatchSequence            int                              `json:"batchSequence,omitempty"`
+	BatchSequence            *int                             `json:"batchSequence,omitempty"`
 	BatchCoverageWorkItemIDs []common.CoverageWorkItemID      `json:"batchCoverageWorkItemIds,omitempty"`
-	CoverageOrder            []common.CoverageWorkItemID      `json:"coverageOrder"`
+	CoverageOrder            []common.CoverageWorkItemID      `json:"coverageOrder,omitempty"`
 	Proposals                []runtimeSemanticProposalPayload `json:"proposals"`
 }
 
@@ -76,12 +76,12 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 	if wire.DocumentKind != RuntimeProviderDocumentSemanticPlan {
 		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.documentKind", Actual: string(wire.DocumentKind), Allowed: []string{string(RuntimeProviderDocumentSemanticPlan)}, Cause: fmt.Errorf("runtime semantic document kind is invalid")}
 	}
-	if len(wire.CoverageOrder) == 0 {
+	if wire.PlanStep == RuntimeSemanticPlanStepCoverageOrder && len(wire.CoverageOrder) == 0 {
 		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.coverageOrder", Actual: "missing_or_empty", Allowed: []string{"complete ordered CWI list"}, Cause: fmt.Errorf("runtime semantic plan must include provider-authored coverage order")}
 	}
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: wire.SchemaVersion, ManifestHash: wire.ManifestHash, DefinitionSeedHash: wire.DefinitionSeedHash,
-		BatchID: wire.BatchID, BatchSequence: wire.BatchSequence, BatchCoverageWorkItemIDs: wire.BatchCoverageWorkItemIDs,
+		BatchID: wire.BatchID, BatchSequence: runtimeSemanticBatchSequence(wire.BatchSequence), BatchCoverageWorkItemIDs: wire.BatchCoverageWorkItemIDs,
 		PlanStep:      wire.PlanStep,
 		CoverageOrder: wire.CoverageOrder,
 		Proposals:     make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
@@ -129,10 +129,15 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 	wire := runtimeSemanticPlanPayload{
 		DocumentKind: RuntimeProviderDocumentSemanticPlan, SchemaVersion: document.SchemaVersion,
 		ManifestHash: document.ManifestHash, DefinitionSeedHash: document.DefinitionSeedHash,
-		BatchID: document.BatchID, BatchSequence: document.BatchSequence, BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
-		PlanStep:      document.PlanStep,
-		CoverageOrder: append([]common.CoverageWorkItemID(nil), document.CoverageOrder...),
-		Proposals:     make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
+		BatchID: document.BatchID, BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
+		PlanStep:  document.PlanStep,
+		Proposals: make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
+	}
+	if document.PlanStep == RuntimeSemanticPlanStepCoverageOrder {
+		wire.CoverageOrder = append([]common.CoverageWorkItemID(nil), document.CoverageOrder...)
+	} else if document.PlanStep == RuntimeSemanticPlanStepProofBatch {
+		sequence := document.BatchSequence
+		wire.BatchSequence = &sequence
 	}
 	for _, value := range document.Proposals {
 		wire.Proposals = append(wire.Proposals, runtimeSemanticProposalPayload{
@@ -151,12 +156,32 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 	return json.Marshal(wire)
 }
 
+func runtimeSemanticBatchSequence(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 func validateRuntimeSemanticPayloadFields(payload []byte) error {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: strings.TrimSpace(err.Error()), Allowed: runtimeSemanticTopLevelFields, Cause: err}
 	}
-	if err := validateRuntimeSemanticObjectFields("$", envelope, runtimeSemanticTopLevelFields, []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"}); err != nil {
+	var planStep RuntimeSemanticPlanStep
+	if raw, found := envelope["planStep"]; found {
+		_ = json.Unmarshal(raw, &planStep)
+	}
+	allowed := runtimeSemanticTopLevelFields
+	required := []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "proposals"}
+	switch planStep {
+	case RuntimeSemanticPlanStepCoverageOrder:
+		required = append(required, "coverageOrder")
+	case RuntimeSemanticPlanStepProofBatch:
+		allowed = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "definitionSeedHash", "documentKind", "manifestHash", "planStep", "proposals", "schemaVersion"}
+		required = append(required, "batchId", "batchSequence", "batchCoverageWorkItemIds")
+	}
+	if err := validateRuntimeSemanticObjectFields("$", envelope, allowed, required); err != nil {
 		return err
 	}
 	var proposals []json.RawMessage
@@ -242,7 +267,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	recipeIDs = normalizeStrings(recipeIDs)
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
-		"required": []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"},
+		"required": []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "proposals"},
 		"properties": map[string]any{
 			"documentKind":             map[string]any{"const": string(RuntimeProviderDocumentSemanticPlan)},
 			"schemaVersion":            map[string]any{"const": RuntimeSemanticPlanDocumentSchemaCurrent},
@@ -322,7 +347,8 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 		properties["batchId"] = map[string]any{"const": batchID}
 		properties["batchSequence"] = map[string]any{"const": batchSequence}
 		properties["batchCoverageWorkItemIds"] = map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "uniqueItems": true, "items": map[string]any{"type": "string", "enum": coverageIDs}}
-		schema["required"] = []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "batchId", "batchSequence", "batchCoverageWorkItemIds", "coverageOrder", "proposals"}
+		delete(properties, "coverageOrder")
+		schema["required"] = []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "batchId", "batchSequence", "batchCoverageWorkItemIds", "proposals"}
 		proposals, ok := properties["proposals"].(map[string]any)
 		if !ok {
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposals are missing")

@@ -127,8 +127,9 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime 单 owner live 收口：RSO-10。** `run-029` 打开的 SM-3 typed semantic correction 与 canonical
-   terminal projection 已在 RSO-5～RSO-9 完成代码收口，并通过 full/race/boundary/managed matrix。当前需用 fresh deployment 执行 LSP Bridge 的
+1. **必需 Runtime 单 owner live 收口：RSO-10。** typed semantic correction、proof-batch 最小 wire、
+   exact-active-batch reducer invariant 与 canonical combined Definition projection 已在 RSO-4～RSO-8 完成代码收口，
+   最新增量已通过 fmt/vet/full/boundary/affected-package race/managed。当前用 fresh deployment 执行 LSP Bridge 的
    order/batch/feasibility/seal/dispatch/receipt/evidence positive matrix，并以独立 fault injection 验证 whole-document recovery。
    普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见

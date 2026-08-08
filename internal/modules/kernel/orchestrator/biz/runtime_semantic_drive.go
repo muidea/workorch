@@ -468,6 +468,7 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	expected.CorrectionAttempt = 1
 	expected.LogicalRequestID = ""
 	expected.Hash = ""
+	diagnostic = runtimeSemanticCorrectionDiagnostic(diagnostic, expected)
 	if ledger.Manifest == nil || len(diagnostic.SemanticViolations) == 0 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "semantic plan rejection has no sealed typed correction delta", &diagnostic)
 	}
@@ -499,6 +500,21 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		return runtime.RuntimeAggregate{}, fmt.Errorf("semantic correction did not persist its private transition")
 	}
 	return updated.Aggregate, nil
+}
+
+func runtimeSemanticCorrectionDiagnostic(diagnostic runtimecontract.RuntimeOriginalDiagnostic, expected runtimecontract.RuntimeExpectedDocumentContract) runtimecontract.RuntimeOriginalDiagnostic {
+	if len(diagnostic.SemanticViolations) != 0 || expected.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || len(expected.BatchCoverageWorkItemIDs) == 0 {
+		return diagnostic
+	}
+	path := "$"
+	if len(diagnostic.FieldViolations) != 0 && strings.TrimSpace(diagnostic.FieldViolations[0].Path) != "" {
+		path = diagnostic.FieldViolations[0].Path
+	}
+	diagnostic.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{
+		Kind: runtimecontract.RuntimeSemanticContractViolationProofBatchDocument, Path: path,
+		RequiredCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
+	}}
+	return diagnostic
 }
 
 func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {

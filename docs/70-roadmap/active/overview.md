@@ -16,7 +16,7 @@ Last Updated: 2026-08-08
 | --- | --- |
 | Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
-| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-10）**；RSO-1～RSO-9 are code-closed. Typed SM-3 semantic correction and terminal-consistent RuntimeView/activity now pass full/race/boundary/managed regression; fresh positive convergence and whole-document recovery still require deployed proof. See [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md). |
+| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-10）**；RSO-1～RSO-9 code-closed，最新 proof-batch 增量的 full/race/boundary/managed 已通过，RSO-10 仍需 fresh positive convergence 与 whole-document recovery deployed proof。见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
 | Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
@@ -25,10 +25,9 @@ Last Updated: 2026-08-08
 
 ## Residual Mandatory Work
 
-当前 Runtime CWI 主线有两项代码级强制缺口和两项 live 门禁：SM-3 必须从 persisted typed rejection 封存可验证的
-semantic correction directive，LLM owner 只能将其作为 provider-safe C4 fact 渲染；RuntimeView/outcome/activity 必须从同一
-authoritative Run/Result 映射，definition-changed 只能是 read-only attention，不能成为第二套 outcome。随后执行 fresh LSP
-Bridge positive convergence，并通过单独 fault injection 证明 whole-document recovery。此前 restart release-before-create、
+当前 Runtime CWI 主线的代码增量已覆盖 typed semantic correction、proof-batch 最小 wire、exact-active-batch reducer
+invariant 与 canonical combined Definition projection，且 RSO-9 增量 race/managed 已通过。当前执行 fresh LSP Bridge
+positive convergence，并通过单独 fault injection 证明 whole-document recovery。此前 restart release-before-create、
 complete-document、22 组件 EventHub 合同回迁、owner-local terminal delivery、typed diagnostic、single mutation surface、
 managed verifier 与 reasoning selection 仍是回归基线，但不能替代最新 persisted aggregate/provider/projection 反例。
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -24,18 +25,20 @@ func workspaceOutcomeRunMatchesCurrentDefinitions(snapshot readmodelcore.Workspa
 }
 
 func latestWorkspaceDefinitionRevision(snapshot readmodelcore.WorkspaceSnapshotState) string {
-	var revision string
+	goalID, dodID := latestWorkspaceDefinitionIDs(snapshot)
+	var goalRevision string
 	for idx := range snapshot.Goals {
-		if value := strings.TrimSpace(snapshot.Goals[idx].DefinitionRevision); value != "" {
-			revision = value
+		if strings.TrimSpace(string(snapshot.Goals[idx].ID)) == goalID {
+			goalRevision = strings.TrimSpace(snapshot.Goals[idx].DefinitionRevision)
 		}
 	}
+	var dodRevision string
 	for idx := range snapshot.DoDs {
-		if value := strings.TrimSpace(snapshot.DoDs[idx].DefinitionRevision); value != "" {
-			revision = value
+		if strings.TrimSpace(string(snapshot.DoDs[idx].ID)) == dodID {
+			dodRevision = strings.TrimSpace(snapshot.DoDs[idx].DefinitionRevision)
 		}
 	}
-	return revision
+	return workspacecontracts.ExecutionDefinitionRevision(goalID, goalRevision, dodID, dodRevision)
 }
 
 func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceOutcome {

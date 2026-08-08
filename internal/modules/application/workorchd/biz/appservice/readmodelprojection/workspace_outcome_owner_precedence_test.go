@@ -10,13 +10,14 @@ import (
 )
 
 func TestWorkspaceOutcomeAndActivityPreferCurrentTerminalRunOverDefinitionHint(t *testing.T) {
+	definitionRevision := "goal:goal-current@goal:definition-current|dod:dod-current@dod:definition-current"
 	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-current-terminal", State: string(common.WorkspaceStateActive)},
-		Goals:     []workorchmanagementcontract.Goal{{ID: "goal-current", DefinitionRevision: "definition-current", PreviousDefinitionHash: "goal-before"}},
-		DoDs:      []workorchmanagementcontract.DoD{{ID: "dod-current", DefinitionRevision: "definition-current", PreviousDefinitionHash: "dod-before"}},
+		Goals:     []workorchmanagementcontract.Goal{{ID: "goal-current", DefinitionRevision: "goal:definition-current", PreviousDefinitionHash: "goal-before"}},
+		DoDs:      []workorchmanagementcontract.DoD{{ID: "dod-current", DefinitionRevision: "dod:definition-current", PreviousDefinitionHash: "dod-before"}},
 		Runs: []appmodelcore.Run{{
 			ID: "run-current", WorkspaceID: "ws-current-terminal", GoalID: "goal-current", DoDID: "dod-current",
-			DefinitionRevision: "definition-current", State: string(common.RunStateFailed), FailureReason: "semantic contract rejected",
+			DefinitionRevision: definitionRevision, State: string(common.RunStateFailed), FailureReason: "semantic contract rejected",
 		}},
 	}
 	snapshot.Outcome = MapWorkspaceOutcome(snapshot)

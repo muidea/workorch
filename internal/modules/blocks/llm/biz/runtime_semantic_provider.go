@@ -143,7 +143,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=coverage_order and a complete coverageOrder. Do not return proposals or any operation, target, recipe, feasibility, action, credit, terminal, retry, governance, receipt, or markdown field."
 	} else if context.BatchID != "" {
-		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=proof_batch and proposals only for the supplied batch coverage IDs. Do not add, omit, reorder, or claim coverage outside the batch."
+		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=proof_batch and proposals only for the supplied batch coverage IDs. Echo the sealed batch identity exactly. Do not return coverageOrder, add or omit batch coverage, claim coverage outside the batch, or return markdown."
 	}
 	var batchSequence *int
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && context.BatchID != "" {

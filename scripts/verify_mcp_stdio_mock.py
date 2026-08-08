@@ -108,10 +108,10 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
         "manifestHash": _object(manifest, "hash", "Hash"),
         "definitionSeedHash": _object(manifest, "definitionSeedHash", "DefinitionSeedHash") or _object(seed, "hash", "Hash"),
         "planStep": plan_step,
-        "coverageOrder": coverage_order,
         "proposals": [],
     }
     if plan_step == "coverage_order":
+        document["coverageOrder"] = coverage_order
         return document
     if plan_step != "proof_batch":
         raise MockContractError(f"semantic request has invalid plan step {plan_step!r}")
@@ -325,7 +325,7 @@ def self_test() -> None:
     }
     order = semantic_plan_payload(_prompt(("C3.semantic-authority", {
         "Manifest": order_manifest, "DefinitionSeed": {"Hash": "seed-test"},
-        "Schema": {"properties": {"coverageOrder": {"items": {"enum": ["cwi-first", "cwi-test"]}}}},
+        "Schema": {"properties": {}},
         "PlanStep": "coverage_order",
     })), "mcp-test")
     if order.get("coverageOrder") != ["cwi-first", "cwi-test"] or order.get("proposals") != []:
@@ -344,7 +344,7 @@ def self_test() -> None:
         "PlanStep": "proof_batch", "BatchID": "batch-test", "BatchSequence": 1,
         "BatchCoverageWorkItemIDs": ["cwi-test"],
     })), "mcp-test")
-    if semantic.get("batchCoverageWorkItemIds") != ["cwi-test"] or semantic["proposals"][0].get("validationRecipeId") != "mcp/tool_call/mcp-test/repo.summary":
+    if "coverageOrder" in semantic or semantic.get("batchCoverageWorkItemIds") != ["cwi-test"] or semantic["proposals"][0].get("validationRecipeId") != "mcp/tool_call/mcp-test/repo.summary":
         raise AssertionError(f"MCP semantic plan lost owner recipe identity: {semantic}")
 
     validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")

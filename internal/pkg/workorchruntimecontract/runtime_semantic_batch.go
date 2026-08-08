@@ -277,9 +277,6 @@ func MergeRuntimeSemanticPlanBatchDocuments(manifest RuntimeSemanticPlanManifest
 		if err := document.ValidateAgainstManifest(manifest); err != nil {
 			return RuntimeSemanticPlanDocument{}, err
 		}
-		if StableRuntimeSemanticPlanCoverageOrderHash(document) != StableRuntimeSemanticPlanCoverageOrderHash(orderDocument) {
-			return RuntimeSemanticPlanDocument{}, fmt.Errorf("runtime semantic merge coverage order hash drift")
-		}
 		for _, proposal := range document.Proposals {
 			if _, duplicate := seen[proposal.CoverageWorkItemID]; duplicate {
 				return RuntimeSemanticPlanDocument{}, fmt.Errorf("runtime semantic merge duplicates coverage %q", proposal.CoverageWorkItemID)

@@ -1,6 +1,10 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
 
 func TestRuntimeSemanticCorrectionDirectiveIsManifestBoundAndDetached(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
@@ -51,5 +55,37 @@ func TestRuntimeSemanticCorrectionDirectiveIsManifestBoundAndDetached(t *testing
 	staleRejection.Signature = "different"
 	if err := directive.ValidateAgainst(manifest, staleRejection); err == nil {
 		t.Fatal("directive accepted stale source rejection")
+	}
+}
+
+func TestRuntimeSemanticProofBatchCorrectionIsBoundToExactBatch(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	violation := RuntimeSemanticContractViolation{
+		Kind: RuntimeSemanticContractViolationProofBatchDocument, Path: "$.proposals",
+		RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	rejection := *semanticContractTestDiagnostic()
+	rejection.FieldViolations = []RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}}
+	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	directive := RuntimeSemanticCorrectionDirective{
+		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		Violations: []RuntimeSemanticContractViolation{violation},
+	}
+	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+		t.Fatal(err)
+	}
+	clone := directive.Clone()
+	clone.Violations[0].RequiredCoverageWorkItemIDs[0] = "changed"
+	if directive.Violations[0].RequiredCoverageWorkItemIDs[0] != "cwi-001" {
+		t.Fatal("proof-batch correction clone retained batch coverage storage")
+	}
+	wrongStep := directive.Clone()
+	wrongStep.PlanStep = RuntimeSemanticPlanStepCoverageOrder
+	wrongStep.Hash = StableRuntimeSemanticCorrectionDirectiveHash(wrongStep)
+	if err := wrongStep.ValidateAgainst(manifest, rejection); err == nil {
+		t.Fatal("proof-batch correction was accepted outside proof-batch step")
 	}
 }
