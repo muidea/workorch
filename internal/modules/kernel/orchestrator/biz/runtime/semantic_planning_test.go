@@ -240,7 +240,8 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 		Signature: "semantic-plan/batch/invalid-json",
 	}
 	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
-	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", directive, diagnostic); err == nil {
+	expected := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
+	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", expected, diagnostic); err == nil {
 		t.Fatal("unclassified batch diagnostic created correction authority")
 	}
 }
@@ -284,7 +285,8 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 		}},
 	}
 	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
-	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", directive, diagnostic); !errors.Is(err, common.ErrConflict) {
+	expected := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
+	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", expected, diagnostic); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("out-of-batch correction error = %v", err)
 	}
 }
@@ -348,9 +350,10 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	rejection.FieldViolations = []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-v2 before cwi-prerequisite", Required: []string{"cwi-prerequisite before cwi-v2"}}}
 	rejection.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-prerequisite", RequiredAfterID: "cwi-v2", ActualBeforePosition: 1, ActualAfterPosition: 0}}
 	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-1", runtimecontract.RuntimeSemanticPlanStepCoverageOrder, rejection)
+	expectedCorrection := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
 	corrected, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", SemanticCorrectionDirective: &directive, SemanticDiagnostic: &rejection,
+		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", ExpectedDocument: &expectedCorrection, SemanticDiagnostic: &rejection,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -360,7 +363,7 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}
 	replayed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", SemanticCorrectionDirective: &directive, SemanticDiagnostic: &rejection,
+		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", ExpectedDocument: &expectedCorrection, SemanticDiagnostic: &rejection,
 	})
 	if err != nil || replayed.Aggregate.StateRevision != corrected.Aggregate.StateRevision {
 		t.Fatalf("duplicate correction changed state: revision=%d err=%v", replayed.Aggregate.StateRevision, err)
@@ -371,7 +374,7 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}
 	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-3", SemanticCorrectionDirective: &directive, SemanticDiagnostic: &rejection,
+		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-3", ExpectedDocument: &expectedCorrection, SemanticDiagnostic: &rejection,
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("third semantic request error = %v", err)
 	}

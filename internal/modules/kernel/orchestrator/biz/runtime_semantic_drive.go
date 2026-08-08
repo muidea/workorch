@@ -472,16 +472,9 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	if ledger.Manifest == nil || len(diagnostic.SemanticViolations) == 0 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "semantic plan rejection has no sealed typed correction delta", &diagnostic)
 	}
-	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
-		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
-		PlanStep:      expected.PlanStep, ManifestHash: ledger.Manifest.Hash,
-		DefinitionSeedHash: ledger.Manifest.DefinitionSeedHash, StablePrefixHash: ledger.StablePrefixHash,
-		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(diagnostic), Attempt: 1,
-		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
-	}
-	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	if err := directive.ValidateAgainst(*ledger.Manifest, diagnostic); err != nil {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", err.Error(), &diagnostic)
+	directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, ledger.StablePrefixHash, diagnostic)
+	if deriveErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", deriveErr.Error(), &diagnostic)
 	}
 	ensured, correctionSession, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, directive.Hash, expected)
 	if err != nil {
@@ -491,7 +484,7 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		Kind:        runtime.RuntimeInternalEventSemanticPlanCorrectionRequired,
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: correctionSession.LogicalRequestID,
-		SemanticCorrectionDirective: &directive, SemanticDiagnostic: &diagnostic,
+		ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic,
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err

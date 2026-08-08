@@ -138,6 +138,23 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedEmptyEffectViolation(t *testing
 	}
 }
 
+func TestRuntimeSemanticPlanPayloadPreservesTypedCatalogRecipeViolation(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.OwnerCatalogs[0].ValidationRecipeRefs = []string{"recipe/allowed"}
+	manifest.OwnerCatalogs[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[0])
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"prospective_owner_target","ownerSelectorRefs":["file/workspace-relative-create"],"prospectiveConstraintRefs":["workspace-relative-path"],"prospectiveTargetRef":"main.go"},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["none"],"validationRecipeId":"recipe/not-allowed","requiredCheckRefs":["check/unit"],"declarationRef":"dod/cwi-001"}]}`
+	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].validationRecipeId" || diagnostic.Actual != "recipe/not-allowed" || len(diagnostic.SemanticViolations) != 1 {
+		t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
+	}
+	violation := diagnostic.SemanticViolations[0]
+	if violation.Rule != RuntimeSemanticConstraintAllowedValue || violation.CoverageWorkItemID != "cwi-001" || len(violation.Allowed) != 1 || violation.Allowed[0] != "recipe/allowed" {
+		t.Fatalf("typed catalog violation = %+v", violation)
+	}
+}
+
 func TestRuntimeSemanticPlanSchemaAndRequestContextAreManifestBound(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	schema, err := RuntimeSemanticPlanJSONSchema(manifest)

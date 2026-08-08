@@ -708,27 +708,33 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 		}
 		seen[proposal.CoverageWorkItemID] = struct{}{}
 		if _, allowed := owners[proposal.OwnerModuleID]; !allowed {
-			return fmt.Errorf("runtime semantic document owner %q is outside manifest", proposal.OwnerModuleID)
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "ownerModuleId", RuntimeSemanticConstraintAllowedValue, proposal.OwnerModuleID, nil, manifest.AllowedOwnerModuleIDs, fmt.Errorf("runtime semantic document owner %q is outside manifest", proposal.OwnerModuleID))
 		}
 		if _, allowed := kinds[proposal.OperationKind]; !allowed {
-			return fmt.Errorf("runtime semantic document operation %q is outside manifest", proposal.OperationKind)
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "operationKind", RuntimeSemanticConstraintAllowedValue, proposal.OperationKind, nil, manifest.AllowedOperationKinds, fmt.Errorf("runtime semantic document operation %q is outside manifest", proposal.OperationKind))
 		}
 		if _, allowed := policies[proposal.Target.Policy]; !allowed {
-			return fmt.Errorf("runtime semantic document target policy %q is outside manifest", proposal.Target.Policy)
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.policy", RuntimeSemanticConstraintAllowedValue, string(proposal.Target.Policy), nil, runtimeSemanticTargetPoliciesAsStrings(manifest.AllowedTargetPolicies), fmt.Errorf("runtime semantic document target policy %q is outside manifest", proposal.Target.Policy))
 		}
 		catalog, found := catalogs[proposal.OwnerModuleID]
 		if !found || !runtimeOperationKindsContain(catalog.OperationKinds, proposal.OperationKind) {
-			return fmt.Errorf("runtime semantic document proposal is outside owner catalog")
+			allowedKinds := []string(nil)
+			if found {
+				allowedKinds = catalog.OperationKinds
+			}
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "operationKind", RuntimeSemanticConstraintAllowedValue, proposal.OperationKind, nil, allowedKinds, fmt.Errorf("runtime semantic document proposal is outside owner catalog"))
 		}
-		if !runtimeSemanticStringsWithin(proposal.Target.OwnerSelectorRefs, catalog.SelectorRefs) ||
-			!runtimeSemanticStringsWithin(proposal.Target.ProspectiveConstraintRefs, catalog.ConstraintRefs) {
-			return fmt.Errorf("runtime semantic document selector or constraint is outside owner catalog")
+		if !runtimeSemanticStringsWithin(proposal.Target.OwnerSelectorRefs, catalog.SelectorRefs) {
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.ownerSelectorRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.OwnerSelectorRefs, ","), nil, catalog.SelectorRefs, fmt.Errorf("runtime semantic document selector is outside owner catalog"))
+		}
+		if !runtimeSemanticStringsWithin(proposal.Target.ProspectiveConstraintRefs, catalog.ConstraintRefs) {
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.ProspectiveConstraintRefs, ","), nil, catalog.ConstraintRefs, fmt.Errorf("runtime semantic document constraint is outside owner catalog"))
 		}
 		if proposal.Target.Policy == RuntimeOperationTargetPolicyExactTarget && !runtimeSemanticStringsWithin(proposal.Target.ExactTargetRefs, catalog.TargetRefs) {
-			return fmt.Errorf("runtime semantic document exact target is outside owner catalog")
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.exactTargetRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.ExactTargetRefs, ","), nil, catalog.TargetRefs, fmt.Errorf("runtime semantic document exact target is outside owner catalog"))
 		}
 		if proposal.Target.Policy == RuntimeOperationTargetPolicyExistingOwnerScope && !runtimeSemanticStringsWithin(proposal.Target.OwnerScopeTargetRefs, catalog.TargetRefs) {
-			return fmt.Errorf("runtime semantic document owner-scope target is outside owner catalog")
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "target.ownerScopeTargetRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(proposal.Target.OwnerScopeTargetRefs, ","), nil, catalog.TargetRefs, fmt.Errorf("runtime semantic document owner-scope target is outside owner catalog"))
 		}
 		// A prospective target is deliberately absent from the current owner
 		// inventory. Its authority comes from one sealed owner selector plus
@@ -738,7 +744,13 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 		// creation unreachable and collapse this policy into exact_target.
 		if proposal.ValidationRecipeID != "" {
 			if !runtimeSemanticStringsWithin([]string{proposal.ValidationRecipeID}, catalog.ValidationRecipeRefs) {
-				return fmt.Errorf("runtime semantic document validation recipe is outside owner catalog")
+				return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintAllowedValue, proposal.ValidationRecipeID, nil, catalog.ValidationRecipeRefs, fmt.Errorf("runtime semantic document validation recipe is outside owner catalog"))
+			}
+		}
+		if proposal.OperationVariantID != "" {
+			contract, contractFound := RuntimeOperationContractForKind(proposal.OperationKind)
+			if !contractFound || !runtimeSemanticVariantExists(contract, proposal.OperationVariantID) {
+				return runtimeSemanticProposalViolation(proposal, proposalIndex, "operationVariantId", RuntimeSemanticConstraintAllowedValue, proposal.OperationVariantID, nil, runtimeSemanticVariantIDs(contract), fmt.Errorf("runtime semantic operation variant is outside operation contract"))
 			}
 		}
 	}
@@ -776,6 +788,32 @@ func runtimeSemanticStringsWithin(values, allowed []string) bool {
 		}
 	}
 	return true
+}
+
+func runtimeSemanticProposalViolation(proposal RuntimeSemanticProofProposal, proposalIndex int, path string, rule RuntimeSemanticConstraintRule, actual string, required, allowed []string, cause error) error {
+	return &RuntimeSemanticProposalViolationError{
+		ViolationFact: RuntimeSemanticContractViolation{
+			Kind: RuntimeSemanticContractViolationProposalConstraint,
+			Path: fmt.Sprintf("$.proposals[%d].%s", proposalIndex, path), CoverageWorkItemID: proposal.CoverageWorkItemID,
+			ProposalIndex: proposalIndex, Rule: rule, Actual: actual, Required: append([]string(nil), required...), Allowed: append([]string(nil), allowed...),
+		}, Cause: cause,
+	}
+}
+
+func runtimeSemanticTargetPoliciesAsStrings(values []RuntimeOperationTargetPolicy) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, string(value))
+	}
+	return normalizeStrings(ret)
+}
+
+func runtimeSemanticVariantIDs(contract RuntimeOperationContract) []string {
+	ret := make([]string, 0, len(contract.Variants))
+	for _, variant := range contract.Variants {
+		ret = append(ret, variant.ID)
+	}
+	return normalizeStrings(ret)
 }
 
 func StableRuntimeSemanticPlanDocumentHash(document RuntimeSemanticPlanDocument) string {
@@ -1630,21 +1668,21 @@ func validateRuntimeSemanticProposalTarget(target RuntimeOperationTargetAuthoriz
 	switch target.Policy {
 	case RuntimeOperationTargetPolicyExactTarget:
 		if len(target.ExactTargetRefs) == 0 {
-			return fmt.Errorf("runtime semantic exact target proposal requires target refs")
+			return runtimeSemanticProposalConstraint("target.exactTargetRefs", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one target ref"}, nil)
 		}
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		if len(target.OwnerScopeTargetRefs) == 0 && len(target.OwnerSelectorRefs) == 0 {
-			return fmt.Errorf("runtime semantic owner-scope proposal requires bounded targets or selector")
+			return runtimeSemanticProposalConstraint("target", RuntimeSemanticConstraintRelational, "empty_target_scope", []string{"owner scope target or selector"}, nil)
 		}
 		if len(target.OwnerSelectorRefs) > 1 {
-			return fmt.Errorf("runtime semantic owner-scope proposal permits one canonical owner selector")
+			return runtimeSemanticProposalConstraint("target.ownerSelectorRefs", RuntimeSemanticConstraintRelational, fmt.Sprintf("%d selectors", len(target.OwnerSelectorRefs)), []string{"at most one owner selector"}, nil)
 		}
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
 		if target.ProspectiveTargetRef == "" || len(target.ProspectiveConstraintRefs) == 0 || len(target.OwnerSelectorRefs) != 1 {
-			return fmt.Errorf("runtime semantic prospective proposal requires target, constraints and selector")
+			return runtimeSemanticProposalConstraint("target", RuntimeSemanticConstraintRelational, "incomplete_prospective_target", []string{"prospective target, constraints and one selector"}, nil)
 		}
 	default:
-		return fmt.Errorf("runtime semantic proposal requires a supported target policy")
+		return runtimeSemanticProposalConstraint("target.policy", RuntimeSemanticConstraintAllowedValue, string(target.Policy), nil, []string{string(RuntimeOperationTargetPolicyExactTarget), string(RuntimeOperationTargetPolicyExistingOwnerScope), string(RuntimeOperationTargetPolicyProspectiveOwnerTarget)})
 	}
 	return nil
 }

@@ -202,6 +202,37 @@ type RuntimeSemanticCorrectionDirective struct {
 	Violations          []RuntimeSemanticContractViolation `json:"violations"`
 }
 
+// DeriveRuntimeSemanticCorrectionDirective is the owner-neutral, deterministic
+// constructor used by the Orchestrator SM-3 reducer. It only packages already
+// persisted rejection facts; it never chooses whether a retry is allowed.
+func DeriveRuntimeSemanticCorrectionDirective(manifest RuntimeSemanticPlanManifest, expected RuntimeExpectedDocumentContract, stablePrefixHash string, rejection RuntimeOriginalDiagnostic) (RuntimeSemanticCorrectionDirective, error) {
+	manifest = manifest.Normalized()
+	expected = expected.Normalized()
+	if err := manifest.Validate(); err != nil {
+		return RuntimeSemanticCorrectionDirective{}, err
+	}
+	if err := rejection.Validate(); err != nil {
+		return RuntimeSemanticCorrectionDirective{}, err
+	}
+	if strings.TrimSpace(stablePrefixHash) == "" || expected.DocumentKind != RuntimeProviderDocumentSemanticPlan || expected.ManifestHash != manifest.Hash || expected.DefinitionSeedHash != manifest.DefinitionSeedHash || expected.CorrectionAttempt != 1 {
+		return RuntimeSemanticCorrectionDirective{}, fmt.Errorf("runtime semantic correction derivation identity is invalid")
+	}
+	if len(rejection.SemanticViolations) == 0 {
+		return RuntimeSemanticCorrectionDirective{}, fmt.Errorf("runtime semantic correction derivation requires typed violations")
+	}
+	directive := RuntimeSemanticCorrectionDirective{
+		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      expected.PlanStep, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		StablePrefixHash: strings.TrimSpace(stablePrefixHash), SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		Violations: cloneRuntimeSemanticContractViolations(rejection.SemanticViolations),
+	}
+	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+		return RuntimeSemanticCorrectionDirective{}, err
+	}
+	return directive, nil
+}
+
 func (d RuntimeSemanticCorrectionDirective) Normalized() RuntimeSemanticCorrectionDirective {
 	d.SchemaVersion = strings.TrimSpace(d.SchemaVersion)
 	d.Hash = strings.TrimSpace(d.Hash)

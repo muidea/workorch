@@ -26,7 +26,8 @@ checks, metrics, or per-CWI proof contracts.
 
 ## 2. Latest Live Assessment
 
-Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-029`, is the current fact baseline.
+Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-032`, is the current fact baseline. Earlier
+`run-029`/`run-031` observations remain historical regression evidence only.
 
 ### 2.1 Verified Owner-Correct Behavior
 
@@ -39,46 +40,39 @@ Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-029`, is 
   before the semantic contract was sealed.
 - SM-3 sealed the expected-document identity. Attempt 0 and attempt 1 retained the same `coverage_order` plan step,
   manifest hash, Definition seed hash, stable prefix, and authority identity while using distinct logical requests.
-- Both provider calls returned bounded complete JSON documents. Neither used raw suffix assembly or document
-  continuation recovery.
+- Provider request handling remained bounded and did not use raw suffix assembly or document continuation recovery;
+  the latest run reached both coverage-order and proof-batch request steps before admission failure.
 - The terminal aggregate stopped driving after failure; no provider loop, CAS loop, or high-CPU loop was observed.
 
 ### 2.2 Current Semantic Correction Gap
 
-Attempt 0 was correctly rejected because the returned coverage order violated the sealed dependency:
+The latest run passed the previously uncovered order and empty-required-array cases, but failed on a sealed owner
+catalog constraint:
 
 ```text
-cwi-046 -> cwi-043
+validationRecipeId is outside owner catalog
 ```
 
-The persisted original diagnostic retained that exact cause. The provider-facing attempt-1 C4 tail, however, retained
-only a generic field violation such as:
+Admission still collapsed this to `path=$.proposals; actual=contract_violation`. The correction contract therefore
+does not yet identify the affected CWI, proposal index, exact `validationRecipeId` path, returned value, or allowed
+recipe catalog. This is the remaining semantic-plan contract gap; it must be closed as part of the unified evaluator
+track below, not fixed with another provider-specific prompt patch.
 
-```text
-path=$.proposals
-actual=contract_violation
-```
-
-It did not contain an Orchestrator-sealed, provider-safe correction delta stating that `cwi-046` must precede
-`cwi-043`. The attempt-1 document was therefore byte-identical to attempt 0 and failed again. This is not a prompt
-wording defect. The missing authority is a typed semantic correction directive owned by SM-3.
-
-### 2.3 Current Projection Gap
+### 2.3 Historical Projection Gap (Code Closed)
 
 The authoritative Run state and convergence state were both `failed`, and projection revisions were fully caught up.
 The Workspace RuntimeView nevertheless reported an `active`, non-terminal outcome with the summary
 `workspace definitions changed; execution must be rerun`. Its activity feed repeated the derived active outcome.
 
-This is not projection lag. `MapWorkspaceOutcome` currently applies the definition-changed branch before selecting the
-authoritative display Run and returns early. The projection has therefore created a competing outcome interpretation.
-Projection remains read-only, but the displayed outcome is contractually inconsistent with owner facts.
+This was a prior counterexample. The projection closure now selects the authoritative Run before applying definition
+attention, and the latest run has `sourceEventRevision=479` and `projectedSourceRevision=479`. No new projection
+divergence was observed in `run-032`.
 
 ### 2.4 Paths Not Proven By This Run
 
-This run did not reach proof-batch feasibility, semantic seal, operation candidate, sealed dispatch, capability
-execution, receipt, evidence admission, CWI advance, assessment, or durable workspace output. Both documents were
-complete, so SM-4 whole-document recovery was also not exercised. These paths remain regression/live gates even where
-their code is already closed.
+`run-032` did not reach semantic seal, operation candidate, sealed dispatch, capability execution, receipt, evidence
+admission, CWI advance, assessment success, or durable workspace output. It did exercise Result rejection and terminal
+delivery. SM-4 whole-document recovery and the positive semantic-to-effect lineage remain live gates.
 
 ### 2.5 Subsequent Proof-Batch Counterexample And Code Closure
 
@@ -120,6 +114,45 @@ an exact `proposal_constraint` fact through admission. The fact includes authori
 index, exact JSON path, rule, actual value, and required/allowed values. SM-3 accepts that fact only when its CWI belongs
 to the active sealed batch, then persists it in the existing attempt-1 correction directive. LLM remains a fact
 producer/renderer; no additional state machine, authority owner, EventHub transition, or retry was added.
+
+### 2.7 Unified Proposal Evaluator And Single-Owner Closure
+
+The catalog failure proved that schema generation, proposal validation, and correction synthesis must not be maintained
+as separate partial implementations. The code closure now uses one Orchestrator-owned evaluation/reduction flow. A
+fresh deployment still has to prove the provider-facing result. The canonical flow is:
+
+```text
+LLM returns complete candidate document
+  -> Orchestrator/SM-3 canonical evaluator
+  -> owner-neutral typed proposal violations
+  -> Orchestrator-private rejected/evaluated fact event
+  -> SM-3 derives correction from sealed manifest + active batch + rejection
+  -> one CAS-persisted attempt-1 directive or final rejection
+  -> LLM renders only detached correction facts in C4
+```
+
+The canonical evaluator must cover, with the same rules used to render the provider schema:
+
+- required and non-empty fields/arrays;
+- evidence/effect relational constraints;
+- owner/operation and operation-variant ownership;
+- target policy, target refs, selectors, and prospective constraints;
+- validation recipe and required-check membership in the owner catalog;
+- batch membership, duplicate/missing CWI and plan-step identity;
+- dependency ordering against the sealed Definition seed.
+
+Each violation carries the authoritative `coverageWorkItemId`, diagnostic proposal index, exact JSON path, stable rule
+(`required`, `non_empty`, `allowed_value`, or `relational`), actual value, and required/allowed values. CWI identity is
+authoritative; proposal index is display-only.
+
+SM-3 is the only component allowed to derive and persist `RuntimeSemanticCorrectionDirective`. The private evaluated or
+rejected event carries facts only; callers must not submit a pre-decided correction or next transition. A correction is
+accepted only when every referenced CWI is in the active sealed batch and the source rejection, manifest, Definition
+seed, stable prefix, plan step, and attempt identity match the persisted ledger. Attempt 1 remains the sole retry.
+
+No new state machine is introduced. SM-1 remains `blocks/run`; SM-2/SM-3/SM-4 remain `kernel/orchestrator`. LLM and
+capability Blocks remain fact producers. Workspace, Result, projection, TUI, Web, and Application remain owners of
+their existing state or read-only surfaces and cannot trigger Runtime transitions.
 
 ## 3. Non-Negotiable Ownership Rules
 
@@ -323,12 +356,12 @@ projection- or application-selected Runtime transition
 
 | Component | Required closure | Explicitly forbidden |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | semantic directive DTO, normalize/validate/clone/hash; dependency violation DTO | reducer, retry classification, owner lookup, EventHub |
-| `kernel/orchestrator/biz/runtime` | evaluator emits precise typed violations; private reducer seals directive; invariant/CAS checks | provider rendering, capability execution, cross-owner repository |
+| `internal/pkg/workorchruntimecontract` | canonical pure proposal constraints/evaluator facts, schema projection, directive normalize/validate/clone/hash | reducer, retry classification, owner lookup, EventHub |
+| `kernel/orchestrator/biz/runtime` | invoke one evaluator, map facts to owner-private events, derive/persist directive through SM-3 CAS | provider rendering, capability execution, cross-owner repository |
 | `kernel/orchestrator/biz` | drive reads persisted directive and maps LLM facts to private events | reconstructing directive from raw message at send time |
 | `blocks/llm/pkg/events` | semantic command carries detached directive; result remains factual | correction disposition, terminal/action fields |
 | `blocks/llm/pkg/models` | owner-private immutable request representation | Runtime aggregate or mutable owner entity |
-| `blocks/llm/biz` | validate and render provider-safe C4 | infer delta, retry, terminal, coverage, batch transition |
+| `blocks/llm/biz` | validate detached request identity and render provider-safe C4 | proposal validation, infer delta, retry, terminal, coverage, batch transition |
 | `application/workorchd/.../readmodelprojection` | terminal-first canonical outcome and activity derivation | competing execution state machine |
 | `workorchprojectioncontract` | separate outcome from optional attention fact | authority or lifecycle command |
 | TUI/Web/event mapping | render canonical outcome/activity and workspace switch isolation | local conflict resolution or state transition |
@@ -394,10 +427,14 @@ remains open.
 | RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix after the latest proposal-constraint closure | fmt/vet/full tests, affected-package race, boundary contract and managed `verify-ci-mvp-file` pass |
 | RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete semantic-to-effect event/audit lineage |
 | RSO-11 | code_closed | Unify empty required-set schema/admission/correction behavior | exact effect/evidence schema bounds, typed CWI field violation, active-batch and hash/clone tests |
+| RSO-12 | code_closed | Unify all proposal-local and sealed owner-catalog checks behind one pure evaluator | recipe/variant/target/evidence/effect violations carry exact CWI/path/rule facts; local contract tests pass |
+| RSO-13 | code_closed | Make SM-3 derive correction directives from rejected facts and persisted ledger context | production private event carries no directive; reducer derives under CAS; duplicate/stale/restart tests pass |
+| RSO-14 | code_closed | Reduce LLM boundary to detached fact rendering only | C4 contains typed safe facts; LLM cannot classify correction or transition; LLM tests pass |
+| RSO-15 | pending | Fresh deployed positive convergence after RSO-12 through RSO-14 | semantic seal → dispatch → receipt → evidence → CWI close → DoD result |
 
-Implementation order is strict: RSO-5 precedes RSO-6; RSO-6 precedes RSO-7; RSO-8 may be implemented after RSO-5 in
-parallel only if it does not change Runtime authority. RSO-9 follows all code changes. RSO-10 cannot be replaced by mock
-provider proof.
+Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
+RSO-13 precedes RSO-14; RSO-8 may run in parallel only if it does not change Runtime authority. RSO-9 follows every
+code change. RSO-10 and RSO-15 cannot be replaced by mock provider proof.
 
 ### 10.1 2026-08-08 Code-Closure Evidence
 
@@ -419,6 +456,51 @@ provider proof.
 - For the proposal-constraint delta, `make fmt-check`, `make vet`, `make verify-boundary-contract`,
   `go test ./... -count=1`, the affected-package race matrix, and managed `verify-ci-mvp-file` all pass. The managed
   artifacts were retained under `.ci-artifacts/managed-workorch-local` for inspection.
+- RSO-12 now preserves owner-catalog violations for validation recipes, operation variants, target refs, selectors,
+  constraints, owner/operation membership, and target policies as typed proposal facts.
+- RSO-13 production correction events carry only the sealed expected-document identity and rejection facts; SM-3 derives
+  and hashes the correction directive inside the Runtime CAS reducer.
+- RSO-14 no longer exposes a semantic correction directive as an internal-event input; the LLM owner receives only the
+  detached request-side rendering value and remains a factual provider adapter.
+- These are local code-closure results. A fresh deployment must still prove that `validationRecipeId` failures produce
+  field-level C4 correction and that a corrected run reaches semantic seal and downstream effect execution.
+
+### 10.2 Ordered Code-Closure Steps For RSO-12 Through RSO-15
+
+1. **Freeze the owner-neutral constraint vocabulary** in
+   `internal/pkg/workorchruntimecontract`.
+   - Define one pure proposal evaluation result with bounded violation facts.
+   - Cover local proposal shape and sealed manifest/catalog membership in one API.
+   - Keep CWI ID authoritative and proposal index diagnostic-only.
+   - Generate provider schema bounds from the same constraint vocabulary.
+2. **Replace generic semantic document collapse** in
+   `internal/pkg/workorchruntimecontract/runtime_semantic_payload.go` and
+   `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go`.
+   - Preserve all typed proposal, batch, dependency, and field violations.
+   - Never use `$.proposals; contract_violation` when a typed fact is derivable.
+   - Ensure validation recipe, operation variant, target, selector, and constraint catalog failures are
+     `proposal_constraint` facts.
+3. **Move correction derivation behind the SM-3 reducer** in
+   `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go` and
+   `internal/modules/kernel/orchestrator/biz/runtime/internal_event.go`.
+   - Owner-private evaluated/rejected events carry facts only.
+   - Reducer derives the directive from persisted rejection, manifest, active batch, expected document, and attempt.
+   - Persist exactly one attempt-1 directive under the existing Runtime CAS.
+   - Reject caller-provided directive hashes or directives that do not match derived facts.
+4. **Keep the LLM owner factual** in `internal/modules/blocks/llm`.
+   - Accept only detached manifest/context/rejection/directive DTOs.
+   - Render typed correction facts in C4 without raw provider prose or `OriginalMessage`.
+   - Preserve C0-C3 and stable prefix hashes between attempt 0 and attempt 1.
+5. **Keep capability owners factual** in File/Git/Shell/MCP/Web/SSH.
+   - Return catalog and feasibility observations through their owner event contracts.
+   - Do not validate or repair another owner’s proposal and do not mutate SM-2/SM-3/SM-4.
+6. **Verify the four-machine invariants**.
+   - SM-1 remains Run-private; SM-2/3/4 remain Orchestrator-private.
+   - No operation before semantic seal; no attempt 2; no cross-owner repository/service access.
+   - Restart, duplicate, stale, CAS conflict, projection lag, and workspace isolation remain covered.
+7. **Run live positive validation only after code gates pass**.
+   - A failed semantic admission is not positive convergence, even if terminal delivery and projection are correct.
+   - RSO-15 requires complete semantic-to-effect lineage and must record the exact live request/audit evidence.
 
 ## 11. Verification Matrix
 

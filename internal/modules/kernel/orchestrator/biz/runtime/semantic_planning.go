@@ -669,10 +669,9 @@ func (c *RuntimeController) observeSemanticFeasibility(ctx context.Context, work
 
 // requireSemanticPlanCorrection records the complete attempt-0 rejection and
 // opens exactly one correction identity under the same manifest/prefix.
-func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID string, directive runtimecontract.RuntimeSemanticCorrectionDirective, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
+func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID string, expected runtimecontract.RuntimeExpectedDocumentContract, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
 	stablePrefixHash = strings.TrimSpace(stablePrefixHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
-	directive = directive.Clone()
 	if stablePrefixHash == "" || logicalRequestID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -682,6 +681,14 @@ func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, w
 	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil {
 			return false, fmt.Errorf("%w: semantic correction has no sealed manifest", common.ErrConflict)
+		}
+		expected = expected.Clone()
+		expected.CorrectionAttempt = 1
+		expected.LogicalRequestID = ""
+		expected.Hash = ""
+		directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, stablePrefixHash, rejection)
+		if deriveErr != nil {
+			return false, deriveErr
 		}
 		if err := directive.ValidateAgainst(*ledger.Manifest, rejection); err != nil {
 			return false, err
