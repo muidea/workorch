@@ -120,3 +120,24 @@ func TestRuntimeSemanticProposalCorrectionPreservesExactFieldFact(t *testing.T) 
 		t.Fatal("proposal correction hash ignored actual value")
 	}
 }
+
+func TestRuntimeSemanticProposalCorrectionAllowsEmptyCatalogValues(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	violation := RuntimeSemanticContractViolation{
+		Kind: RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].validationRecipeId",
+		CoverageWorkItemID: "cwi-001", ProposalIndex: 0, Rule: RuntimeSemanticConstraintAllowedValue,
+		Actual: "recipe/not-allowed",
+	}
+	rejection := *semanticContractTestDiagnostic()
+	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	directive := RuntimeSemanticCorrectionDirective{
+		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		Violations: []RuntimeSemanticContractViolation{violation},
+	}
+	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+		t.Fatalf("empty sealed catalog should remain a typed correction fact: %v", err)
+	}
+}

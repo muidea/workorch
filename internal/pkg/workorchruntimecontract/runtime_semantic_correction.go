@@ -118,9 +118,9 @@ func (v RuntimeSemanticContractViolation) Validate() error {
 		if (v.Rule == RuntimeSemanticConstraintRequired || v.Rule == RuntimeSemanticConstraintNonEmpty || v.Rule == RuntimeSemanticConstraintRelational) && len(v.Required) == 0 {
 			return fmt.Errorf("runtime semantic proposal violation requires exact required values")
 		}
-		if v.Rule == RuntimeSemanticConstraintAllowedValue && len(v.Allowed) == 0 {
-			return fmt.Errorf("runtime semantic proposal violation requires allowed values")
-		}
+		// An empty allowed set is meaningful: the sealed owner catalog permits
+		// no value for this field. It remains a factual, provider-safe
+		// correction, not an internal contract defect.
 	default:
 		return fmt.Errorf("runtime semantic violation requires a supported kind")
 	}
