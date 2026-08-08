@@ -47,6 +47,17 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if proposalProperties["declarationRef"].(map[string]any)["minLength"] != float64(1) {
 		t.Fatalf("declarationRef schema permits an empty value: %v", proposalProperties["declarationRef"])
 	}
+	target := proposalProperties["target"].(map[string]any)
+	if alternatives, ok := target["oneOf"].([]any); !ok || len(alternatives) != 3 {
+		t.Fatalf("target schema does not expose the three canonical policies: %v", target)
+	}
+	prospectiveTarget := target["properties"].(map[string]any)["prospectiveTargetRef"].(map[string]any)
+	if prospectiveTarget["minLength"] != float64(1) {
+		t.Fatalf("prospective target schema must require a non-empty ref: %v", prospectiveTarget)
+	}
+	if _, enumBound := prospectiveTarget["enum"]; enumBound {
+		t.Fatalf("prospective target schema must not require an existing catalog ref: %v", prospectiveTarget)
+	}
 }
 
 func TestRuntimeSemanticPlanRequestSchemaRejectsUnscopedProofBatch(t *testing.T) {
@@ -58,10 +69,12 @@ func TestRuntimeSemanticPlanRequestSchemaRejectsUnscopedProofBatch(t *testing.T)
 
 func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
+	proposal := semanticContractTestProposal("cwi-001")
+	proposal.Target.ProspectiveTargetRef = "new-file.go"
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
-		BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
+		BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal},
 	}
 	payload, err := EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 	if err != nil {
@@ -152,6 +165,22 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedCatalogRecipeViolation(t *testi
 	violation := diagnostic.SemanticViolations[0]
 	if violation.Rule != RuntimeSemanticConstraintAllowedValue || violation.CoverageWorkItemID != "cwi-001" || len(violation.Allowed) != 1 || violation.Allowed[0] != "recipe/allowed" {
 		t.Fatalf("typed catalog violation = %+v", violation)
+	}
+}
+
+func TestRuntimeSemanticPlanPayloadEnrichesEmptyExactTargetWithCatalogRefs(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExactTarget}
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":[]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
+	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.exactTargetRefs" || len(diagnostic.SemanticViolations) != 1 {
+		t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
+	}
+	violation := diagnostic.SemanticViolations[0]
+	if violation.Rule != RuntimeSemanticConstraintNonEmpty || len(violation.Allowed) != 1 || violation.Allowed[0] != "main.go" {
+		t.Fatalf("target correction did not include sealed catalog refs: %+v", violation)
 	}
 }
 

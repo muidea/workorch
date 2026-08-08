@@ -297,7 +297,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					"target": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"policy"}, "properties": map[string]any{
 						"policy": map[string]any{"type": "string", "enum": policies}, "exactTargetRefs": stringEnumArraySchema(targetRefs),
 						"ownerScopeTargetRefs": stringEnumArraySchema(targetRefs), "ownerSelectorRefs": stringEnumArraySchema(selectorRefs),
-						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "enum": targetRefs},
+						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1},
 					}},
 					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
 					"requiredEffectScopes": stringEnumArraySchemaWithMinimum([]string{
@@ -314,6 +314,34 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	// validation-only proofs cannot omit their recipe/check facts while state
 	// change proofs remain free of validation-only requirements.
 	proposalItems := schema["properties"].(map[string]any)["proposals"].(map[string]any)["items"].(map[string]any)
+	targetSchema := proposalItems["properties"].(map[string]any)["target"].(map[string]any)
+	targetSchema["oneOf"] = []any{
+		map[string]any{
+			"properties": map[string]any{"policy": map[string]any{"const": string(RuntimeOperationTargetPolicyExactTarget)}, "exactTargetRefs": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": targetRefs}}},
+			"required":   []string{"policy", "exactTargetRefs"},
+		},
+		map[string]any{
+			"properties": map[string]any{
+				"policy":               map[string]any{"const": string(RuntimeOperationTargetPolicyExistingOwnerScope)},
+				"ownerScopeTargetRefs": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": targetRefs}},
+				"ownerSelectorRefs":    map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": selectorRefs}},
+			},
+			"required": []string{"policy"},
+			"anyOf":    []any{map[string]any{"required": []string{"ownerScopeTargetRefs"}}, map[string]any{"required": []string{"ownerSelectorRefs"}}},
+		},
+		map[string]any{
+			"properties": map[string]any{
+				"policy":                    map[string]any{"const": string(RuntimeOperationTargetPolicyProspectiveOwnerTarget)},
+				"ownerSelectorRefs":         map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": selectorRefs}},
+				"prospectiveConstraintRefs": map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": constraintRefs}},
+				// A prospective target is intentionally not enum-bound to the
+				// current target catalog: it denotes the resource to be created
+				// under the sealed selector/constraint facts.
+				"prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1},
+			},
+			"required": []string{"policy", "ownerSelectorRefs", "prospectiveConstraintRefs", "prospectiveTargetRef"},
+		},
+	}
 	proposalItems["allOf"] = []any{map[string]any{
 		"if": map[string]any{"properties": map[string]any{
 			"requiredEvidenceKinds": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}},

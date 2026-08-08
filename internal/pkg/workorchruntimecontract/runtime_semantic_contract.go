@@ -692,10 +692,23 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 		if err := proposal.Validate(); err != nil {
 			var constraint *RuntimeSemanticProposalConstraintError
 			if errors.As(err, &constraint) {
+				allowed := append([]string(nil), constraint.Allowed...)
+				if len(allowed) == 0 {
+					if catalog, found := catalogs[proposal.OwnerModuleID]; found {
+						switch constraint.Field {
+						case "target.exactTargetRefs", "target.ownerScopeTargetRefs":
+							allowed = append([]string(nil), catalog.TargetRefs...)
+						case "target.ownerSelectorRefs":
+							allowed = append([]string(nil), catalog.SelectorRefs...)
+						case "target.prospectiveConstraintRefs":
+							allowed = append([]string(nil), catalog.ConstraintRefs...)
+						}
+					}
+				}
 				return &RuntimeSemanticProposalViolationError{ViolationFact: RuntimeSemanticContractViolation{
 					Kind: RuntimeSemanticContractViolationProposalConstraint, Path: fmt.Sprintf("$.proposals[%d].%s", proposalIndex, constraint.Field),
 					CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalIndex: proposalIndex, Rule: constraint.Rule,
-					Actual: constraint.Actual, Required: append([]string(nil), constraint.Required...), Allowed: append([]string(nil), constraint.Allowed...),
+					Actual: constraint.Actual, Required: append([]string(nil), constraint.Required...), Allowed: allowed,
 				}, Cause: err}
 			}
 			return err

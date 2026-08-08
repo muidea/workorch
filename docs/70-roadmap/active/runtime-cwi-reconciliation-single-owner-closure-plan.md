@@ -154,6 +154,46 @@ No new state machine is introduced. SM-1 remains `blocks/run`; SM-2/SM-3/SM-4 re
 capability Blocks remain fact producers. Workspace, Result, projection, TUI, Web, and Application remain owners of
 their existing state or read-only surfaces and cannot trigger Runtime transitions.
 
+### 2.8 Target Policy Counterexample And Closure
+
+After the empty sealed-catalog value fix was deployed, `run-034` produced the first field-level target fact:
+
+```text
+path=$.proposals[0].target.exactTargetRefs
+actual=empty_array
+required=at least one target ref
+```
+
+The evaluator is now precise, but attempt 1 still failed to produce an admissible target. This is not evidence of
+cross-component state ownership. It shows that exact-target, existing-owner-scope, and prospective-owner-target rules
+are not yet one canonical contract from schema through correction rendering.
+
+The target closure must define one pure policy contract:
+
+```text
+exact_target:
+  exactTargetRefs >= 1 and every ref is in owner catalog TargetRefs
+
+existing_owner_scope:
+  ownerScopeTargetRefs >= 1 OR ownerSelectorRefs >= 1
+  ownerSelectorRefs <= 1
+  every ref/selector is in the sealed owner catalog
+
+prospective_owner_target:
+  prospectiveTargetRef is non-empty
+  ownerSelectorRefs == 1
+  prospectiveConstraintRefs >= 1
+  selector/constraint values are in the sealed owner catalog
+```
+
+The same policy rules must drive provider schema, document admission, typed violation generation, and correction
+rendering. When a finite allowed target set exists, SM-3 emits one `allowed_value` or `non_empty` correction containing
+the sealed allowed refs. When no admissible target exists in the owner catalog, SM-3 records an unrepairable catalog gap
+and terminates or requests the existing prerequisite refresh path; it must not spend another ineffective LLM attempt.
+
+LLM remains a renderer of detached target facts. File/Git/Shell/MCP/Web/SSH remain catalog and feasibility fact owners.
+Only Orchestrator SM-3 may classify target correction and transition the semantic ledger.
+
 ## 3. Non-Negotiable Ownership Rules
 
 1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
@@ -431,10 +471,13 @@ remains open.
 | RSO-13 | code_closed | Make SM-3 derive correction directives from rejected facts and persisted ledger context | production private event carries no directive; reducer derives under CAS; duplicate/stale/restart tests pass |
 | RSO-14 | code_closed | Reduce LLM boundary to detached fact rendering only | C4 contains typed safe facts; LLM cannot classify correction or transition; LLM tests pass |
 | RSO-15 | pending | Fresh deployed positive convergence after RSO-12 through RSO-14 | semantic seal → dispatch → receipt → evidence → CWI close → DoD result |
+| RSO-16 | code_closed | Normalize exact/existing/prospective target policy into one schema/evaluator/correction contract | target policy matrix, finite-allowed-value and empty-catalog tests pass |
+| RSO-17 | pending | Prove target correction and no-ineffective-retry behavior in a fresh deployment | target correction → semantic seal, or bounded catalog-gap terminal with no attempt 2 |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
-RSO-13 precedes RSO-14; RSO-8 may run in parallel only if it does not change Runtime authority. RSO-9 follows every
-code change. RSO-10 and RSO-15 cannot be replaced by mock provider proof.
+RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
+change Runtime authority. RSO-9 follows every code change. RSO-10, RSO-15 and RSO-17 cannot be replaced by mock
+provider proof.
 
 ### 10.1 2026-08-08 Code-Closure Evidence
 
@@ -464,6 +507,11 @@ code change. RSO-10 and RSO-15 cannot be replaced by mock provider proof.
   detached request-side rendering value and remains a factual provider adapter.
 - These are local code-closure results. A fresh deployment must still prove that `validationRecipeId` failures produce
   field-level C4 correction and that a corrected run reaches semantic seal and downstream effect execution.
+- `run-034` confirms the catalog correction path now emits an exact target violation, but target-policy correction did
+  not yet produce an admissible `exactTargetRefs` value. The local RSO-16 closure now emits sealed catalog refs for
+  empty exact/owner-scope fields, enforces the three policy shapes in the request schema, and leaves prospective
+  target refs free to name a not-yet-existing resource under sealed selector/constraint facts. RSO-17 remains open
+  for fresh deployed target correction and no-ineffective-retry proof.
 
 ### 10.2 Ordered Code-Closure Steps For RSO-12 Through RSO-15
 
@@ -501,6 +549,15 @@ code change. RSO-10 and RSO-15 cannot be replaced by mock provider proof.
 7. **Run live positive validation only after code gates pass**.
    - A failed semantic admission is not positive convergence, even if terminal delivery and projection are correct.
    - RSO-15 requires complete semantic-to-effect lineage and must record the exact live request/audit evidence.
+8. **Close target policy as one contract** in
+   `internal/pkg/workorchruntimecontract/runtime_semantic_contract.go`,
+   `internal/pkg/workorchruntimecontract/runtime_semantic_payload.go`, and
+   `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go`.
+   - Define exact-target, existing-owner-scope, and prospective-owner-target invariants once.
+   - Project those invariants into the request schema and use the same evaluator at admission.
+   - Include sealed target refs/selectors/constraints in provider-safe correction facts.
+   - If the owner catalog has no admissible target, classify a bounded catalog gap instead of issuing ineffective retry.
+   - Add attempt-0/attempt-1, finite catalog, empty catalog, stale directive, duplicate event, and restart tests.
 
 ## 11. Verification Matrix
 
