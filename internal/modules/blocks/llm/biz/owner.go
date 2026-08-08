@@ -131,7 +131,8 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 		StablePrefixHash: command.StablePrefixHash, DefinitionContext: command.DefinitionContext,
 		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
 		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext,
-		PreviousSemanticRejection: command.PreviousSemanticRejection,
+		PreviousSemanticRejection:   cloneRuntimeOriginalDiagnostic(command.PreviousSemanticRejection),
+		SemanticCorrectionDirective: cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
 	}
 	startedAt := time.Now().UTC()
 	providerRequest, preflightErr := runtimeProviderRequest(request)
@@ -217,20 +218,21 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		return
 	}
 	response, err := llmruntime.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
-		DocumentKind:              command.DocumentKind,
-		RequestIdentity:           command.RequestIdentity,
-		ExpectedDocument:          command.ExpectedDocument,
-		Decision:                  command.Decision,
-		Transaction:               command.Transaction,
-		CandidateAttempt:          command.CandidateAttempt,
-		PreviousFailure:           command.PreviousFailure,
-		StablePrefixHash:          command.StablePrefixHash,
-		CandidateManifest:         command.CandidateManifest,
-		DefinitionContext:         command.DefinitionContext,
-		CandidateContext:          command.CandidateContext,
-		SemanticManifest:          command.SemanticManifest,
-		SemanticContext:           command.SemanticContext,
-		PreviousSemanticRejection: command.PreviousSemanticRejection,
+		DocumentKind:                command.DocumentKind,
+		RequestIdentity:             command.RequestIdentity,
+		ExpectedDocument:            command.ExpectedDocument,
+		Decision:                    command.Decision,
+		Transaction:                 command.Transaction,
+		CandidateAttempt:            command.CandidateAttempt,
+		PreviousFailure:             command.PreviousFailure,
+		StablePrefixHash:            command.StablePrefixHash,
+		CandidateManifest:           command.CandidateManifest,
+		DefinitionContext:           command.DefinitionContext,
+		CandidateContext:            command.CandidateContext,
+		SemanticManifest:            command.SemanticManifest,
+		SemanticContext:             command.SemanticContext,
+		PreviousSemanticRejection:   cloneRuntimeOriginalDiagnostic(command.PreviousSemanticRejection),
+		SemanticCorrectionDirective: cloneRuntimeSemanticCorrectionDirective(command.SemanticCorrectionDirective),
 	})
 	// Always attempt to persist sealed request audit when generation produced one.
 	// Audit may also ride on CandidateRequestError for failed provider calls.
@@ -296,6 +298,18 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		Audit:                providerRequestAuditView(audit),
 		Usage:                usage,
 	}, nil)
+}
+
+func cloneRuntimeSemanticCorrectionDirective(value *runtimecontract.RuntimeSemanticCorrectionDirective) *runtimecontract.RuntimeSemanticCorrectionDirective {
+	if value == nil {
+		return nil
+	}
+	clone := value.Clone()
+	return &clone
+}
+
+func cloneRuntimeOriginalDiagnostic(value *runtimecontract.RuntimeOriginalDiagnostic) *runtimecontract.RuntimeOriginalDiagnostic {
+	return value.CloneOriginal()
 }
 
 func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocumentContract) string {

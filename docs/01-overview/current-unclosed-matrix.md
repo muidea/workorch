@@ -39,9 +39,10 @@ MCP、SSH、Web execute、LLM provider ceiling/preflight/request、八个 owner 
 以及 Git capability-state acquisition、Decision governance-request 合同已直接回迁各自 `blocks/*/pkg/events` 并由 boundary verifier 固化；Run/Result/Workspace lifecycle 合同审计也已确认由各自 owner 定义并消费。
 owner observation/failure/diagnostic、EventHub 接收 owner 归属与 Orchestrator private mutation surface 已形成回归基线；
 controller 只公开唯一 internal-event mutation dispatcher 和 scoped read，所有 lane caller 只传唯一接收 owner
-`Contracts()`。最新 `run-025` 与 revision 367～385 事件链重新打开两个代码级缺口：restart 在 predecessor Workspace
-release 前创建 successor；semantic correction 改变 plan step，且 output-limit recovery 拼接了 escaped raw suffix。当前必须
-先完成 release-before-create 与 complete-document recovery，再执行 fresh LSP Bridge binding-matched positive matrix。
+`Contracts()`。后续代码已关闭 predecessor-owned restart、release-before-successor、sealed expected document、same-step
+identity fencing、raw suffix 删除和 whole-document bounded recovery。`run-029` 暴露的 actionable typed semantic
+correction directive 与 terminal-consistent outcome/activity 已完成代码收口，并通过 full/race/boundary/managed matrix。
+当前仅剩 fresh LSP Bridge binding-matched positive matrix 和 whole-document recovery fault injection。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
@@ -60,7 +61,11 @@ release 前创建 successor；semantic correction 改变 plan step，且 output-
 - Orchestrator 只保留 `ApplyInternalEvent` mutation dispatcher 与唯一 aggregate CAS boundary，删除薄 wrapper 和第二 mutation API；
 - 非 current schema 只产生 `fresh_activation_required`，不参与执行。
 - semantic-plan 与 operations authority 只接受单次完整 JSON；output limit/EOF 进入同一 sealed expected-document 的有界
-  whole-document recovery，不拼接 raw suffix，也不消耗 semantic correction attempt。
+  whole-document recovery，不拼接 raw suffix，也不消耗 semantic correction attempt；
+- complete semantic rejection 先作为 factual diagnostic 持久化，SM-3 private reducer 只能封存一个 typed correction
+  directive 或 final rejection；LLM C4 只渲染 provider-safe rejection + directive，不读取 raw `OriginalMessage`；
+- RuntimeView/outcome/activity 只映射 selected authoritative Run/Result；definition-changed 是 read-only attention，不能覆盖
+  terminal outcome 或形成 projection-owned lifecycle。
 
 唯一实施队列见
 [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
@@ -100,15 +105,16 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
 - **代码主链**：Runtime only；禁止的 authority 不再是问题来源。R3 不增加第二主链或第五状态机，而是
   SM-2 的 owner-local reconciliation 前置 input。complete candidate document 必须先持久化，
   single evaluator 只返回完整 typed diagnostic；是否 correction/final 由 SM-3 internal event 决定。owner
-  feasibility 是正交 typed fact。C12 重新打开的不是 recovery/owner/projection，而是 SM-2 evidence/coverage
-  authority：只有 sealed binding + owner receipt 才能关闭 CWI，LLM/raw check 不得越权。
-- **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、receipt、
-  binding-derived CWI credit、single-owner lifecycle/outcome/SM-4 producer trust 与 terminal delivery均为 R3 回归基线；
-  当前 active 缺口是 restart successor ordering、expected-document/correction/recovery 合同，以及其后的 deployed semantic
-  positive matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
+  feasibility 是正交 typed fact。C12 是必须保持的 SM-2 evidence/coverage 回归基线：只有 sealed binding + owner receipt
+  才能关闭 CWI，LLM/raw check 不得越权；已收口的 semantic correction 与 projection 不能绕过或改写该基线。
+- **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、whole-document recovery、receipt、
+  binding-derived CWI credit、single-owner lifecycle/SM-4 producer trust 与 terminal delivery 均为 R3 回归基线；当前 active
+  typed semantic correction directive 与 terminal-consistent canonical projection 已 code-closed；剩余 deployed semantic
+  positive matrix 和 recovery fault injection。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace
   reasoning effort 实施顺序由 WRE active plan 定义，archive 不得推导新实现约束。
-- **Active roadmap**：RSO 当前包含 restart ordering、complete-document recovery 与 fresh LSP live；WRE 是独立必需收口项，用于 workspace reasoning capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **Active roadmap**：RSO 当前包含 typed semantic correction、canonical projection、fresh LSP positive convergence 与
+  whole-document recovery fault injection；restart ordering 和 complete-document recovery 是必须保持的代码回归基线。WRE 是独立必需收口项，用于 workspace reasoning capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

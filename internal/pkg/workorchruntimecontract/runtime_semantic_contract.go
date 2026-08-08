@@ -942,7 +942,7 @@ type RuntimeSemanticPlanningLedger struct {
 	Attempt                 int
 	StablePrefixHash        string
 	LogicalRequestID        string
-	CorrectionHash          string
+	CorrectionDirective     *RuntimeSemanticCorrectionDirective
 	Document                *RuntimeSemanticPlanDocument
 	DocumentHash            string
 	Batches                 []RuntimeSemanticPlanBatch
@@ -979,7 +979,10 @@ func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedge
 	l.DefinitionSeed = l.DefinitionSeed.Clone()
 	l.StablePrefixHash = strings.TrimSpace(l.StablePrefixHash)
 	l.LogicalRequestID = strings.TrimSpace(l.LogicalRequestID)
-	l.CorrectionHash = strings.TrimSpace(l.CorrectionHash)
+	if l.CorrectionDirective != nil {
+		value := l.CorrectionDirective.Clone()
+		l.CorrectionDirective = &value
+	}
 	if l.Manifest != nil {
 		value := l.Manifest.Clone()
 		l.Manifest = &value
@@ -1158,6 +1161,19 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 			return fmt.Errorf("runtime semantic planning rejection %d: %w", idx, err)
 		}
 	}
+	if l.CorrectionDirective != nil {
+		if l.Attempt != 1 || len(l.Rejections) != 1 || l.Manifest == nil {
+			return fmt.Errorf("runtime semantic correction directive has no exact attempt-0 lineage")
+		}
+		if err := l.CorrectionDirective.ValidateAgainst(*l.Manifest, l.Rejections[0]); err != nil {
+			return err
+		}
+		if l.CorrectionDirective.StablePrefixHash != l.StablePrefixHash {
+			return fmt.Errorf("runtime semantic correction directive stable prefix is stale")
+		}
+	} else if l.Attempt == 1 {
+		return fmt.Errorf("runtime semantic attempt 1 requires a correction directive")
+	}
 	if l.CatalogRefreshAttempts < 0 || l.CatalogRefreshAttempts != len(l.FeasibilityGaps) {
 		return fmt.Errorf("runtime semantic catalog refresh attempts do not match gap lineage")
 	}
@@ -1171,7 +1187,7 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 	}
 	switch l.Phase {
 	case RuntimeSemanticPlanningRequired:
-		if l.Manifest != nil || l.Attempt != 0 || l.StablePrefixHash != "" || l.LogicalRequestID != "" || l.CorrectionHash != "" || l.Document != nil || l.DocumentHash != "" || l.FeasibilityBatchID != "" || len(l.Feasibilities) != 0 || l.FeasibilitySetHash != "" || l.SealedBindingSetHash != "" || len(l.SealedLineageRefs) != 0 || len(l.Rejections) != 0 || l.Failure != nil {
+		if l.Manifest != nil || l.Attempt != 0 || l.StablePrefixHash != "" || l.LogicalRequestID != "" || l.CorrectionDirective != nil || l.Document != nil || l.DocumentHash != "" || l.FeasibilityBatchID != "" || len(l.Feasibilities) != 0 || l.FeasibilitySetHash != "" || l.SealedBindingSetHash != "" || len(l.SealedLineageRefs) != 0 || len(l.Rejections) != 0 || l.Failure != nil {
 			return fmt.Errorf("required runtime semantic planning ledger has unexpected downstream facts")
 		}
 	case RuntimeSemanticPlanningOrderRequestOpen, RuntimeSemanticPlanningRequestOpen, RuntimeSemanticPlanningCorrectionRequired:
@@ -1179,7 +1195,7 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 		if l.Manifest == nil || l.Attempt < 0 || l.Attempt > 1 || l.StablePrefixHash == "" || l.LogicalRequestID == "" || (!batchCorrectionDocument && (l.Document != nil || l.DocumentHash != "")) || l.FeasibilityBatchID != "" || len(l.Feasibilities) != 0 || l.FeasibilitySetHash != "" || l.SealedBindingSetHash != "" || len(l.SealedLineageRefs) != 0 || l.Failure != nil {
 			return fmt.Errorf("open runtime semantic planning ledger has invalid shape")
 		}
-		if (l.Attempt == 0 && l.CorrectionHash != "") || (l.Attempt == 1 && l.CorrectionHash == "") || (l.Phase == RuntimeSemanticPlanningCorrectionRequired && l.Attempt != 1) {
+		if (l.Attempt == 0 && l.CorrectionDirective != nil) || (l.Attempt == 1 && l.CorrectionDirective == nil) || (l.Phase == RuntimeSemanticPlanningCorrectionRequired && l.Attempt != 1) {
 			return fmt.Errorf("runtime semantic planning correction lineage is invalid")
 		}
 		if ((l.Phase == RuntimeSemanticPlanningOrderRequestOpen || l.Phase == RuntimeSemanticPlanningRequestOpen) && len(l.Rejections) != 0) || (l.Phase == RuntimeSemanticPlanningCorrectionRequired && len(l.Rejections) != 1) {
@@ -1367,6 +1383,7 @@ func StableRuntimeSemanticPlanCorrectionHash(rejection RuntimeOriginalDiagnostic
 		writeHashStrings(h, violation.Required)
 		writeHashStrings(h, violation.Forbidden)
 	}
+	writeRuntimeSemanticContractViolationsHash(h, diagnostic.SemanticViolations)
 	return "runtime-semantic-correction-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -1504,7 +1521,12 @@ func validateRuntimeSemanticCoverageOrder(order []common.CoverageWorkItemID, ite
 		for _, dependency := range item.ReopenDependencies {
 			depPos, ok := position[dependency.CoverageWorkItemID]
 			if !ok || depPos >= itemPos {
-				return fmt.Errorf("runtime semantic document coverage order violates dependency %q -> %q", dependency.CoverageWorkItemID, item.ID)
+				return &RuntimeSemanticDependencyOrderError{
+					RequiredBeforeID:     dependency.CoverageWorkItemID,
+					RequiredAfterID:      item.ID,
+					ActualBeforePosition: depPos,
+					ActualAfterPosition:  itemPos,
+				}
 			}
 		}
 	}

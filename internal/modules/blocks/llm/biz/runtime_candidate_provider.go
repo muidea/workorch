@@ -616,7 +616,7 @@ func runtimeProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodel
 }
 
 func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
-	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil {
+	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("operations provider request must not carry semantic plan fields")
 	}
 	definitionContext := request.DefinitionContext.Normalized()

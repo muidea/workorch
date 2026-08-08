@@ -165,7 +165,7 @@ func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspa
 	ledger.Attempt = 0
 	ledger.StablePrefixHash = ""
 	ledger.LogicalRequestID = ""
-	ledger.CorrectionHash = ""
+	ledger.CorrectionDirective = nil
 	ledger.Document = nil
 	ledger.DocumentHash = ""
 	ledger.FeasibilityBatchID = ""
@@ -220,6 +220,12 @@ func (c *RuntimeController) compileSemanticPlanBatch(ctx context.Context, worksp
 		ledger.Batches = append(ledger.Batches, batch.Clone())
 		ledger.ActiveBatchID = batch.BatchID
 		ledger.LogicalRequestID = batch.RequestLogicalID
+		// Correction lineage is scoped to one provider document. A proof-batch
+		// request is a new sealed document contract and must never inherit an
+		// order-document attempt or directive.
+		ledger.Attempt = 0
+		ledger.CorrectionDirective = nil
+		ledger.Rejections = nil
 		// Feasibility fields are scoped to the active batch. Completed facts
 		// remain durably archived in BatchFeasibilityResults; the next batch
 		// starts with an empty working set.
@@ -663,21 +669,27 @@ func (c *RuntimeController) observeSemanticFeasibility(ctx context.Context, work
 
 // requireSemanticPlanCorrection records the complete attempt-0 rejection and
 // opens exactly one correction identity under the same manifest/prefix.
-func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID, correctionHash string, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
+func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID string, directive runtimecontract.RuntimeSemanticCorrectionDirective, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
 	stablePrefixHash = strings.TrimSpace(stablePrefixHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
-	correctionHash = strings.TrimSpace(correctionHash)
-	if stablePrefixHash == "" || logicalRequestID == "" || correctionHash == "" {
+	directive = directive.Clone()
+	if stablePrefixHash == "" || logicalRequestID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	if err := rejection.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if correctionHash != runtimecontract.StableRuntimeSemanticPlanCorrectionHash(rejection) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic correction identity does not match rejection", common.ErrConflict)
-	}
 	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
-		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && ledger.LogicalRequestID == logicalRequestID && ledger.CorrectionHash == correctionHash {
+		if ledger.Manifest == nil {
+			return false, fmt.Errorf("%w: semantic correction has no sealed manifest", common.ErrConflict)
+		}
+		if err := directive.ValidateAgainst(*ledger.Manifest, rejection); err != nil {
+			return false, err
+		}
+		if directive.StablePrefixHash != stablePrefixHash {
+			return false, fmt.Errorf("%w: semantic correction stable prefix is stale", common.ErrConflict)
+		}
+		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && ledger.LogicalRequestID == logicalRequestID && ledger.CorrectionDirective != nil && ledger.CorrectionDirective.Hash == directive.Hash {
 			return false, nil
 		}
 		if (ledger.Phase != runtimecontract.RuntimeSemanticPlanningRequestOpen && ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen) || ledger.Attempt != 0 || ledger.Manifest == nil || ledger.StablePrefixHash != stablePrefixHash {
@@ -686,7 +698,8 @@ func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, w
 		ledger.Phase = runtimecontract.RuntimeSemanticPlanningCorrectionRequired
 		ledger.Attempt = 1
 		ledger.LogicalRequestID = logicalRequestID
-		ledger.CorrectionHash = correctionHash
+		value := directive.Clone()
+		ledger.CorrectionDirective = &value
 		ledger.Rejections = append(ledger.Rejections, *rejection.CloneOriginal())
 		return true, nil
 	})

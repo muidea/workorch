@@ -83,6 +83,10 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   rejected shape 与 field violations 形成 `correctable_once` 或 `rejected_final` owner-local result；前者必须有
   可仅用 manifest + rejection 验证的 `CorrectionDirective`，后者零 correction call。无法归类是
   `runtime_contract_defect`，不能退化为无信息 governance ticket。
+- semantic-plan 的 `CorrectionDirective` 必须持久化 exact dependency edge、actual position、manifest/seed/prefix、
+  plan step 与 source rejection hash；LLM command 只取得 detached fact 并仅在 C4 渲染，不能从 `OriginalMessage`
+  重建。correction lineage 只属于一个 sealed provider document；coverage-order attempt 1 即使 accepted，创建新的
+  proof-batch request 时也必须在同一 SM-3 private CAS 中重置 attempt、directive 与 current rejection lineage。
 - candidate pipeline 只接收 `request_recoverable`、`candidate_rejection`、`owner_feasibility` 和 `accepted`
   factual result。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility
   必须先成为 Orchestrator internal event，再由 SM-2 coordinator 选择 prerequisite、新 authority 或 typed

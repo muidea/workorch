@@ -1136,9 +1136,7 @@ activate_workspace_execution() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
   local request_id="llm-e2e-$(basename "${output_file%.json}")"
-  local workspace_revision
-  capture_runs_before_activation "$output_file"
-  workspace_revision="$(curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["revision"])')"
+	capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
@@ -1168,9 +1166,11 @@ activate_workspace_execution_with_provider() {
   local output_file="$1"
   local provider_id="$2"
   local model_id="${3:-verify-model}"
-  local activation_dod_id="${4:-$dod_id}"
-  local request_id="llm-e2e-$(basename "${output_file%.json}")"
-  capture_runs_before_activation "$output_file"
+	local activation_dod_id="${4:-$dod_id}"
+	local request_id="llm-e2e-$(basename "${output_file%.json}")"
+	local workspace_revision
+	capture_runs_before_activation "$output_file"
+	workspace_revision="$(curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["revision"])')"
   curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-selection" \
     -H 'Content-Type: application/json' \
     -d '{"providerId":"'"$provider_id"'","modelId":"'"$model_id"'","expectedRevision":'"$workspace_revision"'}' >/dev/null

@@ -6,20 +6,21 @@ import (
 )
 
 type RuntimeCandidateRequest struct {
-	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
-	RequestIdentity           runtimecontract.RuntimeCandidateRequestIdentity
-	ExpectedDocument          *runtimecontract.RuntimeExpectedDocumentContract
-	Decision                  runtimecontract.RuntimeDecision
-	Transaction               runtimecontract.AuthorityTransaction
-	CandidateAttempt          int
-	PreviousFailure           *runtimecontract.RuntimeCandidateFailure
-	StablePrefixHash          string
-	CandidateManifest         runtimecontract.RuntimeCandidateContractManifest
-	DefinitionContext         runtimecontract.RuntimeDefinitionContext
-	CandidateContext          runtimecontract.RuntimeCandidateContext
-	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
-	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
-	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
+	DocumentKind                runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity             runtimecontract.RuntimeCandidateRequestIdentity
+	ExpectedDocument            *runtimecontract.RuntimeExpectedDocumentContract
+	Decision                    runtimecontract.RuntimeDecision
+	Transaction                 runtimecontract.AuthorityTransaction
+	CandidateAttempt            int
+	PreviousFailure             *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash            string
+	CandidateManifest           runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext           runtimecontract.RuntimeDefinitionContext
+	CandidateContext            runtimecontract.RuntimeCandidateContext
+	SemanticManifest            runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext             runtimecontract.RuntimeSemanticPlanRequestContext
+	PreviousSemanticRejection   *runtimecontract.RuntimeOriginalDiagnostic
+	SemanticCorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective
 }
 
 // RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime candidate

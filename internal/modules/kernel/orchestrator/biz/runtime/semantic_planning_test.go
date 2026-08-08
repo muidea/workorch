@@ -210,7 +210,7 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRuntimeSemanticBatchCorrectionKeepsBatchLineage(t *testing.T) {
+func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, order, _ := semanticPlanningFixture(t, aggregate)
 	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
@@ -239,13 +239,9 @@ func TestRuntimeSemanticBatchCorrectionKeepsBatchLineage(t *testing.T) {
 		OriginalClass: "semantic_plan", OriginalCode: "invalid_json", OriginalMessage: "batch document was malformed",
 		Signature: "semantic-plan/batch/invalid-json",
 	}
-	correctionHash := runtimecontract.StableRuntimeSemanticPlanCorrectionHash(diagnostic)
-	corrected, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", correctionHash, diagnostic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || corrected.SemanticPlanning.ActiveBatchID != batch.BatchID || corrected.SemanticPlanning.Attempt != 1 {
-		t.Fatalf("batch correction lost active lineage: %+v", corrected.SemanticPlanning)
+	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
+	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", directive, diagnostic); err == nil {
+		t.Fatal("unclassified batch diagnostic created correction authority")
 	}
 }
 
@@ -269,6 +265,10 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}
 
 	manifest, _, _ = semanticPlanningFixture(t, aggregate)
+	manifest = manifest.Clone()
+	manifest.CoverageItems[0].ReopenDependencies = []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-prerequisite", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}
+	manifest.CoverageItems = append(manifest.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: "cwi-prerequisite", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-prerequisite", TargetText: "prerequisite"})
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	started, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanRequestStarted, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1",
@@ -277,10 +277,12 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 		t.Fatal(err)
 	}
 	rejection := semanticPlanningDiagnostic()
-	correctionHash := runtimecontract.StableRuntimeSemanticPlanCorrectionHash(rejection)
+	rejection.FieldViolations = []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-v2 before cwi-prerequisite", Required: []string{"cwi-prerequisite before cwi-v2"}}}
+	rejection.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-prerequisite", RequiredAfterID: "cwi-v2", ActualBeforePosition: 1, ActualAfterPosition: 0}}
+	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-1", runtimecontract.RuntimeSemanticPlanStepCoverageOrder, rejection)
 	corrected, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", CorrectionHash: correctionHash, SemanticDiagnostic: &rejection,
+		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", SemanticCorrectionDirective: &directive, SemanticDiagnostic: &rejection,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -288,11 +290,46 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	if corrected.Aggregate.SemanticPlanning.Attempt != 1 || len(corrected.Aggregate.SemanticPlanning.Rejections) != 1 || corrected.Aggregate.StateRevision != started.Aggregate.StateRevision+1 {
 		t.Fatalf("correction lineage = %+v", corrected.Aggregate.SemanticPlanning)
 	}
+	replayed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", SemanticCorrectionDirective: &directive, SemanticDiagnostic: &rejection,
+	})
+	if err != nil || replayed.Aggregate.StateRevision != corrected.Aggregate.StateRevision {
+		t.Fatalf("duplicate correction changed state: revision=%d err=%v", replayed.Aggregate.StateRevision, err)
+	}
+	recovered, err := controller.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || recovered.SemanticPlanning.CorrectionDirective == nil || recovered.SemanticPlanning.CorrectionDirective.Hash != directive.Hash {
+		t.Fatalf("persisted correction did not survive reload: %+v err=%v", recovered.SemanticPlanning.CorrectionDirective, err)
+	}
 	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-3", CorrectionHash: correctionHash, SemanticDiagnostic: &rejection,
+		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-3", SemanticCorrectionDirective: &directive, SemanticDiagnostic: &rejection,
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("third semantic request error = %v", err)
+	}
+	correctedOrder := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-prerequisite", "cwi-v2"},
+	}
+	accepted, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticPlanEvaluated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		LogicalRequestID: "semantic-request-2", SemanticDocument: &correctedOrder,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, correctedOrder, 0, "proof-request-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batched, err := controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batched.SemanticPlanning.Attempt != 0 || batched.SemanticPlanning.CorrectionDirective != nil || len(batched.SemanticPlanning.Rejections) != 0 || accepted.Aggregate.SemanticPlanning.CorrectionDirective == nil {
+		t.Fatalf("new proof document inherited order correction lineage: %+v", batched.SemanticPlanning)
 	}
 }
 
@@ -942,4 +979,15 @@ func semanticPlanningDiagnostic() runtimecontract.RuntimeOriginalDiagnostic {
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		OriginalClass: "contract", OriginalCode: "semantic_plan_rejected", OriginalMessage: "proposal is outside the manifest", Signature: "semantic-plan/rejected-1",
 	}
+}
+
+func semanticPlanningCorrectionDirective(manifest runtimecontract.RuntimeSemanticPlanManifest, prefix string, step runtimecontract.RuntimeSemanticPlanStep, rejection runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.RuntimeSemanticCorrectionDirective {
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      step, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		StablePrefixHash: prefix, SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
+	}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	return directive
 }

@@ -16,7 +16,7 @@ Last Updated: 2026-08-08
 | --- | --- |
 | Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
-| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-10）**；最新 live 重新打开 restart successor ordering 与 authority document continuation/correction 合同。Owner-local terminal delivery 基线有效，但必须完成 release-before-create、complete-document recovery 与 fresh LSP positive convergence，见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
+| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-10）**；RSO-1～RSO-9 are code-closed. Typed SM-3 semantic correction and terminal-consistent RuntimeView/activity now pass full/race/boundary/managed regression; fresh positive convergence and whole-document recovery still require deployed proof. See [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md). |
 | Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
@@ -25,15 +25,16 @@ Last Updated: 2026-08-08
 
 ## Residual Mandatory Work
 
-当前 Runtime CWI 主线有两项代码级强制缺口和一项 live 门禁：restart 必须在 predecessor 的 Workspace release
-acknowledgement 后才创建 successor；Runtime authority document 必须改为单次完整文档和同一 sealed request 的有界完整
-重试，不再拼接 LLM raw suffix；完成后再执行 fresh LSP Bridge positive convergence。此前 22 组件 EventHub 合同回迁、
-owner-local terminal delivery、typed diagnostic、single mutation surface、managed verifier 与 reasoning selection 仍是回归基线，
-但不能覆盖最新 persisted aggregate/event-order 反例。
+当前 Runtime CWI 主线有两项代码级强制缺口和两项 live 门禁：SM-3 必须从 persisted typed rejection 封存可验证的
+semantic correction directive，LLM owner 只能将其作为 provider-safe C4 fact 渲染；RuntimeView/outcome/activity 必须从同一
+authoritative Run/Result 映射，definition-changed 只能是 read-only attention，不能成为第二套 outcome。随后执行 fresh LSP
+Bridge positive convergence，并通过单独 fault injection 证明 whole-document recovery。此前 restart release-before-create、
+complete-document、22 组件 EventHub 合同回迁、owner-local terminal delivery、typed diagnostic、single mutation surface、
+managed verifier 与 reasoning selection 仍是回归基线，但不能替代最新 persisted aggregate/provider/projection 反例。
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
-| RSO | restart ordering + complete authority document + single-owner CWI convergence | predecessor-owned replacement intent；SM-4 `Result -> Workspace -> Run`；release-before-create；sealed expected-document contract；whole-document recovery；order/batch/feasibility/seal/dispatch/evidence live | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| RSO | typed semantic correction + canonical projection + single-owner CWI convergence | SM-3-sealed correction directive; provider-safe C4; terminal-first outcome/activity; preserve restart/complete-document baselines; feasibility/seal/dispatch/evidence and recovery live | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | WRE | Workspace reasoning effort deployed proof | 代码收口完成；验证 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection与双 workspace隔离 | [active plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 可补一次 `patch apply + validation + DoD closeout` deployed live；不阻塞 Runtime 收口 | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
@@ -54,6 +55,7 @@ owner-local terminal delivery、typed diagnostic、single mutation surface、man
 6. 清理失效内容：禁止的 主链术语、重复 audit、假活跃 Status 不得继续占用 active。
 7. 旧 `RUNTIME-SMO-R2` 与 `OPS-1` 均已归 archive；其中 OPS-1 只是假定存在 production maintenance command
    的历史记录，不能作为维护窗口任务。
-8. C12、slice/focus 分离、普通用户 raw contract JSON 删除、owner contract 回迁与 managed matrix 仍是有效基线；
-   restart release-before-create 和 authority complete-document recovery 已由最新 live 重新打开。不得以 ticket、手工
-   overlay、budget/decoder 放宽、字符串清理、合同 alias/forwarder 或历史绿灯绕过 RSO。
+8. C12、slice/focus 分离、普通用户 raw contract JSON 删除、owner contract 回迁、restart release-before-create、
+   complete-document recovery 与 managed matrix 仍是有效代码基线。最新 live 打开的缺口曾是 typed semantic correction
+   directive 和 canonical terminal projection；whole-document recovery 仍缺 deployed fault injection。不得以 raw message、
+   prompt overlay、ticket、budget/decoder 放宽、字符串清理、合同 alias/forwarder 或历史绿灯绕过 RSO。

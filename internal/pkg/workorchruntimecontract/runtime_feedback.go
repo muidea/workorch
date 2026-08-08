@@ -105,24 +105,25 @@ func (s RuntimeFeedbackScope) validate() error {
 // in both CloneOriginal and Normalized; neither operation sorts or de-duplicates
 // them.
 type RuntimeOriginalDiagnostic struct {
-	SchemaVersion    string                  `json:"schemaVersion"`
-	OwnerModuleID    string                  `json:"ownerModuleId"`
-	OriginalClass    string                  `json:"originalClass"`
-	OriginalCode     string                  `json:"originalCode"`
-	OriginalMessage  string                  `json:"originalMessage"`
-	Signature        string                  `json:"signature"`
-	OperationID      string                  `json:"operationId,omitempty"`
-	TargetRefs       []string                `json:"targetRefs,omitempty"`
-	ExpectedRevision string                  `json:"expectedRevision,omitempty"`
-	ObservedRevision string                  `json:"observedRevision,omitempty"`
-	FieldViolations  []RuntimeFieldViolation `json:"fieldViolations,omitempty"`
-	DetailsRef       string                  `json:"detailsRef,omitempty"`
-	DetailsHash      string                  `json:"detailsHash,omitempty"`
-	DetailsBytes     int64                   `json:"detailsBytes,omitempty"`
-	ContentType      string                  `json:"contentType,omitempty"`
-	OmittedReason    string                  `json:"omittedReason,omitempty"`
-	Truncated        bool                    `json:"truncated,omitempty"`
-	Redacted         bool                    `json:"redacted,omitempty"`
+	SchemaVersion      string                             `json:"schemaVersion"`
+	OwnerModuleID      string                             `json:"ownerModuleId"`
+	OriginalClass      string                             `json:"originalClass"`
+	OriginalCode       string                             `json:"originalCode"`
+	OriginalMessage    string                             `json:"originalMessage"`
+	Signature          string                             `json:"signature"`
+	OperationID        string                             `json:"operationId,omitempty"`
+	TargetRefs         []string                           `json:"targetRefs,omitempty"`
+	ExpectedRevision   string                             `json:"expectedRevision,omitempty"`
+	ObservedRevision   string                             `json:"observedRevision,omitempty"`
+	FieldViolations    []RuntimeFieldViolation            `json:"fieldViolations,omitempty"`
+	SemanticViolations []RuntimeSemanticContractViolation `json:"semanticViolations,omitempty"`
+	DetailsRef         string                             `json:"detailsRef,omitempty"`
+	DetailsHash        string                             `json:"detailsHash,omitempty"`
+	DetailsBytes       int64                              `json:"detailsBytes,omitempty"`
+	ContentType        string                             `json:"contentType,omitempty"`
+	OmittedReason      string                             `json:"omittedReason,omitempty"`
+	Truncated          bool                               `json:"truncated,omitempty"`
+	Redacted           bool                               `json:"redacted,omitempty"`
 	// The following typed observations preserve safe producer facts required by
 	// the Orchestrator reducer. They are diagnostic detail, never an outcome,
 	// retry, target authorization, or transition instruction.
@@ -324,6 +325,7 @@ func StableRuntimeFeedbackHash(feedback RuntimeFeedback) string {
 		writeHashString(h, diagnostic.ExpectedRevision)
 		writeHashString(h, diagnostic.ObservedRevision)
 		writeRuntimeFieldViolationsHash(h, diagnostic.FieldViolations)
+		writeRuntimeSemanticContractViolationsHash(h, diagnostic.SemanticViolations)
 		writeHashString(h, diagnostic.DetailsRef)
 		writeHashString(h, diagnostic.DetailsHash)
 		writeHashString(h, fmt.Sprintf("%d", diagnostic.DetailsBytes))
@@ -406,6 +408,7 @@ func (d *RuntimeOriginalDiagnostic) CloneOriginal() *RuntimeOriginalDiagnostic {
 	for index := range d.FieldViolations {
 		clone.FieldViolations[index] = d.FieldViolations[index].CloneOriginal()
 	}
+	clone.SemanticViolations = cloneRuntimeSemanticContractViolations(d.SemanticViolations)
 	if d.TargetObservation != nil {
 		value := d.TargetObservation.Clone()
 		clone.TargetObservation = &value
@@ -445,6 +448,7 @@ func (d *RuntimeOriginalDiagnostic) Normalized() *RuntimeOriginalDiagnostic {
 	for index := range canonical.FieldViolations {
 		canonical.FieldViolations[index] = canonical.FieldViolations[index].Normalized()
 	}
+	canonical.SemanticViolations = normalizeRuntimeSemanticContractViolations(canonical.SemanticViolations)
 	canonical.DetailsRef = strings.TrimSpace(canonical.DetailsRef)
 	canonical.DetailsHash = strings.TrimSpace(canonical.DetailsHash)
 	canonical.ContentType = strings.TrimSpace(canonical.ContentType)
@@ -487,6 +491,11 @@ func (d *RuntimeOriginalDiagnostic) Validate() error {
 	for _, violation := range canonical.FieldViolations {
 		if err := violation.Validate(); err != nil {
 			return err
+		}
+	}
+	for index, violation := range canonical.SemanticViolations {
+		if err := violation.Validate(); err != nil {
+			return fmt.Errorf("original diagnostic semantic violation %d: %w", index, err)
 		}
 	}
 	if canonical.DetailsBytes < 0 {
@@ -577,6 +586,19 @@ func writeRuntimeFieldViolationsHash(writer hashStringWriter, values []RuntimeFi
 		writeHashStrings(writer, value.Allowed)
 		writeHashStrings(writer, value.Required)
 		writeHashStrings(writer, value.Forbidden)
+	}
+}
+
+func writeRuntimeSemanticContractViolationsHash(writer hashStringWriter, values []RuntimeSemanticContractViolation) {
+	writeHashString(writer, fmt.Sprintf("%d", len(values)))
+	for _, value := range values {
+		value = value.Normalized()
+		writeHashString(writer, string(value.Kind))
+		writeHashString(writer, value.Path)
+		writeHashString(writer, string(value.RequiredBeforeID))
+		writeHashString(writer, string(value.RequiredAfterID))
+		writeHashString(writer, fmt.Sprintf("%d", value.ActualBeforePosition))
+		writeHashString(writer, fmt.Sprintf("%d", value.ActualAfterPosition))
 	}
 }
 

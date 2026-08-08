@@ -298,7 +298,7 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 }
 
 func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
-	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil {
+	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil {
 		return fmt.Errorf("operations document request must not carry semantic plan fields")
 	}
 	if request.CandidateAttempt == 0 && request.PreviousFailure != nil {
@@ -334,14 +334,17 @@ func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateReque
 	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil {
 		return fmt.Errorf("semantic plan document request must not carry operations fields")
 	}
-	if request.CandidateAttempt == 0 && request.PreviousSemanticRejection != nil {
-		return fmt.Errorf("initial semantic plan attempt must not carry a previous rejection")
+	if request.CandidateAttempt == 0 && (request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil) {
+		return fmt.Errorf("initial semantic plan attempt must not carry correction lineage")
 	}
 	if request.CandidateAttempt == 1 {
-		if request.PreviousSemanticRejection == nil {
-			return fmt.Errorf("semantic plan retry requires the previous rejection")
+		if request.PreviousSemanticRejection == nil || request.SemanticCorrectionDirective == nil {
+			return fmt.Errorf("semantic plan retry requires rejection and correction directive")
 		}
 		if err := request.PreviousSemanticRejection.Validate(); err != nil {
+			return err
+		}
+		if err := request.SemanticCorrectionDirective.ValidateAgainst(request.SemanticManifest, *request.PreviousSemanticRejection); err != nil {
 			return err
 		}
 	}
@@ -353,6 +356,9 @@ func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateReque
 	}
 	expected := request.ExpectedDocument.Normalized()
 	context := request.SemanticContext.Normalized()
+	if request.CandidateAttempt == 1 && (request.SemanticCorrectionDirective.PlanStep != context.PlanStep || request.SemanticCorrectionDirective.StablePrefixHash != strings.TrimSpace(request.StablePrefixHash)) {
+		return fmt.Errorf("semantic correction identity is stale")
+	}
 	if expected.PlanStep != context.PlanStep || expected.CorrectionAttempt != request.CandidateAttempt || expected.DefinitionSeedHash != context.DefinitionSeed.Hash || expected.BatchID != context.BatchID || expected.BatchSequence != context.BatchSequence || !sameCoverageWorkItemIDs(expected.BatchCoverageWorkItemIDs, context.BatchCoverageWorkItemIDs) {
 		return fmt.Errorf("semantic expected document does not match request context")
 	}

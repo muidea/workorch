@@ -75,8 +75,9 @@ type runtimeSemanticDiagnosticProjection struct {
 }
 
 type runtimeSemanticTailProjection struct {
-	Attempt           int                                  `json:"attempt"`
-	PreviousRejection *runtimeSemanticDiagnosticProjection `json:"previousRejection,omitempty"`
+	Attempt             int                                                 `json:"attempt"`
+	PreviousRejection   *runtimeSemanticDiagnosticProjection                `json:"previousRejection,omitempty"`
+	CorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective `json:"correctionDirective,omitempty"`
 }
 
 func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
@@ -91,15 +92,21 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if request.CandidateAttempt < 0 || request.CandidateAttempt > 1 {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan attempt must be 0 or 1")
 	}
-	if request.CandidateAttempt == 0 && request.PreviousSemanticRejection != nil {
-		return llmmodels.ProviderRequest{}, fmt.Errorf("initial runtime semantic plan request must not carry a previous rejection")
+	if request.CandidateAttempt == 0 && (request.PreviousSemanticRejection != nil || request.SemanticCorrectionDirective != nil) {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("initial runtime semantic plan request must not carry correction lineage")
 	}
 	if request.CandidateAttempt == 1 {
-		if request.PreviousSemanticRejection == nil {
-			return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan correction requires the previous rejection")
+		if request.PreviousSemanticRejection == nil || request.SemanticCorrectionDirective == nil {
+			return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan correction requires rejection and directive")
 		}
 		if err := request.PreviousSemanticRejection.Validate(); err != nil {
 			return llmmodels.ProviderRequest{}, err
+		}
+		if err := request.SemanticCorrectionDirective.ValidateAgainst(manifest, *request.PreviousSemanticRejection); err != nil {
+			return llmmodels.ProviderRequest{}, err
+		}
+		if request.SemanticCorrectionDirective.PlanStep != context.PlanStep || request.SemanticCorrectionDirective.StablePrefixHash != strings.TrimSpace(request.StablePrefixHash) {
+			return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan correction identity is stale")
 		}
 	}
 	wantPrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(context.Definition, context.Activation.ExecutionContract)
@@ -153,6 +160,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	}
 	tailJSON, err := json.Marshal(runtimeSemanticTailProjection{
 		Attempt: request.CandidateAttempt, PreviousRejection: runtimeProviderSafeSemanticDiagnostic(request.PreviousSemanticRejection),
+		CorrectionDirective: cloneRuntimeSemanticCorrectionDirective(request.SemanticCorrectionDirective),
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -197,7 +205,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
-	if err := validateRuntimeSemanticContextIntegrity(context, manifest, request.CandidateAttempt, request.PreviousSemanticRejection, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
+	if err := validateRuntimeSemanticContextIntegrity(context, manifest, request.CandidateAttempt, request.PreviousSemanticRejection, request.SemanticCorrectionDirective, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_semantic_context_integrity_failed"
 		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"
@@ -355,7 +363,7 @@ func cloneRuntimeFieldViolations(values []runtimecontract.RuntimeFieldViolation)
 	return ret
 }
 
-func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest, attempt int, previous *runtimecontract.RuntimeOriginalDiagnostic, budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) error {
+func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest, attempt int, previous *runtimecontract.RuntimeOriginalDiagnostic, directive *runtimecontract.RuntimeSemanticCorrectionDirective, budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) error {
 	if budget == nil || prompt == nil {
 		return fmt.Errorf("runtime semantic context integrity requires prompt and budget metadata")
 	}
@@ -378,7 +386,7 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	if context.ProviderCeiling == nil {
 		missing = append(missing, "P4.current_snapshots")
 	}
-	if attempt == 1 && previous == nil {
+	if attempt == 1 && (previous == nil || directive == nil) {
 		missing = append(missing, "P1.current_failure")
 	}
 	if len(budget.RedactedPaths) > 0 && budget.RedactionApplied {

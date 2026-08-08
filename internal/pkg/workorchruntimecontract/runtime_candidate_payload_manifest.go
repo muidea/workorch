@@ -13,12 +13,13 @@ import (
 // aggregate state and does not choose retry/action; SM-3 classifies it after
 // the LLM owner returns the error.
 type RuntimeCandidatePayloadDiagnostic struct {
-	Path      string
-	Actual    string
-	Allowed   []string
-	Required  []string
-	Forbidden []string
-	Cause     error
+	Path               string
+	Actual             string
+	Allowed            []string
+	Required           []string
+	Forbidden          []string
+	SemanticViolations []RuntimeSemanticContractViolation
+	Cause              error
 }
 
 func (d *RuntimeCandidatePayloadDiagnostic) Error() string {

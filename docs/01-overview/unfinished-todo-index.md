@@ -22,13 +22,13 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | Runtime restart/document transaction closure | **代码与 live gap**：predecessor-owned replacement intent；SM-4 `Result -> Workspace -> Run` release-before-create；sealed expected-document；禁止 raw suffix 拼接；whole-document recovery；same-step correction；persisted proof-batch identity | [RSO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| A2 | LSP Bridge deployed positive proof | A1 代码收口后，在 ready provider 的 fresh deployment 中逐 CWI 验证 order → bounded batch → owner feasibility → sealed binding → operation → receipt → evidence/assessment → terminal；不得写入内置 defaults | [RSO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A1 | Runtime deployed positive convergence | **代码已收口**：SM-3 typed correction、provider-safe C4 和 canonical outcome/activity 已通过 full/race/managed gates；待 fresh deployment 证明 semantic correction → proof batch → effect → terminal，并单独验证 whole-document recovery fault injection | [RSO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A2 | LSP Bridge deployed positive and recovery proof | A1 代码收口后，在 ready provider 的 fresh deployment 中逐 CWI 验证 correction → order → bounded batch → owner feasibility → sealed binding → operation → receipt → evidence/assessment → terminal；另以 fault injection 验证 whole-document recovery；不得写入内置 defaults | [RSO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | A3 | Workspace reasoning effort deployed proof | 代码与正式合同已收口；剩余重新部署后的 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection 和双 workspace 隔离验证 | [WRE plan](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md) |
 
-Immutable binding、strict decoder、receipt matcher、owner-local terminal delivery、replay/CAS、CPU guard 与
-dual-workspace deployed matrix 继续作为 A1/A2 的回归基线；旧 restart/continuation 绿灯已被最新 live 反例推翻，不能
-继续标记为当前闭环。
+Predecessor-owned restart、release-before-successor、complete-document recovery、immutable binding、strict decoder、
+receipt matcher、owner-local terminal delivery、replay/CAS、CPU guard 与 dual-workspace matrix 继续作为 A1/A2 的代码回归
+基线；未实际执行的 recovery 和 downstream path 不能因本地绿灯标记为 live closed。
 
 ## C. 可选验证
 

@@ -42,6 +42,7 @@ type RuntimeInternalEvent struct {
 	SemanticPlanMergedFeasibilities    []runtimecontract.RuntimeSemanticProofFeasibility
 	SemanticFeasibility                *runtimecontract.RuntimeSemanticProofFeasibility
 	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
+	SemanticCorrectionDirective        *runtimecontract.RuntimeSemanticCorrectionDirective
 	SemanticBatchID                    string
 	SemanticRefreshGeneration          int
 
@@ -178,10 +179,10 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticPlanCorrectionRequired:
-		if event.SemanticDiagnostic == nil {
+		if event.SemanticDiagnostic == nil || event.SemanticCorrectionDirective == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.requireSemanticPlanCorrection(ctx, event.WorkspaceID, event.RunID, event.StablePrefixHash, event.LogicalRequestID, event.CorrectionHash, *event.SemanticDiagnostic)
+		aggregate, err := c.requireSemanticPlanCorrection(ctx, event.WorkspaceID, event.RunID, event.StablePrefixHash, event.LogicalRequestID, *event.SemanticCorrectionDirective, *event.SemanticDiagnostic)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticContractSealed:

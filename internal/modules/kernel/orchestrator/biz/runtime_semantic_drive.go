@@ -199,8 +199,8 @@ func runtimeSemanticExpectedDocumentForLedger(aggregate runtime.RuntimeAggregate
 }
 
 func runtimeSemanticRequestIdentityHash(ledger runtimecontract.RuntimeSemanticPlanningLedger) (string, error) {
-	if ledger.CorrectionHash != "" {
-		return ledger.CorrectionHash, nil
+	if ledger.CorrectionDirective != nil {
+		return ledger.CorrectionDirective.Hash, nil
 	}
 	if ledger.ActiveBatchID == "" {
 		return "", nil
@@ -261,18 +261,22 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
 	}
 	var previous *runtimecontract.RuntimeOriginalDiagnostic
+	var correction *runtimecontract.RuntimeSemanticCorrectionDirective
 	if ledger.Attempt == 1 {
-		if len(ledger.Rejections) != 1 {
+		if len(ledger.Rejections) != 1 || ledger.CorrectionDirective == nil {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_correction_lineage_invalid", "semantic correction has no exact attempt-0 diagnostic", nil)
 		}
 		previous = ledger.Rejections[0].CloneOriginal()
+		value := ledger.CorrectionDirective.Clone()
+		correction = &value
 	}
 	preflight, err := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
 		SemanticManifest: manifest, SemanticContext: semanticContext,
-		PreviousSemanticRejection: previous,
+		PreviousSemanticRejection:   previous,
+		SemanticCorrectionDirective: correction,
 	})
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_context_integrity", err.Error(), nil)
@@ -295,7 +299,8 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		ExpectedDocument: session.ExpectedDocument,
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
 		SemanticManifest: manifest, SemanticContext: semanticContext,
-		PreviousSemanticRejection: previous,
+		PreviousSemanticRejection:   previous,
+		SemanticCorrectionDirective: correction,
 	})
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_contract_error", err.Error(), nil)
@@ -456,7 +461,6 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	if ledger.Attempt >= 1 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_plan_retry_exhausted", diagnostic.OriginalMessage, &diagnostic)
 	}
-	correctionHash := runtimecontract.StableRuntimeSemanticPlanCorrectionHash(diagnostic)
 	if session.ExpectedDocument == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_expected_document_missing", "semantic correction has no sealed expected document", nil)
 	}
@@ -464,7 +468,21 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	expected.CorrectionAttempt = 1
 	expected.LogicalRequestID = ""
 	expected.Hash = ""
-	ensured, correctionSession, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, correctionHash, expected)
+	if ledger.Manifest == nil || len(diagnostic.SemanticViolations) == 0 {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "semantic plan rejection has no sealed typed correction delta", &diagnostic)
+	}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      expected.PlanStep, ManifestHash: ledger.Manifest.Hash,
+		DefinitionSeedHash: ledger.Manifest.DefinitionSeedHash, StablePrefixHash: ledger.StablePrefixHash,
+		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(diagnostic), Attempt: 1,
+		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
+	}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	if err := directive.ValidateAgainst(*ledger.Manifest, diagnostic); err != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", err.Error(), &diagnostic)
+	}
+	ensured, correctionSession, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, ledger.StablePrefixHash, ledger.Manifest.Hash, directive.Hash, expected)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -472,7 +490,7 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		Kind:        runtime.RuntimeInternalEventSemanticPlanCorrectionRequired,
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: correctionSession.LogicalRequestID,
-		CorrectionHash: correctionHash, SemanticDiagnostic: &diagnostic,
+		SemanticCorrectionDirective: &directive, SemanticDiagnostic: &diagnostic,
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
@@ -647,7 +665,7 @@ func runtimeSemanticRequestTerminalOutcome(code string) runtimecontract.RuntimeC
 func runtimeSemanticPayloadDiagnostic(err error) runtimecontract.RuntimeOriginalDiagnostic {
 	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "semantic_plan_rejection",
+		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalClass: "semantic_plan_rejection",
 		OriginalCode: "semantic_plan_invalid", OriginalMessage: err.Error(), Signature: "semantic-plan/invalid-document",
 	}
 	var payloadDiagnostic *runtimecontract.RuntimeCandidatePayloadDiagnostic
@@ -656,6 +674,7 @@ func runtimeSemanticPayloadDiagnostic(err error) runtimecontract.RuntimeOriginal
 			Path: payloadDiagnostic.Path, Actual: payloadDiagnostic.Actual,
 			Allowed: append([]string(nil), payloadDiagnostic.Allowed...), Required: append([]string(nil), payloadDiagnostic.Required...), Forbidden: append([]string(nil), payloadDiagnostic.Forbidden...),
 		}}
+		diagnostic.SemanticViolations = append([]runtimecontract.RuntimeSemanticContractViolation(nil), payloadDiagnostic.SemanticViolations...)
 	}
 	return diagnostic
 }

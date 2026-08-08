@@ -37,6 +37,17 @@ func TestRuntimeCandidateProviderUsesOrchestratorPhysicalCallID(t *testing.T) {
 
 func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *testing.T) {
 	base := runtimeSemanticProviderTestRequest(t)
+	base.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	base.SemanticContext.BatchID = ""
+	base.SemanticContext.BatchCoverageWorkItemIDs = nil
+	base.SemanticManifest.CoverageItems[0].ReopenDependencies = []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-000", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}
+	prerequisite := runtimecontract.RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"}
+	base.SemanticManifest.CoverageItems = append(base.SemanticManifest.CoverageItems, prerequisite)
+	base.SemanticContext.DefinitionSeed.CoverageItems = append(base.SemanticContext.DefinitionSeed.CoverageItems, prerequisite)
+	base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs = append(base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs, "cwi-000")
+	base.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(base.SemanticContext.DefinitionSeed)
+	base.SemanticManifest.DefinitionSeedHash = base.SemanticContext.DefinitionSeed.Hash
+	base.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(base.SemanticManifest)
 	initial, err := runtimeProviderRequest(base)
 	if err != nil {
 		t.Fatal(err)
@@ -57,11 +68,21 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "schema", OriginalCode: "missing_target",
 		OriginalMessage: "secret raw provider message must not be rendered", Signature: "semantic/missing-target",
-		TargetRefs: []string{"main.go"}, FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals[0].target", Required: []string{"target"}}},
+		TargetRefs: []string{"main.go"}, FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-001 before cwi-000", Required: []string{"cwi-000 before cwi-001"}}},
+		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-000", RequiredAfterID: "cwi-001", ActualBeforePosition: 1, ActualAfterPosition: 0}},
 	}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder, ManifestHash: base.SemanticManifest.Hash,
+		DefinitionSeedHash: base.SemanticManifest.DefinitionSeedHash, StablePrefixHash: base.StablePrefixHash,
+		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*rejection), Attempt: 1,
+		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
+	}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	retryRequest := base
 	retryRequest.CandidateAttempt = 1
 	retryRequest.PreviousSemanticRejection = rejection
+	retryRequest.SemanticCorrectionDirective = &directive
 	retry, err := runtimeProviderRequest(retryRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -75,8 +96,25 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 		t.Fatal("semantic correction changed stable prefix")
 	}
 	tail := retry.PromptContext.Sections[4].Content
-	if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.proposals[0].target"`) {
+	if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.coverageOrder"`) || !strings.Contains(tail, `"requiredBeforeId":"cwi-000"`) {
 		t.Fatalf("semantic correction tail is not provider-safe: %s", tail)
+	}
+}
+
+func TestRuntimeSemanticCorrectionBoundaryClonesNestedValues(t *testing.T) {
+	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "semantic", OriginalCode: "order",
+		OriginalMessage: "order rejected", Signature: "semantic/order",
+		FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Required: []string{"cwi-000 before cwi-001"}}},
+	}
+	directive := &runtimecontract.RuntimeSemanticCorrectionDirective{Violations: []runtimecontract.RuntimeSemanticContractViolation{{RequiredBeforeID: "cwi-000"}}}
+	clonedRejection := cloneRuntimeOriginalDiagnostic(rejection)
+	clonedDirective := cloneRuntimeSemanticCorrectionDirective(directive)
+	clonedRejection.FieldViolations[0].Required[0] = "changed"
+	clonedDirective.Violations[0].RequiredBeforeID = "changed"
+	if rejection.FieldViolations[0].Required[0] != "cwi-000 before cwi-001" || directive.Violations[0].RequiredBeforeID != "cwi-000" {
+		t.Fatal("LLM owner boundary retained caller-owned nested storage")
 	}
 }
 

@@ -8,7 +8,7 @@ Last Updated: 2026-08-08
 
 ## 1. Purpose And Authority
 
-This is the only active implementation queue for Runtime lifecycle, CWI semantic planning, reconciliation, and
+This is the only active implementation queue for Runtime lifecycle, semantic planning, CWI reconciliation, and
 single-owner state-machine closure. It is subordinate to:
 
 1. `docs/00-core/runtime-stage-contract.md`;
@@ -16,397 +16,421 @@ single-owner state-machine closure. It is subordinate to:
 3. `internal/modules/kernel/orchestrator/readme.md`;
 4. `internal/pkg/workorchruntimecontract`.
 
-Archived plans and previous green verification artifacts are regression evidence only. They cannot override a current
-persisted aggregate or live event-order counterexample.
+Archived plans and previous green artifacts are regression evidence only. They cannot override the latest persisted
+aggregate, owner event order, provider audit, or projection counterexample.
 
-The product contract remains unchanged: a user supplies a template, Goal, DoD, and workspace directory. WorkOrch must
-derive the bounded semantic plan, execute it, collect evidence, and assess the DoD without requiring the user to author
-Runtime JSON, target selectors, recipes, checks, metrics, or per-CWI proof contracts.
+The product contract remains unchanged: a user supplies a template, Goal, DoD, workspace directory, and optional
+workspace inference selection. WorkOrch derives a bounded semantic plan, obtains owner feasibility, seals authority,
+executes operations, collects evidence, and assesses the DoD. The user does not author Runtime JSON, targets, recipes,
+checks, metrics, or per-CWI proof contracts.
 
-## 2. Current Live Facts
+## 2. Latest Live Assessment
 
-Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-025`, established the following facts.
+Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-029`, is the current fact baseline.
 
-### 2.1 Working Baseline
+### 2.1 Verified Owner-Correct Behavior
 
-- The service and projection were ready; source and projected event revisions both reached `385`.
-- Workspace owner persisted the next-run inference selection. Run owner sealed `ai-proxy/deepseek-v4-flash` with
-  `reasoningEffort=none` into the Run.
-- Run owner performed `pending -> active -> failed` through owner-local lifecycle events.
-- SM-2 rejected the invalid semantic document before binding, candidate, dispatch, receipt, or evidence creation.
-- SM-4 persisted terminal acknowledgements in the required `Result -> Workspace -> Run` order.
-- Result, Workspace, and Run owners changed only their own resources.
+- Run owner performed the SM-1 lifecycle and terminalized the Run as `failed`.
+- Terminal delivery used the required order: Result persisted the rejected outcome, Workspace released the exact
+  `ActiveRunID`, and Run then entered its terminal state.
+- File, Git, MCP, and Shell returned typed prerequisite/admissibility facts. The Git capability-state binding that was
+  missing in an earlier deployment was present.
+- SM-2 did not create binding credit, operation candidate, dispatch, receipt, evidence, governance, or workspace effect
+  before the semantic contract was sealed.
+- SM-3 sealed the expected-document identity. Attempt 0 and attempt 1 retained the same `coverage_order` plan step,
+  manifest hash, Definition seed hash, stable prefix, and authority identity while using distinct logical requests.
+- Both provider calls returned bounded complete JSON documents. Neither used raw suffix assembly or document
+  continuation recovery.
+- The terminal aggregate stopped driving after failure; no provider loop, CAS loop, or high-CPU loop was observed.
 
-### 2.2 Reopened Contract Gaps
+### 2.2 Current Semantic Correction Gap
 
-Two previously claimed closure areas are reopened.
-
-#### Restart successor ordering
-
-The observed event order was:
+Attempt 0 was correctly rejected because the returned coverage order violated the sealed dependency:
 
 ```text
-revision 367  run-025 created
-revision 368  run-024 result rejected
-revision 369  workspace released run-024
-revision 370  run-024 superseded
-revision 372  run-025 started
+cwi-046 -> cwi-043
 ```
 
-The successor was created before predecessor terminal delivery released the Workspace slot. Starting the successor was
-delayed correctly, but early creation violates the required release-before-create contract and can leave an orphan
-pending successor if predecessor delivery fails.
-
-#### Semantic correction and whole-document recovery
-
-The first request returned a complete `coverage_order` document. SM-3 correctly rejected it because it violated the
-sealed dependency `cwi-046 -> cwi-043`.
-
-The one allowed correction then returned a `proof_batch` document instead of a corrected `coverage_order`. It omitted
-`batchId`, `batchSequence`, and `batchCoverageWorkItemIds`, retained the invalid order, reached the 8192-token output
-limit, and stopped inside the JSON key `requiredEffectScopes`. A second physical call returned escaped text rather than
-the exact next JSON bytes. Concatenation produced an invalid document.
-
-This is not a single backslash defect. The current path fails to preserve both:
-
-- the sealed expected document contract across correction; and
-- the byte/document boundary across provider output-limit recovery.
-
-## 3. Non-Negotiable Rules
-
-1. There are exactly four state machines. No restart saga, semantic-plan batch, provider request session, continuation
-   carrier, projection, or scheduler may become a fifth state machine.
-2. SM-1 is owned only by `blocks/run`.
-3. SM-2, SM-3, and SM-4 are owned only by `kernel/orchestrator` and mutate only through exhaustive private internal
-   events and the single Runtime CAS coordinator.
-4. Workspace state and `ActiveRunID` are owned only by `blocks/workspace`; Result lifecycle is owned only by
-   `blocks/result`.
-5. Cross-owner EventHub contracts carry only immutable intent, fact, query, receipt, or acknowledgement. They never
-   carry target state, next action, retry choice, terminal choice, reducer instruction, repository, or complete mutable
-   owner entity.
-6. Application, TUI, Web, projection, LLM, and capability owners do not choose Runtime transitions.
-7. Run persists the Runtime aggregate as opaque data. It cannot interpret or rebuild SM-2/3/4 authority.
-8. A complete semantic contract must be sealed before operation candidate generation. Candidate claims, prose, exit
-   code, file existence, Git revision, generic checks, or assessments never create CWI credit.
-9. Provider-facing authority documents must be bounded complete documents. Runtime authority must not depend on an LLM
-   reproducing an exact raw string suffix across physical calls.
-
-## 4. Target Unified Flow
+The persisted original diagnostic retained that exact cause. The provider-facing attempt-1 C4 tail, however, retained
+only a generic field violation such as:
 
 ```text
-Application compiles typed RuntimeBootstrap
-  -> Workspace owner validates current definition and active-run identity
-  -> Run owner handles SM-1 activation/restart intent
-  -> Orchestrator SM-4 drives persisted work
-  -> SM-2 requires semantic contract
-  -> SM-3 requests one bounded complete coverage-order document
-  -> Orchestrator compiles persisted proof batches
-  -> SM-3 requests one bounded complete document per proof batch
-  -> capability owners return typed feasibility facts
-  -> SM-2 atomically seals binding/reconciliation authority
+path=$.proposals
+actual=contract_violation
+```
+
+It did not contain an Orchestrator-sealed, provider-safe correction delta stating that `cwi-046` must precede
+`cwi-043`. The attempt-1 document was therefore byte-identical to attempt 0 and failed again. This is not a prompt
+wording defect. The missing authority is a typed semantic correction directive owned by SM-3.
+
+### 2.3 Current Projection Gap
+
+The authoritative Run state and convergence state were both `failed`, and projection revisions were fully caught up.
+The Workspace RuntimeView nevertheless reported an `active`, non-terminal outcome with the summary
+`workspace definitions changed; execution must be rerun`. Its activity feed repeated the derived active outcome.
+
+This is not projection lag. `MapWorkspaceOutcome` currently applies the definition-changed branch before selecting the
+authoritative display Run and returns early. The projection has therefore created a competing outcome interpretation.
+Projection remains read-only, but the displayed outcome is contractually inconsistent with owner facts.
+
+### 2.4 Paths Not Proven By This Run
+
+This run did not reach proof-batch feasibility, semantic seal, operation candidate, sealed dispatch, capability
+execution, receipt, evidence admission, CWI advance, assessment, or durable workspace output. Both documents were
+complete, so SM-4 whole-document recovery was also not exercised. These paths remain regression/live gates even where
+their code is already closed.
+
+## 3. Non-Negotiable Ownership Rules
+
+1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
+   projection, activity, and scheduling do not introduce another state machine.
+2. SM-1 is owned only by `blocks/run`. Activation, blocked recovery, cancellation, supersession, and terminal lifecycle
+   transitions occur only through Run-private events and the Run reducer.
+3. SM-2, SM-3, and SM-4 are owned only by `kernel/orchestrator`. Their state changes occur only through exhaustive
+   Orchestrator-private internal events and the single Runtime aggregate CAS coordinator.
+4. Workspace state, definition selection, and `ActiveRunID` are owned only by `blocks/workspace`; Result lifecycle is
+   owned only by `blocks/result`.
+5. Cross-owner EventHub contracts carry immutable typed intent, fact, query, receipt, or acknowledgement. They never
+   carry target state, next action, retry choice, terminal choice, reducer instruction, repository, mutable owner entity,
+   or unbounded raw provider content.
+6. LLM and capability owners return facts only. They cannot choose correction, retry, Runtime action, coverage credit,
+   governance, or terminal outcome.
+7. Application, scheduler, projection, eventstream, TUI, and Web submit intent or display facts only. They cannot infer a
+   transition and feed it back into an owner.
+8. `workorchruntimecontract` contains owner-neutral DTO, normalize, validate, clone, and deterministic hash helpers only.
+   It contains no reducer, EventHub dispatch, repository access, owner selection, retry policy, or terminal policy.
+9. Run persists the Runtime aggregate as opaque data and provides semantic CAS. It does not interpret or rebuild
+   SM-2/3/4 authority.
+10. A complete semantic contract is sealed before operation candidate generation. Only SM-2 can derive a
+    `CoverageEvidenceBinding`; only a binding-matched owner receipt can create CWI credit.
+
+## 4. Unified Target Flow
+
+```text
+Application compiles typed RuntimeBootstrap and submits execution intent
+  -> Workspace owner validates selection/definition and owns ActiveRunID
+  -> Run owner handles SM-1 activation or predecessor replacement
+  -> Orchestrator SM-4 drives the persisted aggregate
+  -> SM-2 requires a semantic contract
+  -> SM-3 seals expected coverage-order document identity
+  -> LLM owner returns one complete-document or provider fact
+  -> Orchestrator evaluator returns accepted or typed factual rejection
+  -> SM-3 private event persists the rejection
+  -> SM-3 reducer seals one typed correction directive or a final rejection
+  -> accepted order lets SM-2/SM-3 compile bounded proof batches
+  -> capability owners return typed semantic feasibility facts
+  -> SM-2 seals binding/reconciliation authority
   -> SM-2 derives operation authority
-  -> SM-3 seals and dispatches operation candidate
-  -> capability owner returns receipt
-  -> SM-2 admits evidence and advances focus
-  -> SM-4 delivers terminal fact: Result -> Workspace -> Run
+  -> SM-3 seals and dispatches the operation candidate
+  -> capability owner returns a typed receipt
+  -> SM-2 admits binding-matched evidence and advances focus
+  -> SM-4 delivers one terminal outcome: Result -> Workspace -> Run
+  -> application projection maps the owner facts without re-adjudication
 ```
 
-## 5. Closure Track A: Restart Ownership And Ordering
+## 5. Closure Track A: Semantic Correction Is SM-3 State
 
-### 5.1 Target Sequence
+### 5.1 Separate Three Contracts
 
-All fresh-activation and ordinary restart paths must use one sequence:
+The implementation must keep these values separate:
+
+| Contract | Producer | Meaning | Must not contain |
+| --- | --- | --- | --- |
+| `RuntimeOriginalDiagnostic` | evaluator/producer adapter | complete factual rejection and audit identity | retry, correction disposition, terminal choice |
+| `RuntimeSemanticCorrectionDirective` | SM-3 private reducer | the one bounded same-contract delta allowed for attempt 1 | raw provider body, raw `OriginalMessage`, owner action, authority expansion |
+| provider-safe C4 projection | LLM owner renderer | bounded diagnostic plus the sealed directive | reconstruction from error prose or transient context |
+
+The existing semantic correction hash binds a rejection identity but is not itself a correction directive. A hash does
+not tell the provider which exact value, order, or field must change.
+
+### 5.2 Typed Directive Shape
+
+Add one owner-neutral immutable value with at least:
+
+- schema version and correction ID/hash;
+- workspace/run scope only where required by the containing private ledger;
+- semantic plan step;
+- manifest hash and Definition seed hash;
+- stable prefix hash;
+- source rejection hash and attempt `1`;
+- an ordered, bounded list of structured violations;
+- each violation's exact path, actual shape/value, and required/allowed/forbidden delta.
+
+For a dependency-order rejection, the directive must be structurally equivalent to:
 
 ```text
-Application -> WorkspaceExecutionIntent(restart)
-  -> Workspace validates Goal/DoD/revision and forwards immutable selection fact
-  -> Run private event persists ReplacementIntent on the predecessor
-  -> Run publishes a persisted administrative termination fact
-  -> Orchestrator SM-4 seals and delivers predecessor terminal outcome
-       Result owner internal event
-       Workspace owner internal event releases exact ActiveRunID
-       Run owner internal event terminalizes predecessor
-  -> Run owner idempotently creates successor from persisted ReplacementIntent
-  -> Run owner internal activation event starts successor
-  -> Run publishes lifecycle facts for projection and Orchestrator drive
+path=$.coverageOrder
+actual=cwi-043 appears before cwi-046
+required=cwi-046 before cwi-043
 ```
 
-The final Run delivery is sent only after the matching Workspace acknowledgement is persisted. Receipt of that final
-delivery is therefore the Run owner's authorization to materialize the successor.
+Do not encode this as a new free-form instruction string. Dependency endpoints must remain typed CWI IDs so validation
+can prove that both belong to the same manifest and that the required edge is sealed.
 
-### 5.2 Run-Owned Replacement Intent
+### 5.3 Owner-Private Transition Sequence
 
-The predecessor Run owns the durable replacement request until the successor is created. The value must include:
+```text
+complete semantic document
+  -> evaluator returns accepted or RuntimeOriginalDiagnostic
+  -> semantic_plan_evaluated private event persists the factual result
+  -> semantic_plan_correction_required private event asks the SM-3 reducer to classify it
+  -> reducer verifies manifest + attempt ledger + typed violations
+       -> unique bounded delta: persist correctable_once + directive
+       -> no safe delta or attempt already used: persist rejected_final
+       -> diagnostic cannot be classified: runtime_contract_defect
+  -> drive reads the persisted directive and issues attempt 1
+  -> attempt-1 complete document re-enters the same evaluator
+```
 
-- workspace and predecessor Run identity;
-- idempotency/request ID;
-- immutable current-schema bootstrap;
-- definition revision and `workspace_full` reconciliation scope;
-- requested administrative terminal kind (`superseded`);
-- request state needed for owner-local recovery;
-- successor ID only after successful creation.
+No EventHub topic exposes these transition events. The LLM command carries a cloned directive as immutable input; it
+does not receive a reducer instruction.
 
-It must not include Workspace target state, SM-2 convergence state, SM-4 acknowledgement state, or an Orchestrator
-action.
+### 5.4 Identity And Validation Rules
 
-### 5.3 Remove Parallel Restart Paths
+- Attempt 1 must keep plan step, manifest, Definition seed, stable prefix, expected-document shape, and batch identity
+  identical to attempt 0.
+- The directive source rejection hash must equal the sole persisted attempt-0 rejection.
+- Every referenced field/CWI/dependency/allowed value must be derivable from the same sealed manifest and rejection.
+- A directive that changes owner catalog, target authorization, operation permission, batch membership, or plan step is
+  invalid; SM-2 must form new authority instead.
+- Duplicate correction events do not change state revision or create another request.
+- A stale directive cannot be reused after manifest, Definition seed, or authority identity changes.
+- Attempt 1 rejection cannot create attempt 2.
+- `OriginalMessage`, provider body, details content, and raw evidence remain absent from provider-facing C4.
 
-Delete or absorb the following behavior after migration:
+### 5.5 LLM Boundary
 
-- creating the replacement before predecessor delivery;
-- storing `ReplacementTerminationIntent` on an already-created successor;
-- synchronous `FreshActivationRelease` returned from Run intent handling;
-- Workspace-specific fresh-release bypass distinct from normal terminal delivery;
-- Application retries or queues that infer restart phase;
-- any callback or repository access used to bypass EventHub owner contracts.
+Extend the semantic-only fields of the LLM owner's preflight/request command and internal request model with the typed
+directive. Semantic and operations fields remain mutually exclusive.
 
-Fresh schema replacement and normal user restart differ only in the Run-owned reason/fact that initiates the same SM-4
-delivery. They do not use separate lifecycle protocols.
+The LLM owner must:
 
-### 5.4 Restart Invariants
+- validate directive identity against the semantic context and expected document;
+- clone/detach all slices before retaining or returning data;
+- render the directive only in C4;
+- preserve C0-C3 byte/hash stability between attempts;
+- reject attempt 1 without exactly one valid directive;
+- reject attempt 0 carrying any directive;
+- avoid all correction classification and next-step selection.
 
-- No successor record exists before the matching Workspace release acknowledgement.
-- At most one replacement intent and one successor exist per restart request ID.
-- Workspace releases only when `ActiveRunID` exactly matches the predecessor.
-- A stale release cannot clear a newer Run.
-- Result success plus Workspace failure remains delivery-pending; it does not create the successor.
-- Process restart resumes from the Run-owned replacement intent and SM-4 ledger.
-- Duplicate terminal delivery is a no-op after the same successor is created.
-- Two workspaces with equal local Run IDs cannot share restart identity, timer, or singleflight state.
+## 6. Closure Track B: Projection Must Not Re-Adjudicate Outcome
 
-## 6. Closure Track B: Complete Semantic Documents
+### 6.1 Canonical Precedence
 
-### 6.1 Sealed Expected Document Contract
+Workspace RuntimeView must use one deterministic precedence:
 
-Before every physical provider call, SM-3 persists an owner-neutral expected document contract containing:
+```text
+selected current/display Run has terminal owner state
+  -> map that Run terminal outcome
+selected Run is active/blocked/pending
+  -> map that Run lifecycle state
+no selected Run and current definitions require execution
+  -> expose a workspace attention hint, not a Run outcome
+```
 
-- `documentKind`;
-- `planStep`;
-- `manifestHash` and `definitionSeedHash`;
-- logical request ID and semantic correction attempt;
-- stable prefix hash;
-- for proof batches: `batchId`, `batchSequence`, `batchCoverageWorkItemIds`, and coverage-order hash;
-- maximum output tokens and request recovery budget.
+Workspace resource state `active` is not equivalent to Run execution outcome `active`. Definition drift/restart-needed
+is not a terminal or lifecycle outcome.
 
-The LLM command carries this value as immutable input. The LLM result echoes its identity but cannot modify it or select
-the next phase.
+### 6.2 Projection Contract
 
-### 6.2 One Complete Document Per Physical Call
+- `WorkspaceOutcome` is derived from the selected authoritative Run and its matching terminal Result.
+- A definition-change signal moves to an explicit read-only attention/action field, or remains absent when the contract
+  does not require one. It must not overwrite `Outcome.State`, `Outcome.Terminal`, `Outcome.RunID`, or terminal summary.
+- Activity outcome items derive from the same canonical outcome function and selected Run identity. They cannot infer a
+  second state from Workspace state.
+- `RunState`, convergence state, task progress, heartbeat, outcome, and activity must agree on the selected Run and
+  runtime state revision.
+- Source/projected revision equality proves freshness only; it must not be treated as semantic correctness.
+- TUI and Web render the projection contract. They do not resolve conflicts locally or issue lifecycle commands from a
+  displayed attention hint.
 
-Remove raw suffix concatenation from Runtime authority documents. This applies to both `semantic_plan` and `operations`
-documents so the shared provider transaction has one rule.
+### 6.3 Projection Staleness And Workspace Switching
 
-The LLM owner returns one typed factual outcome:
+- A projection item whose workspace/run/revision does not match the selected display Run is omitted, not merged.
+- Terminal outcomes remain visible after Workspace releases `ActiveRunID` by selecting the latest matching Run.
+- Switching active workspaces changes only the presentation subscription/cursor; no activity or outcome from another
+  workspace may be reused.
+- Duplicate SSE/EventHub projection notifications do not duplicate activity items.
 
-| Outcome | Meaning | Forbidden interpretation |
-| --- | --- | --- |
-| `complete_document` | one complete final-output JSON value was received | accepted candidate or next action |
-| `incomplete_document` | output ended before the first JSON value completed | semantic rejection |
-| `empty_document` | no final output text | successful no-op |
-| `invalid_provider_output` | final channel is not one JSON value | schema correction |
-| provider transport/auth/config fact | provider request did not produce an adjudicable document | Runtime terminal selected by LLM |
+## 7. Closure Track C: Preserve Closed Runtime Baselines
 
-Raw provider bytes remain LLM-owner audit material subject to redaction rules. Cross-owner results carry only bounded
-content where allowed, hashes, sizes, usage, identity, disposition, and safe original diagnostic.
+The following work is code-closed and remains mandatory regression coverage, not active redesign:
 
-### 6.3 Request Recovery
+- predecessor-owned replacement intent and release-before-successor materialization;
+- one SM-4 terminal delivery path in `Result -> Workspace -> Run` order;
+- sealed expected-document identity;
+- removal of raw suffix/fragment authority assembly;
+- bounded whole-document recovery from the beginning of the same expected document;
+- same-plan-step correction and persisted proof-batch identity;
+- owner-local EventHub topics and concrete command/result contracts;
+- one Runtime aggregate mutation dispatcher and semantic CAS boundary;
+- provider request size/batch bounds and stable C0-C5 cache layout.
 
-`incomplete_document` and provider output-limit outcomes enter the existing SM-4 request-recovery ledger. Recovery
-resubmits the same sealed expected contract as a new physical call and requests a complete document from the beginning.
-It does not concatenate prior output, create a candidate attempt, consume semantic correction attempt, alter the stable
-prefix, or expand the batch.
-
-After the bounded request-recovery budget is exhausted, SM-2 terminalizes with the original provider diagnostic. There
-is no immediate in-memory retry loop.
-
-### 6.4 Coverage Order And Proof Batch Discipline
-
-1. `coverage_order` is requested first and contains the complete CWI order only.
-2. A complete order document is strictly checked against manifest membership, uniqueness, dependency barriers, and
-   current definition identity.
-3. A correctable complete rejection may create exactly one correction for the same `planStep=coverage_order` and the
-   same manifest/stable prefix.
-4. Only an accepted order allows an Orchestrator private event to compile the next bounded proof batch.
-5. `proof_batch` is invalid unless it exactly matches a persisted batch ID, sequence, CWI set, and order hash.
-6. Provider context for a proof batch contains only that batch's CWI/proof vocabulary plus stable C0-C2 contracts.
-7. Current batch feasibility must complete before the next batch is compiled.
-8. Only after all batches are accepted may SM-2 merge documents/feasibilities and seal the binding set.
-
-Wrong `planStep`, missing batch identity, out-of-batch proposal, repeated CWI, or altered order is a complete semantic
-contract rejection. It never becomes continuation or provider transport recovery.
-
-### 6.5 Internal Transition Ownership
-
-External LLM results are facts only. The Orchestrator maps them through the single private dispatcher:
-
-| Current authority | Private internal event | Owner | Result |
-| --- | --- | --- | --- |
-| semantic contract required | `semantic_plan_request_started` | SM-3 | sealed expected document contract/session |
-| provider complete fact | `candidate_document_observed` | SM-3 | durable complete document, then strict evaluation |
-| provider incomplete fact | `candidate_request_recovery_required` | SM-4 | persisted bounded recovery lease |
-| complete correctable rejection | `semantic_plan_correction_required` | SM-3 | one same-step correction |
-| accepted coverage order | `semantic_plan_batch_compiled` | SM-2/SM-3 private transaction | persisted bounded batch |
-| accepted proof batch | `semantic_plan_batch_document_observed` | SM-3 | batch document fact only |
-| matching owner facts | `semantic_plan_batch_feasibility_observed` | SM-2 | accepted batch or typed gap |
-| all batches complete | `semantic_contract_sealed` | SM-2 | binding/reconciliation authority |
-| final rejection/budget exhaustion | `semantic_contract_failed` | SM-2 | sealed terminal decision |
-
-Exact names may reuse current internal-event constants, but no new EventHub topic may expose these transitions.
-
-## 7. Component Scope
-
-| Component | Required change | Must continue to own only |
-| --- | --- | --- |
-| `internal/initiators/workorchruntime` | repository provider/factory only; no Runtime drive, EventHub or policy export | repository construction and persistence wiring |
-| `application/workorchd` | submit one Workspace execution intent; remove restart phase assumptions | bootstrap compilation and protocol ingress |
-| `blocks/workspace` | validate current selection; release slot only through private lifecycle event | Workspace state, definition selection, `ActiveRunID` |
-| `blocks/run` | persist predecessor replacement intent; create successor only after final delivery | SM-1, lineage, opaque Runtime aggregate storage |
-| `kernel/orchestrator` | enforce expected-document identity, complete-call recovery, batch transitions, SM-4 ordering | SM-2, SM-3, SM-4 |
-| `blocks/llm` | Responses final-channel parsing and typed complete/incomplete/invalid facts; no authority suffix stitching | provider transport, catalog capability, usage/audit |
-| `blocks/result` | preserve idempotent terminal materialization | Result lifecycle only |
-| File/Git/Shell/MCP/Web/SSH | no state-machine change; return typed feasibility/receipt facts | each capability resource only |
-| `workorchruntimecontract` | pure expected-document/outcome/identity validation and hash helpers | immutable owner-neutral values only |
-| projection/eventstream/TUI/Web | display replacement/recovery/semantic phase facts | read models and user intent only |
-
-No component may receive another owner's service, repository, reducer, mutable model, or state callback.
-
-Registered component paths covered by this matrix are:
-`internal/initiators/workorchruntime`, `internal/modules/application/workorchd`,
-`internal/modules/blocks/approval`, `internal/modules/blocks/decision`,
-`internal/modules/blocks/eventstream`, `internal/modules/blocks/file`, `internal/modules/blocks/git`,
-`internal/modules/blocks/llm`, `internal/modules/blocks/mcp`, `internal/modules/blocks/mcpregistry`,
-`internal/modules/blocks/memory`, `internal/modules/blocks/result`, `internal/modules/blocks/run`,
-`internal/modules/blocks/shell`, `internal/modules/blocks/skill`, `internal/modules/blocks/soul`,
-`internal/modules/blocks/ssh`, `internal/modules/blocks/web`, `internal/modules/blocks/workspace`,
-`internal/modules/kernel/governance`, `internal/modules/kernel/orchestrator`, and
-`internal/modules/kernel/system`.
-
-## 8. Contract And File Migration
-
-### 8.1 Restart Path
-
-Primary files to audit and change:
-
-- `internal/modules/blocks/run/biz/workspace_execution_intent.go`
-- `internal/modules/blocks/run/biz/replacement_termination_delivery.go`
-- `internal/modules/blocks/run/biz/lifecycle_internal_event.go`
-- `internal/modules/blocks/run/pkg/models/run.go`
-- `internal/modules/blocks/run/pkg/events/lifecycle_messages.go`
-- `internal/modules/blocks/workspace/biz/execution_intent.go`
-- `internal/modules/blocks/workspace/biz/lifecycle_internal_event.go`
-- `internal/modules/blocks/workspace/pkg/events/lifecycle_messages.go`
-- Orchestrator administrative terminal-delivery adapter and tests
-
-Required deletion scan after migration:
+The corresponding symbols and alternate paths must remain absent:
 
 ```text
 FreshActivationRelease
 FreshActivationRunSlotReleaseFact
 successor-owned pending ReplacementTerminationIntent
-replacement creation before workspace release acknowledgement
-```
-
-### 8.2 Provider Transaction Path
-
-Primary files to audit and change:
-
-- `internal/modules/blocks/llm/biz/runtime_semantic_provider.go`
-- `internal/modules/blocks/llm/biz/runtime_candidate_provider.go`
-- `internal/modules/blocks/llm/biz/runtime/candidate_boundary.go`
-- `internal/modules/blocks/llm/biz/http_provider.go`
-- `internal/modules/blocks/llm/pkg/events`
-- `internal/modules/blocks/llm/pkg/models`
-- `internal/modules/kernel/orchestrator/biz/runtime_candidate_request*.go`
-- `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go`
-- `internal/pkg/workorchruntimecontract/runtime_candidate_*.go`
-- `internal/pkg/workorchruntimecontract/runtime_semantic_*.go`
-
-Required deletion scan after migration:
-
-```text
 authority document raw suffix concatenation
 provider prompt requesting exact next bytes
-continuation fragment accepted as a complete authority suffix
-correction that changes expected plan step
-proof-batch request without persisted batch identity
+continuation fragment admitted as authority
+projection- or application-selected Runtime transition
 ```
 
-Artifact continuation storage may remain only for audit artifacts unrelated to authority document assembly. Its state
-must not select Runtime recovery, correction, candidate admission, or terminal outcome.
+## 8. Component Work Matrix
 
-## 9. Ordered Implementation Queue
+| Component | Required closure | Explicitly forbidden |
+| --- | --- | --- |
+| `internal/pkg/workorchruntimecontract` | semantic directive DTO, normalize/validate/clone/hash; dependency violation DTO | reducer, retry classification, owner lookup, EventHub |
+| `kernel/orchestrator/biz/runtime` | evaluator emits precise typed violations; private reducer seals directive; invariant/CAS checks | provider rendering, capability execution, cross-owner repository |
+| `kernel/orchestrator/biz` | drive reads persisted directive and maps LLM facts to private events | reconstructing directive from raw message at send time |
+| `blocks/llm/pkg/events` | semantic command carries detached directive; result remains factual | correction disposition, terminal/action fields |
+| `blocks/llm/pkg/models` | owner-private immutable request representation | Runtime aggregate or mutable owner entity |
+| `blocks/llm/biz` | validate and render provider-safe C4 | infer delta, retry, terminal, coverage, batch transition |
+| `application/workorchd/.../readmodelprojection` | terminal-first canonical outcome and activity derivation | competing execution state machine |
+| `workorchprojectioncontract` | separate outcome from optional attention fact | authority or lifecycle command |
+| TUI/Web/event mapping | render canonical outcome/activity and workspace switch isolation | local conflict resolution or state transition |
+| `blocks/run` | regression only: SM-1 and replacement owner-private events | SM-2/3/4 interpretation |
+| `blocks/workspace` | regression only: exact active-run claim/release | Run or Runtime terminal decision |
+| `blocks/result` | regression only: idempotent sealed outcome storage | acceptance adjudication |
+| File/Git/Shell/MCP/Web/SSH | regression only: typed feasibility/receipt facts | Runtime action, evidence credit, retry/terminal |
 
-Statuses are `pending | in_progress | code_closed | live_closed`. A code-closed item without fresh deployed proof remains
-open.
+No component may receive another owner's service, repository, reducer, mutable model, or state callback.
+
+The matrix covers the complete registered 22-unit baseline. Units not changed by RSO-5 through RSO-8 remain explicit
+regression boundaries rather than implicit exclusions:
+
+- Initiator: `internal/initiators/workorchruntime`.
+- Application/kernel Modules: `internal/modules/application/workorchd`, `internal/modules/kernel/governance`,
+  `internal/modules/kernel/orchestrator`, `internal/modules/kernel/system`.
+- Resource and capability Blocks: `internal/modules/blocks/approval`, `internal/modules/blocks/decision`,
+  `internal/modules/blocks/eventstream`, `internal/modules/blocks/file`, `internal/modules/blocks/git`,
+  `internal/modules/blocks/llm`, `internal/modules/blocks/mcp`, `internal/modules/blocks/mcpregistry`,
+  `internal/modules/blocks/memory`, `internal/modules/blocks/result`, `internal/modules/blocks/run`,
+  `internal/modules/blocks/shell`, `internal/modules/blocks/skill`, `internal/modules/blocks/soul`,
+  `internal/modules/blocks/ssh`, `internal/modules/blocks/web`, `internal/modules/blocks/workspace`.
+
+## 9. Primary Files To Audit
+
+Semantic correction:
+
+- `internal/pkg/workorchruntimecontract/runtime_semantic_*.go`
+- `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning*.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go`
+- `internal/modules/kernel/orchestrator/biz/runtime_candidate_event_adapter.go`
+- `internal/modules/blocks/llm/pkg/events/messages.go`
+- `internal/modules/blocks/llm/pkg/models/runtime_candidate.go`
+- `internal/modules/blocks/llm/biz/runtime/candidate_boundary.go`
+- `internal/modules/blocks/llm/biz/runtime_semantic_provider.go`
+
+Projection consistency:
+
+- `internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_outcome*.go`
+- `internal/modules/application/workorchd/biz/appservice/readmodelprojection/run_outcome*.go`
+- `internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go`
+- `internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_activity*.go`
+- `internal/pkg/workorchprojectioncontract`
+- `internal/modules/application/workorchd/pkg/eventmapping`
+- `internal/services/workorch/service/tui`
+- `web/workorch-console/src`
+
+## 10. Ordered Implementation Queue
+
+Statuses are `pending | in_progress | code_closed | live_closed`. A code-closed item without required deployed proof
+remains open.
 
 | ID | Status | Work item | Completion evidence |
 | --- | --- | --- | --- |
-| RSO-1 | code_closed | Synchronize core contract, request/cache note, Orchestrator readme, and typed value vocabulary | core docs synchronized; obsolete request-size plan removed; contract packages compile |
-| RSO-2 | code_closed | Move restart replacement intent to predecessor Run and add owner-private transitions | predecessor CAS, conflict, clone, pre-terminal absence and duplicate materialization tests |
-| RSO-3 | in_progress | Route predecessor termination through one SM-4 delivery and create successor only after Workspace ack | current-schema final Run delivery materializes one successor; schema-incompatible persisted delivery remains open |
-| RSO-4 | in_progress | Remove fresh-activation release bypass and successor-owned termination intent | production symbols/imports removed; unified fresh restart test depends on RSO-3 schema-incompatible delivery |
-| RSO-5 | code_closed | Add sealed expected-document contract and typed provider disposition | pure value validation/hash/order-sensitive clone and EventHub boundary round-trip tests pass |
-| RSO-6 | code_closed | Remove raw suffix assembly from semantic and operations authority documents | partial bytes no longer cross the LLM boundary; raw suffix functions/types/config removed; forbidden-symbol scan is clean |
-| RSO-7 | code_closed | Implement whole-document bounded request recovery in SM-4 | persisted incomplete fact, duplicate/conflict, whole-document restart, expected-identity stability and exhaustion-without-attempt tests pass |
-| RSO-8 | code_closed | Enforce same-step correction and persisted proof-batch identity | expected-document session + EventHub hash fence; empty-step, first-batch sequence, correction-step/batch and request-order tests pass |
-| RSO-9 | pending | Re-run binding/feasibility/seal/dispatch/evidence regression matrix | focused, full, race, boundary, managed checks |
-| RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete live event/audit chain |
+| RSO-1 | code_closed | Single-owner core contract, typed owner EventHub boundaries, one Runtime mutation surface | boundary scans and owner contract tests remain green |
+| RSO-2 | code_closed | Predecessor-owned restart intent and release-before-successor sequence | restart crash/duplicate/stale/workspace-isolation tests |
+| RSO-3 | code_closed | Sealed complete-document identity; raw suffix removal; whole-document recovery | provider boundary, recovery, restart, exhaustion tests |
+| RSO-4 | code_closed | Bounded coverage-order/proof-batch requests and same-step identity fencing | batch membership/order/hash and request-size tests |
+| RSO-5 | code_closed | Add and validate `RuntimeSemanticCorrectionDirective` | pure DTO/hash/clone and dependency-delta tests pass |
+| RSO-6 | code_closed | Seal semantic correction through SM-3 private events and Runtime CAS | transition, duplicate, stale, restart, attempt exhaustion tests pass |
+| RSO-7 | code_closed | Carry/render the sealed directive through the LLM owner boundary | preflight/request identity, detach and C0-C4 stability tests pass |
+| RSO-8 | code_closed | Remove projection outcome re-adjudication and unify activity | terminal/definition-drift/canonical activity tests pass |
+| RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix | 2026-08-08 repository gates pass |
+| RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete semantic-to-effect event/audit lineage |
 
-Implementation order is strict. RSO-2/3 must not begin before RSO-1 fixes the authority documents. RSO-7/8 must not
-begin before RSO-5/6 establish the single provider outcome contract. RSO-10 cannot be replaced by mock-provider proof.
+Implementation order is strict: RSO-5 precedes RSO-6; RSO-6 precedes RSO-7; RSO-8 may be implemented after RSO-5 in
+parallel only if it does not change Runtime authority. RSO-9 follows all code changes. RSO-10 cannot be replaced by mock
+provider proof.
 
-## 10. Verification Matrix
+### 10.1 2026-08-08 Code-Closure Evidence
 
-### 10.1 Restart
+- SM-3 now persists one cloned `RuntimeSemanticCorrectionDirective`; the semantic ledger no longer treats a standalone
+  correction hash as authority. The generic request session retains only the directive hash as request identity.
+- Dependency-order rejection preserves exact typed predecessor/successor IDs and actual positions. Non-derivable
+  diagnostics fail as `runtime_contract_defect`; attempt 1 cannot create attempt 2.
+- New proof-batch documents reset the previous document's correction lineage in the same private CAS, preventing an
+  accepted coverage-order correction from leaking into proof-batch identity.
+- LLM EventHub commands and owner models carry detached rejection/directive values. C4 renders the directive and bounded
+  safe diagnostic without `OriginalMessage`; C0-C3 and the stable prefix remain unchanged.
+- Workspace outcome selects a current-Definition Run by Goal, DoD and Definition revision before applying the
+  definition-change fallback. Activity consumes that same canonical outcome.
+- `make fmt-check`, `make vet`, `make console-build`, `make verify-boundary-contract`, `go test ./... -count=1`,
+  `go test -race ./... -count=1`, and the CI-equivalent managed `verify-ci-mvp-file` wrapper all pass. The managed script
+  also now reads Workspace revision in the provider-selection helper that performs the owner CAS.
 
-- no predecessor: create and activate exactly one Run;
-- active predecessor: no successor before `Result -> Workspace -> Run` delivery completes;
-- fresh-activation-required predecessor: same sequence as ordinary restart;
-- Workspace release rejection: no successor;
-- Result accepted, Workspace response lost: replay same delivery and create one successor;
-- Run terminal response lost after successor creation: replay is no-op;
-- duplicate restart before/after crash: one replacement request and one successor;
-- stale predecessor ID cannot release or replace a newer active Run;
-- two workspaces and equal local Run IDs remain isolated;
-- startup recovery resumes persisted replacement and delivery without CPU spin.
+## 11. Verification Matrix
 
-### 10.2 Semantic Provider Boundary
+### 11.1 Semantic Correction
 
-- direct compact JSON;
-- one exact outer `json` fence;
-- prose/reasoning-only final output;
-- JSON-string-encoded or escaped JSON;
-- multiple JSON values;
-- empty final channel;
-- wrong `planStep` on correction;
-- proof batch missing/mismatching batch identity;
-- output limit before JSON completion;
-- transport failure before/after provider submission;
-- duplicate physical outcome and response loss;
-- whole-document recovery preserves logical request, transaction, stable prefix, expected contract, and batch;
-- recovery exhaustion creates no candidate attempt, dispatch, Decision, or Approval.
+- dependency order violation produces exact typed predecessor/successor IDs;
+- membership, duplicate, missing-CWI, invalid plan step, and batch mismatch produce bounded structured violations;
+- one unique correction is sealed; an ambiguous/non-derivable correction fails as `runtime_contract_defect`;
+- attempt 0 plus directive is rejected;
+- attempt 1 without directive or with mismatching rejection hash is rejected;
+- attempt 1 keeps C0-C3 and all authority identities unchanged;
+- provider-facing C4 contains the safe diagnostic and directive but no `OriginalMessage` or raw details;
+- attempt-1 rejection creates no attempt 2, operation, governance request, or effect;
+- duplicate/stale private events and CAS conflicts cannot duplicate the request;
+- restart before/after directive persistence resumes the same ledger deterministically.
 
-### 10.3 Four State Machines
+### 11.2 Four State Machines And Owners
 
-- transition and forbidden-transition table tests for SM-1 through SM-4;
-- scope, source owner, authority identity, stale revision, duplicate event, and CAS conflict tests;
-- crash/restart at every persistence/response boundary;
-- state revision and convergence progress signature advance together;
-- terminal decision remains immutable while delivery is pending;
-- capability receipt can affect only matching sealed operation/binding;
-- projection failure cannot rewrite owner authority;
-- no busy loop when provider, CAS, prerequisite, or delivery recovery is pending.
+- SM-1 transition and forbidden-transition tests remain Run-owner local;
+- semantic transitions are reachable only through the Orchestrator internal dispatcher;
+- SM-2 cannot call provider or execute operations;
+- SM-3 cannot select next focus or create coverage credit;
+- SM-4 cannot rebuild authority from diagnostics or projection;
+- capability result affects only its matching sealed operation/binding;
+- Result, Workspace, and Run terminal delivery is idempotent and ordered;
+- no cross-owner target-state command, service/repository injection, entity command, map authority, or raw-message branch;
+- no busy loop while provider/CAS/prerequisite/delivery recovery is pending.
 
-### 10.4 Commands
+### 11.3 Projection
 
-Run focused checks first, then the full repository gates:
+- failed/completed/cancelled/superseded Run overrides definition-change attention;
+- terminal Run remains selected after Workspace releases `ActiveRunID`;
+- active Workspace resource does not imply active Run outcome;
+- outcome/activity/run state/convergence all use the same run and revision;
+- source/projected revisions caught up with a bad outcome fails the contract test rather than passing as fresh;
+- duplicate notifications do not duplicate activity;
+- switching between two active workspaces resumes each workspace's independent activity stream.
+
+### 11.4 Provider And Downstream Regression
+
+- complete semantic and operations documents;
+- output-limit/EOF whole-document recovery without raw concatenation or attempt consumption;
+- recovery exhaustion creates no candidate, dispatch, Decision, Approval, or effect;
+- accepted order compiles bounded proof batches in the sealed order;
+- owner feasibility seals exact per-CWI bindings;
+- no operation before semantic seal;
+- sealed dispatch, fence, receipt, evidence quality, CWI advance, assessment, and terminal delivery survive restart;
+- stable prefix and request sizes remain bounded within each logical request.
+
+### 11.5 Commands
+
+Run focused checks before the full repository gates:
 
 ```bash
-go test ./internal/modules/blocks/run/... -count=1
-go test ./internal/modules/blocks/workspace/... -count=1
+go test ./internal/pkg/workorchruntimecontract -count=1
 go test ./internal/modules/blocks/llm/... -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
-go test ./internal/pkg/workorchruntimecontract -count=1
+go test ./internal/modules/application/workorchd/... -count=1
+go test ./internal/services/workorch/service/tui/... -count=1
 make fmt-check
 make vet
 go test ./... -count=1
@@ -416,21 +440,19 @@ make verify-boundary-contract
 make verify-ci-mvp-file
 ```
 
-Managed verifiers must use a managed disposable instance. They must not bypass the guard protecting an unmanaged live
+Managed verifiers use a disposable managed instance and must not bypass the guard protecting an unmanaged live
 workspace.
 
-## 11. Fresh Deployed Completion Gate
+## 12. Fresh Deployed Completion Gate
 
-The plan is `live_closed` only when a fresh deployment proves all of the following in one auditable lineage:
+The plan is `live_closed` only when a fresh deployment proves this lineage:
 
 ```text
-restart intent
-  -> predecessor replacement intent persisted
-  -> Result acknowledgement
-  -> Workspace release acknowledgement
-  -> predecessor Run terminal acknowledgement
-  -> successor created and activated
-  -> coverage_order accepted
+restart/activation intent
+  -> Run owner activation
+  -> coverage_order attempt 0 factual rejection (fault-injection lineage)
+  -> SM-3 sealed typed correction directive
+  -> corrected coverage_order accepted
   -> bounded proof batches accepted
   -> complete owner feasibility facts
   -> SM-2 binding/reconciliation seal
@@ -440,30 +462,36 @@ restart intent
   -> binding-matched evidence
   -> focus/CWI progress
   -> durable workspace output
+  -> Result -> Workspace -> Run terminal delivery
+  -> terminal-consistent TUI/Web outcome and activity
 ```
 
 The live proof must also show:
 
-- zero cross-owner target-state command;
+- zero cross-owner target-state commands and zero owner repository bypass;
 - no authority document suffix concatenation;
 - no operation before semantic seal;
 - no predecessor credit inherited by restart;
-- stable prefix consistency within each sealed logical request;
+- stable prefix consistency and bounded request size;
 - bounded retries and no high-CPU loop;
 - source/projected revision convergence;
-- correct TUI/Web projection after workspace switching.
+- correct workspace-isolated TUI/Web streaming after workspace switching.
 
-Until this gate passes, previous `R3-E2`, `R3-E3`, `R3-F5`, managed mock, or local test results remain regression
-baselines and must not be described as current live closure.
+Whole-document recovery requires a separate deployed fault-injection proof because a normal complete response does not
+exercise it. Until both positive convergence and recovery fault injection pass, code-closed recovery remains a
+regression baseline rather than a live-closed claim.
 
-## 12. Forbidden Closure Tactics
+## 13. Forbidden Closure Tactics
 
-- Do not fix only the observed backslash or strip arbitrary leading text.
-- Do not search for the first `{` or accept multiple candidate JSON objects.
-- Do not let LLM output choose correction, retry, batch, owner, terminal, or Runtime action.
-- Do not move restart coordination state into Application, Workspace projection, TUI, or Web.
-- Do not let Orchestrator create/modify Run or Workspace entities directly.
-- Do not add a generic event envelope, global topic index, cross-owner facade, service registry, or repository callback.
-- Do not retain compatibility aliases or dual restart/continuation paths.
-- Do not increase token/time limits as a substitute for bounded batches and complete-document recovery.
-- Do not mark code-closed work live-closed without fresh deployed positive convergence.
+- Do not add `OriginalMessage`, raw provider output, or free-form repair prose to C4.
+- Do not let the LLM owner infer dependency edges, correction disposition, retry, terminal, or next action.
+- Do not treat the existing semantic correction hash as an actionable directive.
+- Do not add a fifth semantic, correction, request-session, restart, projection, or scheduler state machine.
+- Do not move coordination state into Application, TUI, Web, projection, Workspace, Run, or Result.
+- Do not let Orchestrator create or mutate Run/Workspace/Result entities directly.
+- Do not let projection overwrite terminal owner facts with definition-change or UI convenience state.
+- Do not add generic event envelopes, global topic indexes, facade/service registries, repository callbacks, map authority,
+  compatibility aliases, or dual paths.
+- Do not relax dependency/order validation, increase retry/token/time limits, or manually reorder CWIs as a substitute
+  for the sealed semantic correction contract.
+- Do not mark code-closed work live-closed without fresh deployed proof of the path being claimed.

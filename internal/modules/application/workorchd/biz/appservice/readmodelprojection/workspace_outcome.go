@@ -1,9 +1,42 @@
 package readmodelprojection
 
 import (
+	"strings"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
+
+func workspaceOutcomeRunMatchesCurrentDefinitions(snapshot readmodelcore.WorkspaceSnapshotState, run appmodelcore.Run) bool {
+	goalID, dodID := latestWorkspaceDefinitionIDs(snapshot)
+	if goalID != "" && strings.TrimSpace(run.GoalID) != goalID {
+		return false
+	}
+	if dodID != "" && strings.TrimSpace(run.DoDID) != dodID {
+		return false
+	}
+	definitionRevision := latestWorkspaceDefinitionRevision(snapshot)
+	if definitionRevision != "" && strings.TrimSpace(run.DefinitionRevision) != definitionRevision {
+		return false
+	}
+	return true
+}
+
+func latestWorkspaceDefinitionRevision(snapshot readmodelcore.WorkspaceSnapshotState) string {
+	var revision string
+	for idx := range snapshot.Goals {
+		if value := strings.TrimSpace(snapshot.Goals[idx].DefinitionRevision); value != "" {
+			revision = value
+		}
+	}
+	for idx := range snapshot.DoDs {
+		if value := strings.TrimSpace(snapshot.DoDs[idx].DefinitionRevision); value != "" {
+			revision = value
+		}
+	}
+	return revision
+}
 
 func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceOutcome {
 	ret := projectioncontract.WorkspaceOutcome{
@@ -11,20 +44,28 @@ func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projecti
 		State:             snapshot.Workspace.State,
 		RawWorkspaceState: snapshot.Workspace.State,
 	}
+	selectedRun := selectWorkspaceOutcomeRun(snapshot)
+	if selectedRun != nil && workspaceOutcomeRunMatchesCurrentDefinitions(snapshot, *selectedRun) {
+		applySelectedWorkspaceRunOutcome(&ret, snapshot, *selectedRun)
+		return ret
+	}
 	if applyWorkspaceDefinitionsChangedOutcome(&ret, snapshot) {
 		return ret
 	}
-	selectedRun := selectWorkspaceOutcomeRun(snapshot)
 	if selectedRun == nil {
 		return ret
 	}
+	applySelectedWorkspaceRunOutcome(&ret, snapshot, *selectedRun)
+	return ret
+}
+
+func applySelectedWorkspaceRunOutcome(ret *projectioncontract.WorkspaceOutcome, snapshot readmodelcore.WorkspaceSnapshotState, selectedRun appmodelcore.Run) {
 	runSnapshot := readmodelcore.RunSnapshotState{
 		Workspace: snapshot.Workspace,
-		Run:       *selectedRun,
+		Run:       selectedRun,
 		Results:   snapshot.Results,
 		Artifacts: snapshot.Artifacts,
 	}
 	outcome := MapRunOutcome(runSnapshot)
-	applyWorkspaceRunOutcome(&ret, outcome)
-	return ret
+	applyWorkspaceRunOutcome(ret, outcome)
 }

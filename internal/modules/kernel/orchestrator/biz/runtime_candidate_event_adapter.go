@@ -293,7 +293,7 @@ func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtime
 func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntimeCandidateCommand) error {
 	switch command.DocumentKind {
 	case runtimecontract.RuntimeProviderDocumentOperations:
-		if command.SemanticManifest.Hash != "" || command.SemanticContext.WorkspaceID != "" || command.SemanticContext.RunID != "" || command.PreviousSemanticRejection != nil {
+		if command.SemanticManifest.Hash != "" || command.SemanticContext.WorkspaceID != "" || command.SemanticContext.RunID != "" || command.PreviousSemanticRejection != nil || command.SemanticCorrectionDirective != nil {
 			return fmt.Errorf("operations candidate preflight must not carry semantic plan fields")
 		}
 		if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
@@ -325,7 +325,7 @@ func validateRuntimeCandidatePreflightCommand(command llmevents.PreflightRuntime
 		if err := command.SemanticContext.Validate(command.SemanticManifest); err != nil {
 			return err
 		}
-		return validateRuntimeSemanticRetryContract(command.CandidateAttempt, command.PreviousSemanticRejection)
+		return validateRuntimeSemanticRetryContract(command.CandidateAttempt, command.SemanticManifest, command.SemanticContext.PlanStep, command.StablePrefixHash, command.PreviousSemanticRejection, command.SemanticCorrectionDirective)
 	default:
 		return fmt.Errorf("runtime candidate preflight requires explicit document kind")
 	}
@@ -337,7 +337,7 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 		Decision: command.Decision, Transaction: command.Transaction, CandidateAttempt: command.CandidateAttempt,
 		PreviousFailure: command.PreviousFailure, StablePrefixHash: command.StablePrefixHash,
 		CandidateManifest: command.CandidateManifest, DefinitionContext: command.DefinitionContext, CandidateContext: command.CandidateContext,
-		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext, PreviousSemanticRejection: command.PreviousSemanticRejection,
+		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext, PreviousSemanticRejection: command.PreviousSemanticRejection, SemanticCorrectionDirective: command.SemanticCorrectionDirective,
 	}
 	if err := validateRuntimeCandidatePreflightCommand(preflight); err != nil {
 		return err
@@ -347,7 +347,7 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 	}
 	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		expected := command.ExpectedDocument.Normalized()
-		if err := expected.Validate(); err != nil || expected.LogicalRequestID != command.RequestIdentity.LogicalRequestID || expected.DocumentKind != command.DocumentKind || expected.ManifestHash != command.SemanticManifest.Hash || expected.StablePrefixHash != command.StablePrefixHash {
+		if err := expected.Validate(); err != nil || expected.LogicalRequestID != command.RequestIdentity.LogicalRequestID || expected.DocumentKind != command.DocumentKind || expected.ManifestHash != command.SemanticManifest.Hash || expected.StablePrefixHash != command.StablePrefixHash || expected.CorrectionAttempt != command.CandidateAttempt || expected.PlanStep != command.SemanticContext.PlanStep {
 			return fmt.Errorf("semantic runtime candidate command has invalid expected document")
 		}
 	} else {
@@ -359,18 +359,27 @@ func validateRuntimeCandidateCommand(command llmevents.RequestRuntimeCandidateCo
 	return nil
 }
 
-func validateRuntimeSemanticRetryContract(attempt int, rejection *runtimecontract.RuntimeOriginalDiagnostic) error {
+func validateRuntimeSemanticRetryContract(attempt int, manifest runtimecontract.RuntimeSemanticPlanManifest, planStep runtimecontract.RuntimeSemanticPlanStep, stablePrefixHash string, rejection *runtimecontract.RuntimeOriginalDiagnostic, directive *runtimecontract.RuntimeSemanticCorrectionDirective) error {
 	if attempt < 0 || attempt > 1 {
 		return fmt.Errorf("runtime semantic plan attempt must be 0 or 1")
 	}
 	if attempt == 0 {
-		if rejection != nil {
-			return fmt.Errorf("initial runtime semantic plan attempt must not carry a previous rejection")
+		if rejection != nil || directive != nil {
+			return fmt.Errorf("initial runtime semantic plan attempt must not carry correction lineage")
 		}
 		return nil
 	}
-	if rejection == nil {
-		return fmt.Errorf("runtime semantic plan retry requires the previous rejection")
+	if rejection == nil || directive == nil {
+		return fmt.Errorf("runtime semantic plan retry requires rejection and correction directive")
 	}
-	return rejection.Validate()
+	if err := rejection.Validate(); err != nil {
+		return err
+	}
+	if err := directive.ValidateAgainst(manifest, *rejection); err != nil {
+		return err
+	}
+	if directive.PlanStep != planStep || directive.StablePrefixHash != strings.TrimSpace(stablePrefixHash) {
+		return fmt.Errorf("runtime semantic plan correction identity is stale")
+	}
+	return nil
 }

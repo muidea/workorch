@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -100,6 +101,17 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		})
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		var dependencyOrder *RuntimeSemanticDependencyOrderError
+		if errors.As(err, &dependencyOrder) {
+			violation := dependencyOrder.Violation()
+			return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{
+				Path:               violation.Path,
+				Actual:             fmt.Sprintf("%s at %d before %s at %d", violation.RequiredAfterID, violation.ActualAfterPosition, violation.RequiredBeforeID, violation.ActualBeforePosition),
+				Required:           []string{fmt.Sprintf("%s before %s", violation.RequiredBeforeID, violation.RequiredAfterID)},
+				SemanticViolations: []RuntimeSemanticContractViolation{violation},
+				Cause:              err,
+			}
+		}
 		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.proposals", Actual: "contract_violation", Allowed: runtimeSemanticProposalFields, Cause: err}
 	}
 	return document, nil
