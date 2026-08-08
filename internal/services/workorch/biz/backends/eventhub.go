@@ -367,13 +367,13 @@ func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req workorch
 	return &view, nil
 }
 
-func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (b *eventHubWorkspaceBackend) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (*projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceUpdateLLMTargetCommand{WorkspaceID: id, Target: target})
-	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, "workspace", string(id), id, "")
-	result, err := cliWorkspaceUpdateLLMTargetResponse(b.parent.commandHub.Send(event))
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceUpdateLLMSelection, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceUpdateLLMSelectionCommand{WorkspaceID: id, Selection: runtimecontract.CloneProviderInferenceSelection(selection), ExpectedRevision: expectedRevision})
+	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceUpdateLLMSelection, "workspace", string(id), id, "")
+	result, err := cliWorkspaceUpdateLLMSelectionResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}

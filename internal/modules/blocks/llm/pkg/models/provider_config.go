@@ -24,7 +24,6 @@ type ProviderConfig struct {
 type ProviderInferenceProfile struct {
 	Temperature          *float64 `json:"temperature,omitempty"`
 	MaxOutputTokens      int      `json:"maxOutputTokens,omitempty"`
-	ReasoningEffort      string   `json:"reasoningEffort,omitempty"`
 	ThinkingBudgetTokens int      `json:"thinkingBudgetTokens,omitempty"`
 }
 

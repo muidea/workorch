@@ -19,7 +19,7 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 			CapabilityContract: []string{"file/edit", "shell/command"},
 		},
-		Activation: RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, DialogLanguage: "zh-CN", Skills: []RuntimeSkillContext{{ID: "skill-1", Instruction: "typed instruction"}}, ExecutionContract: RuntimeExecutionContract{
+		Activation: RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, DialogLanguage: "zh-CN", Skills: []RuntimeSkillContext{{ID: "skill-1", Instruction: "typed instruction"}}, ExecutionContract: RuntimeExecutionContract{
 			MaxRepairAttemptsPerFocus: 7, ValidationPolicies: []RuntimeValidationPolicy{{ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2}},
 		}},
 		Focuses:           []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRefs: []string{"target.txt"}, AcceptedStepKinds: []string{StepKindFileEdit}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding}}},
@@ -63,7 +63,7 @@ func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
 		SchemaVersion:     RuntimeStateSchemaVersionCurrent,
 		Definition:        RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
-		Activation:        RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:        RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		Focuses:           []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
 		Slices:            []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems:     []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "deliverable", SourceID: "source", Order: 1, ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-missing", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}}},

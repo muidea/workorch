@@ -112,6 +112,7 @@ func sendLLMCatalogCommand[Response any](hub magicevent.Hub, ev magicevent.Event
 func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) workorchmanagementcontract.ProviderCatalogSummary {
 	models := make([]workorchmanagementcontract.ProviderModelDescriptorView, 0, len(catalog.Models))
 	for _, model := range catalog.Models {
+		reasoning := model.Reasoning.Normalized()
 		models = append(models, workorchmanagementcontract.ProviderModelDescriptorView{
 			ProviderID:          model.Target.ProviderID,
 			ModelID:             model.Target.ModelID,
@@ -120,9 +121,16 @@ func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) workorchman
 			MaxOutputTokens:     model.MaxOutputTokens,
 			SupportedEndpoints:  append([]string(nil), model.SupportedEndpoints...),
 			Operations:          append([]string(nil), model.Operations...),
-			CapabilityReady:     model.CapabilityReady,
-			UnavailableReason:   model.UnavailableReason,
-			CapabilityRevision:  model.CapabilityRevision,
+			Reasoning: workorchmanagementcontract.ProviderReasoningCapabilityView{
+				Supported:     reasoning.Supported,
+				Valid:         reasoning.Valid,
+				DefaultEffort: reasoning.DefaultEffort,
+				Efforts:       append([]string(nil), reasoning.Efforts...),
+				InvalidReason: reasoning.InvalidReason,
+			},
+			CapabilityReady:    model.CapabilityReady,
+			UnavailableReason:  model.UnavailableReason,
+			CapabilityRevision: model.CapabilityRevision,
 		})
 	}
 	return workorchmanagementcontract.ProviderCatalogSummary{

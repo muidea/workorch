@@ -31,14 +31,19 @@ type ServiceConfig struct {
 }
 
 type ChatModelTargetOption struct {
-	ProviderID          string
-	ModelID             string
-	DisplayName         string
-	ContextWindowTokens int
-	MaxOutputTokens     int
-	CapabilityReady     bool
-	CapabilityRevision  string
-	Source              string
+	ProviderID             string
+	ModelID                string
+	DisplayName            string
+	ContextWindowTokens    int
+	MaxOutputTokens        int
+	CapabilityReady        bool
+	CapabilityRevision     string
+	ReasoningSupported     bool
+	ReasoningValid         bool
+	DefaultReasoningEffort string
+	ReasoningEfforts       []string
+	ReasoningInvalidReason string
+	Source                 string
 }
 
 type ConfigBackend interface {
@@ -57,6 +62,26 @@ func NormalizeChatModelTargetOptions(items []ChatModelTargetOption) []ChatModelT
 		}
 		if strings.TrimSpace(item.DisplayName) == "" {
 			item.DisplayName = item.ModelID
+		}
+		item.DefaultReasoningEffort = strings.TrimSpace(item.DefaultReasoningEffort)
+		item.ReasoningInvalidReason = strings.TrimSpace(item.ReasoningInvalidReason)
+		seenEfforts := map[string]struct{}{}
+		efforts := make([]string, 0, len(item.ReasoningEfforts))
+		for _, effort := range item.ReasoningEfforts {
+			effort = strings.TrimSpace(effort)
+			if effort == "" {
+				continue
+			}
+			if _, ok := seenEfforts[effort]; ok {
+				continue
+			}
+			seenEfforts[effort] = struct{}{}
+			efforts = append(efforts, effort)
+		}
+		if len(efforts) == 0 {
+			item.ReasoningEfforts = nil
+		} else {
+			item.ReasoningEfforts = efforts
 		}
 		unique[item.ProviderID+"\x00"+item.ModelID] = item
 	}

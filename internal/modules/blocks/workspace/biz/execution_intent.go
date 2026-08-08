@@ -60,7 +60,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		return workspaceevents.WorkspaceExecutionIntentResult{}, err
 	}
 	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
-		workspace, err = m.materializeDefaultLLMTargetFromBootstrap(ctx, workspace, cmd.Bootstrap)
+		workspace, err = m.materializeDefaultLLMSelectionFromBootstrap(ctx, workspace, cmd.Bootstrap)
 		if err != nil {
 			return workspaceevents.WorkspaceExecutionIntentResult{}, err
 		}
@@ -166,21 +166,22 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
 }
 
-// materializeDefaultLLMTargetFromBootstrap is an owner-local Workspace
+// materializeDefaultLLMSelectionFromBootstrap is an owner-local Workspace
 // metadata transition. The value is derived only from the validated sealed
 // bootstrap of a successful restart admission; resume never changes the
 // next-run preference and application ingress never writes Workspace state.
-func (m *Biz) materializeDefaultLLMTargetFromBootstrap(ctx context.Context, workspace *workspacemodel.Workspace, bootstrap *runtimecontract.RuntimeBootstrap) (*workspacemodel.Workspace, error) {
+func (m *Biz) materializeDefaultLLMSelectionFromBootstrap(ctx context.Context, workspace *workspacemodel.Workspace, bootstrap *runtimecontract.RuntimeBootstrap) (*workspacemodel.Workspace, error) {
 	if workspace == nil || bootstrap == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if workspace.DefaultLLMTarget != nil {
+	if workspace.DefaultLLMSelection != nil {
 		return workspace, nil
 	}
-	target := bootstrap.Activation.ProviderTarget.Normalized()
+	target := bootstrap.Activation.ProviderSelection.Target.Normalized()
 	if err := target.Validate(); err != nil {
 		return nil, err
 	}
+	selection := runtimecontract.ProviderInferenceSelection{Target: target}
 	for attempt := 0; attempt < 3; attempt++ {
 		current := workspace
 		if attempt > 0 {
@@ -189,12 +190,12 @@ func (m *Biz) materializeDefaultLLMTargetFromBootstrap(ctx context.Context, work
 			if err != nil {
 				return nil, err
 			}
-			if current.DefaultLLMTarget != nil {
+			if current.DefaultLLMSelection != nil {
 				return current, nil
 			}
 		}
 		next := *current
-		next.DefaultLLMTarget = &target
+		next.DefaultLLMSelection = &selection
 		if err := m.workspaces.CompareAndSwap(ctx, &next, current.Revision); err != nil {
 			if err == common.ErrConflict {
 				continue

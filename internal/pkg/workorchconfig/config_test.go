@@ -229,7 +229,6 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 					MaxOutputTokens:     8192,
 					Operations:          []string{LLMOperationChatCompletions},
 					Temperature:         &temperature,
-					ReasoningEffort:     "high",
 				},
 			},
 		},

@@ -2,7 +2,6 @@ package activationports
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
@@ -14,19 +13,9 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestResolveActivationProviderTargetPrecedence(t *testing.T) {
-	explicit := runtimecontract.ProviderModelTarget{ProviderID: "explicit-provider", ModelID: "explicit-model"}
-	workspaceDefault := runtimecontract.ProviderModelTarget{ProviderID: "workspace-provider", ModelID: "workspace-model"}
-
-	got, err := resolveActivationProviderTarget(context.Background(), nil, &explicit, &workspaceDefault)
-	if err != nil {
-		t.Fatalf("resolve explicit target: %v", err)
-	}
-	if !got.Same(explicit) {
-		t.Fatalf("explicit target = %+v, want %+v", got, explicit)
-	}
-
-	got, err = resolveActivationProviderTarget(context.Background(), nil, nil, &workspaceDefault)
+func TestConfiguredActivationProviderSelectionUsesWorkspaceOwnerPreference(t *testing.T) {
+	workspaceDefault := runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "workspace-provider", ModelID: "workspace-model"}, ReasoningEffort: "high"}
+	got, err := configuredActivationProviderSelection(context.Background(), &workspaceDefault)
 	if err != nil {
 		t.Fatalf("resolve workspace target: %v", err)
 	}
@@ -35,16 +24,16 @@ func TestResolveActivationProviderTargetPrecedence(t *testing.T) {
 	}
 }
 
-func TestResolveActivationProviderTargetUsesLatestInjectedSystemDefault(t *testing.T) {
+func TestConfiguredActivationProviderSelectionUsesLatestInjectedSystemDefault(t *testing.T) {
 	ctx := configcore.ContextWithLoader(context.Background(), func() (workorchconfig.Config, error) {
 		return workorchconfig.Config{LLM: workorchconfig.LLMConfig{DefaultChat: workorchconfig.ProviderModelTargetConfig{ProviderID: "latest-provider", ModelID: "latest-model"}}}, nil
 	})
-	got, err := resolveActivationProviderTarget(ctx, nil, nil, nil)
+	got, err := configuredActivationProviderSelection(ctx, nil)
 	if err != nil {
 		t.Fatalf("resolve system default: %v", err)
 	}
 	want := runtimecontract.ProviderModelTarget{ProviderID: "latest-provider", ModelID: "latest-model"}
-	if !got.Same(want) {
+	if !got.Target.Same(want) || got.ReasoningEffort != "" {
 		t.Fatalf("system target = %+v, want %+v", got, want)
 	}
 }
@@ -70,15 +59,15 @@ func TestApplyConfiguredRuntimeRepairLimitUsesInjectedLatestValue(t *testing.T) 
 	}
 }
 
-func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *testing.T) {
+func TestSealedRunProviderSelectionDoesNotDriftAfterWorkspacePreferenceChanges(t *testing.T) {
 	ctx := context.Background()
 	runs := memory.NewRunRepository()
 	workspaces := memory.NewWorkspaceRepository()
 	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}
-	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-sealed", State: common.WorkspaceStateActive, DefaultLLMTarget: &sealed}); err != nil {
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-sealed", State: common.WorkspaceStateActive, DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: sealed}}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: sealed}}
+	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: sealed}}}
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-sealed", WorkspaceID: "ws-sealed", State: common.RunStateActive, RuntimeBootstrap: &bootstrap}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -87,7 +76,7 @@ func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *t
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	workspace.DefaultLLMTarget = &workspacePreference
+	workspace.DefaultLLMSelection = &runtimecontract.ProviderInferenceSelection{Target: workspacePreference, ReasoningEffort: "high"}
 	if err := workspaces.Update(ctx, workspace); err != nil {
 		t.Fatalf("update workspace preference: %v", err)
 	}
@@ -95,29 +84,7 @@ func TestSealedRunProviderTargetDoesNotDriftAfterWorkspacePreferenceChanges(t *t
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if stored.RuntimeBootstrap == nil || !stored.RuntimeBootstrap.Activation.ProviderTarget.Same(sealed) {
+	if stored.RuntimeBootstrap == nil || !stored.RuntimeBootstrap.Activation.ProviderSelection.Target.Same(sealed) {
 		t.Fatalf("sealed run target = %+v, want %+v", stored.RuntimeBootstrap, sealed)
-	}
-}
-
-func TestRejectActiveRunProviderTargetOverride(t *testing.T) {
-	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}
-	run := &runmodel.Run{
-		ID: "run-provider-target-stale",
-		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{
-			Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: sealed},
-		},
-	}
-
-	if err := RejectActiveRunProviderTargetOverride(run, nil); err != nil {
-		t.Fatalf("nil target override: %v", err)
-	}
-	if err := RejectActiveRunProviderTargetOverride(run, &sealed); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("same target override err=%v, want conflict", err)
-	}
-
-	changed := runtimecontract.ProviderModelTarget{ProviderID: "provider-b", ModelID: "model-b"}
-	if err := RejectActiveRunProviderTargetOverride(run, &changed); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("changed target override err=%v, want conflict", err)
 	}
 }

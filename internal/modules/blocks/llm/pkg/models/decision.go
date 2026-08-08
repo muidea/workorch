@@ -3,14 +3,15 @@ package models
 import "github.com/muidea/workorch/internal/pkg/llmaudit"
 
 type ProviderRequest struct {
-	WorkspaceID    string `json:"workspaceId"`
-	RunID          string `json:"runId"`
-	StepID         string `json:"stepId"`
-	Kind           string `json:"kind"`
-	Model          string `json:"model"`
-	SystemLocale   string `json:"systemLocale,omitempty"`
-	DialogLanguage string `json:"dialogLanguage,omitempty"`
-	Schema         string `json:"schema"`
+	WorkspaceID     string `json:"workspaceId"`
+	RunID           string `json:"runId"`
+	StepID          string `json:"stepId"`
+	Kind            string `json:"kind"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	SystemLocale    string `json:"systemLocale,omitempty"`
+	DialogLanguage  string `json:"dialogLanguage,omitempty"`
+	Schema          string `json:"schema"`
 	// MaxOutputTokens is an optional activation-sealed stage budget. The
 	// provider adapter clamps it to the sealed model ceiling.
 	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`

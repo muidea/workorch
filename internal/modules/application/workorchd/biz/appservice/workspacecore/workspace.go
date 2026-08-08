@@ -13,6 +13,7 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		return appmodelcore.Workspace{}
 	}
 	return appmodelcore.Workspace{
+		Revision:             item.Revision,
 		ID:                   string(item.ID),
 		Title:                item.Title,
 		Description:          item.Description,
@@ -22,7 +23,7 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		ActiveRunID:          string(item.ActiveRunID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMSelection:  runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
 		DefaultSoulID:        string(item.DefaultSoulID),
 		SoulBindings:         appmodelcore.MapSoulBindingIDs(item.SoulBindings),
 		ContextHints:         cloneContextMap(item.ContextHints.Map()),
@@ -43,6 +44,7 @@ func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspa
 		return nil
 	}
 	return &workspacemodel.Workspace{
+		Revision:             item.Revision,
 		ID:                   common.WorkspaceID(item.ID),
 		Title:                item.Title,
 		Description:          item.Description,
@@ -52,7 +54,7 @@ func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspa
 		ActiveRunID:          common.RunID(item.ActiveRunID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMSelection:  runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         SoulBindingsFromView(item.SoulBindings),
 		ContextHints:         contextHints,

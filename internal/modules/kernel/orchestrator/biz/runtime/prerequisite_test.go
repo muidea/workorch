@@ -9,7 +9,7 @@ import (
 
 func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID:        "ws-gateway",
 		RunID:              "run-gateway",
 		DefinitionRevision: "definition-1",
@@ -505,7 +505,7 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 			result.ValidationScratch = &runtimecontract.ValidationScratch{Reference: ".workorch-validation/run-1", Revision: "scratch-1"}
 		case runtimecontract.PrerequisiteKindProviderCeiling:
 			result.ProviderCeiling = &runtimecontract.ProviderCeiling{
-				Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+				Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				ContextWindowTokens:      128000,
 				ProviderMaxOutputTokens:  16384,
 				EffectiveMaxOutputTokens: 4096,
@@ -529,7 +529,7 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 
 func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition", EvidenceRevision: "evidence",
 		Focus: runtimecontract.CoverageFocus{ID: "focus"},
 	}
@@ -640,7 +640,7 @@ func TestMergeCapabilityKindsDoesNotOverwrite(t *testing.T) {
 func TestApplyCapabilityPrerequisiteMergesOwners(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1",
-		Activation:   runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:   runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		Focus:        runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
 		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{"file/read"}},
 		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{{

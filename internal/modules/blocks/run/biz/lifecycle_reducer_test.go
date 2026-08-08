@@ -402,7 +402,7 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) {
 	ctx := context.Background()
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
 		StateRevision: 7, Definition: definition,
@@ -443,7 +443,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	ctx := context.Background()
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
 		StateRevision: 7, Definition: definition,

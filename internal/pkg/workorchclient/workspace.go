@@ -69,16 +69,24 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) err
 	return nil
 }
 
-func (c *Client) UpdateWorkspaceLLMTarget(ctx context.Context, id string, target runtimecontract.ProviderModelTarget) (*workorchprojectioncontract.Workspace, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), target)
+func (c *Client) UpdateWorkspaceLLMSelection(ctx context.Context, id string, selection runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (*workorchprojectioncontract.Workspace, error) {
+	selection = selection.Normalized()
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-selection", escapePath(id)), struct {
+		ProviderID       string `json:"providerId"`
+		ModelID          string `json:"modelId"`
+		ReasoningEffort  string `json:"reasoningEffort,omitempty"`
+		ExpectedRevision uint64 `json:"expectedRevision"`
+	}{ProviderID: selection.Target.ProviderID, ModelID: selection.Target.ModelID, ReasoningEffort: selection.ReasoningEffort, ExpectedRevision: expectedRevision})
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[workorchprojectioncontract.Workspace](resp, "workspace")
 }
 
-func (c *Client) ClearWorkspaceLLMTarget(ctx context.Context, id string) (*workorchprojectioncontract.Workspace, error) {
-	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), nil)
+func (c *Client) ClearWorkspaceLLMSelection(ctx context.Context, id string, expectedRevision uint64) (*workorchprojectioncontract.Workspace, error) {
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-selection", escapePath(id)), struct {
+		ExpectedRevision uint64 `json:"expectedRevision"`
+	}{ExpectedRevision: expectedRevision})
 	if err != nil {
 		return nil, err
 	}

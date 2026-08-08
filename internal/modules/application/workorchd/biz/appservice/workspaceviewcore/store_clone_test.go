@@ -7,11 +7,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestCloneWorkspaceClonesDefaultLLMTarget(t *testing.T) {
+func TestCloneWorkspaceClonesDefaultLLMSelection(t *testing.T) {
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
-	cloned := cloneWorkspace(appmodelcore.Workspace{ID: "ws-model", DefaultLLMTarget: &target})
+	cloned := cloneWorkspace(appmodelcore.Workspace{ID: "ws-model", DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: target}})
 	target.ModelID = "mutated"
-	if cloned.DefaultLLMTarget == nil || cloned.DefaultLLMTarget.ProviderID != "custom" || cloned.DefaultLLMTarget.ModelID != "model-a" {
-		t.Fatalf("cloned target = %+v", cloned.DefaultLLMTarget)
+	if cloned.DefaultLLMSelection == nil || cloned.DefaultLLMSelection.Target.ProviderID != "custom" || cloned.DefaultLLMSelection.Target.ModelID != "model-a" {
+		t.Fatalf("cloned target = %+v", cloned.DefaultLLMSelection)
 	}
 }

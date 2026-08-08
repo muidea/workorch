@@ -298,16 +298,25 @@ type MemoryMutation struct {
 }
 
 type ProviderModelDescriptorView struct {
-	ProviderID          string   `json:"providerId"`
-	ModelID             string   `json:"modelId"`
-	RouteOwner          string   `json:"routeOwner,omitempty"`
-	ContextWindowTokens int      `json:"contextWindowTokens,omitempty"`
-	MaxOutputTokens     int      `json:"maxOutputTokens,omitempty"`
-	SupportedEndpoints  []string `json:"supportedEndpoints,omitempty"`
-	Operations          []string `json:"operations,omitempty"`
-	CapabilityReady     bool     `json:"capabilityReady"`
-	UnavailableReason   string   `json:"unavailableReason,omitempty"`
-	CapabilityRevision  string   `json:"capabilityRevision,omitempty"`
+	ProviderID          string                          `json:"providerId"`
+	ModelID             string                          `json:"modelId"`
+	RouteOwner          string                          `json:"routeOwner,omitempty"`
+	ContextWindowTokens int                             `json:"contextWindowTokens,omitempty"`
+	MaxOutputTokens     int                             `json:"maxOutputTokens,omitempty"`
+	SupportedEndpoints  []string                        `json:"supportedEndpoints,omitempty"`
+	Operations          []string                        `json:"operations,omitempty"`
+	Reasoning           ProviderReasoningCapabilityView `json:"reasoning"`
+	CapabilityReady     bool                            `json:"capabilityReady"`
+	UnavailableReason   string                          `json:"unavailableReason,omitempty"`
+	CapabilityRevision  string                          `json:"capabilityRevision,omitempty"`
+}
+
+type ProviderReasoningCapabilityView struct {
+	Supported     bool     `json:"supported"`
+	Valid         bool     `json:"valid"`
+	DefaultEffort string   `json:"defaultEffort,omitempty"`
+	Efforts       []string `json:"efforts,omitempty"`
+	InvalidReason string   `json:"invalidReason,omitempty"`
 }
 
 type ProviderCatalogSummary struct {

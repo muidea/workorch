@@ -45,7 +45,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -66,7 +65,7 @@ import (
 	"github.com/muidea/workorch/web/consoleassets"
 )
 
-func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testing.T) {
+func TestWorkspaceLLMSelectionRoutesValidateScopeAndPersistCompleteTarget(t *testing.T) {
 	hub := magicevent.NewHub(32)
 	routine := magictask.NewBackgroundRoutine(16)
 	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
@@ -79,24 +78,22 @@ func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testin
 		_ = routine.Shutdown(ctx)
 	})
 	llmObserver := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
-	llmObserver.Subscribe(llmevents.TopicLLMCommandResolveProviderModelTarget, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(llmevents.ResolveProviderModelTargetCommand)
-		result.Set(llmevents.ResolveProviderModelTargetResult{Profile: llmmodel.ResolvedProviderModelProfile{
-			Target: command.Target, Operation: "responses", CapabilityRevision: "capability-1", ConfigurationRevision: "configuration-1",
-		}}, nil)
+	llmObserver.Subscribe(llmevents.TopicLLMCommandValidateInferenceSelection, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.ValidateProviderInferenceSelectionCommand)
+		result.Set(llmevents.ValidateProviderInferenceSelectionResult{Selection: command.Selection, CapabilityRevision: "capability-1"}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicLLMCommandResolveProviderModelTarget) })
-	var ownerCommands []workspaceevents.UpdateWorkspaceLLMTargetCommand
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicLLMCommandValidateInferenceSelection) })
+	var ownerCommands []workspaceevents.UpdateWorkspaceLLMSelectionCommand
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
-	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(workspaceevents.UpdateWorkspaceLLMTargetCommand)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(workspaceevents.UpdateWorkspaceLLMSelectionCommand)
 		ownerCommands = append(ownerCommands, command)
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, State: common.WorkspaceStateActive, DefaultLLMTarget: command.Target}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, Revision: command.ExpectedRevision + 1, State: common.WorkspaceStateActive, DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(command.Selection)}}, nil)
 	})
-	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget) })
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection) })
 
 	mux := newMuxWithState(state)
-	put := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-target", strings.NewReader(`{"providerId":"custom","modelId":"model-a"}`))
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"providerId":"custom","modelId":"model-a","reasoningEffort":"none","expectedRevision":1}`))
 	put.Header.Set("Content-Type", "application/json")
 	putResponse := httptest.NewRecorder()
 	mux.ServeHTTP(putResponse, put)
@@ -107,21 +104,25 @@ func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testin
 	if err := json.NewDecoder(putResponse.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode PUT response: %v", err)
 	}
-	if updated.Workspace.ID != "ws-model" || updated.Workspace.DefaultLLMTarget == nil || updated.Workspace.DefaultLLMTarget.ProviderID != "custom" || updated.Workspace.DefaultLLMTarget.ModelID != "model-a" {
+	if updated.Workspace.ID != "ws-model" || updated.Workspace.DefaultLLMSelection == nil || updated.Workspace.DefaultLLMSelection.Target.ProviderID != "custom" || updated.Workspace.DefaultLLMSelection.Target.ModelID != "model-a" || updated.Workspace.DefaultLLMSelection.ReasoningEffort != "none" {
 		t.Fatalf("PUT workspace = %+v", updated.Workspace)
 	}
 
-	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/workorch/workspaces/ws-model/llm-target", nil)
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"expectedRevision":2}`))
+	deleteRequest.Header.Set("Content-Type", "application/json")
 	deleteResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deleteResponse, deleteRequest)
 	if deleteResponse.Code != http.StatusOK {
 		t.Fatalf("DELETE status = %d body=%s", deleteResponse.Code, deleteResponse.Body.String())
 	}
-	if len(ownerCommands) != 2 || ownerCommands[0].WorkspaceID != "ws-model" || ownerCommands[0].Target == nil || ownerCommands[1].WorkspaceID != "ws-model" || ownerCommands[1].Target != nil {
+	if len(ownerCommands) != 2 || ownerCommands[0].WorkspaceID != "ws-model" || ownerCommands[0].Selection == nil || ownerCommands[1].WorkspaceID != "ws-model" || ownerCommands[1].Selection != nil {
 		t.Fatalf("owner commands = %+v", ownerCommands)
 	}
+	if ownerCommands[0].ExpectedRevision != 1 || ownerCommands[0].Selection.ReasoningEffort != "none" || ownerCommands[1].ExpectedRevision != 2 {
+		t.Fatalf("owner command CAS/selection = %+v", ownerCommands)
+	}
 
-	invalid := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-target", strings.NewReader(`{"providerId":"custom"}`))
+	invalid := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"providerId":"custom"}`))
 	invalid.Header.Set("Content-Type", "application/json")
 	invalidResponse := httptest.NewRecorder()
 	mux.ServeHTTP(invalidResponse, invalid)
@@ -2597,7 +2598,6 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			if workspaceID != "ws-native-read" ||
 				cmd.GoalID != "goal-native" ||
 				cmd.DoDID != "dod-native" ||
-				cmd.LLMTarget == nil || cmd.LLMTarget.ProviderID != "ai-proxy" || cmd.LLMTarget.ModelID != "gpt-4o" ||
 				cmd.SoulID != "soul-native" ||
 				cmd.SoulBindings["validation"] != "soul-native-validation" ||
 				cmd.DialogLanguage != "zh-CN" ||

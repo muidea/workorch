@@ -313,7 +313,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}}},
 	}, []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: filemodule.ModuleID},
 		{Kind: runtimecontract.PrerequisiteKindCapability, SubjectRef: filemodule.ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{filemodule.StepKindPatchApply}},
@@ -329,7 +329,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		case runtimecontract.PrerequisiteKindProviderCeiling:
 			facts, err = AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, llmevents.AcquireProviderCeilingCommand{
 				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID,
-				Target: facts.Activation.ProviderTarget, MinimumBytes: 64 * 1024,
+				Selection: facts.Activation.ProviderSelection, MinimumBytes: 64 * 1024,
 			})
 		case runtimecontract.PrerequisiteKindCapability:
 			facts, err = AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, runtimecontract.RuntimeCapabilityAcquisitionRequest{
@@ -346,8 +346,8 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	}
 	if facts.Resources.ProviderCeiling == nil ||
 		facts.Resources.ProviderCeiling.MaxBytes < 64*1024 ||
-		facts.Resources.ProviderCeiling.Target.ProviderID != "custom-test" ||
-		facts.Resources.ProviderCeiling.Target.ModelID != "model-1" ||
+		facts.Resources.ProviderCeiling.Selection.Target.ProviderID != "custom-test" ||
+		facts.Resources.ProviderCeiling.Selection.Target.ModelID != "model-1" ||
 		facts.Resources.ProviderCeiling.CapabilityRevision == "" ||
 		facts.Resources.ProviderCeiling.ConfigurationRevision == "" {
 		t.Fatalf("provider ceiling = %+v", facts.Resources.ProviderCeiling)
@@ -385,13 +385,13 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	defer llm.Stop(ctx)
 
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
 	}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
 	item := facts.Prerequisites.Pending[0]
 	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, llmevents.AcquireProviderCeilingCommand{
-		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", Target: facts.Activation.ProviderTarget,
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", Selection: facts.Activation.ProviderSelection,
 		PrerequisiteID: item.ID, MinimumBytes: item.MinimumBytes,
 	})
 	if err == nil || !strings.Contains(err.Error(), "below required minimum") {
@@ -419,7 +419,7 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 		t.Fatal(err)
 	}
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}}},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",

@@ -21,14 +21,14 @@ type Run struct {
 	BlockingTicketID   string                        `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string                        `json:"blockingApprovalId,omitempty"`
 	FailureReason      string                        `json:"failureReason,omitempty"`
-	// SealedLLMTarget is copied from the persisted Runtime bootstrap. It is
-	// read-only history for this Run; Workspace.DefaultLLMTarget is the mutable
+	// SealedLLMSelection is copied from the persisted Runtime bootstrap. It is
+	// read-only history for this Run; Workspace.DefaultLLMSelection is the mutable
 	// preference used only for a subsequent activation.
-	SealedLLMTarget   *runtimecontract.ProviderModelTarget        `json:"sealedLLMTarget,omitempty"`
-	RuntimeActivation *projectioncontract.RuntimeActivationStatus `json:"runtimeActivation,omitempty"`
-	CreatedAt         string                                      `json:"createdAt,omitempty"`
-	StartedAt         string                                      `json:"startedAt,omitempty"`
-	EndedAt           string                                      `json:"endedAt,omitempty"`
+	SealedLLMSelection *runtimecontract.ProviderInferenceSelection `json:"sealedLLMSelection,omitempty"`
+	RuntimeActivation  *projectioncontract.RuntimeActivationStatus `json:"runtimeActivation,omitempty"`
+	CreatedAt          string                                      `json:"createdAt,omitempty"`
+	StartedAt          string                                      `json:"startedAt,omitempty"`
+	EndedAt            string                                      `json:"endedAt,omitempty"`
 	// RuntimeState is projection input only. It must never be serialized as an
 	// application DTO or become a second authority.
 	RuntimeState *runtimecontract.RuntimeStateRecord `json:"-"`

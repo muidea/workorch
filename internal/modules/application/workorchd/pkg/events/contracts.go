@@ -15,7 +15,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("workorchd.workspace_projection", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicWorkspaceProjectionChanged,
 	)...)
-	ret = append(ret, eventcontract.Build("cli.workspace", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMTarget)...)
+	ret = append(ret, eventcontract.Build("cli.workspace", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMSelection)...)
 	ret = append(ret, eventcontract.Build("cli.goal", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIGoalDefine, TopicCLIGoalList, TopicCLIGoalGet, TopicCLIGoalUpdate)...)
 	ret = append(ret, eventcontract.Build("cli.dod", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIDoDDefine, TopicCLIDoDList, TopicCLIDoDGet, TopicCLIDoDUpdate)...)
 	ret = append(ret, eventcontract.Build("cli.run", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIRunGet, TopicCLIRunList, TopicCLIRunStatus)...)

@@ -1167,6 +1167,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"  /model               select workspace provider/model",
 		"  /model show          show workspace and system model targets",
 		"  /model clear         inherit the system default for future runs",
+		"  /model reasoning X   set next-run reasoning effort (or default)",
 		"  /config              system configuration",
 		"  /clear               clear display",
 		"  /help                show this help",

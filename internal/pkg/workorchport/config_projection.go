@@ -35,6 +35,10 @@ func ChatModelTargetOptionsFromConfiguration(item *workorchconfigurationcontract
 			ProviderID: model.ProviderID, ModelID: model.ModelID, DisplayName: model.ModelID,
 			ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens,
 			CapabilityReady: true, CapabilityRevision: model.CapabilityRevision, Source: item.LLM.Catalog.Source,
+			ReasoningSupported: model.Reasoning.Supported, ReasoningValid: model.Reasoning.Valid,
+			DefaultReasoningEffort: model.Reasoning.DefaultEffort,
+			ReasoningEfforts:       append([]string(nil), model.Reasoning.Efforts...),
+			ReasoningInvalidReason: model.Reasoning.InvalidReason,
 		})
 	}
 	for _, provider := range item.LLM.CustomProviders {

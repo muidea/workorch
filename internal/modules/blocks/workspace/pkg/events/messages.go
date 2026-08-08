@@ -35,7 +35,7 @@ type Workspace struct {
 	ActiveRunID          common.RunID
 	TemplateID           string
 	ProfileID            string
-	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID        common.SoulID
 	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
@@ -63,15 +63,16 @@ type UpdateWorkspaceCommand struct {
 	InternalDirectory    string
 	TemplateID           string
 	ProfileID            string
-	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID        common.SoulID
 	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
 }
-type UpdateWorkspaceLLMTargetCommand struct {
-	WorkspaceID common.WorkspaceID
-	Target      *runtimecontract.ProviderModelTarget
+type UpdateWorkspaceLLMSelectionCommand struct {
+	WorkspaceID      common.WorkspaceID
+	Selection        *runtimecontract.ProviderInferenceSelection
+	ExpectedRevision uint64
 }
 type DeleteWorkspaceCommand struct{ WorkspaceID common.WorkspaceID }
 type DefineGoalCommand struct {
@@ -161,7 +162,7 @@ type WorkspaceChangedData struct {
 	State                common.WorkspaceState
 	ActiveRunID          common.RunID
 	RunID                common.RunID
-	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
 }
 
 type GoalDefinedData struct {
@@ -188,6 +189,7 @@ type DoDDefinedData struct {
 type WorkspaceCommandResult struct {
 	Workspace  *Workspace
 	Workspaces []*Workspace
+	Changed    bool
 	Goal       *workspacemodel.Goal
 	Goals      []*workspacemodel.Goal
 	DoD        *workspacemodel.DoD
@@ -202,7 +204,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GetWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListWorkspacesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandList).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdate).MessageContract(),
-		eventcontract.CommandTopic[UpdateWorkspaceLLMTargetCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMTarget).MessageContract(),
+		eventcontract.CommandTopic[UpdateWorkspaceLLMSelectionCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMSelection).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[DefineGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineGoal).MessageContract(),
 		eventcontract.CommandTopic[UpdateGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateGoal).MessageContract(),

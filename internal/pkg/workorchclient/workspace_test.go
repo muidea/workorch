@@ -58,23 +58,26 @@ func TestClientDecodesWorkspaceProjectionMetadata(t *testing.T) {
 	}
 }
 
-func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
+func TestClientWorkspaceLLMSelectionRoutesCarryProviderAndModel(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/api/v1/workorch/workspaces/ws-model/llm-target" {
+		if r.URL.Path != "/api/v1/workorch/workspaces/ws-model/llm-selection" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
 		switch r.Method {
 		case http.MethodPut:
-			var target runtimecontract.ProviderModelTarget
-			if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+			var request struct {
+				ProviderID, ModelID, ReasoningEffort string
+				ExpectedRevision                     uint64
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode target: %v", err)
 			}
-			if target.ProviderID != "custom" || target.ModelID != "model-a" {
-				t.Fatalf("target = %+v", target)
+			if request.ProviderID != "custom" || request.ModelID != "model-a" || request.ReasoningEffort != "high" || request.ExpectedRevision != 7 {
+				t.Fatalf("request = %+v", request)
 			}
-			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","title":"Model","state":"active","defaultLLMTarget":{"providerId":"custom","modelId":"model-a"}}}`))
+			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","revision":8,"title":"Model","state":"active","defaultLLMSelection":{"target":{"providerId":"custom","modelId":"model-a"},"reasoningEffort":"high"}}}`))
 		case http.MethodDelete:
 			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","title":"Model","state":"active"}}`))
 		default:
@@ -84,18 +87,18 @@ func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
 	defer server.Close()
 
 	cl := New(server.URL)
-	updated, err := cl.UpdateWorkspaceLLMTarget(context.Background(), "ws-model", runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"})
+	updated, err := cl.UpdateWorkspaceLLMSelection(context.Background(), "ws-model", runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}, ReasoningEffort: "high"}, 7)
 	if err != nil {
-		t.Fatalf("UpdateWorkspaceLLMTarget: %v", err)
+		t.Fatalf("UpdateWorkspaceLLMSelection: %v", err)
 	}
-	if updated.DefaultLLMTarget == nil || updated.DefaultLLMTarget.ProviderID != "custom" || updated.DefaultLLMTarget.ModelID != "model-a" {
+	if updated.DefaultLLMSelection == nil || updated.DefaultLLMSelection.Target.ProviderID != "custom" || updated.DefaultLLMSelection.Target.ModelID != "model-a" {
 		t.Fatalf("updated workspace = %+v", updated)
 	}
-	cleared, err := cl.ClearWorkspaceLLMTarget(context.Background(), "ws-model")
+	cleared, err := cl.ClearWorkspaceLLMSelection(context.Background(), "ws-model", 8)
 	if err != nil {
-		t.Fatalf("ClearWorkspaceLLMTarget: %v", err)
+		t.Fatalf("ClearWorkspaceLLMSelection: %v", err)
 	}
-	if cleared.DefaultLLMTarget != nil || requests != 2 {
+	if cleared.DefaultLLMSelection != nil || requests != 2 {
 		t.Fatalf("cleared workspace = %+v requests=%d", cleared, requests)
 	}
 }

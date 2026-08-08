@@ -127,8 +127,8 @@ type AppModel struct {
 	modelSelectClearConfirming   bool
 	modelSelectCursor            int
 	modelSelectOptions           []backend.ChatModelTargetOption
-	modelSelectCurrent           *runtimecontract.ProviderModelTarget
-	modelSelectPending           *runtimecontract.ProviderModelTarget
+	modelSelectCurrent           *runtimecontract.ProviderInferenceSelection
+	modelSelectPending           *runtimecontract.ProviderInferenceSelection
 	modelSelectDefault           runtimecontract.ProviderModelTarget
 	modelSelectError             error
 	modelSelectRequestSeq        int64
@@ -700,10 +700,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ChatModelTargetsLoadedMsg:
 		return m.applyChatModelTargetsLoaded(msg)
-	case WorkspaceLLMTargetUpdatedMsg:
-		return m.applyWorkspaceLLMTargetUpdated(msg)
-	case WorkspaceLLMTargetShowMsg:
-		return m.applyWorkspaceLLMTargetShow(msg)
+	case WorkspaceLLMSelectionUpdatedMsg:
+		return m.applyWorkspaceLLMSelectionUpdated(msg)
+	case WorkspaceLLMSelectionShowMsg:
+		return m.applyWorkspaceLLMSelectionShow(msg)
 	case ErrorMsg:
 		m.setLastError(msg.Error)
 		return m, nil
@@ -958,7 +958,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "model":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
-		subcommand, _ := splitSlashSubcommand(args)
+		subcommand, remainder := splitSlashSubcommand(args)
 		switch subcommand {
 		case "":
 			m.clearInput()
@@ -971,11 +971,33 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				return m, nil, true
 			}
 			m.progressText = "Loading workspace model configuration"
-			return m, FetchWorkspaceLLMTargetShow(m.be, m.activeWorkspaceID), true
+			return m, FetchWorkspaceLLMSelectionShow(m.be, m.activeWorkspaceID), true
 		case "clear":
 			m.clearInput()
 			cmd := m.beginModelSelection(true)
 			return m, cmd, true
+		case "reasoning":
+			m.clearInput()
+			selection := runtimecontract.CloneProviderInferenceSelection(m.activeWorkspaceOverviewSelection())
+			if selection == nil {
+				m.lastError = fmt.Errorf("select a workspace model with /model before setting reasoning effort")
+				return m, nil, true
+			}
+			effort := strings.TrimSpace(remainder)
+			if effort == "default" {
+				effort = ""
+			}
+			if effort == "" && strings.TrimSpace(remainder) == "" {
+				m.lastError = fmt.Errorf("usage: /model reasoning <effort|default>")
+				return m, nil, true
+			}
+			selection.ReasoningEffort = effort
+			m.cancelModelSelection()
+			m.modelSelectMode = true
+			m.modelSelectWorkspaceID = m.activeWorkspaceID
+			m.modelSelectRequestSeq++
+			m.modelSelectSubmitting = true
+			return m, PersistWorkspaceLLMSelection(m.be, m.activeWorkspaceID, m.modelSelectRequestSeq, selection, m.activeWorkspaceRevision()), true
 		default:
 			m.lastError = fmt.Errorf("unknown model subcommand: %s", subcommand)
 			return m, nil, true

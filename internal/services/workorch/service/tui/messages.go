@@ -137,16 +137,16 @@ type ChatModelTargetsLoadedMsg struct {
 	Error       error
 }
 
-type WorkspaceLLMTargetUpdatedMsg struct {
+type WorkspaceLLMSelectionUpdatedMsg struct {
 	RequestSeq  int64
 	WorkspaceID string
 	Workspace   *projectioncontract.Workspace
-	Target      *runtimecontract.ProviderModelTarget
+	Selection   *runtimecontract.ProviderInferenceSelection
 	Cleared     bool
 	Error       error
 }
 
-type WorkspaceLLMTargetShowMsg struct {
+type WorkspaceLLMSelectionShowMsg struct {
 	WorkspaceID string
 	Config      *backend.ServiceConfig
 	Error       error

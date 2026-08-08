@@ -130,12 +130,12 @@ func (f *fakeWS) RuntimeView(context.Context, workorchquerycontract.WorkspaceRun
 	return nil, nil
 }
 
-func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (f *fakeWS) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	item, err := f.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	item.DefaultLLMTarget = target
+	item.DefaultLLMSelection = target
 	return item, nil
 }
 

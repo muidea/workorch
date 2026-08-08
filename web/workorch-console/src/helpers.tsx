@@ -2593,6 +2593,10 @@ export type ProviderModelTargetOption = {
   source: 'catalog' | 'custom' | 'configured';
   ready: boolean;
   disabled?: boolean;
+  reasoningSupported?: boolean;
+  reasoningValid?: boolean;
+  defaultReasoningEffort?: string;
+  reasoningEfforts?: string[];
 };
 
 export function providerModelTargetKey(providerId?: string, modelId?: string) {
@@ -2680,7 +2684,11 @@ export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, 
       providerId,
       modelId,
       source: 'catalog' as const,
-      ready: true
+      ready: true,
+      reasoningSupported: item.reasoning?.supported,
+      reasoningValid: item.reasoning?.valid,
+      defaultReasoningEffort: item.reasoning?.defaultEffort,
+      reasoningEfforts: item.reasoning?.efforts
     }];
   });
 }
@@ -2743,34 +2751,6 @@ export function configurationModelTargetOptions(
   return Array.from(unique.values());
 }
 
-export function customProviderTargetOptions(configuration?: ServiceConfiguration, operation?: string) {
-  const providers = configuration?.llm.customProviders ?? [];
-  const options: Array<{ value: string; label: string; providerId: string; modelId: string }> = [];
-  for (const provider of providers) {
-    for (const model of provider.models ?? []) {
-      const ops = model.operations ?? [];
-      // Strict: no empty-operations fallback and no auto chat_completions.
-      if (ops.length === 0) {
-        continue;
-      }
-      if (operation && !ops.includes(operation)) {
-        continue;
-      }
-      const value = providerModelTargetKey(provider.id, model.id);
-      if (!value) {
-        continue;
-      }
-      options.push({
-        value,
-        label: `[custom] ${provider.id} / ${model.id}`,
-        providerId: provider.id,
-        modelId: model.id
-      });
-    }
-  }
-  return options;
-}
-
 export function customProviderDraftsFromConfiguration(configuration?: ServiceConfiguration): CustomProviderDraft[] {
   return (configuration?.llm.customProviders ?? []).map((provider) => ({
     id: provider.id,
@@ -2785,7 +2765,6 @@ export function customProviderDraftsFromConfiguration(configuration?: ServiceCon
       maxOutputTokens: model.maxOutputTokens,
       operations: [...(model.operations ?? [])],
       temperature: model.temperature,
-      reasoningEffort: model.reasoningEffort,
       thinkingBudgetTokens: model.thinkingBudgetTokens,
       cacheMode: model.cacheMode,
       promptCacheKey: model.promptCacheKey,
@@ -2850,7 +2829,6 @@ export function customProvidersUpdatePayload(drafts: CustomProviderDraft[]): Non
         maxOutputTokens: model.maxOutputTokens,
         operations: model.operations ?? [],
         temperature: model.temperature,
-        reasoningEffort: model.reasoningEffort?.trim() || undefined,
         thinkingBudgetTokens: model.thinkingBudgetTokens,
         cache: (model.cacheMode || model.promptCacheKey !== undefined || model.messageCacheControl !== undefined || (model.cacheUsageFields?.length ?? 0) > 0) ? {
           mode: model.cacheMode?.trim() || undefined,
@@ -2878,7 +2856,11 @@ export function chatTargetOptions(configuration?: ServiceConfiguration, _include
     label: item.label,
     providerId: item.providerId,
     modelId: item.modelId,
-    source: 'catalog' as const
+    source: 'catalog' as const,
+    reasoningSupported: item.reasoningSupported,
+    reasoningValid: item.reasoningValid,
+    defaultReasoningEffort: item.defaultReasoningEffort,
+    reasoningEfforts: item.reasoningEfforts
   }));
 }
 

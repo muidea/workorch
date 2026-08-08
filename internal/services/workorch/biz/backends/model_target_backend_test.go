@@ -31,14 +31,14 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	observer.Subscribe(workorchdevents.TopicCLIConfigurationRefreshChatModels, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: port.ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
 	})
-	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)
-		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workorchdevents.CLIWorkspaceInfo{ID: command.WorkspaceID, DefaultLLMTarget: cloneBackendModelTarget(command.Target)}}, nil)
+	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMSelection, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMSelectionCommand)
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{Workspace: workorchdevents.CLIWorkspaceInfo{ID: command.WorkspaceID, DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(command.Selection)}}, nil)
 	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(workorchdevents.TopicCLIConfigurationGet)
 		observer.Unsubscribe(workorchdevents.TopicCLIConfigurationRefreshChatModels)
-		observer.Unsubscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget)
+		observer.Unsubscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMSelection)
 	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,16 +49,16 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"embedding-only","operations":["embeddings"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"not-ready","operations":["chat_completions"],"capabilityReady":false}]}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/workorch/configuration/llm/models/refresh":
 			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"embedding-only","operations":["embeddings"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"not-ready","operations":["chat_completions"],"capabilityReady":false}]}}`))
-		case (r.Method == http.MethodPut || r.Method == http.MethodDelete) && r.URL.Path == "/api/v1/workorch/workspaces/ws-model/llm-target":
-			var target *runtimecontract.ProviderModelTarget
+		case (r.Method == http.MethodPut || r.Method == http.MethodDelete) && r.URL.Path == "/api/v1/workorch/workspaces/ws-model/llm-selection":
+			var selection *runtimecontract.ProviderInferenceSelection
 			if r.Method == http.MethodPut {
-				var value runtimecontract.ProviderModelTarget
+				var value struct{ ProviderID, ModelID, ReasoningEffort string }
 				if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
 					t.Fatalf("decode target: %v", err)
 				}
-				target = &value
+				selection = &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: value.ProviderID, ModelID: value.ModelID}, ReasoningEffort: value.ReasoningEffort}
 			}
-			body := map[string]any{"workspace": map[string]any{"id": "ws-model", "state": "active", "defaultLLMTarget": target}}
+			body := map[string]any{"workspace": map[string]any{"id": "ws-model", "revision": 2, "state": "active", "defaultLLMSelection": selection}}
 			_ = json.NewEncoder(w).Encode(body)
 		default:
 			http.NotFound(w, r)
@@ -80,12 +80,13 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 				t.Fatalf("refreshed = %+v err=%v", refreshed, err)
 			}
 			target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-b"}
-			workspace, err := be.Workspace().UpdateLLMTarget(ctx, "ws-model", &target)
-			if err != nil || workspace.DefaultLLMTarget == nil || !workspace.DefaultLLMTarget.Same(target) {
+			selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
+			workspace, err := be.Workspace().UpdateLLMSelection(ctx, "ws-model", &selection, 1)
+			if err != nil || workspace.DefaultLLMSelection == nil || !workspace.DefaultLLMSelection.Same(selection) {
 				t.Fatalf("update workspace = %+v err=%v", workspace, err)
 			}
-			workspace, err = be.Workspace().UpdateLLMTarget(ctx, common.WorkspaceID("ws-model"), nil)
-			if err != nil || workspace.DefaultLLMTarget != nil {
+			workspace, err = be.Workspace().UpdateLLMSelection(ctx, common.WorkspaceID("ws-model"), nil, 2)
+			if err != nil || workspace.DefaultLLMSelection != nil {
 				t.Fatalf("clear workspace = %+v err=%v", workspace, err)
 			}
 		})

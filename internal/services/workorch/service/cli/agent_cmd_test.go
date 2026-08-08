@@ -105,7 +105,7 @@ func (agentCommandWorkspaceBackend) RuntimeView(context.Context, workorchqueryco
 	return nil, nil
 }
 
-func (agentCommandWorkspaceBackend) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (agentCommandWorkspaceBackend) UpdateLLMSelection(context.Context, common.WorkspaceID, *runtimecontract.ProviderInferenceSelection, uint64) (*projectioncontract.Workspace, error) {
 	return nil, common.ErrNotFound
 }
 

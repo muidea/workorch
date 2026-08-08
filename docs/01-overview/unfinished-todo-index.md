@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-08-04
+Last Updated: 2026-08-08
 
 ## Purpose
 
@@ -23,6 +23,7 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
 | A1 | LSP Bridge deployed proof | **唯一 live gap**：在 ready provider 的 fresh deployment 中创建临时 LSP Bridge workspace/template selection，逐 CWI 验证 semantic proposal → owner feasibility → sealed binding → bindingRef operation → owner receipt → evidence/assessment → terminal；不得写入内置 defaults | [R3 plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A2 | Workspace reasoning effort deployed proof | 代码与正式合同已收口；剩余重新部署后的 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection 和双 workspace 隔离验证 | [WRE plan](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md) |
 
 Immutable binding、strict decoder、receipt matcher、replay/CAS、empty/resume/restart/drift/crash、CPU guard 与
 dual-workspace deployed matrix 已闭环，继续作为 A1 的代码和 live 回归基线。

@@ -103,7 +103,7 @@ func TestApplyRuntimeProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
 			},
 			CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{ID: "dispatch-1"}},
 			Facts: runtimecontract.RuntimeFacts{
-				Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+				Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 				Focus: runtimecontract.CoverageFocus{ID: "focus-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
 			},
@@ -284,7 +284,7 @@ func TestApplyRuntimeProgressCompletedRunRepairResolved(t *testing.T) {
 			},
 			CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{ID: "dispatch-1"}},
 			Facts: runtimecontract.RuntimeFacts{
-				Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+				Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 				Focus:  runtimecontract.CoverageFocus{ID: "focus-1"},
 				Repair: runtimecontract.RuntimeRepairLedger{FocusID: "focus-1", RepairAttempts: 1},
@@ -309,7 +309,7 @@ func TestApplyRuntimeProgressClearsHistoricalCandidateFailureAfterFocusAdvance(t
 			{Attempt: 1, State: runtimecontract.RuntimeCandidateAttemptStateAccepted},
 		},
 		Facts: runtimecontract.RuntimeFacts{
-			Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev-2",
 			Focus:    runtimecontract.CoverageFocus{ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequireAssessment: true},
 			Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-2", State: runtimecontract.RuntimeCoverageItemStateOpen}},

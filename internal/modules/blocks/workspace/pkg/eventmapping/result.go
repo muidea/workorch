@@ -21,9 +21,9 @@ func Workspace(item *workspaceevents.Workspace) *workspacemodel.Workspace {
 		DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(item.SoulBindings),
 		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
-	if item.DefaultLLMTarget != nil {
-		value := *item.DefaultLLMTarget
-		ret.DefaultLLMTarget = &value
+	if item.DefaultLLMSelection != nil {
+		value := *item.DefaultLLMSelection
+		ret.DefaultLLMSelection = &value
 	}
 	if item.TerminalDelivery != nil {
 		value := *item.TerminalDelivery
@@ -66,9 +66,9 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 		return nil
 	}
 	ret := &workspaceevents.Workspace{Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory, State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.FromSoulIDMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
-	if item.DefaultLLMTarget != nil {
-		value := *item.DefaultLLMTarget
-		ret.DefaultLLMTarget = &value
+	if item.DefaultLLMSelection != nil {
+		value := *item.DefaultLLMSelection
+		ret.DefaultLLMSelection = &value
 	}
 	if item.TerminalDelivery != nil {
 		value := *item.TerminalDelivery

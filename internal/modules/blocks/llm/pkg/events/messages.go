@@ -31,6 +31,7 @@ type ProviderRequest struct {
 	StepID          string
 	Kind            string
 	Model           string
+	ReasoningEffort string
 	SystemLocale    string
 	DialogLanguage  string
 	Schema          string
@@ -50,7 +51,7 @@ func ProviderRequestFromModel(input llmmodel.ProviderRequest) ProviderRequest {
 	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
 	return ProviderRequest{
 		WorkspaceID: input.WorkspaceID, RunID: input.RunID, StepID: input.StepID, Kind: input.Kind,
-		Model: input.Model, SystemLocale: input.SystemLocale, DialogLanguage: input.DialogLanguage,
+		Model: input.Model, ReasoningEffort: input.ReasoningEffort, SystemLocale: input.SystemLocale, DialogLanguage: input.DialogLanguage,
 		Schema: input.Schema, MaxOutputTokens: input.MaxOutputTokens, RawTextOutput: input.RawTextOutput, TraceRefs: refs, Config: input.Config,
 		PromptContext: input.PromptContext, ContextBudget: input.ContextBudget,
 	}
@@ -70,7 +71,7 @@ func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
 	}
 	return llmmodel.ProviderRequest{
 		WorkspaceID: r.WorkspaceID, RunID: r.RunID, StepID: r.StepID, Kind: r.Kind,
-		Model: r.Model, SystemLocale: r.SystemLocale, DialogLanguage: r.DialogLanguage,
+		Model: r.Model, ReasoningEffort: r.ReasoningEffort, SystemLocale: r.SystemLocale, DialogLanguage: r.DialogLanguage,
 		Schema: r.Schema, MaxOutputTokens: r.MaxOutputTokens, RawTextOutput: r.RawTextOutput, TraceRefs: refs, Config: r.Config,
 		PromptContext: r.PromptContext, ContextBudget: r.ContextBudget,
 	}, nil
@@ -97,13 +98,14 @@ type RefreshProviderModelCatalogResult struct {
 	Catalog llmmodel.ProviderModelCatalog
 }
 
-type ResolveProviderModelTargetCommand struct {
-	Target    runtimecontract.ProviderModelTarget
-	Operation string // responses | embeddings; empty means responses for activation default
+type ValidateProviderInferenceSelectionCommand struct {
+	Selection runtimecontract.ProviderInferenceSelection
+	Operation string
 }
 
-type ResolveProviderModelTargetResult struct {
-	Profile llmmodel.ResolvedProviderModelProfile
+type ValidateProviderInferenceSelectionResult struct {
+	Selection          runtimecontract.ProviderInferenceSelection
+	CapabilityRevision string
 }
 
 type AcquireProviderCeilingCommand struct {
@@ -111,7 +113,7 @@ type AcquireProviderCeilingCommand struct {
 	RunID               common.RunID
 	AuthoritySnapshotID string
 	PrerequisiteID      string
-	Target              runtimecontract.ProviderModelTarget
+	Selection           runtimecontract.ProviderInferenceSelection
 	MinimumBytes        int
 }
 
@@ -229,7 +231,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GenerateEmbeddingCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
 		eventcontract.CommandTopic[GetProviderModelCatalogCommand, GetProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetProviderModelCatalog),
 		eventcontract.CommandTopic[RefreshProviderModelCatalogCommand, RefreshProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandRefreshProviderModelCatalog),
-		eventcontract.CommandTopic[ResolveProviderModelTargetCommand, ResolveProviderModelTargetResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandResolveProviderModelTarget),
+		eventcontract.CommandTopic[ValidateProviderInferenceSelectionCommand, ValidateProviderInferenceSelectionResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandValidateInferenceSelection),
 		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireProviderCeiling),
 		eventcontract.CommandTopic[PreflightRuntimeCandidateCommand, PreflightRuntimeCandidateResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicPreflightRuntimeCandidate),
 		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicRequestRuntimeCandidate),

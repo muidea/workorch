@@ -333,7 +333,7 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 	if err := c.DefinitionSeed.Validate(); err != nil {
 		return err
 	}
-	if err := c.Activation.ProviderTarget.Validate(); err != nil {
+	if err := c.Activation.ProviderSelection.Target.Validate(); err != nil {
 		return err
 	}
 	if err := c.ProviderCeiling.Validate(); err != nil {
@@ -350,7 +350,7 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 	}
 	if manifest.WorkspaceID != c.WorkspaceID || manifest.RunID != c.RunID || manifest.DefinitionRevision != c.Definition.Revision ||
 		manifest.DefinitionSeedHash != c.DefinitionSeed.Hash || c.DefinitionSeed.DefinitionRevision != c.Definition.Revision ||
-		manifest.OperationContractRevision != c.Activation.ExecutionContract.OperationContractRevision || c.ProviderCeiling.Target != c.Activation.ProviderTarget {
+		manifest.OperationContractRevision != c.Activation.ExecutionContract.OperationContractRevision || c.ProviderCeiling.Selection.Target != c.Activation.ProviderSelection.Target {
 		return fmt.Errorf("runtime semantic request context identity does not match manifest")
 	}
 	return nil

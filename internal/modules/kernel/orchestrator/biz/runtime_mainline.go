@@ -200,7 +200,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 	case runtimecontract.PrerequisiteKindProviderCeiling:
 		facts, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, m.EventHub(), aggregate.Facts, llmevents.AcquireProviderCeilingCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
-			PrerequisiteID: prerequisite.ID, Target: aggregate.Facts.Activation.ProviderTarget, MinimumBytes: prerequisite.MinimumBytes,
+			PrerequisiteID: prerequisite.ID, Selection: aggregate.Facts.Activation.ProviderSelection, MinimumBytes: prerequisite.MinimumBytes,
 		})
 		if err != nil {
 			return runtime.PrerequisiteResult{}, err

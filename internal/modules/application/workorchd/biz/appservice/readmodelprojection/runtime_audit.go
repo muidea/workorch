@@ -190,7 +190,7 @@ func runtimeAuditGrounding(prerequisites runtimecontract.PrerequisiteState, reso
 	if resources.ProviderCeiling != nil {
 		ceiling := resources.ProviderCeiling.Normalized()
 		ret.ProviderCeiling = &projectioncontract.RuntimeAuditProviderCeiling{
-			ProviderID: ceiling.Target.ProviderID, ModelID: ceiling.Target.ModelID,
+			ProviderID: ceiling.Selection.Target.ProviderID, ModelID: ceiling.Selection.Target.ModelID,
 			ContextWindowTokens: ceiling.ContextWindowTokens, ProviderMaxOutputTokens: ceiling.ProviderMaxOutputTokens,
 			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens, MaxInputTokens: ceiling.MaxInputTokens,
 			MaxBytes: ceiling.MaxBytes, CapabilityRevision: ceiling.CapabilityRevision, ConfigurationRevision: ceiling.ConfigurationRevision,

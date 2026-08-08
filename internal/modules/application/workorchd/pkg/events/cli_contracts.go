@@ -28,11 +28,12 @@ type CLIWorkspaceDeleteCommand struct {
 	Purge       bool
 }
 type CLIWorkspaceDeleteResult struct{ Deleted bool }
-type CLIWorkspaceUpdateLLMTargetCommand struct {
-	WorkspaceID common.WorkspaceID
-	Target      *runtimecontract.ProviderModelTarget
+type CLIWorkspaceUpdateLLMSelectionCommand struct {
+	WorkspaceID      common.WorkspaceID
+	Selection        *runtimecontract.ProviderInferenceSelection
+	ExpectedRevision uint64
 }
-type CLIWorkspaceUpdateLLMTargetResult struct{ Workspace CLIWorkspaceInfo }
+type CLIWorkspaceUpdateLLMSelectionResult struct{ Workspace CLIWorkspaceInfo }
 
 type CLIGoalDefineCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -274,7 +275,7 @@ func CLIMessageContracts() []eventcontract.MessageContract {
 		eventcontract.FacadeTopic[CLIWorkspaceListCommand, CLIWorkspaceListResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceList),
 		eventcontract.FacadeTopic[CLIWorkspaceSnapshotCommand, CLIWorkspaceSnapshotResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceSnapshot),
 		eventcontract.FacadeTopic[CLIWorkspaceDeleteCommand, CLIWorkspaceDeleteResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceDelete),
-		eventcontract.FacadeTopic[CLIWorkspaceUpdateLLMTargetCommand, CLIWorkspaceUpdateLLMTargetResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceUpdateLLMTarget),
+		eventcontract.FacadeTopic[CLIWorkspaceUpdateLLMSelectionCommand, CLIWorkspaceUpdateLLMSelectionResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceUpdateLLMSelection),
 		eventcontract.FacadeTopic[CLIGoalDefineCommand, CLIGoalDefineResult]("cli.goal", definitionPackage, TopicCLIGoalDefine),
 		eventcontract.FacadeTopic[CLIGoalListCommand, CLIGoalListResult]("cli.goal", definitionPackage, TopicCLIGoalList),
 		eventcontract.FacadeTopic[CLIGoalGetCommand, CLIGoalGetResult]("cli.goal", definitionPackage, TopicCLIGoalGet),
@@ -326,7 +327,7 @@ func CLIMessageContracts() []eventcontract.MessageContract {
 
 func CLITopics() []string {
 	return []string{
-		TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMTarget,
+		TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMSelection,
 		TopicCLIGoalDefine, TopicCLIGoalList, TopicCLIGoalGet, TopicCLIGoalUpdate,
 		TopicCLIDoDDefine, TopicCLIDoDList, TopicCLIDoDGet, TopicCLIDoDUpdate,
 		TopicCLIRunGet, TopicCLIRunList, TopicCLIRunStatus,

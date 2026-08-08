@@ -12,7 +12,7 @@ const (
 	TopicCLIWorkspaceList                         = "/cli/workspace/list"
 	TopicCLIWorkspaceSnapshot                     = "/cli/workspace/snapshot"
 	TopicCLIWorkspaceDelete                       = "/cli/workspace/delete"
-	TopicCLIWorkspaceUpdateLLMTarget              = "/cli/workspace/update-llm-target"
+	TopicCLIWorkspaceUpdateLLMSelection           = "/cli/workspace/update-llm-selection"
 	TopicCLIGoalDefine                            = "/cli/goal/define"
 	TopicCLIGoalList                              = "/cli/goal/list"
 	TopicCLIGoalGet                               = "/cli/goal/get"

@@ -24,7 +24,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("workspace", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkspaceCommandCreate,
 		TopicWorkspaceCommandUpdate,
-		TopicWorkspaceCommandUpdateLLMTarget,
+		TopicWorkspaceCommandUpdateLLMSelection,
 		TopicWorkspaceCommandDelete,
 		TopicWorkspaceCommandDefineGoal,
 		TopicWorkspaceCommandUpdateGoal,

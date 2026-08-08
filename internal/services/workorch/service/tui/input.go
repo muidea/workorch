@@ -374,6 +374,7 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 		{Command: "/model", Description: "select workspace provider/model"},
 		{Command: "/model show", Description: "show workspace model selection"},
 		{Command: "/model clear", Description: "inherit system default model"},
+		{Command: "/model reasoning", Insert: "/model reasoning ", Description: "set next-run reasoning effort"},
 		{Command: "/workspace", Description: "select workspace"},
 		{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace"},
 		{Command: "/goal", Insert: "/goal ", Description: "submit a new goal"},

@@ -911,7 +911,7 @@ type ValidationScratch struct {
 // Runtime core only checks identity, positive ceilings, and revision presence.
 // Budget derivation remains owned by blocks/llm.
 type ProviderCeiling struct {
-	Target                   ProviderModelTarget
+	Selection                ProviderInferenceSelection
 	ContextWindowTokens      int
 	ProviderMaxOutputTokens  int
 	EffectiveMaxOutputTokens int
@@ -922,7 +922,7 @@ type ProviderCeiling struct {
 }
 
 func (c ProviderCeiling) Normalized() ProviderCeiling {
-	c.Target = c.Target.Normalized()
+	c.Selection = c.Selection.Normalized()
 	c.CapabilityRevision = strings.TrimSpace(c.CapabilityRevision)
 	c.ConfigurationRevision = strings.TrimSpace(c.ConfigurationRevision)
 	return c
@@ -930,8 +930,8 @@ func (c ProviderCeiling) Normalized() ProviderCeiling {
 
 func (c ProviderCeiling) Validate() error {
 	c = c.Normalized()
-	if err := c.Target.Validate(); err != nil {
-		return fmt.Errorf("provider ceiling target: %w", err)
+	if err := c.Selection.Validate(); err != nil {
+		return fmt.Errorf("provider ceiling selection: %w", err)
 	}
 	if c.ContextWindowTokens <= 0 || c.ProviderMaxOutputTokens <= 0 || c.EffectiveMaxOutputTokens <= 0 || c.MaxInputTokens <= 0 || c.MaxBytes <= 0 {
 		return fmt.Errorf("provider ceiling requires positive token and byte ceilings")
@@ -951,7 +951,7 @@ func SameProviderCeiling(left *ProviderCeiling, right *ProviderCeiling) bool {
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	return l.Target.Same(r.Target) &&
+	return l.Selection.Same(r.Selection) &&
 		l.ContextWindowTokens == r.ContextWindowTokens &&
 		l.ProviderMaxOutputTokens == r.ProviderMaxOutputTokens &&
 		l.EffectiveMaxOutputTokens == r.EffectiveMaxOutputTokens &&

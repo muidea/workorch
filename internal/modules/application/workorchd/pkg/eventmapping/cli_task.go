@@ -96,7 +96,7 @@ func taskPlanDTOs(items []projectioncontract.TaskPlan) ([]workorchdevents.CLITas
 			NodeRunning: item.NodeRunning, Nodes: nodes, RetryOf: item.RetryOf, RetryAttempt: item.RetryAttempt,
 			FailureClass: item.FailureClass, FailureSignature: item.FailureSignature, TargetScope: item.TargetScope,
 			BlockingTicketID: item.BlockingTicketID, EvidenceRefs: append([]string(nil), item.EvidenceRefs...), OccurredAt: item.OccurredAt,
-			SourceProjection: item.SourceProjection, SealedLLMTarget: runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget),
+			SourceProjection: item.SourceProjection, SealedLLMSelection: runtimecontract.CloneProviderInferenceSelection(item.SealedLLMSelection),
 			RuntimeActivation: cloneRuntimeActivation(item.RuntimeActivation),
 		})
 	}
@@ -116,7 +116,7 @@ func taskPlanProjections(items []workorchdevents.CLITaskPlanInfo) []projectionco
 			NodeRunning: item.NodeRunning, Nodes: taskNodeProjections(item.Nodes), RetryOf: item.RetryOf, RetryAttempt: item.RetryAttempt,
 			FailureClass: item.FailureClass, FailureSignature: item.FailureSignature, TargetScope: item.TargetScope,
 			BlockingTicketID: item.BlockingTicketID, EvidenceRefs: append([]string(nil), item.EvidenceRefs...), OccurredAt: item.OccurredAt,
-			SourceProjection: item.SourceProjection, SealedLLMTarget: runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget),
+			SourceProjection: item.SourceProjection, SealedLLMSelection: runtimecontract.CloneProviderInferenceSelection(item.SealedLLMSelection),
 			RuntimeActivation: cloneRuntimeActivation(item.RuntimeActivation),
 		})
 	}

@@ -23,11 +23,11 @@ type WorkspaceRunScheduler interface {
 	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error)
 }
 
-func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID string, target *runtimecontract.ProviderModelTarget) (appmodelcore.Workspace, error) {
+func (s *serverState) updateWorkspaceLLMSelection(ctx context.Context, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
 	var ret appmodelcore.Workspace
 	err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 		var err error
-		ret, err = appservice.UpdateWorkspaceLLMTargetWithSession(ctx, session, workspaceID, target)
+		ret, err = appservice.UpdateWorkspaceLLMSelectionWithSession(ctx, session, workspaceID, selection, expectedRevision)
 		return err
 	})
 	return ret, err

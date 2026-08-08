@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-31
+Last Updated: 2026-08-08
 
 ## Purpose
 
@@ -31,6 +31,8 @@ Last Updated: 2026-07-31
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - 当前 Runtime CWI reconciliation、`/run resume`/`/run restart` scope 与 single-owner lifecycle 收口：
   [runtime-cwi-reconciliation-single-owner-closure-plan.md](70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
+- Workspace reasoning effort、ai-proxy capability、Run seal、Web Start/Restart 与 TUI `/model` 收口：
+  [workspace-reasoning-effort-single-owner-closure-plan.md](70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)
 - 当前仓库事实 / 未关项：
   [current-state.md](01-overview/current-state.md),
   [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md),

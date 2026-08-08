@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-04
+Last Updated: 2026-08-08
 
 ## Purpose
 
@@ -62,6 +62,24 @@ binding-matched semantic matrix。
 唯一实施队列见
 [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 
+### B. Workspace reasoning effort 单 Owner 收口（WRE，code-closed，待 deployed）
+
+当前代码已形成唯一 selection 链：
+
+- LLM owner 解析并校验模型公开的 reasoning capability；
+- Workspace owner 持久化下一次运行的 `DefaultLLMSelection`；
+- Run owner在 fresh activation/restart 封存 selection，Resume 保持当前 Run 值；
+- Orchestrator 只携带 sealed fact并将其纳入 provider ceiling，不选择或降级 effort；
+- LLM owner只发送目录允许的 nested `reasoning.effort`；空值省略、`none` 保持显式；
+- Web Start/Restart 与 TUI `/model` 通过同一 owner command更新 workspace 偏好；
+- target-only API、全局 provider reasoning source、旧 wire DTO 和兼容路径已删除。
+
+剩余门槛只是在重新部署实例上验证 Web Start/Restart、TUI `/model reasoning`、Resume 保持 sealed selection以及双
+workspace 隔离；未执行 live 前不宣称完整关闭。
+
+该项不新增状态机，也不修改 CWI、candidate、dispatch、evidence 或 terminal authority。唯一实施队列见
+[workspace-reasoning-effort-single-owner-closure-plan.md](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)。
+
 ### D. 可选验证
 
 | ID | 项 | 说明 | 历史过程稿 |
@@ -85,9 +103,9 @@ binding-matched semantic matrix。
   binding-derived CWI credit、single-owner lifecycle/outcome/SM-4 producer trust 与 terminal delivery均为 R3 回归基线；
   当前 active 缺口是 minimal bootstrap 后的自动 semantic-plan/owner-feasibility/SM-2 seal 事务、普通产品入口收拢与
   deployed semantic matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
-- **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；当前实施顺序仅由 R3 active plan 定义，archive
-  不得推导新实现约束。
-- **Active roadmap**：R3 是唯一必需项，当前仅剩 E3 live；EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace
+  reasoning effort 实施顺序由 WRE active plan 定义，archive 不得推导新实现约束。
+- **Active roadmap**：R3 当前仅剩 E3 live；WRE 是独立必需收口项，用于 workspace reasoning capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

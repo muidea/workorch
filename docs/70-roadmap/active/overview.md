@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-08-04
+Last Updated: 2026-08-08
 
 ## Purpose
 
@@ -17,6 +17,7 @@ Last Updated: 2026-08-04
 | Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
 | Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（仅 R3-E3）**；Runtime-sensitive owner 合同回迁、单 mutation surface、全仓 race 与 fresh managed deployed matrix 已闭环；剩余 fresh LSP Bridge 逐 CWI 验收，见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
+| Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
 | 禁止的 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
@@ -24,7 +25,8 @@ Last Updated: 2026-08-04
 
 ## Residual Mandatory Work
 
-当前必须关闭的 Runtime 项仅剩 **fresh LSP Bridge deployed semantic matrix**。22 组件 EventHub 合同归一及其全链
+当前 Runtime CWI 主线仅剩 **fresh LSP Bridge deployed semantic matrix**；同时新增独立的 **workspace reasoning effort
+single-owner closure**，它不改变 CWI 或四状态机 action 权威。22 组件 EventHub 合同归一及其全链
 验证已经完成并归档，且未新增或修改 Runtime 状态机。CWI semantic contract
 自动编译、deployed reconciliation、空 workspace prospective target、resume/restart/drift/crash/concurrency 与 CPU guard 已形成
 基线。capability execute、LLM provider、Runtime capability acquisition、operation admissibility/feasibility、semantic-proof
@@ -39,6 +41,7 @@ LSP live 必须继续由受约束 semantic-plan document + owner feasibility 形
 | --- | --- | --- | --- |
 | R3 | single-owner semantic contract + CWI reconciliation + contract consolidation | minimal bootstrap；SM-3 typed document；SM-2 seal；`resume=current_run`、`restart=workspace_full`；接收 owner EventHub 合同；private internal event；canonical feedback/original diagnostic；LSP Bridge 逐 CWI验收 | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | RDS | DeepSeek Responses 请求规模与超时收口 | text-only Responses、semantic-plan 分批、阶段级输出预算、continuation、stream、provider timeout 顺序与错误分类 | [active plan](runtime-deepseek-responses-request-size-closure-plan.md) |
+| WRE | Workspace reasoning effort deployed proof | 代码收口完成；验证 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection与双 workspace隔离 | [active plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 可补一次 `patch apply + validation + DoD closeout` deployed live；不阻塞 Runtime 收口 | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
 延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。

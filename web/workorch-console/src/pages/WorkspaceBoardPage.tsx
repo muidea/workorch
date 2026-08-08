@@ -69,9 +69,10 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     }
   });
 
-  const trackWorkspaceResumeInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
+	const trackWorkspaceResumeInBackground = (workspace: Workspace, request: WorkspaceExecutionActivationRequest) => {
+		const workspaceId = workspace.id;
     void (request.llmTarget
-      ? workorchApi.updateWorkspaceLLMTarget(workspaceId, request.llmTarget)
+		? workorchApi.updateWorkspaceLLMSelection(workspaceId, { target: request.llmTarget, reasoningEffort: request.reasoningEffort }, workspace.revision)
       : Promise.resolve(undefined))
       .then(() => workorchApi.resumeWorkspaceExecution(workspaceId, request))
       .then(() => {
@@ -93,7 +94,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       return;
     }
     message.info('工作空间执行已提交，正在后台处理');
-    trackWorkspaceResumeInBackground(workspace.id, request);
+	trackWorkspaceResumeInBackground(workspace, request);
   };
 
   const handleWorkspaceCreated = async (workspaceId: string) => {

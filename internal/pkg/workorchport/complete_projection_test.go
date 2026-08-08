@@ -68,10 +68,10 @@ func TestCompleteProjectionContractsPreserveOriginalFieldsAndDetachStorage(t *te
 	}
 
 	target := &runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}
-	plans := []projectioncontract.TaskPlan{{SealedLLMTarget: target, RuntimeActivation: &projectioncontract.RuntimeActivationStatus{Disposition: "ready"}}}
+	plans := []projectioncontract.TaskPlan{{SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: *target}, RuntimeActivation: &projectioncontract.RuntimeActivationStatus{Disposition: "ready"}}}
 	gotPlans := projectioncontract.CloneTaskPlans(plans)
 	target.ModelID = "mutated"
-	if gotPlans[0].SealedLLMTarget.ModelID != "model" || gotPlans[0].RuntimeActivation.Disposition != "ready" {
+	if gotPlans[0].SealedLLMSelection.Target.ModelID != "model" || gotPlans[0].RuntimeActivation.Disposition != "ready" {
 		t.Fatalf("task plan projection = %+v", gotPlans[0])
 	}
 

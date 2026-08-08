@@ -305,8 +305,8 @@ func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite r
 		if result.ProviderCeiling.MaxBytes < prerequisite.MinimumBytes {
 			return fmt.Errorf("provider ceiling prerequisite returned an insufficient ceiling")
 		}
-		if target := facts.Activation.ProviderTarget.Normalized(); target.ProviderID != "" || target.ModelID != "" {
-			if !result.ProviderCeiling.Target.Same(target) {
+		if target := facts.Activation.ProviderSelection.Target.Normalized(); target.ProviderID != "" || target.ModelID != "" {
+			if !result.ProviderCeiling.Selection.Target.Same(target) {
 				return fmt.Errorf("provider ceiling target does not match activation target")
 			}
 		}

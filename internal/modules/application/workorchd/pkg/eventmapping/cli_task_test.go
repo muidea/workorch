@@ -22,7 +22,7 @@ func TestCLITaskProjectionRoundTripDetachesMutableFields(t *testing.T) {
 			ID: "node-1", DependsOn: []string{"node-0"}, EvidenceRefs: []string{"evidence-1"},
 			CoverageTargets: []string{"target-1"}, Input: input,
 		}},
-		EvidenceRefs: []string{"plan-evidence-1"}, SealedLLMTarget: target, RuntimeActivation: activation,
+		EvidenceRefs: []string{"plan-evidence-1"}, SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: *target}, RuntimeActivation: activation,
 	}}
 
 	dto, err := taskPlanDTOs(plans)
@@ -47,9 +47,9 @@ func TestCLITaskProjectionRoundTripDetachesMutableFields(t *testing.T) {
 				"items":  []any{map[string]any{"value": "original"}},
 			},
 		}},
-		EvidenceRefs:      []string{"plan-evidence-1"},
-		SealedLLMTarget:   &runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"},
-		RuntimeActivation: &projectioncontract.RuntimeActivationStatus{Disposition: "ready"},
+		EvidenceRefs:       []string{"plan-evidence-1"},
+		SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}},
+		RuntimeActivation:  &projectioncontract.RuntimeActivationStatus{Disposition: "ready"},
 	}}
 	if !reflect.DeepEqual(roundTrip, want) {
 		t.Fatalf("task plan round trip = %#v, want %#v", roundTrip, want)

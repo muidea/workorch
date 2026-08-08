@@ -15,7 +15,7 @@ import (
 )
 
 func RuntimeActivationContext(
-	providerTarget runtimecontract.ProviderModelTarget,
+	providerSelection runtimecontract.ProviderInferenceSelection,
 	dialogLanguage string,
 	defaultSoul *soulmodel.Soul,
 	stageSouls map[string]*soulmodel.Soul,
@@ -29,7 +29,7 @@ func RuntimeActivationContext(
 	continuation runtimecontract.RuntimeContinuationContext,
 ) runtimecontract.RuntimeActivationContext {
 	ret := runtimecontract.RuntimeActivationContext{
-		ProviderTarget:    providerTarget.Normalized(),
+		ProviderSelection: providerSelection.Normalized(),
 		DialogLanguage:    strings.TrimSpace(dialogLanguage),
 		DefaultSoul:       runtimeSoulContext(defaultSoul),
 		Skills:            runtimeSkillContexts(skills),

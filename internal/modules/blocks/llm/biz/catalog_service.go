@@ -38,6 +38,13 @@ type aiProxyModelRecord struct {
 	SupportedEndpoints  []string `json:"supported_endpoints"`
 	ContextWindowTokens int      `json:"contextWindowTokens"`
 	MaxOutputTokens     int      `json:"maxOutputTokens"`
+	Capabilities        struct {
+		Reasoning *struct {
+			Supported     bool     `json:"supported"`
+			DefaultEffort string   `json:"default_effort"`
+			Efforts       []string `json:"efforts"`
+		} `json:"reasoning"`
+	} `json:"capabilities"`
 }
 
 type catalogCacheKey struct {
@@ -310,6 +317,15 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 			SupportedEndpoints:  endpoints,
 			Operations:          ops,
 		}
+		if item.Capabilities.Reasoning != nil {
+			desc.Reasoning = llmmodels.ProviderReasoningCapability{
+				Supported:     item.Capabilities.Reasoning.Supported,
+				DefaultEffort: item.Capabilities.Reasoning.DefaultEffort,
+				Efforts:       append([]string(nil), item.Capabilities.Reasoning.Efforts...),
+			}.Normalized()
+		} else {
+			desc.Reasoning = (llmmodels.ProviderReasoningCapability{}).Normalized()
+		}
 		switch {
 		case containsOperation(ops, workorchconfig.LLMOperationEmbeddings):
 			// Embeddings do not produce model output. Their readiness is based on
@@ -328,7 +344,7 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		default:
 			desc.CapabilityReady = true
 		}
-		desc.CapabilityRevision = capabilityRevision(desc.Target, desc.ContextWindowTokens, desc.MaxOutputTokens, strings.Join(ops, ","))
+		desc.CapabilityRevision = capabilityRevision(desc.Target, desc.ContextWindowTokens, desc.MaxOutputTokens, descriptorCapabilityRevisionInput(desc))
 		models = append(models, desc)
 	}
 	sort.SliceStable(models, func(i, j int) bool {
@@ -395,6 +411,21 @@ func catalogRevision(providerID string, models []llmmodels.ProviderModelDescript
 		for _, endpoint := range endpoints {
 			writeLenPrefixed(h, endpoint)
 		}
+		reasoning := model.Reasoning.Normalized()
+		if reasoning.Supported {
+			writeLenPrefixed(h, "reasoning-supported")
+		} else {
+			writeLenPrefixed(h, "reasoning-unsupported")
+		}
+		if reasoning.Valid {
+			writeLenPrefixed(h, "reasoning-valid")
+		} else {
+			writeLenPrefixed(h, "reasoning-invalid")
+		}
+		writeLenPrefixed(h, reasoning.DefaultEffort)
+		for _, effort := range reasoning.Efforts {
+			writeLenPrefixed(h, effort)
+		}
 		if model.CapabilityReady {
 			writeLenPrefixed(h, "1")
 		} else {
@@ -402,6 +433,18 @@ func catalogRevision(providerID string, models []llmmodels.ProviderModelDescript
 		}
 	}
 	return "catalog-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func descriptorCapabilityRevisionInput(desc llmmodels.ProviderModelDescriptor) string {
+	parts := append([]string(nil), desc.Operations...)
+	reasoning := desc.Reasoning.Normalized()
+	parts = append(parts, fmt.Sprintf("reasoning:supported=%t", reasoning.Supported))
+	parts = append(parts, fmt.Sprintf("reasoning:valid=%t", reasoning.Valid))
+	parts = append(parts, "reasoning:default="+reasoning.DefaultEffort)
+	for _, effort := range reasoning.Efforts {
+		parts = append(parts, "reasoning:effort="+effort)
+	}
+	return strings.Join(parts, ",")
 }
 
 func capabilityRevision(target runtimecontract.ProviderModelTarget, contextWindowTokens int, maxOutputTokens int, overrideRevision string) string {
@@ -430,6 +473,7 @@ func cloneCatalog(catalog llmmodels.ProviderModelCatalog) llmmodels.ProviderMode
 	for idx := range catalog.Models {
 		catalog.Models[idx].SupportedEndpoints = append([]string(nil), catalog.Models[idx].SupportedEndpoints...)
 		catalog.Models[idx].Operations = append([]string(nil), catalog.Models[idx].Operations...)
+		catalog.Models[idx].Reasoning = catalog.Models[idx].Reasoning.Clone()
 	}
 	return catalog
 }

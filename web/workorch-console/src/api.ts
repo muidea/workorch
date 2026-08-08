@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderModelTarget, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -199,10 +199,10 @@ export const workorchApi = {
     });
     return body.soulBindings;
   },
-  updateWorkspaceLLMTarget: async (workspaceId: string, target: ProviderModelTarget) => {
-    const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/llm-target`, {
+  updateWorkspaceLLMSelection: async (workspaceId: string, selection: ProviderInferenceSelection, expectedRevision: number) => {
+    const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/llm-selection`, {
       method: 'PUT',
-      body: JSON.stringify({ providerId: target.providerId, modelId: target.modelId })
+      body: JSON.stringify({ providerId: selection.target.providerId, modelId: selection.target.modelId, reasoningEffort: selection.reasoningEffort, expectedRevision })
     });
     return body.workspace;
   },

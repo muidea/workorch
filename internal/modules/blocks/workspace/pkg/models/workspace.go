@@ -19,7 +19,7 @@ type Workspace struct {
 	ActiveRunID          common.RunID
 	TemplateID           string
 	ProfileID            string
-	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
 	ContextHints         workorcheventpayload.Payload

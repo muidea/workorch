@@ -175,7 +175,7 @@ func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req workorchqu
 	return &view, nil
 }
 
-func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (b *remoteWorkspaceBackend) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (*projectioncontract.Workspace, error) {
 	if b == nil || b.cl == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -183,14 +183,14 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 		ws  *projectioncontract.Workspace
 		err error
 	)
-	if target == nil {
-		ws, err = b.cl.ClearWorkspaceLLMTarget(ctx, string(id))
+	if selection == nil {
+		ws, err = b.cl.ClearWorkspaceLLMSelection(ctx, string(id), expectedRevision)
 	} else {
-		value := target.Normalized()
+		value := selection.Normalized()
 		if err := value.Validate(); err != nil {
 			return nil, err
 		}
-		ws, err = b.cl.UpdateWorkspaceLLMTarget(ctx, string(id), value)
+		ws, err = b.cl.UpdateWorkspaceLLMSelection(ctx, string(id), value, expectedRevision)
 	}
 	if err != nil {
 		return nil, err

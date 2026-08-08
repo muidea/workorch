@@ -703,9 +703,11 @@ wait_runtime_result_snapshot() {
 post_execution_activation() {
   local payload="$TMP_DIR/activation-request.json"
   local status=""
-  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+  local workspace_revision
+  workspace_revision="$(curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["revision"])')"
+  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-selection" \
     -H 'Content-Type: application/json' \
-    -d '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}' >"$TMP_DIR/llm-target.json"
+    -d '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model","expectedRevision":'"$workspace_revision"'}' >"$TMP_DIR/llm-selection.json"
   curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" \
     -H 'Content-Type: application/json' \
     -d '{"defaultSoulId":"'"$SOUL_ID"'","bindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"}}' >"$TMP_DIR/soul-bindings.json"

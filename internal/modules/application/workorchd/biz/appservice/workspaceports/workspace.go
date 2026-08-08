@@ -53,7 +53,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		InternalDirectory:    item.InternalDirectory,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMSelection:  runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         soulbinding.FromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
@@ -64,24 +64,25 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 	return err
 }
 
-func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*workspacemodel.Workspace, error) {
+func UpdateWorkspaceLLMSelection(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (*workspacemodel.Workspace, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	var cloned *runtimecontract.ProviderModelTarget
-	if target != nil {
-		value := target.Normalized()
+	var cloned *runtimecontract.ProviderInferenceSelection
+	if selection != nil {
+		value := selection.Normalized()
 		if err := value.Validate(); err != nil {
 			return nil, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 		}
 		cloned = &value
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMTargetCommand{
-		WorkspaceID: workspaceID,
-		Target:      cloned,
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceLLMSelectionCommand{
+		WorkspaceID:      workspaceID,
+		Selection:        cloned,
+		ExpectedRevision: expectedRevision,
 	})
-	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateLLMTarget)
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateLLMSelection)
 	if err != nil {
 		return nil, err
 	}

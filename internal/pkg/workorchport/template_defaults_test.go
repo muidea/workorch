@@ -104,7 +104,7 @@ func (b fakeWorkspaceBackend) RuntimeView(context.Context, workorchquerycontract
 	return nil, nil
 }
 
-func (b fakeWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (b fakeWorkspaceBackend) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	return b.Get(ctx, id)
 }
 

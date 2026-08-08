@@ -392,7 +392,7 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 	}
 	prepared := initialized
 	prepared.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target: prepared.Facts.Activation.ProviderTarget, ContextWindowTokens: 8192,
+		Selection: runtimecontract.ProviderInferenceSelection{Target: prepared.Facts.Activation.ProviderSelection.Target}, ContextWindowTokens: 8192,
 		ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536,
 		CapabilityRevision: "semantic-capability-v1", ConfigurationRevision: "semantic-config-v1",
 	}

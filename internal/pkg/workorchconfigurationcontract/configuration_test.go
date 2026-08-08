@@ -11,7 +11,7 @@ func TestServiceConfigurationRoundTripPreservesProviderCapabilities(t *testing.T
 	want := ServiceConfiguration{LLM: LLMConfiguration{CustomProviders: []CustomProviderConfigurationView{{
 		ID: "provider-1", Models: []CustomProviderModelView{{
 			ID: "model-1", ContextWindowTokens: 128000, MaxOutputTokens: 32768,
-			Temperature: &temperature, ReasoningEffort: "high", ThinkingBudgetTokens: 8192,
+			Temperature: &temperature, ThinkingBudgetTokens: 8192,
 			CacheMode: "provider", PromptCacheKey: &enabled, MessageCacheControl: &enabled,
 			CacheUsageFields: []string{"cache_read_input_tokens"},
 		}},
@@ -25,7 +25,7 @@ func TestServiceConfigurationRoundTripPreservesProviderCapabilities(t *testing.T
 		t.Fatalf("unmarshal: %v", err)
 	}
 	model := got.LLM.CustomProviders[0].Models[0]
-	if model.Temperature == nil || *model.Temperature != temperature || model.ReasoningEffort != "high" || model.ThinkingBudgetTokens != 8192 || model.CacheMode != "provider" || model.PromptCacheKey == nil || !*model.PromptCacheKey || len(model.CacheUsageFields) != 1 {
+	if model.Temperature == nil || *model.Temperature != temperature || model.ThinkingBudgetTokens != 8192 || model.CacheMode != "provider" || model.PromptCacheKey == nil || !*model.PromptCacheKey || len(model.CacheUsageFields) != 1 {
 		t.Fatalf("provider capability fields were lost: %+v", model)
 	}
 }

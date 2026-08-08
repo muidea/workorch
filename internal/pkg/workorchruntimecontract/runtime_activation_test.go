@@ -8,7 +8,7 @@ import (
 
 func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *testing.T) {
 	activation := RuntimeActivationContext{
-		ProviderTarget:    ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ReasoningEffort: "high"},
 		DialogLanguage:    "zh-CN",
 		DefaultSoul:       &RuntimeSoulContext{ID: "soul-default", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
 		StageSoulBindings: []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},
@@ -48,6 +48,11 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 	if !SameRuntimeActivationContext(activation, cloned) {
 		t.Fatalf("activation clone drifted: source=%+v clone=%+v", activation, cloned)
 	}
+	cloned.ProviderSelection.ReasoningEffort = "low"
+	if SameRuntimeActivationContext(activation, cloned) {
+		t.Fatal("provider reasoning effort drift was not detected")
+	}
+	cloned = activation.Clone()
 	cloned.Skills[0].Instruction = "mutated"
 	if SameRuntimeActivationContext(activation, cloned) {
 		t.Fatal("skill instruction drift was not detected")

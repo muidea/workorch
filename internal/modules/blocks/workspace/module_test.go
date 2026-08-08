@@ -63,7 +63,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 }
 
-func TestWorkspaceChangedNotificationClonesDefaultLLMTarget(t *testing.T) {
+func TestWorkspaceChangedNotificationClonesDefaultLLMSelection(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	workspaces := memory.NewWorkspaceRepository()
@@ -90,19 +90,21 @@ func TestWorkspaceChangedNotificationClonesDefaultLLMTarget(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workspaceevents.TopicWorkspaceStateChanged) })
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
-	sendWorkspaceTestCommand(t, context.Background(), hub, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: "ws-notify", Target: &target})
+	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
+	current, _ := workspaces.Get(context.Background(), "ws-notify")
+	sendWorkspaceTestCommand(t, context.Background(), hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: "ws-notify", Selection: &selection, ExpectedRevision: current.Revision})
 	target.ModelID = "mutated"
 	select {
 	case data := <-received:
-		if data.DefaultLLMTarget == nil || data.DefaultLLMTarget.ModelID != "model-a" {
-			t.Fatalf("notification target = %+v", data.DefaultLLMTarget)
+		if data.DefaultLLMSelection == nil || data.DefaultLLMSelection.Target.ModelID != "model-a" || data.DefaultLLMSelection.ReasoningEffort != "high" {
+			t.Fatalf("notification target = %+v", data.DefaultLLMSelection)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for workspace notification")
 	}
 }
 
-func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testing.T) {
+func TestUpdateWorkspaceLLMSelectionCommandPersistsCompleteTargetAndClears(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
 	workspaceID := common.WorkspaceID("ws-model-target")
@@ -118,33 +120,58 @@ func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testi
 		t.Fatalf("Start: %v", err)
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom-provider", ModelID: "model-a"}
-	result := sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID, Target: &target})
-	if result.Workspace == nil || result.Workspace.DefaultLLMTarget == nil || !result.Workspace.DefaultLLMTarget.Same(target) {
+	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "none"}
+	current, _ := repo.Get(ctx, workspaceID)
+	result := sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: workspaceID, Selection: &selection, ExpectedRevision: current.Revision})
+	if !result.Changed {
+		t.Fatal("first selection update was not reported as changed")
+	}
+	if result.Workspace == nil || result.Workspace.DefaultLLMSelection == nil || !result.Workspace.DefaultLLMSelection.Same(selection) {
 		t.Fatalf("updated target = %+v", result.Workspace)
 	}
 	if result.Workspace.ActiveRunID != "run-current" {
 		t.Fatalf("active run changed = %q", result.Workspace.ActiveRunID)
 	}
-	sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID, Target: result.Workspace.DefaultLLMTarget})
+	duplicate := sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: workspaceID, Selection: result.Workspace.DefaultLLMSelection, ExpectedRevision: result.Workspace.Revision})
+	if duplicate.Changed || duplicate.Workspace == nil || duplicate.Workspace.Revision != result.Workspace.Revision {
+		t.Fatalf("duplicate update = %+v, want unchanged revision %d", duplicate, result.Workspace.Revision)
+	}
+	staleResult := hub.Send(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandUpdateLLMSelection,
+		"workspace/module-test",
+		workspaceevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		workspaceevents.UpdateWorkspaceLLMSelectionCommand{
+			WorkspaceID: workspaceID,
+			Selection: &runtimecontract.ProviderInferenceSelection{
+				Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-provider", ModelID: "stale-model"},
+			},
+			ExpectedRevision: current.Revision,
+		},
+	))
+	if staleResult == nil || !errors.Is(staleResult.Error(), common.ErrConflict) {
+		t.Fatalf("stale update error = %v, want conflict", staleResult)
+	}
 	target.ModelID = "mutated"
 	stored, err := repo.Get(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("Get workspace: %v", err)
 	}
-	if stored.DefaultLLMTarget == nil || stored.DefaultLLMTarget.ModelID != "model-a" {
-		t.Fatalf("stored target = %+v", stored.DefaultLLMTarget)
+	if stored.DefaultLLMSelection == nil || stored.DefaultLLMSelection.Target.ModelID != "model-a" || stored.DefaultLLMSelection.ReasoningEffort != "none" {
+		t.Fatalf("stored target = %+v", stored.DefaultLLMSelection)
 	}
-	sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID})
+	sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: workspaceID, ExpectedRevision: stored.Revision})
 	stored, err = repo.Get(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("Get cleared workspace: %v", err)
 	}
-	if stored.DefaultLLMTarget != nil {
-		t.Fatalf("cleared target = %+v, want nil", stored.DefaultLLMTarget)
+	if stored.DefaultLLMSelection != nil {
+		t.Fatalf("cleared target = %+v, want nil", stored.DefaultLLMSelection)
 	}
 }
 
-func TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart(t *testing.T) {
+func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspaces.json")
 	workspaceID := common.WorkspaceID("ws-model-restart")
@@ -162,7 +189,9 @@ func TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart(t *testing.T) {
 		t.Fatalf("start first owner: %v", err)
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-after-restart"}
-	sendWorkspaceTestCommand(t, ctx, firstHub, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, workspaceevents.UpdateWorkspaceLLMTargetCommand{WorkspaceID: workspaceID, Target: &target})
+	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "low"}
+	current, _ := firstRepo.Get(ctx, workspaceID)
+	sendWorkspaceTestCommand(t, ctx, firstHub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: workspaceID, Selection: &selection, ExpectedRevision: current.Revision})
 
 	secondHub := magicevent.NewHub(16)
 	t.Cleanup(func() { secondHub.Terminate(context.Background()) })
@@ -174,7 +203,7 @@ func TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart(t *testing.T) {
 		t.Fatalf("start restarted owner: %v", err)
 	}
 	result := sendWorkspaceTestCommand(t, ctx, secondHub, workspaceevents.TopicWorkspaceCommandGet, workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
-	if result.Workspace == nil || result.Workspace.DefaultLLMTarget == nil || !result.Workspace.DefaultLLMTarget.Same(target) {
+	if result.Workspace == nil || result.Workspace.DefaultLLMSelection == nil || !result.Workspace.DefaultLLMSelection.Same(selection) {
 		t.Fatalf("target after restart = %+v", result.Workspace)
 	}
 }

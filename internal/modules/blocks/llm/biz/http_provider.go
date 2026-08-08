@@ -186,7 +186,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		PromptCacheKey:  promptCacheKeyForRequest(p.config, request),
 		Temperature:     providerTemperature(p.config),
 		MaxOutputTokens: maxOutputTokensForRequest(p.config, request),
-		ReasoningEffort: p.config.InferenceProfile.ReasoningEffort,
+		Reasoning:       responsesReasoningForRequest(request),
 		Text:            responsesTextForRequest(p.config.Capabilities, request),
 	}
 	if !p.config.Capabilities.Responses {
@@ -194,7 +194,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		if err != nil {
 			return llmmodels.ProviderCompletionResult{}, err
 		}
-		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokensForRequest(p.config, request), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request)}
+		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokensForRequest(p.config, request), Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request)}
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -285,7 +285,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		PromptCacheKey:  promptCacheKeyForRequest(p.config, request),
 		Temperature:     providerTemperature(p.config),
 		MaxOutputTokens: maxOutputTokensForRequest(p.config, request),
-		ReasoningEffort: p.config.InferenceProfile.ReasoningEffort,
+		Reasoning:       responsesReasoningForRequest(request),
 		Text:            responsesTextForRequest(p.config.Capabilities, request),
 		Stream:          true,
 	}
@@ -294,7 +294,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		if err != nil {
 			return llmmodels.ProviderCompletionResult{}, err
 		}
-		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokensForRequest(p.config, request), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request), Stream: true, StreamOptions: &chatCompletionStreamOptions{IncludeUsage: true}}
+		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokensForRequest(p.config, request), Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request), Stream: true, StreamOptions: &chatCompletionStreamOptions{IncludeUsage: true}}
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -446,7 +446,6 @@ type chatCompletionRequest struct {
 	PromptCacheKey      string                         `json:"prompt_cache_key,omitempty"`
 	Temperature         float64                        `json:"temperature"`
 	MaxCompletionTokens int64                          `json:"max_completion_tokens,omitempty"`
-	ReasoningEffort     string                         `json:"reasoning_effort,omitempty"`
 	Thinking            *compatibleThinkingConfigParam `json:"thinking,omitempty"`
 	ResponseFormat      map[string]any                 `json:"response_format,omitempty"`
 	Stream              bool                           `json:"stream,omitempty"`
@@ -462,9 +461,21 @@ type responsesRequest struct {
 	PromptCacheKey  string               `json:"prompt_cache_key,omitempty"`
 	Temperature     float64              `json:"temperature,omitempty"`
 	MaxOutputTokens int64                `json:"max_output_tokens,omitempty"`
-	ReasoningEffort string               `json:"reasoning_effort,omitempty"`
+	Reasoning       *responsesReasoning  `json:"reasoning,omitempty"`
 	Text            *responsesTextConfig `json:"text,omitempty"`
 	Stream          bool                 `json:"stream,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort"`
+}
+
+func responsesReasoningForRequest(request llmmodels.ProviderRequest) *responsesReasoning {
+	effort := strings.TrimSpace(request.ReasoningEffort)
+	if effort == "" {
+		return nil
+	}
+	return &responsesReasoning{Effort: effort}
 }
 
 type responsesTextConfig struct {

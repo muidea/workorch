@@ -20,7 +20,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLIWorkspaceList,
 		workorchdevents.TopicCLIWorkspaceSnapshot,
 		workorchdevents.TopicCLIWorkspaceDelete,
-		workorchdevents.TopicCLIWorkspaceUpdateLLMTarget,
+		workorchdevents.TopicCLIWorkspaceUpdateLLMSelection,
 	} {
 		d.SubscribeFunc(topic, d.handleTypedCLIWorkspace)
 	}

@@ -25,18 +25,18 @@ func (b *modelSelectionBackend) Config() backend.ConfigBackend       { return b.
 
 type modelSelectionWorkspaceBackend struct {
 	*fakeWS
-	lastTarget  *runtimecontract.ProviderModelTarget
+	lastTarget  *runtimecontract.ProviderInferenceSelection
 	updateCalls int
 	updateErr   error
 }
 
-func (b *modelSelectionWorkspaceBackend) UpdateLLMTarget(_ context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (b *modelSelectionWorkspaceBackend) UpdateLLMSelection(_ context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	b.updateCalls++
 	if b.updateErr != nil {
 		return nil, b.updateErr
 	}
-	b.lastTarget = runtimecontract.CloneProviderModelTarget(target)
-	return &projectioncontract.Workspace{ID: string(id), Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(target)}, nil
+	b.lastTarget = runtimecontract.CloneProviderInferenceSelection(target)
+	return &projectioncontract.Workspace{ID: string(id), Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(target)}, nil
 }
 
 type modelSelectionConfigBackend struct {
@@ -170,7 +170,7 @@ func TestWorkspaceDeletedDuringModelUpdateExitsSelection(t *testing.T) {
 	m.modelSelectMode = true
 	m.modelSelectWorkspaceID = "ws-1"
 	m.modelSelectRequestSeq = 4
-	next, _ := m.Update(WorkspaceLLMTargetUpdatedMsg{RequestSeq: 4, WorkspaceID: "ws-1", Error: common.ErrNotFound})
+	next, _ := m.Update(WorkspaceLLMSelectionUpdatedMsg{RequestSeq: 4, WorkspaceID: "ws-1", Error: common.ErrNotFound})
 	m = appModelFromTea(t, next)
 	if m.modelSelectMode || !errors.Is(m.lastError, common.ErrNotFound) {
 		t.Fatalf("deleted workspace state = mode:%v err:%v", m.modelSelectMode, m.lastError)
@@ -205,7 +205,7 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 	m = appModelFromTea(t, next)
 	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m = appModelFromTea(t, next)
-	if !m.modelSelectConfirming || m.modelSelectPending == nil || m.modelSelectPending.ProviderID != "custom" || m.modelSelectPending.ModelID != "model-b" {
+	if !m.modelSelectConfirming || m.modelSelectPending == nil || m.modelSelectPending.Target.ProviderID != "custom" || m.modelSelectPending.Target.ModelID != "model-b" {
 		t.Fatalf("pending target = %+v", m.modelSelectPending)
 	}
 	next, saveCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -213,13 +213,13 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 	if saveCmd == nil {
 		t.Fatal("second enter did not submit")
 	}
-	updated := saveCmd().(WorkspaceLLMTargetUpdatedMsg)
+	updated := saveCmd().(WorkspaceLLMSelectionUpdatedMsg)
 	next, _ = m.Update(updated)
 	m = appModelFromTea(t, next)
 	if m.modelSelectMode {
 		t.Fatal("selection mode remained open after save")
 	}
-	if be.workspace.lastTarget == nil || be.workspace.lastTarget.ProviderID != "custom" || be.workspace.lastTarget.ModelID != "model-b" {
+	if be.workspace.lastTarget == nil || be.workspace.lastTarget.Target.ProviderID != "custom" || be.workspace.lastTarget.Target.ModelID != "model-b" {
 		t.Fatalf("persisted target = %+v", be.workspace.lastTarget)
 	}
 }
@@ -228,7 +228,7 @@ func TestModelClearRequiresConfirmationAndPersistsNil(t *testing.T) {
 	be := &modelSelectionBackend{fakeBE: newFake(t), workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}}, config: &modelSelectionConfigBackend{fakeC: &fakeC{}}}
 	m := NewAppModel(be, "ws-1", "")
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
-	m.workspaces = []projectioncontract.Workspace{{ID: "ws-1", Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMTarget: &target}}
+	m.workspaces = []projectioncontract.Workspace{{ID: "ws-1", Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: target}}}
 	m.activeWorkspaceID = "ws-1"
 	m.setInput("/model clear")
 	next, cmd := m.submitInput()
@@ -241,7 +241,7 @@ func TestModelClearRequiresConfirmationAndPersistsNil(t *testing.T) {
 	if saveCmd == nil {
 		t.Fatal("clear confirmation did not submit")
 	}
-	updated := saveCmd().(WorkspaceLLMTargetUpdatedMsg)
+	updated := saveCmd().(WorkspaceLLMSelectionUpdatedMsg)
 	next, _ = m.Update(updated)
 	m = appModelFromTea(t, next)
 	if be.workspace.lastTarget != nil {
@@ -254,14 +254,14 @@ func TestModelShowDistinguishesNextRunDefaultFromCurrentRunSealedTarget(t *testi
 	m := NewAppModel(be, "ws-model-show", "")
 	nextTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-next", ModelID: "model-next"}
 	sealedTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-current", ModelID: "model-current"}
-	m.workspaces = []projectioncontract.Workspace{{ID: "ws-model-show", State: string(common.WorkspaceStateActive), DefaultLLMTarget: &nextTarget}}
+	m.workspaces = []projectioncontract.Workspace{{ID: "ws-model-show", State: string(common.WorkspaceStateActive), DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: nextTarget}}}
 	m.activeWorkspaceID = "ws-model-show"
 	entry := m.ensureWorkspaceRuntimeState("ws-model-show")
 	entry.Display.ActiveRunID = "run-model-show"
-	entry.Display.SealedLLMTarget = &sealedTarget
+	entry.Display.SealedLLMSelection = &runtimecontract.ProviderInferenceSelection{Target: sealedTarget, ReasoningEffort: "high"}
 	entry.HasDisplay = true
 
-	next, _ := m.applyWorkspaceLLMTargetShow(WorkspaceLLMTargetShowMsg{
+	next, _ := m.applyWorkspaceLLMSelectionShow(WorkspaceLLMSelectionShowMsg{
 		WorkspaceID: "ws-model-show",
 		Config:      &backend.ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "provider-system", ModelID: "model-system"}},
 	})
@@ -273,6 +273,44 @@ func TestModelShowDistinguishesNextRunDefaultFromCurrentRunSealedTarget(t *testi
 	} {
 		if !strings.Contains(got.result, want) {
 			t.Fatalf("model show result = %q, missing %q", got.result, want)
+		}
+	}
+}
+
+func TestModelReasoningCommandPersistsExplicitAndDefaultEffort(t *testing.T) {
+	be := &modelSelectionBackend{fakeBE: newFake(t), workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}}, config: &modelSelectionConfigBackend{fakeC: &fakeC{}}}
+	m := NewAppModel(be, "ws-reasoning", "")
+	m.workspaces = []projectioncontract.Workspace{{
+		ID:       "ws-reasoning",
+		Revision: 7,
+		State:    string(common.WorkspaceStateActive),
+		DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{
+			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"},
+		},
+	}}
+	m.activeWorkspaceID = "ws-reasoning"
+
+	for _, testCase := range []struct {
+		command string
+		want    string
+	}{
+		{command: "/model reasoning high", want: "high"},
+		{command: "/model reasoning default", want: ""},
+	} {
+		m.setInput(testCase.command)
+		next, cmd := m.submitInput()
+		m = appModelFromTea(t, next)
+		if cmd == nil {
+			t.Fatalf("%s did not submit", testCase.command)
+		}
+		message, ok := cmd().(WorkspaceLLMSelectionUpdatedMsg)
+		if !ok {
+			t.Fatalf("%s result type = %T", testCase.command, cmd())
+		}
+		next, _ = m.Update(message)
+		m = appModelFromTea(t, next)
+		if be.workspace.lastTarget == nil || be.workspace.lastTarget.ReasoningEffort != testCase.want {
+			t.Fatalf("%s persisted selection = %+v, want effort %q", testCase.command, be.workspace.lastTarget, testCase.want)
 		}
 	}
 }

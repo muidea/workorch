@@ -102,7 +102,7 @@ func TestRuntimeBootstrapAcceptsDefinitionSeedWithoutPrecompiledProof(t *testing
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"verify behavior"}},
 		"definition-1", nil,
 		runtimecontract.RuntimeActivationContext{
-			ProviderTarget:    runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce},
 		},
 	)
@@ -120,7 +120,7 @@ func TestRuntimeBootstrapAcceptsDefinitionSeedWithoutPrecompiledProof(t *testing
 // operation, or ticket can exist.
 func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -158,7 +158,7 @@ func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) 
 
 func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "shared-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 		}},
@@ -191,7 +191,7 @@ func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(
 
 func TestRuntimeBootstrapDefersMissingSemanticFieldsToPlanning(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -214,7 +214,7 @@ func TestRuntimeBootstrapDefersMissingSemanticFieldsToPlanning(t *testing.T) {
 
 func TestRuntimeBootstrapDoesNotClaimShellOwnerRecipeFeasibility(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -237,7 +237,7 @@ func TestRuntimeBootstrapDoesNotClaimShellOwnerRecipeFeasibility(t *testing.T) {
 
 func TestRuntimeBootstrapDefersCWIValidationCheckToSemanticPlanning(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 		}},
@@ -266,7 +266,7 @@ func TestRuntimeBootstrapDefersCWIValidationCheckToSemanticPlanning(t *testing.T
 
 func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "shared-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 		}},
@@ -305,7 +305,7 @@ func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 
 func TestRuntimeBootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "shared-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 		}},
@@ -351,7 +351,7 @@ func TestRuntimeBootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t
 
 func TestRuntimeBootstrapDefinitionSeedCoversEveryCWIWithoutPreflightFailure(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget:    runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy()},
 	}
 	bootstrap, err := RuntimeBootstrap(
@@ -370,7 +370,7 @@ func TestRuntimeBootstrapDefinitionSeedCoversEveryCWIWithoutPreflightFailure(t *
 // fail activation or tempt a later runtime component to infer a target.
 func TestRuntimeBootstrapDoesNotCarryEvidencePolicyBindingTarget(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "source-present", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 			CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
@@ -405,7 +405,7 @@ func TestRuntimeBootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"实现行为一", "验证行为二", "覆盖行为三"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}},
+		runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +485,7 @@ func TestRuntimeBootstrapAllowsValidationOnlyFocusWhenStateChangeIsOptional(t *t
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"核对结果已验证"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
+		runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -502,7 +502,7 @@ func TestRuntimeBootstrapSealsConfiguredConvergencePolicy(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"validate"}},
 		"definition-1",
 		nil,
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+		runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 			MaxRepairAttemptsPerFocus: 7,
 			ValidationPolicies: []runtimecontract.RuntimeValidationPolicy{{
 				ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2,
@@ -518,7 +518,7 @@ func TestRuntimeBootstrapSealsConfiguredConvergencePolicy(t *testing.T) {
 }
 
 func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID:                   "software-dev",
@@ -577,7 +577,7 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 }
 
 func TestRuntimeBootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "bounded-git",
@@ -650,7 +650,7 @@ func assertRuntimeBootstrapHasNoSemanticFocusAuthority(t *testing.T, focuses []r
 }
 
 func TestRuntimeBootstrapRejectsUnknownProfileAcceptedKind(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "broken-profile",
@@ -670,7 +670,7 @@ func TestRuntimeBootstrapRejectsUnknownProfileAcceptedKind(t *testing.T) {
 }
 
 func TestRuntimeBootstrapSoftwareDevProfileIncludesManagedValidation(t *testing.T) {
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
 		StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 		ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "software-dev",
@@ -707,7 +707,7 @@ func TestRuntimeBootstrapSoftwareDevProfileIncludesManagedValidation(t *testing.
 
 func TestRuntimeBootstrapRegistersSelectedReadOnlyMCPToolForValidation(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
 			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", Name: "repo.summary", Enabled: true,
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),

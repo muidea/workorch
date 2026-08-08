@@ -15,71 +15,42 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func ensureProviderTargetReady(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget) error {
-	return ensureProviderTargetReadyForOperation(ctx, hub, target, workorchconfig.LLMOperationResponses)
-}
-
-func EnsureProviderTargetReady(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget) error {
-	return ensureProviderTargetReady(ctx, hub, target)
-}
-
-func ensureProviderTargetReadyForOperation(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget, operation string) error {
-	target = target.Normalized()
+func EnsureProviderInferenceSelection(ctx context.Context, hub magicevent.Hub, selection runtimecontract.ProviderInferenceSelection) (runtimecontract.ProviderInferenceSelection, error) {
+	selection = selection.Normalized()
 	if hub == nil {
-		return common.ErrInvalidArgument
+		return runtimecontract.ProviderInferenceSelection{}, common.ErrInvalidArgument
 	}
-	if err := target.Validate(); err != nil {
-		return err
+	if err := selection.Validate(); err != nil {
+		return runtimecontract.ProviderInferenceSelection{}, err
 	}
-	ev := magicevent.NewEventWithContext(
-		llmevents.TopicLLMCommandResolveProviderModelTarget,
+	event := magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandValidateInferenceSelection,
 		modulecommon.ModuleID,
 		llmevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		llmevents.ResolveProviderModelTargetCommand{Target: target, Operation: operation},
+		llmevents.ValidateProviderInferenceSelectionCommand{Selection: selection, Operation: workorchconfig.LLMOperationResponses},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandResolveProviderModelTarget, eventcontract.LaneScope{
-		SubjectType: "llm_target",
-		SubjectID:   target.ProviderID + "/" + target.ModelID + "/" + operation,
+	event.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandValidateInferenceSelection, eventcontract.LaneScope{
+		SubjectType: "llm_selection", SubjectID: selection.Target.ProviderID + "/" + selection.Target.ModelID + "/" + selection.ReasoningEffort,
 	}))
-	result := hub.Send(ev)
+	result := hub.Send(event)
 	if result == nil {
-		return common.ErrInvalidArgument
+		return runtimecontract.ProviderInferenceSelection{}, common.ErrInvalidArgument
 	}
 	if resultErr := result.Error(); resultErr != nil {
 		if resultErr.Cause != nil {
-			return resultErr.Cause
+			return runtimecontract.ProviderInferenceSelection{}, resultErr.Cause
 		}
-		return resultErr
+		return runtimecontract.ProviderInferenceSelection{}, resultErr
 	}
 	data, resultErr := result.Get()
 	if resultErr != nil {
-		return resultErr
+		return runtimecontract.ProviderInferenceSelection{}, resultErr
 	}
-	response, ok := data.(llmevents.ResolveProviderModelTargetResult)
-	if !ok {
-		return fmt.Errorf("%w: resolve provider target result type %T", common.ErrInvalidArgument, data)
+	response, ok := data.(llmevents.ValidateProviderInferenceSelectionResult)
+	if !ok || !response.Selection.Same(selection) || strings.TrimSpace(response.CapabilityRevision) == "" {
+		return runtimecontract.ProviderInferenceSelection{}, fmt.Errorf("%w: invalid inference selection validation result", common.ErrInvalidArgument)
 	}
-	if err := response.Profile.Target.Validate(); err != nil {
-		return err
-	}
-	if !response.Profile.Target.Same(target) {
-		return fmt.Errorf("%w: readiness response target does not match request target", common.ErrInvalidArgument)
-	}
-	wantOp := strings.TrimSpace(operation)
-	if wantOp == "" {
-		wantOp = workorchconfig.LLMOperationResponses
-	}
-	gotOp := strings.TrimSpace(response.Profile.Operation)
-	if gotOp == "" {
-		return fmt.Errorf("%w: readiness response operation is missing", common.ErrInvalidArgument)
-	}
-	if gotOp != wantOp {
-		return fmt.Errorf("%w: readiness response operation %q does not match request operation %q", common.ErrInvalidArgument, gotOp, wantOp)
-	}
-	if response.Profile.CapabilityRevision == "" || response.Profile.ConfigurationRevision == "" {
-		return fmt.Errorf("%w: readiness profile revisions are incomplete", common.ErrInvalidArgument)
-	}
-	return nil
+	return response.Selection, nil
 }

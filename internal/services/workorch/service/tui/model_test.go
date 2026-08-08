@@ -5269,7 +5269,7 @@ func (f *workspaceCreateWS) RuntimeView(context.Context, workorchquerycontract.W
 	return nil, nil
 }
 
-func (f *workspaceCreateWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (f *workspaceCreateWS) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	return f.Get(ctx, id)
 }
 
@@ -5395,7 +5395,7 @@ func (f *recordingWorkspace) Delete(ctx context.Context, id common.WorkspaceID, 
 	return nil
 }
 
-func (f *recordingWorkspace) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (f *recordingWorkspace) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	return f.Get(ctx, id)
 }
 
@@ -5487,7 +5487,7 @@ func (f *conflictWorkspaceBackend) RuntimeView(context.Context, workorchquerycon
 	return nil, nil
 }
 
-func (f *conflictWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (f *conflictWorkspaceBackend) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	return f.Get(ctx, id)
 }
 
@@ -5601,12 +5601,12 @@ func (f *fakeWS) RuntimeView(context.Context, workorchquerycontract.WorkspaceRun
 	return nil, nil
 }
 
-func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (f *fakeWS) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	item, err := f.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	item.DefaultLLMTarget = runtimecontract.CloneProviderModelTarget(target)
+	item.DefaultLLMSelection = runtimecontract.CloneProviderInferenceSelection(target)
 	return item, nil
 }
 

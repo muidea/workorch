@@ -47,7 +47,6 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanageme
 				ContextWindowTokens:  model.ContextWindowTokens,
 				MaxOutputTokens:      model.MaxOutputTokens,
 				Operations:           append([]string(nil), model.Operations...),
-				ReasoningEffort:      model.ReasoningEffort,
 				ThinkingBudgetTokens: model.ThinkingBudgetTokens,
 				CacheMode:            model.Cache.Mode,
 				CacheUsageFields:     append([]string(nil), model.Cache.UsageFields...),

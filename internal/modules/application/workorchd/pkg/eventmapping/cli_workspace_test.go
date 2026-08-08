@@ -50,25 +50,25 @@ func TestCLIWorkspaceAndTemplateMappingIsStableDetachedAndRejectsDuplicates(t *t
 	}
 }
 
-func TestCLIWorkspaceMappingRoundTripClonesDefaultLLMTarget(t *testing.T) {
+func TestCLIWorkspaceMappingRoundTripClonesDefaultLLMSelection(t *testing.T) {
 	target := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}
 	workspace := projectioncontract.Workspace{
-		ID:               "ws-map",
-		DefaultLLMTarget: &target,
-		SoulBindings:     map[string]string{"execution": "soul-e"},
-		ContextHints:     map[string]any{"scope": "workspace", "nested": map[string]any{"items": []any{"one"}}},
-		EvidencePolicies: []map[string]any{{"kind": "test"}},
+		ID:                  "ws-map",
+		DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: target},
+		SoulBindings:        map[string]string{"execution": "soul-e"},
+		ContextHints:        map[string]any{"scope": "workspace", "nested": map[string]any{"items": []any{"one"}}},
+		EvidencePolicies:    []map[string]any{{"kind": "test"}},
 	}
 	dto, err := WorkspaceDTO(workspace)
 	if err != nil {
 		t.Fatalf("workspace DTO: %v", err)
 	}
-	if dto.DefaultLLMTarget == workspace.DefaultLLMTarget {
-		t.Fatal("workspace DTO retained DefaultLLMTarget pointer")
+	if dto.DefaultLLMSelection == workspace.DefaultLLMSelection {
+		t.Fatal("workspace DTO retained DefaultLLMSelection pointer")
 	}
-	dto.DefaultLLMTarget.ModelID = "mutated"
-	if workspace.DefaultLLMTarget.ModelID != "model-a" {
-		t.Fatal("workspace DTO DefaultLLMTarget mutation leaked into port DTO")
+	dto.DefaultLLMSelection.Target.ModelID = "mutated"
+	if workspace.DefaultLLMSelection.Target.ModelID != "model-a" {
+		t.Fatal("workspace DTO DefaultLLMSelection mutation leaked into port DTO")
 	}
 	dto, err = WorkspaceDTO(workspace)
 	if err != nil {
@@ -81,8 +81,8 @@ func TestCLIWorkspaceMappingRoundTripClonesDefaultLLMTarget(t *testing.T) {
 	if !reflect.DeepEqual(roundTrip, workspace) {
 		t.Fatalf("workspace round trip = %#v, want %#v", roundTrip, workspace)
 	}
-	if roundTrip.DefaultLLMTarget == dto.DefaultLLMTarget {
-		t.Fatal("workspace port retained Event DTO DefaultLLMTarget pointer")
+	if roundTrip.DefaultLLMSelection == dto.DefaultLLMSelection {
+		t.Fatal("workspace port retained Event DTO DefaultLLMSelection pointer")
 	}
 }
 
@@ -188,7 +188,7 @@ func TestWorkorchdCLIMapFreeMessageGraph(t *testing.T) {
 		reflect.TypeOf(workorchdevents.CLIWorkspaceCreateCommand{}), reflect.TypeOf(workorchdevents.CLIWorkspaceCreateResult{}),
 		reflect.TypeOf(workorchdevents.CLIWorkspaceGetResult{}), reflect.TypeOf(workorchdevents.CLIWorkspaceListResult{}),
 		reflect.TypeOf(workorchdevents.CLIWorkspaceSnapshotResult{}), reflect.TypeOf(workorchdevents.ReadWorkspaceRuntimeViewResult{}),
-		reflect.TypeOf(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}),
+		reflect.TypeOf(workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{}),
 		reflect.TypeOf(workorchdevents.CLITemplateCreateCommand{}), reflect.TypeOf(workorchdevents.CLITemplateCreateResult{}),
 		reflect.TypeOf(workorchdevents.CLITemplateGetResult{}), reflect.TypeOf(workorchdevents.CLITemplateListResult{}),
 		reflect.TypeOf(workorchdevents.CLITemplateUpdateCommand{}), reflect.TypeOf(workorchdevents.CLITemplateUpdateResult{}),

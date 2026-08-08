@@ -42,13 +42,15 @@ const {
   workspaceSetupSmartDraftStep, defaultSoulBindingStages
 } = helpers;
 
-function providerModelTargetLabel(target?: { providerId?: string; modelId?: string }): string {
+function providerModelTargetLabel(selection?: { target?: { providerId?: string; modelId?: string }; reasoningEffort?: string }): string {
+  const target = selection?.target;
   const providerID = target?.providerId?.trim();
   const modelID = target?.modelId?.trim();
   if (!providerID && !modelID) {
     return '-';
   }
-  return [providerID || 'default provider', modelID || 'default model'].join(' / ');
+  const label = [providerID || 'default provider', modelID || 'default model'].join(' / ');
+  return selection?.reasoningEffort ? `${label} · reasoning ${selection.reasoningEffort}` : label;
 }
 
 export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
@@ -134,6 +136,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const lastEventRevisionRef = useRef(0);
   const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
   const [activationForm] = Form.useForm();
+	const activationSelectedTargetKey = Form.useWatch('llmTargetKey', activationForm);
   const [soulBindingsForm] = Form.useForm();
   const [setupSoulBindingsForm] = Form.useForm<SoulBindingFormValues>();
   const [workspaceForm] = Form.useForm<WorkspaceSetupFormValues>();
@@ -216,6 +219,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const activationLLMTargetOptions = helpers.chatTargetOptions(configuration, activationAdvancedLLM);
+	const selectedOption = activationLLMTargetOptions.find((item) => item.value === activationSelectedTargetKey);
   const activationReadyTarget = helpers.activationReadyChatTarget(configuration);
   const standardActivationLLMTargetOptions = helpers.chatTargetOptions(configuration, false);
   const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
@@ -1076,6 +1080,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           modelId: selectedModelId
         }
       : undefined;
+	const reasoningEffort = request.reasoningEffort?.trim() || undefined;
     if (!normalizedLLMTarget) {
       message.error('当前没有 ready 的对话模型，请先完成模型配置');
       return;
@@ -1099,7 +1104,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     // Model and Soul are workspace-owned configuration.  Persist the selected
     // values before sending the intent; the activation endpoint intentionally
     // ignores form-only context fields and accepts no lifecycle target.
-    void workorchApi.updateWorkspaceLLMTarget(targetWorkspaceId, normalizedLLMTarget)
+	const expectedRevision = snapshot?.workspace.revision ?? 0;
+    void workorchApi.updateWorkspaceLLMSelection(targetWorkspaceId, { target: normalizedLLMTarget, reasoningEffort }, expectedRevision)
       .then(async () => {
         if (requestWithCapabilityServers.soulId || requestWithCapabilityServers.soulBindings) {
           const nextBindings: WorkspaceSoulBindings = {
@@ -1157,6 +1163,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   const requestWorkspaceActivation = (intent: 'resume' | 'restart' = 'resume') => {
     const target = activationReadyTarget;
+	const defaultSelection = snapshot?.workspace.defaultLLMSelection;
     const standardTargetReady = standardActivationLLMTargetOptions.some(
       (item) => item.providerId === target?.providerId && item.modelId === target?.modelId
     );
@@ -1166,6 +1173,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
       llmTarget: target,
+	  reasoningEffort: defaultSelection?.target.providerId === target?.providerId && defaultSelection?.target.modelId === target?.modelId
+		? defaultSelection?.reasoningEffort
+		: undefined,
       llmTargetKey: helpers.providerModelTargetKey(target?.providerId, target?.modelId),
       soulId: undefined,
       soulBindings: {},
@@ -1223,7 +1233,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     { title: '运行 ID（Run ID）', dataIndex: 'id', copyable: true },
     { title: '目标', dataIndex: 'goalId', copyable: true },
     { title: '验收标准', dataIndex: 'doDId', copyable: true },
-    { title: '封存模型目标', render: (_, item) => providerModelTargetLabel(item.sealedLLMTarget), ellipsis: true },
+    { title: '封存模型目标', render: (_, item) => providerModelTargetLabel(item.sealedLLMSelection), ellipsis: true },
     { title: '优先级', render: (_, item) => runPriority(item), width: 100 },
     { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     { title: '阻塞工单', dataIndex: 'blockingTicketId', copyable: true },
@@ -1353,8 +1363,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               items={[
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
-                { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMTarget) },
-                { key: 'activeRunSealedLLMTarget', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMTarget) },
+                { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMSelection) },
+                { key: 'activeRunSealedLLMSelection', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMSelection) },
                 ...(activeRunRequiresFreshActivation ? [{
                   key: 'activeRunRuntimeActivation',
                   label: '运行恢复状态',
@@ -2889,7 +2899,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   llmTarget: {
                     providerId: selected?.providerId || 'ai-proxy',
                     modelId: selected?.modelId
-                  }
+				  },
+				  reasoningEffort: undefined
                 });
               }}
             />
@@ -2900,6 +2911,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name={['llmTarget', 'modelId']} hidden>
             <Input />
           </Form.Item>
+		  <Form.Item name="reasoningEffort" label="推理强度" extra={selectedOption?.defaultReasoningEffort ? `Provider 默认：${selectedOption.defaultReasoningEffort}` : '留空时使用 Provider 默认策略'}>
+			<Select
+			  allowClear
+			  placeholder="Provider 默认"
+			  disabled={!selectedOption?.reasoningSupported || !selectedOption?.reasoningValid}
+			  options={(selectedOption?.reasoningEfforts ?? []).map((effort) => ({ value: effort, label: effort }))}
+			/>
+		  </Form.Item>
           <Form.Item name="soulId" label="本次默认执行人格（Soul）">
             <Select allowClear placeholder="继承工作空间默认和阶段执行人格配置" options={soulOptions} />
           </Form.Item>

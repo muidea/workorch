@@ -82,13 +82,13 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 			return
 		}
 		result.Set(workorchdevents.CLIWorkspaceDeleteResult{Deleted: true}, nil)
-	case workorchdevents.CLIWorkspaceUpdateLLMTargetCommand:
+	case workorchdevents.CLIWorkspaceUpdateLLMSelectionCommand:
 		if command.WorkspaceID == "" {
 			setInvalidTypedCLICommand(result)
 			return
 		}
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		item, err := UpdateWorkspaceLLMTargetWithHub(ctx, d.EventHub(), string(command.WorkspaceID), command.Target)
+		item, err := UpdateWorkspaceLLMSelectionWithHub(ctx, d.EventHub(), string(command.WorkspaceID), command.Selection, command.ExpectedRevision)
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -96,7 +96,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, mapErr) {
 			return
 		}
-		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workspace}, nil)
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{Workspace: workspace}, nil)
 	default:
 		setInvalidTypedCLICommand(result)
 	}

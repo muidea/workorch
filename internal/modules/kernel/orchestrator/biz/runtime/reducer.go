@@ -690,7 +690,7 @@ func governanceDependencyForFacts(facts runtimecontract.RuntimeFacts) (runtimeco
 	if facts.Failure == nil || (facts.Failure.Class != runtimecontract.FailureClassProviderAuthentication && facts.Failure.Class != runtimecontract.FailureClassProviderConfiguration) || facts.Resources.ProviderCeiling == nil {
 		return runtimecontract.ExternalDependency{}, false
 	}
-	target := facts.Resources.ProviderCeiling.Target.Normalized()
+	target := facts.Resources.ProviderCeiling.Selection.Target.Normalized()
 	if target.ProviderID == "" || target.ModelID == "" {
 		return runtimecontract.ExternalDependency{}, false
 	}

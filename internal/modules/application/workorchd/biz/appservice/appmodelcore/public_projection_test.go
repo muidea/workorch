@@ -11,9 +11,9 @@ import (
 func TestProjectWorkspaceSealsProjectionStatusAndDetachesMutableValues(t *testing.T) {
 	target := &runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}
 	input := Workspace{
-		ID:               "ws-1",
-		DefaultLLMTarget: target,
-		SoulBindings:     map[string]string{"execution": "soul-1"},
+		ID:                  "ws-1",
+		DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: *target, ReasoningEffort: "high"},
+		SoulBindings:        map[string]string{"execution": "soul-1"},
 		ContextHints: map[string]any{
 			"nested": map[string]any{"target": "source/main.go"},
 		},
@@ -32,7 +32,7 @@ func TestProjectWorkspaceSealsProjectionStatusAndDetachesMutableValues(t *testin
 		t.Fatalf("projection = %+v, want status derived from view model", got.Projection)
 	}
 
-	got.DefaultLLMTarget.ModelID = "mutated"
+	got.DefaultLLMSelection.Target.ModelID = "mutated"
 	got.SoulBindings["execution"] = "mutated"
 	got.ContextHints["nested"].(map[string]any)["target"] = "mutated"
 	got.EvidencePolicies[0]["kinds"].([]any)[0] = "mutated"

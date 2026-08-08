@@ -3516,9 +3516,9 @@ func cloneStoredMap[K comparable, V any](items map[K]V) map[K]V {
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned := *item
-	if item.DefaultLLMTarget != nil {
-		target := item.DefaultLLMTarget.Clone()
-		cloned.DefaultLLMTarget = &target
+	if item.DefaultLLMSelection != nil {
+		target := item.DefaultLLMSelection.Clone()
+		cloned.DefaultLLMSelection = &target
 	}
 	if item.SoulBindings != nil {
 		cloned.SoulBindings = map[string]common.SoulID{}

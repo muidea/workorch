@@ -185,3 +185,67 @@ func TestBuildCatalogFromWireDerivesResponsesAndEmbeddingOperations(t *testing.T
 		t.Fatalf("responses model not ready: %+v", catalog.Models)
 	}
 }
+
+func TestBuildCatalogFromWireNormalizesReasoningCapability(t *testing.T) {
+	var wire aiProxyModelsResponse
+	if err := json.Unmarshal([]byte(`{
+		"object":"list",
+		"data":[{
+			"id":"DeepSeek-V4-Flash",
+			"supported_endpoints":["/v1/responses"],
+			"contextWindowTokens":1000000,
+			"maxOutputTokens":65536,
+			"capabilities":{"reasoning":{"supported":true,"default_effort":"low","efforts":["none","low","high","high"]}},
+			"future_field":{"ignored":true}
+		}]
+	}`), &wire); err != nil {
+		t.Fatalf("decode wire: %v", err)
+	}
+	catalog, err := buildCatalogFromWire(wire, workorchconfig.DefaultLLMConfig(), time.Now())
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	if len(catalog.Models) != 1 {
+		t.Fatalf("models = %+v", catalog.Models)
+	}
+	reasoning := catalog.Models[0].Reasoning
+	if !reasoning.Supported || !reasoning.Valid || reasoning.DefaultEffort != "low" || len(reasoning.Efforts) != 3 || !reasoning.Allows("high") || reasoning.Allows("HIGH") {
+		t.Fatalf("reasoning capability = %+v", reasoning)
+	}
+}
+
+func TestBuildCatalogFromWireKeepsBaseReadinessWhenReasoningIsInvalid(t *testing.T) {
+	var wire aiProxyModelsResponse
+	if err := json.Unmarshal([]byte(`{
+		"object":"list",
+		"data":[{
+			"id":"model-a",
+			"supported_endpoints":["/v1/responses"],
+			"contextWindowTokens":8192,
+			"maxOutputTokens":2048,
+			"capabilities":{"reasoning":{"supported":true,"default_effort":"max","efforts":["low","high"]}}
+		},{
+			"id":"model-b",
+			"supported_endpoints":["/v1/responses"],
+			"contextWindowTokens":8192,
+			"maxOutputTokens":2048
+		}]
+	}`), &wire); err != nil {
+		t.Fatalf("decode wire: %v", err)
+	}
+	catalog, err := buildCatalogFromWire(wire, workorchconfig.DefaultLLMConfig(), time.Now())
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	for _, model := range catalog.Models {
+		if !model.CapabilityReady {
+			t.Fatalf("base model should remain ready: %+v", model)
+		}
+		if model.Target.ModelID == "model-a" && (model.Reasoning.Valid || model.Reasoning.Allows("high")) {
+			t.Fatalf("invalid reasoning capability = %+v", model.Reasoning)
+		}
+		if model.Target.ModelID == "model-b" && (model.Reasoning.Supported || !model.Reasoning.Valid || !model.Reasoning.Allows("")) {
+			t.Fatalf("missing reasoning capability = %+v", model.Reasoning)
+		}
+	}
+}

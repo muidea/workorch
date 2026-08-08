@@ -25,7 +25,7 @@ func (m *AppModel) beginModelSelection(clear bool) tea.Cmd {
 	m.modelSelectMode = true
 	m.modelSelectWorkspaceID = m.activeWorkspaceID
 	m.modelSelectRequestSeq++
-	m.modelSelectCurrent = runtimecontract.CloneProviderModelTarget(m.activeWorkspaceOverviewTarget())
+	m.modelSelectCurrent = runtimecontract.CloneProviderInferenceSelection(m.activeWorkspaceOverviewSelection())
 	m.modelSelectClearConfirming = clear
 	m.modelSelectConfirming = clear
 	m.modelSelectLoading = !clear
@@ -40,11 +40,31 @@ func (m *AppModel) beginModelSelection(clear bool) tea.Cmd {
 }
 
 func (m *AppModel) activeWorkspaceOverviewTarget() *runtimecontract.ProviderModelTarget {
+	selection := m.activeWorkspaceOverviewSelection()
+	if selection == nil {
+		return nil
+	}
+	target := selection.Target
+	return &target
+}
+
+func (m *AppModel) activeWorkspaceOverviewSelection() *runtimecontract.ProviderInferenceSelection {
 	ws := m.activeWorkspaceOverview()
 	if ws == nil {
 		return nil
 	}
-	return ws.DefaultLLMTarget
+	return ws.DefaultLLMSelection
+}
+
+func displayInferenceSelection(selection *runtimecontract.ProviderInferenceSelection, empty string) string {
+	if selection == nil || selection.Validate() != nil {
+		return empty
+	}
+	label := displayModelTarget(&selection.Target, empty)
+	if selection.ReasoningEffort != "" {
+		label += " (reasoning: " + selection.ReasoningEffort + ")"
+	}
+	return label
 }
 
 func displayModelTarget(target *runtimecontract.ProviderModelTarget, empty string) string {
@@ -121,7 +141,7 @@ func (m *AppModel) handleModelSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		}
 		if m.modelSelectClearConfirming {
 			m.modelSelectSubmitting = true
-			return m, PersistWorkspaceLLMTarget(m.be, m.modelSelectWorkspaceID, m.modelSelectRequestSeq, nil)
+			return m, PersistWorkspaceLLMSelection(m.be, m.modelSelectWorkspaceID, m.modelSelectRequestSeq, nil, m.activeWorkspaceRevision())
 		}
 		if !m.modelSelectConfirming {
 			if len(m.modelSelectOptions) == 0 {
@@ -133,7 +153,7 @@ func (m *AppModel) handleModelSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 				return m, nil
 			}
 			target := runtimecontract.ProviderModelTarget{ProviderID: option.ProviderID, ModelID: option.ModelID}.Normalized()
-			m.modelSelectPending = &target
+			m.modelSelectPending = &runtimecontract.ProviderInferenceSelection{Target: target}
 			m.modelSelectConfirming = true
 			return m, nil
 		}
@@ -141,10 +161,18 @@ func (m *AppModel) handleModelSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		m.modelSelectSubmitting = true
-		return m, PersistWorkspaceLLMTarget(m.be, m.modelSelectWorkspaceID, m.modelSelectRequestSeq, m.modelSelectPending)
+		return m, PersistWorkspaceLLMSelection(m.be, m.modelSelectWorkspaceID, m.modelSelectRequestSeq, m.modelSelectPending, m.activeWorkspaceRevision())
 	default:
 		return m, nil
 	}
+}
+
+func (m *AppModel) activeWorkspaceRevision() uint64 {
+	workspace := m.activeWorkspaceOverview()
+	if workspace == nil {
+		return 0
+	}
+	return workspace.Revision
 }
 
 func FetchChatModelTargets(be backend.Backend, workspaceID string, requestSeq int64, refresh bool) tea.Cmd {
@@ -171,27 +199,27 @@ func FetchChatModelTargets(be backend.Backend, workspaceID string, requestSeq in
 	}
 }
 
-func PersistWorkspaceLLMTarget(be backend.Backend, workspaceID string, requestSeq int64, target *runtimecontract.ProviderModelTarget) tea.Cmd {
+func PersistWorkspaceLLMSelection(be backend.Backend, workspaceID string, requestSeq int64, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if be == nil || be.Workspace() == nil {
-			return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
+			return WorkspaceLLMSelectionUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
 		}
-		item, err := be.Workspace().UpdateLLMTarget(ctx, common.WorkspaceID(workspaceID), runtimecontract.CloneProviderModelTarget(target))
-		return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Workspace: item, Target: runtimecontract.CloneProviderModelTarget(target), Cleared: target == nil, Error: err}
+		item, err := be.Workspace().UpdateLLMSelection(ctx, common.WorkspaceID(workspaceID), runtimecontract.CloneProviderInferenceSelection(selection), expectedRevision)
+		return WorkspaceLLMSelectionUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Workspace: item, Selection: runtimecontract.CloneProviderInferenceSelection(selection), Cleared: selection == nil, Error: err}
 	}
 }
 
-func FetchWorkspaceLLMTargetShow(be backend.Backend, workspaceID string) tea.Cmd {
+func FetchWorkspaceLLMSelectionShow(be backend.Backend, workspaceID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if be == nil || be.Config() == nil {
-			return WorkspaceLLMTargetShowMsg{WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
+			return WorkspaceLLMSelectionShowMsg{WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
 		}
 		cfg, err := be.Config().Get(ctx)
-		return WorkspaceLLMTargetShowMsg{WorkspaceID: workspaceID, Config: cfg, Error: err}
+		return WorkspaceLLMSelectionShowMsg{WorkspaceID: workspaceID, Config: cfg, Error: err}
 	}
 }
 
@@ -213,7 +241,11 @@ func (m *AppModel) applyChatModelTargetsLoaded(msg ChatModelTargetsLoadedMsg) (t
 	if msg.Config != nil {
 		m.modelSelectDefault = runtimecontract.ProviderModelTarget{ProviderID: msg.Config.DefaultChat.ProviderID, ModelID: msg.Config.DefaultChat.ModelID}.Normalized()
 	}
-	m.modelSelectOptions = orderModelOptions(msg.Options, m.modelSelectCurrent, m.modelSelectDefault)
+	var currentTarget *runtimecontract.ProviderModelTarget
+	if m.modelSelectCurrent != nil {
+		currentTarget = &m.modelSelectCurrent.Target
+	}
+	m.modelSelectOptions = orderModelOptions(msg.Options, currentTarget, m.modelSelectDefault)
 	m.modelSelectCursor = 0
 	m.modelSelectError = nil
 	return m, nil
@@ -273,7 +305,7 @@ func orderModelOptions(items []backend.ChatModelTargetOption, current *runtimeco
 	return ret
 }
 
-func (m *AppModel) applyWorkspaceLLMTargetUpdated(msg WorkspaceLLMTargetUpdatedMsg) (tea.Model, tea.Cmd) {
+func (m *AppModel) applyWorkspaceLLMSelectionUpdated(msg WorkspaceLLMSelectionUpdatedMsg) (tea.Model, tea.Cmd) {
 	if !m.modelSelectMode || msg.WorkspaceID != m.modelSelectWorkspaceID || msg.WorkspaceID != m.activeWorkspaceID || msg.RequestSeq != m.modelSelectRequestSeq {
 		return m, nil
 	}
@@ -290,8 +322,8 @@ func (m *AppModel) applyWorkspaceLLMTargetUpdated(msg WorkspaceLLMTargetUpdatedM
 	if msg.Workspace != nil {
 		m.upsertWorkspace(*msg.Workspace)
 	}
-	label := displayModelTarget(msg.Target, "inherit system default")
-	sealed := displayModelTarget(m.activeWorkspaceSealedTarget(), "no active sealed target")
+	label := displayInferenceSelection(msg.Selection, "inherit system default")
+	sealed := displayInferenceSelection(m.activeWorkspaceSealedSelection(), "no active sealed selection")
 	m.cancelModelSelection()
 	m.lastError = nil
 	m.result = "Workspace model updated\n- next-run workspace default: " + label + "\n- current-run sealed target: " + sealed
@@ -308,7 +340,7 @@ func (m *AppModel) applyWorkspaceLLMTargetUpdated(msg WorkspaceLLMTargetUpdatedM
 	return m, m.requestWorkspaceListRefresh()
 }
 
-func (m *AppModel) applyWorkspaceLLMTargetShow(msg WorkspaceLLMTargetShowMsg) (tea.Model, tea.Cmd) {
+func (m *AppModel) applyWorkspaceLLMSelectionShow(msg WorkspaceLLMSelectionShowMsg) (tea.Model, tea.Cmd) {
 	if msg.WorkspaceID != m.activeWorkspaceID {
 		return m, nil
 	}
@@ -316,12 +348,12 @@ func (m *AppModel) applyWorkspaceLLMTargetShow(msg WorkspaceLLMTargetShowMsg) (t
 		m.setLastError(msg.Error)
 		return m, nil
 	}
-	workspaceTarget := displayModelTarget(m.activeWorkspaceOverviewTarget(), "inherit system default")
+	workspaceTarget := displayInferenceSelection(m.activeWorkspaceOverviewSelection(), "inherit system default")
 	systemTarget := "unavailable"
 	if msg.Config != nil {
 		systemTarget = msg.Config.DefaultChat.ProviderID + "/" + msg.Config.DefaultChat.ModelID
 	}
-	sealedTarget := displayModelTarget(m.activeWorkspaceSealedTarget(), "no active sealed target")
+	sealedTarget := displayInferenceSelection(m.activeWorkspaceSealedSelection(), "no active sealed selection")
 	m.result = "Workspace model configuration\n- next-run workspace default: " + workspaceTarget + "\n- current-run sealed target: " + sealedTarget + "\n- system default: " + systemTarget
 	m.progressText = "Showing workspace model configuration"
 	m.lastError = nil
@@ -338,7 +370,7 @@ func (m AppModel) renderModelSelection(width, height int) string {
 	lines := []string{"Workspace model selection", "", "Workspace: " + title}
 	current := "inherit system default"
 	if m.modelSelectCurrent != nil {
-		current = m.modelSelectCurrent.ProviderID + "/" + m.modelSelectCurrent.ModelID
+		current = displayInferenceSelection(m.modelSelectCurrent, "inherit system default")
 	}
 	lines = append(lines, "Current: "+current)
 	if m.modelSelectClearConfirming {
@@ -348,7 +380,7 @@ func (m AppModel) renderModelSelection(width, height int) string {
 	if m.modelSelectLoading {
 		lines = append(lines, "", "Loading available chat models...")
 	} else if m.modelSelectConfirming && m.modelSelectPending != nil {
-		lines = append(lines, "", "Change to: "+m.modelSelectPending.ProviderID+"/"+m.modelSelectPending.ModelID, "Future new/replacement runs will use this target.", "Current run remains unchanged.", "", "Enter: confirm save | Esc: cancel")
+		lines = append(lines, "", "Change to: "+displayInferenceSelection(m.modelSelectPending, ""), "Future new/replacement runs will use this selection.", "Current run remains unchanged.", "", "Enter: confirm save | Esc: cancel")
 	} else {
 		lines = append(lines, "", "Available provider/model targets:")
 		if len(m.modelSelectOptions) == 0 {

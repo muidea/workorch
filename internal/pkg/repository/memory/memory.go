@@ -1023,9 +1023,9 @@ func (r *WorkspaceRepository) Delete(_ context.Context, id common.WorkspaceID) e
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned := *item
-	if item.DefaultLLMTarget != nil {
-		target := item.DefaultLLMTarget.Clone()
-		cloned.DefaultLLMTarget = &target
+	if item.DefaultLLMSelection != nil {
+		target := item.DefaultLLMSelection.Clone()
+		cloned.DefaultLLMSelection = &target
 	}
 	if item.SoulBindings != nil {
 		cloned.SoulBindings = map[string]common.SoulID{}

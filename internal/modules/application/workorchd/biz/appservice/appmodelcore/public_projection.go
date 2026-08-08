@@ -6,6 +6,7 @@ import (
 
 func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
 	return projectioncontract.CloneWorkspace(projectioncontract.Workspace{
+		Revision:             item.Revision,
 		ID:                   item.ID,
 		Title:                item.Title,
 		Description:          item.Description,
@@ -16,7 +17,7 @@ func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
 		BlockingApprovalID:   item.BlockingApprovalID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     item.DefaultLLMTarget,
+		DefaultLLMSelection:  item.DefaultLLMSelection,
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         item.SoulBindings,
 		ContextHints:         item.ContextHints,
@@ -54,7 +55,7 @@ func ProjectRun(item Run) projectioncontract.Run {
 		BlockingTicketID:   item.BlockingTicketID,
 		BlockingApprovalID: item.BlockingApprovalID,
 		FailureReason:      item.FailureReason,
-		SealedLLMTarget:    item.SealedLLMTarget,
+		SealedLLMSelection: item.SealedLLMSelection,
 		RuntimeActivation:  item.RuntimeActivation,
 		CreatedAt:          item.CreatedAt,
 		StartedAt:          item.StartedAt,

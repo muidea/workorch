@@ -44,7 +44,7 @@ func TestCatalogConnectionRevisionChangesOnSameLengthAPIKeyRotation(t *testing.T
 
 func TestProfileFromProviderCeilingUsesSealedBudget(t *testing.T) {
 	ceiling := runtimecontract.ProviderCeiling{
-		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -69,7 +69,7 @@ func TestResolveProviderClientForSealedCeilingRejectsConfigDrift(t *testing.T) {
 	cfg := testLLMConfig()
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}
 	ceiling := runtimecontract.ProviderCeiling{
-		Target:                   target,
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: target},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -104,7 +104,7 @@ func TestResolveProviderClientForSealedCeilingDoesNotFallbackWhenTargetUnavailab
 	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "fallback-model"}
 	sealed := runtimecontract.ProviderModelTarget{ProviderID: "retired-provider", ModelID: "retired-model"}
 	ceiling := runtimecontract.ProviderCeiling{
-		Target:                   sealed,
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: sealed},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,

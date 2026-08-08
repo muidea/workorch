@@ -11,7 +11,7 @@ import (
 
 func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -63,7 +63,7 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 
 func TestCompileRuntimeCoverageDefersTargetSelectionToFileOwner(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -91,7 +91,7 @@ func TestCompileRuntimeCoverageDefersTargetSelectionToFileOwner(t *testing.T) {
 
 func TestCompileRuntimeCoverageCarriesProfileProspectiveTarget(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "initial-deliverable", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 				ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
@@ -118,7 +118,7 @@ func TestCompileRuntimeCoverageCarriesProfileProspectiveTarget(t *testing.T) {
 
 func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "software-dev", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source_change", Required: true, EvidenceRole: "primary_state_change"}},
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
@@ -151,7 +151,7 @@ func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing
 
 func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDependencyOrder(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 			SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 			MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
@@ -204,7 +204,7 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 		dodItems[idx] = fmt.Sprintf("acceptance item %02d", idx+1)
 	}
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
@@ -261,7 +261,7 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 
 func TestCompileRuntimeCoverageCarriesProfileDeclaredSelector(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile-lsp", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "implementation", Required: true}}, EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 				ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
@@ -293,7 +293,7 @@ func TestCompileRuntimeCoverageCarriesProfileDeclaredSelector(t *testing.T) {
 // File remains the owner that verifies the path and reports the create fact.
 func TestCompileRuntimeCoverageCarriesProspectiveTargetIntoLeadingDoDFocus(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
 				{
@@ -353,7 +353,7 @@ func TestCompileRuntimeCoverageCarriesProspectiveTargetIntoLeadingDoDFocus(t *te
 
 func TestResolveCoverageEvidencePolicyCompilesGroundedDirectEvidenceScopes(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "software-dev",
@@ -388,7 +388,7 @@ func TestResolveCoverageEvidencePolicyCompilesGroundedDirectEvidenceScopes(t *te
 
 func TestCompileRuntimeCoverageFocusesExactBeatsWildcard(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -443,7 +443,7 @@ func TestCompileRuntimeCoverageFocusesExactBeatsWildcard(t *testing.T) {
 
 func TestCompileRuntimeCoverageFocusesRejectsUnknownAcceptedKind(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "broken",
@@ -465,7 +465,7 @@ func TestCompileRuntimeCoverageFocusesRejectsUnknownAcceptedKind(t *testing.T) {
 
 func TestCompileRuntimeCoverageFocusesUsesEvidencePolicyCoverageRequirements(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "policy-1", AppliesTo: "shell/command",
 			CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
@@ -507,7 +507,7 @@ func TestCompileRuntimeCoverageFocusesUsesEvidencePolicyCoverageRequirements(t *
 
 func TestCompileRuntimeCoverageCompilesDodWildcardIntoFocuses(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
@@ -541,7 +541,7 @@ func TestCompileRuntimeCoverageCompilesDodWildcardIntoFocuses(t *testing.T) {
 
 func TestRuntimeBootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			// Validation proof bindings are CWI-granular; keep this fixture's
 			// independent DoD items in separate focuses while testing the run-level
@@ -583,7 +583,7 @@ func TestRuntimeBootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 
 func TestExplicitCWIStateChangeProofReplacesNeutralValidationFallback(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "verify", ModelID: "verify-model"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "verify", ModelID: "verify-model"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 1, MaxFocuses: 2, MaxCandidateContextItems: 2},
 		},
@@ -610,7 +610,7 @@ func TestExplicitCWIStateChangeProofReplacesNeutralValidationFallback(t *testing
 
 func TestCompileRuntimeCoverageFocusesKeepsDeliverableStateChange(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -657,7 +657,7 @@ func TestCompileRuntimeCoverageFocusesKeepsDeliverableStateChange(t *testing.T) 
 
 func TestCompileRuntimeCoverageFocusesRejectsUngroundedRequiredTarget(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true, EvidenceRole: "primary_state_change"}},
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
@@ -696,7 +696,7 @@ func TestCompileRuntimeCoverageFocusesSplitsIncompatibleTargetBindingsWithinSlic
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			activation := runtimecontract.RuntimeActivationContext{
-				ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+				ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 				ExecutionContract: runtimecontract.RuntimeExecutionContract{
 					AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 						SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
@@ -739,7 +739,7 @@ func TestCompileRuntimeCoverageFocusesSplitsIncompatibleTargetBindingsWithinSlic
 
 func TestCompileRuntimeCoverageFocusesPreservesSharedTargetBindingWithinSlice(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
@@ -778,7 +778,7 @@ func TestCompileRuntimeCoverageFocusesPreservesSharedTargetBindingWithinSlice(t 
 
 func TestCompileRuntimeCoverageCompilesProfileCoverageDependencies(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 2, MaxFocuses: 4, MaxCandidateContextItems: 4,
@@ -810,7 +810,7 @@ func TestCompileRuntimeCoverageCompilesProfileCoverageDependencies(t *testing.T)
 
 func TestCompileRuntimeCoverageRejectsUnresolvedCoverageDependency(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true}},
 			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "missing-dependent", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "missing", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
@@ -824,7 +824,7 @@ func TestCompileRuntimeCoverageRejectsUnresolvedCoverageDependency(t *testing.T)
 
 func TestCompileRuntimeCoverageRejectsCyclicCoverageDependencies(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "first", Required: true}, {ID: "second", Required: true}},
 			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
@@ -845,7 +845,7 @@ func TestCompileRuntimeCoverageSlicesBoundLargeDoD(t *testing.T) {
 		items = append(items, "行为"+string(rune('A'+i-1)))
 	}
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
@@ -891,7 +891,7 @@ func TestCompileRuntimeCoverageSlicesBoundLargeDoD(t *testing.T) {
 
 func TestCompileRuntimeCoverageRejectsInvalidSliceMax(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
@@ -917,7 +917,7 @@ func TestCompileRuntimeCoverageRejectsUnboundedFocusCount(t *testing.T) {
 	_, err := compileRuntimeCoverage(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: items},
-		runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 	)
 	if err == nil || !strings.Contains(err.Error(), "exceeding sealed policy limit") {
 		t.Fatalf("expected focus-count guard failure, got %v", err)

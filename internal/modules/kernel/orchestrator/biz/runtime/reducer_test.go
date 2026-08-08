@@ -17,7 +17,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 		{
 			name: "lsp validation failure remains validation without owner repair target",
 			facts: runtimecontract.RuntimeFacts{
-				Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+				Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 				WorkspaceID:        "ws-5cfc9874cebda0b8",
 				RunID:              "run-006",
 				DefinitionRevision: "definition-lsp",
@@ -42,7 +42,7 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 		{
 			name: "gateway incomplete coverage requires state change",
 			facts: runtimecontract.RuntimeFacts{
-				Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+				Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 				WorkspaceID:        "ws-609ce9149734ebb7",
 				RunID:              "run-007-replan-001",
 				DefinitionRevision: "definition-gateway",
@@ -688,7 +688,7 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 	// Validation rejected, then state-change repair also rejected: stay on produce_state_change.
 	// Re-opening produce_validation would anti-replay the same failed validation shape.
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-6",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -807,7 +807,7 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 
 func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-4",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -847,7 +847,7 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 
 func TestReduceRuntimeStateRejectedValidationWithoutOwnerTargetRemainsValidation(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-2", DefinitionRevision: "def-1", EvidenceRevision: "ev-2",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -937,8 +937,8 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesFreshnessReacquisit
 func validationFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
 		Activation: runtimecontract.RuntimeActivationContext{
-			ProviderTarget:   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
-			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{runtimeManagedValidationEvidencePolicy()},
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			EvidencePolicies:  []runtimecontract.RuntimeEvidencePolicy{runtimeManagedValidationEvidencePolicy()},
 		},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
@@ -1212,7 +1212,7 @@ func TestReduceRuntimeStateProviderAuthenticationOpensConfigurationGovernance(t 
 		Class: runtimecontract.FailureClassProviderAuthentication, Code: "provider_authentication",
 		Message: "provider rejected the configured credential",
 	}
-	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{Selection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}}}
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 	decision, err := reduceRuntimeStateFixture(t, facts, nil)
 	if err != nil {

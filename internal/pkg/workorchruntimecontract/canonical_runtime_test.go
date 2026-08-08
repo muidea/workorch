@@ -223,7 +223,7 @@ func validDecisionForState(state ConvergenceState) RuntimeDecision {
 
 func testRuntimeFacts() RuntimeFacts {
 	return RuntimeFacts{
-		Activation:         RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:         RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID:        common.WorkspaceID("ws-1"),
 		RunID:              common.RunID("run-1"),
 		DefinitionRevision: "definition-1",

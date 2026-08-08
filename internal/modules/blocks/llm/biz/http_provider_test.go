@@ -46,11 +46,11 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		Timeout:  5 * time.Second,
 		InferenceProfile: llmmodels.ProviderInferenceProfile{
 			MaxOutputTokens:      65536,
-			ReasoningEffort:      "high",
 			ThinkingBudgetTokens: 32768,
 		},
 	})
-	result, err := provider.Complete(context.Background(), llmProviderRequest())
+	request := llmProviderRequest()
+	result, err := provider.Complete(context.Background(), request)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -68,7 +68,6 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		t.Fatalf("payload = %+v, undeclared compatible provider capability must omit response_format", gotRawPayload)
 	}
 	if gotPayload.MaxCompletionTokens != 65536 ||
-		gotPayload.ReasoningEffort != "high" ||
 		gotPayload.Thinking == nil ||
 		gotPayload.Thinking.BudgetTokens != 32768 {
 		t.Fatalf("payload = %+v, want configured inference profile", gotPayload)
@@ -105,12 +104,20 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 
 func TestHTTPProviderResponsesAdapter(t *testing.T) {
 	var got responsesRequest
+	var raw map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Fatalf("path = %q, want /v1/responses", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request: %v", err)
+		}
+		if err := json.Unmarshal(payload, &got); err != nil {
 			t.Fatalf("decode request: %v", err)
+		}
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			t.Fatalf("decode raw request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`))
@@ -119,6 +126,7 @@ func TestHTTPProviderResponsesAdapter(t *testing.T) {
 	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: "compatible", APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, BaseURL: server.URL + "/v1", Model: "gpt-5.5", Capabilities: llmmodels.ProviderCapabilities{Responses: true}, InferenceProfile: llmmodels.ProviderInferenceProfile{MaxOutputTokens: 16}})
 	request := llmProviderRequest()
 	request.MaxOutputTokens = 8
+	request.ReasoningEffort = "high"
 	result, err := provider.Complete(context.Background(), request)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
@@ -126,11 +134,53 @@ func TestHTTPProviderResponsesAdapter(t *testing.T) {
 	if got.Model != "gpt-5.5" || strings.TrimSpace(got.Input) == "" || got.MaxOutputTokens != 8 {
 		t.Fatalf("request = %+v", got)
 	}
+	if got.Reasoning == nil || got.Reasoning.Effort != "high" {
+		t.Fatalf("reasoning = %+v, want nested high effort", got.Reasoning)
+	}
+	if _, exists := raw["reasoning_effort"]; exists {
+		t.Fatalf("Responses request contains obsolete reasoning_effort: %+v", raw)
+	}
 	if got.Text != nil {
 		t.Fatalf("Responses request unexpectedly contains text.format: %+v", got.Text)
 	}
 	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestHTTPProviderResponsesReasoningDisposition(t *testing.T) {
+	requests := make(chan map[string]any, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: "compatible", APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, BaseURL: server.URL + "/v1", Model: "model", Capabilities: llmmodels.ProviderCapabilities{Responses: true}})
+	for _, effort := range []string{"", "none"} {
+		request := llmProviderRequest()
+		request.ReasoningEffort = effort
+		if _, err := provider.Complete(context.Background(), request); err != nil {
+			t.Fatalf("complete effort %q: %v", effort, err)
+		}
+		payload := <-requests
+		reasoning, exists := payload["reasoning"]
+		if effort == "" {
+			if exists {
+				t.Fatalf("empty effort encoded reasoning: %+v", reasoning)
+			}
+			continue
+		}
+		object, ok := reasoning.(map[string]any)
+		if !ok || object["effort"] != "none" {
+			t.Fatalf("explicit none reasoning = %+v", reasoning)
+		}
 	}
 }
 

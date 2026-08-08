@@ -2151,7 +2151,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			}
 			runsPath := filepath.Join(root, "runs.json")
 			bootstrap := runtimeBootstrap()
-			bootstrap.Activation.ProviderTarget = runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}
+			bootstrap.Activation.ProviderSelection.Target = runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{{
 				Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: llmmodule.ModuleID,
 				MinimumBytes: 32 * 1024, Reason: "sealed provider ceiling",
@@ -2166,7 +2166,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			startProcess := func(t *testing.T) (magicevent.Hub, *filerepository.RunRepository, *runmodule.Module, *llmmodule.Module, magicevent.SimpleObserver, magicevent.SimpleObserver, *int) {
 				t.Helper()
 				// The module must resolve configuration from a freshly opened source on
-				// every simulated process start; no DefaultLLMTarget or process-global
+				// every simulated process start; no DefaultLLMSelection or process-global
 				// test configuration is reused as prerequisite authority.
 				if err := workorchconfig.Close(); err != nil {
 					t.Fatal(err)
@@ -2322,7 +2322,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			}
 			if committedCeiling != nil {
 				got := resumed.Facts.Resources.ProviderCeiling
-				if got.Target != committedCeiling.Target || got.CapabilityRevision != committedCeiling.CapabilityRevision ||
+				if !got.Selection.Same(committedCeiling.Selection) || got.CapabilityRevision != committedCeiling.CapabilityRevision ||
 					got.ConfigurationRevision != committedCeiling.ConfigurationRevision || got.MaxBytes != committedCeiling.MaxBytes ||
 					got.ContextWindowTokens != committedCeiling.ContextWindowTokens || got.EffectiveMaxOutputTokens != committedCeiling.EffectiveMaxOutputTokens {
 					t.Fatalf("restart did not reuse committed provider ceiling: got=%+v want=%+v", got, committedCeiling)
@@ -8785,7 +8785,7 @@ func TestRuntimeProviderAuthenticationCreatesConfigurationDependency(t *testing.
 		Focus:   runtimecontract.CoverageFocus{ID: "focus-1"},
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassProviderAuthentication, Message: "invalid provider credential"},
 		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
-			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"},
+			Selection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}},
 		}},
 	}
 	dependency, found := runtime.GovernanceDependencyForAggregate(runtime.RuntimeAggregate{Facts: facts})
@@ -9448,7 +9448,7 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 
 	facts := runtimeAggregate(t, 1).Facts
 	ceiling := runtimecontract.ProviderCeiling{
-		Target: facts.Activation.ProviderTarget, ContextWindowTokens: 128000, ProviderMaxOutputTokens: 16384,
+		Selection: runtimecontract.ProviderInferenceSelection{Target: facts.Activation.ProviderSelection.Target}, ContextWindowTokens: 128000, ProviderMaxOutputTokens: 16384,
 		EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,
 		CapabilityRevision: "capability-v1", ConfigurationRevision: "config-v1",
 	}
@@ -9460,7 +9460,7 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
 		ContentHash: "provider-ceiling-v1", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
 			Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
-			SubjectRef: string(ceiling.Target.ProviderID) + "/" + string(ceiling.Target.ModelID), Revision: ceiling.ConfigurationRevision,
+			SubjectRef: string(ceiling.Selection.Target.ProviderID) + "/" + string(ceiling.Selection.Target.ModelID), Revision: ceiling.ConfigurationRevision,
 		}},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
@@ -9506,7 +9506,7 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 	stale := runtimecontract.RuntimePrerequisiteStale{
 		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
 		Domain: runtimecontract.RuntimeResourceProviderConfig, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
-		SubjectRef: string(ceiling.Target.ProviderID) + "/" + string(ceiling.Target.ModelID), ExpectedRevision: "config-v1", ObservedRevision: "config-v2",
+		SubjectRef: string(ceiling.Selection.Target.ProviderID) + "/" + string(ceiling.Selection.Target.ModelID), ExpectedRevision: "config-v1", ObservedRevision: "config-v2",
 		Reason: "provider configuration changed",
 	}
 	invalidated, err := firstOwner.InvalidateRuntimeCandidateRequestSessionForPrerequisiteStale(ctx, completed.Facts.WorkspaceID, completed.Facts.RunID, session.LogicalRequestID, stale)
@@ -9747,7 +9747,7 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	facts := runtimeAggregate(t, 1).Facts
 	ceiling := runtimecontract.ProviderCeiling{
-		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -9908,7 +9908,7 @@ func TestRuntimeEnsureCandidateFeasibleBlocksProviderWithoutKinds(t *testing.T) 
 
 func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus:    runtimecontract.CoverageFocus{ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
@@ -9943,7 +9943,7 @@ func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) 
 
 func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRecipe(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
@@ -9986,7 +9986,7 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 
 func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID:        "ws-v2",
 		RunID:              "run-v2",
 		DefinitionRevision: "definition-v2",

@@ -95,7 +95,7 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 		return WorkspaceRuntimeActivationBuild{}, err
 	}
 
-	providerTarget, err := resolveActivationProviderTarget(ctx, request.Hub, command.LLMTarget, workspace.DefaultLLMTarget)
+	providerSelection, err := resolveActivationProviderSelection(ctx, request.Hub, workspace.DefaultLLMSelection)
 	if err != nil {
 		return WorkspaceRuntimeActivationBuild{}, err
 	}
@@ -109,7 +109,7 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 		),
 		DefinitionChangeImpact: RuntimeDefinitionChangeImpact(definitionChangeImpact),
 		RuntimeActivation: RuntimeActivationContext(
-			providerTarget,
+			providerSelection,
 			dialogLanguage,
 			defaultSoul,
 			bindings.stageSouls,
@@ -145,42 +145,38 @@ func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract ma
 	return nil
 }
 
-func resolveActivationProviderTarget(ctx context.Context, hub magicevent.Hub, requested *runtimecontract.ProviderModelTarget, workspaceDefault *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
-	target, err := configuredActivationProviderTarget(ctx, requested, workspaceDefault)
+func resolveActivationProviderSelection(ctx context.Context, hub magicevent.Hub, workspaceDefault *runtimecontract.ProviderInferenceSelection) (runtimecontract.ProviderInferenceSelection, error) {
+	selection, err := configuredActivationProviderSelection(ctx, workspaceDefault)
 	if err != nil {
-		return runtimecontract.ProviderModelTarget{}, err
+		return runtimecontract.ProviderInferenceSelection{}, err
 	}
-	// Optional readiness check through LLM block when hub is available.
-	if hub != nil {
-		if err := ensureProviderTargetReady(ctx, hub, target); err != nil {
-			return runtimecontract.ProviderModelTarget{}, err
-		}
+	validated, err := EnsureProviderInferenceSelection(ctx, hub, selection)
+	if err != nil {
+		return runtimecontract.ProviderInferenceSelection{}, err
 	}
-	return target, nil
+	return validated, nil
 }
 
-func configuredActivationProviderTarget(ctx context.Context, requested *runtimecontract.ProviderModelTarget, workspaceDefault *runtimecontract.ProviderModelTarget) (runtimecontract.ProviderModelTarget, error) {
-	var target runtimecontract.ProviderModelTarget
-	if requested != nil {
-		target = requested.Normalized()
-	} else if workspaceDefault != nil {
-		target = workspaceDefault.Normalized()
+func configuredActivationProviderSelection(ctx context.Context, workspaceDefault *runtimecontract.ProviderInferenceSelection) (runtimecontract.ProviderInferenceSelection, error) {
+	var selection runtimecontract.ProviderInferenceSelection
+	if workspaceDefault != nil {
+		selection = workspaceDefault.Normalized()
 	} else {
 		cfg, err := configcore.LoadFromContext(ctx)
 		if err != nil {
-			return runtimecontract.ProviderModelTarget{}, err
+			return runtimecontract.ProviderInferenceSelection{}, err
 		}
-		target = cfg.LLM.DefaultChat.ToRuntimeTarget()
-		if target.ProviderID == "" && target.ModelID == "" {
+		selection.Target = cfg.LLM.DefaultChat.ToRuntimeTarget()
+		if selection.Target.ProviderID == "" && selection.Target.ModelID == "" {
 			cfg, err = workorchconfig.Current()
 			if err != nil {
-				return runtimecontract.ProviderModelTarget{}, err
+				return runtimecontract.ProviderInferenceSelection{}, err
 			}
-			target = cfg.LLM.DefaultChat.ToRuntimeTarget()
+			selection.Target = cfg.LLM.DefaultChat.ToRuntimeTarget()
 		}
 	}
-	if err := target.Validate(); err != nil {
-		return runtimecontract.ProviderModelTarget{}, err
+	if err := selection.Validate(); err != nil {
+		return runtimecontract.ProviderInferenceSelection{}, err
 	}
-	return target, nil
+	return selection, nil
 }

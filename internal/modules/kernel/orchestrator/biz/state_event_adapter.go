@@ -431,7 +431,7 @@ func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspacee
 		InternalDirectory:    item.InternalDirectory,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMSelection:  runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         soulbinding.FromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),

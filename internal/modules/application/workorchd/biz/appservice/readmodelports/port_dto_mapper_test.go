@@ -119,15 +119,16 @@ func TestWorkspaceSnapshotProjectionPreservesTypedProjectionFields(t *testing.T)
 
 func TestRunProjectionPreservesSealedTargetWithoutAliasing(t *testing.T) {
 	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-read", ModelID: "model-read"}
+	selection := runtimecontract.ProviderInferenceSelection{Target: sealed, ReasoningEffort: "high"}
 	got := appmodelcore.ProjectRun(appmodelcore.Run{
-		ID:              "run-read",
-		WorkspaceID:     "ws-read",
-		SealedLLMTarget: &sealed,
+		ID:                 "run-read",
+		WorkspaceID:        "ws-read",
+		SealedLLMSelection: &selection,
 	})
-	if got.SealedLLMTarget == nil || !got.SealedLLMTarget.Same(sealed) {
-		t.Fatalf("sealed target = %+v, want %+v", got.SealedLLMTarget, sealed)
+	if got.SealedLLMSelection == nil || !got.SealedLLMSelection.Same(selection) {
+		t.Fatalf("sealed target = %+v, want %+v", got.SealedLLMSelection, sealed)
 	}
-	got.SealedLLMTarget.ModelID = "mutated-port-value"
+	got.SealedLLMSelection.Target.ModelID = "mutated-port-value"
 	if sealed.ModelID != "model-read" {
 		t.Fatalf("port mapping aliases app model target: %+v", sealed)
 	}

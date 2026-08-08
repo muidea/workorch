@@ -69,7 +69,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 		t.Fatal(err)
 	}
 	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target:              aggregate.Facts.Activation.ProviderTarget,
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: aggregate.Facts.Activation.ProviderSelection.Target},
 		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
 		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
 	}
@@ -148,7 +148,7 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 		t.Fatal(err)
 	}
 	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target:              aggregate.Facts.Activation.ProviderTarget,
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: aggregate.Facts.Activation.ProviderSelection.Target},
 		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
 		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
 	}

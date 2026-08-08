@@ -306,15 +306,15 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 			FailureClass: "internal", FailureReason: err.Error(),
 		}, err
 	}
-	providerRequest.Model = ceiling.Target.ModelID
+	providerRequest.Model = ceiling.Selection.Target.ModelID
 	if budget := request.CandidateContext.Activation.ExecutionContract.CandidateMaxOutputTokens; budget > 0 && budget < ceiling.EffectiveMaxOutputTokens {
 		providerRequest.MaxOutputTokens = budget
 	}
 	if providerRequest.ContextBudget == nil {
 		providerRequest.ContextBudget = &llmmodels.ProviderContextBudget{}
 	}
-	providerRequest.ContextBudget.ProviderID = ceiling.Target.ProviderID
-	providerRequest.ContextBudget.ModelID = ceiling.Target.ModelID
+	providerRequest.ContextBudget.ProviderID = ceiling.Selection.Target.ProviderID
+	providerRequest.ContextBudget.ModelID = ceiling.Selection.Target.ModelID
 	providerRequest.ContextBudget.CapabilityRevision = ceiling.CapabilityRevision
 	providerRequest.ContextBudget.ConfigurationRevision = ceiling.ConfigurationRevision
 	providerRequest.ContextBudget.ContextWindowTokens = ceiling.ContextWindowTokens
@@ -430,7 +430,7 @@ func providerCeilingConfigurationStale(request llmmodels.RuntimeCandidateRequest
 			if configErr != nil {
 				return nil
 			}
-			observed := TargetConfigurationRevision(cfg.LLM, ceiling.Target)
+			observed := TargetConfigurationRevision(cfg.LLM, ceiling.Selection.Target)
 			if observed == "" || observed == dependency.Revision {
 				return nil
 			}
@@ -505,7 +505,7 @@ func sealedAuditFromRequest(
 	capabilityRevision := ""
 	configurationRevision := ""
 	if ceiling != nil {
-		target = ceiling.Target
+		target = ceiling.Selection.Target
 		capabilityRevision = ceiling.CapabilityRevision
 		configurationRevision = ceiling.ConfigurationRevision
 	}
@@ -640,7 +640,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if ceiling == nil || ceiling.MaxBytes <= 0 {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate provider ceiling is missing")
 	}
-	if err := ceiling.Target.Validate(); err != nil {
+	if err := ceiling.Selection.Target.Validate(); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate provider ceiling target invalid: %w", err)
 	}
 	definitionJSON, err := json.Marshal(runtimeCandidateDefinitionProjection{
@@ -683,7 +683,8 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	providerRequest := llmmodels.ProviderRequest{
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_candidate",
-		Schema: runtimeCandidateSchemaForManifest(manifest),
+		ReasoningEffort: ceiling.Selection.ReasoningEffort,
+		Schema:          runtimeCandidateSchemaForManifest(manifest),
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v3", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract/v2"}, Content: runtimeCandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, SourceRefs: []string{"runtime://definition/" + definitionContext.Revision}, Content: string(definitionJSON)},
@@ -693,7 +694,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 			{ID: "C5.large-refs", Name: "Large and historical references", Role: "user", Cacheability: "volatile", DisplayOrder: 5, SourceRefs: []string{"runtime://remaining-focuses"}, Content: string(largeRefsJSON)},
 		}},
 		ContextBudget: &llmmodels.ProviderContextBudget{
-			ProviderID: ceiling.Target.ProviderID, ModelID: ceiling.Target.ModelID,
+			ProviderID: ceiling.Selection.Target.ProviderID, ModelID: ceiling.Selection.Target.ModelID,
 			CapabilityRevision: ceiling.CapabilityRevision, ConfigurationRevision: ceiling.ConfigurationRevision,
 			ContextWindowTokens: ceiling.ContextWindowTokens, ProviderMaxOutputTokens: ceiling.ProviderMaxOutputTokens,
 			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens,

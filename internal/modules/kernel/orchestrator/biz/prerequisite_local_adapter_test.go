@@ -17,7 +17,7 @@ import (
 
 func TestLocalPrerequisiteAdaptersCommitOwnerFacts(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",
@@ -214,7 +214,7 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 		}},
 	}
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "git-state-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 		}},

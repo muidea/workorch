@@ -15,7 +15,7 @@ import (
 type workspaceDisplayState struct {
 	ActiveRunID           string
 	DisplayRunID          string
-	SealedLLMTarget       *runtimecontract.ProviderModelTarget
+	SealedLLMSelection    *runtimecontract.ProviderInferenceSelection
 	CurrentTask           string
 	DoDItems              []string
 	Transcript            []transcriptItem
@@ -191,12 +191,12 @@ func (m *AppModel) activeWorkspaceOverview() *projectioncontract.Workspace {
 // activeWorkspaceSealedTarget is display-only data copied from the current
 // Run read model. It is deliberately not inferred from the mutable workspace
 // preference and is never used to construct a Resume request.
-func (m *AppModel) activeWorkspaceSealedTarget() *runtimecontract.ProviderModelTarget {
+func (m *AppModel) activeWorkspaceSealedSelection() *runtimecontract.ProviderInferenceSelection {
 	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
 	if entry == nil {
 		return nil
 	}
-	return runtimecontract.CloneProviderModelTarget(entry.Display.SealedLLMTarget)
+	return runtimecontract.CloneProviderInferenceSelection(entry.Display.SealedLLMSelection)
 }
 
 func workspaceOverviewHasProjectionAuthority(ws *projectioncontract.Workspace) bool {
@@ -703,9 +703,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	displayRun := msg.DisplayRun
 	if entry := m.ensureWorkspaceRuntimeState(workspaceID); entry != nil {
 		if workspaceHasLive && activeRun != nil {
-			entry.Display.SealedLLMTarget = runtimecontract.CloneProviderModelTarget(activeRun.SealedLLMTarget)
+			entry.Display.SealedLLMSelection = runtimecontract.CloneProviderInferenceSelection(activeRun.SealedLLMSelection)
 		} else {
-			entry.Display.SealedLLMTarget = nil
+			entry.Display.SealedLLMSelection = nil
 		}
 	}
 	if displayRun == nil {
@@ -1737,7 +1737,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 	entry.Display = workspaceDisplayState{
 		ActiveRunID:           m.activeRunID,
 		DisplayRunID:          string(entry.RuntimeView.DisplayRunID),
-		SealedLLMTarget:       runtimecontract.CloneProviderModelTarget(entry.Display.SealedLLMTarget),
+		SealedLLMSelection:    runtimecontract.CloneProviderInferenceSelection(entry.Display.SealedLLMSelection),
 		CurrentTask:           m.currentTask,
 		DoDItems:              append([]string(nil), m.dodItems...),
 		Transcript:            append([]transcriptItem(nil), m.transcript...),

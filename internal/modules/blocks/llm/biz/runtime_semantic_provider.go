@@ -111,7 +111,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if ceiling == nil || ceiling.MaxBytes <= 0 {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan provider ceiling is missing")
 	}
-	if err := ceiling.Target.Validate(); err != nil {
+	if err := ceiling.Selection.Target.Validate(); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime semantic plan provider ceiling target invalid: %w", err)
 	}
 	schema, err := runtimecontract.RuntimeSemanticPlanJSONSchemaForRequest(manifest, context.PlanStep, context.BatchID, context.BatchSequence, context.BatchCoverageWorkItemIDs)
@@ -165,7 +165,8 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	}
 	providerRequest := llmmodels.ProviderRequest{
 		WorkspaceID: string(context.WorkspaceID), RunID: string(context.RunID), Kind: "runtime_semantic_plan",
-		Schema: schema,
+		ReasoningEffort: ceiling.Selection.ReasoningEffort,
+		Schema:          schema,
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_semantic_plan_prompt.v1", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-semantic-contract", Name: "Runtime semantic plan contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://semantic-plan-contract/v1"}, Content: runtimeSemanticPlanContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: context.Definition.Revision, SourceRefs: []string{"runtime://definition/" + context.Definition.Revision}, Content: string(definitionJSON)},
@@ -175,7 +176,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 			{ID: "C5.acceptance-slices", Name: "Acceptance slice references", Role: "user", Cacheability: "volatile", DisplayOrder: 5, SourceRefs: []string{"runtime://definition-seed/" + context.DefinitionSeed.Hash}, Content: string(slicesJSON)},
 		}},
 		ContextBudget: &llmmodels.ProviderContextBudget{
-			ProviderID: ceiling.Target.ProviderID, ModelID: ceiling.Target.ModelID,
+			ProviderID: ceiling.Selection.Target.ProviderID, ModelID: ceiling.Selection.Target.ModelID,
 			CapabilityRevision: ceiling.CapabilityRevision, ConfigurationRevision: ceiling.ConfigurationRevision,
 			ContextWindowTokens: ceiling.ContextWindowTokens, ProviderMaxOutputTokens: ceiling.ProviderMaxOutputTokens,
 			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens,

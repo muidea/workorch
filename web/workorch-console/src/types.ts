@@ -53,6 +53,11 @@ export type ProviderModelTarget = {
   modelId: string;
 };
 
+export type ProviderInferenceSelection = {
+  target: ProviderModelTarget;
+  reasoningEffort?: string;
+};
+
 export type AIProxyConfigurationView = {
   baseUrl?: string;
   apiKeyConfigured: boolean;
@@ -75,7 +80,6 @@ export type CustomProviderModelView = {
   maxOutputTokens: number;
   operations: string[];
   temperature?: number;
-  reasoningEffort?: string;
   thinkingBudgetTokens?: number;
   cacheMode?: string;
   promptCacheKey?: boolean;
@@ -100,7 +104,6 @@ export type CustomProviderModelDraft = {
   supportedEndpoints?: string[];
   operations?: string[];
   temperature?: number;
-  reasoningEffort?: string;
   thinkingBudgetTokens?: number;
   cacheMode?: string;
   promptCacheKey?: boolean;
@@ -130,6 +133,13 @@ export type ProviderModelDescriptorView = {
   capabilityReady: boolean;
   unavailableReason?: string;
   capabilityRevision?: string;
+  reasoning?: {
+    supported: boolean;
+    valid: boolean;
+    defaultEffort?: string;
+    efforts?: string[];
+    invalidReason?: string;
+  };
 };
 
 export type ProviderCatalogSummary = {
@@ -191,7 +201,6 @@ export type UpdateLLMConfigurationRequest = {
       maxOutputTokens?: number;
       operations?: string[];
       temperature?: number;
-      reasoningEffort?: string;
       thinkingBudgetTokens?: number;
       cache?: {
         mode?: string;
@@ -294,6 +303,7 @@ export type GovernanceBudgetConfiguration = {
 };
 
 export type Workspace = {
+	revision: number;
   id: string;
   title: string;
   description?: string;
@@ -301,7 +311,7 @@ export type Workspace = {
   state: string;
   activeRunId?: string;
   // Mutable workspace preference. It applies only to the next activation.
-  defaultLLMTarget?: ProviderModelTarget;
+  defaultLLMSelection?: ProviderInferenceSelection;
   defaultSoulId?: string;
   soulBindings?: Record<string, string>;
 	contextHints?: Record<string, unknown>;
@@ -390,7 +400,7 @@ export type Run = {
   blockingApprovalId?: string;
   failureReason?: string;
   // Immutable Runtime activation input; never send it back on Resume.
-  sealedLLMTarget?: ProviderModelTarget;
+  sealedLLMSelection?: ProviderInferenceSelection;
   // Read-only Run-owner disposition. It is not an Orchestrator action and
   // must never be returned as an activation input.
   runtimeActivation?: RuntimeActivationStatus;
@@ -535,6 +545,7 @@ export type WorkspaceExecutionActivationRequest = {
   goalId?: string;
   doDId?: string;
   llmTarget?: ProviderModelTarget;
+  reasoningEffort?: string;
   soulId?: string;
   soulBindings?: Record<string, string>;
   skillIds?: string[];

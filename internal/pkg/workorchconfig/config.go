@@ -154,7 +154,6 @@ type CustomLLMModelConfig struct {
 	MaxOutputTokens      int                 `json:"maxOutputTokens" toml:"maxOutputTokens"`
 	Operations           []string            `json:"operations" toml:"operations"`
 	Temperature          *float64            `json:"temperature,omitempty" toml:"temperature,omitempty"`
-	ReasoningEffort      string              `json:"reasoningEffort,omitempty" toml:"reasoningEffort,omitempty"`
 	ThinkingBudgetTokens int                 `json:"thinkingBudgetTokens,omitempty" toml:"thinkingBudgetTokens,omitempty"`
 	Cache                ProviderCacheConfig `json:"cache,omitempty" toml:"cache,omitempty"`
 }

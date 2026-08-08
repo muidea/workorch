@@ -70,7 +70,6 @@ type CustomProviderModelView struct {
 	MaxOutputTokens      int      `json:"maxOutputTokens"`
 	Operations           []string `json:"operations"`
 	Temperature          *float64 `json:"temperature,omitempty"`
-	ReasoningEffort      string   `json:"reasoningEffort,omitempty"`
 	ThinkingBudgetTokens int      `json:"thinkingBudgetTokens,omitempty"`
 	CacheMode            string   `json:"cacheMode,omitempty"`
 	PromptCacheKey       *bool    `json:"promptCacheKey,omitempty"`

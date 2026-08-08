@@ -5,7 +5,7 @@ const (
 	TopicLLMCommandGenerateEmbedding           = "/llm/command/generate-embedding"
 	TopicLLMCommandGetProviderModelCatalog     = "/llm/command/get-provider-model-catalog"
 	TopicLLMCommandRefreshProviderModelCatalog = "/llm/command/refresh-provider-model-catalog"
-	TopicLLMCommandResolveProviderModelTarget  = "/llm/command/resolve-provider-model-target"
+	TopicLLMCommandValidateInferenceSelection  = "/llm/command/validate-inference-selection"
 	TopicAcquireProviderCeiling                = "/llm/runtime/acquire-provider-ceiling"
 	TopicAcquireRuntimeCapabilities            = "/llm/runtime-prerequisite/acquire-capabilities"
 	TopicPreflightRuntimeCandidate             = "/llm/runtime-candidate/preflight"

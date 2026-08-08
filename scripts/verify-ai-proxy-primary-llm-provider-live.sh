@@ -324,9 +324,12 @@ curl --fail --silent --show-error -H 'Content-Type: application/json' \
   -d '{"items":["A result is traceable"]}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/dods" >"$ARTIFACT_DIR/runtime-dod.json"
 DOD_ID="$(json_field "$ARTIFACT_DIR/runtime-dod.json" dod.id)"
+curl --fail --silent --show-error \
+  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID" >"$ARTIFACT_DIR/runtime-workspace-before-selection.json"
+WORKSPACE_REVISION="$(json_field "$ARTIFACT_DIR/runtime-workspace-before-selection.json" workspace.revision)"
 curl --fail --silent --show-error -H 'Content-Type: application/json' -X PUT \
-  -d '{"providerId":"ai-proxy","modelId":"live-chat-a"}' \
-  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/llm-target" >"$ARTIFACT_DIR/runtime-llm-target.json"
+  -d '{"providerId":"ai-proxy","modelId":"live-chat-a","expectedRevision":'"$WORKSPACE_REVISION"'}' \
+  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/llm-selection" >"$ARTIFACT_DIR/runtime-llm-selection.json"
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
   -d '{"intent":"restart","requestId":"ai-proxy-runtime-probe","reason":"live_verification_restart","source":"verification"}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" >"$ARTIFACT_DIR/runtime-activation.json"
@@ -400,9 +403,12 @@ curl --fail --silent --show-error -H 'Content-Type: application/json' \
   -d '{"items":["A second result is traceable"]}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/dods" >"$ARTIFACT_DIR/runtime-second-dod.json"
 SECOND_DOD_ID="$(json_field "$ARTIFACT_DIR/runtime-second-dod.json" dod.id)"
+curl --fail --silent --show-error \
+  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID" >"$ARTIFACT_DIR/runtime-second-workspace-before-selection.json"
+SECOND_WORKSPACE_REVISION="$(json_field "$ARTIFACT_DIR/runtime-second-workspace-before-selection.json" workspace.revision)"
 curl --fail --silent --show-error -H 'Content-Type: application/json' -X PUT \
-  -d '{"providerId":"ai-proxy","modelId":"live-chat-b"}' \
-  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/llm-target" >"$ARTIFACT_DIR/runtime-second-llm-target.json"
+  -d '{"providerId":"ai-proxy","modelId":"live-chat-b","expectedRevision":'"$SECOND_WORKSPACE_REVISION"'}' \
+  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/llm-selection" >"$ARTIFACT_DIR/runtime-second-llm-selection.json"
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
   -d '{"intent":"restart","requestId":"ai-proxy-runtime-second","reason":"live_verification_restart","source":"verification"}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/execution-activations" >"$ARTIFACT_DIR/runtime-second-activation.json"

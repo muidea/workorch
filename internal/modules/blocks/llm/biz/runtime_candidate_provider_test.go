@@ -131,7 +131,7 @@ func runtimeSemanticProviderTestRequest(t *testing.T) llmmodels.RuntimeCandidate
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget:    target,
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()},
 	}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "the artifact works", Order: 1}}
@@ -152,7 +152,7 @@ func runtimeSemanticProviderTestRequest(t *testing.T) llmmodels.RuntimeCandidate
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	ceiling := &runtimecontract.ProviderCeiling{
-		Target: target, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		Selection: runtimecontract.ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
 		MaxInputTokens: 4096, MaxBytes: 128 * 1024, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
 	}
 	context := runtimecontract.RuntimeSemanticPlanRequestContext{
@@ -265,7 +265,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
-			Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ContextWindowTokens:      128000,
 			ProviderMaxOutputTokens:  16384,
 			EffectiveMaxOutputTokens: 4096,
@@ -281,9 +281,9 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 		}}},
 		Activation: runtimecontract.RuntimeActivationContext{
-			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
-			DialogLanguage: "zh-CN",
-			DefaultSoul:    &runtimecontract.RuntimeSoulContext{ID: "soul-default", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			DialogLanguage:    "zh-CN",
+			DefaultSoul:       &runtimecontract.RuntimeSoulContext{ID: "soul-default", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
 			StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{
 				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024)}},
 				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
@@ -553,7 +553,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 	limitedContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)
 	limitedContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -1370,12 +1370,12 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 		Resources: runtimecontract.RuntimeResourceFacts{
 			TargetSelection: &selection,
 			ProviderCeiling: &runtimecontract.ProviderCeiling{
-				Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ContextWindowTokens: 128000,
+				Selection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ContextWindowTokens: 128000,
 				ProviderMaxOutputTokens: 16384, EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,
 				CapabilityRevision: "capability-scope", ConfigurationRevision: "config-scope",
 			},
 		},
-		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation: runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 	}
 	bindRuntimeCandidateTestSelection(&facts, selection)
 	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{
@@ -1567,7 +1567,7 @@ func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) 
 
 func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-v1-00000000000000000001",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
@@ -1580,7 +1580,7 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 		}}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 		Resources: runtimecontract.RuntimeResourceFacts{ProviderCeiling: &runtimecontract.ProviderCeiling{
-			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ContextWindowTokens: 128000,
+			Selection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ContextWindowTokens: 128000,
 			ProviderMaxOutputTokens: 16384, EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,
 			CapabilityRevision: "capability-1", ConfigurationRevision: "config-1",
 		}},
@@ -1643,7 +1643,7 @@ func TestRuntimeCandidateContextPublishesExactRejectedShapes(t *testing.T) {
 	path := "main.go"
 	operation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{path}}
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-v1-00000000000000000001",
 		Focus:        runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
 		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},

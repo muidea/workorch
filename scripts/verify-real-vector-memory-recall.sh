@@ -551,9 +551,10 @@ post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" \
 activation_request_id="real-vector-memory-e2e-$$"
 activation_reason="e2e_restart"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
-  '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}' \
-  "$TMP_DIR/llm-target.json"
+workspace_revision="$(curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["revision"])')"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-selection" \
+  '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model","expectedRevision":'"$workspace_revision"'}' \
+  "$TMP_DIR/llm-selection.json"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   '{"intent":"restart","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e"}' \
   "$TMP_DIR/activation.json"

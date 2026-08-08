@@ -93,7 +93,7 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 		CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: target, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target}, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "works", Order: 1}}
 	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
 	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, items, slices)
@@ -112,7 +112,7 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	context := runtimecontract.RuntimeSemanticPlanRequestContext{
 		WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Activation: activation,
-		ProviderCeiling: &runtimecontract.ProviderCeiling{Target: target, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
+		ProviderCeiling: &runtimecontract.ProviderCeiling{Selection: runtimecontract.ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 	}
 	return llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
@@ -435,7 +435,7 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	decision := sealedCandidateTestDecision(t)
 	candidateContext := candidateContextForDecision(decision)
 	candidateContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -498,7 +498,7 @@ func TestPreflightRuntimeCandidateOverBudgetPublishesSecretFreeAuditWithoutProvi
 	decision := sealedCandidateTestDecision(t)
 	candidateContext := candidateContextForDecision(decision)
 	candidateContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -596,7 +596,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	defer llm.Stop(ctx)
 
 	activation := runtimecontract.RuntimeActivationContext{
-		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
 			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", Name: "repo.summary", Enabled: true,
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
@@ -713,7 +713,7 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 		DeclarationRef: "test/runtime-candidate-event-adapter",
 	})
 	facts := runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
@@ -747,7 +747,7 @@ func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runti
 		WorkspaceID: decision.AuthoritySnapshot.WorkspaceID, RunID: decision.AuthoritySnapshot.RunID,
 		DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision, EvidenceRevision: decision.AuthoritySnapshot.EvidenceRevision,
 		Focus:                 decision.Focus,
-		Activation:            runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation:            runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		RequiredState:         decision.State,
 		RequiredEffectScopes:  append([]runtimecontract.RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		RequiredEvidenceKinds: append([]string(nil), required.RequiredEvidenceKinds...),

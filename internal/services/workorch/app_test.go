@@ -178,7 +178,7 @@ func (b serviceDefaultWorkspaceWorkspaceBackend) RuntimeView(context.Context, wo
 	return nil, nil
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
 	return b.Get(ctx, id)
 }
 

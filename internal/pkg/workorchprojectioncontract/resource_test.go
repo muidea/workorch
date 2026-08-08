@@ -8,9 +8,9 @@ import (
 
 func TestCloneWorkspaceDetachesNestedProjectionState(t *testing.T) {
 	source := Workspace{
-		ID:               "ws-clone",
-		DefaultLLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"},
-		SoulBindings:     map[string]string{"execution": "soul-a"},
+		ID:                  "ws-clone",
+		DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}},
+		SoulBindings:        map[string]string{"execution": "soul-a"},
 		ContextHints: map[string]any{
 			"nested": map[string]any{"items": []any{"one"}},
 		},
@@ -25,7 +25,7 @@ func TestCloneWorkspaceDetachesNestedProjectionState(t *testing.T) {
 	}
 
 	cloned := CloneWorkspace(source)
-	cloned.DefaultLLMTarget.ModelID = "mutated"
+	cloned.DefaultLLMSelection.Target.ModelID = "mutated"
 	cloned.SoulBindings["execution"] = "mutated"
 	cloned.ContextHints["nested"].(map[string]any)["items"].([]any)[0] = "mutated"
 	cloned.EvidencePolicies[0]["checks"].([]any)[0] = "mutated"
@@ -33,7 +33,7 @@ func TestCloneWorkspaceDetachesNestedProjectionState(t *testing.T) {
 	cloned.ViewModel.FailedWorkspaceIds[0] = "mutated"
 	cloned.ViewModel.Sections["runtime"] = WorkspaceViewModelSection{Name: "runtime", Revision: 2}
 
-	if source.DefaultLLMTarget.ModelID != "model-a" || source.SoulBindings["execution"] != "soul-a" {
+	if source.DefaultLLMSelection.Target.ModelID != "model-a" || source.SoulBindings["execution"] != "soul-a" {
 		t.Fatal("workspace scalar reference fields share clone storage")
 	}
 	if source.ContextHints["nested"].(map[string]any)["items"].([]any)[0] != "one" {
@@ -61,14 +61,14 @@ func TestCloneWorkspacesPreservesNilAndEmptyCollections(t *testing.T) {
 
 func TestCloneRunDetachesSealedTargetAndRuntimeActivation(t *testing.T) {
 	source := Run{
-		ID:                "run-clone",
-		SealedLLMTarget:   &runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"},
-		RuntimeActivation: &RuntimeActivationStatus{Disposition: "fresh_activation_required"},
+		ID:                 "run-clone",
+		SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}},
+		RuntimeActivation:  &RuntimeActivationStatus{Disposition: "fresh_activation_required"},
 	}
 	cloned := CloneRun(source)
-	cloned.SealedLLMTarget.ModelID = "mutated"
+	cloned.SealedLLMSelection.Target.ModelID = "mutated"
 	cloned.RuntimeActivation.Disposition = "mutated"
-	if source.SealedLLMTarget.ModelID != "model-a" || source.RuntimeActivation.Disposition != "fresh_activation_required" {
+	if source.SealedLLMSelection.Target.ModelID != "model-a" || source.RuntimeActivation.Disposition != "fresh_activation_required" {
 		t.Fatal("run projection clone shares nested storage")
 	}
 	if CloneRuns(nil) != nil {

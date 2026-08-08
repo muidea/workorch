@@ -16,16 +16,17 @@ import (
 
 func TestUpdateWorkspaceCommandFromModelExcludesLifecycleFields(t *testing.T) {
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
-	command, err := updateWorkspaceCommandFromModel(&workspacemodel.Workspace{ID: "ws-model", ActiveRunID: "run-current", DefaultLLMTarget: &target})
+	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
+	command, err := updateWorkspaceCommandFromModel(&workspacemodel.Workspace{ID: "ws-model", ActiveRunID: "run-current", DefaultLLMSelection: &selection})
 	if err != nil {
 		t.Fatalf("updateWorkspaceCommandFromModel: %v", err)
 	}
-	if command.DefaultLLMTarget == nil || !command.DefaultLLMTarget.Same(target) {
+	if command.DefaultLLMSelection == nil || !command.DefaultLLMSelection.Same(selection) {
 		t.Fatalf("command = %+v", command)
 	}
 	target.ModelID = "mutated"
-	if command.DefaultLLMTarget.ModelID != "model-a" {
-		t.Fatalf("command target aliased input = %+v", command.DefaultLLMTarget)
+	if command.DefaultLLMSelection.Target.ModelID != "model-a" {
+		t.Fatalf("command target aliased input = %+v", command.DefaultLLMSelection)
 	}
 }
 

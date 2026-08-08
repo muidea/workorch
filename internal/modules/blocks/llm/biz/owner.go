@@ -70,7 +70,7 @@ func (m *Biz) Start() error {
 		llmevents.TopicLLMCommandGenerateEmbedding,
 		llmevents.TopicLLMCommandGetProviderModelCatalog,
 		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
-		llmevents.TopicLLMCommandResolveProviderModelTarget,
+		llmevents.TopicLLMCommandValidateInferenceSelection,
 	}
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
@@ -565,17 +565,19 @@ func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result m
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
-	target := command.Target.Normalized()
-	if err := target.Validate(); err != nil {
+	selection := command.Selection.Normalized()
+	if err := selection.Validate(); err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
 	}
+	target := selection.Target
 	profile, err := m.resolveTarget(event.Context(), target, workorchconfig.LLMOperationResponses)
 	if err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
 	}
 	ceiling := ProfileToProviderCeiling(profile)
+	ceiling.Selection = selection
 	if command.MinimumBytes > 0 && ceiling.MaxBytes < command.MinimumBytes {
 		setPrerequisiteMagicError(result, fmt.Errorf("provider %q model %q request ceiling %d is below required minimum %d", target.ProviderID, target.ModelID, ceiling.MaxBytes, command.MinimumBytes))
 		return
@@ -601,9 +603,9 @@ func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result m
 // silent provider/model substitution.
 func providerCeilingObservation(prerequisiteID string, ceiling runtimecontract.ProviderCeiling) runtimecontract.RuntimePrerequisiteObservation {
 	ceiling = ceiling.Normalized()
-	subject := ceiling.Target.ProviderID + "/" + ceiling.Target.ModelID
+	subject := ceiling.Selection.Target.ProviderID + "/" + ceiling.Selection.Target.ModelID
 	contentHash := fmt.Sprintf("provider-ceiling:%s:%s:%s:%s:%d:%d:%d:%d:%d",
-		ceiling.Target.ProviderID, ceiling.Target.ModelID, ceiling.CapabilityRevision, ceiling.ConfigurationRevision,
+		ceiling.Selection.Target.ProviderID, ceiling.Selection.Target.ModelID, ceiling.CapabilityRevision, ceiling.ConfigurationRevision,
 		ceiling.ContextWindowTokens, ceiling.ProviderMaxOutputTokens, ceiling.EffectiveMaxOutputTokens, ceiling.MaxInputTokens, ceiling.MaxBytes)
 	observation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: prerequisiteID,
@@ -654,28 +656,50 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		}
 		result.Set(llmevents.RefreshProviderModelCatalogResult{Catalog: catalog}, nil)
 		return
-	case llmevents.TopicLLMCommandResolveProviderModelTarget:
-		cmd, ok := ev.Data().(llmevents.ResolveProviderModelTargetCommand)
+	case llmevents.TopicLLMCommandValidateInferenceSelection:
+		cmd, ok := ev.Data().(llmevents.ValidateProviderInferenceSelectionCommand)
 		if !ok {
 			setLLMMagicError(result, common.ErrInvalidArgument)
 			return
 		}
-		profile, err := m.resolveTarget(ev.Context(), cmd.Target, cmd.Operation)
+		selection, revision, err := m.validateInferenceSelection(ev.Context(), cmd.Selection, cmd.Operation)
 		if err != nil {
 			setLLMMagicError(result, err)
 			return
 		}
-		// Response target must match request target identity.
-		if !profile.Target.Same(cmd.Target.Normalized()) {
-			setLLMMagicError(result, fmt.Errorf("%w: resolved target mismatch", common.ErrInvalidArgument))
-			return
-		}
-		result.Set(llmevents.ResolveProviderModelTargetResult{Profile: profile}, nil)
+		result.Set(llmevents.ValidateProviderInferenceSelectionResult{Selection: selection, CapabilityRevision: revision}, nil)
 		return
 	}
 
 	response, err := m.executeCommand(ev)
 	setLLMMagicResult(result, response, err)
+}
+
+func (m *Biz) validateInferenceSelection(ctx context.Context, selection runtimecontract.ProviderInferenceSelection, operation string) (runtimecontract.ProviderInferenceSelection, string, error) {
+	selection = selection.Normalized()
+	if err := selection.Validate(); err != nil {
+		return runtimecontract.ProviderInferenceSelection{}, "", err
+	}
+	profile, err := m.resolveTarget(ctx, selection.Target, operation)
+	if err != nil {
+		return runtimecontract.ProviderInferenceSelection{}, "", err
+	}
+	if selection.ReasoningEffort == "" {
+		return selection, profile.CapabilityRevision, nil
+	}
+	catalog, err := m.getCatalog(ctx, selection.Target.ProviderID, false)
+	if err != nil {
+		return runtimecontract.ProviderInferenceSelection{}, "", err
+	}
+	for _, descriptor := range catalog.Models {
+		if descriptor.Target.Same(selection.Target) {
+			if !descriptor.Reasoning.Allows(selection.ReasoningEffort) {
+				return runtimecontract.ProviderInferenceSelection{}, "", fmt.Errorf("%w: reasoning effort %q is not allowed for %s/%s", common.ErrInvalidArgument, selection.ReasoningEffort, selection.Target.ProviderID, selection.Target.ModelID)
+			}
+			return selection, descriptor.CapabilityRevision, nil
+		}
+	}
+	return runtimecontract.ProviderInferenceSelection{}, "", common.ErrNotFound
 }
 
 func (m *Biz) executeCommand(ev magicevent.Event) (llmevents.LLMCommandResult, error) {
@@ -793,8 +817,8 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	if err := ceiling.Validate(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	if model := strings.TrimSpace(request.Model); model != "" && model != ceiling.Target.ModelID {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider request model %q conflicts with sealed ceiling model %q", common.ErrInvalidArgument, model, ceiling.Target.ModelID)
+	if model := strings.TrimSpace(request.Model); model != "" && model != ceiling.Selection.Target.ModelID {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider request model %q conflicts with sealed ceiling model %q", common.ErrInvalidArgument, model, ceiling.Selection.Target.ModelID)
 	}
 	cfg, err := workorchconfig.Current()
 	if err != nil {
@@ -812,14 +836,15 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	if provider == nil {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
-	request.Model = ceiling.Target.ModelID
+	request.Model = ceiling.Selection.Target.ModelID
+	request.ReasoningEffort = ceiling.Selection.ReasoningEffort
 	request.Config = llmproviderconfig.RedactedProviderConfig(runtime)
 	if request.ContextBudget == nil {
 		request.ContextBudget = &llmmodels.ProviderContextBudget{}
 	}
 	// Ensure sealed identity is present on the request audit surface before dispatch.
-	request.ContextBudget.ProviderID = ceiling.Target.ProviderID
-	request.ContextBudget.ModelID = ceiling.Target.ModelID
+	request.ContextBudget.ProviderID = ceiling.Selection.Target.ProviderID
+	request.ContextBudget.ModelID = ceiling.Selection.Target.ModelID
 	request.ContextBudget.CapabilityRevision = ceiling.CapabilityRevision
 	request.ContextBudget.ConfigurationRevision = ceiling.ConfigurationRevision
 	request.ContextBudget.CapabilitySource = "sealed_ceiling"

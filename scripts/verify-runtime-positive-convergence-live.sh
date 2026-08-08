@@ -324,9 +324,10 @@ def activate_workspace(ws, label):
     body_snap = snapshot(ws)
     snap = body_snap.get("snapshot") or body_snap
     if provider_id and model_id:
-        request("PUT", f"/api/v1/workorch/workspaces/{ws}/llm-target", {
+        request("PUT", f"/api/v1/workorch/workspaces/{ws}/llm-selection", {
             "providerId": provider_id,
             "modelId": model_id,
+            "expectedRevision": snap.get("workspace", {}).get("revision", snap.get("revision")),
         })
     payload = {
         "intent": "restart",

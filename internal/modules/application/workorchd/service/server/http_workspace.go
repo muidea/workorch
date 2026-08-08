@@ -407,18 +407,27 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			Workspace: appmodelcore.ProjectWorkspace(item),
 		})
 	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-target", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-selection", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "llm-target" {
+		if !ok || action != "llm-selection" {
 			http.NotFound(w, r)
 			return
 		}
-		var target runtimecontract.ProviderModelTarget
-		if err := decodeJSON(r, &target); err != nil {
+		var request struct {
+			ProviderID       string `json:"providerId"`
+			ModelID          string `json:"modelId"`
+			ReasoningEffort  string `json:"reasoningEffort,omitempty"`
+			ExpectedRevision uint64 `json:"expectedRevision"`
+		}
+		if err := decodeJSON(r, &request); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
-		item, err := state.updateWorkspaceLLMTarget(r.Context(), workspaceID, &target)
+		selection := runtimecontract.ProviderInferenceSelection{
+			Target:          runtimecontract.ProviderModelTarget{ProviderID: request.ProviderID, ModelID: request.ModelID},
+			ReasoningEffort: request.ReasoningEffort,
+		}
+		item, err := state.updateWorkspaceLLMSelection(r.Context(), workspaceID, &selection, request.ExpectedRevision)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -426,13 +435,22 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		state.upsertProjectedWorkspace(item)
 		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: appmodelcore.ProjectWorkspace(item)})
 	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-target", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-selection", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "llm-target" {
+		if !ok || action != "llm-selection" {
 			http.NotFound(w, r)
 			return
 		}
-		item, err := state.updateWorkspaceLLMTarget(r.Context(), workspaceID, nil)
+		var request struct {
+			ExpectedRevision uint64 `json:"expectedRevision"`
+		}
+		if r.Body != nil && r.ContentLength != 0 {
+			if err := decodeJSON(r, &request); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+				return
+			}
+		}
+		item, err := state.updateWorkspaceLLMSelection(r.Context(), workspaceID, nil, request.ExpectedRevision)
 		if err != nil {
 			writeBusinessError(w, err)
 			return

@@ -38,23 +38,23 @@ func TestMapRunProjectsLineageAndLifecycleTimestamps(t *testing.T) {
 	}
 }
 
-func TestMapRunProjectsSealedProviderTargetWithoutAliasingBootstrap(t *testing.T) {
-	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-sealed", ModelID: "model-sealed"}
+func TestMapRunProjectsSealedProviderSelectionWithoutAliasingBootstrap(t *testing.T) {
+	sealed := runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-sealed", ModelID: "model-sealed"}, ReasoningEffort: "high"}
 	item := &runmodel.Run{
 		ID:          "run-sealed-target",
 		WorkspaceID: "ws-sealed-target",
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{
-			Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: sealed},
+			Activation: runtimecontract.RuntimeActivationContext{ProviderSelection: sealed},
 		},
 	}
 
 	got := MapRun(item)
-	if got.SealedLLMTarget == nil || !got.SealedLLMTarget.Same(sealed) {
-		t.Fatalf("sealed target = %+v, want %+v", got.SealedLLMTarget, sealed)
+	if got.SealedLLMSelection == nil || !got.SealedLLMSelection.Same(sealed) {
+		t.Fatalf("sealed target = %+v, want %+v", got.SealedLLMSelection, sealed)
 	}
-	got.SealedLLMTarget.ModelID = "mutated-read-model"
-	if item.RuntimeBootstrap.Activation.ProviderTarget.ModelID != "model-sealed" {
-		t.Fatalf("read model target mutation changed bootstrap = %+v", item.RuntimeBootstrap.Activation.ProviderTarget)
+	got.SealedLLMSelection.Target.ModelID = "mutated-read-model"
+	if item.RuntimeBootstrap.Activation.ProviderSelection.Target.ModelID != "model-sealed" {
+		t.Fatalf("read model target mutation changed bootstrap = %+v", item.RuntimeBootstrap.Activation.ProviderSelection.Target)
 	}
 }
 

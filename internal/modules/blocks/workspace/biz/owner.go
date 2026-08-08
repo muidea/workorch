@@ -65,7 +65,7 @@ func (m *Biz) Start() error {
 		workspaceevents.TopicWorkspaceCommandGet,
 		workspaceevents.TopicWorkspaceCommandList,
 		workspaceevents.TopicWorkspaceCommandUpdate,
-		workspaceevents.TopicWorkspaceCommandUpdateLLMTarget,
+		workspaceevents.TopicWorkspaceCommandUpdateLLMSelection,
 		workspaceevents.TopicWorkspaceCommandDelete,
 		workspaceevents.TopicWorkspaceCommandDefineGoal,
 		workspaceevents.TopicWorkspaceCommandUpdateGoal,
@@ -239,8 +239,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		}
 		m.publishWorkspaceUpdated(ctx, item)
 		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
-	case workspaceevents.TopicWorkspaceCommandUpdateLLMTarget:
-		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceLLMTargetCommand)
+	case workspaceevents.TopicWorkspaceCommandUpdateLLMSelection:
+		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceLLMSelectionCommand)
 		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
@@ -248,20 +248,28 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		if cmd.Target == nil {
-			item.DefaultLLMTarget = nil
+		if cmd.ExpectedRevision == 0 || item.Revision != cmd.ExpectedRevision {
+			return workspaceevents.WorkspaceCommandResult{}, common.ErrConflict
+		}
+		currentSelection := runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection)
+		if cmd.Selection == nil {
+			item.DefaultLLMSelection = nil
 		} else {
-			target := cmd.Target.Normalized()
-			if err := target.Validate(); err != nil {
+			selection := cmd.Selection.Normalized()
+			if err := selection.Validate(); err != nil {
 				return workspaceevents.WorkspaceCommandResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 			}
-			item.DefaultLLMTarget = &target
+			item.DefaultLLMSelection = &selection
 		}
-		if err := m.workspaces.CompareAndSwap(ctx, item, item.Revision); err != nil {
+		if (currentSelection == nil && item.DefaultLLMSelection == nil) ||
+			(currentSelection != nil && item.DefaultLLMSelection != nil && currentSelection.Same(*item.DefaultLLMSelection)) {
+			return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item), Changed: false}, nil
+		}
+		if err := m.workspaces.CompareAndSwap(ctx, item, cmd.ExpectedRevision); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, item)
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(item), Changed: true}, nil
 	case workspaceevents.TopicWorkspaceCommandDelete:
 		cmd, ok := ev.Data().(workspaceevents.DeleteWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
@@ -447,7 +455,7 @@ func (m *Biz) publishWorkspaceUpdated(ctx context.Context, item *workspacemodel.
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceStateChanged, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, workspaceevents.WorkspaceChangedData{
 		WorkspaceID: item.ID, Title: item.Title, Description: item.Description,
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
-		State: item.State, ActiveRunID: item.ActiveRunID, DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
+		State: item.State, ActiveRunID: item.ActiveRunID, DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
 	})
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
 	m.PostEvent(event)
@@ -464,7 +472,7 @@ func workspaceScopeFromCommand(ev magicevent.Event) (common.WorkspaceID, error) 
 		return cmd.WorkspaceID, nil
 	case workspaceevents.UpdateWorkspaceCommand:
 		return cmd.WorkspaceID, nil
-	case workspaceevents.UpdateWorkspaceLLMTargetCommand:
+	case workspaceevents.UpdateWorkspaceLLMSelectionCommand:
 		return cmd.WorkspaceID, nil
 	case workspaceevents.DeleteWorkspaceCommand:
 		return cmd.WorkspaceID, nil
@@ -563,7 +571,7 @@ func workspaceFromUpdateCommand(current *workspacemodel.Workspace, cmd workspace
 	item.InternalDirectory = cmd.InternalDirectory
 	item.TemplateID = cmd.TemplateID
 	item.ProfileID = cmd.ProfileID
-	item.DefaultLLMTarget = runtimecontract.CloneProviderModelTarget(cmd.DefaultLLMTarget)
+	item.DefaultLLMSelection = runtimecontract.CloneProviderInferenceSelection(cmd.DefaultLLMSelection)
 	item.DefaultSoulID = cmd.DefaultSoulID
 	item.SoulBindings = soulbinding.SoulIDMap(cmd.SoulBindings)
 	item.ContextHints = cmd.ContextHints.Clone()

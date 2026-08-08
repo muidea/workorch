@@ -66,7 +66,7 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 		CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: target, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target}, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "works", Order: 1}}
 	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
 	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, items, slices)
@@ -85,7 +85,7 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	context := runtimecontract.RuntimeSemanticPlanRequestContext{
 		WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Activation: activation,
-		ProviderCeiling: &runtimecontract.ProviderCeiling{Target: target, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
+		ProviderCeiling: &runtimecontract.ProviderCeiling{Selection: runtimecontract.ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 	}
 	return llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
@@ -499,7 +499,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Activation: runtimecontract.RuntimeActivationContext{
-			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 				ID: "test-managed-validation", AppliesTo: runtimecontract.StepKindShellCommand,
 				CommandName: "true", RecipeDeclared: true, RecipeArgs: []string{"workorch-validation"},

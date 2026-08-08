@@ -128,20 +128,20 @@ func cliWorkspaceDeleteResponse(response magicevent.Result) (workorchdevents.CLI
 	return result, nil
 }
 
-func cliWorkspaceUpdateLLMTargetResponse(response magicevent.Result) (workorchdevents.CLIWorkspaceUpdateLLMTargetResult, error) {
+func cliWorkspaceUpdateLLMSelectionResponse(response magicevent.Result) (workorchdevents.CLIWorkspaceUpdateLLMSelectionResult, error) {
 	if response == nil {
-		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, common.ErrInvalidArgument
+		return workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{}, common.ErrInvalidArgument
 	}
 	if err := cd.ToStdError(response.Error()); err != nil {
-		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, err
+		return workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{}, err
 	}
 	data, resultErr := response.Get()
 	if err := cd.ToStdError(resultErr); err != nil {
-		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, err
+		return workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{}, err
 	}
-	result, ok := data.(workorchdevents.CLIWorkspaceUpdateLLMTargetResult)
+	result, ok := data.(workorchdevents.CLIWorkspaceUpdateLLMSelectionResult)
 	if !ok {
-		return workorchdevents.CLIWorkspaceUpdateLLMTargetResult{}, fmt.Errorf("%w: workspace llm target update result type %T", common.ErrInvalidArgument, data)
+		return workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{}, fmt.Errorf("%w: workspace llm target update result type %T", common.ErrInvalidArgument, data)
 	}
 	return result, nil
 }

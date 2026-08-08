@@ -51,9 +51,9 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 		DefaultSoulID: workspace.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(workspace.SoulBindings),
 		ContextHints: workspace.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(workspace.EvidencePolicies),
 	}
-	if workspace.DefaultLLMTarget != nil {
-		target := *workspace.DefaultLLMTarget
-		ret.DefaultLLMTarget = &target
+	if workspace.DefaultLLMSelection != nil {
+		target := *workspace.DefaultLLMSelection
+		ret.DefaultLLMSelection = &target
 	}
 	if workspace.TerminalDelivery != nil {
 		identity := *workspace.TerminalDelivery

@@ -9,11 +9,11 @@ import (
 )
 
 // RuntimeActivationContext 是一次 Runtime Run 在 application activation 阶段
-// 已解析完成的 typed 运行输入。它保存 provider/model target identity 与
+// 已解析完成的 typed 运行输入。它保存 provider inference selection 与
 // provider-facing 所需的稳定内容快照，不使用 map/JSON bridge 表达组件合同。
-// ProviderTarget 是 identity 快照，不进入 C0/C1/C2 stable prefix。
+// ProviderSelection 是 Run owner 封存的不可变事实，不进入 C0/C1/C2 stable prefix。
 type RuntimeActivationContext struct {
-	ProviderTarget    ProviderModelTarget
+	ProviderSelection ProviderInferenceSelection
 	DialogLanguage    string
 	DefaultSoul       *RuntimeSoulContext
 	StageSoulBindings []RuntimeStageSoulBinding
@@ -105,7 +105,7 @@ type RuntimeMemoryContext struct {
 }
 
 func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
-	c.ProviderTarget = c.ProviderTarget.Normalized()
+	c.ProviderSelection = c.ProviderSelection.Normalized()
 	c.DialogLanguage = strings.TrimSpace(c.DialogLanguage)
 	if c.DefaultSoul != nil {
 		value := c.DefaultSoul.Normalized()
@@ -128,8 +128,8 @@ func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 
 func (c RuntimeActivationContext) Validate() error {
 	c = c.Normalized()
-	if err := c.ProviderTarget.Validate(); err != nil {
-		return fmt.Errorf("runtime activation provider target: %w", err)
+	if err := c.ProviderSelection.Validate(); err != nil {
+		return fmt.Errorf("runtime activation provider selection: %w", err)
 	}
 	for _, binding := range c.StageSoulBindings {
 		if binding.Stage == "" || binding.Soul.ID == "" {
@@ -170,7 +170,7 @@ func (c RuntimeActivationContext) Clone() RuntimeActivationContext {
 func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeActivationContext) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if !left.ProviderTarget.Same(right.ProviderTarget) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
+	if !left.ProviderSelection.Same(right.ProviderSelection) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
 		len(left.StageSoulBindings) != len(right.StageSoulBindings) || len(left.Skills) != len(right.Skills) ||
 		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.Memories) != len(right.Memories) ||
 		!SameRuntimeEvidencePolicies(left.EvidencePolicies, right.EvidencePolicies) {

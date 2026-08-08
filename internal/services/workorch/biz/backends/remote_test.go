@@ -83,8 +83,8 @@ func TestWorkspaceSnapshotFromClientPreservesCompleteDetachedProjection(t *testi
 	input := projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: "ws-1"},
 		Run: &projectioncontract.Run{
-			ID:              "run-1",
-			SealedLLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"},
+			ID:                 "run-1",
+			SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}},
 		},
 		Step:                 &projectioncontract.StepView{ID: "step-1"},
 		Result:               &projectioncontract.Result{ID: "result-1", EvidenceRefs: []string{"evidence-1"}},
@@ -104,11 +104,11 @@ func TestWorkspaceSnapshotFromClientPreservesCompleteDetachedProjection(t *testi
 		t.Fatalf("snapshot collections lost: %+v", got)
 	}
 
-	got.Run.SealedLLMTarget.ModelID = "changed"
+	got.Run.SealedLLMSelection.Target.ModelID = "changed"
 	got.Result.EvidenceRefs[0] = "changed"
 	got.ExecutionSections[0].RelatedDoDItems[0] = "changed"
 	got.DoDs[0].Items[0] = "changed"
-	if input.Run.SealedLLMTarget.ModelID != "model-1" || input.Result.EvidenceRefs[0] != "evidence-1" || input.ExecutionSections[0].RelatedDoDItems[0] != "dod-1" || input.DoDs[0].Items[0] != "item-1" {
+	if input.Run.SealedLLMSelection.Target.ModelID != "model-1" || input.Result.EvidenceRefs[0] != "evidence-1" || input.ExecutionSections[0].RelatedDoDItems[0] != "dod-1" || input.DoDs[0].Items[0] != "item-1" {
 		t.Fatal("remote snapshot conversion retained mutable input aliases")
 	}
 }
@@ -760,7 +760,7 @@ func TestRemoteRunGetMapsDefinitionRevision(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"service":"workorch","run":{"id":"run-001","workspaceId":"ws-remote","goalId":"goal-001","doDId":"dod-001","definitionRevision":"goal:goal-001|dod:dod-001","state":"running","sealedLLMTarget":{"providerId":"sealed-provider","modelId":"sealed-model"}}}`)
+		_, _ = fmt.Fprint(w, `{"service":"workorch","run":{"id":"run-001","workspaceId":"ws-remote","goalId":"goal-001","doDId":"dod-001","definitionRevision":"goal:goal-001|dod:dod-001","state":"running","sealedLLMSelection":{"target":{"providerId":"sealed-provider","modelId":"sealed-model"},"reasoningEffort":"high"}}}`)
 	}))
 	defer server.Close()
 
@@ -772,8 +772,8 @@ func TestRemoteRunGetMapsDefinitionRevision(t *testing.T) {
 	if got.DefinitionRevision != "goal:goal-001|dod:dod-001" {
 		t.Fatalf("definitionRevision = %q, want mapped owner revision", got.DefinitionRevision)
 	}
-	if got.SealedLLMTarget == nil || got.SealedLLMTarget.ProviderID != "sealed-provider" || got.SealedLLMTarget.ModelID != "sealed-model" {
-		t.Fatalf("sealed target = %+v, want server-sealed target", got.SealedLLMTarget)
+	if got.SealedLLMSelection == nil || got.SealedLLMSelection.Target.ProviderID != "sealed-provider" || got.SealedLLMSelection.Target.ModelID != "sealed-model" {
+		t.Fatalf("sealed target = %+v, want server-sealed target", got.SealedLLMSelection)
 	}
 }
 

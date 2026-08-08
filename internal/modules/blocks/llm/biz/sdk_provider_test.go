@@ -43,10 +43,10 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 		Timeout:  5 * time.Second,
 		InferenceProfile: llmmodels.ProviderInferenceProfile{
 			MaxOutputTokens: 65536,
-			ReasoningEffort: "high",
 		},
 	})
-	result, err := provider.Complete(context.Background(), llmProviderRequest())
+	request := llmProviderRequest()
+	result, err := provider.Complete(context.Background(), request)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -59,8 +59,8 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	if gotPayload["model"] != "test-model" {
 		t.Fatalf("payload model = %v, want test-model", gotPayload["model"])
 	}
-	if gotPayload["max_completion_tokens"] != float64(65536) || gotPayload["reasoning_effort"] != "high" {
-		t.Fatalf("payload = %+v, want configured OpenAI inference profile", gotPayload)
+	if gotPayload["max_completion_tokens"] != float64(65536) {
+		t.Fatalf("payload = %+v, want request-scoped OpenAI inference selection", gotPayload)
 	}
 	if _, ok := gotPayload["response_format"]; ok {
 		t.Fatalf("payload = %+v, undeclared provider capability must omit response_format", gotPayload)

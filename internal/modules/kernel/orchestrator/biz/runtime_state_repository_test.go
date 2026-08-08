@@ -3275,7 +3275,7 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
-		Target:                   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -3351,7 +3351,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 	}
 	providerPrerequisite := initialized.Facts.Prerequisites.Pending[0]
 	ceiling := runtimecontract.ProviderCeiling{
-		Target:                   facts.Activation.ProviderTarget,
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: facts.Activation.ProviderSelection.Target},
 		ContextWindowTokens:      128000,
 		ProviderMaxOutputTokens:  16384,
 		EffectiveMaxOutputTokens: 4096,
@@ -4201,7 +4201,7 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Definition:    runtimeDefinition(),
 		Activation: runtimecontract.RuntimeActivationContext{
-			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{
 				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 				AcceptanceSlicePolicy:     &policy,

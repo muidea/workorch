@@ -44,18 +44,18 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			ChatModelTargets: options,
 		}}, nil)
 	})
-	var embeddedTarget *runtimecontract.ProviderModelTarget
-	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)
-		embeddedTarget = runtimecontract.CloneProviderModelTarget(command.Target)
-		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workorchdevents.CLIWorkspaceInfo{
+	var embeddedTarget *runtimecontract.ProviderInferenceSelection
+	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMSelection, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMSelectionCommand)
+		embeddedTarget = runtimecontract.CloneProviderInferenceSelection(command.Selection)
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMSelectionResult{Workspace: workorchdevents.CLIWorkspaceInfo{
 			ID: command.WorkspaceID, Title: "Workspace", State: common.WorkspaceStateActive,
-			DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(command.Target),
+			DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(command.Selection),
 		}}, nil)
 	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(workorchdevents.TopicCLIConfigurationGet)
-		observer.Unsubscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget)
+		observer.Unsubscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMSelection)
 	})
 
 	var remoteTarget *runtimecontract.ProviderModelTarget
@@ -65,14 +65,14 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			_, _ = w.Write([]byte(`{"configuration":{"llm":{"defaultChat":{"providerId":"ai-proxy","modelId":"model-a"},"aiProxy":{},"budget":{},"customProviders":[{"id":"custom","models":[{"id":"model-b","operations":["chat_completions"]}]}],"catalog":{}}}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/workorch/configuration/llm/models":
 			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true}]}}`))
-		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/workorch/workspaces/ws-model/llm-target":
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/workorch/workspaces/ws-model/llm-selection":
 			var target runtimecontract.ProviderModelTarget
 			if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 				t.Fatalf("decode remote target: %v", err)
 			}
 			remoteTarget = runtimecontract.CloneProviderModelTarget(&target)
 			_ = json.NewEncoder(w).Encode(map[string]any{"workspace": map[string]any{
-				"id": "ws-model", "title": "Workspace", "state": "active", "defaultLLMTarget": target,
+				"id": "ws-model", "title": "Workspace", "state": "active", "defaultLLMSelection": target,
 			}})
 		default:
 			http.NotFound(w, r)
@@ -113,10 +113,10 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			}
 			next, _ = m.Update(saveCmd())
 			m = appModelFromTea(t, next)
-			if m.modelSelectMode || !strings.Contains(m.result, "custom/model-b") || !strings.Contains(m.result, "current-run sealed target: no active sealed target") {
+			if m.modelSelectMode || !strings.Contains(m.result, "custom/model-b") || !strings.Contains(m.result, "current-run sealed target: no active sealed selection") {
 				t.Fatalf("saved selection result = mode:%v result:%q", m.modelSelectMode, m.result)
 			}
-			if name == "embedded" && (embeddedTarget == nil || embeddedTarget.ProviderID != "custom" || embeddedTarget.ModelID != "model-b") {
+			if name == "embedded" && (embeddedTarget == nil || embeddedTarget.Target.ProviderID != "custom" || embeddedTarget.Target.ModelID != "model-b") {
 				t.Fatalf("embedded persisted target = %+v", embeddedTarget)
 			}
 			if name == "remote" && (remoteTarget == nil || remoteTarget.ProviderID != "custom" || remoteTarget.ModelID != "model-b") {

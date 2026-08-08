@@ -268,9 +268,11 @@ print(json.dumps({
 }, ensure_ascii=False, separators=(",", ":")))
 PY
 )"
-  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+  local workspace_revision
+  workspace_revision="$(curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["revision"])')"
+  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-selection" \
     -H 'Content-Type: application/json' \
-    -d '{"providerId":"verify","modelId":"verify-model"}' >"$TMP_DIR/${workspace_id}-llm-target.json"
+    -d '{"providerId":"verify","modelId":"verify-model","expectedRevision":'"$workspace_revision"'}' >"$TMP_DIR/${workspace_id}-llm-selection.json"
   if ! curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d "$request_body" >"$output_file"; then

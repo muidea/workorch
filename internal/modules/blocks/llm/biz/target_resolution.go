@@ -239,7 +239,7 @@ func deriveBudgetProfile(
 
 func ProfileToProviderCeiling(profile llmmodels.ResolvedProviderModelProfile) runtimecontract.ProviderCeiling {
 	return runtimecontract.ProviderCeiling{
-		Target:                   profile.Target,
+		Selection:                runtimecontract.ProviderInferenceSelection{Target: profile.Target},
 		ContextWindowTokens:      profile.ContextWindowTokens,
 		ProviderMaxOutputTokens:  profile.ProviderMaxOutputTokens,
 		EffectiveMaxOutputTokens: profile.EffectiveMaxOutputTokens,
@@ -338,7 +338,6 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 		InferenceProfile: llmmodels.ProviderInferenceProfile{
 			Temperature:          model.Temperature,
 			MaxOutputTokens:      profile.EffectiveMaxOutputTokens,
-			ReasoningEffort:      model.ReasoningEffort,
 			ThinkingBudgetTokens: model.ThinkingBudgetTokens,
 		},
 		ContextProfile: llmmodels.ProviderContextProfile{
@@ -450,7 +449,7 @@ func ProfileFromProviderCeiling(ceiling runtimecontract.ProviderCeiling) (llmmod
 		tokensPerByte = float64(ceiling.MaxInputTokens) / float64(ceiling.MaxBytes)
 	}
 	return llmmodels.ResolvedProviderModelProfile{
-		Target:                   ceiling.Target,
+		Target:                   ceiling.Selection.Target,
 		APISurface:               llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
 		ContextWindowTokens:      ceiling.ContextWindowTokens,
 		ProviderMaxOutputTokens:  ceiling.ProviderMaxOutputTokens,
@@ -476,12 +475,12 @@ func ResolveProviderClientForSealedCeiling(cfg workorchconfig.LLMConfig, ceiling
 	if err := ceiling.Validate(); err != nil {
 		return llmmodels.ProviderConfig{}, llmmodels.ResolvedProviderModelProfile{}, err
 	}
-	currentRevision := TargetConfigurationRevision(cfg, ceiling.Target)
+	currentRevision := TargetConfigurationRevision(cfg, ceiling.Selection.Target)
 	if currentRevision != ceiling.ConfigurationRevision {
 		return llmmodels.ProviderConfig{}, llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureConfigurationDrift,
 			Message: "sealed target configuration revision drifted; create a new run to use the updated provider configuration",
-			Target:  ceiling.Target,
+			Target:  ceiling.Selection.Target,
 		}
 	}
 	profile, err := ProfileFromProviderCeiling(ceiling)
@@ -489,7 +488,7 @@ func ResolveProviderClientForSealedCeiling(cfg workorchconfig.LLMConfig, ceiling
 		return llmmodels.ProviderConfig{}, llmmodels.ResolvedProviderModelProfile{}, err
 	}
 	// Preserve sealed budget fields; ResolveProviderClient may fill surface-specific client details.
-	client, err := ResolveProviderClient(cfg, ceiling.Target, profile)
+	client, err := ResolveProviderClient(cfg, ceiling.Selection.Target, profile)
 	if err != nil {
 		return llmmodels.ProviderConfig{}, llmmodels.ResolvedProviderModelProfile{}, err
 	}

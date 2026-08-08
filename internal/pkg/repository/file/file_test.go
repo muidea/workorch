@@ -55,34 +55,34 @@ func TestWorkspaceRepositoryGetReturnsErrorWhenPersistedJSONCorrupt(t *testing.T
 	}
 }
 
-func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMTarget(t *testing.T) {
+func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.json")
 	repo := NewWorkspaceRepository(path)
 	target := orchestratormodel.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
-	item := &workspacemodel.Workspace{ID: "ws-model-target", Title: "workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: &target}
+	item := &workspacemodel.Workspace{ID: "ws-model-target", Title: "workspace", State: common.WorkspaceStateActive, DefaultLLMSelection: &orchestratormodel.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	item.DefaultLLMTarget.ModelID = "mutated"
+	item.DefaultLLMSelection.Target.ModelID = "mutated"
 	stored, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if stored.DefaultLLMTarget == nil || stored.DefaultLLMTarget.ProviderID != "custom" || stored.DefaultLLMTarget.ModelID != "model-a" {
-		t.Fatalf("stored target = %+v", stored.DefaultLLMTarget)
+	if stored.DefaultLLMSelection == nil || stored.DefaultLLMSelection.Target.ProviderID != "custom" || stored.DefaultLLMSelection.Target.ModelID != "model-a" {
+		t.Fatalf("stored target = %+v", stored.DefaultLLMSelection)
 	}
-	stored.DefaultLLMTarget.ProviderID = "mutated"
+	stored.DefaultLLMSelection.Target.ProviderID = "mutated"
 	again, err := NewWorkspaceRepository(path).Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("second Get: %v", err)
 	}
-	if again.DefaultLLMTarget == nil || again.DefaultLLMTarget.ProviderID != "custom" {
-		t.Fatalf("cloned target = %+v", again.DefaultLLMTarget)
+	if again.DefaultLLMSelection == nil || again.DefaultLLMSelection.Target.ProviderID != "custom" {
+		t.Fatalf("cloned target = %+v", again.DefaultLLMSelection)
 	}
 }
 
-func TestWorkspaceRepositoryReadsLegacyWorkspaceWithoutDefaultLLMTarget(t *testing.T) {
+func TestWorkspaceRepositoryReadsLegacyWorkspaceWithoutDefaultLLMSelection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 	if err := os.WriteFile(path, []byte(`{"ws-legacy":{"ID":"ws-legacy","Title":"legacy","State":"active"}}`), 0o600); err != nil {
 		t.Fatalf("write legacy workspace: %v", err)
@@ -91,8 +91,8 @@ func TestWorkspaceRepositoryReadsLegacyWorkspaceWithoutDefaultLLMTarget(t *testi
 	if err != nil {
 		t.Fatalf("read legacy workspace: %v", err)
 	}
-	if item.DefaultLLMTarget != nil {
-		t.Fatalf("legacy target = %+v, want nil", item.DefaultLLMTarget)
+	if item.DefaultLLMSelection != nil {
+		t.Fatalf("legacy target = %+v, want nil", item.DefaultLLMSelection)
 	}
 }
 

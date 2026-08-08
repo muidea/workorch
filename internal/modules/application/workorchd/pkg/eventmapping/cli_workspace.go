@@ -27,15 +27,16 @@ func WorkspaceDTO(item projectioncontract.Workspace) (workorchdevents.CLIWorkspa
 		return workorchdevents.CLIWorkspaceInfo{}, err
 	}
 	ret := workorchdevents.CLIWorkspaceInfo{
-		ID: common.WorkspaceID(item.ID), Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
+		Revision: item.Revision,
+		ID:       common.WorkspaceID(item.ID), Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
 		State: common.WorkspaceState(item.State), ActiveRunID: common.RunID(item.ActiveRunID), BlockingTicketID: common.TicketID(item.BlockingTicketID), BlockingApprovalID: common.ApprovalID(item.BlockingApprovalID),
 		TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: common.SoulID(item.DefaultSoulID), SoulBindings: soulbinding.FromStringMap(item.SoulBindings),
 		ContextHints: hints, EvidencePolicies: policies,
 		Projection: item.Projection, ViewModel: WorkspaceViewModelDTO(item.ViewModel),
 	}
-	if item.DefaultLLMTarget != nil {
-		value := item.DefaultLLMTarget.Clone()
-		ret.DefaultLLMTarget = &value
+	if item.DefaultLLMSelection != nil {
+		value := item.DefaultLLMSelection.Clone()
+		ret.DefaultLLMSelection = &value
 	}
 	return ret, nil
 }
@@ -64,14 +65,15 @@ func WorkspaceProjection(item workorchdevents.CLIWorkspaceInfo) (projectioncontr
 		return projectioncontract.Workspace{}, err
 	}
 	ret := projectioncontract.Workspace{
-		ID: string(item.ID), Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
+		Revision: item.Revision,
+		ID:       string(item.ID), Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
 		State: string(item.State), ActiveRunID: string(item.ActiveRunID), BlockingTicketID: string(item.BlockingTicketID), BlockingApprovalID: string(item.BlockingApprovalID),
 		TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: string(item.DefaultSoulID), SoulBindings: soulbinding.StringMap(item.SoulBindings),
 		ContextHints: item.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(item.EvidencePolicies), Projection: item.Projection, ViewModel: view,
 	}
-	if item.DefaultLLMTarget != nil {
-		value := item.DefaultLLMTarget.Clone()
-		ret.DefaultLLMTarget = &value
+	if item.DefaultLLMSelection != nil {
+		value := item.DefaultLLMSelection.Clone()
+		ret.DefaultLLMSelection = &value
 	}
 	return projectioncontract.CloneWorkspace(ret), nil
 }

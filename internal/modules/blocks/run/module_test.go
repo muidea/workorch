@@ -572,7 +572,7 @@ func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 
 func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-v2", DoDID: "dod-v2", Revision: "definition-v2"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	state := runtimecontract.RuntimeStateRecord{
 		StateRevision: 1,
@@ -623,7 +623,7 @@ func TestRuntimeStateUpdateRejectsNonOrchestratorSource(t *testing.T) {
 	hub := newRunModuleTestHub(t)
 	runs := memory.NewRunRepository()
 	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-source", DoDID: "dod-source", Revision: "definition-source"}
-	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
+	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	state := runtimecontract.RuntimeStateRecord{StateRevision: 1, Definition: definition, Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-source", RunID: "run-source", DefinitionRevision: definition.Revision, Activation: activation,

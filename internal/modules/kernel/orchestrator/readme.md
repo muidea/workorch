@@ -13,12 +13,13 @@ authority transaction、terminal delivery 或 Run notification 的最终合同�
 stable factual category 与完整、安全 original diagnostic；Orchestrator 只读取前者选择 internal transition，
 不得解析原 message/code。
 
-## Provider / model ceiling（2026-07-15）
+## Provider inference selection / ceiling（2026-08-08）
 
-- activation 持久化 `RuntimeActivationContext.ProviderTarget`
-- provider ceiling prerequisite 请求与封存完整 `ProviderCeiling{Target, token/byte ceilings, revisions}`
-- candidate 强制使用 ceiling target；Restart/Resume 不携带 provider/model patch
-- Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy 或模型品牌
+- activation 持久化 Run owner封存的 `RuntimeActivationContext.ProviderSelection`
+- provider ceiling prerequisite 请求与封存完整 `ProviderCeiling{Selection, token/byte ceilings, revisions}`
+- candidate 强制使用 ceiling selection；Resume 不携带或重读 selection patch，Restart 由 fresh activation读取 Workspace owner最新 canonical selection
+- reasoning effort参与 activation/ceiling identity，但不改变 stable prefix、CWI、focus、预算、retry或 action
+- Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy、模型品牌或 effort语义
 
 ## Runtime 四状态机实现约束（2026-07-16）
 

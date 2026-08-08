@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-29
+Last Updated: 2026-08-08
 
 ## 当前生产合同（2026-07-15 cutover）
 
@@ -12,10 +12,11 @@ WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 
 1. canonical config 使用 `llm.aiProxy` + `llm.defaultChat` + `llm.budget` + 可选 `llm.customProviders`。
 2. `blocks/llm` 通过 `GET /v1/models` 获取精确模型容量，并维护进程内 TTL/LKG catalog cache。
-3. application activation 解析完整 `ProviderModelTarget`，写入 typed `RuntimeBootstrap.Activation.ProviderTarget`。
-4. Runtime prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）；输出上限直接采用 selected model 的 `maxOutputTokens`，输入 token/byte ceiling 由 selected model 的 `contextWindowTokens` 自动派生，不叠加进程级固定 output/request cap。
-5. candidate/completion/embedding 强制使用已封存 target；不存在 provider map fallback 或 provider context 传递。
-6. `llm.aiProxy.apiKey` 是可选客户端身份配置；`/v1/models`、chat、stream 与 embedding 必须使用同一 header 规则，仅在 key 非空时发送 Bearer credential。
+3. `blocks/llm` 从 catalog 的 `capabilities.reasoning` 发布允许值、provider default 与独立 validity；application 先取得 typed validation fact，再由 Workspace owner CAS 保存 `DefaultLLMSelection`。
+4. fresh Start/Restart 从 Workspace canonical selection 构造 `RuntimeBootstrap.Activation.ProviderSelection`；Run owner封存完整 selection，Resume 与 recovery 不重读 Workspace。
+5. Runtime prerequisite 封存完整 `ProviderCeiling`（selection + token/byte ceiling + capability/configuration revision）；输出上限直接采用 selected model 的 `maxOutputTokens`，输入 token/byte ceiling 由 selected model 的 `contextWindowTokens` 自动派生。
+6. Runtime candidate/semantic-plan request 强制使用 sealed selection；Responses adapter只把非空 effort编码为 `reasoning.effort`，不存在全局 reasoning source、provider fallback 或 provider context 传递。
+7. `llm.aiProxy.apiKey` 是可选客户端身份配置；`/v1/models`、Responses、stream 与 embedding 必须使用同一 header 规则，仅在 key 非空时发送 Bearer credential。
 
 已删除：
 
@@ -46,11 +47,12 @@ provider code/message 选择 correction、retry、governance 或 terminal。
 - built-in `ai-proxy` 是唯一默认 provider；`customProviders` 只能由显式 target 使用，不能参与 map fallback。
 - `/v1/models` 返回的 model identity、context window、max output、capability 与 revision 是 catalog SoT；不存在本地
   model pattern、conservative token default 或固定 4096/8192 output fallback。
-- activation 必须把 ready 的完整 provider/model target 封入 `RuntimeBootstrap`；后续 request 只使用 sealed target。
+- activation 必须把已由 LLM owner校验的完整 inference selection 封入 `RuntimeBootstrap`；后续 request只使用 sealed selection。空 effort表示 provider default，显式 `none` 仍是独立 identity。
 - provider ceiling 必须按 selected model 自动推导并持久化；catalog 缺失、target 不 ready 或容量字段无效时返回
   typed configuration factual result，不能猜测容量或静默切换模型。
 - TTL/LKG 只属于 LLM owner 的 catalog 可用性策略；LKG 必须携带 revision/observed-at，不能覆盖显式 not-ready、
   authentication 或 incompatible capability 事实。
+- catalog reasoning capability invalid 不覆盖 model 的基础 Responses readiness；但显式 effort 必须在 Workspace 写入前拒绝，运行期 capability drift也不得静默降级 selection。
 
 ## C0～C5 与 stable prefix
 

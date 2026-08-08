@@ -4,19 +4,21 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-03
+Last Updated: 2026-08-08
 
 
 ## LLM Provider（2026-07-15）
 
 - 首选 provider：内置 `ai-proxy`
 - 模型发现：`blocks/llm` 读取 `/v1/models` catalog
-- activation：提交/持久化 `llmTarget` / `ProviderModelTarget`
-- workspace 默认 target：`blocks/workspace` 持久化可选 `DefaultLLMTarget`；新 Run 按 explicit activation → workspace → system `defaultChat` 解析
+- workspace 下一次运行选择：`blocks/workspace` CAS 持久化可选 `DefaultLLMSelection`；选择包含完整 ai-proxy model target 与可选 reasoning effort
+- activation：fresh Start/Restart 读取 Workspace owner canonical selection；为空时使用当前系统 `defaultChat` 且省略 reasoning；caller 不得提交仅对本次 Run 生效的 selection patch
+- Run 封存：`blocks/run` 在 activation 中持久化 `ProviderInferenceSelection`；Resume 与进程恢复只使用该 sealed fact，不重读 mutable Workspace 偏好
 - TUI 运行控制通过 scoped Run intent 提交；可继续的 current-schema Run 才可 `/run resume`，terminal 或
   `fresh_activation_required` Run 必须由用户显式 restart 创建新的 Runtime activation，TUI 不再以本地状态猜测续跑路径
-- TUI：`/model` 自动列出 ready chat `providerId/modelId`，双确认后更新当前 workspace；`/model show` 查看，`/model clear` 恢复继承系统默认
-- Runtime：`ProviderCeiling` 封存 target + token/byte ceiling + revision
+- TUI：`/model` 自动列出 ready Responses target；`/model reasoning <effort|default>` 更新当前 workspace 的下一次运行偏好；`/model show` 区分 next-run 与 current-run sealed selection
+- Runtime：`ProviderCeiling` 封存完整 selection + token/byte ceiling + capability/configuration revision；reasoning effort 不改变 CWI、预算或稳定 prompt prefix
+- LLM wire：`blocks/llm` 只依据 ai-proxy catalog 校验显式 effort，并在 `/v1/responses` 中编码 nested `reasoning.effort`；空 effort 完全省略 `reasoning`
 - 旧 `defaultProvider` / provider list / model pattern / provider context 路径已删除
 
 ## Purpose

@@ -16,6 +16,6 @@ type WorkspaceBackend interface {
 	List(ctx context.Context) ([]projectioncontract.Workspace, error)
 	Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 	RuntimeView(ctx context.Context, query workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error)
-	UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error)
+	UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (*projectioncontract.Workspace, error)
 	Delete(ctx context.Context, id common.WorkspaceID, purge bool) error
 }

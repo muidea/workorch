@@ -13,7 +13,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("llm", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicAcquireRuntimeCapabilities,
 		TopicLLMCommandGetProviderModelCatalog,
-		TopicLLMCommandResolveProviderModelTarget,
+		TopicLLMCommandValidateInferenceSelection,
 		TopicAcquireProviderCeiling,
 		TopicPreflightRuntimeCandidate,
 	)...)

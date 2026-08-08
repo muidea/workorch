@@ -185,9 +185,6 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 	if maxTokens := maxOutputTokens(p.config); maxTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(maxTokens)
 	}
-	if p.config.InferenceProfile.ReasoningEffort != "" {
-		params.ReasoningEffort = shared.ReasoningEffort(p.config.InferenceProfile.ReasoningEffort)
-	}
 	return params
 }
 

@@ -89,9 +89,9 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		ret.RuntimeState = &state
 	}
 	if item.RuntimeBootstrap != nil {
-		target := item.RuntimeBootstrap.Activation.ProviderTarget.Normalized()
-		if target.Validate() == nil {
-			ret.SealedLLMTarget = &target
+		selection := item.RuntimeBootstrap.Activation.ProviderSelection.Normalized()
+		if selection.Validate() == nil {
+			ret.SealedLLMSelection = &selection
 		}
 	}
 	if item.RuntimeActivationStatus != nil {

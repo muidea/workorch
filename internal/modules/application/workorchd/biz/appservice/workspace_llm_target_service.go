@@ -15,30 +15,31 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func UpdateWorkspaceLLMTargetWithHub(ctx context.Context, hub magicevent.Hub, workspaceID string, target *runtimecontract.ProviderModelTarget) (appmodelcore.Workspace, error) {
+func UpdateWorkspaceLLMSelectionWithHub(ctx context.Context, hub magicevent.Hub, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
 	id := common.WorkspaceID(strings.TrimSpace(workspaceID))
 	if hub == nil || id == "" {
 		return appmodelcore.Workspace{}, common.ErrInvalidArgument
 	}
-	var normalized *runtimecontract.ProviderModelTarget
-	if target != nil {
-		value := target.Normalized()
+	var normalized *runtimecontract.ProviderInferenceSelection
+	if selection != nil {
+		value := selection.Normalized()
 		if err := value.Validate(); err != nil {
 			return appmodelcore.Workspace{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 		}
-		if err := activationports.EnsureProviderTargetReady(ctx, hub, value); err != nil {
+		validated, err := activationports.EnsureProviderInferenceSelection(ctx, hub, value)
+		if err != nil {
 			return appmodelcore.Workspace{}, err
 		}
-		normalized = &value
+		normalized = &validated
 	}
-	item, err := workspaceports.UpdateWorkspaceLLMTarget(ctx, hub, id, normalized)
+	item, err := workspaceports.UpdateWorkspaceLLMSelection(ctx, hub, id, normalized, expectedRevision)
 	if err != nil {
 		return appmodelcore.Workspace{}, err
 	}
 	return workspacecore.MapWorkspace(item), nil
 }
 
-func UpdateWorkspaceLLMTargetWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, target *runtimecontract.ProviderModelTarget) (appmodelcore.Workspace, error) {
+func UpdateWorkspaceLLMSelectionWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
 	if session == nil {
 		return appmodelcore.Workspace{}, common.ErrInvalidArgument
 	}
@@ -46,5 +47,5 @@ func UpdateWorkspaceLLMTargetWithSession(ctx context.Context, session *runtimeco
 	if err != nil {
 		return appmodelcore.Workspace{}, err
 	}
-	return UpdateWorkspaceLLMTargetWithHub(ctx, hub, workspaceID, target)
+	return UpdateWorkspaceLLMSelectionWithHub(ctx, hub, workspaceID, selection, expectedRevision)
 }

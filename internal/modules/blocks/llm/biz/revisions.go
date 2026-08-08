@@ -76,7 +76,6 @@ func TargetConfigurationRevision(cfg workorchconfig.LLMConfig, target runtimecon
 			if model.Temperature != nil {
 				writeLenPrefixed(h, fmt.Sprintf("temp=%.8f", *model.Temperature))
 			}
-			writeLenPrefixed(h, strings.TrimSpace(model.ReasoningEffort))
 			_ = binary.Write(h, binary.BigEndian, int64(model.ThinkingBudgetTokens))
 			writeLenPrefixed(h, strings.TrimSpace(model.Cache.Mode))
 			if model.Cache.PromptCacheKey != nil {

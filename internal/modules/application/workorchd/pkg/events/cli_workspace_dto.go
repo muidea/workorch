@@ -31,6 +31,7 @@ type CLIWorkspaceViewModelInfo struct {
 }
 
 type CLIWorkspaceInfo struct {
+	Revision             uint64
 	ID                   common.WorkspaceID
 	Title                string
 	Description          string
@@ -41,7 +42,7 @@ type CLIWorkspaceInfo struct {
 	BlockingApprovalID   common.ApprovalID
 	TemplateID           string
 	ProfileID            string
-	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID        common.SoulID
 	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
