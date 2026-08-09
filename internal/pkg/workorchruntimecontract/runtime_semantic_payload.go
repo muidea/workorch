@@ -12,7 +12,7 @@ import (
 
 var (
 	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "documentKind", "manifestHash", "planStep", "proposals", "schemaVersion"}
-	runtimeSemanticProposalFields = []string{"artifactRefs", "coverageWorkItemId", "declarationRef", "metricConstraints", "operationKind", "operationVariantId", "ownerModuleId", "requiredCheckRefs", "requiredEffectScopes", "requiredEvidenceKinds", "target", "validationRecipeId"}
+	runtimeSemanticProposalFields = []string{"artifactRefs", "coverageWorkItemId", "declarationRef", "metricConstraints", "operationKind", "operationVariantId", "ownerModuleId", "requiredCheckRefs", "requiredEvidenceKinds", "target", "validationRecipeId"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRef"}
 )
 
@@ -36,7 +36,6 @@ type runtimeSemanticProposalPayload struct {
 	OperationVariantID    string                       `json:"operationVariantId,omitempty"`
 	Target                runtimeSemanticTargetPayload `json:"target"`
 	RequiredEvidenceKinds []string                     `json:"requiredEvidenceKinds"`
-	RequiredEffectScopes  []RuntimeEffectScope         `json:"requiredEffectScopes"`
 	ValidationRecipeID    string                       `json:"validationRecipeId,omitempty"`
 	RequiredCheckRefs     []string                     `json:"requiredCheckRefs,omitempty"`
 	MetricConstraints     []string                     `json:"metricConstraints,omitempty"`
@@ -51,6 +50,49 @@ type runtimeSemanticTargetPayload struct {
 	OwnerSelectorRefs         []string                     `json:"ownerSelectorRefs,omitempty"`
 	ProspectiveConstraintRefs []string                     `json:"prospectiveConstraintRefs,omitempty"`
 	ProspectiveTargetRef      string                       `json:"prospectiveTargetRef,omitempty"`
+}
+
+// deriveRuntimeSemanticProposalEffects compiles the internal proposal effect
+// from sealed owner facts. It is deliberately used only after strict wire
+// decoding; the provider never submits this value.
+func deriveRuntimeSemanticProposalEffects(manifest RuntimeSemanticPlanManifest, value runtimeSemanticProposalPayload) []RuntimeEffectScope {
+	proposal := RuntimeSemanticProofProposal{
+		OwnerModuleID: value.OwnerModuleID, OperationKind: value.OperationKind,
+		OperationVariantID: value.OperationVariantID, ValidationRecipeID: value.ValidationRecipeID,
+		RequiredEvidenceKinds: value.RequiredEvidenceKinds,
+	}
+	for _, catalog := range manifest.OwnerCatalogs {
+		if catalog.OwnerModuleID != proposal.OwnerModuleID {
+			continue
+		}
+		if proposal.ValidationRecipeID != "" {
+			if capability, ok := runtimeMCPCapabilityForValidationRecipe(catalog, proposal.ValidationRecipeID); ok {
+				effect := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
+				if effect != RuntimeEffectUnknown {
+					return []RuntimeEffectScope{effect}
+				}
+			}
+		}
+		if proposal.OperationVariantID != "" {
+			if contract, ok := RuntimeOperationContractForKind(proposal.OperationKind); ok {
+				for _, variant := range contract.Variants {
+					if variant.ID == proposal.OperationVariantID {
+						effect := NormalizeRuntimeEffectScope(variant.EffectScope)
+						if effect != RuntimeEffectUnknown {
+							return []RuntimeEffectScope{effect}
+						}
+					}
+				}
+			}
+		}
+		break
+	}
+	for _, kind := range value.RequiredEvidenceKinds {
+		if kind == EvidenceKindStateChange {
+			return []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}
+		}
+	}
+	return []RuntimeEffectScope{RuntimeEffectNone}
 }
 
 // DecodeRuntimeSemanticPlanPayloadWithManifest is the sole strict semantic
@@ -95,7 +137,7 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				OwnerScopeTargetRefs: value.Target.OwnerScopeTargetRefs, OwnerSelectorRefs: value.Target.OwnerSelectorRefs,
 				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRef: value.Target.ProspectiveTargetRef,
 			},
-			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: value.RequiredEffectScopes,
+			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: deriveRuntimeSemanticProposalEffects(manifest, value),
 			ValidationRecipeID: value.ValidationRecipeID, RequiredCheckRefs: value.RequiredCheckRefs,
 			MetricConstraints: value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
 		})
@@ -156,8 +198,8 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				OwnerScopeTargetRefs: value.Target.OwnerScopeTargetRefs, OwnerSelectorRefs: value.Target.OwnerSelectorRefs,
 				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRef: value.Target.ProspectiveTargetRef,
 			},
-			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: value.RequiredEffectScopes,
-			ValidationRecipeID: value.ValidationRecipeID, RequiredCheckRefs: value.RequiredCheckRefs,
+			RequiredEvidenceKinds: value.RequiredEvidenceKinds,
+			ValidationRecipeID:    value.ValidationRecipeID, RequiredCheckRefs: value.RequiredCheckRefs,
 			MetricConstraints: value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
 		})
 	}
@@ -201,7 +243,7 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 		if err := json.Unmarshal(raw, &proposal); err != nil {
 			return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("$.proposals[%d]", idx), Actual: "non_object", Allowed: []string{"object"}, Cause: err}
 		}
-		if err := validateRuntimeSemanticObjectFields(fmt.Sprintf("$.proposals[%d]", idx), proposal, runtimeSemanticProposalFields, []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "requiredEffectScopes", "declarationRef"}); err != nil {
+		if err := validateRuntimeSemanticObjectFields(fmt.Sprintf("$.proposals[%d]", idx), proposal, runtimeSemanticProposalFields, []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "declarationRef"}); err != nil {
 			return err
 		}
 		var target map[string]json.RawMessage
@@ -300,7 +342,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			"coverageOrder":            map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "items": map[string]any{"type": "string", "enum": coverageIDs}},
 			"proposals": map[string]any{"type": "array", "minItems": 0, "maxItems": len(coverageIDs), "items": map[string]any{
 				"type": "object", "additionalProperties": false,
-				"required": []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "requiredEffectScopes", "declarationRef"},
+				"required": []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "declarationRef"},
 				"properties": map[string]any{
 					"coverageWorkItemId": map[string]any{"type": "string", "enum": coverageIDs},
 					"ownerModuleId":      map[string]any{"type": "string", "enum": manifest.AllowedOwnerModuleIDs},
@@ -312,11 +354,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1},
 					}},
 					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
-					"requiredEffectScopes": stringEnumArraySchemaWithMinimum([]string{
-						string(RuntimeEffectNone), string(RuntimeEffectEphemeralSession), string(RuntimeEffectGovernanceOnly),
-						string(RuntimeEffectWorkspaceDurable), string(RuntimeEffectRemoteDurable), string(RuntimeEffectUnknown),
-					}, 1),
-					"validationRecipeId": stringEnumSchema(recipeIDs), "requiredCheckRefs": stringArraySchema(),
+					"validationRecipeId":    stringEnumSchema(recipeIDs), "requiredCheckRefs": stringArraySchema(),
 					"metricConstraints": stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string", "minLength": 1},
 				},
 			}},
@@ -432,33 +470,9 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					"properties": map[string]any{
 						"validationRecipeId": stringEnumSchemaWithMinimum(catalog.ValidationRecipeRefs, 1),
 						"requiredCheckRefs":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
-						"requiredEffectScopes": map[string]any{"type": "array", "contains": map[string]any{
-							"enum": []string{string(RuntimeEffectNone), string(RuntimeEffectEphemeralSession)},
-						}},
 					},
 				},
 			}}
-			// Each dynamic MCP validation recipe has one exact owner-authored
-			// effect. Project that fact into the request schema so structured
-			// output cannot select an incompatible effect and only discover the
-			// mismatch during owner feasibility or after dispatch.
-			for _, capability := range catalog.MCPCapabilities {
-				capability = SealMCPCapabilityEffect(capability)
-				recipeID := RuntimeMCPToolValidationRecipeID(string(capability.ServerID), capability.Name)
-				effect := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
-				if !capability.Enabled || CanonicalRuntimeBlockKind(capability.OperationKind) != StepKindMCPToolCall ||
-					recipeID == "" || effect == RuntimeEffectUnknown || !runtimeSemanticStringsWithin([]string{recipeID}, catalog.ValidationRecipeRefs) {
-					continue
-				}
-				then["allOf"] = append(then["allOf"].([]any), map[string]any{
-					"if": map[string]any{"properties": map[string]any{
-						"validationRecipeId": map[string]any{"const": recipeID},
-					}},
-					"then": map[string]any{"properties": map[string]any{
-						"requiredEffectScopes": map[string]any{"type": "array", "contains": map[string]any{"const": string(effect)}},
-					}},
-				})
-			}
 		}
 		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), ownerRule)
 	}

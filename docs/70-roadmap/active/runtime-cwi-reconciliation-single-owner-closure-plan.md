@@ -26,8 +26,8 @@ checks, metrics, or per-CWI proof contracts.
 
 ## 2. Latest Live Assessment
 
-Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-054`, is the current fact baseline. Earlier
-`run-029` through `run-053` observations remain historical regression evidence only.
+Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Runs `run-061` and `run-062`, is the current fact baseline.
+`run-054` through `run-060` observations remain historical regression evidence only.
 
 ### 2.1 Verified Owner-Correct Behavior
 
@@ -96,9 +96,11 @@ read-only SM-4 projection delivery surface; they do not give the LLM or projecti
 
 ### 2.6 Empty Proposal Constraint Counterexample And Code Closure
 
-Fresh deployed `run-031` proved that coverage-order correction and exact proof-batch scoping now work: attempt 1
+Historical deployed `run-031` proved that coverage-order correction and exact proof-batch scoping now work: attempt 1
 repaired `cwi-046 -> cwi-043`, and the first proof batch contained only `cwi-046`, `cwi-043`, `cwi-001`, and
 `cwi-002`. The batch nevertheless failed twice because proposals returned an empty required set, including:
+
+The historical provider payload contained the now-deleted field:
 
 ```json
 "requiredEffectScopes": []
@@ -109,8 +111,9 @@ Admission then collapsed the failure to `$.proposals`, so attempt 1 received onl
 the exact CWI field. This was one logical proposal contract implemented independently by schema, validator, and
 correction synthesis.
 
-The code closure makes required evidence/effect arrays non-empty and enum-bounded in the provider schema and preserves
-an exact `proposal_constraint` fact through admission. The fact includes authoritative CWI ID, diagnostic proposal
+The code closure makes required evidence arrays non-empty and enum-bounded in the provider schema and preserves
+an exact `proposal_constraint` fact through admission. Effect/idempotency are no longer provider proposal fields; they
+are compiled from owner facts under RSO-23. The fact includes authoritative CWI ID, diagnostic proposal
 index, exact JSON path, rule, actual value, and required/allowed values. SM-3 accepts that fact only when its CWI belongs
 to the active sealed batch, then persists it in the existing attempt-1 correction directive. LLM remains a fact
 producer/renderer; no additional state machine, authority owner, EventHub transition, or retry was added.
@@ -236,6 +239,27 @@ The same live trace exposed two related duplicate-authority risks:
 
 This plan therefore keeps evidence admission strict and moves the missing check to the owner-feasibility boundary. It
 must not add an MCP name branch to Runtime, infer effect from risk/tool names, or let Orchestrator repair registry state.
+
+### 2.11 Latest Live Counterexamples: Provider-Owned Effect Echo Is Still Authoritative
+
+Fresh `run-061` and `run-062` prove that the preceding schema/evaluator closure is fail-closed but not convergent. The
+provider was still asked to submit `requiredEffectScopes`. It alternated between two valid owner recipes:
+
+```text
+lsp_status:      actual=ephemeral_session, allowed=none
+lsp_initialize:  actual=none,             allowed=ephemeral_session
+```
+
+Both runs stopped before dispatch (`dispatch=0`, `receipt=0`, `evidence=0`). This is not an MCP metadata defect and
+must not be repaired with tool-name branches, prompt wording, larger retry budgets, or a second correction loop. The
+remaining contract violation is that a provider-facing proposal field duplicates an owner fact and lets the LLM choose
+an authority value that the owner can only reject.
+
+The required closure is RSO-23: remove `requiredEffectScopes` from the provider proposal, wire schema, DTO, decoder,
+hash/clone/merge and correction surface. The field is removed without a compatibility or fallback path; a payload that
+contains the deleted field is rejected as an unknown field. The original provider response remains available in the
+bounded diagnostic/audit record, while the authoritative effect and idempotency facts are retained in the owner catalog,
+owner feasibility observation, SM-2 `CoverageEvidenceBinding`, sealed dispatch, receipt, and evidence.
 
 ## 3. Non-Negotiable Ownership Rules
 
@@ -499,7 +523,8 @@ acquisition generation without consuming semantic candidate correction attempt.
 
 ### 7.1.4 Semantic Manifest And Owner Feasibility
 
-The persisted semantic manifest projects each dynamic MCP recipe together with its finite effect domain:
+The persisted semantic manifest (private Orchestrator input, not provider authority) projects each dynamic MCP recipe
+together with its finite effect domain:
 
 ```json
 {
@@ -511,21 +536,22 @@ The persisted semantic manifest projects each dynamic MCP recipe together with i
 }
 ```
 
-LLM receives that detached finite domain and remains a renderer. MCP owner remains the final factual feasibility source.
-For the exact recipe it must validate, in order:
+The LLM receives only recipe identity and operation/target/check facts. It does not receive or submit effect or
+idempotency authority. MCP owner remains the final factual feasibility source. For the exact recipe it must validate, in
+order:
 
 1. workspace/run/definition/request scope;
 2. catalog revision freshness;
 3. exact server/tool/capability identity and enabled state;
 4. operation kind;
-5. proposal required effect includes the capability effect;
+5. compile the canonical effect/idempotency from the owner fact;
 6. target/selector/constraint and approval facts;
 7. transport/prerequisite probe when applicable.
 
-An effect mismatch returns `infeasible` with a bounded original diagnostic identifying the exact CWI, proposal field,
-actual required effect, allowed owner effect, capability ref, and revision. It does not return correction, retry, action,
-terminal, coverage, or binding state. Orchestrator converts the fact to its existing owner-private semantic feasibility
-event; only SM-2/SM-3 may persist rejection, derive the single correction, or seal the binding.
+An unavailable, stale, or incomplete owner fact returns `infeasible`/`stale` with a bounded original diagnostic. It does
+not return correction, retry, action, terminal, coverage, or binding state. Orchestrator converts the fact to its existing
+owner-private semantic feasibility event; only SM-2/SM-3 may persist rejection, compile the canonical effect, or seal the
+binding.
 
 ### 7.1.5 Dispatch And Receipt
 
@@ -643,7 +669,7 @@ remains open.
 | RSO-8 | code_closed | Remove projection outcome re-adjudication and unify activity | combined Definition identity plus terminal/definition-drift/canonical activity tests pass |
 | RSO-9 | code_closed | Run focused/full/race/boundary/managed regression matrix after the latest proposal-constraint closure | fmt/vet/full tests, affected-package race, boundary contract and managed `verify-ci-mvp-file` pass |
 | RSO-10 | pending | Fresh deployed LSP Bridge positive convergence | complete semantic-to-effect event/audit lineage |
-| RSO-11 | code_closed | Unify empty required-set schema/admission/correction behavior | exact effect/evidence schema bounds, typed CWI field violation, active-batch and hash/clone tests |
+| RSO-11 | code_closed | Unify empty required-set schema/admission/correction behavior | exact evidence schema bounds, typed CWI field violation, active-batch and hash/clone tests |
 | RSO-12 | code_closed | Unify all proposal-local and sealed owner-catalog checks behind one pure evaluator | recipe/variant/target/evidence/effect violations carry exact CWI/path/rule facts; local contract tests pass |
 | RSO-13 | code_closed | Make SM-3 derive correction directives from rejected facts and persisted ledger context | production private event carries no directive; reducer derives under CAS; duplicate/stale/restart tests pass |
 | RSO-14 | code_closed | Reduce LLM boundary to detached fact rendering only | C4 contains typed safe facts; LLM cannot classify correction or transition; LLM tests pass |
@@ -652,14 +678,15 @@ remains open.
 | RSO-17 | pending | Prove target correction and no-ineffective-retry behavior in a fresh deployment | target correction → semantic seal, or bounded catalog-gap terminal with no attempt 2 |
 | RSO-18 | code_closed | Separate dynamic MCP/Shell capability identities from static operation variants and scope schema by owner/kind | dynamic-variant rejection, owner-selector isolation, static-variant and null-enum tests pass |
 | RSO-19 | code_closed | Unify MCP effective capability catalog and revision | enabled capability/whitelist intersection, capability metadata in snapshot hash, and catalog query boundary tests pass |
-| RSO-20 | code_closed | Enforce MCP recipe/effect feasibility before SM-2 binding seal | semantic schema/evaluator bind each recipe to its exact owner effect; owner feasibility remains the final stale/execution gate; mismatch creates zero dispatch |
+| RSO-20 | code_closed | Enforce MCP recipe/effect feasibility before SM-2 binding seal | schema/evaluator and owner feasibility fail closed on stale/unknown/mismatched owner facts; mismatch creates zero dispatch (provider effect echo remains to be removed by RSO-23) |
 | RSO-21 | code_closed | Make MCP receipt effect owner-observed | receipt derives effect from exact enabled capability; expected effect is never copied into observed effect; receipt integration passes |
-| RSO-22 | pending | Fresh deployed positive convergence after MCP effect closure | semantic seal → dispatch → receipt → binding-matched evidence → CWI advance; no post-dispatch binding mismatch |
+| RSO-22 | pending | Fresh deployed positive convergence after owner-fact effect compilation | semantic seal → owner-fact binding → dispatch → receipt → binding-matched evidence → CWI advance |
+| RSO-23 | code_closed | Remove provider-owned effect/idempotency echo and compile canonical binding from owner facts | provider schema/DTO/decoder contain no `requiredEffectScopes`; old field is unknown-field rejected; SM-2 binding compilation overwrites intermediate effect with sealed owner-catalog fact |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
-change Runtime authority. RSO-9 follows every code change. RSO-19 precedes RSO-20; RSO-20 precedes RSO-21 and
-RSO-22. RSO-10, RSO-15, RSO-17 and RSO-22 cannot be replaced by mock provider proof.
+change Runtime authority. RSO-9 follows every code change. RSO-19 precedes RSO-20; RSO-20 precedes RSO-21; RSO-23
+precedes RSO-22. RSO-10, RSO-15, RSO-17, RSO-22 and RSO-23 cannot be replaced by mock provider proof.
 
 RSO-10 and RSO-15 are retained as historical positive-lineage labels for the earlier semantic/candidate closure. Their
 fresh deployed proof is now executed under RSO-22 together with the MCP effect contract. RSO-17 remains the separate
@@ -764,13 +791,14 @@ target-correction deployed proof and is not satisfied by the RSO-22 positive pat
 2. **Compile one effective MCP catalog in `blocks/mcp`.** Intersect enabled server whitelist and enabled exact
    capability records, normalize deterministically, and hash the complete effective set. Remove server-only recipe
    authority from semantic feasibility. Return a detached catalog fact with workspace/run/authority scope and revision.
-3. **Bind semantic recipes to catalog facts.** Extend the sealed manifest/context so each dynamic recipe carries the
-   exact capability reference, operation kind, finite effect domain, idempotency class, and catalog revision. LLM only
-   renders these values; it cannot add a new recipe/effect.
-4. **Reject effect mismatch before seal.** MCP semantic feasibility must return `infeasible` for a proposal whose
-   `requiredEffectScopes` does not contain the exact capability effect. Orchestrator persists the observation through its
-   private SM-2 event, derives at most one correction through the existing SM-3 reducer, and never creates a dispatch for
-   an unmatchable binding.
+3. **Bind semantic recipes to catalog facts without provider effect echo.** Extend the private sealed
+   manifest/context so each dynamic recipe carries the exact capability reference, operation kind, finite effect domain,
+   idempotency class, and catalog revision. The provider-facing proposal contains no effect/idempotency field; the LLM
+   only renders recipe, operation, target, selector, check, and declaration facts.
+4. **Compile effect and idempotency in SM-2.** After owner feasibility returns a confirmed typed fact, Orchestrator
+   submits one private internal event. SM-2 derives the canonical effect/idempotency and seals `CoverageEvidenceBinding`.
+   Missing, stale, unknown, or contradictory owner facts fail closed before candidate/dispatch; there is no LLM correction
+   for an owner fact and no second effect-selection loop.
 5. **Re-check exact capability at dispatch.** Before executing, MCP owner validates capability ID, catalog revision,
    operation kind, effect, idempotency, target policy, and transport. Drift returns stale/infeasible typed facts and
    schedules the existing bounded prerequisite refresh; it does not mutate Orchestrator state directly.
@@ -798,14 +826,67 @@ It did not receive CWI credit because the sealed binding required `none` while t
 released `activeRunId` and the terminal delivery completed; RSO-22 remains open until a fresh run reaches
 binding-matched evidence/CWI advance without a post-dispatch mismatch.
 
-Fresh `run-055` and explicitly restarted `run-056` proved that RSO-20 now rejects the inverse mismatch before dispatch:
+Fresh `run-055` and explicitly restarted `run-056` proved that RSO-20 rejects an inverse owner-effect mismatch before dispatch:
 the semantic proposal selected `mcp/tool_call/mcp-lsp-bridge/lsp_status` with `ephemeral_session`, while the effective
 owner catalog declares `none`. Both runs terminated as `semantic_contract_failed` with zero dispatch, zero receipt and
 zero evidence; no post-dispatch `coverage_binding_mismatch` occurred. The follow-up local closure now projects every
 dynamic MCP recipe's exact owner `effectScope` into the request-specific JSON Schema and applies the same check in the
-pure semantic document/catalog evaluator. The MCP owner feasibility check remains as a freshness and defense-in-depth
-gate. RSO-22 remains pending until this schema-bound change is deployed and a fresh run reaches binding-matched CWI
-advance.
+pure semantic document/catalog evaluator. This is a fail-closed baseline only; it does not make the provider the effect
+authority. RSO-23 must remove this provider-facing echo. RSO-22 remains pending until RSO-23 is deployed and a fresh run
+reaches binding-matched CWI advance.
+
+### 10.5 Ordered Code-Closure Steps For RSO-23: Remove Provider-Owned Effect Echo
+
+RSO-23 is the remaining code item exposed by `run-061`/`run-062`. It is a contract simplification, not a new retry or
+state machine. Implement it in this order:
+
+1. **Remove the duplicate wire field** from the provider-facing semantic proposal DTO, JSON schema, decoder, normalize/
+   validate, merge and correction surface in `internal/pkg/workorchruntimecontract`. The internal proposal value may
+   retain a derived, non-wire effect slice solely as the canonical binding intermediate; it must be populated from the
+   sealed owner catalog and never from provider JSON. The canonical provider proposal contains CWI, owner, operation
+   kind/variant, target policy, validation recipe, checks/metrics/artifacts, and declaration refs; it does not contain
+   `requiredEffectScopes` or any provider-selected idempotency.
+2. **Fail closed on stale wire**, with no compatibility or fallback path. Unknown-field decoding must preserve a bounded
+   original diagnostic/audit record, but must not enter semantic evaluation, correction, binding, dispatch, or retry.
+3. **Compile owner facts through one Orchestrator-private event.** Capability owners (`file`, `git`, `shell`, `mcp`, `web`,
+   `ssh`) return typed feasibility facts containing operation identity, effective effect scope, idempotency class,
+   target/selector, recipe/check identity, catalog revision, and feasibility status. They never mutate Runtime state.
+4. **Have SM-2 seal the canonical binding.** The Orchestrator maps each confirmed owner fact to a private
+   `RuntimeInternalEvent`; only the SM-2 reducer derives and persists effect/idempotency in
+   `CoverageEvidenceBinding`. SM-3 consumes that sealed binding for candidate/dispatch, and SM-4 records receipt/evidence.
+5. **Delete effect correction paths.** Remove prompt/schema instructions, provider DTO fields, and evaluator branches that
+   ask the LLM to repair or select effect/idempotency. Keep mismatch/stale/unknown owner facts as typed prerequisite or
+   semantic diagnostics with zero dispatch.
+6. **Preserve all original information at the factual boundaries.** Do not discard owner catalog metadata,
+   feasibility observations, sealed binding, dispatch authorization, owner receipt, evidence, or audit diagnostics. Only
+   remove the duplicate provider echo.
+
+#### RSO-23 Component And State-Machine Matrix
+
+| Component | RSO-23 responsibility | Forbidden responsibility |
+| --- | --- | --- |
+| `workorchruntimecontract` | owner-neutral proposal without effect; canonical binding value/validation/hash helpers | owner lookup, reducer, EventHub, compatibility alias |
+| `kernel/orchestrator/biz/runtime` | collect typed owner feasibility; emit private event; SM-2 compiles binding; SM-3/4 continue candidate/receipt/evidence | provider effect inference, direct owner repository/service, cross-SM transition |
+| `blocks/llm` | render/parse detached proposal and bounded diagnostics | effect/idempotency selection, correction, retry, Runtime transition |
+| `blocks/file`, `git`, `shell`, `mcp`, `web`, `ssh` | return exact owner capability/feasibility facts and owner receipts | mutate SM-2/3/4 or echo expected effect as observed fact |
+| `blocks/mcpregistry` | own capability catalog, metadata, enabled state and revision | Runtime binding, MCP execution, template/domain assumptions |
+| `blocks/run` | own SM-1 lifecycle and CAS persistence of opaque Runtime aggregate | semantic effect compilation or SM-2/3/4 transitions |
+| Application/Web/TUI/projection/EventHub adapters | pass typed intent or display canonical facts | local state machine, effect selection, correction/retry |
+
+#### RSO-23 Invariants And Tests
+
+- schema and DTO tests prove `requiredEffectScopes` is absent and an old field is rejected as unknown;
+- `lsp_status` compiles `none`, `lsp_initialize` compiles `ephemeral_session`, without provider selection;
+- File/Git durable, Shell validation, and MCP/Web/SSH effects all compile from owner facts through the same path;
+- stale/unknown/missing capability facts produce zero dispatch, receipt, evidence, and CWI credit;
+- duplicate/stale private events do not seal a second binding; restart reproduces the same binding hash;
+- receipt/binding mismatch remains fail-closed and preserves the original owner diagnostic;
+- fresh deployed positive path reaches semantic proposal → owner feasibility → SM-2 binding seal → SM-3 dispatch → owner
+  receipt → binding-matched evidence → CWI advance.
+
+Local RSO-23 code closure is complete: provider-facing semantic schema and strict payload decoder no longer admit the
+effect field, old payloads fail closed, and SM-2 binding compilation re-resolves effect from the sealed owner catalog.
+The remaining deployed proof is intentionally tracked under RSO-22; code-closed does not imply live-closed.
 
 ## 11. Verification Matrix
 
@@ -851,7 +932,7 @@ advance.
 - recovery exhaustion creates no candidate, dispatch, Decision, Approval, or effect;
 - accepted order compiles bounded proof batches in the sealed order;
 - owner feasibility seals exact per-CWI bindings;
-- MCP owner rejects recipe/effect mismatch before binding seal and dispatch;
+- MCP owner rejects stale, unknown, or contradictory owner facts before binding seal and dispatch;
 - MCP catalog revision changes when capability effect/idempotency changes;
 - MCP receipt observed effect is owner-derived and never copied from expected dispatch effect;
 - no operation before semantic seal;
@@ -894,7 +975,7 @@ restart/activation intent
   -> corrected coverage_order accepted
   -> bounded proof batches accepted
   -> complete owner feasibility facts
-  -> SM-2 binding/reconciliation seal
+  -> SM-2 owner-fact effect/idempotency binding seal
   -> operation candidate accepted
   -> sealed dispatch
   -> capability receipt
@@ -916,7 +997,8 @@ The live proof must also show:
 - source/projected revision convergence;
 - correct workspace-isolated TUI/Web streaming after workspace switching;
 - MCP effective capability revision includes effect/idempotency metadata;
-- an MCP recipe/effect mismatch fails during owner feasibility with zero dispatch;
+- provider proposal contains no effect/idempotency authority and an old effect field is rejected as unknown;
+- an MCP owner-fact mismatch fails during owner feasibility with zero dispatch;
 - a matching MCP recipe reaches owner-observed receipt, binding-matched evidence, and CWI advance without a
   post-dispatch `coverage_binding_mismatch`.
 

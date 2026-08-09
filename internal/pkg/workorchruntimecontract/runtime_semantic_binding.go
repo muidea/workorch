@@ -35,6 +35,15 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 	focuses := make([]CoverageFocus, 0, len(document.Proposals))
 	for _, proposal := range document.Proposals {
 		proposal = proposal.Normalized()
+		// Effect/idempotency authority is compiled from the sealed owner catalog
+		// at the SM-2 binding boundary. Any provider-shaped or stale intermediate
+		// value is ignored here; the resulting binding is the canonical source
+		// consumed by SM-3 dispatch and SM-4 evidence admission.
+		proposal.RequiredEffectScopes = deriveRuntimeSemanticProposalEffects(manifest, runtimeSemanticProposalPayload{
+			OwnerModuleID: proposal.OwnerModuleID, OperationKind: proposal.OperationKind,
+			OperationVariantID: proposal.OperationVariantID, RequiredEvidenceKinds: proposal.RequiredEvidenceKinds,
+			ValidationRecipeID: proposal.ValidationRecipeID,
+		})
 		item, found := items[string(proposal.CoverageWorkItemID)]
 		if !found {
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding references unknown coverage %q", proposal.CoverageWorkItemID)

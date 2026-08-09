@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-09
 
 ## Purpose
 
@@ -44,10 +44,11 @@ identity fencing、raw suffix 删除和 whole-document bounded recovery。`run-0
 correction directive、proof-batch 最小 wire、exact-active-batch reducer invariant 与 terminal-consistent canonical Definition
 outcome/activity 已完成代码收口。最新增量已通过 fmt/vet/full/boundary/affected-package race/managed；`run-054` 已证明
 MCP typed metadata 可部署加载并推进至 semantic seal、dispatch、receipt/evidence commit。后续 `run-055`/`run-056`
-已证明 recipe/effect 反向不匹配会在 dispatch 前以零 receipt/evidence fail-closed；本地代码进一步把每个 MCP recipe 的
-exact owner effect 同时投影到 semantic JSON Schema 和纯 evaluator，避免 provider 在结构化输出中选择不匹配 scope。
-RSO-19～RSO-21 已完成代码收口，当前剩余 RSO-22 fresh binding-matched positive convergence；whole-document recovery
-fault injection 仍独立保留。
+已证明 recipe/effect 反向不匹配会在 dispatch 前以零 receipt/evidence fail-closed；这只是 RSO-20 的防线，不是
+provider effect authority。`run-061`/`run-062` 证明 LLM 仍会在 `lsp_status` 与 `lsp_initialize` 间交换
+`requiredEffectScopes`，因此新增的 RSO-23 已完成本地代码收口：删除 provider effect/idempotency echo，由 owner
+feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 canonical binding。RSO-19～RSO-21、RSO-23 已完成代码收口；
+RSO-22 fresh binding-matched positive convergence 尚未完成；whole-document recovery fault injection 仍独立保留。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
@@ -114,12 +115,14 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
   才能关闭 CWI，LLM/raw check 不得越权；已收口的 semantic correction 与 projection 不能绕过或改写该基线。
 - **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、whole-document recovery、receipt、
   binding-derived CWI credit、single-owner lifecycle/SM-4 producer trust 与 terminal delivery 均为 R3 回归基线；当前 active
-  typed semantic correction directive、proof-batch wire 与 terminal-consistent canonical projection 已 code-closed；剩余
-  deployed semantic positive matrix 和 recovery fault injection。latest persisted aggregate/live 反例优先于过去的本地绿灯。
+  typed semantic correction directive、proof-batch wire、terminal-consistent canonical projection 与 RSO-23 provider effect
+  echo removal 已 code-closed；仍需 deployed semantic positive matrix 和 recovery fault injection。latest persisted
+  aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace
   reasoning effort 实施顺序由 WRE active plan 定义，archive 不得推导新实现约束。
 - **Active roadmap**：RSO 当前包含 typed semantic correction、canonical projection、MCP effective capability/effect
-  feasibility、fresh LSP positive convergence 与 whole-document recovery fault injection；restart ordering 和
+  feasibility、provider effect/idempotency echo removal、fresh LSP positive convergence 与 whole-document recovery fault
+  injection；restart ordering 和
   complete-document recovery 是必须保持的代码回归基线。WRE 是独立必需收口项，用于 workspace reasoning
   capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞
   可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、

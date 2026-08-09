@@ -38,7 +38,7 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if len(coverageEnum) != 1 || coverageEnum[0] != "cwi-002" || proposals["minItems"] != float64(1) || properties["batchId"].(map[string]any)["const"] != "batch-1" {
 		t.Fatalf("proof-batch schema did not bind exact batch: %s", proofSchema)
 	}
-	for _, field := range []string{"requiredEvidenceKinds", "requiredEffectScopes"} {
+	for _, field := range []string{"requiredEvidenceKinds"} {
 		constraint := proposalProperties[field].(map[string]any)
 		if constraint["minItems"] != float64(1) || constraint["uniqueItems"] != true {
 			t.Fatalf("%s schema permits an empty or duplicate required set: %v", field, constraint)
@@ -58,7 +58,7 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if _, enumBound := prospectiveTarget["enum"]; enumBound {
 		t.Fatalf("prospective target schema must not require an existing catalog ref: %v", prospectiveTarget)
 	}
-	if strings.Contains(proofSchema, `"enum":null`) {
+	if strings.Contains(proofSchema, `"enum":null`) || strings.Contains(proofSchema, `requiredEffectScopes`) {
 		t.Fatalf("semantic schema emitted an invalid null enum: %s", proofSchema)
 	}
 }
@@ -92,7 +92,7 @@ func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog, shellCatalog)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"validation/managed_session","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["ephemeral_session"],"validationRecipeId":"software-dev-validation-evidence","requiredCheckRefs":["validation-target-must-exist"],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"validation/managed_session","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"validationRecipeId":"software-dev-validation-evidence","requiredCheckRefs":["validation-target-must-exist"],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.ownerSelectorRefs" || len(diagnostic.SemanticViolations) != 1 {
@@ -104,7 +104,7 @@ func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	}
 }
 
-func TestRuntimeSemanticPlanRejectsMCPRecipeEffectMismatchBeforeOwnerFeasibility(t *testing.T) {
+func TestRuntimeSemanticPlanDoesNotExposeMCPEffectToProvider(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	mcpCatalog := semanticTestOwnerCatalog("semantic-mcp-catalog", RuntimeModuleMCP, []string{StepKindMCPToolCall})
 	mcpCatalog.SelectorRefs = []string{"mcp-lsp-bridge"}
@@ -120,21 +120,14 @@ func TestRuntimeSemanticPlanRejectsMCPRecipeEffectMismatchBeforeOwnerFeasibility
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	schema, err := RuntimeSemanticPlanJSONSchema(manifest)
-	if err != nil || !strings.Contains(schema, `"const":"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || !strings.Contains(schema, `"contains":{"const":"none"}`) {
-		t.Fatalf("MCP recipe effect was not projected into semantic schema: err=%v schema=%s", err, schema)
+	if err != nil || !strings.Contains(schema, `"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || strings.Contains(schema, `requiredEffectScopes`) {
+		t.Fatalf("MCP effect leaked into provider semantic schema: err=%v schema=%s", err, schema)
 	}
-	proposal := RuntimeSemanticProofProposal{
-		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
-		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"mcp-lsp-bridge"}},
-		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
-		ValidationRecipeID: RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status"), RequiredCheckRefs: []string{"status"}, DeclarationRef: "dod/cwi-001",
-	}
-	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
-	err = document.ValidateAgainstManifest(manifest)
-	var violation *RuntimeSemanticProposalViolationError
-	if !errors.As(err, &violation) || violation.ViolationFact.Path != "$.proposals[0].requiredEffectScopes" || len(violation.ViolationFact.Allowed) != 1 || violation.ViolationFact.Allowed[0] != string(RuntimeEffectNone) {
-		t.Fatalf("MCP recipe effect mismatch = %v, violation = %+v", err, violation)
+	oldPayload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/mcp","operationKind":"mcp/tool_call","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["none"],"validationRecipeId":"mcp/tool_call/mcp-lsp-bridge/lsp_status","requiredCheckRefs":["status"],"declarationRef":"dod/cwi-001"}]}`
+	_, err = DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(oldPayload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredEffectScopes" || diagnostic.Actual != "unknown_field" {
+		t.Fatalf("old provider effect field was not rejected: %+v err=%v", diagnostic, err)
 	}
 }
 
@@ -172,7 +165,7 @@ func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 
 func TestRuntimeSemanticPlanPayloadRejectsUnknownMissingAndWrongKind(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	base := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
+	base := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"declarationRef":"dod/cwi-001"}]}`
 	tests := []struct {
 		name    string
 		payload string
@@ -211,21 +204,13 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedDependencyOrderViolation(t *tes
 	}
 }
 
-func TestRuntimeSemanticPlanPayloadPreservesTypedEmptyEffectViolation(t *testing.T) {
+func TestRuntimeSemanticPlanPayloadRejectsDeletedEffectField(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["main.go"]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":[],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"prospective_owner_target","ownerSelectorRefs":["file/workspace-relative-create"],"prospectiveConstraintRefs":["workspace-relative-path"],"prospectiveTargetRef":"main.go"},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":[],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredEffectScopes" || diagnostic.Actual != "empty_array" || len(diagnostic.SemanticViolations) != 1 {
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredEffectScopes" || diagnostic.Actual != "unknown_field" {
 		t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
-	}
-	violation := diagnostic.SemanticViolations[0]
-	if violation.Kind != RuntimeSemanticContractViolationProposalConstraint || violation.CoverageWorkItemID != "cwi-001" ||
-		violation.ProposalIndex != 0 || violation.Rule != RuntimeSemanticConstraintNonEmpty || len(violation.Required) != 1 {
-		t.Fatalf("typed proposal violation = %+v", violation)
-	}
-	if err := violation.ValidateAgainstManifest(manifest); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -241,7 +226,7 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedCatalogRecipeViolation(t *testi
 	manifest.AllowedOperationKinds = []string{RuntimeBlockKindManagedValidationSession}
 	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExistingOwnerScope}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"validation/managed_session","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["workspace-validation-target"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["none"],"validationRecipeId":"recipe/not-allowed","requiredCheckRefs":["check/unit"],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"validation/managed_session","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["workspace-validation-target"]},"requiredEvidenceKinds":["validation"],"validationRecipeId":"recipe/not-allowed","requiredCheckRefs":["check/unit"],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].validationRecipeId" || diagnostic.Actual != "recipe/not-allowed" || len(diagnostic.SemanticViolations) != 1 {
@@ -257,7 +242,7 @@ func TestRuntimeSemanticPlanPayloadEnrichesEmptyExactTargetWithCatalogRefs(t *te
 	manifest := semanticContractTestManifest(t)
 	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExactTarget}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":[]},"requiredEvidenceKinds":["state_change"],"requiredEffectScopes":["workspace_durable"],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":[]},"requiredEvidenceKinds":["state_change"],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.exactTargetRefs" || len(diagnostic.SemanticViolations) != 1 {
