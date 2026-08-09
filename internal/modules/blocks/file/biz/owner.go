@@ -472,6 +472,11 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			return
 		}
 	}
+	if strings.TrimSpace(command.Proposal.ValidationRecipeID) != "" || len(command.Proposal.RequiredCheckRefs) != 0 {
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "file_semantic_proof_unavailable", "File target observation is not an independent semantic validation proof", "", manifest.Revision, targetRefs))
+		return
+	}
 	m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, manifest.Revision, targetRefs, nil)
 }
 

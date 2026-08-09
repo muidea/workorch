@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -263,6 +264,11 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_selector_not_admissible", "runtime semantic Web selector is absent from the owner catalog", "", revision, []string{selector}))
 			return
 		}
+	}
+	if strings.TrimSpace(command.Proposal.ValidationRecipeID) != "" || len(command.Proposal.RequiredCheckRefs) != 0 {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_semantic_proof_unavailable", "Web provider availability is not an independent semantic validation proof", "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
+		return
 	}
 	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
 }

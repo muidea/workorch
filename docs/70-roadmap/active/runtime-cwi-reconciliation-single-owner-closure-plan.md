@@ -706,11 +706,13 @@ remains open.
 | RSO-22 | pending | Fresh deployed positive convergence after owner-fact effect compilation | semantic seal → owner-fact binding → dispatch → receipt → binding-matched evidence → CWI advance |
 | RSO-23 | code_closed | Remove provider-owned effect/idempotency echo and compile canonical binding from owner facts | provider schema/DTO/decoder contain no `requiredEffectScopes`; old field is unknown-field rejected; SM-2 binding compilation overwrites intermediate effect with sealed owner-catalog fact |
 | RSO-24 | code_closed | Remove provider-owned validation-check echo and compile canonical checks from owner facts | provider schema/DTO/decoder contain no `requiredCheckRefs`; owner recipe/check feasibility is confirmed before binding seal; unsupported check yields zero dispatch |
+| RSO-25 | code_closed | Close owner feasibility timing and unify preflight/binding admission | owner returns one executable feasibility fact; SM-2 seals only matching facts; zero-attempt validation exhaustion is not `no_progress_exhausted`; positive and zero-dispatch live paths both pass |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
 change Runtime authority. RSO-9 follows every code change. RSO-19 precedes RSO-20; RSO-20 precedes RSO-21; RSO-23
-precedes RSO-24; RSO-24 precedes RSO-22. RSO-10, RSO-15, RSO-17, RSO-22, RSO-23 and RSO-24 cannot be replaced by mock provider proof.
+precedes RSO-24; RSO-24 precedes RSO-25; RSO-25 precedes RSO-22. RSO-10, RSO-15, RSO-17, RSO-22, RSO-23, RSO-24
+and RSO-25 cannot be replaced by mock provider proof.
 
 RSO-10 and RSO-15 are retained as historical positive-lineage labels for the earlier semantic/candidate closure. Their
 fresh deployed proof is now executed under RSO-22 together with the MCP effect contract. RSO-17 remains the separate
@@ -968,6 +970,86 @@ Local code closure is complete. In the current owner-neutral contract, a recipe 
 identity when (and only when) it is present in the addressed owner's sealed `ValidationRecipeRefs`/`ValidationRecipes`;
 there is no global check index or provider-supplied alias. Fresh deployed positive convergence remains an RSO-22 live
 verification item.
+
+### 10.7 Ordered Code-Closure Steps For RSO-25: Owner Feasibility Transaction Closure
+
+`run-064` proves that removing provider check authority is necessary but not sufficient. Shell returned a feasible
+semantic recipe/check fact, then rejected the same recipe during operation preflight because the workspace had no
+`*_test.go` target. This is an owner-fact timing defect, not a new Runtime state machine.
+
+#### Contract objective
+
+Each capability owner must return one complete feasibility outcome for the exact recipe/check/target in the addressed
+catalog revision. The outcome must include the result of the owner-local executable preflight. Orchestrator must never
+seal an SM-2 binding from a catalog identity that the owner has not proven executable.
+
+#### Ordered implementation slices
+
+1. **Owner-local preflight closure (`blocks/shell`).** Move validation recipe discovery and executable-target preflight
+   into the Shell semantic feasibility handler. The returned typed fact must be `feasible` only when the same command,
+   target and check can execute and be observed. Missing `*_test.go`, invalid command, stale workspace manifest or
+   unavailable toolchain returns `prerequisite_required`/`infeasible` with the original diagnostic. The later operation
+   admissibility path may re-check freshness, but it must not be the first place that discovers basic recipe absence.
+2. **Capability-owner parity.** Apply the same one-owner fact rule to `blocks/mcp`, `blocks/file`, `blocks/git`,
+   `blocks/web` and `blocks/ssh`: catalog, capability state, recipe/check preflight, target and revision are one typed
+   owner result. File/Git/Web/SSH now fail closed with `*_semantic_proof_unavailable` whenever a proposal declares
+   validation recipe/checks that those owners cannot independently prove; MCP likewise keeps catalog/tool probing out
+   of semantic proof. No owner may publish a semantic `feasible` result while its operation preflight would reject the
+   same sealed identity.
+3. **SM-2 admission guard (`kernel/orchestrator/biz/runtime`).** Before compiling `CoverageEvidenceBinding`, require
+   owner feasibility status `feasible`, canonical check set non-empty for validation, matching recipe/effect/idempotency,
+   exact target/selector and matching catalog/observed revision. Any missing or stale fact produces zero binding seal,
+   zero operation candidate, zero dispatch and zero CWI credit.
+4. **SM-3 dispatch gate.** Operations candidate generation is allowed only after the SM-2 binding set is sealed. If owner
+   feasibility is unavailable, SM-3 must not issue an operations provider request. This gate is an Orchestrator internal
+   event transition; capability owners never mutate SM-3 state.
+5. **Failure classification closure.** `validation_recipe_exhausted` with zero repair attempts must remain a typed
+   owner/capability contract failure. It must not be projected as `no_progress_exhausted`; that class is valid only
+   after a real bounded repair or retry budget is consumed. Result, Workspace and Run must preserve the same nested
+   original diagnostic.
+6. **Restart/idempotency regression.** Persist owner preflight revision and canonical check identity in the feasibility
+   observation/binding hash. Duplicate/stale owner events cannot reseal a binding. Restart resumes the same owner fact or
+   requests a new bounded owner observation; it never reuses a provider check or replays dispatch.
+
+#### RSO-25 owner/state-machine matrix
+
+| Component | Owner-local contract | Forbidden cross-owner action |
+| --- | --- | --- |
+| `blocks/shell` | recipe discovery, executable preflight, canonical validation checks, factual receipt | writing Runtime state or accepting provider check lists |
+| `blocks/mcpregistry` | MCP catalog, enabled capability, recipe/check vocabulary and revision | executing checks or sealing CWI bindings |
+| `blocks/mcp` | tool/resource feasibility, behavior check execution and factual receipt | mutating registry or SM-1/2/3/4 |
+| `blocks/file`, `git`, `web`, `ssh` | owner-specific target and recipe/check preflight plus receipt | reading another owner repository/service or migrating Runtime state |
+| `blocks/llm` | provider transport and check-free semantic proposal | selecting check/effect/idempotency/retry/terminal |
+| `kernel/orchestrator/biz/runtime` | only SM-2/3/4 reducer, private internal events, binding/dispatch/evidence gate | direct owner repository/service access |
+| `blocks/run` | only SM-1 lifecycle and aggregate CAS | compiling binding or executing capabilities |
+| Result/Workspace/Application/Web/TUI/Projection | result, lifecycle, API and display projection | inferring or triggering Runtime transitions |
+
+#### RSO-25 acceptance matrix
+
+- Shell semantic feasibility rejects a workspace with no executable validation target before SM-2 binding seal;
+- no owner can report semantic `feasible` and later reject the same recipe solely during first operation preflight;
+- unsupported/stale/unverifiable facts produce zero binding, candidate, dispatch, receipt, evidence and CWI credit;
+- `run-064`-style zero-attempt `validation_recipe_exhausted` is not classified as `no_progress_exhausted`;
+- provider requests remain free of `requiredCheckRefs`, `requiredEffectScopes` and other owner authority;
+- sealed binding check/effect/idempotency/target/revision are sourced from one matching owner fact;
+- duplicate, stale and restart paths preserve the same owner/binding identity without cross-owner state writes;
+- a fresh deployed run with an executable validation target reaches binding → operations candidate → dispatch → matching
+  receipt → evidence → CWI advance.
+
+#### RSO-25 verification commands
+
+```bash
+go test ./internal/modules/blocks/shell/... -count=1
+go test ./internal/modules/blocks/mcp/... ./internal/modules/blocks/file/... ./internal/modules/blocks/git/... -count=1
+go test ./internal/modules/kernel/orchestrator/... -count=1
+go test ./... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+```
+
+RSO-25 cannot be marked live-closed until a fresh deployment demonstrates both the zero-dispatch unavailable-recipe
+path and the executable-recipe positive path.
 
 ## 11. Verification Matrix
 

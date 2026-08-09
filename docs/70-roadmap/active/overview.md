@@ -16,7 +16,7 @@ Last Updated: 2026-08-09
 | --- | --- |
 | Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
-| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-24）**；RSO-1～RSO-9、RSO-11～RSO-14、RSO-16、RSO-18～RSO-21、RSO-23 code-closed；`run-055`/`run-056` 已证明 MCP owner-fact mismatch 在 dispatch 前零副作用拒绝，`run-061`/`run-062` 暴露的 provider `requiredEffectScopes` echo 已删除，SM-2 现从 owner catalog 编译 canonical binding；`run-063` 暴露 provider `requiredCheckRefs` echo，RSO-24 负责由 owner recipe/check facts 编译 binding。RSO-22 仍需 fresh positive convergence；whole-document recovery 仍需独立 deployed fault injection。见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
+| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-25）**；RSO-1～RSO-9、RSO-11～RSO-14、RSO-16、RSO-18～RSO-21、RSO-23～RSO-25 code-closed；`run-055`/`run-056` 已证明 MCP owner-fact mismatch 在 dispatch 前零副作用拒绝，`run-061`/`run-062` 暴露的 provider `requiredEffectScopes` echo 已删除，`run-063` 暴露的 provider `requiredCheckRefs` echo 已删除；`run-064` 暴露的 owner semantic feasibility 与 operation preflight 时序缺口，现已由 Shell owner-local preflight 和其他 capability owner 的 proof fail-closed 收口。RSO-22 仍需 fresh positive convergence；whole-document recovery 仍需独立 deployed fault injection。见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
 | Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
@@ -31,7 +31,7 @@ invariant 与 canonical combined Definition projection，且 RSO-9 增量 race/m
 不匹配 recipe/effect 会在 dispatch 前以零副作用拒绝，但这只是 fail-closed 防线。`run-061`/`run-062` 证明 provider
 仍提交 `requiredEffectScopes` 并在 recipe 间交换 effect；RSO-23 已删除 provider effect/idempotency echo，由 owner
 feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 binding。`run-063` 又证明 provider 可提交 owner 无法执行的
-`requiredCheckRefs`，当前进入 RSO-24；完成后再执行 RSO-22 fresh positive convergence，并
+`requiredCheckRefs`，RSO-24 已完成代码收口；`run-064` 暴露 owner feasibility timing 缺口，当前进入 RSO-25。完成 RSO-25 后再执行 RSO-22 fresh positive convergence，并
 通过单独 fault injection 证明 whole-document recovery。此前 restart release-before-create、
 complete-document、22 组件 EventHub 合同回迁、owner-local terminal delivery、typed diagnostic、single mutation surface、
 managed verifier 与 reasoning selection 仍是回归基线，但不能替代最新 persisted aggregate/provider/projection 反例。

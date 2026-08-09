@@ -387,7 +387,11 @@ func (c *RuntimeController) invalidateCandidateAttemptForOwnerInfeasibility(ctx 
 	// prerequisite/blueprint fact; absent that fact the factual outcome is a
 	// deterministic terminal, not a correction or random state change.
 	if observation.FailureCategory() == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
-		failure.Class = runtimecontract.FailureClassNoProgressExhausted
+		// The owner rejected the sealed recipe before any repair attempt or
+		// dispatch. This is an owner/capability contract gap, not exhausted
+		// repair progress; preserving that distinction prevents a zero-attempt
+		// prerequisite failure from being reported as no-progress exhaustion.
+		failure.Class = runtimecontract.FailureClassCandidateInfeasible
 		failure.Code = "validation_recipe_exhausted"
 		failure.Signature = "validation-recipe-exhausted/" + diagnostic.Signature
 		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage

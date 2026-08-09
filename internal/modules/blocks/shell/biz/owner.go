@@ -562,8 +562,8 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_not_sealed", "runtime semantic validation recipe is absent from the Shell catalog", "", current.ObservedRevision, nil))
 			return
 		}
-		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, []runtimecontract.RuntimeValidationRecipe{recipe})
-		if preflightErr != nil || len(confirmed) != 1 || confirmed[0].ID != recipe.ID {
+		preflightErr := m.runtimeAdapter.PreflightRuntimeSemanticValidationRecipe(command.WorkspaceDeliverableDirectory, recipe)
+		if preflightErr != nil {
 			message := "runtime semantic validation recipe is not executable"
 			if preflightErr != nil {
 				message = preflightErr.Error()

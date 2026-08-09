@@ -153,6 +153,37 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipes(workspaceDirectory st
 	return runtimemodel.NormalizeRuntimeValidationRecipes(confirmed), nil
 }
 
+// PreflightRuntimeSemanticValidationRecipe performs the owner-local checks
+// required before semantic feasibility may be reported as feasible. The
+// ordinary admissibility preflight remains available for the final sealed
+// operation, but semantic planning must not be the first phase to discover
+// that a validation target (for example a Go test file) is absent.
+func (a *RuntimeAdapter) PreflightRuntimeSemanticValidationRecipe(workspaceDirectory string, recipe runtimemodel.RuntimeValidationRecipe) error {
+	confirmed, err := a.PreflightRuntimeValidationRecipes(workspaceDirectory, []runtimemodel.RuntimeValidationRecipe{recipe})
+	if err != nil {
+		return err
+	}
+	if len(confirmed) != 1 || confirmed[0].ID != recipe.ID {
+		return fmt.Errorf("validation recipe %q is unavailable", recipe.ID)
+	}
+	command, args, specErr := shellCommandSpec(recipe.Command, recipe.Args)
+	if specErr != nil {
+		return specErr
+	}
+	request := RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspaceDirectory,
+		ValidationRecipeID:            recipe.ID,
+		ValidationEvidence: runtimemodel.RuntimeValidationEvidence{
+			Mode: "runtime_behavior", ObservationType: "semantic_feasibility",
+		},
+		ManagedValidation: runtimemodel.RuntimeManagedValidation{
+			RuntimeManaged: true, Kind: runtimemodel.RuntimeBlockKindManagedValidationSession,
+			OriginalNodeKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
+		},
+	}
+	return validateShellValidationPreflight(workspaceDirectory, command, args, request)
+}
+
 // ProbeRuntimeOperationFeasibility validates a concrete shell operation without
 // starting a process. It deliberately shares the execution policy helpers so
 // candidate admission and owner execution cannot disagree on basic viability.

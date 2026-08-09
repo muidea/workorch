@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestValidateGoTestValidationPreflightMissingTests(t *testing.T) {
@@ -31,6 +32,15 @@ func TestValidateGoTestValidationPreflightWithTests(t *testing.T) {
 	}
 	if err := validateGoTestValidationPreflight(dir, []string{"test", "./...", "-run", "TestHealthz"}); err != nil {
 		t.Fatalf("expected preflight pass, got %v", err)
+	}
+}
+
+func TestRuntimeAdapterSemanticValidationPreflightRejectsMissingTests(t *testing.T) {
+	workspace := t.TempDir()
+	recipe := runtimemodel.RuntimeValidationRecipe{ID: "go-tests", Command: "go", Args: []string{"test", "./..."}}
+	err := NewRuntimeAdapter().PreflightRuntimeSemanticValidationRecipe(workspace, recipe)
+	if err == nil || !strings.Contains(err.Error(), "no *_test.go files found") {
+		t.Fatalf("expected semantic owner preflight to reject missing tests, got %v", err)
 	}
 }
 

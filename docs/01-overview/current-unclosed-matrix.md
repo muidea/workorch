@@ -47,10 +47,11 @@ MCP typed metadata 可部署加载并推进至 semantic seal、dispatch、receip
 已证明 recipe/effect 反向不匹配会在 dispatch 前以零 receipt/evidence fail-closed；这只是 RSO-20 的防线，不是
 provider effect authority。`run-061`/`run-062` 证明 LLM 仍会在 `lsp_status` 与 `lsp_initialize` 间交换
 `requiredEffectScopes`，因此新增的 RSO-23 已完成本地代码收口：删除 provider effect/idempotency echo，由 owner
-feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 canonical binding。`run-063` 又暴露 provider check echo，当前
-进入 RSO-24：删除 provider check authority，由 owner recipe/check fact 编译 binding。RSO-19～RSO-21、RSO-23 已完成
-代码收口；RSO-22 fresh binding-matched positive convergence 和 RSO-24 尚未完成；whole-document recovery fault
-injection 仍独立保留。
+ feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 canonical binding。`run-063` 又暴露 provider check echo，RSO-24
+已完成本地代码收口：删除 provider check authority，由 owner recipe/check fact 编译 binding。最新 `run-064` 进一步暴露
+owner semantic feasibility 与 operation preflight 不一致，RSO-25 已完成代码收口：统一 owner-local preflight、SM-2 admission guard
+和 failure classification。RSO-19～RSO-21、RSO-23～RSO-24 已完成代码收口；RSO-22 fresh binding-matched positive
+convergence、RSO-25 和 whole-document recovery fault injection 仍未完成。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
@@ -117,8 +118,8 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
   才能关闭 CWI，LLM/raw check 不得越权；已收口的 semantic correction 与 projection 不能绕过或改写该基线。
 - **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、whole-document recovery、receipt、
   binding-derived CWI credit、single-owner lifecycle/SM-4 producer trust 与 terminal delivery 均为 R3 回归基线；当前 active
-  typed semantic correction directive、proof-batch wire、terminal-consistent canonical projection 与 RSO-23 provider effect
-  echo removal 已 code-closed；RSO-24 provider check echo removal 和 deployed semantic positive matrix 仍未完成，recovery
+  typed semantic correction directive、proof-batch wire、terminal-consistent canonical projection 与 RSO-23～RSO-24 provider
+  authority removal 已 code-closed；RSO-25 owner feasibility transaction closure 和 deployed semantic positive matrix 仍未完成，recovery
   fault injection 独立保留。latest persisted
   aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace

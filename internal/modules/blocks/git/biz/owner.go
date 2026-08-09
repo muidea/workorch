@@ -381,6 +381,11 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Git semantic catalog is stale", command.OwnerCatalog.ObservedRevision, snapshot.ObservedRevision, nil))
 		return
 	}
+	if strings.TrimSpace(command.Proposal.ValidationRecipeID) != "" || len(command.Proposal.RequiredCheckRefs) != 0 {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, snapshot.ObservedRevision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "git_semantic_proof_unavailable", "Git repository state is not an independent semantic validation proof", "", snapshot.ObservedRevision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
+		return
+	}
 	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, snapshot.ObservedRevision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
 }
 
