@@ -28,24 +28,26 @@ type embeddedSoul struct {
 }
 
 type embeddedMCPCapability struct {
-	ID             string         `json:"id"`
-	ServerID       string         `json:"serverId"`
-	Kind           string         `json:"kind"`
-	Name           string         `json:"name"`
-	DisplayName    string         `json:"displayName,omitempty"`
-	Description    string         `json:"description,omitempty"`
-	Category       string         `json:"category,omitempty"`
-	Tags           []string       `json:"tags,omitempty"`
-	UsageHint      string         `json:"usageHint,omitempty"`
-	InputSummary   string         `json:"inputSummary,omitempty"`
-	OutputSummary  string         `json:"outputSummary,omitempty"`
-	StageHints     []string       `json:"stageHints,omitempty"`
-	RiskLevel      string         `json:"riskLevel,omitempty"`
-	Schema         map[string]any `json:"schema,omitempty"`
-	URI            string         `json:"uri,omitempty"`
-	Enabled        bool           `json:"enabled"`
-	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
-	Status         string         `json:"status,omitempty"`
+	ID               string         `json:"id"`
+	ServerID         string         `json:"serverId"`
+	Kind             string         `json:"kind"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"displayName,omitempty"`
+	Description      string         `json:"description,omitempty"`
+	Category         string         `json:"category,omitempty"`
+	Tags             []string       `json:"tags,omitempty"`
+	UsageHint        string         `json:"usageHint,omitempty"`
+	InputSummary     string         `json:"inputSummary,omitempty"`
+	OutputSummary    string         `json:"outputSummary,omitempty"`
+	StageHints       []string       `json:"stageHints,omitempty"`
+	RiskLevel        string         `json:"riskLevel,omitempty"`
+	EffectScope      string         `json:"effectScope,omitempty"`
+	IdempotencyClass string         `json:"idempotencyClass,omitempty"`
+	Schema           map[string]any `json:"schema,omitempty"`
+	URI              string         `json:"uri,omitempty"`
+	Enabled          bool           `json:"enabled"`
+	ApprovalPolicy   string         `json:"approvalPolicy,omitempty"`
+	Status           string         `json:"status,omitempty"`
 }
 
 func loadEmbeddedTemplates() ([]workorchmanagementcontract.WorkspaceTemplate, error) {
@@ -225,6 +227,7 @@ func BuiltinMCPCapabilityDefaults() ([]workorchmanagementcontract.MCPCapability,
 			DisplayName: strings.TrimSpace(item.DisplayName), Description: strings.TrimSpace(item.Description), Category: strings.TrimSpace(item.Category),
 			Tags: filterEmptyStrings(item.Tags), UsageHint: strings.TrimSpace(item.UsageHint), InputSummary: strings.TrimSpace(item.InputSummary),
 			OutputSummary: strings.TrimSpace(item.OutputSummary), StageHints: filterEmptyStrings(item.StageHints), RiskLevel: strings.TrimSpace(item.RiskLevel),
+			EffectScope: strings.TrimSpace(item.EffectScope), IdempotencyClass: strings.TrimSpace(item.IdempotencyClass),
 			Schema: cloneContextMap(item.Schema), URI: strings.TrimSpace(item.URI), Enabled: item.Enabled,
 			ApprovalPolicy: strings.TrimSpace(item.ApprovalPolicy), Status: strings.TrimSpace(item.Status),
 		})

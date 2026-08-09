@@ -27,6 +27,8 @@
     "outputSummary": "initialization status and language server metadata",
     "stageHints": ["planning", "execution", "repair"],
     "riskLevel": "read_only",
+    "effectScope": "ephemeral_session",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -59,6 +61,8 @@
     "outputSummary": "sync status",
     "stageHints": ["execution", "repair"],
     "riskLevel": "workspace_state",
+    "effectScope": "ephemeral_session",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -103,6 +107,8 @@
     "outputSummary": "definition locations",
     "stageHints": ["planning", "repair"],
     "riskLevel": "read_only",
+    "effectScope": "none",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -147,6 +153,8 @@
     "outputSummary": "hover summary",
     "stageHints": ["planning", "repair"],
     "riskLevel": "read_only",
+    "effectScope": "none",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -192,6 +200,8 @@
     "outputSummary": "reference locations with truncation metadata",
     "stageHints": ["planning", "repair"],
     "riskLevel": "read_only",
+    "effectScope": "none",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -226,6 +236,8 @@
     "outputSummary": "diagnostics with severity and source",
     "stageHints": ["execution", "repair", "validation"],
     "riskLevel": "read_only",
+    "effectScope": "none",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -255,6 +267,8 @@
     "outputSummary": "language server instance status and dependency health",
     "stageHints": ["planning", "execution", "repair", "validation"],
     "riskLevel": "read_only",
+    "effectScope": "none",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -290,6 +304,8 @@
     "outputSummary": "shutdown status for matching instances",
     "stageHints": ["execution", "repair", "validation"],
     "riskLevel": "workspace_state",
+    "effectScope": "ephemeral_session",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -324,6 +340,8 @@
     "outputSummary": "repair recommendation or safe recovery result",
     "stageHints": ["execution", "repair", "validation"],
     "riskLevel": "workspace_state",
+    "effectScope": "ephemeral_session",
+    "idempotencyClass": "safe_to_replay",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"

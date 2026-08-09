@@ -544,6 +544,21 @@ func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 	if err != nil || len(capabilities) == 0 {
 		t.Fatalf("BuiltinMCPCapabilityDefaults = %d, err=%v", len(capabilities), err)
 	}
+	foundLSPStatus := false
+	for _, capability := range capabilities {
+		if capability.ServerID == "mcp-lsp-bridge" && (capability.EffectScope == "" || capability.IdempotencyClass == "") {
+			t.Fatalf("embedded MCP capability %q missing runtime metadata", capability.Name)
+		}
+		if capability.ServerID == "mcp-lsp-bridge" && capability.Name == "lsp_status" {
+			foundLSPStatus = true
+			if capability.EffectScope != "none" || capability.IdempotencyClass != "safe_to_replay" {
+				t.Fatalf("lsp_status runtime metadata = %q/%q, want none/safe_to_replay", capability.EffectScope, capability.IdempotencyClass)
+			}
+		}
+	}
+	if !foundLSPStatus {
+		t.Fatal("embedded MCP defaults missing mcp-lsp-bridge lsp_status")
+	}
 }
 
 // assertSoftwareDevWorkspaceDeliverableSelectors guards the startup-default
