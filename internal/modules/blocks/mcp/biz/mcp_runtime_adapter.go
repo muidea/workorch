@@ -21,6 +21,7 @@ import (
 	"time"
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
@@ -45,6 +46,10 @@ type serverGetter interface {
 
 type serverLister interface {
 	ListServers(context.Context) ([]*mcpmodel.Server, error)
+}
+
+type capabilityLister interface {
+	ListCapabilities(context.Context, registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error)
 }
 
 const (
@@ -251,22 +256,55 @@ func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, 
 	ids := make([]string, 0, len(orderedServers))
 	recipeRefs := make([]string, 0)
 	persisted := make([]mcpmodel.Server, 0, len(orderedServers))
+	serverAllowedTools := make(map[string]map[string]struct{}, len(orderedServers))
 	for _, server := range orderedServers {
 		if server == nil || !server.Enabled || strings.TrimSpace(string(server.ID)) == "" {
 			continue
 		}
 		ids = append(ids, string(server.ID))
+		allowed := make(map[string]struct{}, len(server.AllowedTools))
 		for _, tool := range server.AllowedTools {
 			if tool = strings.TrimSpace(tool); tool != "" {
-				recipeRefs = append(recipeRefs, "mcp/tool_call/"+string(server.ID)+"/"+tool)
+				allowed[tool] = struct{}{}
 			}
 		}
+		serverAllowedTools[string(server.ID)] = allowed
 		persisted = append(persisted, *server)
 	}
 	if len(ids) == 0 {
 		return nil, nil, "", fmt.Errorf("%w: no enabled mcp server is available", common.ErrNotFound)
 	}
-	raw, err := json.Marshal(persisted)
+	var persistedCapabilities []*mcpmodel.Capability
+	if lister, ok := a.service.(capabilityLister); ok {
+		allCapabilities, listErr := lister.ListCapabilities(ctx, registryevents.CapabilityQuery{Enabled: boolPtr(true), Kind: mcpmodel.CapabilityKindTool})
+		if listErr != nil {
+			return nil, nil, "", listErr
+		}
+		for _, capability := range allCapabilities {
+			if capability == nil || !capability.Enabled || strings.TrimSpace(capability.Name) == "" ||
+				strings.TrimSpace(capability.EffectScope) == string(runtimecontract.RuntimeEffectUnknown) ||
+				strings.TrimSpace(capability.IdempotencyClass) == string(runtimecontract.RuntimeOperationIdempotencyUnknown) {
+				continue
+			}
+			if _, enabled := serverAllowedTools[string(capability.ServerID)][capability.Name]; !enabled {
+				continue
+			}
+			persistedCapabilities = append(persistedCapabilities, capability)
+		}
+		for _, capability := range persistedCapabilities {
+			recipeRefs = append(recipeRefs, "mcp/tool_call/"+string(capability.ServerID)+"/"+capability.Name)
+		}
+	} else {
+		for serverID, tools := range serverAllowedTools {
+			for tool := range tools {
+				recipeRefs = append(recipeRefs, "mcp/tool_call/"+serverID+"/"+tool)
+			}
+		}
+	}
+	raw, err := json.Marshal(struct {
+		Servers      []mcpmodel.Server      `json:"servers"`
+		Capabilities []*mcpmodel.Capability `json:"capabilities,omitempty"`
+	}{Servers: persisted, Capabilities: persistedCapabilities})
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -274,6 +312,27 @@ func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, 
 	sort.Strings(recipeRefs)
 	return ids, recipeRefs, "mcp-admissibility-" + hex.EncodeToString(sum[:])[:20], nil
 }
+
+// EffectiveCapabilities returns the registry owner's detached capability facts
+// for the enabled MCP surface. Runtime never derives effect metadata from a
+// server risk label or tool name; an absent capability catalog is therefore an
+// explicit prerequisite failure for semantic proof feasibility.
+func (a *RuntimeAdapter) EffectiveCapabilities(ctx context.Context) ([]*mcpmodel.Capability, error) {
+	if a == nil || a.service == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	lister, ok := a.service.(capabilityLister)
+	if !ok {
+		return nil, fmt.Errorf("%w: mcp capability catalog is unavailable", common.ErrInvalidArgument)
+	}
+	items, err := lister.ListCapabilities(ctx, registryevents.CapabilityQuery{Enabled: boolPtr(true)})
+	if err != nil {
+		return nil, err
+	}
+	return mcpmodel.CloneCapabilities(items), nil
+}
+
+func boolPtr(value bool) *bool { return &value }
 
 func (a *RuntimeAdapter) Close() {
 	if a == nil {

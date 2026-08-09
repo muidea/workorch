@@ -21,6 +21,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -504,6 +505,17 @@ func (g runtimeMCPServerGetter) ListServers(context.Context) ([]*mcpmodel.Server
 		return nil, common.ErrNotFound
 	}
 	return []*mcpmodel.Server{g.server}, nil
+}
+
+func (g runtimeMCPServerGetter) ListCapabilities(context.Context, registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+	if g.server == nil {
+		return nil, common.ErrNotFound
+	}
+	return []*mcpmodel.Capability{{
+		ID:       common.MCPCapabilityID(string(g.server.ID) + ":tool:lookup.references"),
+		ServerID: g.server.ID, Kind: mcpmodel.CapabilityKindTool, Name: "lookup.references", Enabled: true,
+		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+	}}, nil
 }
 
 func runtimeStringPointer(value string) *string { return &value }

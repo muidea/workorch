@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-09
 
 ## 1. Purpose And Authority
 
@@ -26,8 +26,8 @@ checks, metrics, or per-CWI proof contracts.
 
 ## 2. Latest Live Assessment
 
-Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-032`, is the current fact baseline. Earlier
-`run-029`/`run-031` observations remain historical regression evidence only.
+Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-054`, is the current fact baseline. Earlier
+`run-029` through `run-053` observations remain historical regression evidence only.
 
 ### 2.1 Verified Owner-Correct Behavior
 
@@ -44,9 +44,9 @@ Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Run `run-032`, is 
   the latest run reached both coverage-order and proof-batch request steps before admission failure.
 - The terminal aggregate stopped driving after failure; no provider loop, CAS loop, or high-CPU loop was observed.
 
-### 2.2 Current Semantic Correction Gap
+### 2.2 Earlier Semantic Correction Gap (Code Closed)
 
-The latest run passed the previously uncovered order and empty-required-array cases, but failed on a sealed owner
+Run `run-032` passed the previously uncovered order and empty-required-array cases, but failed on a sealed owner
 catalog constraint:
 
 ```text
@@ -68,7 +68,7 @@ This was a prior counterexample. The projection closure now selects the authorit
 attention, and the latest run has `sourceEventRevision=479` and `projectedSourceRevision=479`. No new projection
 divergence was observed in `run-032`.
 
-### 2.4 Paths Not Proven By This Run
+### 2.4 Historical Run-032 Paths Not Proven By That Run
 
 `run-032` did not reach semantic seal, operation candidate, sealed dispatch, capability execution, receipt, evidence
 admission, CWI advance, assessment success, or durable workspace output. It did exercise Result rejection and terminal
@@ -208,6 +208,34 @@ array, never JSON `null`; an empty admissibility domain is a bounded catalog gap
 
 The Orchestrator remains the only component that turns these facts into an SM-3 correction/CAS transition. MCP, Shell,
 File, and Git continue to return typed catalog/feasibility facts only; LLM remains a detached fact renderer.
+
+### 2.10 MCP Capability Effect Counterexample And Active Closure
+
+Fresh `run-054` proved that the typed MCP metadata default is deployed and that the mainline now reaches semantic seal,
+sealed dispatch, MCP execution, receipt persistence, evidence commit, and terminal delivery. It then failed closed:
+
+```text
+semantic binding: lsp_initialize requires effect [none]
+sealed execution: expected effect ephemeral_session
+owner receipt: observed effect ephemeral_session
+SM-2 admission: coverage_binding_mismatch
+```
+
+The safe parts behaved correctly: no CWI credit was granted, Result stored the rejected outcome, Workspace released the
+exact active Run, Run entered `failed`, and the aggregate stopped driving. The defect is earlier than evidence
+admission. MCP semantic feasibility checked server, recipe, selector, and transport readiness but did not compare the
+proposal effect with the exact capability owner's declared effect. The recipe was therefore sealed as feasible even
+though its proof shape could never match the owner receipt.
+
+The same live trace exposed two related duplicate-authority risks:
+
+- recipe identities are derived from `Server.AllowedTools`, while effect/idempotency are stored in the capability
+  catalog;
+- MCP receipts currently may populate `ObservedEffectScope` from the caller's sealed expected effect instead of an
+  exact owner capability/execution fact.
+
+This plan therefore keeps evidence admission strict and moves the missing check to the owner-feasibility boundary. It
+must not add an MCP name branch to Runtime, infer effect from risk/tool names, or let Orchestrator repair registry state.
 
 ## 3. Non-Negotiable Ownership Rules
 
@@ -407,23 +435,144 @@ continuation fragment admitted as authority
 projection- or application-selected Runtime transition
 ```
 
+## 7.1 Closure Track D: Effective MCP Capability Is One Owner Fact
+
+This track closes the `run-054` counterexample without adding a state machine or a cross-owner mutation path.
+
+### 7.1.1 Ownership And State Boundaries
+
+| State/fact | Sole owner | Legal transition/input |
+| --- | --- | --- |
+| MCP server/capability catalog, metadata, enabled state, catalog revision | `blocks/mcpregistry` | registry owner-private mutation event and repository CAS |
+| MCP transport/session execution state | `blocks/mcp` | MCP owner-private execution/session event |
+| effective MCP admissibility and semantic feasibility observation | `blocks/mcp` | detached fact compiled from typed registry query plus owner-local probe |
+| semantic feasibility ledger, binding seal, candidate, dispatch, receipt admission, CWI credit | `kernel/orchestrator` SM-2/SM-3/SM-4 | Orchestrator private internal event and Runtime aggregate CAS |
+| Run lifecycle | `blocks/run` SM-1 | Run owner-private lifecycle event |
+
+`mcpregistry` must not drive Runtime. `mcp` must not persist or mutate registry entities. Orchestrator must not read the
+registry repository, infer a tool effect, or write MCP state. Application, LLM, TUI, Web, projection, Result, Workspace,
+and Run do not participate in MCP feasibility state.
+
+### 7.1.2 Canonical Effective Capability Fact
+
+Remove the split semantic authority between server `AllowedTools` and capability metadata. Keep `AllowedTools` only as
+the server transport/admission whitelist. MCP owner compiles one bounded effective fact from the intersection of an
+enabled server, its whitelist, and an enabled exact capability:
+
+```go
+type RuntimeEffectiveMCPCapability struct {
+    CapabilityID       string
+    ServerID           string
+    ToolName           string
+    OperationKind      string
+    EffectScope        RuntimeEffectScope
+    IdempotencyClass   RuntimeOperationIdempotencyClass
+    ApprovalPolicy     string
+    Enabled            bool
+    CapabilityRevision string
+    CatalogRevision    string
+}
+```
+
+The concrete EventHub query/result belongs to `blocks/mcpregistry/pkg/events`. The owner-neutral detached value,
+normalization, validation, clone, and stable hash helper belong to `workorchruntimecontract`. It contains no repository,
+Hub, callback, state transition, retry choice, Runtime action, or mutable entity.
+
+An effective tool is unavailable when any required identity or typed effect/idempotency field is empty/unknown. Unknown
+metadata remains a diagnostic catalog fact but cannot become an executable semantic recipe. No risk-level, tool-name,
+stage-hint, or template inference is allowed.
+
+### 7.1.3 One Catalog Revision
+
+The MCP semantic admissibility revision must hash the normalized effective capability set, including:
+
+- server ID and enabled state;
+- capability ID, tool name, operation kind, enabled/status state;
+- effect scope and idempotency class;
+- approval policy and capability revision;
+- whitelist membership relevant to the effective projection.
+
+A change to any field produces a new catalog revision. Server-only hashing and parallel recipe/effect revisions are
+removed. A feasibility request bound to an older revision returns `stale`; MCP owner does not select reacquisition.
+Orchestrator first persists the stale observation through its private event, then re-enters its existing bounded catalog
+acquisition generation without consuming semantic candidate correction attempt.
+
+### 7.1.4 Semantic Manifest And Owner Feasibility
+
+The persisted semantic manifest projects each dynamic MCP recipe together with its finite effect domain:
+
+```json
+{
+  "validationRecipeId": "mcp/tool_call/<server>/<tool>",
+  "operationKind": "mcp/tool_call",
+  "allowedEffectScopes": ["ephemeral_session"],
+  "capabilityRef": "<server>:tool:<tool>",
+  "catalogRevision": "<sealed revision>"
+}
+```
+
+LLM receives that detached finite domain and remains a renderer. MCP owner remains the final factual feasibility source.
+For the exact recipe it must validate, in order:
+
+1. workspace/run/definition/request scope;
+2. catalog revision freshness;
+3. exact server/tool/capability identity and enabled state;
+4. operation kind;
+5. proposal required effect includes the capability effect;
+6. target/selector/constraint and approval facts;
+7. transport/prerequisite probe when applicable.
+
+An effect mismatch returns `infeasible` with a bounded original diagnostic identifying the exact CWI, proposal field,
+actual required effect, allowed owner effect, capability ref, and revision. It does not return correction, retry, action,
+terminal, coverage, or binding state. Orchestrator converts the fact to its existing owner-private semantic feasibility
+event; only SM-2/SM-3 may persist rejection, derive the single correction, or seal the binding.
+
+### 7.1.5 Dispatch And Receipt
+
+The sealed operation authorization binds exact capability ref, catalog revision, operation kind, effect,
+idempotency, target policy, recipe/check, and CWI binding. Immediately before execution, MCP owner verifies that the
+exact effective capability still matches the sealed identity. Drift returns a typed stale/infeasible receipt and no
+tool call.
+
+`ObservedEffectScope` must be derived from MCP owner capability/execution facts. The following assignment pattern is
+forbidden:
+
+```go
+receipt.ObservedEffectScope = command.Execution.ExpectedEffectScope
+```
+
+Expected effect belongs to the sealed dispatch; observed effect belongs to the owner receipt. SM-2 compares both with
+the sealed binding. A mismatch remains fail-closed and grants zero CWI credit.
+
+### 7.1.6 Required Deletions And Boundary Scans
+
+- delete server-only semantic recipe hashing when it competes with the effective capability revision;
+- delete parallel string-list recipe/effect authority at the MCP Runtime boundary;
+- delete receipt construction that echoes caller expected effect as owner observation;
+- do not add LSP/software/template names to `blocks/mcp`, `blocks/mcpregistry`, Orchestrator, or Runtime contracts;
+- do not add direct `mcp -> mcpregistry` service/repository injection; use the registry owner's concrete EventHub query;
+- do not create a generic capability registry, global topic index, map payload, compatibility alias, or second Runtime
+  mutation facade.
+
 ## 8. Component Work Matrix
 
 | Component | Required closure | Explicitly forbidden |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | canonical pure proposal constraints/evaluator facts, schema projection, directive normalize/validate/clone/hash | reducer, retry classification, owner lookup, EventHub |
-| `kernel/orchestrator/biz/runtime` | invoke one evaluator, map facts to owner-private events, derive/persist directive through SM-3 CAS | provider rendering, capability execution, cross-owner repository |
+| `internal/pkg/workorchruntimecontract` | canonical pure proposal/effective-capability facts, schema projection, normalize/validate/clone/hash | reducer, retry classification, owner lookup, EventHub |
+| `kernel/orchestrator/biz/runtime` | invoke one evaluator, map feasibility facts to owner-private events, derive/persist directive and binding through SM-2/SM-3 CAS | provider rendering, capability/effect inference or execution, cross-owner repository |
 | `kernel/orchestrator/biz` | drive reads persisted directive and maps LLM facts to private events | reconstructing directive from raw message at send time |
 | `blocks/llm/pkg/events` | semantic command carries detached directive; result remains factual | correction disposition, terminal/action fields |
 | `blocks/llm/pkg/models` | owner-private immutable request representation | Runtime aggregate or mutable owner entity |
 | `blocks/llm/biz` | validate detached request identity and render provider-safe C4 | proposal validation, infer delta, retry, terminal, coverage, batch transition |
+| `blocks/mcpregistry` | sole catalog owner; validate/persist typed capability metadata and return detached catalog query facts/revision | Runtime transition, MCP transport execution, cross-owner repository exposure |
+| `blocks/mcp` | compile effective capability facts, exact recipe/effect feasibility, transport probe/execute, owner-observed receipt | registry mutation, Runtime action/correction/credit, expected-effect echo as observation |
 | `application/workorchd/.../readmodelprojection` | terminal-first canonical outcome and activity derivation | competing execution state machine |
 | `workorchprojectioncontract` | separate outcome from optional attention fact | authority or lifecycle command |
 | TUI/Web/event mapping | render canonical outcome/activity and workspace switch isolation | local conflict resolution or state transition |
 | `blocks/run` | regression only: SM-1 and replacement owner-private events | SM-2/3/4 interpretation |
 | `blocks/workspace` | regression only: exact active-run claim/release | Run or Runtime terminal decision |
 | `blocks/result` | regression only: idempotent sealed outcome storage | acceptance adjudication |
-| File/Git/Shell/MCP/Web/SSH | regression only: typed feasibility/receipt facts | Runtime action, evidence credit, retry/terminal |
+| File/Git/Shell/Web/SSH | regression only: typed feasibility/receipt facts | Runtime action, evidence credit, retry/terminal |
 
 No component may receive another owner's service, repository, reducer, mutable model, or state callback.
 
@@ -464,6 +613,19 @@ Projection consistency:
 - `internal/services/workorch/service/tui`
 - `web/workorch-console/src`
 
+MCP capability/effect closure:
+
+- `internal/modules/blocks/mcpregistry/pkg/events`
+- `internal/modules/blocks/mcpregistry/pkg/models`
+- `internal/modules/blocks/mcpregistry/biz/mcp_service.go`
+- `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go`
+- `internal/modules/blocks/mcp/biz/owner.go`
+- `internal/modules/blocks/mcp/pkg/events/runtime_admissibility.go`
+- `internal/pkg/workorchruntimecontract/runtime_effect_resolve.go`
+- `internal/pkg/workorchruntimecontract/runtime_semantic_feasibility_*.go`
+- `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go`
+- `internal/pkg/workorchdefaults/defaults/mcp_capabilities.json`
+
 ## 10. Ordered Implementation Queue
 
 Statuses are `pending | in_progress | code_closed | live_closed`. A code-closed item without required deployed proof
@@ -489,11 +651,19 @@ remains open.
 | RSO-16 | code_closed | Normalize exact/existing/prospective target policy into one schema/evaluator/correction contract | target policy matrix, finite-allowed-value and empty-catalog tests pass |
 | RSO-17 | pending | Prove target correction and no-ineffective-retry behavior in a fresh deployment | target correction → semantic seal, or bounded catalog-gap terminal with no attempt 2 |
 | RSO-18 | code_closed | Separate dynamic MCP/Shell capability identities from static operation variants and scope schema by owner/kind | dynamic-variant rejection, owner-selector isolation, static-variant and null-enum tests pass |
+| RSO-19 | code_closed | Unify MCP effective capability catalog and revision | enabled capability/whitelist intersection, capability metadata in snapshot hash, and catalog query boundary tests pass |
+| RSO-20 | code_closed | Enforce MCP recipe/effect feasibility before SM-2 binding seal | exact recipe/effect mismatch returns owner infeasible fact before binding seal; helper and owner integration tests pass |
+| RSO-21 | code_closed | Make MCP receipt effect owner-observed | receipt derives effect from exact enabled capability; expected effect is never copied into observed effect; receipt integration passes |
+| RSO-22 | pending | Fresh deployed positive convergence after MCP effect closure | semantic seal → dispatch → receipt → binding-matched evidence → CWI advance; no post-dispatch binding mismatch |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
-change Runtime authority. RSO-9 follows every code change. RSO-10, RSO-15 and RSO-17 cannot be replaced by mock
-provider proof.
+change Runtime authority. RSO-9 follows every code change. RSO-19 precedes RSO-20; RSO-20 precedes RSO-21 and
+RSO-22. RSO-10, RSO-15, RSO-17 and RSO-22 cannot be replaced by mock provider proof.
+
+RSO-10 and RSO-15 are retained as historical positive-lineage labels for the earlier semantic/candidate closure. Their
+fresh deployed proof is now executed under RSO-22 together with the MCP effect contract. RSO-17 remains the separate
+target-correction deployed proof and is not satisfied by the RSO-22 positive path.
 
 ### 10.1 2026-08-08 Code-Closure Evidence
 
@@ -585,6 +755,49 @@ provider proof.
    - Reject cross-owner selector/recipe facts before owner feasibility dispatch.
    - Add dynamic-variant, owner-isolation, static-variant, and empty-enum schema tests.
 
+### 10.3 Ordered Code-Closure Steps For RSO-19 Through RSO-22
+
+1. **Extend the registry owner contract first.** Add typed capability metadata to the registry query/result and make
+   the owner validate non-empty effect/idempotency values when a capability is enabled for Runtime. Keep arbitrary
+   custom capability metadata configurable; do not hard-code template, language, LSP, or software-development names in
+   registry or Runtime code.
+2. **Compile one effective MCP catalog in `blocks/mcp`.** Intersect enabled server whitelist and enabled exact
+   capability records, normalize deterministically, and hash the complete effective set. Remove server-only recipe
+   authority from semantic feasibility. Return a detached catalog fact with workspace/run/authority scope and revision.
+3. **Bind semantic recipes to catalog facts.** Extend the sealed manifest/context so each dynamic recipe carries the
+   exact capability reference, operation kind, finite effect domain, idempotency class, and catalog revision. LLM only
+   renders these values; it cannot add a new recipe/effect.
+4. **Reject effect mismatch before seal.** MCP semantic feasibility must return `infeasible` for a proposal whose
+   `requiredEffectScopes` does not contain the exact capability effect. Orchestrator persists the observation through its
+   private SM-2 event, derives at most one correction through the existing SM-3 reducer, and never creates a dispatch for
+   an unmatchable binding.
+5. **Re-check exact capability at dispatch.** Before executing, MCP owner validates capability ID, catalog revision,
+   operation kind, effect, idempotency, target policy, and transport. Drift returns stale/infeasible typed facts and
+   schedules the existing bounded prerequisite refresh; it does not mutate Orchestrator state directly.
+6. **Make receipts factual.** MCP owner derives observed effect/idempotency/target/check facts from its capability and
+   execution result. Never copy expected dispatch fields into observed fields. SM-2 compares sealed authorization,
+   receipt, and binding before granting evidence or CWI credit.
+7. **Preserve the existing four-machine boundaries.** No new MCP state machine, no application facade, no registry
+   repository injection, no Runtime-specific MCP branch, and no fifth retry/correction loop.
+8. **Run local and deployed gates.** Add transition, stale/duplicate/restart, effect mismatch, exact receipt, zero
+   dispatch, bounded retry, and positive semantic-to-effect lineage tests. Then execute a fresh deployment proving
+   `semantic_contract_sealed → dispatch → receipt → binding-matched evidence → CWI advance`.
+
+### 10.4 2026-08-09 Live Evidence
+
+Fresh deployment loaded the corrected default metadata:
+
+```text
+lsp_status: effectScope=none, idempotencyClass=safe_to_replay
+```
+
+`run-054` then reached `semantic_contract_sealed`, sealed one dispatch, executed
+`mcp/tool_call/mcp-lsp-bridge/lsp_initialize`, persisted an owner receipt, and committed the operation evidence.
+It did not receive CWI credit because the sealed binding required `none` while the owner receipt observed
+`ephemeral_session`. This is a valid fail-closed proof of the evidence gate, not positive convergence. The workspace
+released `activeRunId` and the terminal delivery completed; RSO-22 remains open until a fresh run reaches
+binding-matched evidence/CWI advance without a post-dispatch mismatch.
+
 ## 11. Verification Matrix
 
 ### 11.1 Semantic Correction
@@ -629,6 +842,9 @@ provider proof.
 - recovery exhaustion creates no candidate, dispatch, Decision, Approval, or effect;
 - accepted order compiles bounded proof batches in the sealed order;
 - owner feasibility seals exact per-CWI bindings;
+- MCP owner rejects recipe/effect mismatch before binding seal and dispatch;
+- MCP catalog revision changes when capability effect/idempotency changes;
+- MCP receipt observed effect is owner-derived and never copied from expected dispatch effect;
 - no operation before semantic seal;
 - sealed dispatch, fence, receipt, evidence quality, CWI advance, assessment, and terminal delivery survive restart;
 - stable prefix and request sizes remain bounded within each logical request.
@@ -639,6 +855,8 @@ Run focused checks before the full repository gates:
 
 ```bash
 go test ./internal/pkg/workorchruntimecontract -count=1
+go test ./internal/modules/blocks/mcpregistry/... -count=1
+go test ./internal/modules/blocks/mcp/... -count=1
 go test ./internal/modules/blocks/llm/... -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
 go test ./internal/modules/application/workorchd/... -count=1
@@ -687,7 +905,11 @@ The live proof must also show:
 - stable prefix consistency and bounded request size;
 - bounded retries and no high-CPU loop;
 - source/projected revision convergence;
-- correct workspace-isolated TUI/Web streaming after workspace switching.
+- correct workspace-isolated TUI/Web streaming after workspace switching;
+- MCP effective capability revision includes effect/idempotency metadata;
+- an MCP recipe/effect mismatch fails during owner feasibility with zero dispatch;
+- a matching MCP recipe reaches owner-observed receipt, binding-matched evidence, and CWI advance without a
+  post-dispatch `coverage_binding_mismatch`.
 
 Whole-document recovery requires a separate deployed fault-injection proof because a normal complete response does not
 exercise it. Until both positive convergence and recovery fault injection pass, code-closed recovery remains a

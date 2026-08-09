@@ -225,8 +225,12 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
 	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
-		observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
-		observation.Changed = runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope)
+		if capabilities, capabilityErr := m.runtimeAdapter.EffectiveCapabilities(event.Context()); capabilityErr == nil {
+			if capability, found := findEffectiveMCPCapability(capabilities, command.Data.ServerID, command.Data.Tool); found {
+				observation.ObservedEffectScope = runtimecontract.NormalizeRuntimeEffectScope(runtimecontract.RuntimeEffectScope(capability.EffectScope))
+			}
+		}
+		observation.Changed = runtimecontract.RuntimeEffectIsDurable(observation.ObservedEffectScope)
 	}
 	attachMCPToolValidationObservation(&evidence, status, command.OperationKind, command.EvidenceKind, command.Data.ServerID, command.Data.Tool)
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, nil, observation)
@@ -292,6 +296,9 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		return
 	}
 	inventory.ValidationRecipeRefs = recipeRefs
+	if capabilities, capabilityErr := m.runtimeAdapter.EffectiveCapabilities(event.Context()); capabilityErr == nil {
+		inventory.MCPCapabilities = runtimeMCPCapabilityContexts(capabilities)
+	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {
 		setCapabilityError(result, err)
@@ -299,6 +306,23 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	}
 	observation := mcpAdmissibilityObservation(command.PrerequisiteID, inventory)
 	result.Set(mcpevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
+}
+
+func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontract.RuntimeMCPCapabilityContext {
+	ret := make([]runtimecontract.RuntimeMCPCapabilityContext, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, runtimecontract.SealMCPCapabilityEffect(runtimecontract.RuntimeMCPCapabilityContext{
+			ID: item.ID, ServerID: item.ServerID, Kind: item.Kind, Name: item.Name, DisplayName: item.DisplayName,
+			Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
+			InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
+			RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
+			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+		}))
+	}
+	return ret
 }
 
 func setRuntimeOperationFeasibilityResult(result magicevent.Result, command mcpevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
@@ -387,6 +411,28 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the owner catalog", "", revision, nil))
 		return
 	}
+	capabilities, capabilityErr := m.runtimeAdapter.EffectiveCapabilities(event.Context())
+	if capabilityErr != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_capability_catalog_unavailable", capabilityErr.Error(), "", revision, nil))
+		return
+	}
+	serverID, tool, parseErr := parseMCPValidationRecipe(command.Proposal.ValidationRecipeID)
+	if parseErr != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_invalid", parseErr.Error(), "", revision, nil))
+		return
+	}
+	capability, found := findEffectiveMCPCapability(capabilities, serverID, tool)
+	if !found || !runtimeEffectScopeAccepted(command.Proposal.RequiredEffectScopes, runtimecontract.RuntimeEffectScope(capability.EffectScope)) {
+		actual := "missing"
+		if found {
+			actual = capability.EffectScope
+		}
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_effect_mismatch", fmt.Sprintf("recipe %q requires effect %v but owner capability effect is %q", command.Proposal.ValidationRecipeID, command.Proposal.RequiredEffectScopes, actual), "", revision, []string{command.Proposal.ValidationRecipeID}))
+		return
+	}
 	for _, selector := range command.Proposal.Target.OwnerSelectorRefs {
 		if !containsMCPAdmissibleServer(serverIDs, selector) {
 			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
@@ -395,6 +441,33 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		}
 	}
 	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+}
+
+func parseMCPValidationRecipe(recipe string) (string, string, error) {
+	parts := strings.SplitN(strings.TrimSpace(recipe), "/", 4)
+	if len(parts) != 4 || parts[0] != "mcp" || parts[1] != "tool_call" || parts[2] == "" || parts[3] == "" {
+		return "", "", fmt.Errorf("MCP validation recipe %q is not an executable tool recipe", recipe)
+	}
+	return parts[2], parts[3], nil
+}
+
+func findEffectiveMCPCapability(items []*mcpmodel.Capability, serverID, tool string) (*mcpmodel.Capability, bool) {
+	for _, item := range items {
+		if item != nil && item.Enabled && item.Kind == mcpmodel.CapabilityKindTool && string(item.ServerID) == serverID && item.Name == tool {
+			return item, true
+		}
+	}
+	return nil, false
+}
+
+func runtimeEffectScopeAccepted(required []runtimecontract.RuntimeEffectScope, actual runtimecontract.RuntimeEffectScope) bool {
+	actual = runtimecontract.NormalizeRuntimeEffectScope(actual)
+	for _, scope := range required {
+		if runtimecontract.NormalizeRuntimeEffectScope(scope) == actual {
+			return true
+		}
+	}
+	return false
 }
 
 func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
@@ -511,4 +584,27 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 		return nil, common.ErrNotFound
 	}
 	return response.Server.Model()
+}
+
+func (g mcpEventServerGetter) ListCapabilities(ctx context.Context, query registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+	if g.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ev := magicevent.NewEventWithContext(registryevents.TopicMCPCommandListCapabilities, ModuleID, registryevents.CommandDestination, magicevent.NewHeader(), ctx, registryevents.ListCapabilitiesCommand{Query: query})
+	result := g.hub.Send(ev)
+	if result == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := result.Error(); err != nil {
+		return nil, err
+	}
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return nil, resultErr
+	}
+	response, ok := data.(registryevents.MCPCommandResult)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return mcpmodel.CloneCapabilities(response.Capabilities), nil
 }

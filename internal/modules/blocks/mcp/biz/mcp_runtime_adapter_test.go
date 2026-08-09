@@ -1094,3 +1094,15 @@ func newMCPService(t *testing.T, server mcpmodel.Server) serverGetter {
 	}
 	return staticMCPServerGetter{server: &server}
 }
+
+func TestRuntimeSemanticEffectScopeHelpers(t *testing.T) {
+	if server, tool, err := parseMCPValidationRecipe("mcp/tool_call/mcp-lsp-bridge/lsp_initialize"); err != nil || server != "mcp-lsp-bridge" || tool != "lsp_initialize" {
+		t.Fatalf("parse MCP recipe = %q/%q/%v", server, tool, err)
+	}
+	if runtimeEffectScopeAccepted([]runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, runtimecontract.RuntimeEffectEphemeralSession) {
+		t.Fatal("effect mismatch was accepted")
+	}
+	if !runtimeEffectScopeAccepted([]runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}, runtimecontract.RuntimeEffectEphemeralSession) {
+		t.Fatal("matching effect was rejected")
+	}
+}

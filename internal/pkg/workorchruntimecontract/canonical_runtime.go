@@ -589,6 +589,10 @@ type RuntimeOperationAdmissibility struct {
 	// command recipe below; other owners such as MCP expose only opaque recipe
 	// identities and keep transport parameters inside their own boundary.
 	ValidationRecipeRefs []string
+	// MCPCapabilities is the exact owner-sealed capability metadata used for
+	// dynamic mcp/tool_call effect and replay checks. It is intentionally part
+	// of this owner catalog rather than a second global capability authority.
+	MCPCapabilities []RuntimeMCPCapabilityContext
 	// ValidationRecipes contains only the Shell-owner-confirmed executable
 	// recipes for validation/managed_session. It is never provider supplied and
 	// is included in this owner snapshot identity.
@@ -606,6 +610,19 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
 	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
+	if len(a.MCPCapabilities) > 0 {
+		caps := make([]RuntimeMCPCapabilityContext, 0, len(a.MCPCapabilities))
+		for _, capability := range a.MCPCapabilities {
+			caps = append(caps, SealMCPCapabilityEffect(capability))
+		}
+		sort.Slice(caps, func(i, j int) bool {
+			if caps[i].ServerID != caps[j].ServerID {
+				return caps[i].ServerID < caps[j].ServerID
+			}
+			return caps[i].Name < caps[j].Name
+		})
+		a.MCPCapabilities = caps
+	}
 	a.ValidationRecipes = NormalizeRuntimeValidationRecipes(a.ValidationRecipes)
 	for _, recipe := range a.ValidationRecipes {
 		a.ValidationRecipeRefs = append(a.ValidationRecipeRefs, recipe.ID)
@@ -658,6 +675,17 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 	writeHashStrings(h, value.SelectorRefs)
 	writeHashStrings(h, value.ConstraintRefs)
 	writeHashStrings(h, value.ValidationRecipeRefs)
+	for _, capability := range value.MCPCapabilities {
+		writeHashString(h, string(capability.ID))
+		writeHashString(h, string(capability.ServerID))
+		writeHashString(h, capability.Kind)
+		writeHashString(h, capability.OperationKind)
+		writeHashString(h, capability.Name)
+		writeHashString(h, capability.EffectScope)
+		writeHashString(h, capability.IdempotencyClass)
+		writeHashString(h, fmt.Sprintf("%t", capability.Enabled))
+		writeHashString(h, capability.Status)
+	}
 	for _, recipe := range value.ValidationRecipes {
 		writeHashString(h, recipe.ID)
 		writeHashString(h, recipe.Command)

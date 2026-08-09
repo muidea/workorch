@@ -42,8 +42,11 @@ controller 只公开唯一 internal-event mutation dispatcher 和 scoped read，
 `Contracts()`。后续代码已关闭 predecessor-owned restart、release-before-successor、sealed expected document、same-step
 identity fencing、raw suffix 删除和 whole-document bounded recovery。`run-029` 暴露的 actionable typed semantic
 correction directive、proof-batch 最小 wire、exact-active-batch reducer invariant 与 terminal-consistent canonical Definition
-outcome/activity 已完成代码收口。最新增量已通过 fmt/vet/full/boundary/affected-package race/managed；当前仅剩 fresh
-LSP Bridge binding-matched positive matrix 和 whole-document recovery fault injection。
+outcome/activity 已完成代码收口。最新增量已通过 fmt/vet/full/boundary/affected-package race/managed；`run-054` 已证明
+MCP typed metadata 可部署加载并推进至 semantic seal、dispatch、receipt/evidence commit，但因 `lsp_initialize` 的
+proposal effect 与 owner effect 不一致而在 SM-2 admission fail-closed。RSO-19～RSO-21 已完成本地代码收口：统一 MCP
+effective capability catalog/revision、前置 recipe/effect feasibility 和 owner-observed receipt。当前剩余 RSO-22 fresh
+binding-matched positive convergence；whole-document recovery fault injection 仍独立保留。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
@@ -114,8 +117,11 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
   deployed semantic positive matrix 和 recovery fault injection。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace
   reasoning effort 实施顺序由 WRE active plan 定义，archive 不得推导新实现约束。
-- **Active roadmap**：RSO 当前包含 typed semantic correction、canonical projection、fresh LSP positive convergence 与
-  whole-document recovery fault injection；restart ordering 和 complete-document recovery 是必须保持的代码回归基线。WRE 是独立必需收口项，用于 workspace reasoning capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **Active roadmap**：RSO 当前包含 typed semantic correction、canonical projection、MCP effective capability/effect
+  feasibility、fresh LSP positive convergence 与 whole-document recovery fault injection；restart ordering 和
+  complete-document recovery 是必须保持的代码回归基线。WRE 是独立必需收口项，用于 workspace reasoning
+  capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞
+  可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
