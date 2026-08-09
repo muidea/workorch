@@ -411,7 +411,7 @@
             "id": "slice-version-control-snapshot",
             "title": "Version-control snapshot",
             "scope": "version_control_snapshot",
-            "priority": 25,
+            "priority": 15,
             "maxWorkItems": 2,
             "match": {
               "sourceRequirementIds": [

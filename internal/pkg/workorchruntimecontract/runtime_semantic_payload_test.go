@@ -84,15 +84,15 @@ func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	mcpCatalog.ConstraintRefs = []string{"configured-mcp-server"}
 	mcpCatalog.ValidationRecipeRefs = []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}
 	mcpCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(mcpCatalog)
-	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{StepKindShellCommand})
+	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
 	shellCatalog.ValidationRecipeRefs = []string{"software-dev-validation-evidence"}
 	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
 	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleMCP, RuntimeModuleShell)
-	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindMCPToolCall, StepKindShellCommand)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindMCPToolCall, RuntimeBlockKindManagedValidationSession)
 	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog, shellCatalog)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"shell/command","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["ephemeral_session"],"validationRecipeId":"software-dev-validation-evidence","requiredCheckRefs":["validation-target-must-exist"],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"validation/managed_session","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["ephemeral_session"],"validationRecipeId":"software-dev-validation-evidence","requiredCheckRefs":["validation-target-must-exist"],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.ownerSelectorRefs" || len(diagnostic.SemanticViolations) != 1 {
@@ -197,10 +197,17 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedEmptyEffectViolation(t *testing
 
 func TestRuntimeSemanticPlanPayloadPreservesTypedCatalogRecipeViolation(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
+	manifest.OwnerCatalogs[0].OwnerModuleID = RuntimeModuleShell
+	manifest.OwnerCatalogs[0].OperationKinds = []string{RuntimeBlockKindManagedValidationSession}
+	manifest.OwnerCatalogs[0].SelectorRefs = []string{"workspace-validation-target"}
+	manifest.OwnerCatalogs[0].ConstraintRefs = nil
 	manifest.OwnerCatalogs[0].ValidationRecipeRefs = []string{"recipe/allowed"}
 	manifest.OwnerCatalogs[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[0])
+	manifest.AllowedOwnerModuleIDs = []string{RuntimeModuleShell}
+	manifest.AllowedOperationKinds = []string{RuntimeBlockKindManagedValidationSession}
+	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExistingOwnerScope}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"prospective_owner_target","ownerSelectorRefs":["file/workspace-relative-create"],"prospectiveConstraintRefs":["workspace-relative-path"],"prospectiveTargetRef":"main.go"},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["none"],"validationRecipeId":"recipe/not-allowed","requiredCheckRefs":["check/unit"],"declarationRef":"dod/cwi-001"}]}`
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/shell","operationKind":"validation/managed_session","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["workspace-validation-target"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["none"],"validationRecipeId":"recipe/not-allowed","requiredCheckRefs":["check/unit"],"declarationRef":"dod/cwi-001"}]}`
 	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].validationRecipeId" || diagnostic.Actual != "recipe/not-allowed" || len(diagnostic.SemanticViolations) != 1 {

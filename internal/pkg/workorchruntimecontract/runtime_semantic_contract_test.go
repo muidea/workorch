@@ -137,6 +137,53 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticDocumentRejectsValidationOnOwnerWithoutRecipe(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	gitCatalog := semanticTestOwnerCatalog("semantic-git-catalog", RuntimeModuleGit, []string{StepKindGitWrite})
+	gitCatalog.SelectorRefs = []string{"workspace-repository"}
+	gitCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
+	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleGit)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindGitWrite)
+	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
+	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, gitCatalog)
+	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-002", TargetText: "commit", Order: 2})
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	proposal := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-002", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite,
+		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-repository"}},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+		ValidationRecipeID: "software-dev-validation-evidence", RequiredCheckRefs: []string{"check"}, DeclarationRef: "dod-002",
+	}
+	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-002"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
+	if err := document.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "operationKind") {
+		t.Fatalf("validation proposal for recipe-less owner error = %v", err)
+	}
+}
+
+func TestRuntimeSemanticProposalRejectsDurableValidationEffect(t *testing.T) {
+	proposal := semanticContractTestProposal("cwi-001")
+	proposal.RequiredEvidenceKinds = []string{EvidenceKindValidation}
+	proposal.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}
+	proposal.ValidationRecipeID = "recipe/validation"
+	proposal.RequiredCheckRefs = []string{"check"}
+	if err := proposal.Validate(); err == nil || !strings.Contains(err.Error(), "requiredEffectScopes") {
+		t.Fatalf("durable validation effect error = %v", err)
+	}
+}
+
+func TestRuntimeSemanticProposalRejectsShellCommandAsValidationProof(t *testing.T) {
+	proposal := semanticContractTestProposal("cwi-001")
+	proposal.OwnerModuleID = RuntimeModuleShell
+	proposal.OperationKind = StepKindShellCommand
+	proposal.RequiredEvidenceKinds = []string{EvidenceKindValidation}
+	proposal.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectEphemeralSession}
+	proposal.ValidationRecipeID = "recipe/validation"
+	proposal.RequiredCheckRefs = []string{"check"}
+	if err := proposal.Validate(); err == nil || !strings.Contains(err.Error(), "operationKind") {
+		t.Fatalf("shell command validation proof error = %v", err)
+	}
+}
+
 func TestRuntimeSemanticPlanCoverageOrderMustRespectDependencies(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems = []RuntimeCoverageItem{

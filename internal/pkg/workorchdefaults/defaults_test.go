@@ -1123,9 +1123,9 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 			t.Fatalf("acceptanceSlicePolicy missing group %q in %+v", id, groups)
 		}
 	}
-	if !(priorities["slice-direct-validation"] < priorities["slice-version-control-snapshot"] &&
-		priorities["slice-version-control-snapshot"] < priorities["slice-supplemental-evidence"]) {
-		t.Fatalf("acceptanceSlicePolicy priorities = %+v, want version snapshot after validation and before generic supplemental", priorities)
+	if !(priorities["slice-version-control-snapshot"] < priorities["slice-direct-validation"] &&
+		priorities["slice-direct-validation"] < priorities["slice-supplemental-evidence"]) {
+		t.Fatalf("acceptanceSlicePolicy priorities = %+v, want version snapshot before direct validation and generic supplemental", priorities)
 	}
 }
 

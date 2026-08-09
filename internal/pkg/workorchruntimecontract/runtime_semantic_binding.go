@@ -83,7 +83,7 @@ func compileRuntimeSemanticFocus(definitionRevision string, item RuntimeCoverage
 	}
 	targetRefs, selectorRef, prospectiveTargetRef, err := semanticBindingTarget(proposal, fact)
 	if err != nil {
-		return CoverageFocus{}, err
+		return CoverageFocus{}, fmt.Errorf("runtime semantic proposal %q target: %w", proposal.CoverageWorkItemID, err)
 	}
 	binding := CoverageEvidenceBinding{
 		ID: bindingID, CoverageWorkItemID: proposal.CoverageWorkItemID, FocusID: focusID, DefinitionRevision: definitionRevision,
@@ -153,7 +153,10 @@ func semanticBindingTarget(proposal RuntimeSemanticProofProposal, fact RuntimeSe
 		}
 		return factTargets, selector, "", nil
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if !sameStrings(factTargets, []string{target.ProspectiveTargetRef}) {
+		// A prospective target is not required to exist in the owner inventory.
+		// Feasibility may therefore legitimately return no TargetRefs; when it
+		// does return one, it must agree with the sealed prospective ref.
+		if len(factTargets) != 0 && !sameStrings(factTargets, []string{target.ProspectiveTargetRef}) {
 			return nil, "", "", fmt.Errorf("runtime semantic prospective target owner fact does not match proposal")
 		}
 		return nil, target.OwnerSelectorRefs[0], target.ProspectiveTargetRef, nil

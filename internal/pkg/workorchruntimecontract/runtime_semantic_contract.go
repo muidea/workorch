@@ -570,6 +570,12 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 				return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintRelational, strings.Join(RuntimeEffectScopesAsStrings(p.RequiredEffectScopes), ","), []string{"durable effect for state_change"}, nil)
 			}
 		case EvidenceKindValidation:
+			if !runtimeSemanticHasNonDurableEffect(p.RequiredEffectScopes) {
+				return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintRelational, strings.Join(RuntimeEffectScopesAsStrings(p.RequiredEffectScopes), ","), []string{"non-durable effect for validation"}, nil)
+			}
+			if !RuntimeOperationKindSupportsCoverageEvidence(p.OperationKind, EvidenceKindValidation) {
+				return runtimeSemanticProposalConstraint("operationKind", RuntimeSemanticConstraintRelational, p.OperationKind, []string{StepKindMCPToolCall, RuntimeBlockKindManagedValidationSession}, nil)
+			}
 			if p.ValidationRecipeID == "" {
 				return runtimeSemanticProposalConstraint("validationRecipeId", RuntimeSemanticConstraintRequired, "empty", []string{"non-empty recipe for validation"}, nil)
 			}
@@ -766,6 +772,9 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 		// decides whether the concrete proposed ref is admissible. Requiring the
 		// ref to already exist in catalog.TargetRefs would make empty-workspace
 		// creation unreachable and collapse this policy into exact_target.
+		if len(catalog.ValidationRecipeRefs) == 0 && containsRuntimeSemanticEvidenceKind(proposal.RequiredEvidenceKinds, EvidenceKindValidation) {
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEvidenceKinds", RuntimeSemanticConstraintRelational, EvidenceKindValidation, []string{EvidenceKindStateChange}, nil, fmt.Errorf("runtime semantic document owner %q does not provide validation recipes", catalog.OwnerModuleID))
+		}
 		if proposal.ValidationRecipeID != "" {
 			if !runtimeSemanticStringsWithin([]string{proposal.ValidationRecipeID}, catalog.ValidationRecipeRefs) {
 				return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintAllowedValue, proposal.ValidationRecipeID, nil, catalog.ValidationRecipeRefs, fmt.Errorf("runtime semantic document validation recipe is outside owner catalog"))
@@ -812,6 +821,15 @@ func runtimeSemanticStringsWithin(values, allowed []string) bool {
 		}
 	}
 	return true
+}
+
+func containsRuntimeSemanticEvidenceKind(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeSemanticProposalViolation(proposal RuntimeSemanticProofProposal, proposalIndex int, path string, rule RuntimeSemanticConstraintRule, actual string, required, allowed []string, cause error) error {
@@ -1735,6 +1753,15 @@ func validateRuntimeSemanticProposalTarget(target RuntimeOperationTargetAuthoriz
 func runtimeSemanticHasDurableEffect(values []RuntimeEffectScope) bool {
 	for _, value := range values {
 		if RuntimeEffectIsDurable(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeSemanticHasNonDurableEffect(values []RuntimeEffectScope) bool {
+	for _, value := range values {
+		if RuntimeEffectIsNonDurable(value) {
 			return true
 		}
 	}

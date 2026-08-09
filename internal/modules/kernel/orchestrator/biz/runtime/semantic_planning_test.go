@@ -1052,6 +1052,14 @@ func semanticPlanningDiagnostic() runtimecontract.RuntimeOriginalDiagnostic {
 	}
 }
 
+func TestRuntimeCapabilitiesWithSemanticProofsAddsValidationOperation(t *testing.T) {
+	focus := runtimecontract.CoverageFocus{CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{{Proofs: []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}}}}}}
+	got := runtimeCapabilitiesWithSemanticProofs(runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}, []runtimecontract.CoverageFocus{focus})
+	if !containsString(got.ValidationKinds, runtimecontract.StepKindMCPToolCall) || !containsString(got.ValidationKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+		t.Fatalf("semantic validation capabilities = %+v", got.ValidationKinds)
+	}
+}
+
 func semanticPlanningCorrectionDirective(manifest runtimecontract.RuntimeSemanticPlanManifest, prefix string, step runtimecontract.RuntimeSemanticPlanStep, rejection runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.RuntimeSemanticCorrectionDirective {
 	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,

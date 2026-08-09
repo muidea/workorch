@@ -354,18 +354,22 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			"required": []string{"policy", "ownerSelectorRefs", "prospectiveConstraintRefs", "prospectiveTargetRef"},
 		},
 	}
-	proposalItems["allOf"] = []any{map[string]any{
+	// Validation is an owner capability, not a global property. The owner
+	// catalog rules below add recipe/check requirements only for owners that
+	// actually publish validation recipes; owners without recipes cannot borrow
+	// another owner's recipe merely because a CWI is in a validation slice.
+	proposalItems["allOf"] = []any{}
+	// Only owners with a typed validation observation may produce validation
+	// proof. A plain shell command is an executable operation, not a validation
+	// receipt, even when its command happens to run a test.
+	proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
 		"if": map[string]any{"properties": map[string]any{
 			"requiredEvidenceKinds": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}},
 		}},
-		"then": map[string]any{
-			"required": []string{"validationRecipeId", "requiredCheckRefs"},
-			"properties": map[string]any{
-				"validationRecipeId": stringEnumSchemaWithMinimum(recipeIDs, 1),
-				"requiredCheckRefs":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
-			},
-		},
-	}}
+		"then": map[string]any{"properties": map[string]any{
+			"operationKind": map[string]any{"enum": []string{StepKindMCPToolCall, RuntimeBlockKindManagedValidationSession}},
+		}},
+	})
 	// Dynamic capability operations do not have static RuntimeOperationVariant
 	// contracts. Their owner-scoped identity is carried by validationRecipeId
 	// (for MCP tools) or the owner feasibility facts, never by operationVariantId.
@@ -395,7 +399,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	// the bounded per-run authority; no process-global registry is introduced.
 	for _, catalog := range manifest.OwnerCatalogs {
 		catalog = catalog.Normalized()
-		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+		ownerRule := map[string]any{
 			"if": map[string]any{"properties": map[string]any{"ownerModuleId": map[string]any{"const": catalog.OwnerModuleID}}},
 			"then": map[string]any{"properties": map[string]any{
 				"operationKind":      map[string]any{"type": "string", "enum": normalizeStrings(catalog.OperationKinds)},
@@ -407,7 +411,35 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					"prospectiveConstraintRefs": stringEnumArraySchema(catalog.ConstraintRefs),
 				}},
 			}},
-		})
+		}
+		then := ownerRule["then"].(map[string]any)
+		if len(catalog.ValidationRecipeRefs) == 0 {
+			then["allOf"] = []any{map[string]any{
+				"if": map[string]any{"properties": map[string]any{
+					"requiredEvidenceKinds": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}},
+				}},
+				"then": map[string]any{"properties": map[string]any{
+					"requiredEvidenceKinds": map[string]any{"not": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}}},
+				}},
+			}}
+		} else {
+			then["allOf"] = []any{map[string]any{
+				"if": map[string]any{"properties": map[string]any{
+					"requiredEvidenceKinds": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}},
+				}},
+				"then": map[string]any{
+					"required": []string{"validationRecipeId", "requiredCheckRefs"},
+					"properties": map[string]any{
+						"validationRecipeId": stringEnumSchemaWithMinimum(catalog.ValidationRecipeRefs, 1),
+						"requiredCheckRefs":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+						"requiredEffectScopes": map[string]any{"type": "array", "contains": map[string]any{
+							"enum": []string{string(RuntimeEffectNone), string(RuntimeEffectEphemeralSession)},
+						}},
+					},
+				},
+			}}
+		}
+		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), ownerRule)
 	}
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err

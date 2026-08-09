@@ -47,3 +47,17 @@ func TestCompileRuntimeSemanticBindingsRejectsPartialOrNonFeasibleBatch(t *testi
 		t.Fatal("non-feasible owner batch was sealed")
 	}
 }
+
+func TestCompileRuntimeSemanticBindingsAllowsEmptyProspectiveOwnerFacts(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	proposal := semanticContractTestProposal("cwi-001")
+	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []RuntimeSemanticProofProposal{proposal}}
+	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: "catalog-file-1", Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1"}
+	focuses, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || focuses[0].ProspectiveTargetRef != "main.go" {
+		t.Fatalf("compiled focus = %+v", focuses)
+	}
+}

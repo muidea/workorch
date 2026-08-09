@@ -798,6 +798,7 @@ func (c *RuntimeController) sealSemanticContract(ctx context.Context, workspaceI
 	aggregate.SemanticPlanning = ledger
 	aggregate.Facts.Focus = focuses[0]
 	aggregate.Facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), focuses[1:]...)
+	aggregate.Facts.Capabilities = runtimeCapabilitiesWithSemanticProofs(aggregate.Facts.Capabilities, focuses)
 	aggregate.Facts.CompletedFocuses = nil
 	aggregate.Facts.ReconciliationContract = reconciliation
 	aggregate.Facts.RepairDirective = nil
@@ -816,6 +817,27 @@ func (c *RuntimeController) sealSemanticContract(ctx context.Context, workspaceI
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// runtimeCapabilitiesWithSemanticProofs projects only already-feasible,
+// sealed proof kinds into the reducer capability view. This remains an SM-2
+// internal derivation: capability owners supplied the catalogs and feasibility
+// facts, while the orchestrator merely records which concrete proof operations
+// may satisfy each convergence state.
+func runtimeCapabilitiesWithSemanticProofs(capabilities runtimecontract.RuntimeCapabilities, focuses []runtimecontract.CoverageFocus) runtimecontract.RuntimeCapabilities {
+	for _, focus := range focuses {
+		for _, binding := range focus.CoverageEvidenceBindings {
+			for _, proof := range binding.Proofs {
+				switch proof.EvidenceKind {
+				case runtimecontract.EvidenceKindStateChange:
+					capabilities.StateChangeKinds = append(capabilities.StateChangeKinds, proof.AllowedOperationKinds...)
+				case runtimecontract.EvidenceKindValidation:
+					capabilities.ValidationKinds = append(capabilities.ValidationKinds, proof.AllowedOperationKinds...)
+				}
+			}
+		}
+	}
+	return capabilities
 }
 
 // failSemanticContract is the only semantic terminal transition. It preserves
