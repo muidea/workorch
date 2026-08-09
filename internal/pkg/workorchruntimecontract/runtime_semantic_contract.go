@@ -579,9 +579,9 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 			if p.ValidationRecipeID == "" {
 				return runtimeSemanticProposalConstraint("validationRecipeId", RuntimeSemanticConstraintRequired, "empty", []string{"non-empty recipe for validation"}, nil)
 			}
-			if len(p.RequiredCheckRefs) == 0 {
-				return runtimeSemanticProposalConstraint("requiredCheckRefs", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one check for validation"}, nil)
-			}
+			// Validation checks are capability-owner facts. The provider may not
+			// declare them; SM-2 requires the matching owner observation before
+			// compiling a binding.
 		default:
 			return runtimeSemanticProposalConstraint("requiredEvidenceKinds", RuntimeSemanticConstraintAllowedValue, kind, nil, []string{EvidenceKindStateChange, EvidenceKindValidation})
 		}
@@ -601,7 +601,6 @@ func StableRuntimeSemanticProofProposalHash(proposal RuntimeSemanticProofProposa
 	writeHashStrings(h, proposal.RequiredEvidenceKinds)
 	writeHashStrings(h, RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes))
 	writeHashString(h, proposal.ValidationRecipeID)
-	writeHashStrings(h, proposal.RequiredCheckRefs)
 	writeHashStrings(h, proposal.MetricConstraints)
 	writeHashStrings(h, proposal.ArtifactRefs)
 	writeHashString(h, proposal.DeclarationRef)
@@ -968,6 +967,14 @@ func (f RuntimeSemanticProofFeasibility) ValidateForProposal(manifest RuntimeSem
 	case RuntimeSemanticFeasibilityFeasible:
 		if f.OriginalDiagnostic != nil {
 			return fmt.Errorf("feasible runtime semantic observation must not carry a failure diagnostic")
+		}
+		if f.ValidationRecipeID != proposal.ValidationRecipeID {
+			return fmt.Errorf("feasible runtime semantic observation recipe does not match proposal")
+		}
+		for _, kind := range proposal.RequiredEvidenceKinds {
+			if kind == EvidenceKindValidation && (f.ValidationRecipeID == "" || len(f.RequiredCheckRefs) == 0) {
+				return fmt.Errorf("feasible runtime semantic observation requires owner-confirmed validation checks")
+			}
 		}
 	case RuntimeSemanticFeasibilityStale, RuntimeSemanticFeasibilityPrerequisiteRequired, RuntimeSemanticFeasibilityInfeasible:
 		if f.OriginalDiagnostic == nil {

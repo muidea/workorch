@@ -82,8 +82,8 @@ func compileRuntimeSemanticFocus(definitionRevision string, item RuntimeCoverage
 			proof.AllowedOperationVariants = []RuntimeOperationVariantRef{{Kind: proposal.OperationKind, VariantID: proposal.OperationVariantID}}
 		}
 		if evidenceKind == EvidenceKindValidation {
-			proof.ValidationRecipeID = proposal.ValidationRecipeID
-			proof.RequiredCheckRefs = append([]string(nil), proposal.RequiredCheckRefs...)
+			proof.ValidationRecipeID = fact.ValidationRecipeID
+			proof.RequiredCheckRefs = append([]string(nil), fact.RequiredCheckRefs...)
 		}
 		if err := proof.Validate(); err != nil {
 			return CoverageFocus{}, fmt.Errorf("runtime semantic proposal %q proof: %w", proposal.CoverageWorkItemID, err)
@@ -117,7 +117,7 @@ func compileRuntimeSemanticFocus(definitionRevision string, item RuntimeCoverage
 		TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
 		ProspectiveTargetRef: prospectiveTargetRef, RequireTargetGrounding: true,
 		AcceptedStepKinds: []string{proposal.OperationKind}, RequireDirectEvidence: true, RequireAssessment: true,
-		ValidationRecipeID: proposal.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), proposal.RequiredCheckRefs...),
+		ValidationRecipeID: fact.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), fact.RequiredCheckRefs...),
 		MetricConstraints: append([]string(nil), proposal.MetricConstraints...), ArtifactRefs: append([]string(nil), proposal.ArtifactRefs...),
 	}
 	if proposal.OperationVariantID != "" {

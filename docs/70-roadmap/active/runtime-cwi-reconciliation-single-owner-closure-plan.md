@@ -261,6 +261,29 @@ contains the deleted field is rejected as an unknown field. The original provide
 bounded diagnostic/audit record, while the authoritative effect and idempotency facts are retained in the owner catalog,
 owner feasibility observation, SM-2 `CoverageEvidenceBinding`, sealed dispatch, receipt, and evidence.
 
+### 2.12 Latest Live Counterexample: Provider-Owned Check Echo
+
+Fresh deployed `run-063` proves the effect closure is active and exposes the next duplicate authority:
+
+```text
+semantic_contract_sealed
+  -> 47 owner feasibility observations
+  -> SM-2 binding seal
+  -> 1 dispatch
+  -> 1 MCP receipt
+  -> evidence admission rejected
+```
+
+The sealed binding required the provider-authored check `lsp_status_returns_ten_tools`, while the MCP receipt could only
+return the owner recipe check `mcp/tool_call/mcp-lsp-bridge/lsp_status`. The run therefore failed with
+`coverage_binding_mismatch` after dispatch. No CWI credit was granted and terminal delivery remained owner-correct, but
+the mismatch should have been rejected before dispatch.
+
+This is RSO-24, a cross-owner contract closure rather than an LSP-specific fix. The provider must not author
+`requiredCheckRefs`; canonical checks are returned by the capability owner and compiled by SM-2. If an owner cannot
+execute or observe a check that proves the requested CWI, feasibility is `unverifiable`/`infeasible` and dispatch is zero.
+The failure must not be classified as `no_progress_exhausted` when no repair attempt occurred.
+
 ## 3. Non-Negotiable Ownership Rules
 
 1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
@@ -682,11 +705,12 @@ remains open.
 | RSO-21 | code_closed | Make MCP receipt effect owner-observed | receipt derives effect from exact enabled capability; expected effect is never copied into observed effect; receipt integration passes |
 | RSO-22 | pending | Fresh deployed positive convergence after owner-fact effect compilation | semantic seal → owner-fact binding → dispatch → receipt → binding-matched evidence → CWI advance |
 | RSO-23 | code_closed | Remove provider-owned effect/idempotency echo and compile canonical binding from owner facts | provider schema/DTO/decoder contain no `requiredEffectScopes`; old field is unknown-field rejected; SM-2 binding compilation overwrites intermediate effect with sealed owner-catalog fact |
+| RSO-24 | code_closed | Remove provider-owned validation-check echo and compile canonical checks from owner facts | provider schema/DTO/decoder contain no `requiredCheckRefs`; owner recipe/check feasibility is confirmed before binding seal; unsupported check yields zero dispatch |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
 change Runtime authority. RSO-9 follows every code change. RSO-19 precedes RSO-20; RSO-20 precedes RSO-21; RSO-23
-precedes RSO-22. RSO-10, RSO-15, RSO-17, RSO-22 and RSO-23 cannot be replaced by mock provider proof.
+precedes RSO-24; RSO-24 precedes RSO-22. RSO-10, RSO-15, RSO-17, RSO-22, RSO-23 and RSO-24 cannot be replaced by mock provider proof.
 
 RSO-10 and RSO-15 are retained as historical positive-lineage labels for the earlier semantic/candidate closure. Their
 fresh deployed proof is now executed under RSO-22 together with the MCP effect contract. RSO-17 remains the separate
@@ -888,6 +912,63 @@ Local RSO-23 code closure is complete: provider-facing semantic schema and stric
 effect field, old payloads fail closed, and SM-2 binding compilation re-resolves effect from the sealed owner catalog.
 The remaining deployed proof is intentionally tracked under RSO-22; code-closed does not imply live-closed.
 
+### 10.6 Ordered Code-Closure Steps For RSO-24: Remove Provider-Owned Check Echo
+
+RSO-24 closes the `run-063` check mismatch without adding a fifth state machine or a tool-specific branch.
+
+1. **Define canonical owner check facts.** Each capability owner's sealed admissibility/validation recipe identity set is
+   the finite canonical check set for that owner (the recipe identity is the check identity unless the owner publishes a
+   more specific typed check fact). A check is executable only when the owner can perform and observe it. Recipe/check
+   identity, effect, idempotency, target and catalog revision remain one owner fact; no global check index is introduced.
+2. **Remove provider check authority.** Delete `requiredCheckRefs` from the provider-facing semantic-plan schema, DTO,
+   strict decoder, normalize/hash/clone/merge and correction rendering. Old payloads containing the field are rejected as
+   unknown; there is no compatibility or fallback path. The provider may select a sealed recipe identity only when that
+   recipe is in the owner catalog.
+3. **Return typed feasibility facts.** `blocks/file`, `blocks/git`, `blocks/shell`, `blocks/mcp`, `blocks/web`, and
+   `blocks/ssh` return confirmed recipe/check/effect/idempotency/target facts through their owner EventHub contracts. A
+   missing, stale, unsupported or unverifiable check returns a typed fact and never changes Runtime state.
+4. **Compile binding only in SM-2.** Orchestrator maps owner results to one private `RuntimeInternalEvent`. SM-2 derives
+   `CoverageEvidenceBinding.RequiredCheckRefs` from confirmed owner facts and seals the binding under the existing Runtime
+   CAS. SM-3 consumes only that sealed binding; SM-4 records receipt/evidence. No caller may submit a binding or check list.
+5. **Make receipts factual.** Capability owners return the exact check identities actually executed and observed. A receipt
+   must never copy expected checks from dispatch. SM-2 compares recipe/check/effect/idempotency/target and revision before
+   evidence or CWI credit.
+6. **Correct failure classification.** Unsupported or unverifiable checks fail as a typed semantic/capability contract
+   gap before dispatch. A post-dispatch mismatch is `runtime_contract_defect` or `owner_receipt_contract_mismatch`, not
+   `no_progress_exhausted`, unless a real bounded retry budget was consumed.
+
+#### RSO-24 Component And State-Machine Matrix
+
+| Component | Sole responsibility | Forbidden responsibility |
+| --- | --- | --- |
+| `workorchruntimecontract` | owner-neutral check/recipe fact DTOs, validation, clone/hash | global check registry, owner lookup, reducer, EventHub |
+| `blocks/mcpregistry` | MCP capability metadata, recipe/check catalog, enabled state and revision | Runtime binding, execution, CWI credit |
+| `blocks/mcp` | MCP feasibility probe, exact check execution, factual receipt | mutating registry or Runtime state |
+| `blocks/shell` | executable validation recipe/check facts and receipt | accepting provider command/check authority |
+| `blocks/file`, `git`, `web`, `ssh` | owner-specific recipe/check feasibility and receipts | Runtime transitions or cross-owner repository access |
+| `blocks/llm` | render recipe selection and parse check-free proposal | selecting checks, effect, idempotency, retry or terminal |
+| `kernel/orchestrator/biz/runtime` | private event dispatch; SM-2 binding compilation; SM-3/4 execution/evidence | reading owner repositories or repairing owner facts |
+| `blocks/run` | SM-1 lifecycle and opaque Runtime aggregate CAS | SM-2/3/4 or capability fact compilation |
+| Workspace/Result/Application/Web/TUI/projection | own lifecycle or display only | transition inference, check selection, correction/retry |
+
+#### RSO-24 Invariants And Tests
+
+- provider schema and DTO contain no `requiredCheckRefs`;
+- old provider payloads containing the field fail closed as unknown-field diagnostics;
+- every sealed validation binding has checks sourced from one owner fact and a matching catalog revision;
+- MCP `lsp_status` cannot seal `lsp_status_returns_ten_tools` unless MCP owner declares and executes that check;
+- an unverifiable check produces zero dispatch, receipt, evidence and CWI credit;
+- duplicate/stale owner feasibility events cannot seal a second binding;
+- restart preserves the same owner check/binding hash;
+- receipts cannot copy expected checks and check mismatch remains fail-closed;
+- failure classification distinguishes contract gap from actual retry exhaustion;
+- fresh live proof reaches owner-confirmed check → binding → dispatch → matching receipt → evidence → CWI advance.
+
+Local code closure is complete. In the current owner-neutral contract, a recipe identity is also the canonical check
+identity when (and only when) it is present in the addressed owner's sealed `ValidationRecipeRefs`/`ValidationRecipes`;
+there is no global check index or provider-supplied alias. Fresh deployed positive convergence remains an RSO-22 live
+verification item.
+
 ## 11. Verification Matrix
 
 ### 11.1 Semantic Correction
@@ -999,6 +1080,8 @@ The live proof must also show:
 - MCP effective capability revision includes effect/idempotency metadata;
 - provider proposal contains no effect/idempotency authority and an old effect field is rejected as unknown;
 - an MCP owner-fact mismatch fails during owner feasibility with zero dispatch;
+- provider proposal contains no check authority and an old `requiredCheckRefs` field is rejected as unknown;
+- an owner-unverifiable check fails during feasibility with zero dispatch;
 - a matching MCP recipe reaches owner-observed receipt, binding-matched evidence, and CWI advance without a
   post-dispatch `coverage_binding_mismatch`.
 

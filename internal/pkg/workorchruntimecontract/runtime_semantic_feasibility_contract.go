@@ -188,13 +188,14 @@ func allStringsContained(values, allowed []string) bool {
 // constructor never summarizes or rewrites that diagnostic.
 func NewRuntimeSemanticProofFeasibilityObservation(command RuntimeSemanticProofFeasibilityRequest, status RuntimeSemanticFeasibilityStatus, observedRevision string, targetRefs []string, diagnostic *RuntimeOriginalDiagnostic) (RuntimeSemanticProofFeasibilityObservation, error) {
 	proposal := command.Proposal.Normalized()
+	confirmedChecks := runtimeSemanticOwnerConfirmedCheckRefs(command.OwnerCatalog, proposal.ValidationRecipeID)
 	observation := RuntimeSemanticProofFeasibility{
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent,
 		ManifestHash:  command.Manifest.Normalized().Hash, DefinitionSeedHash: command.Manifest.Normalized().DefinitionSeedHash,
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
 		OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: command.OwnerCatalog.SnapshotID, Status: status, ObservedRevision: strings.TrimSpace(observedRevision),
 		TargetRefs: append([]string(nil), targetRefs...), ValidationRecipeID: proposal.ValidationRecipeID,
-		RequiredCheckRefs: append([]string(nil), proposal.RequiredCheckRefs...), OriginalDiagnostic: diagnostic.CloneOriginal(),
+		RequiredCheckRefs: confirmedChecks, OriginalDiagnostic: diagnostic.CloneOriginal(),
 	}
 	if command.CatalogObservation != nil {
 		observation.CatalogObservationID = command.CatalogObservation.ObservationID
@@ -203,6 +204,27 @@ func NewRuntimeSemanticProofFeasibilityObservation(command RuntimeSemanticProofF
 		return RuntimeSemanticProofFeasibilityObservation{}, err
 	}
 	return RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: strings.TrimSpace(command.FeasibilityBatchID), Observation: observation}, nil
+}
+
+// runtimeSemanticOwnerConfirmedCheckRefs derives the canonical validation
+// identity from the addressed owner's sealed catalog. Provider proposals do
+// not carry check refs and therefore cannot influence this value.
+func runtimeSemanticOwnerConfirmedCheckRefs(catalog RuntimeOperationAdmissibility, recipeID string) []string {
+	recipeID = strings.TrimSpace(recipeID)
+	if recipeID == "" {
+		return nil
+	}
+	for _, recipe := range catalog.ValidationRecipes {
+		if strings.TrimSpace(recipe.ID) == recipeID {
+			return []string{recipeID}
+		}
+	}
+	for _, value := range catalog.ValidationRecipeRefs {
+		if strings.TrimSpace(value) == recipeID {
+			return []string{recipeID}
+		}
+	}
+	return nil
 }
 
 func RuntimeSemanticFeasibilityDiagnostic(ownerModuleID, code, message, expectedRevision, observedRevision string, targetRefs []string) *RuntimeOriginalDiagnostic {

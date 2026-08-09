@@ -12,7 +12,7 @@ import (
 
 var (
 	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "documentKind", "manifestHash", "planStep", "proposals", "schemaVersion"}
-	runtimeSemanticProposalFields = []string{"artifactRefs", "coverageWorkItemId", "declarationRef", "metricConstraints", "operationKind", "operationVariantId", "ownerModuleId", "requiredCheckRefs", "requiredEvidenceKinds", "target", "validationRecipeId"}
+	runtimeSemanticProposalFields = []string{"artifactRefs", "coverageWorkItemId", "declarationRef", "metricConstraints", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRef"}
 )
 
@@ -37,7 +37,6 @@ type runtimeSemanticProposalPayload struct {
 	Target                runtimeSemanticTargetPayload `json:"target"`
 	RequiredEvidenceKinds []string                     `json:"requiredEvidenceKinds"`
 	ValidationRecipeID    string                       `json:"validationRecipeId,omitempty"`
-	RequiredCheckRefs     []string                     `json:"requiredCheckRefs,omitempty"`
 	MetricConstraints     []string                     `json:"metricConstraints,omitempty"`
 	ArtifactRefs          []string                     `json:"artifactRefs,omitempty"`
 	DeclarationRef        string                       `json:"declarationRef"`
@@ -138,8 +137,8 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRef: value.Target.ProspectiveTargetRef,
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: deriveRuntimeSemanticProposalEffects(manifest, value),
-			ValidationRecipeID: value.ValidationRecipeID, RequiredCheckRefs: value.RequiredCheckRefs,
-			MetricConstraints: value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
+			ValidationRecipeID: value.ValidationRecipeID,
+			MetricConstraints:  value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
 		})
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
@@ -199,8 +198,8 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRef: value.Target.ProspectiveTargetRef,
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds,
-			ValidationRecipeID:    value.ValidationRecipeID, RequiredCheckRefs: value.RequiredCheckRefs,
-			MetricConstraints: value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
+			ValidationRecipeID:    value.ValidationRecipeID,
+			MetricConstraints:     value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
 		})
 	}
 	return json.Marshal(wire)
@@ -354,8 +353,8 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1},
 					}},
 					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
-					"validationRecipeId":    stringEnumSchema(recipeIDs), "requiredCheckRefs": stringArraySchema(),
-					"metricConstraints": stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string", "minLength": 1},
+					"validationRecipeId":    stringEnumSchema(recipeIDs),
+					"metricConstraints":     stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string", "minLength": 1},
 				},
 			}},
 		},
@@ -466,10 +465,9 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					"requiredEvidenceKinds": map[string]any{"contains": map[string]any{"const": EvidenceKindValidation}},
 				}},
 				"then": map[string]any{
-					"required": []string{"validationRecipeId", "requiredCheckRefs"},
+					"required": []string{"validationRecipeId"},
 					"properties": map[string]any{
 						"validationRecipeId": stringEnumSchemaWithMinimum(catalog.ValidationRecipeRefs, 1),
-						"requiredCheckRefs":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
 					},
 				},
 			}}
