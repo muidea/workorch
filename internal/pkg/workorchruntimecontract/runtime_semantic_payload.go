@@ -438,6 +438,27 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					},
 				},
 			}}
+			// Each dynamic MCP validation recipe has one exact owner-authored
+			// effect. Project that fact into the request schema so structured
+			// output cannot select an incompatible effect and only discover the
+			// mismatch during owner feasibility or after dispatch.
+			for _, capability := range catalog.MCPCapabilities {
+				capability = SealMCPCapabilityEffect(capability)
+				recipeID := RuntimeMCPToolValidationRecipeID(string(capability.ServerID), capability.Name)
+				effect := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
+				if !capability.Enabled || CanonicalRuntimeBlockKind(capability.OperationKind) != StepKindMCPToolCall ||
+					recipeID == "" || effect == RuntimeEffectUnknown || !runtimeSemanticStringsWithin([]string{recipeID}, catalog.ValidationRecipeRefs) {
+					continue
+				}
+				then["allOf"] = append(then["allOf"].([]any), map[string]any{
+					"if": map[string]any{"properties": map[string]any{
+						"validationRecipeId": map[string]any{"const": recipeID},
+					}},
+					"then": map[string]any{"properties": map[string]any{
+						"requiredEffectScopes": map[string]any{"type": "array", "contains": map[string]any{"const": string(effect)}},
+					}},
+				})
+			}
 		}
 		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), ownerRule)
 	}

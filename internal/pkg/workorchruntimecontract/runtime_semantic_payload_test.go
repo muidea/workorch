@@ -104,6 +104,40 @@ func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticPlanRejectsMCPRecipeEffectMismatchBeforeOwnerFeasibility(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	mcpCatalog := semanticTestOwnerCatalog("semantic-mcp-catalog", RuntimeModuleMCP, []string{StepKindMCPToolCall})
+	mcpCatalog.SelectorRefs = []string{"mcp-lsp-bridge"}
+	mcpCatalog.ValidationRecipeRefs = []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")}
+	mcpCatalog.MCPCapabilities = []RuntimeMCPCapabilityContext{{
+		ID: "mcp-lsp-bridge:tool:lsp_status", ServerID: "mcp-lsp-bridge", Kind: "tool", OperationKind: StepKindMCPToolCall,
+		Name: "lsp_status", EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay), Enabled: true,
+	}}
+	mcpCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(mcpCatalog)
+	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleMCP)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindMCPToolCall)
+	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
+	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog)
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	schema, err := RuntimeSemanticPlanJSONSchema(manifest)
+	if err != nil || !strings.Contains(schema, `"const":"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || !strings.Contains(schema, `"contains":{"const":"none"}`) {
+		t.Fatalf("MCP recipe effect was not projected into semantic schema: err=%v schema=%s", err, schema)
+	}
+	proposal := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
+		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"mcp-lsp-bridge"}},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+		ValidationRecipeID: RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status"), RequiredCheckRefs: []string{"status"}, DeclarationRef: "dod/cwi-001",
+	}
+	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
+	err = document.ValidateAgainstManifest(manifest)
+	var violation *RuntimeSemanticProposalViolationError
+	if !errors.As(err, &violation) || violation.ViolationFact.Path != "$.proposals[0].requiredEffectScopes" || len(violation.ViolationFact.Allowed) != 1 || violation.ViolationFact.Allowed[0] != string(RuntimeEffectNone) {
+		t.Fatalf("MCP recipe effect mismatch = %v, violation = %+v", err, violation)
+	}
+}
+
 func TestRuntimeSemanticPlanRequestSchemaRejectsUnscopedProofBatch(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	if _, err := RuntimeSemanticPlanJSONSchemaForRequest(manifest, RuntimeSemanticPlanStepProofBatch, "", 0, nil); err == nil {

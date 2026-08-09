@@ -652,7 +652,7 @@ remains open.
 | RSO-17 | pending | Prove target correction and no-ineffective-retry behavior in a fresh deployment | target correction → semantic seal, or bounded catalog-gap terminal with no attempt 2 |
 | RSO-18 | code_closed | Separate dynamic MCP/Shell capability identities from static operation variants and scope schema by owner/kind | dynamic-variant rejection, owner-selector isolation, static-variant and null-enum tests pass |
 | RSO-19 | code_closed | Unify MCP effective capability catalog and revision | enabled capability/whitelist intersection, capability metadata in snapshot hash, and catalog query boundary tests pass |
-| RSO-20 | code_closed | Enforce MCP recipe/effect feasibility before SM-2 binding seal | exact recipe/effect mismatch returns owner infeasible fact before binding seal; helper and owner integration tests pass |
+| RSO-20 | code_closed | Enforce MCP recipe/effect feasibility before SM-2 binding seal | semantic schema/evaluator bind each recipe to its exact owner effect; owner feasibility remains the final stale/execution gate; mismatch creates zero dispatch |
 | RSO-21 | code_closed | Make MCP receipt effect owner-observed | receipt derives effect from exact enabled capability; expected effect is never copied into observed effect; receipt integration passes |
 | RSO-22 | pending | Fresh deployed positive convergence after MCP effect closure | semantic seal → dispatch → receipt → binding-matched evidence → CWI advance; no post-dispatch binding mismatch |
 
@@ -797,6 +797,15 @@ It did not receive CWI credit because the sealed binding required `none` while t
 `ephemeral_session`. This is a valid fail-closed proof of the evidence gate, not positive convergence. The workspace
 released `activeRunId` and the terminal delivery completed; RSO-22 remains open until a fresh run reaches
 binding-matched evidence/CWI advance without a post-dispatch mismatch.
+
+Fresh `run-055` and explicitly restarted `run-056` proved that RSO-20 now rejects the inverse mismatch before dispatch:
+the semantic proposal selected `mcp/tool_call/mcp-lsp-bridge/lsp_status` with `ephemeral_session`, while the effective
+owner catalog declares `none`. Both runs terminated as `semantic_contract_failed` with zero dispatch, zero receipt and
+zero evidence; no post-dispatch `coverage_binding_mismatch` occurred. The follow-up local closure now projects every
+dynamic MCP recipe's exact owner `effectScope` into the request-specific JSON Schema and applies the same check in the
+pure semantic document/catalog evaluator. The MCP owner feasibility check remains as a freshness and defense-in-depth
+gate. RSO-22 remains pending until this schema-bound change is deployed and a fresh run reaches binding-matched CWI
+advance.
 
 ## 11. Verification Matrix
 

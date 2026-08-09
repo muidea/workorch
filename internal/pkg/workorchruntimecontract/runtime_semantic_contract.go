@@ -779,6 +779,16 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 			if !runtimeSemanticStringsWithin([]string{proposal.ValidationRecipeID}, catalog.ValidationRecipeRefs) {
 				return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintAllowedValue, proposal.ValidationRecipeID, nil, catalog.ValidationRecipeRefs, fmt.Errorf("runtime semantic document validation recipe is outside owner catalog"))
 			}
+			if proposal.OperationKind == StepKindMCPToolCall {
+				if capability, capabilityFound := runtimeMCPCapabilityForValidationRecipe(catalog, proposal.ValidationRecipeID); capabilityFound {
+					actual := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
+					if actual == RuntimeEffectUnknown || !runtimeSemanticStringsWithin([]string{string(actual)}, RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes)) {
+						return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEffectScopes", RuntimeSemanticConstraintAllowedValue,
+							strings.Join(RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes), ","), nil, []string{string(actual)},
+							fmt.Errorf("runtime semantic MCP recipe %q requires owner effect %q", proposal.ValidationRecipeID, actual))
+					}
+				}
+			}
 		}
 		if proposal.OperationVariantID != "" {
 			contract, contractFound := RuntimeOperationContractForKind(proposal.OperationKind)

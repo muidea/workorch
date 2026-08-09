@@ -43,10 +43,11 @@ controller 只公开唯一 internal-event mutation dispatcher 和 scoped read，
 identity fencing、raw suffix 删除和 whole-document bounded recovery。`run-029` 暴露的 actionable typed semantic
 correction directive、proof-batch 最小 wire、exact-active-batch reducer invariant 与 terminal-consistent canonical Definition
 outcome/activity 已完成代码收口。最新增量已通过 fmt/vet/full/boundary/affected-package race/managed；`run-054` 已证明
-MCP typed metadata 可部署加载并推进至 semantic seal、dispatch、receipt/evidence commit，但因 `lsp_initialize` 的
-proposal effect 与 owner effect 不一致而在 SM-2 admission fail-closed。RSO-19～RSO-21 已完成本地代码收口：统一 MCP
-effective capability catalog/revision、前置 recipe/effect feasibility 和 owner-observed receipt。当前剩余 RSO-22 fresh
-binding-matched positive convergence；whole-document recovery fault injection 仍独立保留。
+MCP typed metadata 可部署加载并推进至 semantic seal、dispatch、receipt/evidence commit。后续 `run-055`/`run-056`
+已证明 recipe/effect 反向不匹配会在 dispatch 前以零 receipt/evidence fail-closed；本地代码进一步把每个 MCP recipe 的
+exact owner effect 同时投影到 semantic JSON Schema 和纯 evaluator，避免 provider 在结构化输出中选择不匹配 scope。
+RSO-19～RSO-21 已完成代码收口，当前剩余 RSO-22 fresh binding-matched positive convergence；whole-document recovery
+fault injection 仍独立保留。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
