@@ -13,7 +13,7 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 	decision := RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			AcceptedKinds:         []string{StepKindShellCommand, RuntimeBlockKindPatchApply},
+			AcceptedKinds:         []string{StepKindShellCommand, StepKindFileWrite},
 			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
@@ -21,16 +21,32 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 			TargetRefs:            []string{"new-file.txt"},
 		},
 	}
-	selection := &RuntimeTargetSelection{OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionCreate}
+	selection := &RuntimeTargetSelection{OwnerModuleID: RuntimeModuleFile, SelectorRef: "file/workspace_deliverable", Disposition: RuntimeTargetSelectionCreate, ProspectiveTargetRef: "new-file.txt"}
+	inventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-file-create", OwnerModuleID: RuntimeModuleFile,
+		OperationKinds: []string{StepKindFileWrite}, SelectorRefs: []string{"file/workspace_deliverable"},
+		ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+			Kind: StepKindFileWrite,
+			AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+				RuntimeOperationTargetPolicyExactTarget,
+				RuntimeOperationTargetPolicyExistingOwnerScope,
+				RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs: []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		}},
+		ObservedRevision: "workspace-empty-v1",
+	}
+	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection, OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 	}
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) ||
 		manifest.DependenciesAllowed || !reflect.DeepEqual(manifest.RequiredTopLevelFields, []string{"operations"}) ||
-		len(manifest.Operations) != 1 || manifest.Operations[0].Kind != RuntimeBlockKindPatchApply {
+		len(manifest.Operations) != 1 || manifest.Operations[0].Kind != StepKindFileWrite {
 		t.Fatalf("creation-scope manifest = %+v", manifest)
 	}
 	if manifest.EffectPolicy.State != ConvergenceStateNeedStateChange ||
@@ -45,7 +61,7 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		!operation.RequireTargetRefs || containsManifestString(operation.AllowedOperationFields, "dependsOn") ||
 		!containsManifestString(operation.AllowedOperationFields, "targetRefs") ||
 		!containsManifestString(operation.ForbiddenParameters, "targetRefs") {
-		t.Fatalf("patch operation manifest did not preserve target/dependency contract: %+v", operation)
+		t.Fatalf("file operation manifest did not preserve target/dependency contract: %+v", operation)
 	}
 	if operation.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
 		operation.Target.ProspectiveTargetRef != "new-file.txt" ||
@@ -200,16 +216,84 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 			t.Fatalf("existing owner scope authorization = %+v", operation)
 		}
 	})
+	t.Run("scope with sealed prospective target keeps prospective policy", func(t *testing.T) {
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
+		decision.RequiredOutput.AcceptedKinds = []string{StepKindFileWrite}
+		selection := &RuntimeTargetSelection{
+			PrerequisiteID: "selection-scope-create", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable",
+			SelectorRef: "file/workspace_deliverable", Disposition: RuntimeTargetSelectionScope,
+			TargetRefs: []string{"existing.go", "support.go"}, CandidateTargetRefs: []string{"existing.go", "support.go"},
+			ProspectiveTargetRef: "created.go", CandidateCount: 2, ObservedRevision: "tree-v2",
+		}
+		selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(*selection)
+		inventory := RuntimeOperationAdmissibility{
+			PrerequisiteID: "admissibility-scope-create", OwnerModuleID: RuntimeModuleFile,
+			OperationKinds: []string{StepKindFileWrite}, TargetRefs: []string{"existing.go", "support.go"},
+			SelectorRefs: []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+			OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+				Kind: StepKindFileWrite,
+				AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+					RuntimeOperationTargetPolicyExactTarget,
+					RuntimeOperationTargetPolicyExistingOwnerScope,
+					RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				},
+				SelectorRefs: []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+			}},
+			ObservedRevision: "tree-v2",
+		}
+		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
+		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
+			TargetSelection: selection, OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
+		})
+		if err != nil {
+			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
+		}
+		operation := manifest.Operations[0]
+		if operation.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
+			operation.Target.ProspectiveTargetRef != "created.go" ||
+			!reflect.DeepEqual(operation.Target.OwnerSelectorRefs, []string{"file/workspace_deliverable"}) ||
+			!reflect.DeepEqual(operation.Target.ProspectiveConstraintRefs, []string{"new-target-requires-owner-selector", "workspace-relative-path"}) ||
+			!reflect.DeepEqual(operation.Target.AllowedTargetRefs(), []string{"created.go"}) {
+			t.Fatalf("scope prospective authorization = %+v", operation.Target)
+		}
+		if !operation.RequireTargetRefs {
+			t.Fatalf("prospective target authorization must require targetRefs: %+v", operation)
+		}
+		createdPayload := []byte(`{"operations":[{"id":"create","kind":"file/write","bindingRefs":["binding/test/cwi-1"],"targetRefs":["created.go"],"parameters":[{"name":"content","string":"new content"}]}]}`)
+		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, createdPayload); err != nil {
+			t.Fatalf("candidate did not accept sealed prospective target: %v", err)
+		}
+		existingPayload := []byte(`{"operations":[{"id":"create","kind":"file/write","bindingRefs":["binding/test/cwi-1"],"targetRefs":["existing.go"],"parameters":[{"name":"content","string":"new content"}]}]}`)
+		_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, existingPayload)
+		var diagnostic *RuntimeCandidatePayloadDiagnostic
+		if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].targetRefs" || !containsManifestString(diagnostic.Allowed, "created.go") || containsManifestString(diagnostic.Allowed, "existing.go") {
+			t.Fatalf("candidate existing target was not rejected by prospective membership: %+v err=%v", diagnostic, err)
+		}
+	})
 	t.Run("prospective_owner_target from create selection", func(t *testing.T) {
 		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
+		decision.RequiredOutput.AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: RuntimeBlockKindPatchApply, VariantID: "file_write"}}
 		selection := &RuntimeTargetSelection{
 			PrerequisiteID: "selection-create", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable",
 			SelectorRef: "file/workspace_deliverable", Disposition: RuntimeTargetSelectionCreate,
 			ProspectiveTargetRef: "created.go", ObservedRevision: "empty-v1",
 		}
 		selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(*selection)
+		inventory := RuntimeOperationAdmissibility{
+			PrerequisiteID: "admissibility-create", OwnerModuleID: RuntimeModuleFile,
+			OperationKinds: []string{RuntimeBlockKindPatchApply},
+			OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+				Kind: RuntimeBlockKindPatchApply, VariantID: "file_write",
+				AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+				SelectorRefs:          []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+			}},
+			SelectorRefs: []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+			ObservedRevision: "empty-v1",
+		}
+		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
-		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
+		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection, OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 		}
@@ -550,7 +634,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			t.Fatal("missing admissibility must not match sealed authorization")
 		}
 	})
-	t.Run("selector-only admissibility seals prospective create path", func(t *testing.T) {
+	t.Run("selector-only admissibility without operation fact cannot seal prospective create path", func(t *testing.T) {
 		decision := RuntimeDecision{
 			State: ConvergenceStateNeedStateChange,
 			RequiredOutput: RequiredOutputContract{
@@ -567,18 +651,19 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		}
 		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
-		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
+		selection := &RuntimeTargetSelection{
+			PrerequisiteID: "selection-file-create", OwnerModuleID: RuntimeModuleFile,
+			TargetRole: "deliverable", SelectorRef: "file/workspace_deliverable",
+			Disposition: RuntimeTargetSelectionCreate, ProspectiveTargetRef: "new-file.txt",
+			ObservedRevision: "empty-v1",
+		}
+		selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(*selection)
+		_, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
+			TargetSelection:          selection,
 			OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
 		})
-		if err != nil {
-			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
-		}
-		operation := manifest.Operations[0]
-		if operation.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget ||
-			!reflect.DeepEqual(operation.Target.OwnerSelectorRefs, []string{"file/workspace_deliverable"}) ||
-			!reflect.DeepEqual(operation.Target.ProspectiveConstraintRefs, []string{"create:empty_workspace"}) ||
-			!reflect.DeepEqual(operation.AdmissibilitySnapshotRefs, []string{inventory.SnapshotID}) {
-			t.Fatalf("selector-only prospective authorization = %+v", operation)
+		if err == nil || !strings.Contains(err.Error(), "explicit owner-admissible operation variant") {
+			t.Fatalf("selector-only catalog unexpectedly sealed prospective authorization: %v", err)
 		}
 	})
 	t.Run("mcp selector-only inventory does not force targetRefs", func(t *testing.T) {

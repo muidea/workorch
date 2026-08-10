@@ -56,16 +56,20 @@ func TestCompileRuntimeSemanticBindingsRejectsPartialOrNonFeasibleBatch(t *testi
 	}
 }
 
-func TestCompileRuntimeSemanticBindingsAllowsEmptyProspectiveOwnerFacts(t *testing.T) {
+func TestCompileRuntimeSemanticBindingsRequiresConcreteProspectiveOwnerFact(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")
 	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
-	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1"}
+	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{proposal.Target.ProspectiveTargetRef}}
 	focuses, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(focuses) != 1 || focuses[0].ProspectiveTargetRef != "main.go" {
 		t.Fatalf("compiled focus = %+v", focuses)
+	}
+	fact.TargetRefs = nil
+	if _, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact}); err == nil {
+		t.Fatal("feasible prospective owner fact without concrete target was accepted")
 	}
 }

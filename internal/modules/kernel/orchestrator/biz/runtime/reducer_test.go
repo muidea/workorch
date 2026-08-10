@@ -262,7 +262,13 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		inventory := runtimecontract.RuntimeOperationAdmissibility{
 			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}, SelectorRefs: []string{"owner-new-target-selector"},
-			ObservedRevision: "workspace-empty-v1",
+			ConstraintRefs: []string{"new-target-requires-owner-selector"}, ObservedRevision: "workspace-empty-v1",
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{
+				{Kind: runtimecontract.StepKindFileWrite, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"}},
+				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"}},
+				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}},
+				{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff", AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"}},
+			},
 		}
 		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
@@ -284,7 +290,16 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		inventory := runtimecontract.RuntimeOperationAdmissibility{
 			PrerequisiteID: "admissibility-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{"owner-new-target-selector"},
-			ObservedRevision: "workspace-empty-v1",
+			ConstraintRefs: []string{"new-target-requires-owner-selector"}, ObservedRevision: "workspace-empty-v1",
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+				Kind: runtimecontract.StepKindFileWrite,
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+					runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+					runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+					runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				},
+				SelectorRefs: []string{"owner-new-target-selector"}, ConstraintRefs: []string{"new-target-requires-owner-selector"},
+			}},
 		}
 		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
@@ -374,6 +389,15 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 			PrerequisiteID: "file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{facts.Focus.TargetSelectorRef},
 			ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"}, ObservedRevision: "workspace-empty-v1",
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+				Kind: runtimecontract.StepKindFileWrite,
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+					runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+					runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+					runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				},
+				SelectorRefs: []string{facts.Focus.TargetSelectorRef}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"},
+			}},
 		}
 		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 		binding := facts.Focus.CoverageEvidenceBindings[0]
@@ -411,6 +435,11 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		{name: "missing owner selector", mutate: func(facts *runtimecontract.RuntimeFacts) {
 			catalog := facts.Resources.OperationAdmissibilities[0]
 			catalog.SelectorRefs = nil
+			catalog.OperationVariants[0].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			}
+			catalog.OperationVariants[0].SelectorRefs = nil
 			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 			facts.Resources.OperationAdmissibilities[0] = catalog
 			binding := facts.Focus.CoverageEvidenceBindings[0]
@@ -421,6 +450,11 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		{name: "missing prospective constraint", mutate: func(facts *runtimecontract.RuntimeFacts) {
 			catalog := facts.Resources.OperationAdmissibilities[0]
 			catalog.ConstraintRefs = []string{"workspace-relative-path"}
+			catalog.OperationVariants[0].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			}
+			catalog.OperationVariants[0].ConstraintRefs = []string{"workspace-relative-path"}
 			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 			facts.Resources.OperationAdmissibilities[0] = catalog
 			binding := facts.Focus.CoverageEvidenceBindings[0]

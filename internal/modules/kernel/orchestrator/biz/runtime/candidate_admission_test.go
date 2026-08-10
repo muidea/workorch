@@ -385,7 +385,7 @@ func TestEvaluateCandidateAdmissionRejectsDurableChangeOutsideGroundedRepairTarg
 	}
 }
 
-func TestEvaluateCandidateAdmissionAllowsOwnerGroundedWorkspaceScopeThroughFileAdmissibility(t *testing.T) {
+func TestEvaluateCandidateAdmissionAllowsFiniteOwnerGroundedWorkspaceScopeThroughFileAdmissibility(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Focus.TargetRole = "deliverable"
@@ -402,11 +402,35 @@ func TestEvaluateCandidateAdmissionAllowsOwnerGroundedWorkspaceScopeThroughFileA
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
 
 	candidate := stateChangeCandidate()
-	newTarget := "new-deliverable.go"
-	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{newTarget}
-	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(newTarget)
+	groundedTarget := "implementation.go"
+	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{groundedTarget}
+	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(groundedTarget)
 	if admitted := EvaluateCandidateAdmission(aggregate, candidate); !admitted.Accepted() {
 		t.Fatalf("owner-grounded workspace scope candidate rejected before File admissibility: %+v", admitted)
+	}
+}
+
+func TestEvaluateCandidateAdmissionRejectsTargetOutsideFiniteOwnerGroundedWorkspaceScope(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	aggregate.Facts.Focus.RequireTargetGrounding = true
+	aggregate.Facts.Focus.TargetRole = "deliverable"
+	aggregate.Facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	selection := runtimecontract.RuntimeTargetSelection{
+		PrerequisiteID: "target-selection-scope", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: "deliverable",
+		SelectorRef: "file/workspace_deliverable", Disposition: runtimecontract.RuntimeTargetSelectionScope,
+		TargetRefs: []string{"implementation.go", "support.go"}, CandidateTargetRefs: []string{"implementation.go", "support.go"}, CandidateCount: 2, ObservedRevision: "workspace-tree-v1",
+	}
+	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
+	aggregate.Facts.Resources.TargetSelection = &selection
+	bindCurrentFocusTargetSelection(&aggregate.Facts)
+
+	candidate := stateChangeCandidate()
+	outsideTarget := "new-deliverable.go"
+	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{outsideTarget}
+	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(outsideTarget)
+	admitted := EvaluateCandidateAdmission(aggregate, candidate)
+	if admitted.Disposition != CandidateAdmissionRejectedContract || admitted.Failure == nil || admitted.Failure.Code != candidateAdmissionCodeInvalid {
+		t.Fatalf("outside finite owner scope admission = %+v", admitted)
 	}
 }
 

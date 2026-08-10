@@ -17,7 +17,7 @@ func TestRuntimeSemanticProofFeasibilityCommandRequiresExactOwnerAndCatalog(t *t
 	}
 	outside := command
 	outside.Proposal.Target.ProspectiveConstraintRefs = []string{"outside-owner-contract"}
-	if err := runtimecontract.ValidateRuntimeSemanticProofFeasibilityRequest(outside, runtimecontract.RuntimeModuleFile); err == nil || !strings.Contains(err.Error(), "outside owner catalog") {
+	if err := runtimecontract.ValidateRuntimeSemanticProofFeasibilityRequest(outside, runtimecontract.RuntimeModuleFile); err == nil || !strings.Contains(err.Error(), "prospectiveConstraintRefs") {
 		t.Fatalf("catalog escape error = %v", err)
 	}
 }
@@ -132,6 +132,16 @@ func semanticFeasibilityCommandFixture(t *testing.T) runtimecontract.RuntimeSema
 	if err != nil {
 		t.Fatal(err)
 	}
+	catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+		Kind: runtimecontract.StepKindFileWrite,
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+	}}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	manifest.OwnerCatalogs = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	return runtimecontract.RuntimeSemanticProofFeasibilityRequest{

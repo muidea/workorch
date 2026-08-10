@@ -319,7 +319,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		command.RequiredKinds,
 		nil,
 		[]string{gitWorkspaceRepositorySelector},
-		[]string{"repository-state-snapshot:" + snapshot.SnapshotID, "owner-execution-policy"},
+		[]string{"repository-state-snapshot:" + snapshot.SnapshotID, "repository-state-snapshot", "owner-execution-policy"},
 		snapshot.ObservedRevision,
 		binding,
 	)
@@ -327,8 +327,48 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
+	// Git owns the executable sub-operation vocabulary.  Keep the concrete
+	// variant facts on this owner-authored inventory so semantic planning and
+	// candidate admission never infer an init/add/commit (or read) operation
+	// from the broad git kind or selector alone.
+	inventory.OperationVariants = gitAdmissibilityOperationVariants(command.RequiredKinds)
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
 	observation := gitAdmissibilityObservation(command.PrerequisiteID, inventory, snapshot.WorkspaceTreeRevision)
 	result.Set(gitevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
+}
+
+// gitAdmissibilityOperationVariants is the Git owner's explicit sub-operation
+// target-policy surface. Git acts on the owner-controlled repository scope;
+// it never receives prospective workspace-target authority from this catalog.
+// ExactTarget remains available for bounded pathspecs, while
+// ExistingOwnerScope covers repository-wide operations such as status and
+// commit. The selector/constraint values are opaque owner facts, not a global
+// registry or a Runtime inference rule.
+func gitAdmissibilityOperationVariants(operationKinds []string) []runtimecontract.RuntimeOperationAdmissibilityVariant {
+	selectorRefs := []string{gitWorkspaceRepositorySelector}
+	constraintRefs := []string{"repository-state-snapshot", "owner-execution-policy"}
+	ret := make([]runtimecontract.RuntimeOperationAdmissibilityVariant, 0)
+	for _, rawKind := range operationKinds {
+		kind := runtimecontract.CanonicalRuntimeBlockKind(rawKind)
+		for _, supported := range SupportedRuntimeOperationVariants() {
+			if runtimecontract.CanonicalRuntimeBlockKind(supported.Kind) != kind || strings.TrimSpace(supported.VariantID) == "" {
+				continue
+			}
+			ret = append(ret, runtimecontract.RuntimeOperationAdmissibilityVariant{
+				Kind: kind, VariantID: strings.TrimSpace(supported.VariantID),
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+					runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+					runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				},
+				SelectorRefs: append([]string(nil), selectorRefs...), ConstraintRefs: append([]string(nil), constraintRefs...),
+			})
+		}
+	}
+	return ret
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {

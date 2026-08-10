@@ -383,6 +383,18 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 				}
 			}
 		}
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		// A finite owner scope is still a membership contract. Selector-only
+		// scopes intentionally leave the final target resolution to the owner
+		// feasibility probe, but a bounded scope must reject arbitrary targets at
+		// the candidate boundary.
+		if allowedTargets := operationManifest.Target.AllowedTargetRefs(); len(allowedTargets) != 0 {
+			for _, targetRef := range operation.TargetRefs {
+				if !runtimeCandidatePayloadContains(allowedTargets, targetRef) {
+					return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: targetRef, Allowed: allowedTargets}
+				}
+			}
+		}
 	}
 	if !runtimeCandidatePayloadContains(operationManifest.AllowedOperationFields, "dependsOn") {
 		if _, found := raw["dependsOn"]; found {

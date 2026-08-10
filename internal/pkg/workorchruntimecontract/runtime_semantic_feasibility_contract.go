@@ -85,33 +85,54 @@ func runtimeSemanticManifestContainsProposal(manifest RuntimeSemanticPlanManifes
 }
 
 func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofProposal, catalog RuntimeOperationAdmissibility) error {
+	proposal = proposal.Normalized()
+	catalog = catalog.Normalized()
+	variant, variantFound, variantErr := RuntimeOperationAdmissibilityVariantForProposal(catalog, proposal.OperationKind, proposal.OperationVariantID)
+	if variantErr != nil {
+		return variantErr
+	}
+	contract, contractFound := RuntimeOperationContractForKind(proposal.OperationKind)
+	if contractFound && len(contract.Variants) != 0 && !variantFound {
+		return runtimeSemanticProposalConstraint("operationVariantId", RuntimeSemanticConstraintAllowedValue, proposal.OperationVariantID, []string{"owner-admissible static operation variant"}, runtimeSemanticCatalogVariantIDs(catalog, proposal.OperationKind))
+	}
+	allowed, _, _, _, policyErr := RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, proposal.OperationKind, proposal.OperationVariantID, proposal.Target.Policy)
+	if policyErr != nil {
+		return policyErr
+	}
+	if !allowed {
+		allowedPolicies := runtimeSemanticOwnerTargetPolicies(catalog, proposal.OperationKind, proposal.OperationVariantID)
+		return runtimeSemanticProposalConstraint("target.policy", RuntimeSemanticConstraintAllowedValue, string(proposal.Target.Policy), nil, runtimeSemanticTargetPoliciesAsStrings(allowedPolicies))
+	}
+	selectorRefs := catalog.SelectorRefs
+	constraintRefs := catalog.ConstraintRefs
+	if variantFound {
+		selectorRefs = variant.SelectorRefs
+		constraintRefs = variant.ConstraintRefs
+	}
 	target := proposal.Target.Normalized()
 	switch target.Policy {
 	case RuntimeOperationTargetPolicyExactTarget:
-		if len(catalog.TargetRefs) != 0 && !allStringsContained(target.ExactTargetRefs, catalog.TargetRefs) {
-			return fmt.Errorf("runtime semantic exact target is outside owner catalog")
+		if !allStringsContained(target.ExactTargetRefs, catalog.TargetRefs) {
+			return runtimeSemanticProposalConstraint("target.exactTargetRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.ExactTargetRefs, ","), nil, catalog.TargetRefs)
 		}
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		if len(target.OwnerScopeTargetRefs) != 0 && !allStringsContained(target.OwnerScopeTargetRefs, catalog.TargetRefs) {
-			return fmt.Errorf("runtime semantic owner scope is outside owner catalog")
+			return runtimeSemanticProposalConstraint("target.ownerScopeTargetRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.OwnerScopeTargetRefs, ","), nil, catalog.TargetRefs)
 		}
-		if len(target.OwnerSelectorRefs) != 0 && !allStringsContained(target.OwnerSelectorRefs, catalog.SelectorRefs) {
-			return fmt.Errorf("runtime semantic owner selector is outside owner catalog")
+		if len(target.OwnerSelectorRefs) != 0 && !allStringsContained(target.OwnerSelectorRefs, selectorRefs) {
+			return runtimeSemanticProposalConstraint("target.ownerSelectorRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.OwnerSelectorRefs, ","), nil, selectorRefs)
 		}
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		if !allStringsContained(target.OwnerSelectorRefs, catalog.SelectorRefs) || !allStringsContained(target.ProspectiveConstraintRefs, catalog.ConstraintRefs) {
-			return fmt.Errorf("runtime semantic prospective target policy is outside owner catalog")
+		if !allStringsContained(target.OwnerSelectorRefs, selectorRefs) {
+			return runtimeSemanticProposalConstraint("target.ownerSelectorRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.OwnerSelectorRefs, ","), nil, selectorRefs)
 		}
-	}
-	if proposal.OperationVariantID != "" {
-		contract, found := RuntimeOperationContractForKind(proposal.OperationKind)
-		if !found || !runtimeSemanticVariantExists(contract, proposal.OperationVariantID) {
-			return fmt.Errorf("runtime semantic operation variant %q is outside owner contract", proposal.OperationVariantID)
+		if !allStringsContained(target.ProspectiveConstraintRefs, constraintRefs) {
+			return runtimeSemanticProposalConstraint("target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.ProspectiveConstraintRefs, ","), nil, constraintRefs)
 		}
 	}
 	if proposal.ValidationRecipeID != "" {
 		if !allStringsContained([]string{proposal.ValidationRecipeID}, catalog.ValidationRecipeRefs) {
-			return fmt.Errorf("runtime semantic validation recipe %q is outside owner catalog", proposal.ValidationRecipeID)
+			return runtimeSemanticProposalConstraint("validationRecipeId", RuntimeSemanticConstraintAllowedValue, proposal.ValidationRecipeID, nil, catalog.ValidationRecipeRefs)
 		}
 		// Dynamic MCP recipes are bound to the exact effect fact published by
 		// the MCP owner.  Do not let a provider choose a broader or different
@@ -120,12 +141,28 @@ func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofPr
 			if capability, found := runtimeMCPCapabilityForValidationRecipe(catalog, proposal.ValidationRecipeID); found {
 				actual := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
 				if actual == RuntimeEffectUnknown || !allStringsContained([]string{string(actual)}, RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes)) {
-					return fmt.Errorf("runtime semantic MCP recipe %q requires owner effect %q", proposal.ValidationRecipeID, actual)
+					return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintAllowedValue,
+						strings.Join(RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes), ","), nil, []string{string(actual)})
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func runtimeSemanticOwnerTargetPolicies(catalog RuntimeOperationAdmissibility, kind, variantID string) []RuntimeOperationTargetPolicy {
+	ret := make([]RuntimeOperationTargetPolicy, 0, 3)
+	for _, policy := range []RuntimeOperationTargetPolicy{
+		RuntimeOperationTargetPolicyExactTarget,
+		RuntimeOperationTargetPolicyExistingOwnerScope,
+		RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+	} {
+		allowed, _, _, _, err := RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, kind, variantID, policy)
+		if err == nil && allowed {
+			ret = append(ret, policy)
+		}
+	}
+	return ret
 }
 
 func runtimeMCPCapabilityForValidationRecipe(catalog RuntimeOperationAdmissibility, recipeID string) (RuntimeMCPCapabilityContext, bool) {
@@ -255,11 +292,13 @@ func RuntimeSemanticProposalTargetRefs(proposal RuntimeSemanticProofProposal) []
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		return append([]string(nil), target.OwnerScopeTargetRefs...)
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		// A prospective target is an owner-authorized recipe/selector identity,
-		// not an already-existing workspace path.  Feasibility observations must
-		// therefore not reinterpret it as a declared file target and require it
-		// to exist before the owner can execute the sealed operation.
-		return nil
+		// File owner feasibility must inspect the concrete prospective path for
+		// traversal, existence and regular-file conflicts. It is not a current
+		// catalog target, but it is still the exact owner-observed target fact.
+		if target.ProspectiveTargetRef == "" {
+			return nil
+		}
+		return []string{target.ProspectiveTargetRef}
 	}
 	return nil
 }

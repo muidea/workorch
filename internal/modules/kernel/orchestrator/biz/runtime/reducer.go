@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -416,14 +417,17 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	return base, nil
 }
 
-// creationScopeAdmissibleFileOperationKinds checks only the committed owner
-// inventory. It does not know a selector name, choose a path, inspect a
-// workspace, or call a capability owner: a non-empty File SelectorRefs list
-// is the owner's opaque assertion that the listed kind may receive a new
-// concrete target. The descriptor's AllowsNewTarget property then narrows the
-// candidate contract to operations that can actually create an absent target.
-// Keeping that interpretation in SM-2 prevents the LLM from treating an empty
-// workspace as authority for Git/Shell/MCP side effects.
+// creationScopeAdmissibleFileOperationKinds checks only the committed File
+// owner inventory. It never chooses a target or infers a create grant from an
+// owner identity, descriptor effect, or broad selector union. For a static
+// operation kind such as patch/apply, every currently sealed variant must have
+// the same explicit prospective-target fact; a mixed variant set must be
+// narrowed by semantic binding before it can reach candidate rendering.
+//
+// Keeping that interpretation in SM-2 prevents an empty workspace from
+// becoming authority for Git/Shell/MCP side effects, while still allowing the
+// File owner to publish e.g. patch/apply:unified_diff as a concrete creation
+// operation.
 func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []string {
 	accepted := make(map[string]struct{}, len(acceptedKinds))
 	for _, kind := range acceptedKinds {
@@ -432,7 +436,7 @@ func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFact
 	admissible := make(map[string]struct{}, len(acceptedKinds))
 	for _, inventory := range facts.Resources.OperationAdmissibilities {
 		inventory = inventory.Normalized()
-		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile || len(inventory.SelectorRefs) == 0 {
+		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile {
 			continue
 		}
 		for _, kind := range inventory.OperationKinds {
@@ -441,7 +445,17 @@ func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFact
 				continue
 			}
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(kind)
-			if known && descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile && descriptor.AllowsNewTarget && runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+			if !known || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+				continue
+			}
+			variantIDs := creationScopeOperationVariantIDs(facts, kind)
+			if !creationScopeOperationVariantsAreDurable(kind, variantIDs) {
+				continue
+			}
+			allowed, _, _, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
+				inventory, kind, variantIDs, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			)
+			if err == nil && allowed {
 				admissible[kind] = struct{}{}
 			}
 		}
@@ -454,6 +468,72 @@ func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFact
 		}
 	}
 	return ret
+}
+
+func creationScopeOperationVariantIDs(facts runtimecontract.RuntimeFacts, kind string) []string {
+	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+	focus := facts.Focus.Normalized()
+	seen := make(map[string]struct{})
+	ret := make([]string, 0)
+	for _, value := range focus.AcceptedOperationVariants {
+		if runtimecontract.CanonicalRuntimeBlockKind(value.Kind) != kind || strings.TrimSpace(value.VariantID) == "" {
+			continue
+		}
+		if _, duplicate := seen[value.VariantID]; duplicate {
+			continue
+		}
+		seen[value.VariantID] = struct{}{}
+		ret = append(ret, strings.TrimSpace(value.VariantID))
+	}
+	for _, snapshot := range facts.Resources.CapabilityStates {
+		if snapshot.Disposition != runtimecontract.RuntimeCapabilityStateSequenceRequired {
+			continue
+		}
+		for _, value := range snapshot.RequiredOperationSequence {
+			if runtimecontract.CanonicalRuntimeBlockKind(value.Kind) != kind || strings.TrimSpace(value.VariantID) == "" {
+				continue
+			}
+			variantID := strings.TrimSpace(value.VariantID)
+			if _, duplicate := seen[variantID]; duplicate {
+				continue
+			}
+			seen[variantID] = struct{}{}
+			ret = append(ret, variantID)
+		}
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+func creationScopeOperationVariantsAreDurable(kind string, variantIDs []string) bool {
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+	if !found || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+		return false
+	}
+	contract, hasContract := runtimecontract.RuntimeOperationContractForKind(kind)
+	if !hasContract || len(contract.Variants) == 0 {
+		return len(variantIDs) == 0
+	}
+	if len(variantIDs) == 0 {
+		return false
+	}
+	for _, variantID := range variantIDs {
+		matched := false
+		for _, variant := range contract.Variants {
+			if variant.ID != variantID {
+				continue
+			}
+			matched = true
+			if !runtimecontract.RuntimeEffectIsDurable(variant.EffectScope) {
+				return false
+			}
+			break
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 // requiredCapabilityStateSequence only contributes a capability owner's
@@ -580,10 +660,36 @@ func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) boo
 			if focus.ProspectiveTargetRef == "" || len(focus.TargetRefs) != 0 ||
 				binding.TargetSelectorSubjectRef == "" || binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
 				binding.ProspectiveTargetRef == "" || binding.ProspectiveTargetRef != focus.ProspectiveTargetRef || len(binding.TargetRefs) != 0 ||
-				!runtimeStringsContain(catalog.ConstraintRefs, "new-target-requires-owner-selector") {
+				!runtimeStringsContain(catalog.ConstraintRefs, "new-target-requires-owner-selector") ||
+				!runtimeBindingProspectiveOperationAllowed(catalog, binding) {
 				continue
 			}
 			return true
+		}
+	}
+	return false
+}
+
+func runtimeBindingProspectiveOperationAllowed(catalog runtimecontract.RuntimeOperationAdmissibility, binding runtimecontract.CoverageEvidenceBinding) bool {
+	for _, proof := range binding.Proofs {
+		proof = proof.Normalized()
+		if proof.EvidenceKind != runtimecontract.EvidenceKindStateChange {
+			continue
+		}
+		for _, kind := range proof.AllowedOperationKinds {
+			kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
+			variantIDs := make([]string, 0)
+			for _, ref := range proof.AllowedOperationVariants {
+				if runtimecontract.CanonicalRuntimeBlockKind(ref.Kind) == kind && strings.TrimSpace(ref.VariantID) != "" {
+					variantIDs = append(variantIDs, strings.TrimSpace(ref.VariantID))
+				}
+			}
+			allowed, selectors, constraints, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
+				catalog, kind, variantIDs, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			)
+			if err == nil && allowed && runtimeStringsContain(selectors, binding.TargetSelectorRef) && len(constraints) != 0 {
+				return true
+			}
 		}
 	}
 	return false

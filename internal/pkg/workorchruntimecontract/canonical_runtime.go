@@ -581,9 +581,16 @@ type RuntimeOperationAdmissibility struct {
 	AcquisitionBinding string
 	OwnerModuleID      string
 	OperationKinds     []string
-	TargetRefs         []string
-	SelectorRefs       []string
-	ConstraintRefs     []string
+	// OperationVariants is the owner-authored, variant-scoped target policy
+	// surface.  OperationKinds remains the bounded kind inventory; this slice
+	// is the only authority that can say which discriminated operation variant
+	// may use a prospective target.  It is intentionally a typed slice rather
+	// than a process-wide index or map so the fact is persisted with the owner
+	// catalog and can be validated/replayed as one immutable snapshot.
+	OperationVariants []RuntimeOperationAdmissibilityVariant
+	TargetRefs        []string
+	SelectorRefs      []string
+	ConstraintRefs    []string
 	// ValidationRecipeRefs is the owner-neutral identity set of validation
 	// surfaces the owner can execute. Shell may additionally retain the full
 	// command recipe below; other owners such as MCP expose only opaque recipe
@@ -600,12 +607,239 @@ type RuntimeOperationAdmissibility struct {
 	ObservedRevision  string
 }
 
+// RuntimeOperationAdmissibilityVariant is one owner-confirmed target-policy
+// fact for an operation kind and (when the executable contract has variants)
+// its concrete variant.  The owner publishes the allowed target policies and
+// the selector/constraint vocabulary; Runtime core only compiles and checks
+// those values and never infers them from owner identity or effect scope.
+type RuntimeOperationAdmissibilityVariant struct {
+	Kind                  string
+	VariantID             string
+	AllowedTargetPolicies []RuntimeOperationTargetPolicy
+	SelectorRefs          []string
+	ConstraintRefs        []string
+}
+
+func (v RuntimeOperationAdmissibilityVariant) Normalized() RuntimeOperationAdmissibilityVariant {
+	v.Kind = CanonicalRuntimeBlockKind(v.Kind)
+	v.VariantID = strings.TrimSpace(v.VariantID)
+	v.AllowedTargetPolicies = normalizeRuntimeSemanticTargetPolicies(v.AllowedTargetPolicies)
+	v.SelectorRefs = normalizeStrings(v.SelectorRefs)
+	v.ConstraintRefs = normalizeStrings(v.ConstraintRefs)
+	return v
+}
+
+func (v RuntimeOperationAdmissibilityVariant) Validate(owner string, operationKinds []string, selectors, constraints []string) error {
+	rawPolicies := append([]RuntimeOperationTargetPolicy(nil), v.AllowedTargetPolicies...)
+	v = v.Normalized()
+	owner = strings.TrimSpace(owner)
+	if v.Kind == "" || !runtimeOperationKindsContain(operationKinds, v.Kind) {
+		return fmt.Errorf("runtime operation admissibility variant %q is absent from owner kind inventory", v.Kind)
+	}
+	descriptor, ok := RuntimeOperationDescriptorForKind(v.Kind)
+	if !ok || descriptor.OwnerModuleID != owner {
+		return fmt.Errorf("runtime operation admissibility variant %q does not belong to owner %q", v.Kind, owner)
+	}
+	contract, found := RuntimeOperationContractForKind(v.Kind)
+	if found && len(contract.Variants) != 0 && v.VariantID == "" {
+		return fmt.Errorf("runtime operation admissibility kind %q requires a concrete variant fact", v.Kind)
+	}
+	if v.VariantID != "" && (!found || !runtimeSemanticVariantExists(contract, v.VariantID)) {
+		return fmt.Errorf("runtime operation admissibility variant %q/%q is outside owner operation contract", v.Kind, v.VariantID)
+	}
+	for _, raw := range rawPolicies {
+		switch RuntimeOperationTargetPolicy(strings.TrimSpace(string(raw))) {
+		case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		default:
+			return fmt.Errorf("runtime operation admissibility variant %q/%q declares unknown target policy %q", v.Kind, v.VariantID, raw)
+		}
+	}
+	if len(v.AllowedTargetPolicies) == 0 {
+		return fmt.Errorf("runtime operation admissibility variant %q/%q requires target policies", v.Kind, v.VariantID)
+	}
+	if !allStringsContained(v.SelectorRefs, selectors) || !allStringsContained(v.ConstraintRefs, constraints) {
+		return fmt.Errorf("runtime operation admissibility variant %q/%q references undeclared selector or constraint", v.Kind, v.VariantID)
+	}
+	if runtimeOperationAdmissibilityVariantAllowsTargetPolicy(v, RuntimeOperationTargetPolicyProspectiveOwnerTarget) &&
+		(len(v.SelectorRefs) == 0 || len(v.ConstraintRefs) == 0) {
+		return fmt.Errorf("runtime operation admissibility variant %q/%q prospective target policy requires owner selector and constraint", v.Kind, v.VariantID)
+	}
+	return nil
+}
+
+// RuntimeOperationAdmissibilityVariantForOperation returns the exact owner
+// fact selected by a concrete operation.  For non-discriminated kinds the
+// empty VariantID is used.  A missing variant fact is distinguishable from an
+// invalid operation so callers can fail closed without guessing.
+func RuntimeOperationAdmissibilityVariantForOperation(inventory RuntimeOperationAdmissibility, operation RuntimeOperation) (RuntimeOperationAdmissibilityVariant, bool, error) {
+	inventory = inventory.Normalized()
+	operation = operation.Normalized()
+	if !runtimeOperationKindsContain(inventory.OperationKinds, operation.Kind) {
+		return RuntimeOperationAdmissibilityVariant{}, false, nil
+	}
+	variantID := ""
+	contract, found := RuntimeOperationContractForKind(operation.Kind)
+	if found && len(contract.Variants) != 0 {
+		variant, err := MatchRuntimeOperationVariant(operation, contract)
+		if err != nil {
+			return RuntimeOperationAdmissibilityVariant{}, false, err
+		}
+		variantID = strings.TrimSpace(variant.ID)
+	}
+	return runtimeOperationAdmissibilityVariantForRef(inventory, operation.Kind, variantID)
+}
+
+// RuntimeOperationAdmissibilityVariantForProposal is the semantic-plan
+// equivalent of RuntimeOperationAdmissibilityVariantForOperation.
+func RuntimeOperationAdmissibilityVariantForProposal(inventory RuntimeOperationAdmissibility, kind, variantID string) (RuntimeOperationAdmissibilityVariant, bool, error) {
+	inventory = inventory.Normalized()
+	kind = CanonicalRuntimeBlockKind(kind)
+	variantID = strings.TrimSpace(variantID)
+	if !runtimeOperationKindsContain(inventory.OperationKinds, kind) {
+		return RuntimeOperationAdmissibilityVariant{}, false, nil
+	}
+	if variantID == "" {
+		if contract, found := RuntimeOperationContractForKind(kind); found && len(contract.Variants) != 0 {
+			return RuntimeOperationAdmissibilityVariant{}, false, fmt.Errorf("runtime operation admissibility kind %q requires a concrete variant", kind)
+		}
+	}
+	return runtimeOperationAdmissibilityVariantForRef(inventory, kind, variantID)
+}
+
+func runtimeOperationAdmissibilityVariantForRef(inventory RuntimeOperationAdmissibility, kind, variantID string) (RuntimeOperationAdmissibilityVariant, bool, error) {
+	var matches []RuntimeOperationAdmissibilityVariant
+	for _, raw := range inventory.OperationVariants {
+		value := raw.Normalized()
+		if value.Kind == CanonicalRuntimeBlockKind(kind) && value.VariantID == strings.TrimSpace(variantID) {
+			matches = append(matches, value)
+		}
+	}
+	if len(matches) > 1 {
+		return RuntimeOperationAdmissibilityVariant{}, false, fmt.Errorf("runtime operation admissibility has duplicate variant fact %q/%q", kind, variantID)
+	}
+	if len(matches) == 1 {
+		return matches[0], true, nil
+	}
+	return RuntimeOperationAdmissibilityVariant{}, false, nil
+}
+
+// RuntimeOperationAdmissibilityAllowsTargetPolicy is the single policy lookup
+// shared by semantic planning, candidate compilation, reducer gates and owner
+// preflight.  Variant-scoped facts always win.  Variant-less operations may
+// use the owner catalog's explicit selector/constraint declaration, but no
+// same-owner/durable-effect inference is permitted.
+func RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory RuntimeOperationAdmissibility, kind, variantID string, policy RuntimeOperationTargetPolicy) (allowed bool, selectorRefs, constraintRefs []string, factFound bool, err error) {
+	inventory = inventory.Normalized()
+	kind = CanonicalRuntimeBlockKind(kind)
+	policy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(policy)))
+	fact, found, lookupErr := RuntimeOperationAdmissibilityVariantForProposal(inventory, kind, variantID)
+	if lookupErr != nil {
+		return false, nil, nil, false, lookupErr
+	}
+	if found {
+		return runtimeOperationAdmissibilityVariantAllowsTargetPolicy(fact, policy), append([]string(nil), fact.SelectorRefs...), append([]string(nil), fact.ConstraintRefs...), true, nil
+	}
+	// A catalog that publishes variant facts is an explicit discriminated
+	// authority surface.  Missing the selected kind/variant must fail closed;
+	// the broad kind-level selector/constraint union cannot be used to fill the
+	// gap (especially for prospective creation).
+	if len(inventory.OperationVariants) != 0 {
+		return false, nil, nil, false, nil
+	}
+	// Existing/exact scope may still use a non-discriminated owner catalog.
+	// Prospective authority cannot: a broad selector/constraint union is only
+	// vocabulary, not a create grant.  The owner must publish the exact
+	// kind/variant fact above.
+	if policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+		return false, append([]string(nil), inventory.SelectorRefs...), append([]string(nil), inventory.ConstraintRefs...), false, nil
+	}
+	// A catalog without discriminated facts is still explicit for a
+	// non-variant kind's existing/exact scope.
+	if variantID != "" {
+		return false, nil, nil, false, nil
+	}
+	if policy == RuntimeOperationTargetPolicyExactTarget && len(inventory.TargetRefs) == 0 {
+		return false, nil, nil, false, nil
+	}
+	if policy == RuntimeOperationTargetPolicyExistingOwnerScope && len(inventory.TargetRefs) == 0 && len(inventory.SelectorRefs) == 0 {
+		return false, nil, nil, false, nil
+	}
+	return policy == RuntimeOperationTargetPolicyExactTarget || policy == RuntimeOperationTargetPolicyExistingOwnerScope,
+		append([]string(nil), inventory.SelectorRefs...), append([]string(nil), inventory.ConstraintRefs...), false, nil
+}
+
+// RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants applies one
+// owner-published target policy to every sealed variant of an operation kind.
+// It is deliberately a pure value helper: callers retain their own state
+// ownership, while a mixed or missing variant fact fails closed instead of
+// being widened through a kind-level selector union.
+func RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(inventory RuntimeOperationAdmissibility, kind string, variantIDs []string, policy RuntimeOperationTargetPolicy) (allowed bool, selectorRefs, constraintRefs []string, factFound bool, err error) {
+	inventory = inventory.Normalized()
+	kind = CanonicalRuntimeBlockKind(kind)
+	variantIDs = normalizeStrings(variantIDs)
+	if len(variantIDs) == 0 {
+		return RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory, kind, "", policy)
+	}
+	var expectedSelectors []string
+	var expectedConstraints []string
+	for index, variantID := range variantIDs {
+		variantAllowed, selectors, constraints, found, lookupErr := RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory, kind, variantID, policy)
+		if lookupErr != nil {
+			return false, nil, nil, false, lookupErr
+		}
+		// A selected static variant without an exact owner fact has no target
+		// authority. Do not fall back to a broad catalog declaration.
+		if !found || !variantAllowed {
+			return false, nil, nil, found, nil
+		}
+		if index == 0 {
+			expectedSelectors = append([]string(nil), selectors...)
+			expectedConstraints = append([]string(nil), constraints...)
+			continue
+		}
+		// One candidate authorization cannot safely express different selector
+		// vocabularies for multiple variants. The semantic planner may instead
+		// seal one concrete variant per CWI.
+		if !sameStrings(expectedSelectors, selectors) || !sameStrings(expectedConstraints, constraints) {
+			return false, nil, nil, true, fmt.Errorf("runtime operation admissibility variants for %q have incompatible target policy facts", kind)
+		}
+	}
+	return true, expectedSelectors, expectedConstraints, true, nil
+}
+
+func runtimeOperationAdmissibilityVariantAllowsTargetPolicy(variant RuntimeOperationAdmissibilityVariant, policy RuntimeOperationTargetPolicy) bool {
+	policy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(policy)))
+	for _, value := range variant.Normalized().AllowedTargetPolicies {
+		if value == policy {
+			return true
+		}
+	}
+	return false
+}
+
 func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibility {
 	a.PrerequisiteID = strings.TrimSpace(a.PrerequisiteID)
 	a.SnapshotID = strings.TrimSpace(a.SnapshotID)
 	a.AcquisitionBinding = strings.TrimSpace(a.AcquisitionBinding)
 	a.OwnerModuleID = strings.TrimSpace(a.OwnerModuleID)
 	a.OperationKinds = canonicalizeOperationKinds(a.OperationKinds)
+	if len(a.OperationVariants) > 0 {
+		variants := make([]RuntimeOperationAdmissibilityVariant, 0, len(a.OperationVariants))
+		for _, raw := range a.OperationVariants {
+			value := raw.Normalized()
+			if value.Kind == "" {
+				continue
+			}
+			variants = append(variants, value)
+		}
+		sort.Slice(variants, func(i, j int) bool {
+			if variants[i].Kind != variants[j].Kind {
+				return variants[i].Kind < variants[j].Kind
+			}
+			return variants[i].VariantID < variants[j].VariantID
+		})
+		a.OperationVariants = nilIfEmpty(variants)
+	}
 	a.TargetRefs = normalizeStrings(a.TargetRefs)
 	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
@@ -633,6 +867,20 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 }
 
 func (a RuntimeOperationAdmissibility) Validate() error {
+	// Preserve duplicate variant facts until validation. Silently canonicalizing
+	// them would make two conflicting owner declarations replay as one fact.
+	seenVariants := make(map[string]struct{}, len(a.OperationVariants))
+	for _, raw := range a.OperationVariants {
+		value := raw.Normalized()
+		if value.Kind == "" {
+			return fmt.Errorf("runtime operation admissibility has a variant fact without operation kind")
+		}
+		key := value.Kind + "|" + value.VariantID
+		if _, duplicate := seenVariants[key]; duplicate {
+			return fmt.Errorf("runtime operation admissibility has duplicate variant fact %q/%q", value.Kind, value.VariantID)
+		}
+		seenVariants[key] = struct{}{}
+	}
 	a = a.Normalized()
 	if a.PrerequisiteID == "" || a.SnapshotID == "" || a.OwnerModuleID == "" || len(a.OperationKinds) == 0 || a.ObservedRevision == "" {
 		return fmt.Errorf("runtime operation admissibility requires identity, owner, kinds and revision")
@@ -641,6 +889,11 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 		descriptor, ok := RuntimeOperationDescriptorForKind(kind)
 		if !ok || descriptor.OwnerModuleID != a.OwnerModuleID {
 			return fmt.Errorf("runtime operation admissibility kind %q does not belong to owner %q", kind, a.OwnerModuleID)
+		}
+	}
+	for _, variant := range a.OperationVariants {
+		if err := variant.Validate(a.OwnerModuleID, a.OperationKinds, a.SelectorRefs, a.ConstraintRefs); err != nil {
+			return err
 		}
 	}
 	if len(a.ValidationRecipes) > 0 {
@@ -671,6 +924,15 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 	writeHashString(h, value.OwnerModuleID)
 	writeHashString(h, value.AcquisitionBinding)
 	writeHashStrings(h, value.OperationKinds)
+	for _, variant := range value.OperationVariants {
+		writeHashString(h, variant.Kind)
+		writeHashString(h, variant.VariantID)
+		for _, policy := range variant.AllowedTargetPolicies {
+			writeHashString(h, string(policy))
+		}
+		writeHashStrings(h, variant.SelectorRefs)
+		writeHashStrings(h, variant.ConstraintRefs)
+	}
 	writeHashStrings(h, value.TargetRefs)
 	writeHashStrings(h, value.SelectorRefs)
 	writeHashStrings(h, value.ConstraintRefs)

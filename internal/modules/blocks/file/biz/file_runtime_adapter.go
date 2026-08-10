@@ -293,11 +293,12 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
 	}
 	inventory := runtimemodel.RuntimeOperationAdmissibility{
-		PrerequisiteID: prerequisiteID,
-		OwnerModuleID:  runtimemodel.RuntimeModuleFile,
-		OperationKinds: append([]string(nil), operationKinds...),
-		TargetRefs:     boundedAdmissibilityTargetRefs(requiredTargetRefs, manifest.TargetRefs, maxItems),
-		SelectorRefs:   fileAdmissibilitySelectorRefs(operationKinds),
+		PrerequisiteID:    prerequisiteID,
+		OwnerModuleID:     runtimemodel.RuntimeModuleFile,
+		OperationKinds:    append([]string(nil), operationKinds...),
+		OperationVariants: fileAdmissibilityOperationVariants(operationKinds),
+		TargetRefs:        boundedAdmissibilityTargetRefs(requiredTargetRefs, manifest.TargetRefs, maxItems),
+		SelectorRefs:      fileAdmissibilitySelectorRefs(operationKinds),
 		ConstraintRefs: []string{
 			"workspace-relative-path",
 			"existing-target-must-be-listed",
@@ -321,6 +322,62 @@ func fileAdmissibilitySelectorRefs(operationKinds []string) []string {
 		}
 	}
 	return nil
+}
+
+// fileAdmissibilityOperationVariants is the File owner's sole declaration of
+// variant-specific target semantics.  The broad selector/constraint union on
+// RuntimeOperationAdmissibility remains useful as bounded provider vocabulary,
+// but it is never sufficient to authorize a concrete variant when this typed
+// slice is present.
+func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.RuntimeOperationAdmissibilityVariant {
+	policiesExisting := []runtimemodel.RuntimeOperationTargetPolicy{
+		runtimemodel.RuntimeOperationTargetPolicyExactTarget,
+		runtimemodel.RuntimeOperationTargetPolicyExistingOwnerScope,
+	}
+	policiesCreate := append(append([]runtimemodel.RuntimeOperationTargetPolicy(nil), policiesExisting...), runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget)
+	selector := []string{runtimeFileSelectorWorkspaceRelativeNewTarget}
+	constraints := []string{"workspace-relative-path", "new-target-requires-owner-selector"}
+	ret := make([]runtimemodel.RuntimeOperationAdmissibilityVariant, 0)
+	for _, raw := range operationKinds {
+		kind := runtimemodel.CanonicalRuntimeBlockKind(raw)
+		switch kind {
+		case runtimemodel.StepKindFileWrite:
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesCreate, SelectorRefs: selector, ConstraintRefs: constraints})
+		case runtimemodel.StepKindFileEdit:
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesExisting})
+		case runtimemodel.RuntimeBlockKindPatchApply:
+			for _, variantID := range []string{patchTypeFileWrite, patchTypeTextReplace, patchTypeUnifiedDiff} {
+				policies := policiesExisting
+				variantSelectors := []string(nil)
+				variantConstraints := []string{"workspace-relative-path", "existing-target-must-be-listed"}
+				if variantID == patchTypeFileWrite || variantID == patchTypeUnifiedDiff {
+					policies = policiesCreate
+					variantSelectors = selector
+					variantConstraints = constraints
+				}
+				ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, VariantID: variantID, AllowedTargetPolicies: policies, SelectorRefs: variantSelectors, ConstraintRefs: variantConstraints})
+			}
+		case runtimemodel.RuntimeBlockKindPatchPreview:
+			for _, variantID := range []string{patchTypeFileWrite, patchTypeTextReplace, patchTypeUnifiedDiff} {
+				policies := policiesExisting
+				variantSelectors := []string(nil)
+				variantConstraints := []string{"workspace-relative-path", "existing-target-must-be-listed"}
+				if variantID == patchTypeFileWrite || variantID == patchTypeUnifiedDiff {
+					policies = policiesCreate
+					variantSelectors = selector
+					variantConstraints = constraints
+				}
+				ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, VariantID: variantID, AllowedTargetPolicies: policies, SelectorRefs: variantSelectors, ConstraintRefs: variantConstraints})
+			}
+		case runtimemodel.StepKindFileRead:
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesExisting})
+		case runtimemodel.StepKindFileList:
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: []runtimemodel.RuntimeOperationTargetPolicy{runtimemodel.RuntimeOperationTargetPolicyExactTarget}})
+		case runtimemodel.RuntimeBlockKindPatchRevert:
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesExisting})
+		}
+	}
+	return ret
 }
 
 func boundedAdmissibilityTargetRefs(required, available []string, maxItems int) []string {
@@ -444,7 +501,7 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 	if fileOperationRequiresExistingTarget(operation) {
 		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires an existing regular file", []string{filepath.ToSlash(rel)}), nil
 	}
-	if !fileInventoryContainsTarget(inventory, targetRef) && !fileInventoryAllowsNewTarget(inventory) {
+	if !fileInventoryContainsTarget(inventory, targetRef) && !fileInventoryAllowsNewTargetForOperation(inventory, operation) {
 		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef}), nil
 	}
 	if failure := a.probePatchFeasibility(workspaceDirectory, operation, filepath.ToSlash(rel)); failure != nil {
@@ -581,9 +638,32 @@ func fileInventoryContainsTarget(inventory runtimemodel.RuntimeOperationAdmissib
 	return false
 }
 
-func fileInventoryAllowsNewTarget(inventory runtimemodel.RuntimeOperationAdmissibility) bool {
-	for _, value := range inventory.Normalized().SelectorRefs {
-		if value == runtimeFileSelectorWorkspaceRelativeNewTarget {
+func fileInventoryAllowsNewTargetForOperation(inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation) bool {
+	inventory = inventory.Normalized()
+	variant, found, err := runtimemodel.RuntimeOperationAdmissibilityVariantForOperation(inventory, operation)
+	if err != nil {
+		return false
+	}
+	if found {
+		if !containsString(inventory.SelectorRefs, runtimeFileSelectorWorkspaceRelativeNewTarget) {
+			return false
+		}
+		for _, policy := range variant.AllowedTargetPolicies {
+			if policy == runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget && containsString(variant.SelectorRefs, runtimeFileSelectorWorkspaceRelativeNewTarget) {
+				return true
+			}
+		}
+		return false
+	}
+	// Prospective creation is never authorized by the broad selector union.
+	// File must publish an exact kind/variant fact, including the variant-less
+	// file/write fact, before a missing target can be considered feasible.
+	return false
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == strings.TrimSpace(wanted) {
 			return true
 		}
 	}

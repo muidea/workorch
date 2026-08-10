@@ -976,13 +976,11 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 }
 
 // TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable verifies
-// the owner-chain counterpart to empty-workspace creation. A complete bounded
-// scope is authority for File to assess a concrete new workspace-relative
-// target, not an Orchestrator permission to synthesize one. A rejected no-op
-// must not be closed by an assessment claim: canonical coverage requires a
-// later accepted write to a concrete File-admitted target and validation of
-// that same target before assessment can converge. Scope contents remain File
-// feasibility inventory; they must never be read as concrete snapshots.
+// the owner-chain counterpart to empty-workspace creation. The bounded scope
+// remains File feasibility inventory; creation authority comes only from the
+// explicitly sealed prospective target and the File owner's admissible
+// variant fact. The candidate therefore writes and validates that exact
+// prospective target in one owner-grounded sequence.
 func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -1014,6 +1012,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	bootstrap.ConvergencePolicy.MaxCandidateContextItems = 4
 	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Focuses[0].ProspectiveTargetRef = "new-deliverable.txt"
 	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
@@ -1049,7 +1048,6 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	startRuntimeManagedValidationTestOwner(t, hub)
 	candidateCalls := 0
-	stateChangeCalls := 0
 	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
 	initialSelectionCount := 0
 	initialSnapshots := 0
@@ -1062,27 +1060,8 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 			initialSelectionCount = command.CandidateContext.Resources.TargetSelection.CandidateCount
 			initialSnapshots = len(command.CandidateContext.Resources.TargetSnapshots)
 		}
-		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
-			stateChangeCalls++
-			if stateChangeCalls == 1 {
-				// A valid File write to unchanged content produces an owner no-op
-				// receipt.  Scope must remain feasibility inventory through this
-				// repair, not become the concrete directive target that blocks the
-				// next File proposal below.
-				result.Set(runtimeCandidateResultForTest(t, command, runtimeWorkspaceCreationCandidate(command, "implementation.txt", "before\n")), nil)
-				return
-			}
-		}
 		if command.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
-			// Before the accepted repair this only observes the rejected no-op's
-			// original target.  The repair closure then requires validation of
-			// the new concrete File target; an assessment claim cannot substitute
-			// for either durable evidence or target-bound validation.
-			target := "implementation.txt"
-			if stateChangeCalls >= 2 {
-				target = "new-deliverable.txt"
-			}
-			result.Set(runtimeCandidateResultForTest(t, command, runtimeWorkspaceCreationCandidate(command, target, "before\n")), nil)
+			result.Set(runtimeCandidateResultForTest(t, command, runtimeWorkspaceCreationCandidate(command, "new-deliverable.txt", "created\n")), nil)
 			return
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeWorkspaceCreationCandidate(command, "new-deliverable.txt", "created\n")), nil)
@@ -1095,8 +1074,8 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 6 || stateChangeCalls != 2 {
-		t.Fatalf("bounded scope new-deliverable completion=%+v terminal=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, completed.Terminal, candidateCalls, stateChangeCalls, err)
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
+		t.Fatalf("bounded scope new-deliverable completion=%+v terminal=%+v candidateCalls=%d err=%v", completed, completed.Terminal, candidateCalls, err)
 	}
 	if content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt")); err != nil || string(content) != "created\n" {
 		t.Fatalf("canonical repair did not produce the owner-admitted target: content=%q err=%v", content, err)
@@ -1105,7 +1084,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSelectionCount != 5 || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 6 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
-		len(persisted.RuntimeState.OperationReceipts) != 4 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 3 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
+		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 0 ||
 		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
 		if persisted != nil && persisted.RuntimeState != nil {
 			state := persisted.RuntimeState

@@ -77,6 +77,71 @@ func TestRuntimeSemanticPlanRejectsDynamicOperationVariant(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticPlanStaticVariantSchemaUsesOnlyOwnerCatalogFacts(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	gitCatalog := semanticTestOwnerCatalog("semantic-git-catalog", RuntimeModuleGit, []string{StepKindGitWrite})
+	gitCatalog.SelectorRefs = []string{"workspace-repository"}
+	gitCatalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{
+		Kind: StepKindGitWrite, VariantID: "commit",
+		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+			RuntimeOperationTargetPolicyExactTarget,
+			RuntimeOperationTargetPolicyExistingOwnerScope,
+		},
+		SelectorRefs: []string{"workspace-repository"},
+	}}
+	gitCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
+	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleGit)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindGitWrite)
+	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, gitCatalog)
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+
+	schema, err := RuntimeSemanticPlanJSONSchema(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(schema, `"add"`) || strings.Contains(schema, `"push"`) {
+		t.Fatalf("schema leaked unsealed Git variants: %s", schema)
+	}
+	if !strings.Contains(schema, `"commit"`) {
+		t.Fatalf("schema omitted owner-published Git variant: %s", schema)
+	}
+
+	// A missing static variant must be repaired from the sealed owner catalog,
+	// not from the executable Git contract (which also contains init and add).
+	missingVariant := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite,
+		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-repository"}},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, DeclarationRef: "dod/cwi-001",
+	}
+	manifestForMissing := manifest.Clone()
+	manifestForMissing.AllowedTargetPolicies = append(manifestForMissing.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
+	manifestForMissing.Hash = StableRuntimeSemanticPlanManifestHash(manifestForMissing)
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifestForMissing.Hash,
+		DefinitionSeedHash: manifestForMissing.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-variant", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals: []RuntimeSemanticProofProposal{missingVariant},
+	}
+	var violation *RuntimeSemanticProposalViolationError
+	if err := document.ValidateAgainstManifest(manifestForMissing); !errors.As(err, &violation) {
+		t.Fatalf("missing owner variant was not rejected with a typed violation: %v", err)
+	}
+	if got := violation.Violation().Allowed; len(got) != 1 || got[0] != "commit" {
+		t.Fatalf("missing variant correction leaked technical variants: %v", got)
+	}
+
+	proposal := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite, OperationVariantID: "add",
+		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-repository"}},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, DeclarationRef: "dod/cwi-001",
+	}
+	var constraint *RuntimeSemanticProposalConstraintError
+	if err := validateSemanticProposalAgainstOwnerCatalog(proposal, gitCatalog); !errors.As(err, &constraint) ||
+		constraint.Field != "operationVariantId" || len(constraint.Allowed) != 1 || constraint.Allowed[0] != "commit" {
+		t.Fatalf("owner variant diagnostic = %+v err=%v", constraint, err)
+	}
+}
+
 func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	mcpCatalog := semanticTestOwnerCatalog("semantic-mcp-catalog", RuntimeModuleMCP, []string{StepKindMCPToolCall})
@@ -85,6 +150,7 @@ func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	mcpCatalog.ValidationRecipeRefs = []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}
 	mcpCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(mcpCatalog)
 	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
+	shellCatalog.SelectorRefs = []string{"shell-validation-target"}
 	shellCatalog.ValidationRecipeRefs = []string{"software-dev-validation-evidence"}
 	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
 	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleMCP, RuntimeModuleShell)
@@ -99,7 +165,7 @@ func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 		t.Fatalf("owner-scoped selector diagnostic = %+v err=%v", diagnostic, err)
 	}
 	violation := diagnostic.SemanticViolations[0]
-	if len(violation.Allowed) != 0 || violation.Rule != RuntimeSemanticConstraintAllowedValue {
+	if len(violation.Allowed) != 1 || violation.Allowed[0] != "shell-validation-target" || violation.Rule != RuntimeSemanticConstraintAllowedValue {
 		t.Fatalf("owner-scoped selector violation = %+v", violation)
 	}
 }
@@ -252,6 +318,7 @@ func TestRuntimeSemanticPlanPayloadPreservesTypedCatalogRecipeViolation(t *testi
 	manifest := semanticContractTestManifest(t)
 	manifest.OwnerCatalogs[0].OwnerModuleID = RuntimeModuleShell
 	manifest.OwnerCatalogs[0].OperationKinds = []string{RuntimeBlockKindManagedValidationSession}
+	manifest.OwnerCatalogs[0].OperationVariants = nil
 	manifest.OwnerCatalogs[0].SelectorRefs = []string{"workspace-validation-target"}
 	manifest.OwnerCatalogs[0].ConstraintRefs = nil
 	manifest.OwnerCatalogs[0].ValidationRecipeRefs = []string{"recipe/allowed"}

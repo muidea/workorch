@@ -149,13 +149,11 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if err := validateRuntimeCandidateManifestTargetCardinality(operation, operationManifest.TargetCardinality); err != nil {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", runtimeCandidateManifestTargetCardinalityActual(operation.TargetRefs), operationManifest.AllowedOperationFields, []string{string(operationManifest.TargetCardinality)}, nil, err)
 	}
-	// exact_target and prospective_owner_target seal an exclusive membership set
-	// that the decoder may enforce as a typed observation. existing_owner_scope
-	// only obligates a concrete non-empty target here: whether a target is inside
-	// the sealed inventory, newly creatable, or infeasible remains SM-3 grounding
-	// plus owner feasibility (N4/N5), not a second wire allow-list.
+	// All finite target sets are enforced at the candidate boundary. A
+	// selector-only existing_owner_scope intentionally has no finite membership
+	// set and remains subject to owner feasibility.
 	switch operationManifest.Target.Normalized().Policy {
-	case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+	case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyProspectiveOwnerTarget, RuntimeOperationTargetPolicyExistingOwnerScope:
 		if allowedTargets := operationManifest.Target.AllowedTargetRefs(); len(allowedTargets) != 0 {
 			for _, targetRef := range operation.TargetRefs {
 				if !runtimeCandidatePayloadContains(allowedTargets, targetRef) {

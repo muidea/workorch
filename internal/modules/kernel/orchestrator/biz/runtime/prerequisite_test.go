@@ -296,6 +296,16 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:blocks/file:::file/write::0", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{"workspace-relative-new-file-target"},
+		ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileWrite,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"},
+		}},
 		ObservedRevision: "empty-workspace-v1",
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)

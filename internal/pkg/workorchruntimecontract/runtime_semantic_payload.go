@@ -423,22 +423,6 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			"then": map[string]any{"not": map[string]any{"required": []string{"operationVariantId"}}},
 		})
 	}
-	// Static variants are narrowed to the operation kind's own contract. This
-	// avoids presenting a global variant set that can cross owner boundaries.
-	for _, kind := range manifest.AllowedOperationKinds {
-		contract, found := RuntimeOperationContractForKind(kind)
-		if !found || len(contract.Variants) == 0 {
-			continue
-		}
-		variantIDs := make([]string, 0, len(contract.Variants))
-		for _, variant := range contract.Variants {
-			variantIDs = append(variantIDs, variant.ID)
-		}
-		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
-			"if":   map[string]any{"properties": map[string]any{"operationKind": map[string]any{"const": kind}}},
-			"then": map[string]any{"properties": map[string]any{"operationVariantId": map[string]any{"type": "string", "enum": normalizeStrings(variantIDs)}}},
-		})
-	}
 	// Every owner receives only its own sealed catalog values. The manifest is
 	// the bounded per-run authority; no process-global registry is introduced.
 	for _, catalog := range manifest.OwnerCatalogs {
@@ -480,6 +464,75 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			}}
 		}
 		proposalItems["allOf"] = append(proposalItems["allOf"].([]any), ownerRule)
+		// Narrow target policy and selector/constraint enums by the concrete
+		// owner operation fact. The broad owner rule above remains a vocabulary
+		// envelope; these conditions prevent a selector from one File variant (or
+		// another owner) from authorizing a different variant.
+		for _, kind := range catalog.OperationKinds {
+			kind = CanonicalRuntimeBlockKind(kind)
+			contract, contractFound := RuntimeOperationContractForKind(kind)
+			if !contractFound || len(contract.Variants) == 0 {
+				allowedPolicies := runtimeSemanticOwnerTargetPolicies(catalog, kind, "")
+				policyValues := make([]string, 0, len(allowedPolicies))
+				for _, policy := range allowedPolicies {
+					policyValues = append(policyValues, string(policy))
+				}
+				proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+					"if": map[string]any{"properties": map[string]any{
+						"ownerModuleId": map[string]any{"const": catalog.OwnerModuleID},
+						"operationKind": map[string]any{"const": kind},
+					}},
+					"then": map[string]any{"properties": map[string]any{
+						"target": map[string]any{"properties": map[string]any{"policy": stringEnumSchema(policyValues)}},
+					}},
+				})
+				continue
+			}
+			// A static operation must carry an owner-admissible concrete variant.
+			// Do not first enumerate the wider technical operation contract: a
+			// provider correction must never be told to choose a variant that this
+			// sealed owner catalog did not publish.
+			variantIDs := runtimeSemanticCatalogVariantIDs(catalog, kind)
+			proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+				"if": map[string]any{"properties": map[string]any{
+					"ownerModuleId": map[string]any{"const": catalog.OwnerModuleID},
+					"operationKind": map[string]any{"const": kind},
+				}},
+				"then": map[string]any{
+					"required": []string{"operationVariantId"},
+					"properties": map[string]any{
+						"operationVariantId": stringEnumSchemaWithMinimum(variantIDs, 1),
+					},
+				},
+			})
+			for _, rawVariant := range catalog.OperationVariants {
+				variant := rawVariant.Normalized()
+				if variant.Kind != kind || variant.VariantID == "" {
+					continue
+				}
+				policyValues := make([]string, 0, len(variant.AllowedTargetPolicies))
+				for _, policy := range variant.AllowedTargetPolicies {
+					policyValues = append(policyValues, string(policy))
+				}
+				proposalItems["allOf"] = append(proposalItems["allOf"].([]any), map[string]any{
+					"if": map[string]any{"allOf": []any{
+						map[string]any{"properties": map[string]any{
+							"ownerModuleId": map[string]any{"const": catalog.OwnerModuleID},
+							"operationKind": map[string]any{"const": kind},
+						}},
+						map[string]any{"required": []string{"operationVariantId"}},
+						map[string]any{"properties": map[string]any{"operationVariantId": map[string]any{"const": variant.VariantID}}},
+					}},
+					"then": map[string]any{"properties": map[string]any{
+						"target": map[string]any{"properties": map[string]any{
+							"policy":                    stringEnumSchema(policyValues),
+							"ownerSelectorRefs":         stringEnumArraySchema(variant.SelectorRefs),
+							"prospectiveConstraintRefs": stringEnumArraySchema(variant.ConstraintRefs),
+						}},
+					}},
+				})
+			}
+		}
 	}
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err

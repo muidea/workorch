@@ -746,7 +746,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 	}
 
 	if ownerFacts.TargetSelection == nil {
-		if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+		if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, required, admissibility, hasAdmissibility, exactRefs, false); ok {
 			return target, nil, admissibilityRefs, nil
 		}
 		return RuntimeOperationTargetAuthorization{
@@ -765,8 +765,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 		// AllowsNewTarget owners). A sealed ProspectiveTargetRef turns that into
 		// prospective_owner_target; without it the authorization stays exact and
 		// only kind narrowing applies.
-		allowsProspective := descriptor.AllowsNewTarget ||
-			(descriptor.OwnerModuleID == value.OwnerModuleID && RuntimeEffectIsDurable(descriptor.DefaultEffectScope))
+		allowsProspective, ownerSelectors, ownerConstraints := runtimeCandidateAdmissibilityAllowsProspective(required, contract, admissibility, hasAdmissibility)
 		prospectiveRef := value.ProspectiveTargetRef
 		if prospectiveRef == "" && len(exactRefs) == 1 {
 			// Required output may already seal the single create path while the
@@ -775,13 +774,10 @@ func runtimeCandidateTargetAuthorizationForKind(
 			prospectiveRef = exactRefs[0]
 		}
 		if !allowsProspective || prospectiveRef == "" {
-			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, required, admissibility, hasAdmissibility, exactRefs, true); ok {
 				return target, prerequisiteRefs, admissibilityRefs, nil
 			}
-			return RuntimeOperationTargetAuthorization{
-				Policy:          RuntimeOperationTargetPolicyExactTarget,
-				ExactTargetRefs: exactRefs,
-			}, prerequisiteRefs, admissibilityRefs, nil
+			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest prospective target for %q has no explicit owner-admissible operation variant", descriptor.Kind)
 		}
 		selectorRefs := make([]string, 0, 2)
 		if value.SelectorRef != "" {
@@ -789,8 +785,8 @@ func runtimeCandidateTargetAuthorizationForKind(
 		}
 		constraintRefs := append([]string(nil), value.SelectorCandidateRefs...)
 		if hasAdmissibility {
-			selectorRefs = normalizeStrings(append(selectorRefs, admissibility.SelectorRefs...))
-			constraintRefs = normalizeStrings(append(constraintRefs, admissibility.ConstraintRefs...))
+			selectorRefs = normalizeStrings(append(selectorRefs, ownerSelectors...))
+			constraintRefs = normalizeStrings(append(constraintRefs, ownerConstraints...))
 		}
 		return RuntimeOperationTargetAuthorization{
 			Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
@@ -827,6 +823,29 @@ func runtimeCandidateTargetAuthorizationForKind(
 				Policy: RuntimeOperationTargetPolicyExactTarget,
 			}, prerequisiteRefs, admissibilityRefs, nil
 		}
+		// A non-empty workspace may carry both a bounded existing inventory and
+		// an activation-sealed prospective deliverable. When the selected owner
+		// kind/variant explicitly authorizes creation, the prospective target is
+		// the only valid policy for this authorization. Do not downgrade it to
+		// selector-only existing_owner_scope: that policy would erase the
+		// prospective target and allow an existing inventory member to satisfy a
+		// binding intended for the new deliverable. The finite inventory remains
+		// an owner freshness fact and is checked by the owner feasibility probe.
+		if value.ProspectiveTargetRef != "" && hasAdmissibility {
+			if allowsProspective, ownerSelectors, ownerConstraints := runtimeCandidateAdmissibilityAllowsProspective(required, contract, admissibility, true); allowsProspective {
+				selectorRefs := make([]string, 0, 1+len(ownerSelectors))
+				if value.SelectorRef != "" {
+					selectorRefs = append(selectorRefs, value.SelectorRef)
+				}
+				selectorRefs = normalizeStrings(append(selectorRefs, ownerSelectors...))
+				return RuntimeOperationTargetAuthorization{
+					Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+					OwnerSelectorRefs:         selectorRefs,
+					ProspectiveConstraintRefs: ownerConstraints,
+					ProspectiveTargetRef:      value.ProspectiveTargetRef,
+				}, prerequisiteRefs, admissibilityRefs, nil
+			}
+		}
 		if value.CandidateCount != 0 && value.CandidateCount != len(scopeRefs) {
 			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest existing owner scope requires a complete bounded target set")
 		}
@@ -856,7 +875,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 			}, prerequisiteRefs, admissibilityRefs, nil
 		}
 		if len(value.TargetRefs) == 0 {
-			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+			if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, required, admissibility, hasAdmissibility, exactRefs, false); ok {
 				return target, prerequisiteRefs, admissibilityRefs, nil
 			}
 			return RuntimeOperationTargetAuthorization{
@@ -871,7 +890,7 @@ func runtimeCandidateTargetAuthorizationForKind(
 			ExactTargetRefs: append([]string(nil), value.TargetRefs...),
 		}, prerequisiteRefs, admissibilityRefs, nil
 	default:
-		if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, admissibility, hasAdmissibility, exactRefs); ok {
+		if target, ok := runtimeCandidateTargetAuthorizationFromAdmissibility(descriptor, contract, required, admissibility, hasAdmissibility, exactRefs, false); ok {
 			return target, prerequisiteRefs, admissibilityRefs, nil
 		}
 		return RuntimeOperationTargetAuthorization{
@@ -920,20 +939,22 @@ func runtimeCandidateValidateAdmissibilityInventory(value RuntimeOperationAdmiss
 func runtimeCandidateTargetAuthorizationFromAdmissibility(
 	descriptor RuntimeOperationDescriptor,
 	contract RuntimeOperationContract,
+	required RequiredOutputContract,
 	admissibility RuntimeOperationAdmissibility,
 	hasAdmissibility bool,
 	exactRefs []string,
+	creationRequested bool,
 ) (RuntimeOperationTargetAuthorization, bool) {
 	if !hasAdmissibility {
 		return RuntimeOperationTargetAuthorization{}, false
 	}
-	if len(exactRefs) != 0 {
+	if len(exactRefs) != 0 && !creationRequested {
 		return RuntimeOperationTargetAuthorization{
 			Policy:          RuntimeOperationTargetPolicyExactTarget,
 			ExactTargetRefs: exactRefs,
 		}, true
 	}
-	if len(admissibility.TargetRefs) != 0 {
+	if len(admissibility.TargetRefs) != 0 && !creationRequested {
 		if !descriptor.AllowsGroundedWorkspaceTarget && descriptor.OwnerModuleID != admissibility.OwnerModuleID && !contract.RequireTargetRefs {
 			return RuntimeOperationTargetAuthorization{
 				Policy: RuntimeOperationTargetPolicyExactTarget,
@@ -946,12 +967,16 @@ func runtimeCandidateTargetAuthorizationFromAdmissibility(
 		}, true
 	}
 	if len(admissibility.SelectorRefs) != 0 || len(admissibility.ConstraintRefs) != 0 {
-		if descriptor.AllowsNewTarget || (descriptor.OwnerModuleID == admissibility.OwnerModuleID && RuntimeEffectIsDurable(descriptor.DefaultEffectScope)) {
+		allowsProspective, selectorRefs, constraintRefs := runtimeCandidateAdmissibilityAllowsProspective(required, contract, admissibility, true)
+		if allowsProspective {
 			return RuntimeOperationTargetAuthorization{
 				Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-				OwnerSelectorRefs:         append([]string(nil), admissibility.SelectorRefs...),
-				ProspectiveConstraintRefs: append([]string(nil), admissibility.ConstraintRefs...),
+				OwnerSelectorRefs:         append([]string(nil), selectorRefs...),
+				ProspectiveConstraintRefs: append([]string(nil), constraintRefs...),
 			}, true
+		}
+		if creationRequested {
+			return RuntimeOperationTargetAuthorization{}, false
 		}
 		return RuntimeOperationTargetAuthorization{
 			Policy:            RuntimeOperationTargetPolicyExistingOwnerScope,
@@ -959,6 +984,49 @@ func runtimeCandidateTargetAuthorizationFromAdmissibility(
 		}, true
 	}
 	return RuntimeOperationTargetAuthorization{}, false
+}
+
+// runtimeCandidateAdmissibilityAllowsProspective reads only the sealed owner
+// catalog.  When a kind has discriminated variants, an explicit required
+// variant is mandatory whenever policies differ; the compiler never falls back
+// to descriptor owner/effect inference.
+func runtimeCandidateAdmissibilityAllowsProspective(required RequiredOutputContract, contract RuntimeOperationContract, admissibility RuntimeOperationAdmissibility, hasAdmissibility bool) (bool, []string, []string) {
+	if !hasAdmissibility {
+		return false, nil, nil
+	}
+	required = required.Normalized()
+	variantIDs := runtimeCandidateRequiredVariantIDs(contract.Kind, contract, required)
+	allowed, selectors, constraints, _, err := RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
+		admissibility, contract.Kind, variantIDs, RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+	)
+	if err != nil {
+		return false, nil, nil
+	}
+	return allowed, selectors, constraints
+}
+
+func runtimeCandidateRequiredVariantIDs(kind string, contract RuntimeOperationContract, required RequiredOutputContract) []string {
+	kind = CanonicalRuntimeBlockKind(kind)
+	seen := map[string]struct{}{}
+	ret := make([]string, 0)
+	for _, ref := range required.AcceptedOperationVariants {
+		if CanonicalRuntimeBlockKind(ref.Kind) == kind && strings.TrimSpace(ref.VariantID) != "" {
+			if _, ok := seen[ref.VariantID]; !ok {
+				seen[ref.VariantID] = struct{}{}
+				ret = append(ret, strings.TrimSpace(ref.VariantID))
+			}
+		}
+	}
+	for _, ref := range required.RequiredOperationSequence {
+		if CanonicalRuntimeBlockKind(ref.Kind) == kind && strings.TrimSpace(ref.VariantID) != "" {
+			if _, ok := seen[ref.VariantID]; !ok {
+				seen[ref.VariantID] = struct{}{}
+				ret = append(ret, strings.TrimSpace(ref.VariantID))
+			}
+		}
+	}
+	sort.Strings(ret)
+	return ret
 }
 
 func runtimeCandidateManifestVariants(contract RuntimeOperationContract, required RequiredOutputContract) ([]RuntimeOperationVariantContract, []string, error) {

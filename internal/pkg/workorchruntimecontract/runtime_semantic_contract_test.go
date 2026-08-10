@@ -81,6 +81,18 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 		semanticTestOwnerCatalog("file-catalog", RuntimeModuleFile, []string{StepKindFileWrite}),
 		semanticTestOwnerCatalog("shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession}),
 	}
+	catalogs[0].SelectorRefs = []string{"file/workspace-relative-create"}
+	catalogs[0].ConstraintRefs = []string{"workspace-relative-path"}
+	catalogs[0].OperationVariants = []RuntimeOperationAdmissibilityVariant{{
+		Kind: StepKindFileWrite,
+		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+			RuntimeOperationTargetPolicyExactTarget,
+			RuntimeOperationTargetPolicyExistingOwnerScope,
+			RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		SelectorRefs: []string{"file/workspace-relative-create"}, ConstraintRefs: []string{"workspace-relative-path"},
+	}}
+	catalogs[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalogs[0])
 	manifest, err := CompileRuntimeSemanticPlanManifest("ws-1", "run-1", definition, seed, activation.ExecutionContract, catalogs)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +162,7 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
 	}
 	escaped := document.Clone()
 	escaped.Proposals[0].Target.OwnerSelectorRefs = []string{"file/unsealed-selector"}
-	if err := escaped.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "outside owner catalog") {
+	if err := escaped.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "target.ownerSelectorRefs") {
 		t.Fatalf("proposal escaped the sealed owner vocabulary: %v", err)
 	}
 	emptyInventory := manifest.Clone()
@@ -168,6 +180,11 @@ func TestRuntimeSemanticDocumentRejectsValidationOnOwnerWithoutRecipe(t *testing
 	manifest := semanticContractTestManifest(t)
 	gitCatalog := semanticTestOwnerCatalog("semantic-git-catalog", RuntimeModuleGit, []string{StepKindGitWrite})
 	gitCatalog.SelectorRefs = []string{"workspace-repository"}
+	gitCatalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{
+		Kind: StepKindGitWrite, VariantID: "commit",
+		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyExistingOwnerScope},
+		SelectorRefs:          []string{"workspace-repository"},
+	}}
 	gitCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
 	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleGit)
 	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindGitWrite)
@@ -176,7 +193,7 @@ func TestRuntimeSemanticDocumentRejectsValidationOnOwnerWithoutRecipe(t *testing
 	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-002", TargetText: "commit", Order: 2})
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	proposal := RuntimeSemanticProofProposal{
-		CoverageWorkItemID: "cwi-002", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite,
+		CoverageWorkItemID: "cwi-002", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite, OperationVariantID: "commit",
 		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-repository"}},
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
 		ValidationRecipeID: "software-dev-validation-evidence", RequiredCheckRefs: []string{"check"}, DeclarationRef: "dod-002",
@@ -412,7 +429,7 @@ func TestRuntimeSemanticProposalRejectsOwnerKindMismatch(t *testing.T) {
 	}
 }
 
-func TestRuntimeSemanticProposalTargetRefsExcludeProspectiveIdentity(t *testing.T) {
+func TestRuntimeSemanticProposalTargetRefsIncludesProspectiveIdentityForOwnerProbe(t *testing.T) {
 	proposal := semanticContractTestProposal("cwi-001")
 	proposal.Target = RuntimeOperationTargetAuthorization{
 		Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
@@ -420,8 +437,8 @@ func TestRuntimeSemanticProposalTargetRefsExcludeProspectiveIdentity(t *testing.
 		ProspectiveTargetRef:      "go-test-memory-usage",
 		ProspectiveConstraintRefs: []string{"bounded-timeout"},
 	}
-	if refs := RuntimeSemanticProposalTargetRefs(proposal); len(refs) != 0 {
-		t.Fatalf("prospective target was treated as existing target refs: %+v", refs)
+	if refs := RuntimeSemanticProposalTargetRefs(proposal); len(refs) != 1 || refs[0] != "go-test-memory-usage" {
+		t.Fatalf("prospective target was not preserved for owner feasibility: %+v", refs)
 	}
 }
 
@@ -536,6 +553,15 @@ func semanticContractTestManifest(t *testing.T) RuntimeSemanticPlanManifest {
 	catalog.TargetRefs = []string{"main.go"}
 	catalog.SelectorRefs = []string{"file/workspace-relative-create"}
 	catalog.ConstraintRefs = []string{"workspace-relative-path"}
+	catalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{
+		Kind: StepKindFileWrite,
+		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+			RuntimeOperationTargetPolicyExactTarget,
+			RuntimeOperationTargetPolicyExistingOwnerScope,
+			RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		SelectorRefs: []string{"file/workspace-relative-create"}, ConstraintRefs: []string{"workspace-relative-path"},
+	}}
 	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	manifest := RuntimeSemanticPlanManifest{
 		SchemaVersion: RuntimeSemanticPlanManifestSchemaCurrent,

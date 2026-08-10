@@ -359,23 +359,41 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
+	fileInventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "file-admissibility-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileWrite,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs:   []string{"workspace-relative-new-file-target"},
+			ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		}},
+		SelectorRefs:     []string{"workspace-relative-new-file-target"},
+		ConstraintRefs:   []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		ObservedRevision: "file-revision-1",
+	}
+	fileInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileInventory)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileInventory}
 	bindRuntimeCandidateTestSelection(&facts, selection)
-	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.StepKindFileEdit})
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.StepKindFileWrite})
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds:             []string{"file/edit"},
-			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
-			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
-			RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
-			CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
+			AcceptedKinds:        []string{runtimecontract.StepKindFileWrite},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+			CoverageWorkItemIDs:  facts.Focus.CoverageWorkItemIDs,
 		},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	definition := runtimecontract.RuntimeDefinitionContext{
-		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 		ChangeImpact: &runtimecontract.RuntimeDefinitionChangeImpact{
 			Version: runtimecontract.RuntimeDefinitionChangeImpactVersionCurrent, Changed: true, Policy: "cumulative", RequiredPreExecutionAssessment: true,
 			GoalChange:           runtimecontract.RuntimeDefinitionChangeSet{EffectiveDefinitionID: "goal-1"},
@@ -432,9 +450,9 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 	for _, value := range []string{
 		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change"`, `"forbiddenTopLevelFields"`,
-		`"operationContracts":[{"kind":"file/edit"`, `"name":"oldText"`, `"name":"newText"`, `"targetCardinality":"one"`,
-		`"forbiddenParameters":["filePath","fileContent","path","targetRef","targetRefs"]`,
-		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"evidencePolicyIds":["go-test-observable"]`,
+		`"operationContracts":[{"kind":"file/write"`, `"name":"content"`, `"targetCardinality":"one"`,
+		`"forbiddenParameters":["input","output","payload","path","targetRef","targetRefs"]`,
+		`"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"evidencePolicyIds":["go-test-observable"]`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)

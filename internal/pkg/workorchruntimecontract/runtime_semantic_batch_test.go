@@ -237,11 +237,12 @@ func TestMergeRuntimeSemanticPlanBatchFeasibilityResultsRequiresExactBatchDocume
 		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: firstProposal.CoverageWorkItemID,
 		ProposalHash: StableRuntimeSemanticProofProposalHash(firstProposal), OwnerModuleID: firstProposal.OwnerModuleID,
 		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
-		ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision,
+		ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: []string{firstProposal.Target.ProspectiveTargetRef},
 	}
 	secondFact := firstFact.Clone()
 	secondFact.CoverageWorkItemID = secondProposal.CoverageWorkItemID
 	secondFact.ProposalHash = StableRuntimeSemanticProofProposalHash(secondProposal)
+	secondFact.TargetRefs = []string{secondProposal.Target.ProspectiveTargetRef}
 	firstResult := RuntimeSemanticPlanBatchFeasibilityResult{
 		BatchID: firstBatch.BatchID, BatchHash: firstBatch.Hash, DocumentHash: StableRuntimeSemanticPlanDocumentHash(firstDocument),
 		Feasibilities: []RuntimeSemanticProofFeasibility{firstFact},

@@ -261,6 +261,14 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	if got := admissibility.Acquisition.Admissibility.SelectorRefs; len(got) != 1 || got[0] != gitWorkspaceRepositorySelector {
 		t.Fatalf("Git semantic selector refs = %+v, want %q", got, gitWorkspaceRepositorySelector)
 	}
+	variantRefs := make([]runtimecontract.RuntimeOperationVariantRef, 0, len(admissibility.Acquisition.Admissibility.OperationVariants))
+	for _, variant := range admissibility.Acquisition.Admissibility.OperationVariants {
+		variantRefs = append(variantRefs, runtimecontract.RuntimeOperationVariantRef{Kind: variant.Kind, VariantID: variant.VariantID})
+	}
+	wantVariantRefs := []runtimecontract.RuntimeOperationVariantRef{{Kind: StepKindRead, VariantID: "status"}, {Kind: StepKindRead, VariantID: "diff"}, {Kind: StepKindRead, VariantID: "log"}, {Kind: StepKindRead, VariantID: "show"}, {Kind: StepKindRead, VariantID: "branch"}}
+	if !runtimecontract.SameRuntimeOperationVariantRefs(variantRefs, wantVariantRefs) {
+		t.Fatalf("Git owner variant facts = %+v, want %+v", variantRefs, wantVariantRefs)
+	}
 
 	operationName := "status"
 	observation := gitAdmissibilityObservation(admissibilityCommand.PrerequisiteID, admissibility.Acquisition.Admissibility, capability.Snapshot.WorkspaceTreeRevision)
