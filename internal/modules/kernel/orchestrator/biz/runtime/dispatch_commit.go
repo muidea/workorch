@@ -83,11 +83,15 @@ type RuntimeAggregate struct {
 	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
 	// observations enter only through RuntimeInternalEvent and never mutate
 	// Facts directly.
-	Reconciliation              runtimecontract.RuntimeCWIReconciliationLedger
-	Decision                    runtimecontract.RuntimeDecision
-	ActiveDispatch              *SealedDispatch
-	CompletedDispatches         []SealedDispatch
-	ProcessedEventIDs           []string
+	Reconciliation      runtimecontract.RuntimeCWIReconciliationLedger
+	Decision            runtimecontract.RuntimeDecision
+	ActiveDispatch      *SealedDispatch
+	CompletedDispatches []SealedDispatch
+	ProcessedEventIDs   []string
+	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for File-owner
+	// repair-surface facts.  It is separate from generic event IDs so owner
+	// confirmation idempotency cannot become a global event index.
+	RepairSurfaceConfirmations  []runtimecontract.RuntimeRepairSurfaceConfirmationRecord
 	Diagnostics                 []runtimecontract.RuntimeDiagnosticRecord
 	CandidateRequestSessions    []runtimecontract.RuntimeCandidateRequestSession
 	CandidateAttempts           []runtimecontract.RuntimeCandidateAttemptRecord
@@ -577,8 +581,17 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 		// A completed transaction remains durable audit/provenance evidence, but
 		// SM-2 must reacquire changed owner facts before advancing this focus.
 		canAdvanceFocus := !dispatchInvalidated && len(aggregate.Facts.Prerequisites.Pending) == 0
+		previousFocusID := aggregate.Facts.Focus.ID
 		if canAdvanceFocus {
 			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+			if aggregate.Facts.Focus.ID != previousFocusID {
+				// Only the Orchestrator-owned evidence commit may advance SM-2.
+				// When that reaches an unbound placeholder, reopen the retained
+				// global-order ledger for the next focus-local proof transaction.
+				if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+					return EvidenceCommitResult{}, err
+				}
+			}
 		}
 		var previousSnapshot *runtimecontract.AuthoritySnapshot
 		if canAdvanceFocus {
@@ -868,8 +881,12 @@ func coverageBindingMismatchFailure(facts runtimecontract.RuntimeFacts, fact run
 		CoverageWorkItemIDs:  coverageIDs,
 		TargetRefs:           append([]string(nil), fact.TargetRefs...),
 		MissingEvidenceKinds: []string{fact.Kind},
-		FailureClass:         runtimecontract.FailureClassNoProgressExhausted,
-		FailureCode:          coverageBindingMismatchFailureCode,
+		// A receipt/binding mismatch is an already-observed owner/authority
+		// contract violation. No repair budget was consumed and the provider
+		// cannot repair an immutable dispatched receipt, so this must not be
+		// represented as no-progress exhaustion.
+		FailureClass: runtimecontract.FailureClassRuntimeContractMisalignment,
+		FailureCode:  coverageBindingMismatchFailureCode,
 	}
 	if len(gap.CoverageWorkItemIDs) == 0 {
 		gap.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
@@ -879,12 +896,22 @@ func coverageBindingMismatchFailure(facts runtimecontract.RuntimeFacts, fact run
 		runtimecontract.AssessmentDispositionRepairableGap,
 		&gap,
 	)
+	original := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion:   runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID:   runtimecontract.RuntimeModuleOrchestrator,
+		OriginalClass:   "runtime_contract",
+		OriginalCode:    coverageBindingMismatchFailureCode,
+		OriginalMessage: strings.TrimSpace(diagnostic),
+		Signature:       gap.FailureSignature,
+		TargetRefs:      append([]string(nil), fact.TargetRefs...),
+	}
 	return runtimecontract.FailureFact{
-		Class:      runtimecontract.FailureClassNoProgressExhausted,
-		Code:       coverageBindingMismatchFailureCode,
-		Signature:  gap.FailureSignature,
-		Message:    "sealed coverage binding does not match persisted owner receipt: " + strings.TrimSpace(diagnostic),
-		TargetRefs: append([]string(nil), fact.TargetRefs...),
+		Class:              runtimecontract.FailureClassRuntimeContractMisalignment,
+		Code:               coverageBindingMismatchFailureCode,
+		Signature:          gap.FailureSignature,
+		Message:            "sealed coverage binding does not match persisted owner receipt: " + strings.TrimSpace(diagnostic),
+		OriginalDiagnostic: &original,
+		TargetRefs:         append([]string(nil), fact.TargetRefs...),
 	}
 }
 
@@ -1114,6 +1141,14 @@ func (a RuntimeAggregate) Validate() error {
 	for _, invalidation := range a.PrerequisiteInvalidations {
 		if err := invalidation.Validate(); err != nil {
 			return fmt.Errorf("runtime aggregate prerequisite invalidation: %w", err)
+		}
+	}
+	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(a.RepairSurfaceConfirmations); err != nil {
+		return fmt.Errorf("runtime aggregate repair surface confirmations: %w", err)
+	}
+	for _, confirmation := range a.RepairSurfaceConfirmations {
+		if confirmation.Confirmation.Observation.WorkspaceID != a.Facts.WorkspaceID || confirmation.Confirmation.Observation.RunID != a.Facts.RunID {
+			return fmt.Errorf("runtime aggregate repair surface confirmation scope mismatch")
 		}
 	}
 	if a.DriveLease != nil {

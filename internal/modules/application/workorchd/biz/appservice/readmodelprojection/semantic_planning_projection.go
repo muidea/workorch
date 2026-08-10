@@ -74,7 +74,12 @@ func semanticPlanningDisplayState(phase runtimecontract.RuntimeSemanticPlanningP
 		return "semantic_contract_required"
 	case runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
 		return "planning"
-	case runtimecontract.RuntimeSemanticPlanningProposalAccepted, runtimecontract.RuntimeSemanticPlanningFeasibilityRequired:
+	case runtimecontract.RuntimeSemanticPlanningOrderAccepted,
+		runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen,
+		runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted,
+		runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityPending,
+		runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete,
+		runtimecontract.RuntimeSemanticPlanningFeasibilityRequired:
 		return "feasibility"
 	case runtimecontract.RuntimeSemanticPlanningSealed:
 		return "sealed"

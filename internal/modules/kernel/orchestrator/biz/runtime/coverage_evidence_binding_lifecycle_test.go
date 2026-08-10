@@ -215,10 +215,15 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 		t.Fatalf("missing validation proof received CWI credit: %+v", committed.Aggregate)
 	}
 	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || committed.Aggregate.Decision.Terminal == nil ||
-		committed.Aggregate.Decision.Terminal.Code != coverageBindingMismatchFailureCode ||
+		committed.Aggregate.Decision.Terminal.Code != "runtime_contract_defect" ||
 		len(committed.Aggregate.GovernanceRequests) != 0 ||
 		committed.Aggregate.Facts.Recovery.ProviderTransportAttempts != 0 || committed.Aggregate.Facts.Recovery.OperationRecoveryAttempts != 0 {
 		t.Fatalf("missing proof did not reach a bounded SM-2 terminal: %+v", committed.Aggregate)
+	}
+	if committed.Aggregate.Facts.Failure == nil || committed.Aggregate.Facts.Failure.Class != runtimecontract.FailureClassRuntimeContractMisalignment ||
+		committed.Aggregate.Facts.Failure.OriginalDiagnostic == nil ||
+		committed.Aggregate.Facts.Failure.OriginalDiagnostic.OriginalCode != coverageBindingMismatchFailureCode {
+		t.Fatalf("binding mismatch was not retained as a runtime contract diagnostic: %+v", committed.Aggregate.Facts.Failure)
 	}
 	if got := committed.Aggregate.Facts.Evidence.Accepted[0].EvidenceReason; !strings.Contains(got, "coverage_binding_mismatch") {
 		t.Fatalf("original binding diagnostic was not retained: %q", got)

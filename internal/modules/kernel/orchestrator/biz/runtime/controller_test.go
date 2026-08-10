@@ -226,22 +226,30 @@ func TestRuntimeControllerApplyInternalEventPersistsOwnerFactOnce(t *testing.T) 
 }
 
 func TestRuntimeControllerOwnerValidationRecipeExhaustionIsStableTypedTerminal(t *testing.T) {
-	facts := controllerFacts()
-	facts.Failure = &runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassNoProgressExhausted,
-		Code:  "validation_recipe_exhausted", Signature: "validation-recipe-exhausted/test", Message: "sealed validation recipe is unavailable",
-	}
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "validation_recipe_exhausted" {
-		t.Fatalf("validation recipe exhaustion did not become its typed terminal: %+v", aggregate.Decision)
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OriginalClass: "semantic_feasibility", OriginalCode: "validation_recipe_exhausted",
+		OriginalMessage: "sealed validation recipe is unavailable", Signature: "validation-recipe-exhausted/test",
+	}
+	failed, err := controller.failSemanticContract(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "semantic_owner_feasibility_infeasible", diagnostic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "semantic_contract_failed" || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || failed.Facts.Failure.Class == runtimecontract.FailureClassNoProgressExhausted {
+		t.Fatalf("validation recipe exhaustion did not become its typed terminal: %+v", failed)
+	}
+	if failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode {
+		t.Fatalf("validation recipe diagnostic was not preserved: %+v", failed.Facts.Failure)
 	}
 }
 

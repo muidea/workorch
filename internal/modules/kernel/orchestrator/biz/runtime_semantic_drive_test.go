@@ -322,9 +322,13 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		DeclarationRef:        "semantic/budget-test",
 	}
-	document := runtimecontract.RuntimeSemanticPlanDocument{
+	order := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
 	}
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	expected := runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, 0)
@@ -353,7 +357,40 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 	}
 	result, err = controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventSemanticPlanEvaluated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticDocument: &document, LogicalRequestID: session.LogicalRequestID,
+		SemanticDocument: &order, LogicalRequestID: session.LogicalRequestID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = result.Aggregate
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "semantic-budget-proof-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventSemanticPlanBatchCompiled, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		SemanticPlanBatch: &batch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = result.Aggregate
+	proof := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID: batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
+	}
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	result, err = controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventSemanticPlanEvaluated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID,
 	})
 	if err != nil {
 		t.Fatal(err)

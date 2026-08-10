@@ -56,6 +56,17 @@ func (r *semanticResponseLossRepository) Save(ctx context.Context, aggregate Run
 func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempotent(t *testing.T) {
 	controller, repository, aggregate := newSemanticPlanningController(t)
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
+	proposal := document.Proposals[0]
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{proposal.CoverageWorkItemID}
+	order.Proposals = nil
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
 
 	apply := func(event RuntimeInternalEvent) RuntimeAggregate {
 		t.Helper()
@@ -78,7 +89,27 @@ func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempoten
 	if aggregate.StateRevision != requestRevision {
 		t.Fatal("duplicate request changed aggregate revision")
 	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: "semantic-request-1"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-request-1"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := document.Clone()
+	proof.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
 	batchID := aggregate.SemanticPlanning.FeasibilityBatchID
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: batchID, SemanticFeasibility: &feasibility})
@@ -88,9 +119,15 @@ func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempoten
 		t.Fatal("duplicate owner observation changed aggregate revision")
 	}
 	savesBeforeSeal := repository.saves
+	acceptedBatch := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, acceptedBatch, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
-	if repository.saves != savesBeforeSeal+1 {
-		t.Fatalf("semantic seal saves = %d, want one atomic save after %d", repository.saves, savesBeforeSeal)
+	if repository.saves != savesBeforeSeal+2 {
+		t.Fatalf("semantic merge+seal saves = %d, want two CAS saves after %d", repository.saves, savesBeforeSeal)
 	}
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		t.Fatalf("semantic phase = %q", aggregate.SemanticPlanning.Phase)
@@ -100,7 +137,7 @@ func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempoten
 	}
 	sealedRevision := aggregate.StateRevision
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
-	if aggregate.StateRevision != sealedRevision || repository.saves != savesBeforeSeal+1 {
+	if aggregate.StateRevision != sealedRevision || repository.saves != savesBeforeSeal+2 {
 		t.Fatalf("duplicate semantic seal changed authority: revision=%d saves=%d", aggregate.StateRevision, repository.saves)
 	}
 	reloaded, err := controller.Load(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
@@ -117,6 +154,9 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	manifest, order, feasibility := semanticPlanningFixture(t, aggregate)
 	proposal := order.Proposals[0]
 	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
 	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
 	order.Proposals = nil
 	if err := order.ValidateAgainstManifest(manifest); err != nil {
@@ -132,7 +172,10 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "batch-prefix", LogicalRequestID: "order-request"})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, order, 0, "batch-request", 1)
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +189,7 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	proof.BatchID = batch.BatchID
 	proof.BatchSequence = batch.Sequence
 	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	proof.CoverageOrder = nil
 	proof.Proposals = []runtimecontract.RuntimeSemanticProofProposal{proposal}
 	if err := proof.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
@@ -161,12 +205,12 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	accepted := aggregate.SemanticPlanning.Batches[0]
 	batchResult := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
 		BatchID: accepted.BatchID, BatchHash: accepted.Hash,
-		DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(proof),
+		DocumentHash:  accepted.DocumentHash,
 		Feasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility},
 	}
 	batchResult.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchResult)
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, SemanticPlanBatchFeasibilityResult: &batchResult})
-	merged, err := runtimecontract.MergeRuntimeSemanticPlanBatchDocuments(manifest, order, []runtimecontract.RuntimeSemanticPlanDocument{proof})
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +243,6 @@ func TestRuntimeSemanticBatchDocumentReplayIsIdempotent(t *testing.T) {
 	if aggregate.StateRevision != mergeRevision {
 		t.Fatal("replayed merged semantic document changed durable state")
 	}
-	mergeFeasibilityRevision := aggregate.StateRevision
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged, SemanticPlanMergedFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}})
-	if aggregate.StateRevision != mergeFeasibilityRevision {
-		t.Fatal("replayed merged feasibility changed durable state")
-	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(aggregate.Facts.ReconciliationContract.Bindings) != 1 {
 		t.Fatalf("batch replay recovery did not reach atomic semantic seal: %+v", aggregate.SemanticPlanning)
@@ -214,6 +253,9 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, order, _ := semanticPlanningFixture(t, aggregate)
 	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
 	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
 	order.Proposals = nil
 	apply := func(event RuntimeInternalEvent) {
@@ -226,7 +268,10 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "batch-correction-prefix", LogicalRequestID: "order-request"})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, order, 0, "batch-request", 1)
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +300,9 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
 	order.ManifestHash = manifest.Hash
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
 	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID, "cwi-later"}
 	order.Proposals = nil
 	apply := func(event RuntimeInternalEvent) {
@@ -267,7 +315,10 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "batch-scope-prefix", LogicalRequestID: "order-request"})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, order, 0, "batch-request", 1)
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,9 +442,18 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanBatch(manifest, correctedOrder, 0, "proof-request-1", 1)
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, correctedOrder, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 2,
+	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got, want := batch.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-prerequisite", "cwi-v2"}; !sameOrderedSemanticCoverageIDs(got, want) {
+		t.Fatalf("focus batch dependency closure = %v, want %v", got, want)
+	}
+	if len(batch.PendingCoverageWorkItemIDs) != 0 {
+		t.Fatalf("dependency closure left pending IDs: %v", batch.PendingCoverageWorkItemIDs)
 	}
 	batched, err := controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
 	if err != nil {
@@ -407,11 +467,22 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 func TestRuntimeSemanticPlanningFailurePreservesOwnerDiagnosticFacts(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
+	proposal := document.Proposals[0]
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{proposal.CoverageWorkItemID}
+	order.Proposals = nil
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	apply := func(event RuntimeInternalEvent) RuntimeAggregate {
 		t.Helper()
 		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
-		result, err := controller.ApplyInternalEvent(ctx, event)
+		result, err := controller.ApplyInternalEvent(context.Background(), event)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +490,27 @@ func TestRuntimeSemanticPlanningFailurePreservesOwnerDiagnosticFacts(t *testing.
 		return aggregate
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1"})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: "semantic-request-1"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-request-1"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := document.Clone()
+	proof.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
 	ownerDiagnostic := runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -429,9 +520,15 @@ func TestRuntimeSemanticPlanningFailurePreservesOwnerDiagnosticFacts(t *testing.
 	feasibility.OriginalDiagnostic = &ownerDiagnostic
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility})
 	failure := semanticPlanningDiagnostic()
+	failure.OriginalCode = "validation_recipe_exhausted"
+	failure.OriginalMessage = "validation recipe cannot execute in workspace"
+	failure.Signature = "shell/validation-recipe-exhausted"
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractFailed, SemanticDiagnostic: &failure})
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || len(aggregate.SemanticPlanning.Feasibilities) != 1 || aggregate.SemanticPlanning.Feasibilities[0].OriginalDiagnostic == nil || aggregate.SemanticPlanning.Feasibilities[0].OriginalDiagnostic.OriginalMessage != ownerDiagnostic.OriginalMessage {
 		t.Fatalf("failed semantic ledger lost owner facts: %+v", aggregate.SemanticPlanning)
+	}
+	if aggregate.Facts.Failure == nil || aggregate.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
+		t.Fatalf("semantic owner failure was misclassified: %+v", aggregate.Facts.Failure)
 	}
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "semantic_contract_failed" {
 		t.Fatalf("semantic failure did not seal terminal decision: %+v", aggregate.Decision)
@@ -472,6 +569,17 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		t.Fatal(err)
 	}
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
+	proposal := document.Proposals[0]
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{proposal.CoverageWorkItemID}
+	order.Proposals = nil
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
 	feasibility.CatalogSnapshotID = catalog.SnapshotID
 	feasibility.CatalogObservationID = observation.ObservationID
 	feasibility.Status = runtimecontract.RuntimeSemanticFeasibilityStale
@@ -509,7 +617,28 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	if err != nil {
 		t.Fatal(err)
 	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: session.LogicalRequestID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: session.LogicalRequestID})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := document.Clone()
+	proof.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	proof.CoverageOrder = nil
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
 	batchID := aggregate.SemanticPlanning.FeasibilityBatchID
 	beforeObservationRevision := aggregate.StateRevision
@@ -669,6 +798,17 @@ func TestRuntimeSemanticPrerequisiteRequiredRetiresCatalogWithoutInventingStaleR
 		t.Fatal(err)
 	}
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
+	proposal := document.Proposals[0]
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{proposal.CoverageWorkItemID}
+	order.Proposals = nil
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
 	apply := func(event RuntimeInternalEvent) {
 		t.Helper()
 		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
@@ -679,7 +819,28 @@ func TestRuntimeSemanticPrerequisiteRequiredRetiresCatalogWithoutInventingStaleR
 		aggregate = result.Aggregate
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1"})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: "semantic-request-1"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-request-1"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := document.Clone()
+	proof.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	proof.CoverageOrder = nil
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
 	feasibility.CatalogSnapshotID = catalog.SnapshotID
 	feasibility.CatalogObservationID = observation.ObservationID
@@ -717,6 +878,13 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 	}
 	facts.Coverage = append(facts.Coverage, secondItem)
 	facts.Slices[0].CoverageWorkItemIDs = append(facts.Slices[0].CoverageWorkItemIDs, secondItem.ID)
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-v2-second", SliceID: secondItem.SliceID,
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{secondItem.ID},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AcceptedStepKinds:     []string{runtimecontract.StepKindGitWrite},
+		TargetRefs:            []string{"workspace_deliverable"},
+	}}
 	facts.DefinitionSeed.CoverageItems = append(facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{
 		ID: secondItem.ID, SliceID: secondItem.SliceID, SourceScope: secondItem.SourceScope, SourceID: secondItem.SourceID, TargetText: secondItem.TargetText,
 	})
@@ -759,6 +927,14 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 		},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	order := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID, manifest.CoverageItems[1].ID},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
 	proposals := []runtimecontract.RuntimeSemanticProofProposal{
 		{
 			CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
@@ -767,17 +943,14 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			DeclarationRef:        "semantic/" + string(manifest.CoverageItems[0].ID),
 		},
-		{
-			CoverageWorkItemID: manifest.CoverageItems[1].ID, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKind: runtimecontract.StepKindGitWrite,
-			Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"workspace_deliverable"}},
-			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-			DeclarationRef:        "semantic/" + string(manifest.CoverageItems[1].ID),
-		},
 	}
-	document := runtimecontract.RuntimeSemanticPlanDocument{
-		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: proposals,
+	activeProposal := proposals[0]
+	activeFeasibility := runtimecontract.RuntimeSemanticProofFeasibility{
+		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: activeProposal.CoverageWorkItemID,
+		ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(activeProposal), OwnerModuleID: activeProposal.OwnerModuleID,
+		CatalogSnapshotID: fileCatalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
+		ObservedRevision: fileCatalog.ObservedRevision, TargetRefs: activeProposal.Target.ExactTargetRefs,
 	}
 	apply := func(active *RuntimeController, event RuntimeInternalEvent) RuntimeAggregate {
 		t.Helper()
@@ -790,23 +963,31 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 		return aggregate
 	}
 	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1"})
-	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: "semantic-request-1"})
+	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-request-1"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID: batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{activeProposal},
+	}
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
 	apply(controller, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
 	batchID := aggregate.SemanticPlanning.FeasibilityBatchID
-	feasibilities := make([]runtimecontract.RuntimeSemanticProofFeasibility, 0, 2)
-	for _, proposal := range proposals {
-		catalog := fileCatalog
-		if proposal.OwnerModuleID == runtimecontract.RuntimeModuleGit {
-			catalog = gitCatalog
-		}
-		feasibilities = append(feasibilities, runtimecontract.RuntimeSemanticProofFeasibility{
-			SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
-			DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
-			ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
-			CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
-			ObservedRevision: catalog.ObservedRevision, TargetRefs: proposal.Target.ExactTargetRefs,
-		})
-	}
 	responseLoss := &semanticResponseLossRepository{
 		RuntimeStateRepository: repository, marker: "semantic-partial-batch-response-loss",
 		match: func(candidate RuntimeAggregate) bool { return len(candidate.SemanticPlanning.Feasibilities) == 1 },
@@ -823,7 +1004,7 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 		}()
 		_, _ = lostController.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 			Kind: RuntimeInternalEventSemanticFeasibilityObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			SemanticBatchID: batchID, SemanticFeasibility: &feasibilities[1],
+			SemanticBatchID: batchID, SemanticFeasibility: &activeFeasibility,
 		})
 		t.Fatal("expected partial semantic batch response loss after durable CAS")
 	}()
@@ -833,28 +1014,36 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 		t.Fatal(err)
 	}
 	revision := aggregate.StateRevision
-	apply(restarted, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: batchID, SemanticFeasibility: &feasibilities[1]})
+	apply(restarted, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: batchID, SemanticFeasibility: &activeFeasibility})
 	if aggregate.StateRevision != revision {
 		t.Fatal("restart replay changed the committed out-of-order Git feasibility observation")
 	}
-	conflictingGit := feasibilities[1].Clone()
-	conflictingGit.TargetRefs = []string{"different_repository_target"}
+	conflictingFile := activeFeasibility.Clone()
+	conflictingFile.TargetRefs = []string{"different_file_target"}
 	if _, conflictErr := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticFeasibilityObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticBatchID: batchID, SemanticFeasibility: &conflictingGit,
+		SemanticBatchID: batchID, SemanticFeasibility: &conflictingFile,
 	}); !errors.Is(conflictErr, common.ErrConflict) {
 		t.Fatalf("conflicting Git feasibility error = %v, want conflict", conflictErr)
 	}
 	if repository.aggregate.StateRevision != revision {
 		t.Fatalf("conflicting Git feasibility changed durable revision: got %d want %d", repository.aggregate.StateRevision, revision)
 	}
-	apply(restarted, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: batchID, SemanticFeasibility: &feasibilities[0]})
-	if len(aggregate.SemanticPlanning.Feasibilities) != 2 || aggregate.SemanticPlanning.FeasibilitySetHash != runtimecontract.StableRuntimeSemanticFeasibilitySetHash(feasibilities) {
+	if len(aggregate.SemanticPlanning.Feasibilities) != 1 || aggregate.SemanticPlanning.FeasibilitySetHash != runtimecontract.StableRuntimeSemanticFeasibilitySetHash([]runtimecontract.RuntimeSemanticProofFeasibility{activeFeasibility}) {
 		t.Fatalf("partial semantic batch did not resume at the missing owner fact: %+v", aggregate.SemanticPlanning)
 	}
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(restarted, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
 	apply(restarted, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
-	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(aggregate.Facts.ReconciliationContract.Bindings) != 2 {
-		t.Fatalf("recovered semantic fan-out did not seal the complete binding set: %+v", aggregate)
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(aggregate.Facts.ReconciliationContract.Bindings) != 1 {
+		t.Fatalf("recovered semantic focus did not seal current binding set: %+v", aggregate)
+	}
+	if len(aggregate.Facts.RemainingFocuses) != 1 || len(aggregate.Facts.RemainingFocuses[0].CoverageEvidenceBindings) != 0 || aggregate.Facts.RemainingFocuses[0].CoverageWorkItemIDs[0] != secondItem.ID {
+		t.Fatalf("later cross-owner focus was not retained pending: %+v", aggregate.Facts.RemainingFocuses)
 	}
 }
 
@@ -872,51 +1061,90 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "multi-batch-prefix", LogicalRequestID: "order-request"})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "order-request"})
-	for sequence := 0; sequence < 2; sequence++ {
-		batch, err := runtimecontract.CompileRuntimeSemanticPlanBatchFromOffset(manifest, order, sequence, sequence, fmt.Sprintf("batch-request-%d", sequence), 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
-		if err != nil {
-			t.Fatal(err)
-		}
-		document := runtimecontract.RuntimeSemanticPlanDocument{
-			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-			PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: batch.BatchID, BatchSequence: batch.Sequence,
-			BatchCoverageWorkItemIDs: batch.CoverageWorkItemIDs,
-			Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposals[sequence]},
-		}
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: batch.RequestLogicalID})
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[sequence]})
-		accepted := aggregate.SemanticPlanning.Batches[sequence]
-		result := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{BatchID: accepted.BatchID, BatchHash: accepted.Hash, DocumentHash: runtimecontract.StableRuntimeSemanticPlanDocumentHash(document), Feasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibilities[sequence]}}
-		result.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, SemanticPlanBatchFeasibilityResult: &result})
-	}
-	merged, err := runtimecontract.MergeRuntimeSemanticPlanBatchDocuments(manifest, order, aggregate.SemanticPlanning.BatchDocuments)
+	// First transaction is scoped to the active focus only. The second CWI is
+	// retained as an inert pending placeholder and cannot enter this proof
+	// document or owner-fact set.
+	firstBatch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "batch-request-0", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
-	mergedFacts, err := runtimecontract.MergeRuntimeSemanticPlanBatchFeasibilityResults(manifest, merged, aggregate.SemanticPlanning.Batches, aggregate.SemanticPlanning.BatchFeasibilityResults)
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, firstBatch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	responseLoss := &semanticResponseLossRepository{RuntimeStateRepository: repository, marker: "semantic-multi-batch-feasibility-merge-response-loss", match: func(candidate RuntimeAggregate) bool {
-		return candidate.SemanticPlanning.FeasibilitySetHash == runtimecontract.StableRuntimeSemanticFeasibilitySetHash(mergedFacts)
+	firstDocument := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: firstBatch.BatchID, BatchSequence: firstBatch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), firstBatch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposals[0]},
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &firstDocument, LogicalRequestID: firstBatch.RequestLogicalID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[0]})
+	firstAccepted := aggregate.SemanticPlanning.Batches[0]
+	firstMerged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, firstAccepted, firstDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &firstMerged})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	if len(aggregate.Facts.RemainingFocuses) != 1 || len(aggregate.Facts.RemainingFocuses[0].CoverageEvidenceBindings) != 0 {
+		t.Fatalf("first focus admitted later CWI as authority: %+v", aggregate.Facts.RemainingFocuses)
+	}
+	// Simulate the SM-4 evidence commit that satisfies the first CWI and
+	// advances SM-2. This is persisted through the same owner-local helpers;
+	// no provider or capability owner is involved in selecting the next focus.
+	if err := runtimeTestAdvanceSemanticFocus(t, repository, &aggregate); err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted ||
+		aggregate.Facts.Focus.ID != "semantic-pending/focus-v2-second/cwi-v2-second" {
+		t.Fatalf("next focus did not reopen retained order lineage: phase=%s focus=%+v", aggregate.SemanticPlanning.Phase, aggregate.Facts.Focus)
+	}
+	secondBatch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, aggregate.SemanticPlanning.NextBatchSequence, "batch-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, secondBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDocument := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: secondBatch.BatchID, BatchSequence: secondBatch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), secondBatch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposals[1]},
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &secondDocument, LogicalRequestID: secondBatch.RequestLogicalID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[1]})
+	secondAccepted := aggregate.SemanticPlanning.Batches[1]
+	secondMerged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, secondAccepted, secondDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &secondMerged})
+	// Lose the response after the second seal has been durably committed. The
+	// restarted owner must observe the same cumulative reconciliation lineage.
+	responseLoss := &semanticResponseLossRepository{RuntimeStateRepository: repository, marker: "semantic-multi-batch-seal-response-loss", match: func(candidate RuntimeAggregate) bool {
+		return candidate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed && len(candidate.Facts.ReconciliationContract.Bindings) == 2
 	}}
 	controller.repository = responseLoss
 	controller.transitions.repository = responseLoss
 	func() {
 		defer func() {
-			if recovered := recover(); recovered != "semantic-multi-batch-feasibility-merge-response-loss" {
+			if recovered := recover(); recovered != "semantic-multi-batch-seal-response-loss" {
 				t.Fatalf("unexpected feasibility merge response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, SemanticPlanMergedFeasibilities: mergedFacts})
-		t.Fatal("expected feasibility merge response loss after durable CAS")
+		_, _ = controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID})
+		t.Fatal("expected second semantic seal response loss after durable CAS")
 	}()
 	aggregate = *repository.aggregate
 	controller, err = NewRuntimeController(repository)
@@ -924,13 +1152,12 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 		t.Fatal(err)
 	}
 	revision := aggregate.StateRevision
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged, SemanticPlanMergedFeasibilities: mergedFacts})
-	if aggregate.StateRevision != revision {
-		t.Fatal("replayed multi-batch feasibility merge changed durable revision")
-	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	if aggregate.StateRevision != revision {
+		t.Fatal("replayed second semantic seal changed durable revision")
+	}
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(aggregate.Facts.ReconciliationContract.Bindings) != 2 {
-		t.Fatalf("multi-batch feasibility recovery did not seal: %+v", aggregate.SemanticPlanning)
+		t.Fatalf("multi-batch focus recovery did not seal: %+v", aggregate.SemanticPlanning)
 	}
 }
 
@@ -945,6 +1172,13 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	second := runtimecontract.RuntimeCoverageItemFact{ID: "cwi-v2-second", SliceID: facts.Slices[0].ID, SourceScope: "dodItem", SourceID: "dod-v2-second", TargetText: "deliver second", State: runtimecontract.RuntimeCoverageItemStateOpen}
 	facts.Coverage = append(facts.Coverage, second)
 	facts.Slices[0].CoverageWorkItemIDs = append(facts.Slices[0].CoverageWorkItemIDs, second.ID)
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-v2-second", SliceID: second.SliceID,
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{second.ID},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AcceptedStepKinds:     []string{runtimecontract.StepKindFileWrite},
+		TargetRefs:            []string{"target.txt"},
+	}}
 	facts.DefinitionSeed.CoverageItems = append(facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: second.ID, SliceID: second.SliceID, SourceScope: second.SourceScope, SourceID: second.SourceID, TargetText: second.TargetText})
 	facts.DefinitionSeed.Slices = facts.Slices
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
@@ -1031,7 +1265,10 @@ func semanticPlanningFixture(t *testing.T, aggregate RuntimeAggregate) (runtimec
 	}
 	document := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-fixture", BatchSequence: 0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{proposal.CoverageWorkItemID},
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
@@ -1040,7 +1277,7 @@ func semanticPlanningFixture(t *testing.T, aggregate RuntimeAggregate) (runtimec
 		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
 		ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
-		CatalogSnapshotID: "catalog-file-1", Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-revision-1", TargetRefs: []string{"target.txt"},
+		CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision, TargetRefs: []string{"target.txt"},
 	}
 	return manifest, document, feasibility
 }
@@ -1069,4 +1306,74 @@ func semanticPlanningCorrectionDirective(manifest runtimecontract.RuntimeSemanti
 	}
 	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
 	return directive
+}
+
+func sameOrderedSemanticCoverageIDs(left, right []common.CoverageWorkItemID) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+// runtimeTestAdvanceSemanticFocus models the Orchestrator-owned SM-4 evidence
+// commit that closes the current focus and opens the next focus-local semantic
+// transaction.  It intentionally uses only typed aggregate facts; no provider
+// document or capability-owner state is used to choose the next focus.
+func runtimeTestAdvanceSemanticFocus(t *testing.T, repository *controllerRepository, aggregate *RuntimeAggregate) error {
+	t.Helper()
+	if repository == nil || aggregate == nil {
+		return common.ErrInvalidArgument
+	}
+	if len(aggregate.Facts.Focus.CoverageWorkItemIDs) == 0 || len(aggregate.Facts.Focus.CoverageEvidenceBindings) == 0 {
+		return fmt.Errorf("semantic focus fixture has no current binding")
+	}
+	focus := aggregate.Facts.Focus.Normalized()
+	bindingRefs := make([]string, 0, len(focus.CoverageEvidenceBindings))
+	for _, binding := range focus.CoverageEvidenceBindings {
+		bindingRefs = append(bindingRefs, binding.ID)
+	}
+	evidenceID := common.EvidenceRecordID("semantic-focus-advance")
+	fact := runtimecontract.EvidenceFact{
+		ID: evidenceID, Kind: runtimecontract.EvidenceKindStateChange,
+		SubjectRef: "semantic-test-operation", AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+		DispatchID: "semantic-test-dispatch", OperationID: "semantic-test-operation",
+		Revision: nextEvidenceRevision(aggregate.EvidenceSequence + 1), Summary: "semantic focus proof committed",
+		TargetRefs: append([]string(nil), focus.TargetRefs...), BindingRefs: bindingRefs,
+		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), focus.CoverageWorkItemIDs...),
+		Quality:             common.EvidenceQualityValid,
+	}
+	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
+	aggregate.EvidenceSequence++
+	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
+	for idx := range aggregate.Facts.Coverage {
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			if aggregate.Facts.Coverage[idx].ID == coverageID {
+				aggregate.Facts.Coverage[idx].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+			}
+		}
+	}
+	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+	if err := prepareSemanticPlanningForAdvancedFocus(aggregate); err != nil {
+		return err
+	}
+	previousSnapshot := aggregate.Decision.AuthoritySnapshot
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &previousSnapshot)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	expectedRevision := aggregate.StateRevision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return err
+	}
+	if err := repository.Save(context.Background(), *aggregate, expectedRevision); err != nil {
+		return err
+	}
+	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -102,6 +103,24 @@ func TestRuntimeAdapterProbeChecksServerPolicyWithoutCallingTool(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("rejected probe called MCP endpoint %d times", calls)
+	}
+}
+
+func TestRuntimeAdapterAdmissibilityRejectsServerOnlyCatalog(t *testing.T) {
+	adapter := NewRuntimeAdapter(serverOnlyMCPGetter{server: &mcpmodel.Server{
+		ID: common.MCPServerID("mcp-server-only"), Enabled: true,
+		Transport: "http", AllowedTools: []string{"repo.summary"},
+	}})
+	_, _, _, err := adapter.OperationAdmissibility(context.Background())
+	if err == nil {
+		t.Fatal("server-only MCP policy unexpectedly produced admissibility")
+	}
+	var unavailable *runtimecontract.RuntimeCapabilityCatalogUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.OwnerModuleID != ModuleID || unavailable.SubjectRef != "mcp_capability_catalog" || unavailable.Reason != "owner_unavailable" {
+		t.Fatalf("catalog error = %#v, want typed owner-unavailable capability catalog error", err)
+	}
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("catalog error = %v, want invalid-argument compatibility classification", err)
 	}
 }
 
@@ -1070,7 +1089,26 @@ func mcpStringListArgument(name string, value []string) runtimecontract.Operatio
 }
 
 type staticMCPServerGetter struct {
+	server       *mcpmodel.Server
+	capabilities []*mcpmodel.Capability
+}
+
+type serverOnlyMCPGetter struct {
 	server *mcpmodel.Server
+}
+
+func (g serverOnlyMCPGetter) GetServer(_ context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
+	if g.server == nil || g.server.ID != id {
+		return nil, common.ErrNotFound
+	}
+	return g.server, nil
+}
+
+func (g serverOnlyMCPGetter) ListServers(_ context.Context) ([]*mcpmodel.Server, error) {
+	if g.server == nil {
+		return nil, common.ErrNotFound
+	}
+	return []*mcpmodel.Server{g.server}, nil
 }
 
 func (g staticMCPServerGetter) GetServer(_ context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
@@ -1087,22 +1125,36 @@ func (g staticMCPServerGetter) ListServers(_ context.Context) ([]*mcpmodel.Serve
 	return []*mcpmodel.Server{g.server}, nil
 }
 
+func (g staticMCPServerGetter) ListCapabilities(_ context.Context, _ registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+	return mcpmodel.CloneCapabilities(g.capabilities), nil
+}
+
 func newMCPService(t *testing.T, server mcpmodel.Server) serverGetter {
 	t.Helper()
 	if server.ID == "" {
 		t.Fatal("mcp server id is required")
 	}
-	return staticMCPServerGetter{server: &server}
+	// Tests that exercise admissibility provide an explicit owner catalog. The
+	// fixture intentionally materializes capability facts here rather than
+	// relying on RuntimeAdapter's former server-only fallback.
+	capabilities := make([]*mcpmodel.Capability, 0, len(server.AllowedTools))
+	for _, tool := range server.AllowedTools {
+		tool = strings.TrimSpace(tool)
+		if tool == "" {
+			continue
+		}
+		capabilities = append(capabilities, &mcpmodel.Capability{
+			ID: common.MCPCapabilityID(string(server.ID) + ":tool:" + tool), ServerID: server.ID,
+			Kind: mcpmodel.CapabilityKindTool, Name: tool, Enabled: true,
+			EffectScope:      string(runtimecontract.RuntimeEffectNone),
+			IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		})
+	}
+	return staticMCPServerGetter{server: &server, capabilities: capabilities}
 }
 
-func TestRuntimeSemanticEffectScopeHelpers(t *testing.T) {
+func TestRuntimeSemanticRecipeParser(t *testing.T) {
 	if server, tool, err := parseMCPValidationRecipe("mcp/tool_call/mcp-lsp-bridge/lsp_initialize"); err != nil || server != "mcp-lsp-bridge" || tool != "lsp_initialize" {
 		t.Fatalf("parse MCP recipe = %q/%q/%v", server, tool, err)
-	}
-	if runtimeEffectScopeAccepted([]runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, runtimecontract.RuntimeEffectEphemeralSession) {
-		t.Fatal("effect mismatch was accepted")
-	}
-	if !runtimeEffectScopeAccepted([]runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}, runtimecontract.RuntimeEffectEphemeralSession) {
-		t.Fatal("matching effect was rejected")
 	}
 }

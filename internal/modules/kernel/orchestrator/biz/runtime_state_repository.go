@@ -142,6 +142,7 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 		Reconciliation:              aggregate.Reconciliation.Clone(),
 		Decision:                    aggregate.Decision,
 		ProcessedEventIDs:           append([]string(nil), aggregate.ProcessedEventIDs...),
+		RepairSurfaceConfirmations:  cloneRuntimeRepairSurfaceConfirmations(aggregate.RepairSurfaceConfirmations),
 		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(aggregate.CandidateRequestSessions),
 		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
 		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
@@ -181,6 +182,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		Reconciliation:              record.Reconciliation.Clone(),
 		Decision:                    record.Decision,
 		ProcessedEventIDs:           append([]string(nil), record.ProcessedEventIDs...),
+		RepairSurfaceConfirmations:  cloneRuntimeRepairSurfaceConfirmations(record.RepairSurfaceConfirmations),
 		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),
 		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
 		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
@@ -207,6 +209,17 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		ret.CompletedDispatches[idx] = runtimeDispatchFromRecord(record.CompletedDispatches[idx])
 	}
 	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), record.Diagnostics...)
+	return ret
+}
+
+func cloneRuntimeRepairSurfaceConfirmations(values []runtimecontract.RuntimeRepairSurfaceConfirmationRecord) []runtimecontract.RuntimeRepairSurfaceConfirmationRecord {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeRepairSurfaceConfirmationRecord, len(values))
+	for idx, value := range values {
+		ret[idx] = value.Clone()
+	}
 	return ret
 }
 

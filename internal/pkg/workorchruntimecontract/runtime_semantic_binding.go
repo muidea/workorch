@@ -32,8 +32,12 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 		}
 		facts[string(fact.CoverageWorkItemID)] = fact
 	}
-	focuses := make([]CoverageFocus, 0, len(document.Proposals))
-	for _, proposal := range document.Proposals {
+	proposals, err := OrderedRuntimeSemanticProofProposals(document)
+	if err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, err
+	}
+	focuses := make([]CoverageFocus, 0, len(proposals))
+	for _, proposal := range proposals {
 		proposal = proposal.Normalized()
 		// Effect/idempotency authority is compiled from the sealed owner catalog
 		// at the SM-2 binding boundary. Any provider-shaped or stale intermediate
@@ -58,12 +62,46 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 		}
 		focuses = append(focuses, focus)
 	}
-	focuses = normalizeCoverageFocusQueue(focuses)
+	// Do not normalize/sort this queue: batch membership is the persisted
+	// provider order constrained by the active focus dependency closure.
+	// Sorting by CWI ID here would silently replace that semantic order.
 	contract, err := CompileRuntimeCWIReconciliationContract(manifest.DefinitionRevision, focuses)
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	return focuses, contract, nil
+}
+
+// OrderedRuntimeSemanticProofProposals returns the proof proposals in the
+// exact persisted batch order when present.  A full legacy document without
+// batch membership remains deterministically ordered by its normalized
+// proposal list.  This helper is pure and never treats provider order as
+// execution authority; the Orchestrator alone seals the resulting focuses.
+func OrderedRuntimeSemanticProofProposals(document RuntimeSemanticPlanDocument) ([]RuntimeSemanticProofProposal, error) {
+	document = document.Normalized()
+	if len(document.BatchCoverageWorkItemIDs) == 0 {
+		return append([]RuntimeSemanticProofProposal(nil), document.Proposals...), nil
+	}
+	byCoverage := make(map[common.CoverageWorkItemID]RuntimeSemanticProofProposal, len(document.Proposals))
+	for _, proposal := range document.Proposals {
+		if _, duplicate := byCoverage[proposal.CoverageWorkItemID]; duplicate {
+			return nil, fmt.Errorf("runtime semantic proposal order duplicates coverage %q", proposal.CoverageWorkItemID)
+		}
+		byCoverage[proposal.CoverageWorkItemID] = proposal.Clone()
+	}
+	ordered := make([]RuntimeSemanticProofProposal, 0, len(document.BatchCoverageWorkItemIDs))
+	for _, id := range document.BatchCoverageWorkItemIDs {
+		proposal, found := byCoverage[id]
+		if !found {
+			return nil, fmt.Errorf("runtime semantic proposal order has no coverage %q", id)
+		}
+		ordered = append(ordered, proposal)
+		delete(byCoverage, id)
+	}
+	if len(byCoverage) != 0 {
+		return nil, fmt.Errorf("runtime semantic proposal order contains coverage outside batch")
+	}
+	return ordered, nil
 }
 
 func compileRuntimeSemanticFocus(definitionRevision string, item RuntimeCoverageItem, proposal RuntimeSemanticProofProposal, fact RuntimeSemanticProofFeasibility) (CoverageFocus, error) {

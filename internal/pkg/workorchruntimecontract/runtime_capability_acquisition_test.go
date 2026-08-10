@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestResolveRuntimeCapabilityAcquisitionUsesRequestedClass(t *testing.T) {
@@ -69,5 +71,18 @@ func TestResolveRuntimeCapabilityAcquisitionRejectsUnsupportedKind(t *testing.T)
 	if !errors.As(err, &unsupported) || unsupported.OwnerModuleID != "module-1" || unsupported.CapabilityClass != RuntimeCapabilityClassValidation ||
 		len(unsupported.RequiredKinds) != 1 || unsupported.RequiredKinds[0] != "missing" || !strings.Contains(unsupported.Error(), "unsupported_kind") {
 		t.Fatalf("unsupported capability error = %#v, want typed owner/class/kind failure", err)
+	}
+}
+
+func TestRuntimeCapabilityCatalogUnavailableErrorIsTypedAndInvalidArgument(t *testing.T) {
+	err := &RuntimeCapabilityCatalogUnavailableError{
+		OwnerModuleID: "blocks/mcp", SubjectRef: "mcp_capability_catalog", Reason: "owner_unavailable",
+	}
+	var typed *RuntimeCapabilityCatalogUnavailableError
+	if !errors.As(err, &typed) || typed.OwnerModuleID != "blocks/mcp" || typed.SubjectRef != "mcp_capability_catalog" || typed.Reason != "owner_unavailable" {
+		t.Fatalf("typed catalog error = %#v", err)
+	}
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("catalog error = %v, want invalid argument unwrap", err)
 	}
 }

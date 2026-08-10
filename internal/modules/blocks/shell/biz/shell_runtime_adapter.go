@@ -155,10 +155,13 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipes(workspaceDirectory st
 
 // PreflightRuntimeSemanticValidationRecipe performs the owner-local checks
 // required before semantic feasibility may be reported as feasible. The
-// ordinary admissibility preflight remains available for the final sealed
-// operation, but semantic planning must not be the first phase to discover
-// that a validation target (for example a Go test file) is absent.
-func (a *RuntimeAdapter) PreflightRuntimeSemanticValidationRecipe(workspaceDirectory string, recipe runtimemodel.RuntimeValidationRecipe) error {
+// target refs are part of the sealed proposal identity and must be passed to
+// this preflight; otherwise a workspace that happens to contain an unrelated
+// test file could be reported feasible while the later operation preflight
+// rejects the exact target. The ordinary admissibility preflight remains
+// available for the final sealed operation, but semantic planning must not be
+// the first phase to discover that a validation target is absent.
+func (a *RuntimeAdapter) PreflightRuntimeSemanticValidationRecipe(workspaceDirectory string, recipe runtimemodel.RuntimeValidationRecipe, targetRefs []string) error {
 	confirmed, err := a.PreflightRuntimeValidationRecipes(workspaceDirectory, []runtimemodel.RuntimeValidationRecipe{recipe})
 	if err != nil {
 		return err
@@ -173,6 +176,7 @@ func (a *RuntimeAdapter) PreflightRuntimeSemanticValidationRecipe(workspaceDirec
 	request := RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: workspaceDirectory,
 		ValidationRecipeID:            recipe.ID,
+		TargetRefs:                    append([]string(nil), targetRefs...),
 		ValidationEvidence: runtimemodel.RuntimeValidationEvidence{
 			Mode: "runtime_behavior", ObservationType: "semantic_feasibility",
 		},

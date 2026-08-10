@@ -1063,12 +1063,18 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 	}
 	msg := err.Error()
 	var unsupportedCapability *runtimecontract.RuntimeCapabilityUnsupportedError
+	var capabilityCatalogUnavailable *runtimecontract.RuntimeCapabilityCatalogUnavailableError
 	var outcomeUnknown *runtime.OperationOutcomeUnknownError
 	var casConflict *runtime.RuntimeCASConflictError
 	var semanticRejection *runtime.RuntimeSemanticRejectionError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
+	case errors.As(err, &capabilityCatalogUnavailable):
+		return runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassCapabilityUnavailable, Code: "mcp_capability_catalog_unavailable",
+			Signature: "mcp-capability-catalog-unavailable", Message: msg,
+		}
 	case errors.As(err, &unsupportedCapability):
 		return runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_capability_unsupported",

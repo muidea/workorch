@@ -24,6 +24,7 @@ import (
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -693,6 +694,18 @@ func (g runtimeFileBackedMCPServerGetter) ListServers(context.Context) ([]*mcpmo
 		return nil, common.ErrNotFound
 	}
 	return []*mcpmodel.Server{g.server}, nil
+}
+
+func (g runtimeFileBackedMCPServerGetter) ListCapabilities(context.Context, registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+	if g.server == nil {
+		return nil, common.ErrNotFound
+	}
+	return []*mcpmodel.Capability{{
+		ID: common.MCPCapabilityID(string(g.server.ID) + ":tool:lookup.references"), ServerID: g.server.ID,
+		Kind: mcpmodel.CapabilityKindTool, Name: "lookup.references", Enabled: true,
+		EffectScope:      string(runtimecontract.RuntimeEffectNone),
+		IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+	}}, nil
 }
 
 func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {

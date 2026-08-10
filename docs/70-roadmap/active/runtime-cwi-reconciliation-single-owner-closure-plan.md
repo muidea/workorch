@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-09
+Last Updated: 2026-08-10
 
 ## 1. Purpose And Authority
 
@@ -706,7 +706,7 @@ remains open.
 | RSO-22 | pending | Fresh deployed positive convergence after owner-fact effect compilation | semantic seal → owner-fact binding → dispatch → receipt → binding-matched evidence → CWI advance |
 | RSO-23 | code_closed | Remove provider-owned effect/idempotency echo and compile canonical binding from owner facts | provider schema/DTO/decoder contain no `requiredEffectScopes`; old field is unknown-field rejected; SM-2 binding compilation overwrites intermediate effect with sealed owner-catalog fact |
 | RSO-24 | code_closed | Remove provider-owned validation-check echo and compile canonical checks from owner facts | provider schema/DTO/decoder contain no `requiredCheckRefs`; owner recipe/check feasibility is confirmed before binding seal; unsupported check yields zero dispatch |
-| RSO-25 | code_closed | Close owner feasibility timing and unify preflight/binding admission | owner returns one executable feasibility fact; SM-2 seals only matching facts; zero-attempt validation exhaustion is not `no_progress_exhausted`; positive and zero-dispatch live paths both pass |
+| RSO-25 | code_closed | Close owner feasibility timing, current-focus batching and failure classification | owner returns one executable feasibility fact; SM-2 seals only matching facts; current focus is isolated from later CWI; zero-attempt semantic failures are not `no_progress_exhausted`; local probe, batch-isolation, failure-class, restart/idempotency and zero-dispatch tests pass. Fresh deployed positive and zero-dispatch paths remain live-open under RSO-22 |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
@@ -816,7 +816,9 @@ target-correction deployed proof and is not satisfied by the RSO-22 positive pat
    registry or Runtime code.
 2. **Compile one effective MCP catalog in `blocks/mcp`.** Intersect enabled server whitelist and enabled exact
    capability records, normalize deterministically, and hash the complete effective set. Remove server-only recipe
-   authority from semantic feasibility. Return a detached catalog fact with workspace/run/authority scope and revision.
+   authority from semantic feasibility. If the typed capability query is unavailable, return an explicit typed catalog
+   prerequisite failure; never manufacture recipe refs from `Server.AllowedTools`. Return a detached catalog fact with
+   workspace/run/authority scope and revision.
 3. **Bind semantic recipes to catalog facts without provider effect echo.** Extend the private sealed
    manifest/context so each dynamic recipe carries the exact capability reference, operation kind, finite effect domain,
    idempotency class, and catalog revision. The provider-facing proposal contains no effect/idempotency field; the LLM
@@ -993,9 +995,12 @@ seal an SM-2 binding from a catalog identity that the owner has not proven execu
 2. **Capability-owner parity.** Apply the same one-owner fact rule to `blocks/mcp`, `blocks/file`, `blocks/git`,
    `blocks/web` and `blocks/ssh`: catalog, capability state, recipe/check preflight, target and revision are one typed
    owner result. File/Git/Web/SSH now fail closed with `*_semantic_proof_unavailable` whenever a proposal declares
-   validation recipe/checks that those owners cannot independently prove; MCP likewise keeps catalog/tool probing out
-   of semantic proof. No owner may publish a semantic `feasible` result while its operation preflight would reject the
-   same sealed identity.
+   validation recipe/checks that those owners cannot independently prove. MCP catalog/tool probing is likewise not
+   sufficient by itself: when the registry catalog declares a validation recipe, `blocks/mcp` now performs a bounded,
+   owner-local, non-durable safe-to-replay behavior probe and returns a factual `feasible` observation only after the
+   probe succeeds. An unsafe, unsupported, malformed, stale, or unavailable probe returns typed
+   `mcp_semantic_proof_unavailable`/prerequisite facts. No owner may publish a semantic `feasible` result while its
+   operation preflight would reject the same sealed identity.
 3. **SM-2 admission guard (`kernel/orchestrator/biz/runtime`).** Before compiling `CoverageEvidenceBinding`, require
    owner feasibility status `feasible`, canonical check set non-empty for validation, matching recipe/effect/idempotency,
    exact target/selector and matching catalog/observed revision. Any missing or stale fact produces zero binding seal,
@@ -1010,6 +1015,16 @@ seal an SM-2 binding from a catalog identity that the owner has not proven execu
 6. **Restart/idempotency regression.** Persist owner preflight revision and canonical check identity in the feasibility
    observation/binding hash. Duplicate/stale owner events cannot reseal a binding. Restart resumes the same owner fact or
    requests a new bounded owner observation; it never reuses a provider check or replays dispatch.
+7. **Current-focus batch admission (`kernel/orchestrator/biz/runtime`).** The active `focus`/slice and its dependency
+   closure are the only inputs to the next proof batch. The provider-authored global `coverageOrder` remains an order
+   proposal, but it must not mix later focus items into the current SM-2 admission transaction. Pending CWI IDs remain
+   immutable lineage and are admitted only after the current focus is accepted or terminalized. A failure in a later
+   CWI therefore cannot terminate the current focus.
+8. **Semantic failure classification (`kernel/orchestrator/biz/runtime`).** Replace the fixed
+   `FailureClassNoProgressExhausted` assignment in `failSemanticContract` with an exhaustive mapping from typed owner /
+   provider category. `candidate_infeasible`, `prerequisite_required`, `runtime_contract_defect` and provider transient
+   must retain their own class. `no_progress_exhausted` is legal only after a persisted repair/retry budget consumption.
+   Result, Run, Workspace and projections must preserve the same nested original diagnostic and class.
 
 #### RSO-25 owner/state-machine matrix
 
@@ -1017,12 +1032,56 @@ seal an SM-2 binding from a catalog identity that the owner has not proven execu
 | --- | --- | --- |
 | `blocks/shell` | recipe discovery, executable preflight, canonical validation checks, factual receipt | writing Runtime state or accepting provider check lists |
 | `blocks/mcpregistry` | MCP catalog, enabled capability, recipe/check vocabulary and revision | executing checks or sealing CWI bindings |
-| `blocks/mcp` | tool/resource feasibility, behavior check execution and factual receipt | mutating registry or SM-1/2/3/4 |
+| `blocks/mcp` | catalog-backed tool/resource feasibility, bounded side-effect-free behavior check execution and factual receipt | mutating registry or SM-1/2/3/4 |
 | `blocks/file`, `git`, `web`, `ssh` | owner-specific target and recipe/check preflight plus receipt | reading another owner repository/service or migrating Runtime state |
 | `blocks/llm` | provider transport and check-free semantic proposal | selecting check/effect/idempotency/retry/terminal |
 | `kernel/orchestrator/biz/runtime` | only SM-2/3/4 reducer, private internal events, binding/dispatch/evidence gate | direct owner repository/service access |
 | `blocks/run` | only SM-1 lifecycle and aggregate CAS | compiling binding or executing capabilities |
 | Result/Workspace/Application/Web/TUI/Projection | result, lifecycle, API and display projection | inferring or triggering Runtime transitions |
+
+#### RSO-25 state-transition closure contract
+
+The following sequence is the only accepted production path. The arrows are owner-internal events; an EventHub
+command/result may carry a fact across an owner boundary, but it never performs the transition itself.
+
+```text
+Run owner (SM-1)
+  activation/start CAS
+        ↓ RunStarted fact
+Orchestrator (SM-2)
+  active focus → owner prerequisite → semantic feasibility → binding sealed
+        ↓ BindingSealed internal event
+Orchestrator (SM-3)
+  operations candidate → candidate accepted → dispatch sealed
+        ↓ typed operation command / owner receipt
+Capability owner (fact only)
+        ↓ receipt/evidence fact
+Orchestrator (SM-4 → SM-2)
+  evidence committed → CWI accepted → next focus selected
+        ↓ lifecycle/result facts
+Run owner (SM-1)
+  run continues or terminalizes through its own CAS
+```
+
+Required invariants:
+
+1. `blocks/run` is the only writer of SM-1 state and lineage; Orchestrator may only consume its typed facts.
+2. `kernel/orchestrator/biz/runtime` is the only writer of SM-2/SM-3/SM-4 aggregate state. Capability owners never
+   receive a Runtime state target and never call a Runtime reducer.
+3. A semantic proof batch is scoped to `activeFocusID + dependencyClosure`; global `coverageOrder` is retained only as
+   immutable provider order and cannot broaden the current admission set.
+4. `feasible` is permitted only when the addressed owner has independently completed the same recipe/target/check
+   preflight that the later operation path will use. Catalog readiness alone is never sufficient.
+5. Any missing, stale, unsupported or unverifiable owner fact produces zero binding, candidate, dispatch, receipt,
+   evidence and credit for that focus, while unrelated pending focuses remain pending.
+6. Every terminal diagnostic has one typed failure class and one nested `OriginalDiagnostic`; projections must not
+   reclassify it. `no_progress_exhausted` requires persisted repair/retry budget consumption.
+7. Duplicate/stale/restarted facts are idempotent by workspace/run/focus/batch/manifest/catalog identity and cannot
+   reseal a binding or replay an operation.
+
+Implementation order is therefore: (a) MCP owner behavior probe and catalog/probe parity, (b) current-focus batch
+compiler and dependency barrier, (c) semantic failure-class mapper, (d) reducer/restart/idempotency tests, and only then
+(e) fresh deployed positive convergence.
 
 #### RSO-25 acceptance matrix
 
@@ -1035,6 +1094,11 @@ seal an SM-2 binding from a catalog identity that the owner has not proven execu
 - duplicate, stale and restart paths preserve the same owner/binding identity without cross-owner state writes;
 - a fresh deployed run with an executable validation target reaches binding → operations candidate → dispatch → matching
   receipt → evidence → CWI advance.
+- MCP catalog-declared validation recipe with a safe behavior probe reaches `feasible`; an unsafe or unsupported probe
+  returns typed `mcp_semantic_proof_unavailable` without blocking an unrelated current focus.
+- a proof batch contains only the active focus and dependency closure; later-focus infeasibility remains pending.
+- semantic feasibility failure with zero repair attempts preserves `candidate_infeasible` (or the exact typed prerequisite
+  class) instead of `no_progress_exhausted`.
 
 #### RSO-25 verification commands
 
@@ -1048,8 +1112,11 @@ make vet
 make verify-boundary-contract
 ```
 
-RSO-25 cannot be marked live-closed until a fresh deployment demonstrates both the zero-dispatch unavailable-recipe
-path and the executable-recipe positive path.
+RSO-25 is locally `code_closed`: the MCP positive/unsupported probe matrix, current-focus batch isolation, typed
+zero-attempt failure classification, restart/idempotency fencing, full tests, race tests, formatting, vet and boundary
+checks pass. It remains `live-open` until a fresh deployment demonstrates both the zero-dispatch unavailable-recipe
+path and the executable-recipe positive path; those deployed proofs are tracked with RSO-22 and must not be inferred
+from mock-provider or historical runs.
 
 ## 11. Verification Matrix
 

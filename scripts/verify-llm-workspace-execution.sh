@@ -485,9 +485,7 @@ def semantic_validation_proposal(coverage_id, catalogs):
             "operationKind": "validation/managed_session",
             "target": semantic_exact_target(catalog),
             "requiredEvidenceKinds": ["validation"],
-            "requiredEffectScopes": ["none"],
             "validationRecipeId": recipe_id,
-            "requiredCheckRefs": [recipe_id],
             "declarationRef": "mock-semantic/" + coverage_id,
         }
     raise ValueError("semantic manifest has no bounded managed-validation catalog")
@@ -504,7 +502,6 @@ def semantic_state_change_proposal(coverage_id, catalogs):
                 "operationKind": kind,
                 "target": semantic_exact_target(catalog),
                 "requiredEvidenceKinds": ["state_change"],
-                "requiredEffectScopes": ["workspace_durable"],
                 "declarationRef": "mock-semantic/" + coverage_id,
             }
     raise ValueError("semantic manifest has no bounded state-change catalog")

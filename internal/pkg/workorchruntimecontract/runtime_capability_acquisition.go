@@ -59,6 +59,38 @@ func (e *RuntimeCapabilityUnsupportedError) Error() string {
 	return fmt.Sprintf("runtime capability %s for owner %s is %s: %s", e.CapabilityClass, ownerModuleID, reason, strings.Join(kinds, ","))
 }
 
+// RuntimeCapabilityCatalogUnavailableError reports that an owner could not
+// expose the catalog required to author an admissibility fact.  It is
+// deliberately distinct from RuntimeCapabilityUnsupportedError: the owner
+// may support the operation, but no catalog-backed authorization exists yet.
+// Callers must treat this as an explicit prerequisite/availability fact, never
+// as permission to derive recipes from an advisory server policy.
+type RuntimeCapabilityCatalogUnavailableError struct {
+	OwnerModuleID string
+	SubjectRef    string
+	Reason        string
+}
+
+func (e *RuntimeCapabilityCatalogUnavailableError) Error() string {
+	if e == nil {
+		return "runtime capability catalog unavailable"
+	}
+	owner := strings.TrimSpace(e.OwnerModuleID)
+	subject := strings.TrimSpace(e.SubjectRef)
+	reason := strings.TrimSpace(e.Reason)
+	if reason == "" {
+		reason = "owner_unavailable"
+	}
+	if subject == "" {
+		subject = "catalog"
+	}
+	return fmt.Sprintf("runtime capability catalog %s for owner %s (%s): %s", subject, owner, reason, common.ErrInvalidArgument)
+}
+
+func (e *RuntimeCapabilityCatalogUnavailableError) Unwrap() error {
+	return common.ErrInvalidArgument
+}
+
 // ResolveRuntimeCapabilityAcquisition validates a concrete owner request
 // against that owner's immutable capability catalog. It performs no I/O and
 // makes no Runtime transition or disposition decision.

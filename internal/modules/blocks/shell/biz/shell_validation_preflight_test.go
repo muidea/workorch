@@ -38,9 +38,21 @@ func TestValidateGoTestValidationPreflightWithTests(t *testing.T) {
 func TestRuntimeAdapterSemanticValidationPreflightRejectsMissingTests(t *testing.T) {
 	workspace := t.TempDir()
 	recipe := runtimemodel.RuntimeValidationRecipe{ID: "go-tests", Command: "go", Args: []string{"test", "./..."}}
-	err := NewRuntimeAdapter().PreflightRuntimeSemanticValidationRecipe(workspace, recipe)
+	err := NewRuntimeAdapter().PreflightRuntimeSemanticValidationRecipe(workspace, recipe, nil)
 	if err == nil || !strings.Contains(err.Error(), "no *_test.go files found") {
 		t.Fatalf("expected semantic owner preflight to reject missing tests, got %v", err)
+	}
+}
+
+func TestRuntimeAdapterSemanticValidationPreflightRejectsMissingSealedTarget(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "existing_test.go"), []byte("package main\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recipe := runtimemodel.RuntimeValidationRecipe{ID: "go-tests", Command: "go", Args: []string{"test", "./..."}}
+	err := NewRuntimeAdapter().PreflightRuntimeSemanticValidationRecipe(workspace, recipe, []string{"missing_test.go"})
+	if err == nil || !strings.Contains(err.Error(), `validation target "missing_test.go" does not exist`) {
+		t.Fatalf("expected semantic owner preflight to reject missing sealed target, got %v", err)
 	}
 }
 

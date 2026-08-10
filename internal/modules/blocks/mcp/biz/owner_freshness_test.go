@@ -8,6 +8,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -92,6 +93,27 @@ func (g *mcpFreshnessServerGetter) ListServers(context.Context) ([]*mcpmodel.Ser
 		return nil, g.err
 	}
 	return append([]*mcpmodel.Server(nil), g.servers...), nil
+}
+
+func (g *mcpFreshnessServerGetter) ListCapabilities(context.Context, registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+	if g == nil || g.err != nil {
+		return nil, g.err
+	}
+	var capabilities []*mcpmodel.Capability
+	for _, server := range g.servers {
+		if server == nil || !server.Enabled {
+			continue
+		}
+		for _, tool := range server.AllowedTools {
+			capabilities = append(capabilities, &mcpmodel.Capability{
+				ID: common.MCPCapabilityID(string(server.ID) + ":tool:" + tool), ServerID: server.ID,
+				Kind: mcpmodel.CapabilityKindTool, Name: tool, Enabled: true,
+				EffectScope:      string(runtimecontract.RuntimeEffectNone),
+				IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+			})
+		}
+	}
+	return capabilities, nil
 }
 
 func sendMCPFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) mcpevents.ProbeRuntimeOperationFeasibilityResult {

@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-09
+Last Updated: 2026-08-10
 
 ## Purpose
 
@@ -48,10 +48,13 @@ MCP typed metadata 可部署加载并推进至 semantic seal、dispatch、receip
 provider effect authority。`run-061`/`run-062` 证明 LLM 仍会在 `lsp_status` 与 `lsp_initialize` 间交换
 `requiredEffectScopes`，因此新增的 RSO-23 已完成本地代码收口：删除 provider effect/idempotency echo，由 owner
  feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 canonical binding。`run-063` 又暴露 provider check echo，RSO-24
-已完成本地代码收口：删除 provider check authority，由 owner recipe/check fact 编译 binding。最新 `run-064` 进一步暴露
-owner semantic feasibility 与 operation preflight 不一致，RSO-25 已完成代码收口：统一 owner-local preflight、SM-2 admission guard
-和 failure classification。RSO-19～RSO-21、RSO-23～RSO-24 已完成代码收口；RSO-22 fresh binding-matched positive
-convergence、RSO-25 和 whole-document recovery fault injection 仍未完成。
+已完成本地代码收口：删除 provider check authority，由 owner recipe/check fact 编译 binding。最新 `run-064` 暴露
+owner semantic feasibility 与 operation preflight 不一致，已完成 Shell owner-local preflight、File/Git/Web/SSH proof
+fail-closed 和 SM-2 admission guard；`run-065` 暴露的 MCP catalog/probe 矛盾、proof batch 跨 current focus 以及零尝试
+semantic failure 的错误分类已在本地代码中收口：MCP 缺失 catalog 不再由 `AllowedTools` 推断，安全可重放的
+owner-local behavior probe、focus/dependency batch admission、typed failure class、restart/idempotency 和 zero-dispatch
+回归均通过。RSO-25 当前为 **code-closed / live-open**；RSO-22 的 fresh binding-matched positive convergence、
+zero-dispatch deployed proof 和 whole-document recovery fault injection 仍未完成。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
@@ -118,8 +121,8 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
   才能关闭 CWI，LLM/raw check 不得越权；已收口的 semantic correction 与 projection 不能绕过或改写该基线。
 - **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、whole-document recovery、receipt、
   binding-derived CWI credit、single-owner lifecycle/SM-4 producer trust 与 terminal delivery 均为 R3 回归基线；当前 active
-  typed semantic correction directive、proof-batch wire、terminal-consistent canonical projection 与 RSO-23～RSO-24 provider
-  authority removal 已 code-closed；RSO-25 owner feasibility transaction closure 和 deployed semantic positive matrix 仍未完成，recovery
+  typed semantic correction directive、proof-batch wire、terminal-consistent canonical projection 与 RSO-23～RSO-25 provider
+  authority/owner-feasibility closure 已 code-closed；RSO-22 deployed semantic positive/zero-dispatch matrix 仍未完成，recovery
   fault injection 独立保留。latest persisted
   aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace

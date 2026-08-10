@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -91,6 +92,127 @@ type RuntimeRepairSurfaceConfirmation struct {
 	ConfirmedTargetRefs []string
 	ObservedRevision    string
 	Reason              string
+}
+
+// RuntimeRepairSurfaceConfirmationRecord is the Orchestrator-owned replay
+// fence for one File-owner confirmation.  The complete normalized
+// confirmation is retained so a duplicate can be recognized without relying
+// on an event-id index or reconstructing the owner fact from mutable state.
+// IdentitySignature deliberately excludes response-specific disposition,
+// confirmed targets and reason so a conflicting response for the same owner
+// observation is detected; Signature is the exact response identity.
+type RuntimeRepairSurfaceConfirmationRecord struct {
+	Confirmation      RuntimeRepairSurfaceConfirmation `json:"confirmation"`
+	Signature         string                           `json:"signature"`
+	IdentitySignature string                           `json:"identitySignature"`
+}
+
+func (r RuntimeRepairSurfaceConfirmationRecord) Normalized() RuntimeRepairSurfaceConfirmationRecord {
+	r.Confirmation = r.Confirmation.Normalized()
+	r.Signature = strings.TrimSpace(r.Signature)
+	r.IdentitySignature = strings.TrimSpace(r.IdentitySignature)
+	return r
+}
+
+func (r RuntimeRepairSurfaceConfirmationRecord) Validate() error {
+	r = r.Normalized()
+	if err := r.Confirmation.Validate(); err != nil {
+		return fmt.Errorf("repair surface confirmation record: %w", err)
+	}
+	if r.Signature == "" || r.IdentitySignature == "" {
+		return fmt.Errorf("repair surface confirmation record requires exact and identity signatures")
+	}
+	if r.Signature != StableRuntimeRepairSurfaceConfirmationHash(r.Confirmation) {
+		return fmt.Errorf("repair surface confirmation record signature mismatch")
+	}
+	if r.IdentitySignature != StableRuntimeRepairSurfaceConfirmationIdentityHash(r.Confirmation) {
+		return fmt.Errorf("repair surface confirmation record identity signature mismatch")
+	}
+	return nil
+}
+
+func (r RuntimeRepairSurfaceConfirmationRecord) Clone() RuntimeRepairSurfaceConfirmationRecord {
+	r = r.Normalized()
+	r.Confirmation = r.Confirmation.Clone()
+	return r
+}
+
+// ValidateRuntimeRepairSurfaceConfirmationRecords validates the bounded
+// owner-local replay history and rejects both exact duplicates and conflicting
+// responses for one observation. The maps are scoped to this aggregate value;
+// no process-wide event/confirmation index is introduced.
+func ValidateRuntimeRepairSurfaceConfirmationRecords(values []RuntimeRepairSurfaceConfirmationRecord) error {
+	exact := make(map[string]struct{}, len(values))
+	identity := make(map[string]struct{}, len(values))
+	for idx, record := range values {
+		if err := record.Validate(); err != nil {
+			return fmt.Errorf("runtime repair surface confirmation %d: %w", idx, err)
+		}
+		record = record.Normalized()
+		if _, duplicate := exact[record.Signature]; duplicate {
+			return fmt.Errorf("runtime repair surface confirmations duplicate exact response %q", record.Signature)
+		}
+		if _, duplicate := identity[record.IdentitySignature]; duplicate {
+			return fmt.Errorf("runtime repair surface confirmations conflict for owner observation %q", record.IdentitySignature)
+		}
+		exact[record.Signature] = struct{}{}
+		identity[record.IdentitySignature] = struct{}{}
+	}
+	return nil
+}
+
+// StableRuntimeRepairSurfaceConfirmationHash returns the exact confirmation
+// identity.  JSON is used only for this local persisted hash; the value never
+// crosses an EventHub boundary as an untyped payload.
+func StableRuntimeRepairSurfaceConfirmationHash(value RuntimeRepairSurfaceConfirmation) string {
+	value = value.Normalized()
+	encoded, _ := json.Marshal(value)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+// StableRuntimeRepairSurfaceConfirmationIdentityHash identifies the owner
+// observation/revision and response context while intentionally omitting the
+// response-specific disposition, confirmed target list and reason. A
+// different response for the same observation is therefore a conflict, while
+// a new owner revision is a new observation that can be processed normally.
+func StableRuntimeRepairSurfaceConfirmationIdentityHash(value RuntimeRepairSurfaceConfirmation) string {
+	value = value.Normalized()
+	identity := struct {
+		Observation      RuntimeValidationFailureObservation `json:"observation"`
+		OwnerModuleID    string                              `json:"ownerModuleId"`
+		SubjectRef       string                              `json:"subjectRef"`
+		ObservedRevision string                              `json:"observedRevision"`
+	}{
+		Observation: value.Observation, OwnerModuleID: value.OwnerModuleID,
+		SubjectRef: value.SubjectRef, ObservedRevision: value.ObservedRevision,
+	}
+	encoded, _ := json.Marshal(identity)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+func NewRuntimeRepairSurfaceConfirmationRecord(value RuntimeRepairSurfaceConfirmation) (RuntimeRepairSurfaceConfirmationRecord, error) {
+	value = value.Normalized()
+	if err := value.Validate(); err != nil {
+		return RuntimeRepairSurfaceConfirmationRecord{}, err
+	}
+	return RuntimeRepairSurfaceConfirmationRecord{
+		Confirmation: value, Signature: StableRuntimeRepairSurfaceConfirmationHash(value),
+		IdentitySignature: StableRuntimeRepairSurfaceConfirmationIdentityHash(value),
+	}, nil
+}
+
+// SameRuntimeRepairSurfaceConfirmation compares the full normalized owner
+// response, including disposition and any reason/target facts.
+func SameRuntimeRepairSurfaceConfirmation(left, right RuntimeRepairSurfaceConfirmation) bool {
+	return StableRuntimeRepairSurfaceConfirmationHash(left) == StableRuntimeRepairSurfaceConfirmationHash(right)
+}
+
+// SameRuntimeRepairSurfaceConfirmationIdentity compares the replay scope while
+// ignoring only the response disposition and confirmed targets.
+func SameRuntimeRepairSurfaceConfirmationIdentity(left, right RuntimeRepairSurfaceConfirmation) bool {
+	return StableRuntimeRepairSurfaceConfirmationIdentityHash(left) == StableRuntimeRepairSurfaceConfirmationIdentityHash(right)
 }
 
 func (c RuntimeRepairSurfaceConfirmation) Normalized() RuntimeRepairSurfaceConfirmation {

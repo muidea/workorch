@@ -120,14 +120,48 @@ func TestRuntimeSemanticPlanDoesNotExposeMCPEffectToProvider(t *testing.T) {
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	schema, err := RuntimeSemanticPlanJSONSchema(manifest)
-	if err != nil || !strings.Contains(schema, `"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || strings.Contains(schema, `requiredEffectScopes`) {
+	if err != nil || !strings.Contains(schema, `"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || strings.Contains(schema, `requiredEffectScopes`) || strings.Contains(schema, `requiredCheckRefs`) {
 		t.Fatalf("MCP effect leaked into provider semantic schema: err=%v schema=%s", err, schema)
+	}
+	var schemaDocument map[string]any
+	if err := json.Unmarshal([]byte(schema), &schemaDocument); err != nil {
+		t.Fatalf("decode semantic schema: %v", err)
+	}
+	properties, ok := schemaDocument["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema properties missing: %s", schema)
+	}
+	proposalSchema, ok := properties["proposals"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema proposals missing: %s", schema)
+	}
+	proposalItem, ok := proposalSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema proposal item missing: %s", schema)
+	}
+	proposalProperties, ok := proposalItem["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema proposal properties missing: %s", schema)
+	}
+	recipeSchema, ok := proposalProperties["validationRecipeId"].(map[string]any)
+	if !ok {
+		t.Fatalf("semantic schema validation recipe property missing: %s", schema)
+	}
+	recipeEnum, ok := recipeSchema["enum"].([]any)
+	if !ok || len(recipeEnum) != 1 || recipeEnum[0] != "mcp/tool_call/mcp-lsp-bridge/lsp_status" {
+		t.Fatalf("dynamic owner recipe refs were not included in top-level enum: %#v", recipeSchema)
 	}
 	oldPayload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-1","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/mcp","operationKind":"mcp/tool_call","target":{"policy":"existing_owner_scope","ownerSelectorRefs":["mcp-lsp-bridge"]},"requiredEvidenceKinds":["validation"],"requiredEffectScopes":["none"],"validationRecipeId":"mcp/tool_call/mcp-lsp-bridge/lsp_status","declarationRef":"dod/cwi-001"}]}`
 	_, err = DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(oldPayload))
 	var diagnostic *RuntimeCandidatePayloadDiagnostic
 	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredEffectScopes" || diagnostic.Actual != "unknown_field" {
 		t.Fatalf("old provider effect field was not rejected: %+v err=%v", diagnostic, err)
+	}
+	oldCheckPayload := strings.Replace(oldPayload, `"requiredEffectScopes":["none"]`, `"requiredCheckRefs":["lsp_status_returns_ten_tools"]`, 1)
+	_, err = DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(oldCheckPayload))
+	diagnostic = nil
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].requiredCheckRefs" || diagnostic.Actual != "unknown_field" {
+		t.Fatalf("old provider check field was not rejected: %+v err=%v", diagnostic, err)
 	}
 }
 

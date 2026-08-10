@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
@@ -4124,6 +4125,40 @@ func TestRuntimeStateRecordPreservesSemanticPlanningLedgerAcrossOpaqueReload(t *
 	reloaded.SemanticPlanning.DefinitionSeed.CoverageItems[0].SourceID = "mutated"
 	if record.SemanticPlanning.DefinitionSeed.CoverageItems[0].SourceID == "mutated" {
 		t.Fatal("runtime state record shared semantic planning backing storage")
+	}
+}
+
+func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueReload(t *testing.T) {
+	aggregate := runtimeAggregate(t, 7)
+	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: runtimecontract.RuntimeValidationFailureObservation{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: "dispatch-1", OperationID: "validate-1",
+			FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+			CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("d", 64),
+		},
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "changed",
+	}
+	record, err := runtimecontract.NewRuntimeRepairSurfaceConfirmationRecord(confirmation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.RepairSurfaceConfirmations = []runtimecontract.RuntimeRepairSurfaceConfirmationRecord{record}
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("aggregate with confirmation fence: %v", err)
+	}
+	persisted := runtimeStateRecordFromAggregate(aggregate)
+	reloaded := runtimeAggregateFromRecord(persisted.Clone())
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("reloaded aggregate with confirmation fence: %v", err)
+	}
+	if len(reloaded.RepairSurfaceConfirmations) != 1 || !runtimecontract.SameRuntimeRepairSurfaceConfirmation(reloaded.RepairSurfaceConfirmations[0].Confirmation, confirmation) {
+		t.Fatalf("repair surface confirmation fence drifted across reload: %+v", reloaded.RepairSurfaceConfirmations)
+	}
+	reloaded.RepairSurfaceConfirmations[0].Confirmation.Observation.CandidateTargetRefs[0] = "mutated.go"
+	if persisted.RepairSurfaceConfirmations[0].Confirmation.Observation.CandidateTargetRefs[0] == "mutated.go" {
+		t.Fatal("runtime state record shared repair surface confirmation backing storage")
 	}
 }
 

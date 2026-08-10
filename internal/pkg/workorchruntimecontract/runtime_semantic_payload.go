@@ -306,6 +306,13 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 		targetRefs = append(targetRefs, catalog.TargetRefs...)
 		selectorRefs = append(selectorRefs, catalog.SelectorRefs...)
 		constraintRefs = append(constraintRefs, catalog.ConstraintRefs...)
+		// Dynamic capability owners (for example MCP) publish opaque recipe
+		// identities through ValidationRecipeRefs, while Shell may additionally
+		// publish executable RuntimeValidationRecipe values.  Both forms are
+		// sealed owner facts and must be represented in the bounded provider
+		// enum; omitting refs leaves the top-level enum empty and makes the
+		// owner-scoped rule unsatisfiable for dynamic recipes.
+		recipeIDs = append(recipeIDs, catalog.ValidationRecipeRefs...)
 		for _, recipe := range catalog.ValidationRecipes {
 			recipeIDs = append(recipeIDs, recipe.ID)
 		}

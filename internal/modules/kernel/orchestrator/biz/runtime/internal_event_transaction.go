@@ -12,7 +12,6 @@ const (
 	RuntimeInternalEventSemanticPlanBatchFeasibilityObserved RuntimeInternalEventKind = "semantic_plan_batch_feasibility_observed"
 	RuntimeInternalEventSemanticPlanBatchDocumentObserved    RuntimeInternalEventKind = "semantic_plan_batch_document_observed"
 	RuntimeInternalEventSemanticPlanBatchDocumentsMerged     RuntimeInternalEventKind = "semantic_plan_batch_documents_merged"
-	RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged RuntimeInternalEventKind = "semantic_plan_batch_feasibilities_merged"
 	RuntimeInternalEventCandidateRequestSubmitted            RuntimeInternalEventKind = "candidate_request_submitted"
 	RuntimeInternalEventCandidateRequestOutcomeObserved      RuntimeInternalEventKind = "candidate_request_outcome_observed"
 	RuntimeInternalEventCandidateRequestRecoveryRequired     RuntimeInternalEventKind = "candidate_request_recovery_required"

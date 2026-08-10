@@ -284,6 +284,13 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	failure := facts.Failure
+	// failSemanticContract is the only producer of this code. It has already
+	// exhausted (or deliberately declined) the bounded semantic transaction;
+	// keep the producer's typed class for audit while preventing generic owner
+	// feasibility/governance policy from turning it into an unrelated repair.
+	if strings.TrimSpace(failure.Code) == "semantic_contract_failed" {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "semantic_contract_failed", failure.Message), true, nil
+	}
 	if FailureClassDisposition(failure.Class) == FailureDispositionSameFocusRepair &&
 		(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", failure.Message), true, nil
@@ -315,6 +322,15 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_retry_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateDocumentRecoveryExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_document_recovery_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassCandidateInfeasible:
+		// A File owner rejection of the exact validation-derived repair surface
+		// is a typed infeasibility terminal. It did not consume a repair budget,
+		// so it must not be relabeled as no_progress_exhausted or re-enter the
+		// same-focus repair loop.
+		if strings.TrimSpace(failure.Code) == "repair_surface_unavailable" {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "repair_surface_unavailable", failure.Message), true, nil
+		}
+		return runtimecontract.RuntimeDecision{}, false, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "prerequisite_refresh_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassNoProgressExhausted:

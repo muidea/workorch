@@ -124,7 +124,10 @@ type RuntimeStateRecord struct {
 	ActiveDispatch      *RuntimeDispatchRecord
 	CompletedDispatches []RuntimeDispatchRecord
 	ProcessedEventIDs   []string
-	Diagnostics         []RuntimeDiagnosticRecord
+	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for owner
+	// confirmation facts; it is intentionally not folded into ProcessedEventIDs.
+	RepairSurfaceConfirmations []RuntimeRepairSurfaceConfirmationRecord
+	Diagnostics                []RuntimeDiagnosticRecord
 	// CandidateRequestSessions record provider I/O before a complete candidate
 	// exists. They are not candidate attempts and cannot authorize a dispatch.
 	CandidateRequestSessions    []RuntimeCandidateRequestSession
@@ -267,6 +270,14 @@ func (r RuntimeStateRecord) Validate() error {
 	for _, invalidation := range r.PrerequisiteInvalidations {
 		if err := invalidation.Validate(); err != nil {
 			return fmt.Errorf("runtime prerequisite invalidation: %w", err)
+		}
+	}
+	if err := ValidateRuntimeRepairSurfaceConfirmationRecords(r.RepairSurfaceConfirmations); err != nil {
+		return fmt.Errorf("runtime repair surface confirmations: %w", err)
+	}
+	for _, confirmation := range r.RepairSurfaceConfirmations {
+		if confirmation.Confirmation.Observation.WorkspaceID != r.Facts.WorkspaceID || confirmation.Confirmation.Observation.RunID != r.Facts.RunID {
+			return fmt.Errorf("runtime repair surface confirmation scope mismatch")
 		}
 	}
 	if r.DriveLease != nil {
@@ -640,6 +651,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		ret.CompletedDispatches[idx] = r.CompletedDispatches[idx].Clone()
 	}
 	ret.ProcessedEventIDs = append([]string(nil), r.ProcessedEventIDs...)
+	ret.RepairSurfaceConfirmations = make([]RuntimeRepairSurfaceConfirmationRecord, len(r.RepairSurfaceConfirmations))
+	for idx := range r.RepairSurfaceConfirmations {
+		ret.RepairSurfaceConfirmations[idx] = r.RepairSurfaceConfirmations[idx].Clone()
+	}
 	ret.Diagnostics = append([]RuntimeDiagnosticRecord(nil), r.Diagnostics...)
 	ret.CandidateRequestSessions = make([]RuntimeCandidateRequestSession, len(r.CandidateRequestSessions))
 	for idx := range r.CandidateRequestSessions {

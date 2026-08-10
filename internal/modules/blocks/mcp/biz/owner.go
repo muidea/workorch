@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorcheventpayload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -348,7 +350,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	operation := command.Operation.Normalized()
 	serverIDs, _, revision, revisionErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if revisionErr != nil {
-		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_server_catalog_unavailable", revisionErr.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, mcpOperationCatalogUnavailableCode(revisionErr), revisionErr.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -398,7 +400,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	serverIDs, recipeRefs, revision, err := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if err != nil {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
-			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_catalog_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, mcpSemanticCatalogUnavailableCode(err), err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
 	if revision != command.OwnerCatalog.ObservedRevision {
@@ -424,13 +426,26 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		return
 	}
 	capability, found := findEffectiveMCPCapability(capabilities, serverID, tool)
-	if !found || !runtimeEffectScopeAccepted(command.Proposal.RequiredEffectScopes, runtimecontract.RuntimeEffectScope(capability.EffectScope)) {
-		actual := "missing"
-		if found {
-			actual = capability.EffectScope
-		}
+	if !found {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_effect_mismatch", fmt.Sprintf("recipe %q requires effect %v but owner capability effect is %q", command.Proposal.ValidationRecipeID, command.Proposal.RequiredEffectScopes, actual), "", revision, []string{command.Proposal.ValidationRecipeID}))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", fmt.Sprintf("recipe %q is not present in the effective owner capability catalog", command.Proposal.ValidationRecipeID), "", revision, []string{command.Proposal.ValidationRecipeID}))
+		return
+	}
+	// A semantic behavior probe is intentionally narrower than an operation
+	// dispatch. It may invoke a tool only when the MCP registry owner has
+	// explicitly declared that invocation non-durable and safe to replay. This
+	// keeps probe execution owner-local without creating a hidden durable effect
+	// or a second operation-receipt path before SM-2 seals a binding.
+	effect := runtimecontract.NormalizeRuntimeEffectScope(runtimecontract.RuntimeEffectScope(capability.EffectScope))
+	idempotency := runtimecontract.NormalizeRuntimeOperationIdempotencyClass(runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass))
+	if !runtimecontract.RuntimeEffectIsNonDurable(effect) || idempotency != runtimecontract.RuntimeOperationIdempotencySafeToReplay {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_semantic_proof_unavailable", "MCP semantic behavior probe requires a non-durable safe-to-replay capability", "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
+		return
+	}
+	if schemaErr := validateMCPBehaviorProbeSchema(capability.Schema); schemaErr != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_semantic_proof_unavailable", schemaErr.Error(), "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
 		return
 	}
 	for _, selector := range command.Proposal.Target.OwnerSelectorRefs {
@@ -440,12 +455,168 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			return
 		}
 	}
-	if strings.TrimSpace(command.Proposal.ValidationRecipeID) != "" || len(command.Proposal.RequiredCheckRefs) != 0 {
-		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_semantic_proof_unavailable", "MCP catalog and local operation probing are not an independent behavior proof", "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
+	// OperationAdmissibility and EffectiveCapabilities are owner-local typed
+	// reads. Re-check the catalog revision immediately before the behavior
+	// probe so a registry update between those reads cannot produce a feasible
+	// fact from mixed snapshots (and, importantly, cannot invoke the endpoint).
+	_, _, verifiedRevision, verifyErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
+	if verifyErr != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, mcpSemanticCatalogUnavailableCode(verifyErr), verifyErr.Error(), revision, "", nil))
 		return
 	}
+	if verifiedRevision != revision {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, verifiedRevision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime MCP semantic catalog changed during owner proof acquisition", revision, verifiedRevision, nil))
+		return
+	}
+	if recipeID := strings.TrimSpace(command.Proposal.ValidationRecipeID); recipeID != "" {
+		probeErr := m.probeSemanticValidationRecipe(event.Context(), command, serverID, tool)
+		if probeErr != nil {
+			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_semantic_proof_unavailable", probeErr.Error(), "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
+			return
+		}
+		// The probe itself is owner-local and side-effect bounded, but its receipt
+		// must still be tied to the same catalog revision that authorized it.
+		_, _, observedAfterProbe, revisionErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
+		if revisionErr != nil {
+			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, revision, nil,
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_catalog_unavailable", revisionErr.Error(), revision, "", nil))
+			return
+		}
+		if observedAfterProbe != revision {
+			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, observedAfterProbe, nil,
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime MCP semantic catalog changed during owner behavior probe", revision, observedAfterProbe, nil))
+			return
+		}
+	}
 	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+}
+
+func mcpOperationCatalogUnavailableCode(err error) string {
+	var unavailable *runtimecontract.RuntimeCapabilityCatalogUnavailableError
+	if errors.As(err, &unavailable) {
+		return "mcp_capability_catalog_unavailable"
+	}
+	return "mcp_server_catalog_unavailable"
+}
+
+func mcpSemanticCatalogUnavailableCode(err error) string {
+	var unavailable *runtimecontract.RuntimeCapabilityCatalogUnavailableError
+	if errors.As(err, &unavailable) {
+		return "mcp_capability_catalog_unavailable"
+	}
+	return "mcp_catalog_unavailable"
+}
+
+// validateMCPBehaviorProbeSchema is deliberately conservative.  A semantic
+// behavior probe has no provider-authored input values, so it may only invoke
+// a capability whose sealed schema is a well-formed object and whose complete
+// schema (including simple combinators) has no required input.  This is an
+// owner-local safety gate: malformed or input-requiring schemas are reported as
+// typed unavailable facts and never reach the MCP transport.
+func validateMCPBehaviorProbeSchema(schema workorcheventpayload.Payload) error {
+	if schemaType, declared := schema.String("type"); !declared || strings.TrimSpace(schemaType) != "object" {
+		return fmt.Errorf("MCP semantic behavior probe requires a valid object input schema")
+	}
+	return validateMCPBehaviorProbeSchemaNode(schema, "$")
+}
+
+func validateMCPBehaviorProbeSchemaNode(schema workorcheventpayload.Payload, path string) error {
+	if schemaType, declared := schema.String("type"); declared && strings.TrimSpace(schemaType) != "object" {
+		return fmt.Errorf("MCP semantic behavior probe schema %s has unsupported type %q", path, schemaType)
+	}
+	if _, declared := schema.Field("required"); declared {
+		required, ok := schema.StringSlice("required")
+		if !ok {
+			return fmt.Errorf("MCP semantic behavior probe schema %s.required must be a string array", path)
+		}
+		seen := make(map[string]struct{}, len(required))
+		for _, name := range required {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				return fmt.Errorf("MCP semantic behavior probe schema %s.required contains an empty name", path)
+			}
+			if _, duplicate := seen[name]; duplicate {
+				return fmt.Errorf("MCP semantic behavior probe schema %s.required contains duplicate %q", path, name)
+			}
+			seen[name] = struct{}{}
+		}
+		if len(required) != 0 {
+			return fmt.Errorf("MCP semantic behavior probe cannot invent required tool parameters at %s.required", path)
+		}
+	}
+	if properties, declared := schema.Field("properties"); declared && properties.Kind != workorcheventpayload.ValueObject {
+		return fmt.Errorf("MCP semantic behavior probe schema %s.properties must be an object", path)
+	}
+	if additional, declared := schema.Field("additionalProperties"); declared && additional.Kind != workorcheventpayload.ValueBool && additional.Kind != workorcheventpayload.ValueObject {
+		return fmt.Errorf("MCP semantic behavior probe schema %s.additionalProperties must be a boolean or object", path)
+	}
+	for _, fieldName := range []string{"anyOf", "allOf", "oneOf"} {
+		value, declared := schema.Field(fieldName)
+		if !declared {
+			continue
+		}
+		if value.Kind != workorcheventpayload.ValueArray {
+			return fmt.Errorf("MCP semantic behavior probe schema %s.%s must be an array", path, fieldName)
+		}
+		if len(value.Array) == 0 {
+			return fmt.Errorf("MCP semantic behavior probe schema %s.%s must not be empty", path, fieldName)
+		}
+		for index, item := range value.Array {
+			if item.Kind != workorcheventpayload.ValueObject {
+				return fmt.Errorf("MCP semantic behavior probe schema %s.%s[%d] must be an object", path, fieldName, index)
+			}
+			if err := validateMCPBehaviorProbeSchemaNode(workorcheventpayload.Payload{Fields: item.Object}, fmt.Sprintf("%s.%s[%d]", path, fieldName, index)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// probeSemanticValidationRecipe executes one bounded, owner-local MCP behavior
+// probe. It is deliberately not an EventHub operation and does not persist a
+// receipt: this is a factual feasibility observation before SM-2 binding seal.
+// Its caller has already fenced effect/idempotency and required input schema.
+func (m *Biz) probeSemanticValidationRecipe(ctx context.Context, command mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand, serverID, tool string) error {
+	if m == nil || m.runtimeAdapter == nil || strings.TrimSpace(serverID) == "" || strings.TrimSpace(tool) == "" {
+		return common.ErrInvalidArgument
+	}
+	request := RuntimeOperationRequest{
+		WorkspaceID:                   command.WorkspaceID,
+		RunID:                         command.RunID,
+		StepID:                        common.StepID("semantic-probe/" + command.FeasibilityBatchID + "/" + string(command.Proposal.CoverageWorkItemID)),
+		Kind:                          runtimecontract.StepKindMCPToolCall,
+		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		TargetRefs:                    runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal),
+		Data: mcpevents.OperationData{
+			ServerID: serverID,
+			Tool:     tool,
+		},
+	}
+	if err := m.runtimeAdapter.ProbeOperation(ctx, request); err != nil {
+		return fmt.Errorf("MCP behavior probe preflight failed: %w", err)
+	}
+	operationResult, err := m.runtimeAdapter.ExecuteOperation(ctx, request)
+	evidence := operationResult.Evidence
+	status := runtimecontract.RuntimeOperationExecutionStatusRejected
+	if err == nil && operationResult.Status == "completed" {
+		status = runtimecontract.RuntimeOperationExecutionStatusAccepted
+	}
+	attachMCPToolValidationObservation(&evidence, status, runtimecontract.StepKindMCPToolCall, runtimecontract.EvidenceKindValidation, serverID, tool)
+	if err != nil {
+		return fmt.Errorf("MCP behavior probe failed: %w", err)
+	}
+	if operationResult.Status != "completed" || evidence.Validation == nil {
+		return fmt.Errorf("MCP behavior probe did not produce an accepted validation observation")
+	}
+	// Check identity is owner-derived by attachMCPToolValidationObservation
+	// (the executable recipe itself).  The provider proposal is intentionally
+	// not consulted here: RequiredCheckRefs is not provider authority and must
+	// never be echoed into a feasibility decision.
+	return nil
 }
 
 func parseMCPValidationRecipe(recipe string) (string, string, error) {
@@ -463,16 +634,6 @@ func findEffectiveMCPCapability(items []*mcpmodel.Capability, serverID, tool str
 		}
 	}
 	return nil, false
-}
-
-func runtimeEffectScopeAccepted(required []runtimecontract.RuntimeEffectScope, actual runtimecontract.RuntimeEffectScope) bool {
-	actual = runtimecontract.NormalizeRuntimeEffectScope(actual)
-	for _, scope := range required {
-		if runtimecontract.NormalizeRuntimeEffectScope(scope) == actual {
-			return true
-		}
-	}
-	return false
 }
 
 func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {

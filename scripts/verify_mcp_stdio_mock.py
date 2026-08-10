@@ -152,9 +152,7 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
             "operationKind": "mcp/tool_call",
             "target": {"policy": "existing_owner_scope", "ownerSelectorRefs": [expected_server_id]},
             "requiredEvidenceKinds": ["validation"],
-            "requiredEffectScopes": ["none"],
             "validationRecipeId": recipes[0],
-            "requiredCheckRefs": [recipes[0]],
             "declarationRef": f"mock-semantic/{coverage_id}",
         })
     document["batchId"] = batch_id

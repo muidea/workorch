@@ -7,7 +7,7 @@ import (
 )
 
 func TestOwnerFeasibilityCategoriesAreTotal(t *testing.T) {
-	wantCodes := []string{"mcp_server_catalog_unavailable", "mcp_prerequisite_unavailable", "operation_admissibility_stale", "mcp_operation_invalid", "mcp_server_not_admissible"}
+	wantCodes := []string{"mcp_catalog_unavailable", "mcp_server_catalog_unavailable", "mcp_capability_catalog_unavailable", "mcp_prerequisite_unavailable", "operation_admissibility_stale", "mcp_operation_invalid", "mcp_server_not_admissible"}
 	if len(ownerFeasibilityCategories) != len(wantCodes) {
 		t.Fatalf("owner feasibility registry size=%d want=%d", len(ownerFeasibilityCategories), len(wantCodes))
 	}

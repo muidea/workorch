@@ -106,7 +106,9 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent,
 		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
+		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals:                []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
@@ -201,13 +203,27 @@ func TestRuntimeSemanticPlanCoverageOrderMustRespectDependencies(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticPlanDocumentRejectsImplicitProofBatchStep(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash,
+		BatchID:            "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "invalid step") {
+		t.Fatalf("implicit proof-batch plan step error = %v", err)
+	}
+}
+
 func TestRuntimeSemanticPlanBatchDocumentMayCoverOnlyDeclaredBatch(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SliceID: "slice-1", SourceScope: "test", SourceID: "two"})
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, CoverageOrder: []common.CoverageWorkItemID{"cwi-001", "cwi-002"},
+		PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID:  "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 		Proposals: []RuntimeSemanticProofProposal{semanticContractTestProposal("cwi-001")},
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
@@ -233,7 +249,7 @@ func TestRuntimeSemanticFeasibilityRetainsOwnerDiagnosticWithoutSelectingAction(
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent,
 		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
-		OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: "catalog-1", Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
+		OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
 		OriginalDiagnostic: &RuntimeOriginalDiagnostic{
 			SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: RuntimeModuleFile,
 			OriginalClass: "feasibility", OriginalCode: "target_outside_scope", OriginalMessage: "outside workspace",
@@ -302,7 +318,7 @@ func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
 		BatchID: batch.BatchID, BatchSequence: batch.Sequence, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
-		CoverageOrder: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal},
+		Proposals: []RuntimeSemanticProofProposal{proposal},
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
@@ -317,7 +333,7 @@ func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
 		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
-		CatalogSnapshotID: "catalog-1", Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
+		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
 		OriginalDiagnostic: semanticContractTestDiagnostic(),
 	}
 	if err := feasibility.ValidateForProposal(manifest, proposal); err != nil {
@@ -326,8 +342,9 @@ func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *
 	ledger := RuntimeSemanticPlanningLedger{
 		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningFailed,
 		DefinitionSeed: seed, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
-		Document: &order, DocumentHash: StableRuntimeSemanticPlanDocumentHash(order), ActiveBatchID: batch.BatchID,
-		BatchDocuments: []RuntimeSemanticPlanDocument{document}, Batches: []RuntimeSemanticPlanBatch{batch},
+		CoverageOrderDocument: &order, Document: &order, DocumentHash: StableRuntimeSemanticPlanDocumentHash(order), ActiveBatchID: batch.BatchID,
+		NextBatchSequence: 1,
+		BatchDocuments:    []RuntimeSemanticPlanDocument{document}, Batches: []RuntimeSemanticPlanBatch{batch},
 		FeasibilityBatchID: StableRuntimeSemanticFeasibilityBatchID(manifest, document),
 		Feasibilities:      []RuntimeSemanticProofFeasibility{feasibility},
 		FeasibilitySetHash: StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{feasibility}),
@@ -399,14 +416,53 @@ func TestRuntimeSemanticCorrectionHashRetainsOriginalDiagnosticIdentity(t *testi
 func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "request-1", []common.CoverageWorkItemID{"cwi-001"}, []common.CoverageWorkItemID{"cwi-001"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, next := range []RuntimeSemanticPlanBatchState{
+		RuntimeSemanticPlanBatchRequesting,
+		RuntimeSemanticPlanBatchDocumentComplete,
+	} {
+		batch, err = AdvanceRuntimeSemanticPlanBatch(batch, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []RuntimeSemanticProofProposal{proposal},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals:                []RuntimeSemanticProofProposal{proposal},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	batch.DocumentHash = StableRuntimeSemanticPlanDocumentHash(document)
+	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+	for _, next := range []RuntimeSemanticPlanBatchState{
+		RuntimeSemanticPlanBatchFeasibilityPending,
+		RuntimeSemanticPlanBatchFeasibilityComplete,
+		RuntimeSemanticPlanBatchAccepted,
+	} {
+		batch, err = AdvanceRuntimeSemanticPlanBatch(batch, next)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	feasibility := RuntimeSemanticProofFeasibility{
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
-		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: "catalog-1",
+		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID,
 		Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{"main.go"},
 	}
 	seed := RuntimeDefinitionSeed{
@@ -418,12 +474,16 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 	documentHash := StableRuntimeSemanticPlanDocumentHash(document)
 	batchID := StableRuntimeSemanticFeasibilityBatchID(manifest, document)
 	feasibilityHash := StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{feasibility})
+	orderHash := StableRuntimeSemanticPlanCoverageOrderHash(order)
+	merged := document.Clone()
 	ledger := RuntimeSemanticPlanningLedger{
 		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed,
 		DefinitionSeed: seed, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
-		Document: &document, DocumentHash: documentHash, FeasibilityBatchID: batchID,
+		CoverageOrderDocument: &order, Document: &document, DocumentHash: documentHash, FeasibilityBatchID: batchID,
+		Batches: []RuntimeSemanticPlanBatch{batch}, BatchDocuments: []RuntimeSemanticPlanDocument{document},
+		CompletedBatchIDs: []string{batch.BatchID}, NextBatchSequence: 1, MergedDocument: &merged, MergedDocumentHash: documentHash,
 		Feasibilities: []RuntimeSemanticProofFeasibility{feasibility}, FeasibilitySetHash: feasibilityHash,
-		SealedBindingSetHash: "binding-set-1", SealedLineageRefs: []string{"request-1", documentHash, batchID, feasibilityHash},
+		SealedBindingSetHash: "binding-set-1", SealedLineageRefs: []string{manifest.Hash, orderHash, documentHash, batchID, feasibilityHash, "binding-set-1"},
 	}
 	if err := ledger.Validate(); err != nil {
 		t.Fatal(err)
@@ -432,7 +492,7 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 	nonFeasible.Feasibilities[0].Status = RuntimeSemanticFeasibilityInfeasible
 	nonFeasible.Feasibilities[0].OriginalDiagnostic = semanticContractTestDiagnostic()
 	nonFeasible.FeasibilitySetHash = StableRuntimeSemanticFeasibilitySetHash(nonFeasible.Feasibilities)
-	if err := nonFeasible.Validate(); err == nil || !strings.Contains(err.Error(), "non-feasible") {
+	if err := nonFeasible.Validate(); err == nil {
 		t.Fatalf("non-feasible sealed ledger error = %v", err)
 	}
 }

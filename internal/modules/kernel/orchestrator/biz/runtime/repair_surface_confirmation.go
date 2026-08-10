@@ -34,9 +34,19 @@ func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context,
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || confirmation.Validate() != nil || confirmation.Observation.WorkspaceID != workspaceID || confirmation.Observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
+	confirmation = confirmation.Normalized()
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
+	}
+	// Persisted typed confirmation records are checked before terminal/failure
+	// guards.  This makes exact replay a true no-op even after restart or after
+	// the first confirmation has retired the mutable target pointers.
+	if repairSurfaceConfirmationExists(aggregate, confirmation) {
+		return aggregate, nil
+	}
+	if repairSurfaceConfirmationIdentityConflict(aggregate, confirmation) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation conflicts with persisted disposition", common.ErrConflict)
 	}
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
 		return aggregate, nil
@@ -45,19 +55,36 @@ func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context,
 	if failure == nil || failure.ValidationFailureObservation == nil || !runtimecontract.SameRuntimeValidationFailureObservation(*failure.ValidationFailureObservation, confirmation.Observation) || !sealedValidationFailureObservationMatches(aggregate, confirmation.Observation) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation does not match persisted validation failure", common.ErrConflict)
 	}
-	if aggregate.Facts.Resources.FailureTarget != nil {
+	if confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed && aggregate.Facts.Resources.FailureTarget != nil {
 		if aggregate.Facts.Resources.FailureTarget.Signature == failure.Signature && sameRuntimeTargetRefs(aggregate.Facts.Resources.FailureTarget.TargetRefs, confirmation.ConfirmedTargetRefs) {
 			return aggregate, nil
 		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface already resolved for another target", common.ErrConflict)
 	}
 	expected := aggregate.StateRevision
-	if confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed {
+	if confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceRejected {
 		updatedFailure := failure.Clone()
-		updatedFailure.Class = runtimecontract.FailureClassNoProgressExhausted
+		// A rejected owner surface is a typed infeasibility fact, not evidence
+		// that the repair budget was consumed.  Keep the terminal code stable for
+		// callers while preserving the original diagnostic nested in the failure.
+		updatedFailure.Class = runtimecontract.FailureClassCandidateInfeasible
 		updatedFailure.Code = "repair_surface_unavailable"
 		updatedFailure.Message = firstNonEmpty(strings.TrimSpace(confirmation.Reason), "File owner could not confirm a repair surface")
+		updatedFailure.TargetRefs = nil
+		updatedFailure.TargetObservation = nil
 		aggregate.Facts.Failure = &updatedFailure
+	} else if confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceStale {
+		updatedFailure := failure.Clone()
+		// Stale owner scope is a freshness fact. Retire every current target
+		// pointer and let the normal SM-2 prerequisite compiler reacquire the
+		// sealed focus scope; do not turn a stale observation into a terminal.
+		updatedFailure.TargetRefs = nil
+		updatedFailure.TargetObservation = nil
+		aggregate.Facts.Failure = &updatedFailure
+		aggregate.Facts.Resources.FailureTarget = nil
+		aggregate.Facts.Resources.TargetSelection = nil
+		aggregate.Facts.Resources.TargetSnapshots = nil
+		aggregate.Facts = PreflightRuntimeFacts(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
 	} else {
 		updatedFailure := failure.Clone()
 		updatedFailure.TargetRefs = append([]string(nil), confirmation.ConfirmedTargetRefs...)
@@ -77,10 +104,35 @@ func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context,
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
+	record, err := runtimecontract.NewRuntimeRepairSurfaceConfirmationRecord(confirmation)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.RepairSurfaceConfirmations = append(aggregate.RepairSurfaceConfirmations, record)
 	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func repairSurfaceConfirmationExists(aggregate RuntimeAggregate, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
+	signature := runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(confirmation)
+	for _, record := range aggregate.RepairSurfaceConfirmations {
+		if record.Signature == signature || runtimecontract.SameRuntimeRepairSurfaceConfirmation(record.Confirmation, confirmation) {
+			return true
+		}
+	}
+	return false
+}
+
+func repairSurfaceConfirmationIdentityConflict(aggregate RuntimeAggregate, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
+	identity := runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(confirmation)
+	for _, record := range aggregate.RepairSurfaceConfirmations {
+		if record.IdentitySignature == identity || runtimecontract.SameRuntimeRepairSurfaceConfirmationIdentity(record.Confirmation, confirmation) {
+			return !runtimecontract.SameRuntimeRepairSurfaceConfirmation(record.Confirmation, confirmation)
+		}
+	}
+	return false
 }
 
 // sealedValidationFailureObservationMatches binds the diagnostic candidates

@@ -756,7 +756,7 @@ grep '工作空间验收资料' "$TMP_DIR/mcp-resource-capabilities-derived.json
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
 grep '验收提示词' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
 put_json "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
-  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","enabled":true,"approvalPolicy":"operator"}' \
+  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","schema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"enabled":true,"approvalPolicy":"operator"}' \
   "$TMP_DIR/mcp-capability-updated.json"
 grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
 grep '"effectScope": "none"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null

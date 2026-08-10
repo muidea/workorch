@@ -22,9 +22,11 @@ func ownerFeasibilityCategory(failure *runtimecontract.FailureFact) runtimecontr
 }
 
 var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibilityCategory{
-	"mcp_server_catalog_unavailable": runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
-	"mcp_prerequisite_unavailable":   runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
-	"operation_admissibility_stale":  runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
-	"mcp_operation_invalid":          runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
-	"mcp_server_not_admissible":      runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
+	"mcp_catalog_unavailable":            runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
+	"mcp_server_catalog_unavailable":     runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
+	"mcp_capability_catalog_unavailable": runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
+	"mcp_prerequisite_unavailable":       runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
+	"operation_admissibility_stale":      runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
+	"mcp_operation_invalid":              runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
+	"mcp_server_not_admissible":          runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
 }

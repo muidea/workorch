@@ -39,11 +39,15 @@ type RuntimeInternalEvent struct {
 	SemanticPlanBatchFeasibilityResult *runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult
 	SemanticPlanBatchDocument          *runtimecontract.RuntimeSemanticPlanDocument
 	SemanticPlanMergedDocument         *runtimecontract.RuntimeSemanticPlanDocument
-	SemanticPlanMergedFeasibilities    []runtimecontract.RuntimeSemanticProofFeasibility
 	SemanticFeasibility                *runtimecontract.RuntimeSemanticProofFeasibility
 	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
-	SemanticBatchID                    string
-	SemanticRefreshGeneration          int
+	// SemanticFailureCode is an Orchestrator-selected bounded terminal code.
+	// It remains separate from SemanticDiagnostic so the producer-authored
+	// diagnostic can be persisted byte-for-byte while SM-2 retains outcomes
+	// such as prerequisite-refresh or candidate-document recovery exhaustion.
+	SemanticFailureCode       string
+	SemanticBatchID           string
+	SemanticRefreshGeneration int
 
 	PrerequisiteResult  *PrerequisiteResult
 	Stale               *runtimecontract.RuntimePrerequisiteStale
@@ -195,7 +199,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.SemanticDiagnostic == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.failSemanticContract(ctx, event.WorkspaceID, event.RunID, *event.SemanticDiagnostic)
+		aggregate, err := c.failSemanticContract(ctx, event.WorkspaceID, event.RunID, event.SemanticFailureCode, *event.SemanticDiagnostic)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisiteObserved:
@@ -270,10 +274,6 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.mergeSemanticPlanBatchDocuments(ctx, event.WorkspaceID, event.RunID, *event.SemanticPlanMergedDocument)
-		result.Aggregate = aggregate
-		return result, err
-	case RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged:
-		aggregate, err := c.mergeSemanticPlanBatchFeasibilities(ctx, event.WorkspaceID, event.RunID, event.SemanticPlanMergedFeasibilities)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestSubmitted:

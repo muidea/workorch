@@ -166,6 +166,51 @@ func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAgg
 			PolicyHash: "policy-test", CoverageItems: items, Slices: slices,
 		}
 		aggregate.Facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(aggregate.Facts.DefinitionSeed)
+	} else {
+		// A number of reducer fixtures append a second focus after their base
+		// facts were created. Keep the synthetic definition seed in lock-step so
+		// the immutable semantic order can legitimately include that CWI. This is
+		// test scaffolding only; production DefinitionSeed is immutable.
+		seed := aggregate.Facts.DefinitionSeed.Clone()
+		known := make(map[common.CoverageWorkItemID]struct{}, len(seed.CoverageItems))
+		for _, item := range seed.CoverageItems {
+			known[item.ID] = struct{}{}
+		}
+		sliceIndex := make(map[string]int, len(seed.Slices))
+		for idx, slice := range seed.Slices {
+			sliceIndex[slice.ID] = idx
+		}
+		changed := false
+		for _, fact := range aggregate.Facts.Coverage {
+			if _, exists := known[fact.ID]; exists {
+				continue
+			}
+			sliceID := fact.SliceID
+			if sliceID == "" {
+				sliceID = "slice-test-" + string(fact.ID)
+			}
+			sourceScope, sourceID := fact.SourceScope, fact.SourceID
+			if sourceScope == "" {
+				sourceScope = "test"
+			}
+			if sourceID == "" {
+				sourceID = string(fact.ID)
+			}
+			item := runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies}
+			seed.CoverageItems = append(seed.CoverageItems, item)
+			known[fact.ID] = struct{}{}
+			if idx, exists := sliceIndex[sliceID]; exists {
+				seed.Slices[idx].CoverageWorkItemIDs = append(seed.Slices[idx].CoverageWorkItemIDs, fact.ID)
+			} else {
+				seed.Slices = append(seed.Slices, runtimecontract.RuntimeAcceptanceSlice{ID: sliceID, CoverageWorkItemIDs: []common.CoverageWorkItemID{fact.ID}})
+				sliceIndex[sliceID] = len(seed.Slices) - 1
+			}
+			changed = true
+		}
+		if changed {
+			seed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(seed)
+			aggregate.Facts.DefinitionSeed = seed
+		}
 	}
 	if aggregate.SemanticPlanning.SchemaVersion == "" {
 		ledger, err := runtimecontract.NewRuntimeSemanticPlanningLedger(aggregate.Facts.DefinitionSeed)
@@ -174,7 +219,7 @@ func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAgg
 		}
 		aggregate.SemanticPlanning = ledger
 	}
-	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Manifest.DefinitionSeedHash != aggregate.Facts.DefinitionSeed.Hash {
 		ledger, err := runtimeTestBuildSealedSemanticPlanning(*aggregate)
 		if err != nil {
 			t.Fatalf("seal test semantic planning ledger: %v", err)
@@ -215,12 +260,58 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	coverageOrder, err := runtimeTestSemanticCoverageOrder(seed)
+	if err != nil {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, err
+	}
+	orderDocument := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion:      runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:       manifest.Hash,
+		DefinitionSeedHash: seed.Hash,
+		PlanStep:           runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder:      coverageOrder,
+	}
+	if err := orderDocument.ValidateAgainstManifest(manifest); err != nil {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("build test semantic coverage order: %w", err)
+	}
+	activeCoverageIDs := append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
+	if len(activeCoverageIDs) == 0 {
+		if len(coverageOrder) == 0 {
+			return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("test semantic focus has no coverage items")
+		}
+		activeCoverageIDs = []common.CoverageWorkItemID{coverageOrder[0]}
+	}
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, orderDocument, 0, "test-semantic-request", activeCoverageIDs, coverageOrder, len(coverageOrder),
+	)
+	if err != nil {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("build test semantic focus batch: %w", err)
+	}
+	for _, next := range []runtimecontract.RuntimeSemanticPlanBatchState{
+		runtimecontract.RuntimeSemanticPlanBatchRequesting,
+		runtimecontract.RuntimeSemanticPlanBatchDocumentComplete,
+	} {
+		batch, err = runtimecontract.AdvanceRuntimeSemanticPlanBatch(batch, next)
+		if err != nil {
+			return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("advance test semantic batch: %w", err)
+		}
+	}
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(batch.CoverageWorkItemIDs))
+	for _, id := range batch.CoverageWorkItemIDs {
+		selected[id] = struct{}{}
+	}
 	document := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 		ManifestHash:  manifest.Hash, DefinitionSeedHash: seed.Hash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:  batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
 	}
-	feasibilities := make([]runtimecontract.RuntimeSemanticProofFeasibility, 0, len(seed.CoverageItems))
+	feasibilities := make([]runtimecontract.RuntimeSemanticProofFeasibility, 0, len(batch.CoverageWorkItemIDs))
 	for idx, item := range seed.CoverageItems {
+		if _, ok := selected[item.ID]; !ok {
+			continue
+		}
 		target := fmt.Sprintf("semantic-test-target-%d", idx+1)
 		proposal := runtimecontract.RuntimeSemanticProofProposal{
 			CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -235,13 +326,38 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 			SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
 			ManifestHash:  manifest.Hash, DefinitionSeedHash: seed.Hash,
 			CoverageWorkItemID: item.ID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
-			OwnerModuleID: runtimecontract.RuntimeModuleFile, CatalogSnapshotID: "test-semantic-catalog",
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, CatalogSnapshotID: catalog.SnapshotID,
 			Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: "test-semantic-revision", TargetRefs: []string{target},
 		})
 	}
+	if len(document.Proposals) != len(batch.CoverageWorkItemIDs) {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("test semantic focus proposals do not cover batch")
+	}
 	document = document.Normalized()
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("build test semantic proof document: %w", err)
+	}
+	batch.DocumentHash = runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
+	batch.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(batch)
+	for _, next := range []runtimecontract.RuntimeSemanticPlanBatchState{
+		runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending,
+		runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete,
+		runtimecontract.RuntimeSemanticPlanBatchAccepted,
+	} {
+		batch, err = runtimecontract.AdvanceRuntimeSemanticPlanBatch(batch, next)
+		if err != nil {
+			return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("accept test semantic batch: %w", err)
+		}
+	}
+	merged := document.Clone()
 	ledger.Phase = runtimecontract.RuntimeSemanticPlanningSealed
 	ledger.Manifest = &manifest
+	ledger.CoverageOrderDocument = &orderDocument
+	ledger.Batches = []runtimecontract.RuntimeSemanticPlanBatch{batch}
+	ledger.BatchDocuments = []runtimecontract.RuntimeSemanticPlanDocument{document}
+	ledger.CompletedBatchIDs = []string{batch.BatchID}
+	ledger.NextBatchSequence = 1
+	ledger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), batch.PendingCoverageWorkItemIDs...)
 	ledger.StablePrefixHash = "test-semantic-stable-prefix"
 	ledger.LogicalRequestID = "test-semantic-request"
 	ledger.Document = &document
@@ -249,12 +365,55 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 	ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(manifest, document)
 	ledger.Feasibilities = feasibilities
 	ledger.FeasibilitySetHash = runtimecontract.StableRuntimeSemanticFeasibilitySetHash(feasibilities)
+	ledger.MergedDocument = &merged
+	ledger.MergedDocumentHash = ledger.DocumentHash
 	ledger.SealedBindingSetHash = "test-semantic-binding-set"
-	ledger.SealedLineageRefs = []string{manifest.Hash, ledger.DocumentHash, ledger.FeasibilityBatchID, ledger.FeasibilitySetHash, ledger.SealedBindingSetHash}
+	ledger.SealedLineageRefs = []string{manifest.Hash, runtimecontract.StableRuntimeSemanticPlanCoverageOrderHash(orderDocument), ledger.DocumentHash, ledger.FeasibilityBatchID, ledger.FeasibilitySetHash, ledger.SealedBindingSetHash}
 	if err := ledger.Validate(); err != nil {
-		return runtimecontract.RuntimeSemanticPlanningLedger{}, err
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("test sealed semantic ledger validation: %w", err)
 	}
 	return ledger, nil
+}
+
+// runtimeTestSemanticCoverageOrder derives a dependency-valid provider-order
+// fixture without introducing an authority path in production.  The real
+// order is provider-authored; this helper only makes the synthetic sealed
+// ledger satisfy the same immutable order lineage contract as production.
+func runtimeTestSemanticCoverageOrder(seed runtimecontract.RuntimeDefinitionSeed) ([]common.CoverageWorkItemID, error) {
+	items := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItem, len(seed.CoverageItems))
+	for _, item := range seed.CoverageItems {
+		items[item.ID] = item
+	}
+	state := make(map[common.CoverageWorkItemID]uint8, len(items))
+	order := make([]common.CoverageWorkItemID, 0, len(items))
+	var visit func(common.CoverageWorkItemID) error
+	visit = func(id common.CoverageWorkItemID) error {
+		switch state[id] {
+		case 1:
+			return fmt.Errorf("test semantic coverage dependency cycle at %q", id)
+		case 2:
+			return nil
+		}
+		item, found := items[id]
+		if !found {
+			return fmt.Errorf("test semantic coverage dependency %q is not in seed", id)
+		}
+		state[id] = 1
+		for _, dependency := range item.ReopenDependencies {
+			if err := visit(dependency.CoverageWorkItemID); err != nil {
+				return err
+			}
+		}
+		state[id] = 2
+		order = append(order, id)
+		return nil
+	}
+	for _, item := range seed.CoverageItems {
+		if err := visit(item.ID); err != nil {
+			return nil, err
+		}
+	}
+	return order, nil
 }
 
 func reduceRuntimeStateFixture(t *testing.T, facts runtimecontract.RuntimeFacts, prior *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeDecision, error) {

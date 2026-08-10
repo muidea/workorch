@@ -295,10 +295,15 @@ func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, 
 			recipeRefs = append(recipeRefs, "mcp/tool_call/"+string(capability.ServerID)+"/"+capability.Name)
 		}
 	} else {
-		for serverID, tools := range serverAllowedTools {
-			for tool := range tools {
-				recipeRefs = append(recipeRefs, "mcp/tool_call/"+serverID+"/"+tool)
-			}
+		// Server.AllowedTools is an execution policy, not a capability catalog.
+		// Without the registry owner's typed capability query there is no
+		// owner-attested recipe/effect/idempotency fact to seal into Runtime.
+		// Fail closed instead of manufacturing recipe refs from the server-only
+		// whitelist (RSO-19).
+		return nil, nil, "", &runtimecontract.RuntimeCapabilityCatalogUnavailableError{
+			OwnerModuleID: ModuleID,
+			SubjectRef:    "mcp_capability_catalog",
+			Reason:        "owner_unavailable",
 		}
 	}
 	raw, err := json.Marshal(struct {

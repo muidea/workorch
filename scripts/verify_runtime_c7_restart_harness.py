@@ -168,7 +168,6 @@ def semantic_proposal(
                     "operationKind": kind,
                     "target": semantic_target(catalog),
                     "requiredEvidenceKinds": ["state_change"],
-                    "requiredEffectScopes": ["workspace_durable"],
                     "declarationRef": "runtime-c7/" + coverage_id,
                 }
     if evidence_kinds == ["validation"]:
@@ -185,9 +184,7 @@ def semantic_proposal(
                     "operationKind": "validation/managed_session",
                     "target": semantic_target(catalog),
                     "requiredEvidenceKinds": ["validation"],
-                    "requiredEffectScopes": ["none"],
                     "validationRecipeId": recipe_id,
-                    "requiredCheckRefs": [recipe_id],
                     "declarationRef": "runtime-c7/" + coverage_id,
                 }
     raise ValueError(

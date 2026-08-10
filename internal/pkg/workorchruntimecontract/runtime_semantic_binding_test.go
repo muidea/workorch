@@ -1,18 +1,24 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
 
 func TestCompileRuntimeSemanticBindingsSealsOneBindingPerCWI(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []RuntimeSemanticProofProposal{proposal},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals: []RuntimeSemanticProofProposal{proposal},
 	}
 	fact := RuntimeSemanticProofFeasibility{
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
-		CatalogSnapshotID: "catalog-file-1", Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{"main.go"},
+		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{"main.go"},
 	}
 	focuses, contract, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
@@ -32,7 +38,9 @@ func TestCompileRuntimeSemanticBindingsRejectsPartialOrNonFeasibleBatch(t *testi
 	proposal := semanticContractTestProposal("cwi-001")
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []RuntimeSemanticProofProposal{proposal},
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals: []RuntimeSemanticProofProposal{proposal},
 	}
 	if _, _, err := CompileRuntimeSemanticBindings(manifest, document, nil); err == nil {
 		t.Fatal("partial feasibility batch was sealed")
@@ -40,7 +48,7 @@ func TestCompileRuntimeSemanticBindingsRejectsPartialOrNonFeasibleBatch(t *testi
 	fact := RuntimeSemanticProofFeasibility{
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
-		CatalogSnapshotID: "catalog-file-1", Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
+		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityInfeasible, ObservedRevision: "workspace-1",
 		OriginalDiagnostic: semanticContractTestDiagnostic(),
 	}
 	if _, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact}); err == nil {
@@ -51,8 +59,8 @@ func TestCompileRuntimeSemanticBindingsRejectsPartialOrNonFeasibleBatch(t *testi
 func TestCompileRuntimeSemanticBindingsAllowsEmptyProspectiveOwnerFacts(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")
-	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []RuntimeSemanticProofProposal{proposal}}
-	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: "catalog-file-1", Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1"}
+	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
+	fact := RuntimeSemanticProofFeasibility{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1"}
 	focuses, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact})
 	if err != nil {
 		t.Fatal(err)

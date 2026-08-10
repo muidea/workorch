@@ -47,7 +47,6 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventSemanticPlanBatchFeasibilityObserved,
 		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
 		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
-		RuntimeInternalEventSemanticPlanBatchFeasibilitiesMerged,
 		RuntimeInternalEventSemanticPlanEvaluated,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,

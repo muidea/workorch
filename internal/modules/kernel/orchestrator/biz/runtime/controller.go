@@ -361,6 +361,7 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept prerequisite results", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	previousFocusID := aggregate.Facts.Focus.ID
 	// A prerequisite ID is stable across re-acquisition. It is therefore not
 	// sufficient to match only the pending ID here: a response started before a
 	// durable resource change can otherwise satisfy the newly-pending instance
@@ -382,6 +383,13 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 	// therefore cannot skip their required fresh replacement work.
 	if len(facts.Prerequisites.Pending) == 0 && len(facts.FreshnessReacquireCoverage) == 0 {
 		facts = advanceSatisfiedCoverageFocus(facts)
+	}
+	aggregate.Facts = facts
+	if aggregate.Facts.Focus.ID != previousFocusID {
+		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		facts = aggregate.Facts
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
@@ -1342,7 +1350,16 @@ func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID co
 	dispatch.State = DispatchStateCommitted
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	previousFocusID := aggregate.Facts.Focus.ID
 	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+	if aggregate.Facts.Focus.ID != previousFocusID {
+		// Reaching an unbound placeholder is a local SM-2 transition, not a
+		// continuation chosen by the assessment. Retire only the just-sealed
+		// batch working state so SM-4 can request the next scoped proof batch.
+		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	}
 	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err

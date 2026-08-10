@@ -555,6 +555,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Shell semantic catalog is stale", command.OwnerCatalog.ObservedRevision, current.ObservedRevision, nil))
 		return
 	}
+	targetRefs := runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)
 	if command.Proposal.ValidationRecipeID != "" {
 		recipe, found := runtimecontract.RuntimeValidationRecipeForID(command.OwnerCatalog.ValidationRecipes, command.Proposal.ValidationRecipeID)
 		if !found {
@@ -562,7 +563,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_not_sealed", "runtime semantic validation recipe is absent from the Shell catalog", "", current.ObservedRevision, nil))
 			return
 		}
-		preflightErr := m.runtimeAdapter.PreflightRuntimeSemanticValidationRecipe(command.WorkspaceDeliverableDirectory, recipe)
+		preflightErr := m.runtimeAdapter.PreflightRuntimeSemanticValidationRecipe(command.WorkspaceDeliverableDirectory, recipe, targetRefs)
 		if preflightErr != nil {
 			message := "runtime semantic validation recipe is not executable"
 			if preflightErr != nil {
@@ -573,7 +574,6 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			return
 		}
 	}
-	targetRefs := runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)
 	if err := validateDeclaredValidationTargets(command.WorkspaceDeliverableDirectory, targetRefs); err != nil {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, current.ObservedRevision, targetRefs,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_unavailable", "runtime Shell semantic target is outside the current validation scope", "", current.ObservedRevision, targetRefs))
