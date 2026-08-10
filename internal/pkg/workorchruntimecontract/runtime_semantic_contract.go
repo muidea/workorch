@@ -79,6 +79,7 @@ func (s RuntimeDefinitionSeed) Clone() RuntimeDefinitionSeed {
 	s = s.Normalized()
 	s.CoverageItems = append([]RuntimeCoverageItem(nil), s.CoverageItems...)
 	for idx := range s.CoverageItems {
+		s.CoverageItems[idx].PrerequisiteCoverageWorkItemIDs = cloneRuntimeCoveragePrerequisiteIDs(s.CoverageItems[idx].PrerequisiteCoverageWorkItemIDs)
 		s.CoverageItems[idx].ReopenDependencies = cloneRuntimeCoverageReopenDependencies(s.CoverageItems[idx].ReopenDependencies)
 	}
 	s.Slices = append([]RuntimeAcceptanceSlice(nil), s.Slices...)
@@ -1102,7 +1103,7 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 	}
 	refreshable := false
 	for _, feasibility := range g.Feasibilities {
-		if feasibility.Status == RuntimeSemanticFeasibilityStale || feasibility.Status == RuntimeSemanticFeasibilityPrerequisiteRequired {
+		if feasibility.Status == RuntimeSemanticFeasibilityStale {
 			refreshable = true
 		}
 		if feasibility.OriginalDiagnostic != nil {
@@ -1112,7 +1113,7 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 		}
 	}
 	if !refreshable {
-		return fmt.Errorf("runtime semantic feasibility gap requires stale or prerequisite-required owner fact")
+		return fmt.Errorf("runtime semantic feasibility gap requires a stale owner fact")
 	}
 	for idx := range g.Rejections {
 		if err := g.Rejections[idx].Validate(); err != nil {
@@ -2122,11 +2123,11 @@ func validateRuntimeSemanticCoverageOrder(order []common.CoverageWorkItemID, ite
 	}
 	for _, item := range items {
 		itemPos := position[item.ID]
-		for _, dependency := range item.ReopenDependencies {
-			depPos, ok := position[dependency.CoverageWorkItemID]
+		for _, dependencyID := range item.PrerequisiteCoverageWorkItemIDs {
+			depPos, ok := position[dependencyID]
 			if !ok || depPos >= itemPos {
 				return &RuntimeSemanticDependencyOrderError{
-					RequiredBeforeID:     dependency.CoverageWorkItemID,
+					RequiredBeforeID:     dependencyID,
 					RequiredAfterID:      item.ID,
 					ActualBeforePosition: depPos,
 					ActualAfterPosition:  itemPos,
@@ -2243,7 +2244,14 @@ func writeRuntimeSemanticCoverageItemsHash(h hashStringWriter, items []RuntimeCo
 		writeHashString(h, item.SourceID)
 		writeHashString(h, item.TargetText)
 		writeHashString(h, fmt.Sprintf("%d", item.Order))
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			writeHashString(h, "prerequisite:"+string(prerequisiteID))
+		}
 		for _, dependency := range item.ReopenDependencies {
+			// Keep the historical reopen-dependency encoding stable.  The new
+			// prerequisite relation has its own tagged section above, so an
+			// existing seed containing only ReopenDependencies retains its
+			// persisted hash and does not spuriously drift generations.
 			writeHashString(h, string(dependency.CoverageWorkItemID))
 			writeHashStrings(h, dependency.TriggerEvidenceKinds)
 		}

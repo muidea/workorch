@@ -252,11 +252,14 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   correction policy 或占用 attempt。provider authentication/configuration、transient transport、incomplete
   document 与 unknown submission 走独立 dependency 或 request-session/recovery ledger。prerequisite stale
   精确退休旧授权，历史 execution failure 不得触发 authority reseal。
-- semantic `stale | prerequisite_required` 必须先以 `semantic_feasibility_observed` 独立 CAS 保存；SM-2 随后复用
-  `semantic_contract_required` private entry，以 persisted refresh generation 原子保存 gap lineage、退休 matching
-  catalog observation 并回到有界重获。新 revision 编译新 manifest/request session，旧 complete session 只读保留；
-  duplicate generation 不写 CAS，预算耗尽才以原始 owner diagnostic 执行 `semantic_contract_failed`。该回边不新增 phase、
-  不消费 candidate correction，也不创建 Decision/Approval。
+- semantic `stale | prerequisite_required` 必须先以 `semantic_feasibility_observed` 独立 CAS 保存。只有带完整
+  expected/observed revision、精确匹配 current catalog dependency 的 `stale`，才能复用 `semantic_contract_required`
+  private entry，以 persisted refresh generation 原子保存 gap lineage、退休 matching catalog observation 并回到有界重获。
+  当前没有 owner-defined typed semantic prerequisite request 时，`prerequisite_required` 保留 catalog、observation、预算
+  与原始 diagnostic，由 SM-2 fail-closed terminal；不得伪装成 stale 或 generic refresh。新 revision 编译新
+  manifest/request session，旧 complete session 只读保留；duplicate generation 不写 CAS，预算耗尽才以原始 owner
+  diagnostic 执行 `semantic_contract_failed`。上述处理不新增 phase、不消费 candidate correction，也不创建
+  Decision/Approval。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。Result 强制绑定 workspace/run/resolution scope，并保留正交的 `committed | stale_diagnostic | duplicate` CAS 提交事实；它不携带自由文本 diagnostic/reason/failure，也不得由 convergence state 猜测提交事实。
 - Decision owner 可通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Orchestrator 从 persisted binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
 - governed dispatch 通过 `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner 创建确定性 ticket；ticket、snapshot、dispatch 与 dependency 的绑定随 Runtime aggregate 持久化。

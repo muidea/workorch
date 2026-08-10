@@ -22,9 +22,14 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 		Activation: RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, DialogLanguage: "zh-CN", Skills: []RuntimeSkillContext{{ID: "skill-1", Instruction: "typed instruction"}}, ExecutionContract: RuntimeExecutionContract{
 			MaxRepairAttemptsPerFocus: 7, ValidationPolicies: []RuntimeValidationPolicy{{ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2}},
 		}},
-		Focuses:           []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRefs: []string{"target.txt"}, AcceptedStepKinds: []string{StepKindFileEdit}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding}}},
-		Slices:            []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
-		CoverageItems:     []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", Order: 1}},
+		Focuses: []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRefs: []string{"target.txt"}, AcceptedStepKinds: []string{StepKindFileEdit}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding}}},
+		Slices:  []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-0"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
+		CoverageItems: []RuntimeCoverageItem{
+			{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", Order: 1,
+				PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"},
+				ReopenDependencies:              []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-0", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}},
+			{ID: "cwi-0", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", Order: 0},
+		},
 		Requirements:      []RuntimeRequirement{{Kind: PrerequisiteKindCapability, OwnerModuleID: RuntimeModuleFile, CapabilityClass: RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{"file/edit"}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 7, MaxValidationOnlyRetriesPerFocus: 2, MaxAcceptanceSliceWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 	}
@@ -40,6 +45,13 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	}
 	if !SameRuntimeBootstrap(bootstrap, cloned) {
 		t.Fatalf("bootstrap clone drifted: source=%+v clone=%+v", bootstrap, cloned)
+	}
+	if len(cloned.CoverageItems[0].PrerequisiteCoverageWorkItemIDs) != 1 || cloned.CoverageItems[0].PrerequisiteCoverageWorkItemIDs[0] != "cwi-0" {
+		t.Fatalf("bootstrap clone lost prerequisite identity: %+v", cloned.CoverageItems)
+	}
+	cloned.CoverageItems[0].PrerequisiteCoverageWorkItemIDs[0] = "cwi-mutated"
+	if bootstrap.CoverageItems[0].PrerequisiteCoverageWorkItemIDs[0] != "cwi-0" {
+		t.Fatal("bootstrap clone shares mutable prerequisite slice")
 	}
 	facts, err := bootstrap.InitialFacts("ws-1", "run-1")
 	if err != nil {

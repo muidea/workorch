@@ -223,7 +223,7 @@ func TestRuntimeSemanticPlanPayloadRejectsUnknownMissingAndWrongKind(t *testing.
 
 func TestRuntimeSemanticPlanPayloadPreservesTypedDependencyOrderViolation(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	manifest.CoverageItems[0].ReopenDependencies = []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-000", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}
+	manifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
 	manifest.CoverageItems = append(manifest.CoverageItems, RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"})
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	payload := `{"documentKind":"semantic_plan","schemaVersion":"workorch.runtime_semantic_plan_document","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"coverage_order","coverageOrder":["cwi-001","cwi-000"],"proposals":[]}`

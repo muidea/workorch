@@ -153,8 +153,8 @@ func (v RuntimeSemanticContractViolation) ValidateAgainstManifest(manifest Runti
 	}
 	for _, item := range manifest.CoverageItems {
 		if item.ID == v.RequiredAfterID {
-			for _, dependency := range item.ReopenDependencies {
-				if dependency.CoverageWorkItemID == v.RequiredBeforeID {
+			for _, dependencyID := range item.PrerequisiteCoverageWorkItemIDs {
+				if dependencyID == v.RequiredBeforeID {
 					return nil
 				}
 			}

@@ -1296,7 +1296,8 @@ func (f RuntimeFacts) Validate() error {
 	for _, item := range f.Coverage {
 		coverageItems = append(coverageItems, RuntimeCoverageItem{
 			ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
-			TargetText: item.TargetText, ReopenDependencies: item.ReopenDependencies,
+			TargetText: item.TargetText, PrerequisiteCoverageWorkItemIDs: item.PrerequisiteCoverageWorkItemIDs,
+			ReopenDependencies: item.ReopenDependencies,
 		})
 	}
 	if err := ValidateRuntimeCoverageItemDependencies(coverageItems); err != nil {

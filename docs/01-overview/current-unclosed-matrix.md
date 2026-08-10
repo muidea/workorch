@@ -59,6 +59,11 @@ owner-local behavior probe、focus/dependency batch admission、typed failure cl
 zero-dispatch deployed proof 和 whole-document recovery fault injection 仍未完成。逐组件 owner 矩阵与实施顺序
 见 [Runtime plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md#108-detailed-single-owner-implementation-closure-2026-08-10)。
 
+语义 owner feasibility 的 `stale` 与 `prerequisite_required` 已明确分流：只有真实 revision-stale 才能退休
+matching catalog 并消耗有界 refresh budget；当前没有 typed semantic prerequisite request 时，
+`prerequisite_required` 只保留 owner observation/catalog/original diagnostic 并 fail-closed，不伪装成 stale、
+不退休有效 observation，也不触发第二条 acquisition 状态机。
+
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
 

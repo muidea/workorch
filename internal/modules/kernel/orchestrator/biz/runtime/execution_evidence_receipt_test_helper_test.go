@@ -154,7 +154,7 @@ func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAgg
 			if sourceID == "" {
 				sourceID = string(fact.ID)
 			}
-			items = append(items, runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies})
+			items = append(items, runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, PrerequisiteCoverageWorkItemIDs: fact.PrerequisiteCoverageWorkItemIDs, ReopenDependencies: fact.ReopenDependencies})
 			slicesByID[sliceID] = append(slicesByID[sliceID], fact.ID)
 		}
 		slices := make([]runtimecontract.RuntimeAcceptanceSlice, 0, len(slicesByID))
@@ -196,7 +196,7 @@ func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAgg
 			if sourceID == "" {
 				sourceID = string(fact.ID)
 			}
-			item := runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies}
+			item := runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, PrerequisiteCoverageWorkItemIDs: fact.PrerequisiteCoverageWorkItemIDs, ReopenDependencies: fact.ReopenDependencies}
 			seed.CoverageItems = append(seed.CoverageItems, item)
 			known[fact.ID] = struct{}{}
 			if idx, exists := sliceIndex[sliceID]; exists {
@@ -399,8 +399,8 @@ func runtimeTestSemanticCoverageOrder(seed runtimecontract.RuntimeDefinitionSeed
 			return fmt.Errorf("test semantic coverage dependency %q is not in seed", id)
 		}
 		state[id] = 1
-		for _, dependency := range item.ReopenDependencies {
-			if err := visit(dependency.CoverageWorkItemID); err != nil {
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			if err := visit(prerequisiteID); err != nil {
 				return err
 			}
 		}

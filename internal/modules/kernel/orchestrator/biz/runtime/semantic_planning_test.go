@@ -387,7 +387,7 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 
 	manifest, _, _ = semanticPlanningFixture(t, aggregate)
 	manifest = manifest.Clone()
-	manifest.CoverageItems[0].ReopenDependencies = []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-prerequisite", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}
+	manifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-prerequisite"}
 	manifest.CoverageItems = append(manifest.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: "cwi-prerequisite", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-prerequisite", TargetText: "prerequisite"})
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	started, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
@@ -781,7 +781,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	}
 }
 
-func TestRuntimeSemanticPrerequisiteRequiredRetiresCatalogWithoutInventingStaleRevision(t *testing.T) {
+func TestRuntimeSemanticPrerequisiteRequiredFailsClosedWithoutRetiringCatalog(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -854,12 +854,21 @@ func TestRuntimeSemanticPrerequisiteRequiredRetiresCatalogWithoutInventingStaleR
 	}
 	batchID := aggregate.SemanticPlanning.FeasibilityBatchID
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: batchID, SemanticFeasibility: &feasibility})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractRequired, SemanticBatchID: batchID, SemanticRefreshGeneration: 0})
-	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(aggregate.PrerequisiteInvalidations) != 1 ||
-		aggregate.PrerequisiteInvalidations[0].Stale != nil || aggregate.PrerequisiteInvalidations[0].RefreshDiagnostic == nil ||
-		aggregate.PrerequisiteInvalidations[0].RefreshDiagnostic.OriginalMessage != "workspace manifest could not be observed" ||
-		len(aggregate.Facts.Prerequisites.Pending) != 1 || aggregate.Facts.Recovery.PrerequisiteRefreshes != 1 {
-		t.Fatalf("prerequisite-required semantic gap was not preserved as its own refresh fact: %+v", aggregate)
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired ||
+		len(aggregate.SemanticPlanning.Feasibilities) != 1 ||
+		aggregate.SemanticPlanning.Feasibilities[0].Status != runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired {
+		t.Fatalf("prerequisite-required owner observation was not persisted: %+v", aggregate.SemanticPlanning)
+	}
+	if _, refreshErr := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticContractRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		SemanticBatchID: batchID, SemanticRefreshGeneration: 0,
+	}); refreshErr == nil {
+		t.Fatal("prerequisite-required semantic fact unexpectedly entered catalog refresh")
+	}
+	if len(aggregate.PrerequisiteInvalidations) != 0 || len(aggregate.Facts.Resources.OperationAdmissibilities) != 1 ||
+		len(aggregate.Facts.Resources.PrerequisiteObservations) != 1 || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
+		len(aggregate.Facts.Prerequisites.Pending) != 0 {
+		t.Fatalf("prerequisite-required fact retired or budgeted catalog state: facts=%+v invalidations=%+v", aggregate.Facts, aggregate.PrerequisiteInvalidations)
 	}
 }
 

@@ -56,9 +56,11 @@ request 应按 cacheability 从高到低组织：
   contract，C3 Definition seed + sealed semantic manifest/schema；manifest 必须包含 provider request 前已获取的 owner
   admissibility snapshot/revision 与 bounded target/selector/constraint/recipe vocabulary，C4 attempt 0/1 与 provider-safe rejection，C5
   acceptance slice refs。C4 不得渲染 `OriginalMessage`、raw provider body 或 details content。
-- semantic owner 报告 catalog `stale | prerequisite_required` 时，原 request/session 只保留 audit，不把 owner diagnostic
-  放入 C4 或 correction。SM-2 有界重获 catalog；catalog snapshot/revision 改变后必须以新 manifest hash 创建新 logical
-  request identity，不能 continuation/replay 旧 complete document。refresh generation 与完整 owner diagnostic 只属于
+- semantic owner 报告 catalog `stale | prerequisite_required` 时，原 request/session 都只保留 audit，不把 owner
+  diagnostic 放入 C4 或 correction。只有带精确 revision fence 的 `stale` 可由 SM-2 有界重获 catalog；catalog
+  snapshot/revision 改变后必须以新 manifest hash 创建新 logical request identity，不能 continuation/replay 旧 complete
+  document。当前无 owner-defined typed semantic prerequisite request 的 `prerequisite_required` 不退休 catalog、不开启
+  refresh，而是以保留的 original diagnostic fail-closed terminal。refresh generation 与完整 owner diagnostic 都只属于
   persisted aggregate，不进入 provider-facing stable prefix。
 - raw stream、full provider payload、large artifact 默认 ref-only
 

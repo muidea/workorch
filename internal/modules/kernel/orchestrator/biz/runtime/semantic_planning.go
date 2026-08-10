@@ -148,10 +148,7 @@ func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspa
 		}
 		stale = &value
 	} else {
-		facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err = invalidatePrerequisiteObservations(facts, []runtimecontract.RuntimePrerequisiteObservation{observation})
-		if err != nil {
-			return RuntimeAggregate{}, err
-		}
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh requires a stale owner revision", common.ErrConflict)
 	}
 	recovery, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
 	if err != nil {
@@ -162,14 +159,10 @@ func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspa
 	}
 	facts.Recovery = recovery
 
-	diagnostic := gapFact.OriginalDiagnostic.CloneOriginal()
 	invalidation := runtimecontract.RuntimePrerequisiteInvalidationRecord{
 		Signature:       fmt.Sprintf("semantic-catalog-refresh/%d/%s/%s", refreshGeneration, feasibilityBatchID, ledger.FeasibilitySetHash),
 		PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
 		InvalidatedDependencies: invalidatedDependencies, Stale: stale,
-	}
-	if stale == nil {
-		invalidation.RefreshDiagnostic = diagnostic
 	}
 	if err := invalidation.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -525,7 +518,7 @@ func (c *RuntimeController) mergeSemanticPlanBatchFeasibilities(ctx context.Cont
 
 func refreshableRuntimeSemanticFeasibility(values []runtimecontract.RuntimeSemanticProofFeasibility) (runtimecontract.RuntimeSemanticProofFeasibility, bool) {
 	for _, value := range values {
-		if value.Status == runtimecontract.RuntimeSemanticFeasibilityStale || value.Status == runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired {
+		if value.Status == runtimecontract.RuntimeSemanticFeasibilityStale {
 			return value.Clone(), true
 		}
 	}

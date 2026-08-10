@@ -399,7 +399,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	}
 	serverIDs, recipeRefs, revision, err := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if err != nil {
-		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, command.OwnerCatalog.ObservedRevision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, mcpSemanticCatalogUnavailableCode(err), err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
@@ -415,7 +415,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	}
 	capabilities, capabilityErr := m.runtimeAdapter.EffectiveCapabilities(event.Context())
 	if capabilityErr != nil {
-		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, revision, nil,
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_capability_catalog_unavailable", capabilityErr.Error(), "", revision, nil))
 		return
 	}
@@ -461,7 +461,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	// fact from mixed snapshots (and, importantly, cannot invoke the endpoint).
 	_, _, verifiedRevision, verifyErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if verifyErr != nil {
-		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, revision, nil,
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, mcpSemanticCatalogUnavailableCode(verifyErr), verifyErr.Error(), revision, "", nil))
 		return
 	}
@@ -481,7 +481,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		// must still be tied to the same catalog revision that authorized it.
 		_, _, observedAfterProbe, revisionErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
 		if revisionErr != nil {
-			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, revision, nil,
+			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_catalog_unavailable", revisionErr.Error(), revision, "", nil))
 			return
 		}

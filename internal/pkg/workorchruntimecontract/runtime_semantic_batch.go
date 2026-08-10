@@ -273,9 +273,9 @@ func CompileRuntimeSemanticPlanBatchFromOffset(manifest RuntimeSemanticPlanManif
 		items[item.ID] = item
 	}
 	for _, id := range pending {
-		for _, dep := range items[id].ReopenDependencies {
-			if _, inBatch := selectedSet[dep.CoverageWorkItemID]; !inBatch {
-				barriers = append(barriers, string(dep.CoverageWorkItemID)+"->"+string(id))
+		for _, prerequisiteID := range items[id].PrerequisiteCoverageWorkItemIDs {
+			if _, inBatch := selectedSet[prerequisiteID]; !inBatch {
+				barriers = append(barriers, string(prerequisiteID)+"->"+string(id))
 			}
 		}
 	}
@@ -358,8 +358,8 @@ func CompileRuntimeSemanticPlanFocusBatch(
 		if !known {
 			return fmt.Errorf("runtime semantic active coverage %q is outside manifest", id)
 		}
-		for _, dependency := range item.ReopenDependencies {
-			if err := include(dependency.CoverageWorkItemID); err != nil {
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			if err := include(prerequisiteID); err != nil {
 				return err
 			}
 		}
@@ -404,9 +404,9 @@ func CompileRuntimeSemanticPlanFocusBatch(
 func runtimeSemanticPendingDependencyBarriers(items map[common.CoverageWorkItemID]RuntimeCoverageItem, pending []common.CoverageWorkItemID, selected map[common.CoverageWorkItemID]struct{}) []string {
 	barriers := make([]string, 0)
 	for _, id := range pending {
-		for _, dependency := range items[id].ReopenDependencies {
-			if _, inBatch := selected[dependency.CoverageWorkItemID]; !inBatch {
-				barriers = append(barriers, string(dependency.CoverageWorkItemID)+"->"+string(id))
+		for _, prerequisiteID := range items[id].PrerequisiteCoverageWorkItemIDs {
+			if _, inBatch := selected[prerequisiteID]; !inBatch {
+				barriers = append(barriers, string(prerequisiteID)+"->"+string(id))
 			}
 		}
 	}

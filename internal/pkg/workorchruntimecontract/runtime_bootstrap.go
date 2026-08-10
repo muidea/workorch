@@ -170,6 +170,7 @@ func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
 	}
 	b.CoverageItems = append([]RuntimeCoverageItem(nil), b.CoverageItems...)
 	for idx := range b.CoverageItems {
+		b.CoverageItems[idx].PrerequisiteCoverageWorkItemIDs = cloneRuntimeCoveragePrerequisiteIDs(b.CoverageItems[idx].PrerequisiteCoverageWorkItemIDs)
 		b.CoverageItems[idx].ReopenDependencies = cloneRuntimeCoverageReopenDependencies(b.CoverageItems[idx].ReopenDependencies)
 	}
 	b.Requirements = append([]RuntimeRequirement(nil), b.Requirements...)
@@ -242,6 +243,7 @@ func sameRuntimeCoverageItem(left, right RuntimeCoverageItem) bool {
 	right = right.Normalized()
 	if left.ID != right.ID || left.SliceID != right.SliceID || left.SourceScope != right.SourceScope ||
 		left.SourceID != right.SourceID || left.TargetText != right.TargetText || left.Order != right.Order ||
+		!sameCoverageWorkItemIDs(left.PrerequisiteCoverageWorkItemIDs, right.PrerequisiteCoverageWorkItemIDs) ||
 		len(left.ReopenDependencies) != len(right.ReopenDependencies) {
 		return false
 	}

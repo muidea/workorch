@@ -537,7 +537,7 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 	}
 	for _, fact := range ledger.Feasibilities {
 		switch fact.Status {
-		case runtimecontract.RuntimeSemanticFeasibilityStale, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired:
+		case runtimecontract.RuntimeSemanticFeasibilityStale:
 			if fact.OriginalDiagnostic == nil {
 				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_feasibility_failed", "semantic owner feasibility omitted its original diagnostic", nil)
 			}
@@ -551,11 +551,21 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 				SemanticBatchID: ledger.FeasibilityBatchID, SemanticRefreshGeneration: ledger.CatalogRefreshAttempts,
 			})
 			return updated.Aggregate, err
+		case runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired:
+			// A semantic proof owner currently has no typed prerequisite request
+			// contract.  Treat this status as a factual terminal instead of
+			// retiring the already observed catalog.  Generic catalog refresh is
+			// reserved for a real stale revision; a future prerequisite path must
+			// introduce an explicit owner-grounded typed request.
+			if fact.OriginalDiagnostic == nil {
+				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_feasibility_unknown", "semantic owner prerequisite fact omitted its original diagnostic", nil)
+			}
+			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
 		case runtimecontract.RuntimeSemanticFeasibilityInfeasible:
 			if fact.OriginalDiagnostic == nil {
 				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_feasibility_failed", "semantic owner feasibility was not accepted", nil)
 			}
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_feasibility_infeasible", fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
+			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
 		}
 	}
 	observed := make(map[common.CoverageWorkItemID]struct{}, len(ledger.Feasibilities))
@@ -573,6 +583,31 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 	})
 	return sealed.Aggregate, err
+}
+
+// semanticOwnerFeasibilityTerminalCode returns only a closed internal code
+// for the reducer's failure-class mapping. The nested owner diagnostic is
+// preserved unchanged and remains the sole producer-authored detail.
+func semanticOwnerFeasibilityTerminalCode(fact runtimecontract.RuntimeSemanticProofFeasibility) string {
+	if fact.OriginalDiagnostic == nil {
+		return "semantic_owner_feasibility_unknown"
+	}
+	code := strings.TrimSpace(fact.OriginalDiagnostic.OriginalCode)
+	switch code {
+	case "validation_recipe_unavailable", "validation_recipe_not_sealed", "validation_recipe_exhausted",
+		"mcp_semantic_proof_unavailable", "mcp_recipe_not_admissible", "mcp_selector_not_admissible",
+		"file_semantic_proof_unavailable", "git_semantic_proof_unavailable", "web_semantic_proof_unavailable",
+		"ssh_semantic_proof_unavailable", "semantic_target_unavailable", "semantic_target_invalid",
+		"semantic_target_not_regular", "prospective_target_exists", "prospective_target_unobservable",
+		"semantic_owner_feasibility_infeasible", "mcp_recipe_invalid":
+		return code
+	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
+		"mcp_capability_catalog_unavailable", "web_catalog_unavailable", "git_repository_state_unavailable",
+		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing":
+		return code
+	default:
+		return "semantic_owner_feasibility_unknown"
+	}
 }
 
 func runtimeSemanticActiveFeasibilityDocument(ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtimecontract.RuntimeSemanticPlanDocument, bool) {

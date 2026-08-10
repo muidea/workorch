@@ -546,7 +546,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	}
 	current, err := m.runtimeAdapter.AcquireRuntimeOperationAdmissibility(command.WorkspaceDeliverableDirectory, command.OwnerCatalog.PrerequisiteID, []string{command.Proposal.OperationKind})
 	if err != nil {
-		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, command.OwnerCatalog.ObservedRevision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "shell_policy_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
@@ -569,7 +569,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			if preflightErr != nil {
 				message = preflightErr.Error()
 			}
-			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, current.ObservedRevision, nil,
+			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, current.ObservedRevision, nil,
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_unavailable", message, "", current.ObservedRevision, nil))
 			return
 		}

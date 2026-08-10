@@ -372,7 +372,7 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 	}
 	snapshot, err := m.runtimeAdapter.CapabilityState(event.Context(), command.OwnerCatalog.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
 	if err != nil {
-		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, command.OwnerCatalog.ObservedRevision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "git_repository_state_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}

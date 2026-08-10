@@ -37,6 +37,31 @@ func TestRuntimeDefinitionSeedIsStableAndContainsNoProofAuthority(t *testing.T) 
 	}
 }
 
+func TestRuntimeDefinitionSeedHashKeepsReopenEncodingAndAddsPrerequisiteIdentity(t *testing.T) {
+	item := RuntimeCoverageItem{
+		ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001",
+		ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-002", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}},
+	}
+	base := RuntimeDefinitionSeed{
+		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: "definition-1", PolicyHash: "policy-1",
+		CoverageItems: []RuntimeCoverageItem{item, {ID: "cwi-002", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-002"}},
+		Slices:        []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001", "cwi-002"}}},
+	}
+	base.Hash = StableRuntimeDefinitionSeedHash(base)
+	withoutNewRelation := base.Clone()
+	withoutNewRelation.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = nil
+	withoutNewRelation.Hash = StableRuntimeDefinitionSeedHash(withoutNewRelation)
+	if withoutNewRelation.Hash != base.Hash {
+		t.Fatalf("empty prerequisite relation changed legacy reopen hash: %q != %q", withoutNewRelation.Hash, base.Hash)
+	}
+	withPrerequisite := base.Clone()
+	withPrerequisite.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-002"}
+	withPrerequisite.Hash = StableRuntimeDefinitionSeedHash(withPrerequisite)
+	if withPrerequisite.Hash == base.Hash {
+		t.Fatal("prerequisite relation was omitted from definition seed hash")
+	}
+}
+
 func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t *testing.T) {
 	definition := RuntimeDefinitionContext{
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver",
@@ -190,7 +215,7 @@ func TestRuntimeSemanticPlanCoverageOrderMustRespectDependencies(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	manifest.CoverageItems = []RuntimeCoverageItem{
 		{ID: "cwi-001", SliceID: "slice-1", SourceScope: "test", SourceID: "one"},
-		{ID: "cwi-002", SliceID: "slice-1", SourceScope: "test", SourceID: "two", ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-001"}}},
+		{ID: "cwi-002", SliceID: "slice-1", SourceScope: "test", SourceID: "two", PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}},
 	}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	document := RuntimeSemanticPlanDocument{

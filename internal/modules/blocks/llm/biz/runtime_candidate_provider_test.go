@@ -40,7 +40,7 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	base.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
 	base.SemanticContext.BatchID = ""
 	base.SemanticContext.BatchCoverageWorkItemIDs = nil
-	base.SemanticManifest.CoverageItems[0].ReopenDependencies = []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-000", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}
+	base.SemanticManifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
 	prerequisite := runtimecontract.RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"}
 	base.SemanticManifest.CoverageItems = append(base.SemanticManifest.CoverageItems, prerequisite)
 	base.SemanticContext.DefinitionSeed.CoverageItems = append(base.SemanticContext.DefinitionSeed.CoverageItems, prerequisite)

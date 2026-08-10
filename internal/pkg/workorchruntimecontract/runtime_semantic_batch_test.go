@@ -81,6 +81,60 @@ func TestCompileRuntimeSemanticPlanBatchAdvancesThroughProviderOrder(t *testing.
 	}
 }
 
+func TestCompileRuntimeSemanticPlanFocusBatchDoesNotTreatReopenAsPrerequisite(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.CoverageItems = []RuntimeCoverageItem{
+		{ID: "cwi-043", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-043", ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-046", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}},
+		{ID: "cwi-046", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-046"},
+		{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001"},
+	}
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-043", "cwi-046", "cwi-001"},
+	}
+	batch, err := CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "request-1",
+		[]common.CoverageWorkItemID{"cwi-043"},
+		[]common.CoverageWorkItemID{"cwi-043", "cwi-046", "cwi-001"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameOrderedCoverageWorkItemIDs(batch.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-043"}) {
+		t.Fatalf("reopen edge expanded active batch: %+v", batch)
+	}
+	if !sameOrderedCoverageWorkItemIDs(batch.PendingCoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-046", "cwi-001"}) {
+		t.Fatalf("pending coverage changed by reopen edge: %+v", batch)
+	}
+}
+
+func TestCompileRuntimeSemanticPlanFocusBatchIncludesOnlyPrerequisiteClosure(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.CoverageItems = []RuntimeCoverageItem{
+		{ID: "cwi-046", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-046", ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-001", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}},
+		{ID: "cwi-043", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-043", PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-046"}},
+		{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001"},
+	}
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: []common.CoverageWorkItemID{"cwi-046", "cwi-043", "cwi-001"},
+	}
+	batch, err := CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "request-1",
+		[]common.CoverageWorkItemID{"cwi-043"},
+		[]common.CoverageWorkItemID{"cwi-046", "cwi-043", "cwi-001"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameOrderedCoverageWorkItemIDs(batch.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-046", "cwi-043"}) {
+		t.Fatalf("prerequisite closure was not admitted in sealed provider order: %+v", batch)
+	}
+	if !sameOrderedCoverageWorkItemIDs(batch.PendingCoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-001"}) {
+		t.Fatalf("unrelated CWI entered prerequisite closure: %+v", batch)
+	}
+}
+
 func TestAdvanceRuntimeSemanticPlanBatchRejectsLifecycleSkip(t *testing.T) {
 	batch := RuntimeSemanticPlanBatch{BatchID: "batch-1", State: RuntimeSemanticPlanBatchPending}
 	if _, err := AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchAccepted); err == nil {

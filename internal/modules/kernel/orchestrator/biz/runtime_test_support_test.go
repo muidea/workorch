@@ -87,7 +87,7 @@ func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.Ru
 			if sourceID == "" {
 				sourceID = string(fact.ID)
 			}
-			items = append(items, runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies})
+			items = append(items, runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, PrerequisiteCoverageWorkItemIDs: fact.PrerequisiteCoverageWorkItemIDs, ReopenDependencies: fact.ReopenDependencies})
 			slicesByID[sliceID] = append(slicesByID[sliceID], fact.ID)
 		}
 		if len(items) == 0 {
@@ -140,7 +140,8 @@ func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.Ru
 			}
 			seed.CoverageItems = append(seed.CoverageItems, runtimecontract.RuntimeCoverageItem{
 				ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID,
-				TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies,
+				TargetText: fact.TargetText, PrerequisiteCoverageWorkItemIDs: fact.PrerequisiteCoverageWorkItemIDs,
+				ReopenDependencies: fact.ReopenDependencies,
 			})
 			known[fact.ID] = struct{}{}
 			if idx, exists := sliceIndex[sliceID]; exists {
@@ -405,8 +406,8 @@ func runtimeTestSemanticCoverageOrderForSupport(seed runtimecontract.RuntimeDefi
 			return fmt.Errorf("test semantic coverage dependency %q is not in seed", id)
 		}
 		state[id] = 1
-		for _, dependency := range item.ReopenDependencies {
-			if err := visit(dependency.CoverageWorkItemID); err != nil {
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			if err := visit(prerequisiteID); err != nil {
 				return err
 			}
 		}

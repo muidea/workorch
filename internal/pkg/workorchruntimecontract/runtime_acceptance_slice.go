@@ -72,12 +72,17 @@ type RuntimeAcceptanceSlice struct {
 
 // RuntimeCoverageItem is the stable item-level coverage identity independent of slice size.
 type RuntimeCoverageItem struct {
-	ID                 common.CoverageWorkItemID
-	SliceID            string
-	SourceScope        string
-	SourceID           string
-	TargetText         string
-	Order              int
+	ID          common.CoverageWorkItemID
+	SliceID     string
+	SourceScope string
+	SourceID    string
+	TargetText  string
+	Order       int
+	// PrerequisiteCoverageWorkItemIDs constrain semantic-plan admission only;
+	// they never reopen an already satisfied CWI.
+	PrerequisiteCoverageWorkItemIDs []common.CoverageWorkItemID
+	// ReopenDependencies are downstream relations applied after accepted
+	// evidence; they are not semantic-plan prerequisites.
 	ReopenDependencies []RuntimeCoverageReopenDependency
 }
 
@@ -92,16 +97,17 @@ type RuntimeCoverageReopenDependency struct {
 type RuntimeCoverageItemState string
 
 type RuntimeCoverageItemFact struct {
-	ID                     common.CoverageWorkItemID
-	SliceID                string
-	SourceScope            string
-	SourceID               string
-	TargetText             string
-	State                  RuntimeCoverageItemState
-	EvidenceRefs           []string
-	LastAssessmentID       string
-	ReopenDependencies     []RuntimeCoverageReopenDependency
-	ReopenedByEvidenceRefs []string
+	ID                              common.CoverageWorkItemID
+	SliceID                         string
+	SourceScope                     string
+	SourceID                        string
+	TargetText                      string
+	State                           RuntimeCoverageItemState
+	EvidenceRefs                    []string
+	LastAssessmentID                string
+	PrerequisiteCoverageWorkItemIDs []common.CoverageWorkItemID
+	ReopenDependencies              []RuntimeCoverageReopenDependency
+	ReopenedByEvidenceRefs          []string
 }
 
 // InitialRuntimeCoverageFacts materializes the item closure ledger from the
@@ -121,7 +127,8 @@ func InitialRuntimeCoverageFacts(items []RuntimeCoverageItem) []RuntimeCoverageI
 		ret = append(ret, RuntimeCoverageItemFact{
 			ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
 			TargetText: item.TargetText, State: RuntimeCoverageItemStateOpen,
-			ReopenDependencies: cloneRuntimeCoverageReopenDependencies(item.ReopenDependencies),
+			PrerequisiteCoverageWorkItemIDs: cloneRuntimeCoveragePrerequisiteIDs(item.PrerequisiteCoverageWorkItemIDs),
+			ReopenDependencies:              cloneRuntimeCoverageReopenDependencies(item.ReopenDependencies),
 		})
 	}
 	return NormalizeRuntimeCoverageFacts(ret)
@@ -139,6 +146,7 @@ func NormalizeRuntimeCoverageFacts(values []RuntimeCoverageItemFact) []RuntimeCo
 		value.State = RuntimeCoverageItemState(strings.TrimSpace(string(value.State)))
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.LastAssessmentID = strings.TrimSpace(value.LastAssessmentID)
+		value.PrerequisiteCoverageWorkItemIDs = normalizeRuntimeCoveragePrerequisiteIDs(value.PrerequisiteCoverageWorkItemIDs)
 		value.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(value.ReopenDependencies)
 		value.ReopenedByEvidenceRefs = normalizeStrings(value.ReopenedByEvidenceRefs)
 		if value.ID == "" || value.State == "" {
@@ -256,8 +264,13 @@ func (c RuntimeCoverageItem) Normalized() RuntimeCoverageItem {
 	c.SourceScope = strings.TrimSpace(c.SourceScope)
 	c.SourceID = strings.TrimSpace(c.SourceID)
 	c.TargetText = strings.TrimSpace(c.TargetText)
+	c.PrerequisiteCoverageWorkItemIDs = normalizeRuntimeCoveragePrerequisiteIDs(c.PrerequisiteCoverageWorkItemIDs)
 	c.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(c.ReopenDependencies)
 	return c
+}
+
+func normalizeRuntimeCoveragePrerequisiteIDs(values []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	return normalizeCoverageWorkItemIDs(values)
 }
 
 func normalizeRuntimeCoverageReopenDependencies(values []RuntimeCoverageReopenDependency) []RuntimeCoverageReopenDependency {
@@ -287,6 +300,9 @@ func normalizeRuntimeCoverageReopenDependencies(values []RuntimeCoverageReopenDe
 // validation; it does not choose focus ordering or execute a state transition.
 func ValidateRuntimeCoverageItemDependencies(items []RuntimeCoverageItem) error {
 	items = NormalizeRuntimeCoverageItems(items)
+	if err := validateRuntimeCoveragePrerequisiteDependencies(items); err != nil {
+		return err
+	}
 	byID := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(items))
 	for _, item := range items {
 		byID[item.ID] = item
@@ -306,19 +322,46 @@ func ValidateRuntimeCoverageItemDependencies(items []RuntimeCoverageItem) error 
 			edges[item.ID] = append(edges[item.ID], dependency.CoverageWorkItemID)
 		}
 	}
+	return validateRuntimeCoverageDependencyGraph(edges, "reopen")
+}
+
+func validateRuntimeCoveragePrerequisiteDependencies(items []RuntimeCoverageItem) error {
+	byID := make(map[common.CoverageWorkItemID]struct{}, len(items))
+	for _, item := range items {
+		byID[item.ID] = struct{}{}
+	}
+	edges := make(map[common.CoverageWorkItemID][]common.CoverageWorkItemID, len(items))
+	for _, item := range items {
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			if prerequisiteID == "" {
+				return fmt.Errorf("runtime coverage item %s has an empty prerequisite dependency", item.ID)
+			}
+			if prerequisiteID == item.ID {
+				return fmt.Errorf("runtime coverage item %s cannot depend on itself", item.ID)
+			}
+			if _, ok := byID[prerequisiteID]; !ok {
+				return fmt.Errorf("runtime coverage item %s depends on undeclared coverage item %s", item.ID, prerequisiteID)
+			}
+			edges[item.ID] = append(edges[item.ID], prerequisiteID)
+		}
+	}
+	return validateRuntimeCoverageDependencyGraph(edges, "prerequisite")
+}
+
+func validateRuntimeCoverageDependencyGraph(edges map[common.CoverageWorkItemID][]common.CoverageWorkItemID, relation string) error {
 	visiting := map[common.CoverageWorkItemID]bool{}
 	visited := map[common.CoverageWorkItemID]bool{}
 	var visit func(common.CoverageWorkItemID) error
 	visit = func(id common.CoverageWorkItemID) error {
 		if visiting[id] {
-			return fmt.Errorf("runtime coverage reopen dependencies contain a cycle at %s", id)
+			return fmt.Errorf("runtime coverage %s dependencies contain a cycle at %s", relation, id)
 		}
 		if visited[id] {
 			return nil
 		}
 		visiting[id] = true
-		for _, dependent := range edges[id] {
-			if err := visit(dependent); err != nil {
+		for _, dependency := range edges[id] {
+			if err := visit(dependency); err != nil {
 				return err
 			}
 		}
@@ -326,8 +369,8 @@ func ValidateRuntimeCoverageItemDependencies(items []RuntimeCoverageItem) error 
 		visited[id] = true
 		return nil
 	}
-	for _, item := range items {
-		if err := visit(item.ID); err != nil {
+	for id := range edges {
+		if err := visit(id); err != nil {
 			return err
 		}
 	}
@@ -345,6 +388,14 @@ func cloneRuntimeCoverageReopenDependencies(values []RuntimeCoverageReopenDepend
 		ret[idx].TriggerEvidenceKinds = append([]string(nil), values[idx].TriggerEvidenceKinds...)
 	}
 	return ret
+}
+
+func cloneRuntimeCoveragePrerequisiteIDs(values []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	values = normalizeRuntimeCoveragePrerequisiteIDs(values)
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]common.CoverageWorkItemID(nil), values...)
 }
 
 func NormalizeRuntimeAcceptanceSlices(values []RuntimeAcceptanceSlice) []RuntimeAcceptanceSlice {

@@ -82,6 +82,10 @@ budget/guard 以及适用的跨状态机合同测试。
 
 - File/Git/Shell/MCP/SSH/Web 各自拥有 emitted-code total mapping，共享 pkg 不维护全 owner code taxonomy；
 - feasibility 只返回 feasible/stale/prerequisite_required/infeasible factual result；
+  `prerequisite_required` 仅在接收 owner 已定义对应 typed prerequisite acquisition command/result 时合法。
+  当前没有该合同的 semantic proof owner 必须保留完整 original diagnostic 并 fail-closed（通常为
+  `infeasible`/`unverifiable`），不得把它伪装成 revision stale、退休有效 catalog 或消耗 refresh budget；只有
+  携带并精确匹配 expected/observed revision fence 的 `stale` 才能进入有界 catalog refresh。
 - operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，不存在跨 EventHub `Status + Outcome` 双权威；
 - durable no-op 使用 `Outcome=no_op`，删除重复 `NoOp bool`；read-only/validation 的正常零 durable effect 仍为
   accepted，`Changed` 只作 observed effect metadata；

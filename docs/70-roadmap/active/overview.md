@@ -36,6 +36,10 @@ feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 binding。`run-063
 complete-document、22 组件 EventHub 合同回迁、owner-local terminal delivery、typed diagnostic、single mutation surface、
 managed verifier 与 reasoning selection 仍是回归基线，但不能替代最新 persisted aggregate/provider/projection 反例。
 
+语义 catalog freshness 只允许由带 expected/observed revision fence 的 `stale` owner fact 触发；当前没有 typed
+semantic prerequisite acquisition 合同时，`prerequisite_required` observation 保留原始诊断和既有 catalog，直接
+fail-closed，不创建第二条 refresh/状态机路径。
+
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | RSO | typed semantic correction + canonical projection + single-owner CWI convergence | SM-3-sealed correction directive; provider-safe C4; terminal-first outcome/activity; preserve restart/complete-document baselines; feasibility/seal/dispatch/evidence and recovery live | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |

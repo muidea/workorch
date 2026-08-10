@@ -228,12 +228,16 @@ owner batch/observation set 与 sealed binding lineage hash；这些 identity �
 duplicate event 不增加 revision，scope/seed/request/batch 漂移必须拒绝，任何阶段都不得直接创建 dispatch、coverage、
 Decision 或 Approval。
 
-`stale | prerequisite_required` 先以 `semantic_feasibility_observed` 单独持久化 owner factual observation；随后 SM-2
-复用 `semantic_contract_required` private transition，按 persisted refresh generation 原子退休 matching catalog
-observation、保存完整 gap/diagnostic lineage，并回到 bounded catalog acquisition。该回边不是新的 phase 或第五状态机，
-不增加 semantic candidate attempt。新 catalog revision 必须产生新 manifest/request identity，旧 complete session 只保留
-audit；duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入
-`semantic_contract_failed`。
+`stale | prerequisite_required` 先以 `semantic_feasibility_observed` 单独持久化 owner factual observation。
+只有带有 expected/observed revision 且精确匹配当前 catalog dependency 的 `stale` 事实，才能复用
+`semantic_contract_required` private transition，按 persisted refresh generation 原子退休 matching catalog
+observation、保存完整 gap/diagnostic lineage，并回到 bounded catalog acquisition。`prerequisite_required` 不得被
+泛化为 stale、不得退休仍然有效的 catalog/observation，也不得消耗 prerequisite-refresh budget；当前 semantic
+proof 没有 owner-defined typed prerequisite request，因此 SM-2 必须在保留该事实和完整 diagnostic 的前提下
+fail-closed 为 typed terminal。未来若增加 prerequisite acquisition，必须先新增接收 owner 定义的 typed command/result，
+再由同一 private transition 接入，不能复用 stale refresh。以上处理不是新的 phase 或第五状态机，不增加 semantic
+candidate attempt。新 catalog revision 必须产生新 manifest/request identity，旧 complete session 只保留 audit；
+duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入 `semantic_contract_failed`。
 
 ### 单一 candidate evaluator
 
@@ -331,8 +335,11 @@ load facts
 - accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
   `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
   no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。
-  semantic feasibility 的 stale/prerequisite-required 使用同一独立 budget，但必须同时在 semantic ledger 保存 batch、
-  refresh generation、全部 owner facts 与原始 diagnostic；不得只增加 generic recovery 计数或复用 attempt 0/1。
+  semantic feasibility 的 `stale` 使用独立且有界的 prerequisite-refresh budget，并在 semantic ledger 保存 batch、
+  refresh generation、全部 owner facts 与原始 diagnostic；`prerequisite_required` 在当前没有 typed semantic
+  prerequisite request 时不退休 catalog、不增加该 budget，而是由 SM-2 形成保留原始诊断的 typed terminal。两者都
+  不得复用 candidate attempt 0/1；若未来接入 typed prerequisite acquisition，必须使用 owner-defined command/result
+  和独立代际，不能把它重解释为 stale。
 - evidence 必须同时通过 current-run、focus、sealed `CoverageEvidenceBinding`、quality、effect、receipt 和适用的
   recipe/check/metric/artifact 门禁。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
   逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、

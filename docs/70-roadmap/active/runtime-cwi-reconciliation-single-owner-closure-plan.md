@@ -1016,8 +1016,10 @@ seal an SM-2 binding from a catalog identity that the owner has not proven execu
 1. **Owner-local preflight closure (`blocks/shell`).** Move validation recipe discovery and executable-target preflight
    into the Shell semantic feasibility handler. The returned typed fact must be `feasible` only when the same command,
    target and check can execute and be observed. Missing `*_test.go`, invalid command, stale workspace manifest or
-   unavailable toolchain returns `prerequisite_required`/`infeasible` with the original diagnostic. The later operation
-   admissibility path may re-check freshness, but it must not be the first place that discovers basic recipe absence.
+   unavailable toolchain returns `infeasible` (or `prerequisite_required` only when Shell exposes a matching typed
+   semantic prerequisite acquisition command/result) with the original diagnostic. A revision-fenced stale fact may
+   enter the bounded refresh path; the later operation admissibility path may re-check freshness, but it must not be the
+   first place that discovers basic recipe absence.
 2. **Capability-owner parity.** Apply the same one-owner fact rule to `blocks/mcp`, `blocks/file`, `blocks/git`,
    `blocks/web` and `blocks/ssh`: catalog, capability state, recipe/check preflight, target and revision are one typed
    owner result. File/Git/Web/SSH now fail closed with `*_semantic_proof_unavailable` whenever a proposal declares
@@ -1051,6 +1053,14 @@ seal an SM-2 binding from a catalog identity that the owner has not proven execu
    provider category. `candidate_infeasible`, `prerequisite_required`, `runtime_contract_defect` and provider transient
    must retain their own class. `no_progress_exhausted` is legal only after a persisted repair/retry budget consumption.
    Result, Run, Workspace and projections must preserve the same nested original diagnostic and class.
+
+The semantic owner status `prerequisite_required` is not interchangeable with catalog freshness. It may be used only when
+the receiving capability owner exposes a typed semantic prerequisite acquisition command/result. Until that contract exists,
+the observation is persisted as an owner fact, the existing catalog and prerequisite observation remain current, no refresh
+generation or prerequisite-refresh budget is consumed, and SM-2 fail-closes with the preserved original diagnostic. Only a
+`stale` observation carrying an exact expected/observed revision fence may retire the matching catalog and enter the bounded
+refresh path. This prevents a generic retry loop or a second prerequisite state machine from being introduced by a single
+owner failure string.
 
 #### RSO-25 owner/state-machine matrix
 
@@ -1144,6 +1154,22 @@ checks pass. It remains `live-open` until a fresh deployment demonstrates both t
 path and the executable-recipe positive path; those deployed proofs are tracked with RSO-22 and must not be inferred
 from mock-provider or historical runs.
 
+#### CWI dependency contract closure
+
+The two CWI relationship types are intentionally independent and must not be collapsed again:
+
+| Field | Meaning | May affect | Must not affect |
+| --- | --- | --- | --- |
+| `PrerequisiteCoverageWorkItemIDs` | Static prerequisite edge used by semantic planning | coverage-order validation, active-focus transitive batch closure, dependency barriers and bounded correction facts | evidence-triggered reopen, coverage credit, owner feasibility, Run/Workspace lifecycle |
+| `ReopenDependencies` | Source-evidence to downstream-CWI reopen relation | SM-2 evidence commit and requeue of a previously satisfied dependent focus | semantic order validation, current proof-batch membership or provider next-step selection |
+
+Both relations are validated as independent acyclic graphs. They are carried through DefinitionSeed, RuntimeBootstrap,
+RuntimeFacts normalization and detached clones. The DefinitionSeed/semantic-manifest hash appends a tagged prerequisite
+section while retaining the historical reopen encoding, so an existing seed containing only `ReopenDependencies` does not
+drift on reload. Regression coverage must prove that a source CWI with `ReopenDependencies` does not pull its downstream
+CWI into the active proof batch, while a true prerequisite does; downstream reopen remains possible only after matching
+accepted source evidence.
+
 ### 10.8 Detailed single-owner implementation closure (2026-08-10)
 
 This section is the executable work breakdown for the remaining code and deployed verification. It does not introduce a
@@ -1184,8 +1210,11 @@ coordination owner. `internal/pkg/workorchruntimecontract` remains owner-neutral
 4. **Close owner feasibility before binding.** File/Git/Shell/Web/SSH/MCP must execute the same owner-local preflight
    used by the later operation. MCP must intersect registry whitelist and enabled typed capability metadata, run a
    bounded safe behavior probe, and return `feasible`, `stale`, `prerequisite_required`, `infeasible` or
-   `unverifiable` with the original diagnostic. Orchestrator only consumes the fact and seals binding; it never invents
-   missing parameters.
+   `unverifiable` with the original diagnostic. `prerequisite_required` is legal only when that receiving owner also
+   exposes a typed semantic prerequisite acquisition command/result; otherwise the owner must fail closed without
+   retiring its current catalog or consuming refresh budget. Only an exact expected/observed revision-fenced `stale`
+   fact may enter catalog refresh. Orchestrator only consumes the fact and seals binding; it never invents missing
+   parameters.
 5. **Close dispatch/evidence ownership.** SM-3 seals dispatch before any side effect. Capability owners return factual
    receipts; SM-2 derives evidence and CWI credit only from binding-matched receipt/check/effect/target/revision.
    Result → Workspace → Run remains the only terminal delivery order.
