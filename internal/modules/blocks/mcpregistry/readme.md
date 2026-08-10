@@ -9,8 +9,12 @@
 - MCP Server 与 Capability command/query 由 `blocks/mcpregistry/pkg/events` 定义，并返回 `MCPCommandResult`。
   Capability create/update command 只携带字段化配置意图，不接收完整 registry entity；lifecycle `Status` 由
   MCPRegistry owner 创建时派生、更新时保留，调用方不能指定。
-- MCP Server 与 Capability query/result 使用 owner-local detached DTO；所有 slice、map/payload 在 EventHub 边界
-  显式复制，不向调用方泄漏 repository model 或共享可变引用。
+- `AllowedTools`、`AllowedResources` 与 `AllowedPrompts` 只派生通用的 owner capability 默认值（工具、资源、提示词
+  加原始名称）。领域显示名、分类、标签、阶段提示和用途只能来自显式 capability 配置或上层 template/profile 声明；
+  Registry 不根据 tool/resource/prompt 名称推断业务语义。
+- MCP Server 与 Capability query/result 使用 owner-local detached DTO；Capability Result 复用该 owner 的
+  canonical `pkg/models.Capability` 值，不再创建同构 alias。所有 slice、map/payload 在 EventHub 边界显式复制，
+  不向调用方泄漏 repository model 或共享可变引用；handler 必须使用 `CloneCapability/CloneCapabilities`。
 - Event Contract owner、receiver 和 state lane identity 统一为 `mcp-registry`；它与执行 MCP operation 的
   `blocks/mcp` / owner `mcp` 严格分离，不共享 owner identity。
 - `blocks/mcp` 通过 EventHub 查询已注册 server/capability 后执行调用，不注入 registry service 或 repository。

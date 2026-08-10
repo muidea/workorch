@@ -24,6 +24,8 @@ CURL_READY_ATTEMPTS="${WORKORCH_MCP_STDIO_VERIFY_READY_ATTEMPTS:-50}"
 MCP_SERVER_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
 MCP_CAPABILITY_ID="$MCP_SERVER_ID:tool:repo.summary"
 MCP_TEMPLATE_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
+MCP_VERIFICATION_RESOURCE="workspace://verification-context"
+MCP_VERIFICATION_PROMPT="workorch.verification-context"
 MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-.workorch-data/system/mcp-endpoints}"
 MCP_ENDPOINT_DIR="$MCP_ENDPOINT_ROOT/$MCP_SERVER_ID"
 MOCK_PID=""
@@ -746,15 +748,15 @@ grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
   "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" \
-  '{"id":"'"$MCP_SERVER_ID"'","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["workspace://acceptance"],"allowedPrompts":["workorch.acceptance"],"timeoutMillis":5000}' \
+  '{"id":"'"$MCP_SERVER_ID"'","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["'"$MCP_VERIFICATION_RESOURCE"'"],"allowedPrompts":["'"$MCP_VERIFICATION_PROMPT"'"],"timeoutMillis":5000}' \
   "$TMP_DIR/mcp-server.json"
 grep '"transport": "stdio"' "$TMP_DIR/mcp-server.json" >/dev/null
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=tool&q=repo.summary" "$TMP_DIR/mcp-capabilities-derived.json"
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-derived.json" >/dev/null
-get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=resource&q=workspace" "$TMP_DIR/mcp-resource-capabilities-derived.json"
-grep '工作空间验收资料' "$TMP_DIR/mcp-resource-capabilities-derived.json" >/dev/null
-get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
-grep '验收提示词' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
+get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=resource&q=verification" "$TMP_DIR/mcp-resource-capabilities-derived.json"
+grep '"displayName": "资源 workspace://verification-context"' "$TMP_DIR/mcp-resource-capabilities-derived.json" >/dev/null
+get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=verification" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
+grep '"displayName": "提示词 workorch.verification-context"' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
 put_json "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
   '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","schema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"enabled":true,"approvalPolicy":"operator"}' \
   "$TMP_DIR/mcp-capability-updated.json"

@@ -176,6 +176,26 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 		t.Fatalf("capability = %+v, want structured policy/capability fields preserved", capability)
 	}
 
+	// The registry result reuses the canonical owner capability value, but the
+	// owner handler must detach every mutable field before crossing EventHub.
+	// Mutating the command result must therefore never alter the persisted
+	// registry value returned by a subsequent query.
+	capability.Tags[0] = "mutated-result"
+	capability.StageHints[0] = "mutated-result"
+	for idx := range capability.Schema.Fields {
+		if capability.Schema.Fields[idx].Name == "type" {
+			capability.Schema.Fields[idx].Value.String = "mutated-result"
+		}
+	}
+	reread := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandGetCapability,
+		mcpevents.GetCapabilityCommand{CapabilityID: "mcp-server-contract:tool:repo.summary"})
+	if reread.Capability == nil || reread.Capability.Tags[0] != "read" || reread.Capability.StageHints[0] != "planning" {
+		t.Fatalf("mutating EventHub result changed owner capability slices: %+v", reread.Capability)
+	}
+	if schemaType, _ := reread.Capability.Schema.String("type"); schemaType != "object" {
+		t.Fatalf("mutating EventHub result changed owner capability schema: %q", schemaType)
+	}
+
 	listCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandListCapabilities,
 		mcpevents.ListCapabilitiesCommand{
 			Query: mcpevents.CapabilityQuery{

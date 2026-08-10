@@ -284,6 +284,25 @@ This is RSO-24, a cross-owner contract closure rather than an LSP-specific fix. 
 execute or observe a check that proves the requested CWI, feasibility is `unverifiable`/`infeasible` and dispatch is zero.
 The failure must not be classified as `no_progress_exhausted` when no repair attempt occurred.
 
+### 2.13 Latest deployed fail-closed proof (2026-08-10)
+
+The latest fresh deployment reached the MCP semantic-feasibility boundary and returned:
+
+```text
+candidate_infeasible
+mcp_semantic_proof_unavailable
+```
+
+The owner could not produce the required typed behavior-probe facts (for example, a required `lang_id` or
+`root_path`). The run recorded `dispatch=0`, `receipt=0`, `evidence=0`, did not advance any CWI, released its active
+run slot, and stopped driving. This is the expected fail-closed result: it proves that an unverifiable capability does
+not cross the SM-2 binding or SM-3 dispatch boundary. It is not positive convergence and must not be changed by adding
+an Orchestrator default parameter, an LSP/tool-name branch, a provider retry, or a second state machine.
+
+The positive path remains open until an owner catalog/recipe supplies an executable, owner-observable proof shape and a
+fresh deployment reaches binding-matched evidence. Template/profile may declare a parameter source or recipe family,
+but the concrete value and proof remain capability-owner facts.
+
 ## 3. Non-Negotiable Ownership Rules
 
 1. There are exactly four Runtime state machines. Semantic planning, request sessions, reconciliation, restart,
@@ -524,6 +543,13 @@ type RuntimeEffectiveMCPCapability struct {
 The concrete EventHub query/result belongs to `blocks/mcpregistry/pkg/events`. The owner-neutral detached value,
 normalization, validation, clone, and stable hash helper belong to `workorchruntimecontract`. It contains no repository,
 Hub, callback, state transition, retry choice, Runtime action, or mutable entity.
+
+The registry Result intentionally reuses `mcpregistry/pkg/models.Capability` as the canonical owner value; it is not a
+second isomorphic facade or a global index. The MCP Registry handler must return `CloneCapability`/`CloneCapabilities`
+copies, including nested schema payloads, before setting the EventHub Result. Consumers may map the detached value into
+their own read model, but must not receive a repository pointer or submit this complete value back as a mutation
+command. The corresponding EventHub regression mutates a returned capability and verifies that a subsequent owner
+query is unchanged.
 
 An effective tool is unavailable when any required identity or typed effect/idempotency field is empty/unknown. Unknown
 metadata remains a diagnostic catalog fact but cannot become an executable semantic recipe. No risk-level, tool-name,
@@ -1117,6 +1143,94 @@ zero-attempt failure classification, restart/idempotency fencing, full tests, ra
 checks pass. It remains `live-open` until a fresh deployment demonstrates both the zero-dispatch unavailable-recipe
 path and the executable-recipe positive path; those deployed proofs are tracked with RSO-22 and must not be inferred
 from mock-provider or historical runs.
+
+### 10.8 Detailed single-owner implementation closure (2026-08-10)
+
+This section is the executable work breakdown for the remaining code and deployed verification. It does not introduce a
+new state machine. Every arrow below is an owner-private internal event; EventHub only transports the immutable fact
+between the two owners.
+
+#### 10.8.1 Owner matrix and code landing
+
+| Owner/component | State or fact it may write | Required implementation landing | Explicitly forbidden |
+| --- | --- | --- | --- |
+| `blocks/run` | SM-1 lifecycle, lineage, opaque Runtime aggregate CAS | `biz/lifecycle_reducer.go`, `biz/workspace_execution_intent.go`, `pkg/events` | interpreting SM-2/3/4, choosing operations, writing Workspace/Result |
+| `blocks/workspace` | definition/template/profile selection, `ActiveRunID`, workspace state | `biz/execution_intent.go`, `biz/owner.go`, `pkg/events` | setting Run state, deciding terminal outcome, rebuilding Runtime authority |
+| `kernel/orchestrator` | SM-2/3/4 aggregate, binding, candidate, dispatch, evidence, recovery, delivery ledger | `biz/runtime/*`, `biz/owner.go`, `pkg/events` | direct owner repository/service access, direct Run/Workspace/Result mutation |
+| `blocks/result` | Result lifecycle and terminal delivery record | `biz/lifecycle_reducer.go`, `pkg/events` | judging CWI/DoD or changing Run/Workspace |
+| `blocks/mcpregistry` | MCP catalog metadata, enabled state, catalog revision | `biz/mcp_service.go`, `pkg/events`, `pkg/models` | MCP execution, Runtime transition, template/domain assumptions |
+| `blocks/mcp` | effective capability, owner-local probe/session, typed receipt | `biz/owner.go`, `biz/mcp_runtime_adapter.go`, `pkg/events` | registry mutation, CWI credit, expected-effect echo, Runtime transition |
+| `blocks/file`, `git`, `shell`, `web`, `ssh` | target/preflight/feasibility and execution receipts | each block's `biz/owner.go`, adapter and `pkg/events` | interpreting Goal/DoD, retry/terminal choice, evidence credit |
+| `blocks/llm` | provider request/response and detached semantic facts | `biz/*provider*.go`, `pkg/events`, `pkg/models` | correction classification, effect/check/idempotency authority, next action |
+| `kernel/governance`, `blocks/decision`, `blocks/approval` | governance/ticket/approval state | owner-local reducers and owner `pkg/events` | mutating Runtime convergence or Run lifecycle |
+| `application/workorchd`, `kernel/system` | bootstrap, intent submission, startup handoff and read-only API | application `biz/service/pkg`, system startup wiring | Runtime reducer, continuation queue, target-state commands |
+| projection/eventstream/TUI/Web | derived read model, audit and display | `readmodelprojection`, event mapping, TUI/Web presenters | local conflict resolution, implicit resume/restart, state mutation |
+| `memory`, `skill`, `soul`, `workorchruntime` initiator | own resource/catalog facts or repository provisioning | existing owner/initiator packages | Runtime state, cross-owner registry/facade, policy cache |
+
+The last row covers the remaining registered units; they remain regression boundaries and must not be used as a hidden
+coordination owner. `internal/pkg/workorchruntimecontract` remains owner-neutral pure values only.
+
+#### 10.8.2 Ordered code closure
+
+1. **Freeze ownership and mutation surface.** Keep exactly one `ApplyInternalEvent`/CAS path in Orchestrator, one SM-1
+   reducer in Run, and owner-local reducers for Workspace and Result. Remove or reject any facade that accepts a target
+   state, `NextAction`, retry choice, terminal choice, mutable owner entity, repository, or `map[string]any`.
+2. **Freeze typed boundary contracts.** Each cross-owner topic must be defined by the receiving owner and carry only
+   typed intent/query/fact/receipt/ack. The receiver validates workspace/run scope, causation, revision and sealed
+   identity, then creates its private event. Add sender/receiver, duplicate, stale and wrong-owner tests.
+3. **Close semantic planning in SM-2/SM-3.** LLM returns one complete document. The canonical Orchestrator evaluator
+   preserves exact CWI/path/rule facts; SM-3 alone derives the single bounded correction directive. No provider field may
+   author effect, idempotency, check, target authorization, coverage credit, retry or terminal state.
+4. **Close owner feasibility before binding.** File/Git/Shell/Web/SSH/MCP must execute the same owner-local preflight
+   used by the later operation. MCP must intersect registry whitelist and enabled typed capability metadata, run a
+   bounded safe behavior probe, and return `feasible`, `stale`, `prerequisite_required`, `infeasible` or
+   `unverifiable` with the original diagnostic. Orchestrator only consumes the fact and seals binding; it never invents
+   missing parameters.
+5. **Close dispatch/evidence ownership.** SM-3 seals dispatch before any side effect. Capability owners return factual
+   receipts; SM-2 derives evidence and CWI credit only from binding-matched receipt/check/effect/target/revision.
+   Result → Workspace → Run remains the only terminal delivery order.
+6. **Close restart and recovery.** Resume rechecks the current Run's sealed CWI/binding scope; restart creates a new
+   lineage over the full workspace scope and inherits no credit. EOF/output-limit/timeout recovery restarts the same
+   complete document from the beginning and never appends raw suffixes or consumes a semantic correction attempt.
+7. **Keep read models passive.** Projection, eventstream, TUI and Web select the authoritative Run and render it. A
+   definition-change hint is attention only; it cannot overwrite a terminal outcome or schedule a drive. Workspace
+   switching changes only the subscription/cursor and must not mix activity from another workspace.
+
+#### 10.8.3 Required state-transition sequence
+
+```text
+Workspace intent
+  -> Workspace private event
+  -> Run private SM-1 event
+  -> RunStateChanged fact
+  -> Orchestrator SM-4 drive event
+  -> SM-2 prerequisite/feasibility facts
+  -> SM-2 binding-sealed private event
+  -> SM-3 candidate/dispatch private events
+  -> capability-owner execute event and typed receipt
+  -> SM-2 evidence/CWI private event
+  -> SM-4 terminal-delivery fact
+  -> Result private event -> Workspace private event -> Run private event
+```
+
+No external component may skip an arrow, submit the destination state, or invoke another owner's reducer.
+
+#### 10.8.4 Completion evidence per slice
+
+- **Static boundary:** `make verify-boundary-contract`; no cross-owner repository/service import, generic facade,
+  target-state command or forbidden Runtime surface.
+- **Contract:** focused owner package tests for accepted, duplicate, stale, wrong scope, wrong revision and detached
+  clone behavior.
+- **Runtime:** Orchestrator tests for binding-before-dispatch, one correction attempt, zero-dispatch semantic failure,
+  CAS conflict, restart and delivery ordering.
+- **Capability:** MCP/File/Git/Shell/Web/SSH tests proving owner-local preflight and owner-observed receipts; no CWI credit
+  from catalog existence, LLM claims, exit code, Git revision or generic checks.
+- **Live:** fresh deployed positive lineage, fresh zero-dispatch unavailable-proof lineage, target correction, bounded
+  whole-document recovery, TUI/Web workspace isolation and CPU guard.
+
+Only after all deployed evidence is captured may RSO-22 (and the dependent live gates RSO-17/recovery) be marked
+`live_closed`. A fail-closed `mcp_semantic_proof_unavailable` run is retained as required negative evidence, not counted
+as positive convergence.
 
 ## 11. Verification Matrix
 

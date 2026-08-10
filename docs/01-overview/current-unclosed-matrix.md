@@ -53,8 +53,11 @@ owner semantic feasibility 与 operation preflight 不一致，已完成 Shell o
 fail-closed 和 SM-2 admission guard；`run-065` 暴露的 MCP catalog/probe 矛盾、proof batch 跨 current focus 以及零尝试
 semantic failure 的错误分类已在本地代码中收口：MCP 缺失 catalog 不再由 `AllowedTools` 推断，安全可重放的
 owner-local behavior probe、focus/dependency batch admission、typed failure class、restart/idempotency 和 zero-dispatch
-回归均通过。RSO-25 当前为 **code-closed / live-open**；RSO-22 的 fresh binding-matched positive convergence、
-zero-dispatch deployed proof 和 whole-document recovery fault injection 仍未完成。
+回归均通过。最新 fresh deployment `run-066` 在缺少 MCP 行为探针必需事实时以
+`candidate_infeasible/mcp_semantic_proof_unavailable` fail-closed，`dispatch/receipt/evidence=0`，证明了负向防线
+但不是正向收敛。RSO-25 当前为 **code-closed / live-open**；RSO-22 的 fresh binding-matched positive convergence、
+zero-dispatch deployed proof 和 whole-document recovery fault injection 仍未完成。逐组件 owner 矩阵与实施顺序
+见 [Runtime plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md#108-detailed-single-owner-implementation-closure-2026-08-10)。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：

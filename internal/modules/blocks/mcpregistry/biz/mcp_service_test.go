@@ -70,36 +70,36 @@ func TestServiceCreateAndListServer(t *testing.T) {
 	}
 }
 
-func TestServiceDerivesBuiltinAcceptanceCapabilityMetadata(t *testing.T) {
+func TestServiceKeepsGeneratedCapabilityMetadataDomainNeutral(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
 
 	serverID := common.MCPServerID("mcp-acceptance")
 	if err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
 		ServerID:         serverID,
-		Name:             "acceptance server",
+		Name:             "verification server",
 		Transport:        "stdio",
 		Enabled:          true,
-		AllowedResources: []string{"workspace://acceptance"},
-		AllowedPrompts:   []string{"workorch.acceptance"},
+		AllowedResources: []string{"workspace://verification-context"},
+		AllowedPrompts:   []string{"workorch.verification-context"},
 	}); err != nil {
 		t.Fatalf("create server: %v", err)
 	}
 
-	resources, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindResource, Query: "验收资料"})
+	resources, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindResource})
 	if err != nil {
 		t.Fatalf("list resource capabilities: %v", err)
 	}
-	if len(resources) != 1 || resources[0].DisplayName != "工作空间验收资料" || resources[0].URI != "workspace://acceptance" {
-		t.Fatalf("resource capabilities = %+v, want acceptance resource metadata", resources)
+	if len(resources) != 1 || resources[0].DisplayName != "资源 workspace://verification-context" || resources[0].URI != "workspace://verification-context" || resources[0].Category != "" || len(resources[0].Tags) != 0 {
+		t.Fatalf("resource capabilities = %+v, want generic owner metadata", resources)
 	}
 
-	prompts, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindPrompt, Query: "验收提示词"})
+	prompts, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindPrompt})
 	if err != nil {
 		t.Fatalf("list prompt capabilities: %v", err)
 	}
-	if len(prompts) != 1 || prompts[0].DisplayName != "验收提示词" {
-		t.Fatalf("prompt capabilities = %+v, want acceptance prompt metadata", prompts)
+	if len(prompts) != 1 || prompts[0].DisplayName != "提示词 workorch.verification-context" || prompts[0].Category != "" || len(prompts[0].Tags) != 0 {
+		t.Fatalf("prompt capabilities = %+v, want generic owner metadata", prompts)
 	}
 }
 

@@ -196,8 +196,11 @@ type EnsureDefaultsResult struct {
 }
 
 type MCPCommandResult struct {
-	Server       *MCPServer
-	Servers      []*MCPServer
+	Server  *MCPServer
+	Servers []*MCPServer
+	// Capability is the canonical registry owner value. The owner handler
+	// always supplies a detached clone; keeping this type here avoids creating
+	// a second isomorphic capability DTO for EventHub consumers.
 	Capability   *mcpmodel.Capability
 	Capabilities []*mcpmodel.Capability
 }

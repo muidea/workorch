@@ -231,32 +231,7 @@ func defaultCapability(server *mcpmodel.Server, kind string, name string, uri st
 		EffectScope:      "unknown",
 		IdempotencyClass: "unknown",
 	}
-	applyBuiltinCapabilityMetadata(ret)
 	return ret
-}
-
-func applyBuiltinCapabilityMetadata(item *mcpmodel.Capability) {
-	if item == nil {
-		return
-	}
-	switch {
-	case item.Kind == mcpmodel.CapabilityKindResource && item.Name == "workspace://acceptance":
-		item.DisplayName = "工作空间验收资料"
-		item.Description = "读取当前工作空间验收资料，用于 Run 规划、验证和结果审查。"
-		item.Category = "验收"
-		item.Tags = []string{"acceptance", "workspace"}
-		item.UsageHint = "当执行需要读取工作空间验收上下文或 DoD 资料时使用。"
-		item.OutputSummary = "返回工作空间验收资料。"
-		item.StageHints = []string{"planning", "validation"}
-	case item.Kind == mcpmodel.CapabilityKindPrompt && item.Name == "workorch.acceptance":
-		item.DisplayName = "验收提示词"
-		item.Description = "获取 workorch 验收提示词，用于统一 MCP 驱动执行的验收语义。"
-		item.Category = "验收"
-		item.Tags = []string{"acceptance", "prompt"}
-		item.UsageHint = "当执行需要统一验收提示词时使用。"
-		item.OutputSummary = "返回验收提示词内容。"
-		item.StageHints = []string{"planning", "validation"}
-	}
 }
 
 func DefaultCapabilityID(serverID common.MCPServerID, kind string, name string) common.MCPCapabilityID {
