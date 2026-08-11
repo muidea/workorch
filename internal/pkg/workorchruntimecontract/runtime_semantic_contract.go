@@ -1085,6 +1085,21 @@ const (
 	RuntimeSemanticPlanningFailed                        RuntimeSemanticPlanningPhase = "semantic_contract_failed"
 )
 
+// RuntimeSemanticPlanningRetirementReason identifies why an otherwise valid
+// semantic planning generation stopped being current.  The value is audit
+// lineage only; it never selects a retry, operation or terminal outcome.
+type RuntimeSemanticPlanningRetirementReason string
+
+const (
+	RuntimeSemanticPlanningRetirementResourceInvalidated RuntimeSemanticPlanningRetirementReason = "resource_invalidated"
+	RuntimeSemanticPlanningRetirementCatalogRefresh      RuntimeSemanticPlanningRetirementReason = "catalog_refresh"
+)
+
+// RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
+// inside the Runtime aggregate.  Exceeding the bound is a contract failure;
+// history is never silently discarded to make a new generation fit.
+const RuntimeSemanticPlanningHistoryLimit = 16
+
 // RuntimeSemanticFeasibilityGap preserves one retired semantic proposal and
 // its complete owner-fact lineage. It is audit data only: a gap cannot select
 // retry, terminal, or the next semantic proposal.
@@ -1159,6 +1174,95 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 	return nil
 }
 
+// RuntimeSemanticPlanningGeneration is an immutable audit snapshot of a
+// superseded semantic planning ledger.  A receipt or owner freshness change
+// may retire the active manifest/order, but it must not erase the provider
+// document, owner facts, correction lineage or sealed binding identity that
+// explains the already attempted generation.  The nested ledger is a complete
+// typed snapshot; its own History must be empty so generations cannot form a
+// recursive authority graph.
+//
+// Generation identity is the pair (Snapshot.Manifest.Hash,
+// Snapshot.LogicalRequestID).  The manifest hash is the sealed catalog and
+// definition identity; the logical request distinguishes a new semantic
+// request after a resource rollback that happens to recreate an older catalog
+// snapshot.  Logical request changes within one active generation (for
+// example, the bounded correction request or the next focus batch) do not
+// append history because they are still covered by the same retirement
+// snapshot.  This keeps request-session identity and generation identity
+// separate without allowing retired authority to be reused.
+type RuntimeSemanticPlanningGeneration struct {
+	RetiredAtStateRevision uint64
+	Reason                 RuntimeSemanticPlanningRetirementReason
+	InvalidationSignatures []string
+	PrerequisiteIDs        []string
+	Snapshot               RuntimeSemanticPlanningLedger
+}
+
+func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningGeneration {
+	g.Reason = RuntimeSemanticPlanningRetirementReason(strings.TrimSpace(string(g.Reason)))
+	g.InvalidationSignatures = normalizeStrings(g.InvalidationSignatures)
+	g.PrerequisiteIDs = normalizeStrings(g.PrerequisiteIDs)
+	// Detach the generation snapshot without recursively walking a malformed
+	// nested History tree.  Validation below rejects any non-nil nested history;
+	// normalization must remain bounded so a corrupt persisted record cannot
+	// turn startup validation into an unbounded recursive clone.
+	nestedHistory := append([]RuntimeSemanticPlanningGeneration(nil), g.Snapshot.History...)
+	g.Snapshot.History = nil
+	g.Snapshot = g.Snapshot.Clone()
+	if nestedHistory != nil {
+		g.Snapshot.History = nestedHistory
+	}
+	return g
+}
+
+func (g RuntimeSemanticPlanningGeneration) Clone() RuntimeSemanticPlanningGeneration {
+	return g.Normalized()
+}
+
+func (g RuntimeSemanticPlanningGeneration) Validate() error {
+	raw := g
+	g = g.Normalized()
+	if len(raw.InvalidationSignatures) != len(g.InvalidationSignatures) || len(raw.PrerequisiteIDs) != len(g.PrerequisiteIDs) {
+		return fmt.Errorf("runtime semantic planning generation contains duplicate or empty lineage values")
+	}
+	if g.RetiredAtStateRevision == 0 || g.Reason == "" || len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 {
+		return fmt.Errorf("runtime semantic planning generation requires retirement identity and reason")
+	}
+	switch g.Reason {
+	case RuntimeSemanticPlanningRetirementResourceInvalidated, RuntimeSemanticPlanningRetirementCatalogRefresh:
+	default:
+		return fmt.Errorf("runtime semantic planning generation has unsupported retirement reason %q", g.Reason)
+	}
+	if g.Snapshot.History != nil {
+		return fmt.Errorf("runtime semantic planning generation snapshot must not contain nested history")
+	}
+	if g.Snapshot.Phase == RuntimeSemanticPlanningRequired || g.Snapshot.Phase == RuntimeSemanticPlanningFailed {
+		return fmt.Errorf("runtime semantic planning generation snapshot is not an active semantic generation")
+	}
+	if g.Snapshot.Manifest == nil {
+		return fmt.Errorf("runtime semantic planning generation snapshot requires a manifest")
+	}
+	if err := g.Snapshot.Validate(); err != nil {
+		return fmt.Errorf("runtime semantic planning generation snapshot: %w", err)
+	}
+	manifestPrerequisites := make(map[string]struct{}, len(g.Snapshot.Manifest.OwnerCatalogs))
+	for _, catalog := range g.Snapshot.Manifest.OwnerCatalogs {
+		manifestPrerequisites[catalog.PrerequisiteID] = struct{}{}
+	}
+	seenPrerequisites := make(map[string]struct{}, len(g.PrerequisiteIDs))
+	for _, prerequisiteID := range g.PrerequisiteIDs {
+		if _, duplicate := seenPrerequisites[prerequisiteID]; duplicate {
+			return fmt.Errorf("runtime semantic planning generation duplicates prerequisite %q", prerequisiteID)
+		}
+		seenPrerequisites[prerequisiteID] = struct{}{}
+		if _, found := manifestPrerequisites[prerequisiteID]; !found {
+			return fmt.Errorf("runtime semantic planning generation prerequisite %q is outside snapshot manifest", prerequisiteID)
+		}
+	}
+	return nil
+}
+
 // RuntimeSemanticPlanningLedger is persisted owner data.  pkg validates its
 // value shape only; Orchestrator private internal events own every transition.
 type RuntimeSemanticPlanningLedger struct {
@@ -1195,6 +1299,11 @@ type RuntimeSemanticPlanningLedger struct {
 	FeasibilityGaps         []RuntimeSemanticFeasibilityGap
 	CatalogRefreshAttempts  int
 	Failure                 *RuntimeOriginalDiagnostic
+	// History is immutable semantic-generation audit lineage. It is owned by
+	// Orchestrator SM-2 and never participates in the current provider request.
+	// A fresh generation starts with Phase=Required while retaining all prior
+	// snapshots here.
+	History []RuntimeSemanticPlanningGeneration
 }
 
 func NewRuntimeSemanticPlanningLedger(seed RuntimeDefinitionSeed) (RuntimeSemanticPlanningLedger, error) {
@@ -1260,6 +1369,15 @@ func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedge
 		l.FeasibilityGaps[idx] = l.FeasibilityGaps[idx].Normalized()
 	}
 	l.Failure = l.Failure.Normalized()
+	if len(l.History) > 0 {
+		values := make([]RuntimeSemanticPlanningGeneration, 0, len(l.History))
+		for _, value := range l.History {
+			values = append(values, value.Normalized())
+		}
+		// History is append-only semantic lineage. Preserve its order; sorting
+		// would turn a causal chain into a presentation list.
+		l.History = values
+	}
 	return l
 }
 
@@ -1267,6 +1385,7 @@ func (l RuntimeSemanticPlanningLedger) Clone() RuntimeSemanticPlanningLedger {
 	originalFeasibilities := append([]RuntimeSemanticProofFeasibility(nil), l.Feasibilities...)
 	originalRejections := append([]RuntimeOriginalDiagnostic(nil), l.Rejections...)
 	originalGaps := append([]RuntimeSemanticFeasibilityGap(nil), l.FeasibilityGaps...)
+	originalHistory := append([]RuntimeSemanticPlanningGeneration(nil), l.History...)
 	originalFailure := l.Failure.CloneOriginal()
 	var originalCoverageOrder *RuntimeSemanticPlanDocument
 	if l.CoverageOrderDocument != nil {
@@ -1289,6 +1408,14 @@ func (l RuntimeSemanticPlanningLedger) Clone() RuntimeSemanticPlanningLedger {
 	l.FeasibilityGaps = make([]RuntimeSemanticFeasibilityGap, len(originalGaps))
 	for idx := range originalGaps {
 		l.FeasibilityGaps[idx] = originalGaps[idx].Clone()
+	}
+	if originalHistory != nil {
+		l.History = make([]RuntimeSemanticPlanningGeneration, len(originalHistory))
+		for idx := range originalHistory {
+			l.History[idx] = originalHistory[idx].Clone()
+		}
+	} else {
+		l.History = nil
 	}
 	l.Batches = append([]RuntimeSemanticPlanBatch(nil), l.Batches...)
 	l.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), l.PendingCoverageIDs...)
@@ -1336,6 +1463,7 @@ func normalizeRuntimeSemanticPlanDocuments(values []RuntimeSemanticPlanDocument)
 
 func (l RuntimeSemanticPlanningLedger) Validate() error {
 	raw := l
+	rawHistory := append([]RuntimeSemanticPlanningGeneration(nil), l.History...)
 	l = l.Normalized()
 	if l.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaCurrent {
 		return fmt.Errorf("runtime semantic planning ledger requires current schema")
@@ -1345,8 +1473,51 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 	// persisted authority ledger must reject that input rather than silently
 	// changing its lineage while validating it.
 	if len(raw.PendingCoverageIDs) != len(l.PendingCoverageIDs) || len(raw.CompletedBatchIDs) != len(l.CompletedBatchIDs) ||
-		len(raw.Batches) != len(l.Batches) || len(raw.BatchDocuments) != len(l.BatchDocuments) || len(raw.BatchFeasibilityResults) != len(l.BatchFeasibilityResults) {
+		len(raw.Batches) != len(l.Batches) || len(raw.BatchDocuments) != len(l.BatchDocuments) || len(raw.BatchFeasibilityResults) != len(l.BatchFeasibilityResults) ||
+		len(raw.History) != len(l.History) {
 		return fmt.Errorf("runtime semantic planning ledger contains duplicate or empty identity history")
+	}
+	if len(l.History) > RuntimeSemanticPlanningHistoryLimit {
+		return fmt.Errorf("runtime semantic planning history exceeds bounded limit %d", RuntimeSemanticPlanningHistoryLimit)
+	}
+	type generationIdentity struct {
+		manifestHash     string
+		logicalRequestID string
+	}
+	seenHistory := make(map[generationIdentity]struct{}, len(l.History))
+	seenInvalidationSignatures := make(map[string]struct{})
+	lastRetiredRevision := uint64(0)
+	for idx := range l.History {
+		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(l.History[idx].InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(l.History[idx].PrerequisiteIDs) {
+			return fmt.Errorf("runtime semantic planning history %d contains duplicate or empty lineage values", idx)
+		}
+		history := l.History[idx]
+		if err := history.Validate(); err != nil {
+			return fmt.Errorf("runtime semantic planning history %d: %w", idx, err)
+		}
+		if history.Snapshot.DefinitionSeed.Hash != l.DefinitionSeed.Hash {
+			return fmt.Errorf("runtime semantic planning history %d definition seed mismatch", idx)
+		}
+		if lastRetiredRevision != 0 && history.RetiredAtStateRevision <= lastRetiredRevision {
+			return fmt.Errorf("runtime semantic planning history is not append ordered")
+		}
+		lastRetiredRevision = history.RetiredAtStateRevision
+		for _, signature := range history.InvalidationSignatures {
+			if _, duplicate := seenInvalidationSignatures[signature]; duplicate {
+				return fmt.Errorf("runtime semantic planning history duplicates invalidation signature %q", signature)
+			}
+			seenInvalidationSignatures[signature] = struct{}{}
+		}
+		// A document, batch, or phase change under the same sealed catalog and
+		// logical request is still one generation and must not be appended as a
+		// second history entry.  A later request with the same catalog hash is
+		// allowed only when it has a distinct logical identity (resource rollback
+		// recovery); it cannot reuse the old snapshot's request/session lineage.
+		identity := generationIdentity{manifestHash: history.Snapshot.Manifest.Hash, logicalRequestID: history.Snapshot.LogicalRequestID}
+		if _, duplicate := seenHistory[identity]; duplicate {
+			return fmt.Errorf("runtime semantic planning history duplicates generation %q", identity)
+		}
+		seenHistory[identity] = struct{}{}
 	}
 	for idx := range raw.Batches {
 		rawBatch, normalizedBatch := raw.Batches[idx], l.Batches[idx]

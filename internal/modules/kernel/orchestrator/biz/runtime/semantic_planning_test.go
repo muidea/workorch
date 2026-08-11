@@ -770,13 +770,14 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldSessionComplete := false
+	oldSessionTerminal := false
 	for _, persisted := range withNewSession.CandidateRequestSessions {
-		if persisted.LogicalRequestID == session.LogicalRequestID && persisted.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
-			oldSessionComplete = true
+		if persisted.LogicalRequestID == session.LogicalRequestID && persisted.State == runtimecontract.RuntimeCandidateRequestSessionTerminal &&
+			persisted.LastOutcome.Code == "semantic_catalog_invalidated" {
+			oldSessionTerminal = true
 		}
 	}
-	if newSession.LogicalRequestID == session.LogicalRequestID || len(withNewSession.CandidateRequestSessions) != 2 || !oldSessionComplete {
+	if newSession.LogicalRequestID == session.LogicalRequestID || len(withNewSession.CandidateRequestSessions) != 2 || !oldSessionTerminal {
 		t.Fatalf("fresh catalog reused or rewrote old semantic request session: old=%+v new=%+v", session, newSession)
 	}
 }
@@ -869,6 +870,254 @@ func TestRuntimeSemanticPrerequisiteRequiredFailsClosedWithoutRetiringCatalog(t 
 		len(aggregate.Facts.Resources.PrerequisiteObservations) != 1 || aggregate.Facts.Recovery.PrerequisiteRefreshes != 0 ||
 		len(aggregate.Facts.Prerequisites.Pending) != 0 {
 		t.Fatalf("prerequisite-required fact retired or budgeted catalog state: facts=%+v invalidations=%+v", aggregate.Facts, aggregate.PrerequisiteInvalidations)
+	}
+}
+
+func TestRuntimeSemanticCatalogReacquisitionRetiresOnlyCurrentGeneration(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
+	oldLedger := aggregate.SemanticPlanning.Clone()
+
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-retired", "operation-retired", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "execution/semantic-retired", Fence: 1, OperationID: "operation-retired",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: catalog.ObservedRevision, AfterRevision: "file-revision-2",
+		}},
+	})
+	if err != nil || !changed || !semanticCatalogPrerequisitePending(aggregate, prerequisite.ID) {
+		t.Fatalf("receipt invalidation did not reopen current semantic catalog acquisition: changed=%t err=%v aggregate=%+v", changed, err, aggregate)
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = &aggregate
+
+	newCatalog := catalog.Normalized()
+	newCatalog.ObservedRevision = "file-revision-2"
+	newCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(newCatalog)
+	newObservation := observation
+	newObservation.ContentHash = newCatalog.SnapshotID
+	newObservation.Dependencies[0].Revision = newCatalog.ObservedRevision
+	newObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(newObservation)
+	updated, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &newCatalog, Observation: &newObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(updated.SemanticPlanning.History) != 1 ||
+		updated.SemanticPlanning.History[0].Reason != runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated ||
+		updated.SemanticPlanning.History[0].Snapshot.Manifest == nil || updated.SemanticPlanning.History[0].Snapshot.Manifest.Hash != oldLedger.Manifest.Hash {
+		t.Fatalf("same-focus catalog refresh did not preserve and retire only the old generation: %+v", updated.SemanticPlanning)
+	}
+	operationPending := false
+	for _, pending := range updated.Facts.Prerequisites.Pending {
+		if pending.ID == prerequisite.ID {
+			operationPending = true
+		}
+	}
+	if len(updated.Facts.Resources.OperationAdmissibilities) != 1 || updated.Facts.Resources.OperationAdmissibilities[0].SnapshotID != newCatalog.SnapshotID || operationPending {
+		t.Fatalf("reacquired catalog was not retained as the only current owner fact: %+v", updated.Facts)
+	}
+	if semanticCatalogPrerequisitePending(updated, prerequisite.ID) {
+		t.Fatal("retired generation still treats an already reacquired catalog as pending")
+	}
+
+	// Historical invalidations keep their audit record. They must not by
+	// themselves retire a later generation that has no matching pending
+	// acquisition.
+	updated.SemanticPlanning = oldLedger
+	if semanticCatalogPrerequisitePending(updated, prerequisite.ID) {
+		t.Fatal("historical invalidation was treated as a current catalog refresh")
+	}
+}
+
+func TestRuntimeSemanticCatalogReacquisitionWithUnchangedIdentityKeepsGeneration(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
+	beforeLedger := aggregate.SemanticPlanning.Clone()
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-same-catalog", "operation-same-catalog", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "execution/semantic-same-catalog", Fence: 1, OperationID: "operation-same-catalog",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: catalog.ObservedRevision, AfterRevision: "file-revision-2",
+		}},
+	})
+	if err != nil || !changed || !semanticCatalogPrerequisitePending(aggregate, prerequisite.ID) {
+		t.Fatalf("same-identity receipt invalidation did not open reacquisition: changed=%t err=%v aggregate=%+v", changed, err, aggregate)
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = &aggregate
+
+	// The owner re-observes a new resource revision, but its admissibility
+	// vocabulary/snapshot is unchanged.  The semantic generation may therefore
+	// be reused; only the freshness observation identity changes.
+	newObservation := observation
+	newObservation.Dependencies[0].Revision = "file-revision-2"
+	newObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(newObservation)
+	updated, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &catalog, Observation: &newObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.SemanticPlanning.Phase != beforeLedger.Phase || len(updated.SemanticPlanning.History) != len(beforeLedger.History) ||
+		updated.SemanticPlanning.Manifest == nil || updated.SemanticPlanning.Manifest.Hash != beforeLedger.Manifest.Hash {
+		t.Fatalf("unchanged catalog identity unexpectedly retired semantic generation: before=%+v after=%+v", beforeLedger, updated.SemanticPlanning)
+	}
+	if semanticCatalogPrerequisitePending(updated, prerequisite.ID) || len(updated.Facts.Resources.PrerequisiteObservations) != 1 ||
+		updated.Facts.Resources.PrerequisiteObservations[0].ObservationID != newObservation.ObservationID {
+		t.Fatalf("same-identity reacquisition did not leave one fresh current observation: facts=%+v", updated.Facts)
+	}
+}
+
+func TestRuntimeSemanticCatalogInvalidationLineageExcludesRetiredSignatures(t *testing.T) {
+	_, _, aggregate, _, prerequisite, _ := sealedSemanticPlanningAggregate(t)
+	oldLedger := aggregate.SemanticPlanning.Clone()
+	aggregate.SemanticPlanning.History = []runtimecontract.RuntimeSemanticPlanningGeneration{{
+		RetiredAtStateRevision: 2, Reason: runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated,
+		InvalidationSignatures: []string{"invalidation-old"}, PrerequisiteIDs: []string{prerequisite.ID}, Snapshot: oldLedger,
+	}}
+	aggregate.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		{Signature: "invalidation-old", PrerequisiteIDs: []string{prerequisite.ID}, ObservationIDs: []string{"observation-old"}},
+		{Signature: "invalidation-current", PrerequisiteIDs: []string{prerequisite.ID}, ObservationIDs: []string{"observation-current"}},
+	}
+	ids, signatures := semanticCatalogInvalidationLineage(aggregate, *oldLedger.Manifest, []RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: prerequisite.ID}})
+	if len(ids) != 1 || ids[0] != prerequisite.ID || len(signatures) != 1 || signatures[0] != "invalidation-current" {
+		t.Fatalf("historical invalidation signature leaked into current generation lineage: ids=%v signatures=%v", ids, signatures)
+	}
+}
+
+func TestRuntimeSemanticCatalogInvalidationEventRejectsUnknownRetiredManifest(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	aggregate.Facts.Resources.PrerequisiteObservations = nil
+	repository.aggregate = &aggregate
+	beforeRevision := aggregate.StateRevision
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		ManifestHash: "semantic-manifest-unknown", LogicalRequestID: aggregate.SemanticPlanning.LogicalRequestID,
+	}); err == nil || !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unknown retired semantic manifest was accepted: %v", err)
+	}
+	if repository.aggregate.StateRevision != beforeRevision {
+		t.Fatalf("rejected semantic invalidation changed state revision: before=%d after=%d", beforeRevision, repository.aggregate.StateRevision)
+	}
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		ManifestHash: aggregate.SemanticPlanning.Manifest.Hash, LogicalRequestID: "semantic-request-from-another-generation",
+	}); err == nil || !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("semantic invalidation with a mismatched logical generation was accepted: %v", err)
+	}
+	if repository.aggregate.StateRevision != beforeRevision {
+		t.Fatalf("mismatched semantic invalidation changed state revision: before=%d after=%d", beforeRevision, repository.aggregate.StateRevision)
+	}
+	retired, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		ManifestHash: aggregate.SemanticPlanning.Manifest.Hash, LogicalRequestID: aggregate.SemanticPlanning.LogicalRequestID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := retired.Aggregate.StateRevision
+	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		ManifestHash: aggregate.SemanticPlanning.Manifest.Hash, LogicalRequestID: aggregate.SemanticPlanning.LogicalRequestID,
+	})
+	if err != nil || duplicate.Aggregate.StateRevision != revision {
+		t.Fatalf("matching semantic invalidation was not idempotent: err=%v duplicate=%+v", err, duplicate.Aggregate)
+	}
+}
+
+func TestSemanticManifestCatalogFreshnessGapKeepsOwnerScopedObservationIdentity(t *testing.T) {
+	_, _, aggregate, catalog, _, observation := sealedSemanticPlanningAggregate(t)
+	wrongOwner := observation
+	wrongOwner.OwnerModuleID = runtimecontract.RuntimeModuleGit
+	aggregate.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{wrongOwner}
+	gaps := SemanticManifestCatalogFreshnessGaps(aggregate, *aggregate.SemanticPlanning.Manifest)
+	if len(gaps) != 1 || gaps[0].ManifestObservationID != "" || gaps[0].CurrentObservationID != "" {
+		t.Fatalf("cross-owner observation was treated as current catalog identity: catalog=%+v observation=%+v gaps=%+v", catalog, wrongOwner, gaps)
+	}
+	wrongKind := observation
+	wrongKind.Kind = runtimecontract.PrerequisiteKindCapability
+	wrongKind.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(wrongKind)
+	aggregate.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{wrongKind}
+	gaps = SemanticManifestCatalogFreshnessGaps(aggregate, *aggregate.SemanticPlanning.Manifest)
+	if len(gaps) != 1 || gaps[0].ManifestObservationID != "" || gaps[0].CurrentObservationID != "" {
+		t.Fatalf("wrong-kind observation was treated as semantic catalog lineage: catalog=%+v observation=%+v gaps=%+v", catalog, wrongKind, gaps)
+	}
+}
+
+func TestRuntimeSemanticCatalogInvalidationNeverRetiresActiveDispatch(t *testing.T) {
+	_, _, aggregate, catalog, _, _ := sealedSemanticPlanningAggregate(t)
+	changedCatalog := catalog.Normalized()
+	changedCatalog.ObservedRevision = "file-revision-2"
+	changedCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(changedCatalog)
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{changedCatalog}
+	aggregate.ActiveDispatch = &SealedDispatch{ID: "dispatch-active", State: DispatchStateSealed}
+	before := aggregate.SemanticPlanning.Clone()
+	retired, err := resetSemanticPlanningForInvalidatedCatalog(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated)
+	if err != nil || retired || aggregate.SemanticPlanning.Phase != before.Phase || len(aggregate.SemanticPlanning.History) != len(before.History) {
+		t.Fatalf("active dispatch semantic retirement = retired:%t err:%v ledger:%+v", retired, err, aggregate.SemanticPlanning)
+	}
+}
+
+func TestRuntimeSemanticRetirementPreservesPriorProviderDocumentOutcome(t *testing.T) {
+	ledger := runtimecontract.RuntimeSemanticPlanningLedger{}
+	// Build the sealed ledger through the package fixture so the retirement
+	// helper is tested against a complete generation, not a hand-written shape.
+	_, _, aggregate, _, prerequisite, _ := sealedSemanticPlanningAggregate(t)
+	ledger = aggregate.SemanticPlanning.Clone()
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		ManifestHash:  ledger.Manifest.Hash, DefinitionSeedHash: ledger.DefinitionSeed.Hash,
+		LogicalRequestID: "old-provider-request", StablePrefixHash: "old-provider-prefix",
+		BatchID: ledger.Document.BatchID, BatchSequence: ledger.Document.BatchSequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), ledger.Document.BatchCoverageWorkItemIDs...),
+		CoverageOrderHash:        runtimecontract.StableRuntimeSemanticPlanCoverageOrderHash(*ledger.CoverageOrderDocument),
+		MaxOutputTokens:          1024, MaxRecoveryAttempts: 1,
+	}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: expected.Hash,
+		ResponseHash: "provider-response-old", ResponseBytes: 128, Code: "max_output_tokens", Signature: "provider/incomplete",
+	}
+	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{{
+		LogicalRequestID: expected.LogicalRequestID, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		ExpectedDocument: &expected, Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-old"},
+		StablePrefixHash: expected.StablePrefixHash, ManifestHash: expected.ManifestHash,
+		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, IncompleteOutcomes: 1,
+		LastDocumentOutcome: &outcome, LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
+			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: outcome.Code, Signature: outcome.Signature,
+		},
+	}}
+	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, []RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: prerequisite.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := aggregate.CandidateRequestSessions[0].LastDocumentOutcome; got == nil || got.ResponseHash != outcome.ResponseHash || got.Code != outcome.Code {
+		t.Fatalf("retirement discarded prior provider document outcome: %+v", got)
+	}
+	if aggregate.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
+		aggregate.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
+		t.Fatalf("retirement did not close the old provider session: %+v", aggregate.CandidateRequestSessions[0])
 	}
 }
 
@@ -1191,12 +1440,14 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	facts.DefinitionSeed.CoverageItems = append(facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: second.ID, SliceID: second.SliceID, SourceScope: second.SourceScope, SourceID: second.SourceID, TargetText: second.TargetText})
 	facts.DefinitionSeed.Slices = facts.Slices
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-revision-1"}
-	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash, OperationContractRevision: aggregate.Facts.Activation.ExecutionContract.OperationContractRevision, CoverageItems: aggregate.Facts.DefinitionSeed.CoverageItems, AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog}}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	baseProposal := runtimecontract.RuntimeSemanticProofProposal{CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "semantic/" + string(manifest.CoverageItems[0].ID)}
@@ -1231,6 +1482,75 @@ func semanticPlanningCatalogFixture() (runtimecontract.RuntimeOperationAdmissibi
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	return catalog, prerequisite, observation
+}
+
+func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate, runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisite, runtimecontract.RuntimePrerequisiteObservation) {
+	t.Helper()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
+	order.Proposals = nil
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply := func(event RuntimeInternalEvent) {
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, applyErr := controller.ApplyInternalEvent(context.Background(), event)
+		if applyErr != nil {
+			t.Fatalf("apply %s: %v", event.Kind, applyErr)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "semantic-retirement-prefix", LogicalRequestID: "semantic-retirement-request"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-retirement-request"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "semantic-retirement-batch", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := document.Clone()
+	proof.PlanStep = runtimecontract.RuntimeSemanticPlanStepProofBatch
+	proof.BatchID = batch.BatchID
+	proof.BatchSequence = batch.Sequence
+	proof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	proof.CoverageOrder = nil
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	feasibility.CatalogSnapshotID = catalog.SnapshotID
+	feasibility.CatalogObservationID = observation.ObservationID
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility})
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	return controller, repository, aggregate, catalog, prerequisite, observation
 }
 
 func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate) {

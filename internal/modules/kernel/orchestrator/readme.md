@@ -257,7 +257,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   private entry，以 persisted refresh generation 原子保存 gap lineage、退休 matching catalog observation 并回到有界重获。
   当前没有 owner-defined typed semantic prerequisite request 时，`prerequisite_required` 保留 catalog、observation、预算
   与原始 diagnostic，由 SM-2 fail-closed terminal；不得伪装成 stale 或 generic refresh。新 revision 编译新
-  manifest/request session，旧 complete session 只读保留；duplicate generation 不写 CAS，预算耗尽才以原始 owner
+  manifest/request session，旧 complete session 只读保留；generation history identity 固定为
+  `manifestHash + logicalRequestID`：同一 active generation 的 correction/focus request 变化不重复记 generation，
+  资源回滚重现旧 catalog hash 时可由新 logical request 开启独立 generation。duplicate generation 不写 CAS，预算耗尽才以原始 owner
   diagnostic 执行 `semantic_contract_failed`。上述处理不新增 phase、不消费 candidate correction，也不创建
   Decision/Approval。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。Result 强制绑定 workspace/run/resolution scope，并保留正交的 `committed | stale_diagnostic | duplicate` CAS 提交事实；它不携带自由文本 diagnostic/reason/failure，也不得由 convergence state 猜测提交事实。

@@ -16,7 +16,7 @@ Last Updated: 2026-08-10
 | --- | --- |
 | Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
-| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-25）**；RSO-1～RSO-9、RSO-11～RSO-14、RSO-16、RSO-18～RSO-25 已 code-closed；`run-055`/`run-056` 已证明 MCP owner-fact mismatch 在 dispatch 前零副作用拒绝，`run-061`/`run-062` 暴露的 provider `requiredEffectScopes` echo 已删除，`run-063` 暴露的 provider `requiredCheckRefs` echo 已删除；`run-064`/`run-065` 暴露的 owner-feasibility timing、MCP catalog/probe、focus batch 和 failure-class 缺口已完成本地收口。最新 `run-066` 在 MCP 行为探针事实不足时以 `candidate_infeasible/mcp_semantic_proof_unavailable` 零 dispatch fail-closed，属于负向证明而非正向收敛。RSO-22 仍需 fresh positive 与 zero-dispatch deployed convergence；whole-document recovery 仍需独立 deployed fault injection。见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
+| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-25）**；RSO-1～RSO-9、RSO-11～RSO-14、RSO-16、RSO-18～RSO-25 已 code-closed；新增的 semantic catalog generation retirement/history、missing-observation 私有 SM-2 reset、active-dispatch fence、same-identity reacquisition、exact retired-manifest idempotency 与 file-backed reload/zero-owner-probe 回归已纳入 RSO-25。`run-055`/`run-056` 已证明 MCP owner-fact mismatch 在 dispatch 前零副作用拒绝，`run-061`/`run-062` 暴露的 provider `requiredEffectScopes` echo 已删除，`run-063` 暴露的 provider `requiredCheckRefs` echo 已删除；`run-064`/`run-065` 暴露的 owner-feasibility timing、MCP catalog/probe、focus batch 和 failure-class 缺口已完成本地收口。最新 `run-066` 在 MCP 行为探针事实不足时以 `candidate_infeasible/mcp_semantic_proof_unavailable` 零 dispatch fail-closed，属于负向证明而非正向收敛。RSO-22 仍需 fresh positive 与 zero-dispatch deployed convergence；whole-document recovery 仍需独立 deployed fault injection。见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
 | Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
 | 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
@@ -36,7 +36,8 @@ feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 binding。`run-063
 complete-document、22 组件 EventHub 合同回迁、owner-local terminal delivery、typed diagnostic、single mutation surface、
 managed verifier 与 reasoning selection 仍是回归基线，但不能替代最新 persisted aggregate/provider/projection 反例。
 
-语义 catalog freshness 只允许由带 expected/observed revision fence 的 `stale` owner fact 触发；当前没有 typed
+语义 catalog freshness 只允许由带 expected/observed revision fence 的 `stale` owner fact 触发；generation retirement
+保留有界完整历史，missing/mismatched observation 只通过 Orchestrator 私有 SM-2 reset 且 owner probe 为零；当前没有 typed
 semantic prerequisite acquisition 合同时，`prerequisite_required` observation 保留原始诊断和既有 catalog，直接
 fail-closed，不创建第二条 refresh/状态机路径。
 

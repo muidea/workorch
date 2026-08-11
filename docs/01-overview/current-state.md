@@ -38,7 +38,9 @@ Last Updated: 2026-08-08
 > feasibility，并由 SM-2 原子 seal；普通 UI/API 已不再暴露 raw execution-contract JSON。Run snapshot/RuntimeView
 > 已提供 run-scoped semantic phase、逐 CWI owner fact、完整原始 diagnostic 与 gap lineage，并拒绝跨 run/revision 的
 > stale 投影。fresh-process recovery、CPU guard、sealed-contract operation 主链与 R3-F 全链验收均已闭环；当前仅因
-> LSP Bridge deployed proof 尚未验收，R3 保持 active。
+> LSP Bridge deployed proof 尚未验收，R3 保持 active。semantic catalog 失效/重获已由 Orchestrator 单一 SM-2
+> generation retirement/history 处理；missing observation 不调用 capability owner、不消费 refresh budget，active
+> dispatch 期间 fail-closed，仍待 fresh deployed positive proof。
 
 - 当前 Start / Resume 由 TUI/Web/application 仅提交 scoped workspace intent；Workspace/Run 各自 internal event
   完成 slot/lifecycle 后发布事实，Orchestrator 先执行 `current_run` 或 `workspace_full` reconciliation，再进入

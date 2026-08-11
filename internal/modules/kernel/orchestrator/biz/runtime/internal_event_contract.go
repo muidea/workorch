@@ -26,6 +26,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,
 		RuntimeInternalEventSemanticContractRequired,
+		RuntimeInternalEventSemanticCatalogInvalidated,
 		RuntimeInternalEventSemanticFeasibilityRequired,
 		RuntimeInternalEventSemanticFeasibilityObserved,
 		RuntimeInternalEventSemanticContractSealed,

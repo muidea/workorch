@@ -631,6 +631,20 @@ func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtim
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_catalog_missing", "semantic proposal has no sealed owner catalog", nil)
 	}
 	observation := runtimeSemanticCatalogObservation(aggregate, catalog)
+	if observation == nil {
+		// The owner cannot prove a proposal against a retired/missing catalog
+		// observation. Reopen one fresh semantic generation through the private
+		// SM-2 event; do not send a nil observation to a capability owner and do
+		// not terminalize this as a generic runtime contract defect.
+		refreshed, refreshErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:             runtime.RuntimeInternalEventSemanticCatalogInvalidated,
+			WorkspaceID:      aggregate.Facts.WorkspaceID,
+			RunID:            aggregate.Facts.RunID,
+			ManifestHash:     ledger.Manifest.Hash,
+			LogicalRequestID: ledger.LogicalRequestID,
+		})
+		return refreshed.Aggregate, refreshErr
+	}
 	response, err := ProbeRuntimeSemanticProofFeasibility(ctx, m.EventHub(), runtimecontract.RuntimeSemanticProofFeasibilityRequest{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		FeasibilityBatchID: ledger.FeasibilityBatchID, WorkspaceDeliverableDirectory: workspace.DeliverableDirectory,
@@ -658,11 +672,9 @@ func runtimeSemanticManifestOwnerCatalog(manifest runtimecontract.RuntimeSemanti
 }
 
 func runtimeSemanticCatalogObservation(aggregate runtime.RuntimeAggregate, catalog runtimecontract.RuntimeOperationAdmissibility) *runtimecontract.RuntimePrerequisiteObservation {
-	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
-		if observation.PrerequisiteID == catalog.PrerequisiteID && observation.OwnerModuleID == catalog.OwnerModuleID && observation.ContentHash == catalog.SnapshotID {
-			value := observation.Normalized()
-			return &value
-		}
+	if observation, found := runtime.CurrentSemanticCatalogObservation(aggregate, catalog); found {
+		value := observation.Normalized()
+		return &value
 	}
 	return nil
 }

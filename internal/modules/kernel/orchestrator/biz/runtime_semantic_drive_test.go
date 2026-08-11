@@ -2,9 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
@@ -99,7 +103,7 @@ func TestRuntimeSemanticCorrectionDiagnosticBindsProofBatchWithoutReclassifyingO
 	}
 }
 
-func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument(t *testing.T) {
+func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenerationFromProviderCommand(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -125,6 +129,23 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-revision-1"}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	const retiredHistorySentinel = "retired-semantic-history-must-not-reach-provider"
+	retired := runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	if retired.SemanticPlanning.Manifest == nil || len(retired.SemanticPlanning.Manifest.OwnerCatalogs) == 0 {
+		t.Fatalf("retired semantic fixture has no owner catalog: %+v", retired.SemanticPlanning)
+	}
+	retiredSnapshot := retired.SemanticPlanning.Clone()
+	retiredSnapshot.History = nil
+	aggregate.SemanticPlanning.History = []runtimecontract.RuntimeSemanticPlanningGeneration{{
+		RetiredAtStateRevision: 1,
+		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated,
+		InvalidationSignatures: []string{retiredHistorySentinel},
+		PrerequisiteIDs:        []string{retiredSnapshot.Manifest.OwnerCatalogs[0].PrerequisiteID},
+		Snapshot:               retiredSnapshot,
+	}}
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("semantic history fixture is invalid: %v", err)
+	}
 	repository.aggregate = aggregate
 
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
@@ -134,6 +155,20 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" {
 			t.Errorf("semantic request leaked operations authority: %+v", command)
+			return
+		}
+		encoded, encodeErr := json.Marshal(command)
+		if encodeErr != nil {
+			t.Errorf("marshal semantic provider command: %v", encodeErr)
+			return
+		}
+		if strings.Contains(string(encoded), retiredHistorySentinel) {
+			t.Errorf("retired semantic history leaked into provider command: %s", encoded)
+			return
+		}
+		wantStablePrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(command.SemanticContext.Definition, command.SemanticContext.Activation.ExecutionContract)
+		if command.StablePrefixHash != wantStablePrefix {
+			t.Errorf("semantic provider stable prefix = %q, want current definition/execution prefix %q", command.StablePrefixHash, wantStablePrefix)
 			return
 		}
 		requestCount++
@@ -262,6 +297,75 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	session := failed.CandidateRequestSessions[0]
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
 		t.Fatalf("semantic terminal retained open provider or operation work: session=%+v aggregate=%+v", session, failed)
+	}
+}
+
+func TestRuntimeSemanticDriveMissingCatalogObservationReopensGenerationWithoutOwnerProbe(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+
+	bootstrap := runtimeBootstrap()
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	if aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Document == nil || len(aggregate.SemanticPlanning.Document.Proposals) == 0 {
+		t.Fatalf("sealed semantic fixture has no proposal: %+v", aggregate.SemanticPlanning)
+	}
+	catalog := aggregate.SemanticPlanning.Manifest.OwnerCatalogs[0].Normalized()
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	// Deliberately omit the prerequisite observation. The sealed manifest is
+	// therefore stale even though the admissibility catalog itself is present.
+	aggregate.Facts.Resources.PrerequisiteObservations = nil
+	repository.aggregate = aggregate
+
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
+			ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	ownerProbeCalls := 0
+	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	fileObserver.Subscribe(fileevents.TopicProbeRuntimeSemanticProofFeasibility, func(_ magicevent.Event, result magicevent.Result) {
+		ownerProbeCalls++
+		result.Set(nil, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicProbeRuntimeSemanticProofFeasibility) })
+
+	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	proposal := aggregate.SemanticPlanning.Document.Proposals[0]
+	beforeRevision := aggregate.StateRevision
+	updated, err := module.probeRuntimeSemanticProposal(ctx, aggregate, proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerProbeCalls != 0 {
+		t.Fatalf("missing catalog observation called capability owner %d time(s)", ownerProbeCalls)
+	}
+	if updated.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
+		t.Fatalf("missing observation did not reopen a fresh semantic generation: %+v", updated.SemanticPlanning)
+	}
+	if len(updated.SemanticPlanning.History) != 1 || updated.SemanticPlanning.History[0].Snapshot.Manifest == nil ||
+		updated.SemanticPlanning.History[0].Snapshot.Manifest.Hash != aggregate.SemanticPlanning.Manifest.Hash {
+		t.Fatalf("missing observation did not retain the retired generation: %+v", updated.SemanticPlanning.History)
+	}
+	if updated.StateRevision != beforeRevision+1 || updated.Facts.Recovery.PrerequisiteRefreshes != aggregate.Facts.Recovery.PrerequisiteRefreshes ||
+		len(updated.PrerequisiteInvalidations) != len(aggregate.PrerequisiteInvalidations) {
+		t.Fatalf("missing observation changed an unrelated recovery/invalidation ledger: before=%+v after=%+v", aggregate, updated)
 	}
 }
 

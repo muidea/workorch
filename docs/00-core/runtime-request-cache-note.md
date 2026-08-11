@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-11
 
 ## Purpose
 
@@ -60,8 +60,9 @@ request 应按 cacheability 从高到低组织：
   diagnostic 放入 C4 或 correction。只有带精确 revision fence 的 `stale` 可由 SM-2 有界重获 catalog；catalog
   snapshot/revision 改变后必须以新 manifest hash 创建新 logical request identity，不能 continuation/replay 旧 complete
   document。当前无 owner-defined typed semantic prerequisite request 的 `prerequisite_required` 不退休 catalog、不开启
-  refresh，而是以保留的 original diagnostic fail-closed terminal。refresh generation 与完整 owner diagnostic 都只属于
-  persisted aggregate，不进入 provider-facing stable prefix。
+  refresh，而是以保留的 original diagnostic fail-closed terminal。refresh generation、退休 semantic generation 的
+  bounded `History` 与完整 owner diagnostic 都只属于 persisted aggregate，不进入 provider-facing request、C0～C5
+  或 stable prefix。
 - raw stream、full provider payload、large artifact 默认 ref-only
 
 ### Provider-Facing Stable Prefix

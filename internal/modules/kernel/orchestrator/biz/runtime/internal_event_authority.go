@@ -3,9 +3,13 @@ package runtime
 // SM-2 facts are observations used by authority/focus convergence. They never
 // execute operations or project another owner's state.
 const (
-	RuntimeInternalEventReconcileAuthority                 RuntimeInternalEventKind = "reconcile_authority"
-	RuntimeInternalEventReconciliationBatchObserved        RuntimeInternalEventKind = "reconciliation_batch_observed"
-	RuntimeInternalEventSemanticContractRequired           RuntimeInternalEventKind = "semantic_contract_required"
+	RuntimeInternalEventReconcileAuthority          RuntimeInternalEventKind = "reconcile_authority"
+	RuntimeInternalEventReconciliationBatchObserved RuntimeInternalEventKind = "reconciliation_batch_observed"
+	RuntimeInternalEventSemanticContractRequired    RuntimeInternalEventKind = "semantic_contract_required"
+	// SemanticCatalogInvalidated is an Orchestrator-private SM-2 fact
+	// transition. It retires a manifest whose owner observation is no longer
+	// current; it never carries a destination state or provider repair choice.
+	RuntimeInternalEventSemanticCatalogInvalidated         RuntimeInternalEventKind = "semantic_catalog_invalidated"
 	RuntimeInternalEventSemanticFeasibilityRequired        RuntimeInternalEventKind = "semantic_feasibility_required"
 	RuntimeInternalEventSemanticFeasibilityObserved        RuntimeInternalEventKind = "semantic_feasibility_observed"
 	RuntimeInternalEventSemanticContractSealed             RuntimeInternalEventKind = "semantic_contract_sealed"

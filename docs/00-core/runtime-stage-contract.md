@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-11
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -237,7 +237,10 @@ proof 没有 owner-defined typed prerequisite request，因此 SM-2 必须在保
 fail-closed 为 typed terminal。未来若增加 prerequisite acquisition，必须先新增接收 owner 定义的 typed command/result，
 再由同一 private transition 接入，不能复用 stale refresh。以上处理不是新的 phase 或第五状态机，不增加 semantic
 candidate attempt。新 catalog revision 必须产生新 manifest/request identity，旧 complete session 只保留 audit；
-duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入 `semantic_contract_failed`。
+generation history 的 identity 是封存的 `manifestHash + logicalRequestID`，所以同一 active generation 内的
+correction/focus request 变化不会制造重复 history，而资源回滚重现旧 catalog hash 时可以用新的 logical request
+建立独立 generation。duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入
+`semantic_contract_failed`。
 
 ### 单一 candidate evaluator
 

@@ -1045,6 +1045,17 @@ func (a RuntimeAggregate) Validate() error {
 	if err := a.SemanticPlanning.Validate(); err != nil {
 		return fmt.Errorf("runtime aggregate semantic planning ledger: %w", err)
 	}
+	for idx, history := range a.SemanticPlanning.History {
+		if history.Snapshot.Manifest == nil {
+			// The typed ledger validator already rejects this shape; retain an
+			// aggregate-level guard so a future history representation cannot
+			// cross workspace/run ownership silently.
+			return fmt.Errorf("runtime aggregate semantic generation %d has no manifest", idx)
+		}
+		if history.Snapshot.Manifest.WorkspaceID != a.Facts.WorkspaceID || history.Snapshot.Manifest.RunID != a.Facts.RunID {
+			return fmt.Errorf("runtime aggregate semantic generation %d scope mismatch", idx)
+		}
+	}
 	if a.SemanticPlanning.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash {
 		return fmt.Errorf("runtime aggregate semantic planning seed does not match facts")
 	}

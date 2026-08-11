@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-10
+Last Updated: 2026-08-11
 
 ## 1. Purpose And Authority
 
@@ -302,6 +302,38 @@ an Orchestrator default parameter, an LSP/tool-name branch, a provider retry, or
 The positive path remains open until an owner catalog/recipe supplies an executable, owner-observable proof shape and a
 fresh deployment reaches binding-matched evidence. Template/profile may declare a parameter source or recipe family,
 but the concrete value and proof remain capability-owner facts.
+
+### 2.14 Semantic catalog generation retirement closure (2026-08-10)
+
+The local closure now makes owner-catalog freshness a single Orchestrator SM-2 concern. A sealed semantic generation is
+never edited in place after its admissibility catalog or prerequisite observation is no longer current:
+
+- `RuntimeSemanticPlanningLedger.History` retains a bounded (16-entry) detached snapshot of each retired generation,
+  including its manifest, order, proof batches, provider document outcomes, owner feasibility facts, binding lineage,
+  retirement reason, prerequisite IDs and invalidation signatures. Generation identity is the pair of sealed
+  `manifestHash + logicalRequestID`: a correction/focus request change inside one active generation is not a new
+  history entry, while a resource rollback may recreate the same catalog hash only through a new logical request.
+  Nested history, duplicate generation identity,
+  definition-seed drift, duplicate lineage and unsupported retirement reasons are rejected by the typed contract.
+- A receipt-driven resource invalidation and its later owner reacquisition retire the old generation only when the
+  sealed catalog identity actually changes. Reacquisition with the same catalog snapshot keeps the generation and
+  replaces only the current freshness observation.
+- A missing or owner/snapshot-mismatched prerequisite observation is handled by the private
+  `SemanticCatalogInvalidated` SM-2 event. It clears current manifest/order/batch/feasibility authority, preserves the
+  immutable history, does not call a capability owner with a nil observation, and consumes neither semantic correction
+  nor prerequisite-refresh budget. The event is idempotent only for the exact retired manifest and logical request;
+  an arbitrary stale identity is rejected.
+- An active sealed dispatch is fail-closed: no semantic generation is retired while its immutable operation set is still
+  executing. The receipt is admitted first; the next authority then performs the freshness reset.
+- Retired semantic request sessions become terminal audit records while their last typed provider-document outcome is
+  retained. A fresh generation must use a new logical request identity and cannot reuse retired authority. If a rollback
+  recreates an old catalog hash, the new logical request is still a distinct generation; a delayed invalidation event
+  must match both identities before it can be treated as an idempotent duplicate.
+
+The regression matrix covers owner-probe zero-call on missing observation, unchanged-catalog reacquisition,
+retirement-lineage de-duplication, unknown/duplicate private event handling, active-dispatch fencing, and file-backed
+fresh-process reload of the complete retired generation. This is code evidence only; RSO-22 still requires fresh
+deployed positive/zero-dispatch convergence and a separate whole-document recovery fault injection.
 
 ## 3. Non-Negotiable Ownership Rules
 
@@ -732,7 +764,7 @@ remains open.
 | RSO-22 | pending | Fresh deployed positive convergence after owner-fact effect compilation | semantic seal → owner-fact binding → dispatch → receipt → binding-matched evidence → CWI advance |
 | RSO-23 | code_closed | Remove provider-owned effect/idempotency echo and compile canonical binding from owner facts | provider schema/DTO/decoder contain no `requiredEffectScopes`; old field is unknown-field rejected; SM-2 binding compilation overwrites intermediate effect with sealed owner-catalog fact |
 | RSO-24 | code_closed | Remove provider-owned validation-check echo and compile canonical checks from owner facts | provider schema/DTO/decoder contain no `requiredCheckRefs`; owner recipe/check feasibility is confirmed before binding seal; unsupported check yields zero dispatch |
-| RSO-25 | code_closed | Close owner feasibility timing, current-focus batching and failure classification | owner returns one executable feasibility fact; SM-2 seals only matching facts; current focus is isolated from later CWI; zero-attempt semantic failures are not `no_progress_exhausted`; local probe, batch-isolation, failure-class, restart/idempotency and zero-dispatch tests pass. Fresh deployed positive and zero-dispatch paths remain live-open under RSO-22 |
+| RSO-25 | code_closed | Close owner feasibility timing, current-focus batching, failure classification and semantic-catalog generation retirement | owner returns one executable feasibility fact; SM-2 seals only matching facts; current focus is isolated from later CWI; stale/missing catalog facts retire only the exact generation with bounded detached history; active dispatch is fail-closed; zero-attempt semantic failures are not `no_progress_exhausted`; local probe, lineage, reload, batch-isolation, failure-class, restart/idempotency and zero-dispatch tests pass. Fresh deployed positive and zero-dispatch paths remain live-open under RSO-22 |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
@@ -1135,6 +1167,14 @@ compiler and dependency barrier, (c) semantic failure-class mapper, (d) reducer/
 - a proof batch contains only the active focus and dependency closure; later-focus infeasibility remains pending.
 - semantic feasibility failure with zero repair attempts preserves `candidate_infeasible` (or the exact typed prerequisite
   class) instead of `no_progress_exhausted`.
+- missing or cross-owner catalog observation reopens a fresh generation with zero capability-owner probe calls and no
+  refresh-budget increment;
+- changed catalog identity preserves one complete retired generation across file-backed process reload, while unchanged
+  catalog identity does not create a spurious generation;
+- active sealed dispatch blocks retirement, duplicate private invalidation is idempotent only for the matching retired
+  manifest/logical-request identity, and historical invalidation signatures are not copied into a later generation.
+- retired semantic generation history is aggregate-only audit lineage: a fresh provider command contains no retired
+  history/signature, and its stable prefix remains derived from the current Definition and execution contract.
 
 #### RSO-25 verification commands
 
@@ -1142,6 +1182,7 @@ compiler and dependency barrier, (c) semantic failure-class mapper, (d) reducer/
 go test ./internal/modules/blocks/shell/... -count=1
 go test ./internal/modules/blocks/mcp/... ./internal/modules/blocks/file/... ./internal/modules/blocks/git/... -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
+go test ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/orchestrator/... -run 'Semantic.*(Generation|Catalog|Retirement)|RuntimeStateRepositoryFileReloadRetainsSemanticPlanningGenerationHistory' -count=1
 go test ./... -count=1
 make fmt-check
 make vet
@@ -1224,6 +1265,14 @@ coordination owner. `internal/pkg/workorchruntimecontract` remains owner-neutral
 7. **Keep read models passive.** Projection, eventstream, TUI and Web select the authoritative Run and render it. A
    definition-change hint is attention only; it cannot overwrite a terminal outcome or schedule a drive. Workspace
    switching changes only the subscription/cursor and must not mix activity from another workspace.
+8. **Retire stale semantic generations in one SM-2 helper.** Compare the sealed manifest catalog with the current
+   owner-scoped admissibility and operation-prerequisite observation. A changed catalog retires the complete current
+   ledger into bounded immutable `History`; a same-identity reacquisition keeps the generation and updates only the
+   freshness fact. Missing/mismatched observations emit the private `SemanticCatalogInvalidated` event, perform no owner
+   probe and consume no refresh/correction budget. The helper rejects retirement during an active dispatch, closes old
+   semantic request sessions without dropping their last typed document outcome, and filters invalidation lineage already
+   attached to earlier generations. History identity is `manifestHash + logicalRequestID`, so a rollback that recreates
+   an old catalog hash must still open a new logical generation and delayed invalidation events cannot cross that fence.
 
 #### 10.8.3 Required state-transition sequence
 

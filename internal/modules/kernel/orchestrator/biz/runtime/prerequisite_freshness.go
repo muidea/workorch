@@ -4,11 +4,110 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// RuntimeSemanticCatalogFreshnessGap is an Orchestrator-local comparison
+// result. It is deliberately a detached fact: it does not select a retry or
+// mutate any owner state. A gap means the active semantic manifest no longer
+// has the exact owner catalog observation from which it was sealed.
+type RuntimeSemanticCatalogFreshnessGap struct {
+	PrerequisiteID        string
+	ManifestSnapshotID    string
+	CurrentSnapshotID     string
+	ManifestObservationID string
+	CurrentObservationID  string
+}
+
+// SemanticManifestCatalogFreshnessGaps compares every owner catalog in the
+// active semantic manifest with the current typed admissibility and
+// prerequisite-observation facts. A catalog is current only when both facts
+// carry the same snapshot identity; a matching prerequisite ID alone is not a
+// freshness proof after a durable receipt.
+func SemanticManifestCatalogFreshnessGaps(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) []RuntimeSemanticCatalogFreshnessGap {
+	manifest = manifest.Normalized()
+	gaps := make([]RuntimeSemanticCatalogFreshnessGap, 0)
+	for _, catalog := range manifest.OwnerCatalogs {
+		catalog = catalog.Normalized()
+		currentCatalog, catalogFound := currentOperationAdmissibility(aggregate.Facts, catalog)
+		currentObservation, observationFound := CurrentSemanticCatalogObservation(aggregate, catalog)
+		gap := RuntimeSemanticCatalogFreshnessGap{
+			PrerequisiteID:        catalog.PrerequisiteID,
+			ManifestSnapshotID:    catalog.SnapshotID,
+			ManifestObservationID: "",
+		}
+		// Prerequisite IDs are expected to be globally unique inside Runtime,
+		// but retain the owner fence here as well.  A malformed or legacy
+		// observation from another owner must remain a gap rather than being
+		// reported as the manifest's observation lineage.
+		for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
+			observation = observation.Normalized()
+			if observation.PrerequisiteID == catalog.PrerequisiteID &&
+				observation.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility &&
+				observation.OwnerModuleID == catalog.OwnerModuleID {
+				// Preserve an observation identity in the gap only when the
+				// observation itself is a valid owner fact. A malformed or wrong-kind
+				// record proves a gap, but must not become audit lineage for the
+				// retired manifest.
+				if err := observation.Validate(); err == nil {
+					gap.ManifestObservationID = observation.ObservationID
+				}
+				break
+			}
+		}
+		if catalogFound {
+			gap.CurrentSnapshotID = currentCatalog.SnapshotID
+		}
+		if observationFound {
+			gap.CurrentObservationID = currentObservation.ObservationID
+		}
+		if !catalogFound || currentCatalog.SnapshotID != catalog.SnapshotID ||
+			runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(currentCatalog) != catalog.SnapshotID ||
+			!observationFound || currentObservation.ContentHash != catalog.SnapshotID ||
+			currentObservation.PrerequisiteID != catalog.PrerequisiteID || currentObservation.OwnerModuleID != catalog.OwnerModuleID {
+			gaps = append(gaps, gap)
+		}
+	}
+	sort.SliceStable(gaps, func(left, right int) bool { return gaps[left].PrerequisiteID < gaps[right].PrerequisiteID })
+	return gaps
+}
+
+func currentOperationAdmissibility(facts runtimecontract.RuntimeFacts, wanted runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeOperationAdmissibility, bool) {
+	wanted = wanted.Normalized()
+	for _, candidate := range facts.Resources.OperationAdmissibilities {
+		candidate = candidate.Normalized()
+		if candidate.PrerequisiteID == wanted.PrerequisiteID && candidate.OwnerModuleID == wanted.OwnerModuleID {
+			// A matching ID is not enough to establish current authority.  A
+			// malformed owner fact must fail closed even if a forged SnapshotID
+			// happens to equal the manifest identity.
+			if err := candidate.Validate(); err != nil {
+				return runtimecontract.RuntimeOperationAdmissibility{}, false
+			}
+			return candidate, true
+		}
+	}
+	return runtimecontract.RuntimeOperationAdmissibility{}, false
+}
+
+// CurrentSemanticCatalogObservation returns the exact current observation for
+// one manifest catalog. It intentionally rejects an observation that merely
+// shares a prerequisite ID while carrying a different snapshot hash.
+func CurrentSemanticCatalogObservation(aggregate RuntimeAggregate, catalog runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimePrerequisiteObservation, bool) {
+	catalog = catalog.Normalized()
+	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
+		observation = observation.Normalized()
+		if observation.PrerequisiteID == catalog.PrerequisiteID && observation.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility && observation.OwnerModuleID == catalog.OwnerModuleID && observation.ContentHash == catalog.SnapshotID {
+			if err := observation.Validate(); err == nil {
+				return observation, true
+			}
+		}
+	}
+	return runtimecontract.RuntimePrerequisiteObservation{}, false
+}
 
 // invalidatePrerequisitesForReadOnlyStale applies an owner-observed freshness
 // change before any current-authority candidate work or dispatch exists. It is

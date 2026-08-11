@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -85,6 +86,218 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 		return fmt.Errorf("%w: runtime semantic manifest identity is stale", common.ErrConflict)
 	}
 	return nil
+}
+
+// semanticCatalogInvalidationLineage binds a retired semantic generation to
+// the durable prerequisite invalidation(s) that made its owner catalog stale.
+// A missing record is possible only when a corrupted/legacy aggregate reaches
+// the probe guard; the deterministic synthetic signature still preserves the
+// exact manifest/gap identity in the generation audit record.
+func semanticCatalogInvalidationLineage(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, gaps []RuntimeSemanticCatalogFreshnessGap) ([]string, []string) {
+	manifest = manifest.Normalized()
+	ids := make([]string, 0, len(gaps))
+	gapIDs := make(map[string]struct{}, len(gaps))
+	for _, gap := range gaps {
+		id := strings.TrimSpace(gap.PrerequisiteID)
+		if id == "" {
+			continue
+		}
+		if _, duplicate := gapIDs[id]; duplicate {
+			continue
+		}
+		gapIDs[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	// A prerequisite invalidation ledger is intentionally append-only and may
+	// contain several generations of the same stable prerequisite ID.  Only
+	// records not already attached to an immutable retired generation belong to
+	// this retirement.  Without this fence, every later generation would repeat
+	// all historical signatures and make the lineage look causally ambiguous.
+	retiredSignatures := make(map[string]struct{})
+	for _, history := range aggregate.SemanticPlanning.History {
+		for _, signature := range history.InvalidationSignatures {
+			signature = strings.TrimSpace(signature)
+			if signature != "" {
+				retiredSignatures[signature] = struct{}{}
+			}
+		}
+	}
+	signatures := make([]string, 0, len(aggregate.PrerequisiteInvalidations))
+	for _, invalidation := range aggregate.PrerequisiteInvalidations {
+		invalidation = invalidation.Normalized()
+		if _, alreadyRetired := retiredSignatures[invalidation.Signature]; alreadyRetired {
+			continue
+		}
+		matched := false
+		for _, prerequisiteID := range invalidation.PrerequisiteIDs {
+			if _, found := gapIDs[prerequisiteID]; found {
+				matched = true
+				break
+			}
+		}
+		if matched && invalidation.Signature != "" {
+			signatures = append(signatures, invalidation.Signature)
+		}
+	}
+	if len(signatures) == 0 {
+		// Keep this deterministic and bounded; it is an audit reference, not a
+		// provider-facing error string or a retry instruction.
+		logicalRequestID := strings.TrimSpace(aggregate.SemanticPlanning.LogicalRequestID)
+		signatures = append(signatures, "semantic-catalog-invalidated/"+manifest.Hash+"/"+logicalRequestID+"/"+strings.Join(ids, ","))
+	}
+	sort.Strings(signatures)
+	return ids, signatures
+}
+
+// retireSemanticPlanningGeneration clears only the active semantic authority
+// and appends a complete immutable snapshot to its owner-local history. It is
+// intentionally the sole helper that performs this reset, so receipt-driven
+// invalidation, stale refresh and the probe guard cannot diverge in what they
+// preserve or discard.
+func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtimecontract.RuntimeSemanticPlanningRetirementReason, gaps []RuntimeSemanticCatalogFreshnessGap) error {
+	if aggregate == nil {
+		return common.ErrInvalidArgument
+	}
+	ledger := aggregate.SemanticPlanning.Clone()
+	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
+		return nil
+	}
+	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+		return fmt.Errorf("%w: failed semantic planning generation cannot be reopened", common.ErrConflict)
+	}
+	if ledger.Manifest == nil {
+		return fmt.Errorf("%w: semantic planning generation has no manifest", common.ErrConflict)
+	}
+	ids, signatures := semanticCatalogInvalidationLineage(*aggregate, *ledger.Manifest, gaps)
+	if len(ids) == 0 || len(signatures) == 0 {
+		return fmt.Errorf("%w: semantic planning invalidation has no catalog lineage", common.ErrConflict)
+	}
+	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
+		return fmt.Errorf("%w: semantic planning generation history exhausted", common.ErrConflict)
+	}
+	snapshot := ledger.Clone()
+	// A history entry is a complete snapshot, but nested history would duplicate
+	// old generations and turn the persisted record into an unbounded tree.
+	snapshot.History = nil
+	history := runtimecontract.RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: aggregate.StateRevision + 1,
+		Reason:                 reason,
+		InvalidationSignatures: signatures,
+		PrerequisiteIDs:        ids,
+		Snapshot:               snapshot,
+	}
+	if err := history.Validate(); err != nil {
+		return err
+	}
+	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
+		SchemaVersion:          ledger.SchemaVersion,
+		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
+		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
+		FeasibilityGaps:        append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
+		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
+		History:                append(append([]runtimecontract.RuntimeSemanticPlanningGeneration(nil), ledger.History...), history),
+	}
+	if err := newLedger.Validate(); err != nil {
+		return err
+	}
+	retireSemanticPlanningRequestSessions(aggregate, ledger)
+	aggregate.SemanticPlanning = newLedger
+	return nil
+}
+
+func retireSemanticPlanningRequestSessions(aggregate *RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) {
+	if aggregate == nil || ledger.Manifest == nil {
+		return
+	}
+	manifestHash := ledger.Manifest.Hash
+	for idx := range aggregate.CandidateRequestSessions {
+		session := &aggregate.CandidateRequestSessions[idx]
+		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
+			continue
+		}
+		// A semantic generation owns every request session that rendered its
+		// sealed manifest (order, focus batch and bounded correction sessions).
+		// Sessions from a different manifest remain independent even if a
+		// logical request ID was accidentally reused.
+		if session.ManifestHash != manifestHash {
+			continue
+		}
+		session.State = runtimecontract.RuntimeCandidateRequestSessionTerminal
+		session.ProviderSubmitted = false
+		// Keep the last typed provider-document outcome as immutable audit
+		// lineage. Closing this old session must not erase an earlier incomplete
+		// result that explains what the provider actually returned.
+		session.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
+			Class:     runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
+			Code:      "semantic_catalog_invalidated",
+			Signature: "semantic-catalog-invalidated/" + manifestHash + "/" + strings.TrimSpace(session.LogicalRequestID),
+		}
+	}
+}
+
+// semanticPlanningCatalogsCurrent is the common guard used before a sealed
+// semantic generation may be reused. It returns false for any missing,
+// retired, or snapshot-mismatched owner observation.
+func semanticPlanningCatalogsCurrent(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) ([]RuntimeSemanticCatalogFreshnessGap, bool) {
+	gaps := SemanticManifestCatalogFreshnessGaps(aggregate, manifest)
+	return gaps, len(gaps) == 0
+}
+
+// semanticCatalogPrerequisitePending is the receipt-to-generation fence used
+// by commitPrerequisite. It intentionally derives retirement from the current
+// pending prerequisite, not from an unbounded scan of historical invalidation
+// records: a prior generation may legitimately contain the same stable
+// prerequisite ID after a fresh catalog was reacquired.
+func semanticCatalogPrerequisitePending(aggregate RuntimeAggregate, prerequisiteID string) bool {
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || aggregate.SemanticPlanning.Manifest == nil {
+		return false
+	}
+	prerequisiteID = strings.TrimSpace(prerequisiteID)
+	if prerequisiteID == "" {
+		return false
+	}
+	var catalog runtimecontract.RuntimeOperationAdmissibility
+	found := false
+	for _, value := range aggregate.SemanticPlanning.Manifest.OwnerCatalogs {
+		value = value.Normalized()
+		if value.PrerequisiteID == prerequisiteID {
+			catalog, found = value, true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	for _, pending := range aggregate.Facts.Prerequisites.Pending {
+		if pending.ID == prerequisiteID && pending.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility &&
+			pending.OwnerModuleID == catalog.OwnerModuleID {
+			return true
+		}
+	}
+	return false
+}
+
+// resetSemanticPlanningForInvalidatedCatalog retires the active generation
+// when an owner catalog is no longer current. The caller remains responsible
+// for the surrounding SM-2 reducer/CAS transition.
+func resetSemanticPlanningForInvalidatedCatalog(aggregate *RuntimeAggregate, reason runtimecontract.RuntimeSemanticPlanningRetirementReason) (bool, error) {
+	if aggregate == nil || aggregate.SemanticPlanning.Manifest == nil {
+		return false, nil
+	}
+	if aggregate.ActiveDispatch != nil {
+		// A sealed dispatch may finish its immutable operation set. Its receipt
+		// invalidation is applied to the next authority only after dispatch
+		// completion; never tear down the ledger needed to admit that receipt.
+		return false, nil
+	}
+	gaps, current := semanticPlanningCatalogsCurrent(*aggregate, *aggregate.SemanticPlanning.Manifest)
+	if current {
+		return false, nil
+	}
+	if err := retireSemanticPlanningGeneration(aggregate, reason, gaps); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // requireSemanticContract is the SM-2 entry fence. Initialization already
@@ -177,44 +390,90 @@ func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspa
 	}
 	ledger.FeasibilityGaps = append(ledger.FeasibilityGaps, gap)
 	ledger.CatalogRefreshAttempts++
-	ledger.Phase = runtimecontract.RuntimeSemanticPlanningRequired
-	ledger.Manifest = nil
-	ledger.Attempt = 0
-	ledger.StablePrefixHash = ""
-	ledger.LogicalRequestID = ""
-	ledger.CorrectionDirective = nil
-	// A catalog refresh creates a new semantic generation. The previous global
-	// order, proof batches and owner facts were all bound to the superseded
-	// manifest/catalog snapshot; retaining any of them would let a fresh batch
-	// mix authority across generations.
-	ledger.CoverageOrderDocument = nil
-	ledger.Document = nil
-	ledger.DocumentHash = ""
-	ledger.Batches = nil
-	ledger.ActiveBatchID = ""
-	ledger.NextBatchSequence = 0
-	ledger.PendingCoverageIDs = nil
-	ledger.CompletedBatchIDs = nil
-	ledger.BatchFeasibilityResults = nil
-	ledger.BatchDocuments = nil
-	ledger.MergedDocument = nil
-	ledger.MergedDocumentHash = ""
-	ledger.FeasibilityBatchID = ""
-	ledger.Feasibilities = nil
-	ledger.FeasibilitySetHash = ""
-	ledger.Rejections = nil
-	if err := ledger.Validate(); err != nil {
-		return RuntimeAggregate{}, err
+	// Keep the stale generation as an immutable history snapshot, then clear
+	// every active manifest/order/batch/fact field in one owner-local reset.
+	// The invalidation record is installed before comparison so the history can
+	// point to the exact durable stale event.
+	aggregate.SemanticPlanning = ledger
+	aggregate.Facts = facts
+	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, invalidation)
+	retired, resetErr := resetSemanticPlanningForInvalidatedCatalog(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementCatalogRefresh)
+	if resetErr != nil {
+		return RuntimeAggregate{}, resetErr
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if !retired {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh cannot retire an active dispatch", common.ErrConflict)
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
 	expectedRevision := aggregate.StateRevision
-	aggregate.SemanticPlanning = ledger
 	aggregate.Facts = facts
 	aggregate.Decision = decision
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, invalidation)
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// invalidateSemanticCatalogGeneration is the private SM-2 handoff used by
+// semantic feasibility probing when the active manifest no longer has a
+// current owner observation. It is intentionally separate from the generic
+// stale-refresh event: missing/mismatched current facts must reopen a fresh
+// semantic generation, but must not invent a capability-owner prerequisite
+// command or consume the bounded stale-refresh budget.
+func (c *RuntimeController) invalidateSemanticCatalogGeneration(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifestHash, logicalRequestID string) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(manifestHash) == "" || strings.TrimSpace(logicalRequestID) == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation scope mismatch", common.ErrConflict)
+	}
+	manifestHash = strings.TrimSpace(manifestHash)
+	logicalRequestID = strings.TrimSpace(logicalRequestID)
+	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
+		// The reset is the idempotency fence. A duplicate probe after the CAS
+		// already opened the fresh generation must match one exact retired
+		// generation identity. A resource rollback can legally recreate the
+		// same manifest hash under a new logical request, so hash-only matching
+		// would let a delayed old event acknowledge or retire the wrong
+		// generation.
+		for _, history := range aggregate.SemanticPlanning.History {
+			if history.Snapshot.Manifest != nil && history.Snapshot.Manifest.Hash == manifestHash && history.Snapshot.LogicalRequestID == logicalRequestID {
+				return aggregate, nil
+			}
+		}
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation does not match a retired generation", common.ErrConflict)
+	}
+	if aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Manifest.Hash != manifestHash || aggregate.SemanticPlanning.LogicalRequestID != logicalRequestID {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation manifest is not current", common.ErrConflict)
+	}
+	if aggregate.ActiveDispatch != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation cannot retire an active dispatch", common.ErrConflict)
+	}
+	gaps, current := semanticPlanningCatalogsCurrent(aggregate, *aggregate.SemanticPlanning.Manifest)
+	if current {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation has no stale owner observation", common.ErrConflict)
+	}
+	expectedRevision := aggregate.StateRevision
+	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -1041,6 +1300,31 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) error 
 		return nil
 	}
 	ledger := aggregate.SemanticPlanning.Clone()
+	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+		return nil
+	}
+	if ledger.Manifest == nil {
+		return fmt.Errorf("%w: sealed semantic generation has no manifest", common.ErrConflict)
+	}
+	// A durable receipt may have retired one of the owner observations that
+	// produced this sealed manifest. Re-acquisition can complete before focus
+	// advancement, so comparing only the focus ID is insufficient: the old
+	// order/batch must never be reopened against a new catalog generation.
+	_, current := semanticPlanningCatalogsCurrent(*aggregate, *ledger.Manifest)
+	if !current && aggregate.ActiveDispatch != nil {
+		return fmt.Errorf("%w: semantic catalog is stale while an active dispatch still owns the sealed generation", common.ErrConflict)
+	}
+	retired, err := resetSemanticPlanningForInvalidatedCatalog(aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated)
+	if err != nil {
+		return err
+	}
+	if !retired && !current {
+		return fmt.Errorf("%w: semantic catalog is stale but its generation was not retired", common.ErrConflict)
+	}
+	if retired {
+		return nil
+	}
+	ledger = aggregate.SemanticPlanning.Clone()
 	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		return nil
 	}

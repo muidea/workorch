@@ -364,6 +364,84 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	}
 }
 
+func TestRuntimeStateRepositoryFileReloadRetainsSemanticPlanningGenerationHistory(t *testing.T) {
+	ctx := context.Background()
+	runsPath := filepath.Join(t.TempDir(), "runs.json")
+	runs := filerepository.NewRunRepository(runsPath)
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, runtimeDefinition())); err != nil {
+		t.Fatal(err)
+	}
+	firstHub, stopFirst := startRuntimeFileBackedRunOwner(t, ctx, runs)
+	firstRepository := runtimeStateRepository{hub: firstHub}
+	firstController, err := runtime.NewRuntimeController(firstRepository)
+	if err != nil {
+		stopFirst()
+		t.Fatal(err)
+	}
+	initialized, err := runtimeTestControllerInitialize(firstController, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	if err != nil {
+		stopFirst()
+		t.Fatal(err)
+	}
+	sealed := runtimeTestAggregateWithSemanticPlanning(t, initialized)
+	if sealed.SemanticPlanning.Manifest == nil || sealed.SemanticPlanning.Document == nil || len(sealed.SemanticPlanning.Batches) == 0 || len(sealed.SemanticPlanning.Feasibilities) == 0 {
+		stopFirst()
+		t.Fatalf("semantic fixture did not produce a complete generation: %+v", sealed.SemanticPlanning)
+	}
+	// Keep the catalog itself current while removing only its observation. This
+	// makes the private invalidation event exercise the same missing-observation
+	// guard used by the deployed semantic probe path.
+	sealed.Facts.Resources.OperationAdmissibilities = append([]runtimecontract.RuntimeOperationAdmissibility(nil), sealed.SemanticPlanning.Manifest.OwnerCatalogs...)
+	sealed.Facts.Resources.PrerequisiteObservations = nil
+	if err := sealed.Validate(); err != nil {
+		stopFirst()
+		t.Fatalf("file-backed semantic fixture invalid before retirement: %v", err)
+	}
+	if err := firstRepository.Save(ctx, sealed, sealed.StateRevision); err != nil {
+		stopFirst()
+		t.Fatalf("persist sealed semantic fixture: %v", err)
+	}
+	old := sealed.SemanticPlanning.Clone()
+	retiredResult, err := firstController.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
+		ManifestHash: old.Manifest.Hash, LogicalRequestID: old.LogicalRequestID,
+	})
+	if err != nil {
+		stopFirst()
+		t.Fatal(err)
+	}
+	if retiredResult.Aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(retiredResult.Aggregate.SemanticPlanning.History) != 1 {
+		stopFirst()
+		t.Fatalf("semantic generation was not retired before reload: %+v", retiredResult.Aggregate.SemanticPlanning)
+	}
+	stopFirst()
+
+	secondHub, stopSecond := startRuntimeFileBackedRunOwner(t, ctx, filerepository.NewRunRepository(runsPath))
+	t.Cleanup(stopSecond)
+	secondController, err := runtime.NewRuntimeController(runtimeStateRepository{hub: secondHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := secondController.Load(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("reloaded semantic generation history failed validation: %v", err)
+	}
+	if reloaded.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || reloaded.SemanticPlanning.Manifest != nil ||
+		reloaded.SemanticPlanning.Document != nil || len(reloaded.SemanticPlanning.Batches) != 0 || len(reloaded.SemanticPlanning.Feasibilities) != 0 {
+		t.Fatalf("fresh generation retained retired authority as current: %+v", reloaded.SemanticPlanning)
+	}
+	history := reloaded.SemanticPlanning.History
+	if len(history) != 1 || history[0].Snapshot.Manifest == nil || history[0].Snapshot.Manifest.Hash != old.Manifest.Hash ||
+		history[0].Snapshot.DocumentHash != old.DocumentHash || len(history[0].Snapshot.Batches) != len(old.Batches) ||
+		len(history[0].Snapshot.BatchDocuments) != len(old.BatchDocuments) || len(history[0].Snapshot.Feasibilities) != len(old.Feasibilities) ||
+		len(history[0].Snapshot.SealedLineageRefs) != len(old.SealedLineageRefs) {
+		t.Fatalf("file-backed reload lost complete retired semantic generation: history=%+v old=%+v", history, old)
+	}
+}
+
 func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))

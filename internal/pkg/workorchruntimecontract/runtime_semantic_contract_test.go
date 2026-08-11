@@ -591,3 +591,204 @@ func semanticContractTestProposal(id common.CoverageWorkItemID) RuntimeSemanticP
 		DeclarationRef: "semantic-plan/dod-001",
 	}
 }
+
+// semanticSealedLedgerFixture is intentionally assembled through the same
+// pure batch transitions used by the Orchestrator.  History tests therefore
+// exercise the real sealed-generation shape instead of a permissive partial
+// DTO that could hide a missing lineage invariant.
+func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
+	t.Helper()
+	definition := RuntimeDefinitionContext{
+		Revision: "definition-history", GoalID: "goal-history", GoalDefinition: "deliver",
+		DoDID: "dod-history", DoDDefinition: "works", CapabilityContract: []string{StepKindFileWrite},
+	}
+	activation := RuntimeActivationContext{ExecutionContract: RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision()}}
+	items := []RuntimeCoverageItem{{ID: "cwi-history", SliceID: "slice-history", SourceScope: "dodItem", SourceID: "dod-history", TargetText: "works", Order: 1}}
+	slices := []RuntimeAcceptanceSlice{{ID: "slice-history", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-history"}}}
+	seed, err := CompileRuntimeDefinitionSeed(definition, activation, items, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := semanticTestOwnerCatalog("semantic-history-catalog", RuntimeModuleFile, []string{StepKindFileWrite})
+	catalog.TargetRefs = []string{"main.go"}
+	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest, err := CompileRuntimeSemanticPlanManifest("ws-history", "run-history", definition, seed, activation.ExecutionContract, []RuntimeOperationAdmissibility{catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-history", OwnerModuleID: RuntimeModuleFile, OperationKind: StepKindFileWrite,
+		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"}},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		DeclarationRef: "semantic-history/cwi-history",
+	}
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-history"},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "semantic-history-request", []common.CoverageWorkItemID{"cwi-history"}, []common.CoverageWorkItemID{"cwi-history"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch, err = AdvanceRuntimeSemanticPlanBatch(batch, RuntimeSemanticPlanBatchRequesting); err != nil {
+		t.Fatal(err)
+	}
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-history"}, Proposals: []RuntimeSemanticProofProposal{proposal},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	batch.DocumentHash = StableRuntimeSemanticPlanDocumentHash(document)
+	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
+	for _, next := range []RuntimeSemanticPlanBatchState{
+		RuntimeSemanticPlanBatchDocumentComplete,
+		RuntimeSemanticPlanBatchFeasibilityPending,
+		RuntimeSemanticPlanBatchFeasibilityComplete,
+		RuntimeSemanticPlanBatchAccepted,
+	} {
+		batch, err = AdvanceRuntimeSemanticPlanBatch(batch, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	feasibility := RuntimeSemanticProofFeasibility{
+		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
+		CatalogSnapshotID: catalog.SnapshotID, Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision, TargetRefs: []string{"main.go"},
+	}
+	feasibilityHash := StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{feasibility})
+	documentHash := StableRuntimeSemanticPlanDocumentHash(document)
+	batchID := StableRuntimeSemanticFeasibilityBatchID(manifest, document)
+	orderHash := StableRuntimeSemanticPlanCoverageOrderHash(order)
+	merged := document.Clone()
+	ledger := RuntimeSemanticPlanningLedger{
+		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeed: seed,
+		Manifest: &manifest, StablePrefixHash: "semantic-history-prefix", LogicalRequestID: "semantic-history-request",
+		CoverageOrderDocument: &order, Document: &document, DocumentHash: documentHash,
+		Batches: []RuntimeSemanticPlanBatch{batch}, ActiveBatchID: "", NextBatchSequence: 1,
+		CompletedBatchIDs: []string{batch.BatchID}, BatchDocuments: []RuntimeSemanticPlanDocument{document},
+		MergedDocument: &merged, MergedDocumentHash: documentHash, FeasibilityBatchID: batchID,
+		Feasibilities: []RuntimeSemanticProofFeasibility{feasibility}, FeasibilitySetHash: feasibilityHash,
+		SealedBindingSetHash: "binding-history", SealedLineageRefs: []string{manifest.Hash, orderHash, documentHash, batchID, feasibilityHash, "binding-history"},
+	}
+	if err := ledger.Validate(); err != nil {
+		t.Fatalf("sealed semantic fixture invalid: %v", err)
+	}
+	return ledger
+}
+
+func TestRuntimeSemanticPlanningHistoryRetainsBoundedDetachedGenerations(t *testing.T) {
+	ledger := semanticSealedLedgerFixture(t)
+	history := RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: 2, Reason: RuntimeSemanticPlanningRetirementResourceInvalidated,
+		InvalidationSignatures: []string{"resource-change-history"}, PrerequisiteIDs: []string{"semantic-history-catalog"}, Snapshot: ledger,
+	}
+	ledger.History = []RuntimeSemanticPlanningGeneration{history}
+	if err := ledger.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cloned := ledger.Clone()
+	cloned.History[0].Snapshot.Manifest.OwnerCatalogs[0].TargetRefs[0] = "mutated.go"
+	cloned.History[0].Snapshot.Feasibilities[0].TargetRefs[0] = "mutated.go"
+	if ledger.History[0].Snapshot.Manifest.OwnerCatalogs[0].TargetRefs[0] != "main.go" || ledger.History[0].Snapshot.Feasibilities[0].TargetRefs[0] != "main.go" {
+		t.Fatal("semantic generation clone aliases nested owner facts")
+	}
+
+	nested := ledger.Clone()
+	nested.History = []RuntimeSemanticPlanningGeneration{{
+		RetiredAtStateRevision: 2, Reason: RuntimeSemanticPlanningRetirementResourceInvalidated,
+		InvalidationSignatures: []string{"resource-change-history"}, PrerequisiteIDs: []string{"semantic-history-catalog"}, Snapshot: ledger,
+	}}
+	nested.History[0].Snapshot.History = []RuntimeSemanticPlanningGeneration{history}
+	if err := nested.Validate(); err == nil {
+		t.Fatal("nested semantic generation history was accepted")
+	}
+
+	duplicate := ledger.Clone()
+	duplicate.History = []RuntimeSemanticPlanningGeneration{history, history}
+	if err := duplicate.Validate(); err == nil {
+		t.Fatal("duplicate semantic generation history was accepted")
+	}
+	duplicateManifest := ledger.Clone()
+	secondGeneration := history
+	secondGeneration.RetiredAtStateRevision = 3
+	// Change a generation-local field while keeping the snapshot otherwise
+	// valid.  The duplicate check must therefore reject the second history entry
+	// because its sealed manifest + logical-request identity is unchanged,
+	// rather than because a hand-edited document hash made the snapshot
+	// malformed.
+	secondGeneration.Snapshot.StablePrefixHash = "different-prefix-under-same-generation"
+	duplicateManifest.History = []RuntimeSemanticPlanningGeneration{history, secondGeneration}
+	if err := duplicateManifest.Validate(); err == nil {
+		t.Fatal("same semantic generation identity was accepted twice")
+	}
+
+	// A resource rollback may recreate an older catalog snapshot.  It is a new
+	// semantic request generation only when the request identity is also new;
+	// preserving both entries keeps the old authority immutable while allowing
+	// the fresh request to converge.
+	rollback := ledger.Clone()
+	rollbackSnapshot := ledger.Clone()
+	rollbackSnapshot.LogicalRequestID = "rollback-request-under-same-catalog"
+	rollbackSnapshot.History = nil
+	rollbackGeneration := RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: 3, Reason: RuntimeSemanticPlanningRetirementResourceInvalidated,
+		InvalidationSignatures: []string{"resource-change-rollback"}, PrerequisiteIDs: []string{"semantic-history-catalog"},
+		Snapshot: rollbackSnapshot,
+	}
+	rollback.History = []RuntimeSemanticPlanningGeneration{history, rollbackGeneration}
+	if err := rollback.Validate(); err != nil {
+		t.Fatalf("distinct logical generation under a recreated catalog was rejected: %v", err)
+	}
+	duplicateInvalidation := rollback.Clone()
+	duplicateInvalidation.History[1].InvalidationSignatures = []string{"resource-change-history"}
+	if err := duplicateInvalidation.Validate(); err == nil {
+		t.Fatal("an invalidation signature was attached to more than one semantic generation")
+	}
+	duplicatePrerequisite := ledger.Clone()
+	duplicatePrerequisite.History = []RuntimeSemanticPlanningGeneration{history}
+	duplicatePrerequisite.History[0].PrerequisiteIDs = []string{"semantic-history-catalog", "semantic-history-catalog"}
+	if err := duplicatePrerequisite.Validate(); err == nil {
+		t.Fatal("duplicate semantic generation prerequisite lineage was accepted")
+	}
+
+	tooMany := ledger.Clone()
+	tooMany.History = make([]RuntimeSemanticPlanningGeneration, RuntimeSemanticPlanningHistoryLimit+1)
+	for idx := range tooMany.History {
+		tooMany.History[idx] = history
+		tooMany.History[idx].RetiredAtStateRevision = uint64(idx + 2)
+	}
+	if err := tooMany.Validate(); err == nil {
+		t.Fatal("semantic generation history exceeded its bound without rejection")
+	}
+}
+
+func TestRuntimeSemanticPlanningHistoryRejectsSeedAndReasonDrift(t *testing.T) {
+	ledger := semanticSealedLedgerFixture(t)
+	history := RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: 2, Reason: RuntimeSemanticPlanningRetirementCatalogRefresh,
+		InvalidationSignatures: []string{"catalog-refresh-history"}, PrerequisiteIDs: []string{"semantic-history-catalog"}, Snapshot: ledger,
+	}
+	withHistory := ledger.Clone()
+	withHistory.History = []RuntimeSemanticPlanningGeneration{history}
+	if err := withHistory.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	badReason := withHistory.Clone()
+	badReason.History[0].Reason = RuntimeSemanticPlanningRetirementReason("not-a-retirement")
+	if err := badReason.Validate(); err == nil {
+		t.Fatal("unsupported semantic retirement reason was accepted")
+	}
+	badSeed := withHistory.Clone()
+	badSeed.DefinitionSeed.PolicyHash = "different-policy"
+	badSeed.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(badSeed.DefinitionSeed)
+	if err := badSeed.Validate(); err == nil {
+		t.Fatal("semantic history with a mismatched definition seed was accepted")
+	}
+}

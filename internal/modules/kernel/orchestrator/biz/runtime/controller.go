@@ -362,6 +362,7 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 	}
 	expectedRevision := aggregate.StateRevision
 	previousFocusID := aggregate.Facts.Focus.ID
+	semanticCatalogRefreshPending := semanticCatalogPrerequisitePending(aggregate, result.PrerequisiteID)
 	// A prerequisite ID is stable across re-acquisition. It is therefore not
 	// sufficient to match only the pending ID here: a response started before a
 	// durable resource change can otherwise satisfy the newly-pending instance
@@ -385,6 +386,28 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 		facts = advanceSatisfiedCoverageFocus(facts)
 	}
 	aggregate.Facts = facts
+	// A receipt-driven owner catalog change can invalidate the sealed semantic
+	// generation even when the current focus ID remains unchanged (for example
+	// a partial dispatch or a target refresh). Reopen semantic planning before
+	// any candidate path can consume the reacquired facts; an active dispatch is
+	// fenced by resetSemanticPlanningForInvalidatedCatalog itself.
+	if aggregate.ActiveDispatch == nil && semanticCatalogRefreshPending {
+		retired, resetErr := resetSemanticPlanningForInvalidatedCatalog(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated)
+		if resetErr != nil {
+			return RuntimeAggregate{}, resetErr
+		}
+		if !retired {
+			// A prerequisite can be invalidated and reacquired without changing
+			// the owner catalog identity. In that case the sealed generation is
+			// still current and must remain reusable; only a remaining freshness
+			// gap is a contract conflict.
+			if aggregate.SemanticPlanning.Manifest != nil {
+				if gaps, current := semanticPlanningCatalogsCurrent(aggregate, *aggregate.SemanticPlanning.Manifest); !current {
+					return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog prerequisite was reacquired without retiring the stale generation (gaps=%d)", common.ErrConflict, len(gaps))
+				}
+			}
+		}
+	}
 	if aggregate.Facts.Focus.ID != previousFocusID {
 		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
 			return RuntimeAggregate{}, err

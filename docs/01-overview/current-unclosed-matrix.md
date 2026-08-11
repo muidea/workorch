@@ -55,7 +55,9 @@ semantic failure 的错误分类已在本地代码中收口：MCP 缺失 catalog
 owner-local behavior probe、focus/dependency batch admission、typed failure class、restart/idempotency 和 zero-dispatch
 回归均通过。最新 fresh deployment `run-066` 在缺少 MCP 行为探针必需事实时以
 `candidate_infeasible/mcp_semantic_proof_unavailable` fail-closed，`dispatch/receipt/evidence=0`，证明了负向防线
-但不是正向收敛。RSO-25 当前为 **code-closed / live-open**；RSO-22 的 fresh binding-matched positive convergence、
+但不是正向收敛。RSO-25 当前为 **code-closed / live-open**；其 semantic catalog generation retirement/history、missing
+observation 私有 SM-2 reset、active-dispatch fence、same-identity reacquisition 与 file-backed reload/zero-owner-probe
+回归已补齐；RSO-22 的 fresh binding-matched positive convergence、
 zero-dispatch deployed proof 和 whole-document recovery fault injection 仍未完成。逐组件 owner 矩阵与实施顺序
 见 [Runtime plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md#108-detailed-single-owner-implementation-closure-2026-08-10)。
 

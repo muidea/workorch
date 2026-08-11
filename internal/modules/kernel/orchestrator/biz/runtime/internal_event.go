@@ -156,6 +156,13 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, err := c.requireSemanticContract(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, event.SemanticRefreshGeneration)
 		result.Aggregate = aggregate
 		return result, err
+	case RuntimeInternalEventSemanticCatalogInvalidated:
+		if event.ManifestHash == "" || event.LogicalRequestID == "" {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.invalidateSemanticCatalogGeneration(ctx, event.WorkspaceID, event.RunID, event.ManifestHash, event.LogicalRequestID)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventSemanticPlanRequestStarted:
 		if event.SemanticManifest == nil {
 			return result, common.ErrInvalidArgument
