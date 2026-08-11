@@ -102,7 +102,7 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	}
 }
 
-func TestWebLLMConfigurationUsesAIProxyModelIDsOnly(t *testing.T) {
+func TestWebLLMConfigurationHidesAIProxyImplementationDetails(t *testing.T) {
 	pageData := string(readWebConsoleFile(t, "src/pages/ConfigurationPage.tsx"))
 	for _, forbidden := range []string{
 		`defaultChatTargetKey`,
@@ -111,9 +111,17 @@ func TestWebLLMConfigurationUsesAIProxyModelIDsOnly(t *testing.T) {
 		`baseURL`,
 		`baseUrl`,
 		`customProviders`,
+		`ai-proxy`,
+		`Route Owner`,
+		`Endpoints`,
+		`Operations`,
+		`模型目录`,
+		`refreshLLMModelCatalog()`,
+		`clearApiKey`,
+		`显式清空 API 密钥`,
 	} {
 		if strings.Contains(pageData, forbidden) {
-			t.Fatalf("ConfigurationPage retains an unsupported LLM configuration surface %q", forbidden)
+			t.Fatalf("ConfigurationPage exposes an LLM implementation detail %q", forbidden)
 		}
 	}
 	for _, want := range []string{
@@ -123,23 +131,45 @@ func TestWebLLMConfigurationUsesAIProxyModelIDsOnly(t *testing.T) {
 		`name="defaultEmbeddingModelId"`,
 		`name={['budget', 'contextUtilizationRatio']}`,
 		`name={['budget', 'estimatedTokensPerByte']}`,
-		`refreshLLMModelCatalog()`,
-		`restartRequired`,
+		`保存 LLM 配置`,
+		`重启 WorkOrch 后生效`,
 	} {
 		if !strings.Contains(pageData, want) {
-			t.Fatalf("ConfigurationPage missing ai-proxy-only LLM configuration contract %q", want)
+			t.Fatalf("ConfigurationPage missing LLM configuration contract %q", want)
 		}
 	}
 
 	helperData := string(readWebConsoleFile(t, "src/helpers.tsx"))
 	for _, want := range []string{
-		"export function aiProxyModelOptions",
+		"export function llmModelOptions",
 		"（已配置但未 ready）",
 		"source: 'configured'",
 		"disabled: true",
 	} {
 		if !strings.Contains(helperData, want) {
 			t.Fatalf("LLM target helper missing round-trip/readiness contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"label: `${modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`",
+	} {
+		if strings.Contains(helperData, forbidden) {
+			t.Fatalf("LLM target helper exposes a catalog implementation detail %q", forbidden)
+		}
+	}
+	apiData := string(readWebConsoleFile(t, "src/api.ts"))
+	if strings.Contains(apiData, "/configuration/llm/models") {
+		t.Fatal("Web API client retains the standalone LLM catalog surface")
+	}
+
+	workspaceData := string(readWebConsoleFile(t, "src/pages/WorkspaceDetailPage.tsx"))
+	for _, forbidden := range []string{
+		"刷新 ai-proxy 模型目录",
+		"${defaultChatProviderId}/${defaultChatModelId}",
+		"${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}",
+	} {
+		if strings.Contains(workspaceData, forbidden) {
+			t.Fatalf("WorkspaceDetailPage exposes LLM provider details %q", forbidden)
 		}
 	}
 }

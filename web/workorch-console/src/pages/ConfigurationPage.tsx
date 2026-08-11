@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { App as AntApp, Button, Checkbox, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import type {
-  ProviderModelDescriptorView,
   ServiceConfiguration,
   Soul,
   UpdateLLMConfigurationRequest,
@@ -12,7 +11,7 @@ import type {
 } from '../types';
 import { workorchApi } from '../api';
 import {
-  aiProxyModelOptions,
+  llmModelOptions,
   errorMessage,
   llmConfigurationFormValues,
   nextWebSearchProviderDraft,
@@ -46,7 +45,6 @@ export function ConfigurationPage() {
   const [loading, setLoading] = useState(false);
   const [serverSaving, setServerSaving] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
 
   const applyConfiguration = (nextConfiguration: ServiceConfiguration) => {
@@ -108,7 +106,7 @@ export function ConfigurationPage() {
       // A changed model still has to be ready; the configured model is
       // allowed so its credential can be repaired first.
       if (!defaultChatModelId || (!chatModelOptions.some((item) => item.ready && item.value === defaultChatModelId) && defaultChatModelId !== currentChatModelId)) {
-        message.error('请选择 ready 的默认对话模型');
+        message.error('请选择可用的默认对话模型');
         return;
       }
       const defaultEmbeddingModelId = values.defaultEmbeddingModelId?.trim();
@@ -116,7 +114,7 @@ export function ConfigurationPage() {
       if (defaultEmbeddingModelId && (
         !embeddingModelOptions.some((item) => item.ready && item.value === defaultEmbeddingModelId) && defaultEmbeddingModelId !== currentEmbeddingModelId
       )) {
-        message.error('请选择 ready 的默认 Embedding 模型');
+        message.error('请选择可用的默认 Embedding 模型');
         return;
       }
       const payload: UpdateLLMConfigurationRequest = {
@@ -124,13 +122,8 @@ export function ConfigurationPage() {
         defaultChatModelId,
         defaultEmbeddingModelId: defaultEmbeddingModelId || undefined,
         clearDefaultEmbedding: !defaultEmbeddingModelId,
-        clearApiKey: Boolean(values.clearApiKey),
         budget: values.budget
       };
-      if (payload.clearApiKey && payload.apiKey) {
-        message.error('清空 ai-proxy API 密钥时不能同时填写新密钥');
-        return;
-      }
       const nextConfiguration = await workorchApi.updateLLMConfiguration(payload);
       applyConfiguration(nextConfiguration);
       message.success('LLM 配置已保存，重启 WorkOrch 后生效');
@@ -140,29 +133,6 @@ export function ConfigurationPage() {
       setSaving(false);
     }
   };
-
-  async function refreshCatalog() {
-    setCatalogRefreshing(true);
-    try {
-      if (configuration?.llm.restartRequired) {
-        message.error('LLM 配置等待重启后生效');
-        return;
-      }
-      const catalog = await workorchApi.refreshLLMModelCatalog();
-      setConfiguration((current) => current ? {
-        ...current,
-        llm: {
-          ...current.llm,
-          catalog
-        }
-      } : current);
-      message.success('模型目录已刷新');
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setCatalogRefreshing(false);
-    }
-  }
 
   const saveWebSearchConfiguration = async () => {
     setWebSearchSaving(true);
@@ -186,13 +156,12 @@ export function ConfigurationPage() {
   const selectedWebSearchProviderStatus = selectedWebSearchProvider ? webSearchStatusByProviderID.get(selectedWebSearchProvider.id) : undefined;
   const runtimeGit = configuration?.runtime.git;
   const llmOutput = configuration?.runtime.llmOutput;
-  const catalog = configuration?.llm.catalog;
   const chatModelOptions = useMemo(
-    () => aiProxyModelOptions(configuration, 'responses', configuration?.llm.defaultChat?.modelId),
+    () => llmModelOptions(configuration, 'responses', configuration?.llm.defaultChat?.modelId),
     [configuration]
   );
   const embeddingModelOptions = useMemo(
-    () => aiProxyModelOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding?.modelId),
+    () => llmModelOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding?.modelId),
     [configuration]
   );
 
@@ -256,32 +225,10 @@ export function ConfigurationPage() {
     });
   };
 
-  const catalogColumns = [
-    { title: '模型 ID', dataIndex: 'modelId', key: 'modelId' },
-    { title: 'Route Owner', dataIndex: 'routeOwner', key: 'routeOwner', render: (value?: string) => value || '-' },
-    { title: 'Context Window', dataIndex: 'contextWindowTokens', key: 'contextWindowTokens', render: (value?: number) => configNumberText(value) },
-    { title: 'Max Output', dataIndex: 'maxOutputTokens', key: 'maxOutputTokens', render: (value?: number) => configNumberText(value) },
-    { title: 'Endpoints', dataIndex: 'supportedEndpoints', key: 'supportedEndpoints', render: (items?: string[]) => (items?.length ? items.join(', ') : '-') },
-    {
-      title: 'Operations',
-      dataIndex: 'operations',
-      key: 'operations',
-      render: (ops?: string[]) => (ops?.length ? ops.join(', ') : '-')
-    },
-    {
-      title: 'Readiness',
-      dataIndex: 'capabilityReady',
-      key: 'capabilityReady',
-      render: (ready: boolean, record: ProviderModelDescriptorView) => ready
-        ? <Tag color="green">ready</Tag>
-        : <Tag color="red">{record.unavailableReason || 'incomplete'}</Tag>
-    }
-  ];
-
   return (
     <PageContainer
       title="系统配置"
-      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）、ai-proxy 模型与 Web Search Provider"
+      subTitle="管理服务配置、执行人格（Soul）、工作空间模板（Workspace Template）、LLM 与 Web Search Provider"
       extra={<Button onClick={() => void loadConfiguration()} loading={loading}>刷新</Button>}
     >
       <Tabs
@@ -369,24 +316,13 @@ export function ConfigurationPage() {
               <ProCard
                 title="LLM"
                 className="workorch-section"
-                extra={(
-                  <Space>
-                    <Button onClick={() => void refreshCatalog()} loading={catalogRefreshing} disabled={configuration?.llm.restartRequired}>刷新模型</Button>
-                    <Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>
-                  </Space>
-                )}
+                extra={<Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>}
               >
-                <Typography.Paragraph type="secondary">
-                  WorkOrch 只通过 ai-proxy 的 OpenAI 协议访问模型。ai-proxy 地址、超时和目录策略由配置文件管理；此处仅管理 API 密钥、模型选择和请求预算。
-                </Typography.Paragraph>
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   <ProCard title="模型与预算">
                     <Form form={llmForm} layout="vertical" onFinish={(values) => void saveLLMConfiguration(values)}>
-                      <Form.Item name="apiKey" label="ai-proxy API 密钥">
-                        <Input.Password placeholder={configuration?.llm.aiProxy?.apiKeyConfigured ? '已配置，留空表示保留' : '可选'} autoComplete="new-password" />
-                      </Form.Item>
-                      <Form.Item name="clearApiKey" valuePropName="checked">
-                        <Checkbox>显式清空 ai-proxy API 密钥</Checkbox>
+                      <Form.Item name="apiKey" label="API 密钥">
+                        <Input.Password placeholder="留空表示保留已有密钥" autoComplete="new-password" />
                       </Form.Item>
                       <Form.Item
                         name="defaultChatModelId"
@@ -396,13 +332,13 @@ export function ConfigurationPage() {
                           {
                             validator: (_, value?: string) => value === configuration?.llm.defaultChat?.modelId || chatModelOptions.some((item) => item.ready && item.value === value)
                               ? Promise.resolve()
-                              : Promise.reject(new Error('已配置模型当前未 ready，请选择 ready 的模型'))
+                              : Promise.reject(new Error('已配置模型当前不可用，请选择可用模型'))
                           }
                         ]}
                       >
                         <Select
                           showSearch
-                          placeholder={chatModelOptions.some((item) => item.ready) ? '选择 ready Responses 模型' : '请先刷新 ai-proxy 模型目录'}
+                          placeholder={chatModelOptions.some((item) => item.ready) ? '选择可用模型' : '当前没有可用模型'}
                           options={chatModelOptions}
                         />
                       </Form.Item>
@@ -413,7 +349,7 @@ export function ConfigurationPage() {
                           {
                             validator: (_, value?: string) => !value || value === configuration?.llm.defaultEmbedding?.modelId || embeddingModelOptions.some((item) => item.ready && item.value === value)
                               ? Promise.resolve()
-                              : Promise.reject(new Error('已配置模型当前未 ready，请选择 ready 的模型或清空'))
+                              : Promise.reject(new Error('已配置模型当前不可用，请选择可用模型或清空'))
                           }
                         ]}
                       >
@@ -431,29 +367,6 @@ export function ConfigurationPage() {
                         <InputNumber min={0.01} step={0.01} style={{ width: '100%' }} />
                       </Form.Item>
                     </Form>
-                  </ProCard>
-                  <ProCard title="模型目录">
-                    <Descriptions
-                      column={{ xs: 1, md: 2, xl: 3 }}
-                      items={[
-                        { key: 'state', label: '目录状态', children: catalog?.state || '-' },
-                        { key: 'revision', label: '目录 Revision', children: catalog?.revision || '-' },
-                        { key: 'fetchedAt', label: '最近刷新', children: catalog?.fetchedAt || '-' },
-                        { key: 'stale', label: 'Stale', children: catalog?.stale ? <Tag color="orange">stale</Tag> : <Tag color="green">fresh</Tag> },
-                        { key: 'apiKey', label: 'API 密钥', children: configuration?.llm.aiProxy?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
-                        { key: 'restart', label: '生效状态', children: configuration?.llm.restartRequired ? <Tag color="orange">待重启</Tag> : <Tag color="green">已生效</Tag> },
-                        { key: 'error', label: '刷新错误', children: catalog?.errorMessage || '-' }
-                      ]}
-                    />
-                    <Table
-                      style={{ marginTop: 16 }}
-                      size="small"
-                      rowKey={(row) => `${row.providerId}/${row.modelId}`}
-                      pagination={{ pageSize: 10 }}
-                      dataSource={catalog?.models ?? []}
-                      columns={catalogColumns}
-                      locale={{ emptyText: <Empty description="暂无模型，请点击刷新模型" /> }}
-                    />
                   </ProCard>
                 </Space>
               </ProCard>

@@ -44,13 +44,11 @@ const {
 
 function providerModelTargetLabel(selection?: { target?: { providerId?: string; modelId?: string }; reasoningEffort?: string }): string {
   const target = selection?.target;
-  const providerID = target?.providerId?.trim();
   const modelID = target?.modelId?.trim();
-  if (!providerID && !modelID) {
+  if (!modelID) {
     return '-';
   }
-  const label = [providerID || 'default provider', modelID || 'default model'].join(' / ');
-  return selection?.reasoningEffort ? `${label} · reasoning ${selection.reasoningEffort}` : label;
+  return selection?.reasoningEffort ? `${modelID} · reasoning ${selection.reasoningEffort}` : modelID;
 }
 
 export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
@@ -222,7 +220,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const activationReadyTarget = helpers.activationReadyChatTarget(configuration);
   const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
   const defaultChatProviderId = configuration?.llm.defaultChat?.providerId || 'ai-proxy';
-  // Readiness for the system default requires a ready ai-proxy Responses model.
+  // Readiness for the system default requires a ready Responses model.
   const defaultChatReady = Boolean(
     defaultChatModelId &&
       (
@@ -2845,18 +2843,18 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item
             name="llmTargetKey"
             label="LLM 模型"
-            rules={[{ required: true, message: '请选择 ready 的对话模型' }]}
+            rules={[{ required: true, message: '请选择可用的对话模型' }]}
             extra={
               !activationLLMReady
-                ? '当前没有 ready 的对话模型；请先在配置页刷新 ai-proxy 模型目录'
+                ? '当前没有可用的对话模型，请先在系统配置中完成模型设置'
                 : defaultChatModelId
-                  ? `系统默认：${defaultChatProviderId}/${defaultChatModelId}${defaultChatReady ? '' : `（未 ready，已自动选择 ${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}）`}`
-                  : `已自动选择 ready 模型：${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}`
+                  ? `系统默认：${defaultChatModelId}${defaultChatReady ? '' : `（当前不可用，已自动选择 ${activationReadyTarget?.modelId}）`}`
+                  : `已自动选择模型：${activationReadyTarget?.modelId}`
             }
           >
             <Select
               showSearch
-              placeholder="选择 ready 对话模型"
+              placeholder="选择可用对话模型"
               options={activationLLMTargetOptions.map((item) => ({
                 value: item.value,
                 label: item.label
@@ -2879,10 +2877,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name={['llmTarget', 'modelId']} hidden>
             <Input />
           </Form.Item>
-		  <Form.Item name="reasoningEffort" label="推理强度" extra={selectedOption?.defaultReasoningEffort ? `Provider 默认：${selectedOption.defaultReasoningEffort}` : '留空时使用 Provider 默认策略'}>
+		  <Form.Item name="reasoningEffort" label="推理强度" extra={selectedOption?.defaultReasoningEffort ? `模型默认：${selectedOption.defaultReasoningEffort}` : '留空时使用模型默认策略'}>
 			<Select
 			  allowClear
-			  placeholder="Provider 默认"
+			  placeholder="模型默认"
 			  disabled={!selectedOption?.reasoningSupported || !selectedOption?.reasoningValid}
 			  options={(selectedOption?.reasoningEfforts ?? []).map((effort) => ({ value: effort, label: effort }))}
 			/>

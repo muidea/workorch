@@ -819,18 +819,21 @@ func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T
 	}
 }
 
-func TestUpdateLLMConfigurationEndpointRejectsFileOwnedAIProxyFields(t *testing.T) {
+func TestUpdateLLMConfigurationEndpointRejectsUnavailableFields(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/llm", strings.NewReader(`{
-		"aiProxy":{"baseURL":"http://127.0.0.1:9090"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	for _, requestBody := range []string{
+		`{"aiProxy":{"baseURL":"http://127.0.0.1:9090"}}`,
+		`{"clearApiKey":true}`,
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/llm", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
 
-	newMuxWithState(state).ServeHTTP(rec, req)
+		newMuxWithState(state).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "aiProxy") {
-		t.Fatalf("status=%d body=%s, want rejected file-owned aiProxy field", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s, want rejected unsupported LLM configuration field", requestBody, rec.Code, rec.Body.String())
+		}
 	}
 }
 

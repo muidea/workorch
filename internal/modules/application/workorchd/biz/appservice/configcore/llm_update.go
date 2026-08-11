@@ -16,12 +16,7 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (workorchconfigur
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	next := cfg.LLM
-	if cmd.ClearAPIKey && cmd.APIKey != nil && strings.TrimSpace(*cmd.APIKey) != "" {
-		return workorchconfigurationcontract.ServiceConfiguration{}, fmt.Errorf("%w: clearApiKey cannot be combined with a non-empty apiKey", common.ErrInvalidArgument)
-	}
-	if cmd.ClearAPIKey {
-		next.AIProxy.APIKey = ""
-	} else if cmd.APIKey != nil && strings.TrimSpace(*cmd.APIKey) != "" {
+	if cmd.APIKey != nil && strings.TrimSpace(*cmd.APIKey) != "" {
 		next.AIProxy.APIKey = strings.TrimSpace(*cmd.APIKey)
 	}
 	if cmd.DefaultChatModelID != nil {

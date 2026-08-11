@@ -4,7 +4,6 @@ type UpdateLLMConfigurationCommand struct {
 	// The configuration plane owns one provider only: ai-proxy. Endpoint and
 	// transport settings remain file-configured and are deliberately absent.
 	APIKey                  *string                        `json:"apiKey,omitempty"`
-	ClearAPIKey             bool                           `json:"clearApiKey,omitempty"`
 	DefaultChatModelID      *string                        `json:"defaultChatModelId,omitempty"`
 	DefaultEmbeddingModelID *string                        `json:"defaultEmbeddingModelId,omitempty"`
 	ClearDefaultEmbedding   bool                           `json:"clearDefaultEmbedding,omitempty"`

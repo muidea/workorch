@@ -57,17 +57,6 @@ export type ProviderInferenceSelection = {
   reasoningEffort?: string;
 };
 
-export type AIProxyConfigurationView = {
-  baseUrl?: string;
-  apiKeyConfigured: boolean;
-  timeout?: string;
-  catalogRequestTimeout?: string;
-  catalogTTL?: string;
-  catalogMaxStaleAge?: string;
-  maxCatalogResponseBytes?: number;
-  maxCatalogModels?: number;
-};
-
 export type LLMContextBudgetPolicyView = {
   contextUtilizationRatio?: number;
   estimatedTokensPerByte?: number;
@@ -76,13 +65,8 @@ export type LLMContextBudgetPolicyView = {
 export type ProviderModelDescriptorView = {
   providerId: string;
   modelId: string;
-  routeOwner?: string;
-  contextWindowTokens?: number;
-  maxOutputTokens?: number;
   operations?: string[];
   capabilityReady: boolean;
-  unavailableReason?: string;
-  capabilityRevision?: string;
   reasoning?: {
     supported: boolean;
     valid: boolean;
@@ -106,7 +90,6 @@ export type ProviderCatalogSummary = {
 };
 
 export type LLMConfiguration = {
-  aiProxy: AIProxyConfigurationView;
   defaultChat: ProviderModelTarget;
   defaultEmbedding?: ProviderModelTarget;
   budget: LLMContextBudgetPolicyView;
@@ -116,7 +99,6 @@ export type LLMConfiguration = {
 
 export type UpdateLLMConfigurationRequest = {
   apiKey?: string;
-  clearApiKey?: boolean;
   defaultChatModelId?: string;
   defaultEmbeddingModelId?: string;
   clearDefaultEmbedding?: boolean;

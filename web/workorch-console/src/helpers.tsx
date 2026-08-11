@@ -2608,7 +2608,6 @@ export function providerModelTargetKey(providerId?: string, modelId?: string) {
 export function llmConfigurationFormValues(configuration: ServiceConfiguration): LLMConfigurationFormValues {
   return {
     apiKey: undefined,
-    clearApiKey: false,
     defaultChatModelId: configuration.llm.defaultChat?.modelId,
     defaultEmbeddingModelId: configuration.llm.defaultEmbedding?.modelId,
     budget: {
@@ -2620,10 +2619,10 @@ export function llmConfigurationFormValues(configuration: ServiceConfiguration):
 
 export function readyCatalogModels(configuration?: ServiceConfiguration, operation?: string) {
   const models = (configuration?.llm.catalog?.models ?? []).filter((item) => {
-	const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
-	if (providerId !== 'ai-proxy') {
-		return false;
-	}
+    const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
+    if (providerId !== 'ai-proxy') {
+      return false;
+    }
     if (!item.capabilityReady) {
       return false;
     }
@@ -2649,7 +2648,7 @@ export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, 
     }
     return [{
       value,
-      label: `${modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`,
+      label: modelId,
       providerId,
       modelId,
       source: 'catalog' as const,
@@ -2662,7 +2661,7 @@ export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, 
   });
 }
 
-export function aiProxyModelOptions(
+export function llmModelOptions(
   configuration: ServiceConfiguration | undefined,
   operation: string,
   configuredModelId: string | undefined
@@ -2702,7 +2701,7 @@ export function chatTargetOptions(configuration?: ServiceConfiguration) {
 
 // Resolve the concrete chat target carried by every Web activation request.
 // A configured default is usable only when it is present in the ready catalog
-// in the ai-proxy Responses catalog. If it is stale, choose
+// in the configured Responses catalog. If it is stale, choose
 // the first ready target instead of sending the stale default through hidden
 // form fields or relying on backend fallback.
 export function activationReadyChatTarget(configuration?: ServiceConfiguration) {
@@ -3161,7 +3160,7 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem, configura
     return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再提交执行`;
   }
   if (!activationReadyChatTarget(configuration)) {
-    return '当前没有 ready 的 Responses 模型；请先在配置页刷新 ai-proxy catalog';
+    return '当前没有可用的对话模型，请先在系统配置中完成模型设置';
   }
   return '当前工作空间无法确定执行上下文，请进入工作空间核对后再提交执行';
 }

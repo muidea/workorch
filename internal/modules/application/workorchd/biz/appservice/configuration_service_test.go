@@ -248,6 +248,25 @@ dataDir = ".workorch-data"
 	}
 }
 
+func TestUpdateLLMConfigurationBlankAPIKeyPreservesStoredValue(t *testing.T) {
+	useWorkorchTestConfig(t, "file", t.TempDir())
+	apiKey := "stored-key"
+	if _, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{APIKey: &apiKey}); err != nil {
+		t.Fatalf("seed api key: %v", err)
+	}
+	blank := "  "
+	if _, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{APIKey: &blank}); err != nil {
+		t.Fatalf("blank api key update: %v", err)
+	}
+	persistedConfig, err := workorchconfig.Persisted()
+	if err != nil {
+		t.Fatalf("persisted: %v", err)
+	}
+	if persistedConfig.LLM.AIProxy.APIKey != apiKey {
+		t.Fatalf("persisted api key = %q, want preserved stored key", persistedConfig.LLM.AIProxy.APIKey)
+	}
+}
+
 func TestLLMConfigurationProjectionAndCatalogRefreshUseActiveOwnerRevision(t *testing.T) {
 	useWorkorchTestConfig(t, "file", t.TempDir())
 	ctx := context.Background()
@@ -598,57 +617,4 @@ func int64Ptr(value int64) *int64 {
 
 func webSearchProviderUpdates(values ...configcore.UpdateWebSearchProviderConfiguration) *[]configcore.UpdateWebSearchProviderConfiguration {
 	return &values
-}
-
-func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
-	useWorkorchTestConfig(t, "file", t.TempDir())
-	// Seed an API key via update.
-	apiKey := "secret-to-clear"
-	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		APIKey: &apiKey,
-	})
-	if err != nil {
-		t.Fatalf("seed api key: %v", err)
-	}
-	cfg, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		ClearAPIKey: true,
-	})
-	if err != nil {
-		t.Fatalf("clear api key update: %v", err)
-	}
-	if cfg.LLM.AIProxy.APIKeyConfigured {
-		t.Fatalf("apiKeyConfigured = true after clear, want false")
-	}
-	if !cfg.LLM.RestartRequired {
-		t.Fatal("cleared api key must require restart")
-	}
-	persistedConfig, err := workorchconfig.Persisted()
-	if err != nil {
-		t.Fatalf("persisted: %v", err)
-	}
-	if strings.TrimSpace(persistedConfig.LLM.AIProxy.APIKey) != "" {
-		t.Fatalf("persisted api key = %q, want cleared staged key", persistedConfig.LLM.AIProxy.APIKey)
-	}
-	if err := workorchconfig.Reload(); err != nil {
-		t.Fatalf("restart reload: %v", err)
-	}
-	current, err := workorchconfig.Current()
-	if err != nil {
-		t.Fatalf("current after restart: %v", err)
-	}
-	if strings.TrimSpace(current.LLM.AIProxy.APIKey) != "" {
-		t.Fatalf("restarted api key = %q, want empty", current.LLM.AIProxy.APIKey)
-	}
-}
-
-func TestUpdateLLMConfigurationRejectsClearWithNonEmptyAIProxyAPIKey(t *testing.T) {
-	useWorkorchTestConfig(t, "file", t.TempDir())
-	apiKey := "new-secret"
-	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		APIKey:      &apiKey,
-		ClearAPIKey: true,
-	})
-	if err == nil {
-		t.Fatal("expected clearApiKey with non-empty apiKey to fail")
-	}
 }
