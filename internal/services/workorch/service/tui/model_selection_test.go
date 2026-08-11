@@ -84,16 +84,16 @@ func TestModelCommandRequiresActiveWorkspace(t *testing.T) {
 	}
 }
 
-func TestModelOptionsPreferCurrentWorkspaceProviderGroup(t *testing.T) {
-	current := runtimecontract.ProviderModelTarget{ProviderID: "provider-b", ModelID: "model-current"}
-	defaultTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-default"}
+func TestModelOptionsPreferCurrentWorkspaceTarget(t *testing.T) {
+	current := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-current"}
+	defaultTarget := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-default"}
 	got := orderModelOptions([]backend.ChatModelTargetOption{
-		{ProviderID: "provider-c", ModelID: "model-c", CapabilityReady: true},
-		{ProviderID: "provider-b", ModelID: "model-other", CapabilityReady: true},
-		{ProviderID: "provider-a", ModelID: "model-default", CapabilityReady: true},
-		{ProviderID: "provider-b", ModelID: "model-current", CapabilityReady: true},
+		{ProviderID: "ai-proxy", ModelID: "model-c", CapabilityReady: true},
+		{ProviderID: "ai-proxy", ModelID: "model-other", CapabilityReady: true},
+		{ProviderID: "ai-proxy", ModelID: "model-default", CapabilityReady: true},
+		{ProviderID: "ai-proxy", ModelID: "model-current", CapabilityReady: true},
 	}, &current, defaultTarget)
-	if len(got) != 4 || got[0].ProviderID != "provider-b" || got[0].ModelID != "model-current" || got[1].ProviderID != "provider-b" || got[2].ProviderID != "provider-a" {
+	if len(got) != 4 || got[0].ProviderID != "ai-proxy" || got[0].ModelID != "model-current" || got[1].ProviderID != "ai-proxy" || got[2].ProviderID != "ai-proxy" {
 		t.Fatalf("ordered options = %+v", got)
 	}
 }
@@ -182,7 +182,7 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 		fakeBE:    newFake(t),
 		workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}},
 		config: &modelSelectionConfigBackend{fakeC: &fakeC{}, options: []backend.ChatModelTargetOption{
-			{ProviderID: "custom", ModelID: "model-b", CapabilityReady: true},
+			{ProviderID: "ai-proxy", ModelID: "model-b", CapabilityReady: true},
 			{ProviderID: "ai-proxy", ModelID: "default-model", CapabilityReady: true},
 		}},
 	}
@@ -205,7 +205,7 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 	m = appModelFromTea(t, next)
 	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m = appModelFromTea(t, next)
-	if !m.modelSelectConfirming || m.modelSelectPending == nil || m.modelSelectPending.Target.ProviderID != "custom" || m.modelSelectPending.Target.ModelID != "model-b" {
+	if !m.modelSelectConfirming || m.modelSelectPending == nil || m.modelSelectPending.Target.ProviderID != "ai-proxy" || m.modelSelectPending.Target.ModelID != "model-b" {
 		t.Fatalf("pending target = %+v", m.modelSelectPending)
 	}
 	next, saveCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -219,7 +219,7 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 	if m.modelSelectMode {
 		t.Fatal("selection mode remained open after save")
 	}
-	if be.workspace.lastTarget == nil || be.workspace.lastTarget.Target.ProviderID != "custom" || be.workspace.lastTarget.Target.ModelID != "model-b" {
+	if be.workspace.lastTarget == nil || be.workspace.lastTarget.Target.ProviderID != "ai-proxy" || be.workspace.lastTarget.Target.ModelID != "model-b" {
 		t.Fatalf("persisted target = %+v", be.workspace.lastTarget)
 	}
 }
@@ -227,7 +227,7 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 func TestModelClearRequiresConfirmationAndPersistsNil(t *testing.T) {
 	be := &modelSelectionBackend{fakeBE: newFake(t), workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}}, config: &modelSelectionConfigBackend{fakeC: &fakeC{}}}
 	m := NewAppModel(be, "ws-1", "")
-	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}
 	m.workspaces = []projectioncontract.Workspace{{ID: "ws-1", Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: target}}}
 	m.activeWorkspaceID = "ws-1"
 	m.setInput("/model clear")

@@ -8,12 +8,12 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeDecision, error) {
+func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
 	facts = facts.Normalized()
 	if err := facts.Validate(); err != nil {
 		return runtimecontract.RuntimeDecision{}, err
 	}
-	decision, err := reduce(facts)
+	decision, err := reduce(facts, runtimeCoverageProofLineageArgument(proofLineages))
 	if err != nil {
 		return runtimecontract.RuntimeDecision{}, err
 	}
@@ -31,7 +31,7 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 
 // ReduceRuntimeStateWithDirective reduces facts and returns the decision plus facts
 // with RepairDirective synchronized to the sealed decision (INV-05).
-func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
 	facts = facts.Normalized()
 	// A delayed prerequisite result from a completed focus is never current
 	// authority. Retire it before ordinary preflight: otherwise the raw resource
@@ -55,11 +55,11 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	if len(facts.Prerequisites.Pending) == 0 {
 		facts = PreflightRuntimeFacts(facts, runtimeTargetGroundingRequirements(facts))
 	}
-	decision, err := ReduceRuntimeState(facts, previous)
+	decision, err := ReduceRuntimeState(facts, previous, proofLineages...)
 	if err != nil {
 		return facts, runtimecontract.RuntimeDecision{}, err
 	}
-	facts = syncRepairDirective(facts, decision)
+	facts = syncRepairDirective(facts, decision, proofLineages...)
 	// Creating a repair closure or advancing an accepted repair state-change to
 	// its mandatory validation changes the action-level candidate authority.
 	// Re-seal from the persisted directive so neither the first repair dispatch
@@ -68,11 +68,11 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil &&
 		(facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation) &&
 		(decision.State != facts.RepairDirective.RequiredState || decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID) {
-		decision, err = ReduceRuntimeState(facts, previous)
+		decision, err = ReduceRuntimeState(facts, previous, proofLineages...)
 		if err != nil {
 			return facts, runtimecontract.RuntimeDecision{}, err
 		}
-		facts = syncRepairDirective(facts, decision)
+		facts = syncRepairDirective(facts, decision, proofLineages...)
 	}
 	return facts, decision, nil
 }
@@ -130,7 +130,7 @@ func retireNonCurrentFocusScopedPrerequisites(facts runtimecontract.RuntimeFacts
 	return facts.Normalized()
 }
 
-func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
+func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
 	// A failure whose persisted budget/disposition already determines governance
 	// or terminal authority must win before mutable prerequisite bookkeeping.
@@ -163,19 +163,19 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	if needsStateChangeForOwnerGroundedFailure(facts) {
 		return stateChangeDecision(base, facts)
 	}
-	if feasibilityBlocksCurrentAction(facts) {
+	if feasibilityBlocksCurrentAction(facts, proofLineage) {
 		code := "capability_unavailable"
 		if facts.Feasibility.Category == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
 			code = "validation_recipe_exhausted"
 		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, code, firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
 	}
-	if decision, handled, err := noOpWithoutProvenanceDecision(base, facts); err != nil || handled {
+	if decision, handled, err := noOpWithoutProvenanceDecision(base, facts, proofLineage); err != nil || handled {
 		return decision, err
 	}
 	// INV-05: persisted RepairDirective is the sole next-action authority for the focus.
 	// Raw MissingRequiredEvidenceKinds and anti-replay must not override it.
-	if decision, ok, err := applyRepairDirectiveAction(facts, base); err != nil {
+	if decision, ok, err := applyRepairDirectiveAction(facts, base, proofLineage); err != nil {
 		return runtimecontract.RuntimeDecision{}, err
 	} else if ok {
 		return decision, nil
@@ -186,10 +186,10 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	// This is not a domain-specific action choice. SM-2 consumes the persisted
 	// File observation and descriptor contract only; File remains the path and
 	// feasibility authority.
-	if hasOwnerGroundedProspectiveCreationScope(facts) && !hasCurrentFocusTargetBoundStateChangeEvidence(facts) {
+	if hasOwnerGroundedProspectiveCreationScope(facts) && !hasCurrentFocusTargetBoundStateChangeEvidence(facts, proofLineage) {
 		return stateChangeDecision(base, facts)
 	}
-	missing := missingEvidenceKinds(facts)
+	missing := missingEvidenceKinds(facts, proofLineage)
 	if len(missing) == 0 {
 		if !facts.Focus.RequireAssessment {
 			return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
@@ -202,16 +202,16 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		// an action. Coverage was already classified by owner-confirmed receipts
 		// at the internal-event commit boundary; only that persisted result is
 		// consulted here.
-		if currentFocusCoverageSatisfied(facts) {
+		if currentFocusCoverageSatisfied(facts, proofLineage) {
 			return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
 		}
-		return repairableAssessmentDecision(base, facts, assessment)
+		return repairableAssessmentDecision(base, facts, assessment, proofLineage)
 	}
 	if contains(missing, runtimecontract.EvidenceKindStateChange) {
 		return stateChangeDecision(base, facts)
 	}
 	if contains(missing, runtimecontract.EvidenceKindValidation) {
-		return validationDecision(base, facts)
+		return validationDecision(base, facts, proofLineage)
 	}
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
 }
@@ -227,14 +227,14 @@ const runtimeStateChangeNoOpWithoutProvenanceCode = "state_change_noop_without_p
 // validation plus assessment path may close an already-current workspace; a
 // focus without an assessment requirement terminates with a typed provenance
 // gap rather than requesting another random write to manufacture a delta.
-func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, bool, error) {
-	if !hasStateChangeNoOpWithoutProvenance(facts) || !contains(missingEvidenceKinds(facts), runtimecontract.EvidenceKindStateChange) {
+func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
+	if !hasStateChangeNoOpWithoutProvenance(facts) || !contains(missingEvidenceKinds(facts, proofLineage), runtimecontract.EvidenceKindStateChange) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
-	if hasAcceptedCurrentFocusValidationEvidence(facts) {
+	if hasAcceptedCurrentFocusValidationEvidence(facts, proofLineage) {
 		if facts.Focus.RequireAssessment {
 			if assessment, found := assessmentForCurrentFocus(facts); found {
-				if currentFocusCoverageSatisfied(facts) {
+				if currentFocusCoverageSatisfied(facts, proofLineage) {
 					if facts.StateChange.Required && !facts.StateChange.Satisfied {
 						return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 							"state_change_provenance_missing", "workspace state was validated and assessed after a no-op, but the run policy requires durable state-change provenance"), true, nil
@@ -242,7 +242,7 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 					decision, err := completeOrAdvanceDecision(base, facts, "current workspace state was validated and assessed after a no-op")
 					return decision, true, err
 				}
-				decision, err := repairableAssessmentDecision(base, facts, assessment)
+				decision, err := repairableAssessmentDecision(base, facts, assessment, proofLineage)
 				return decision, true, err
 			}
 			return assessmentDecision(base, facts), true, nil
@@ -254,7 +254,7 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 			"state_change_provenance_missing", "owner reported a no-op and no validation capability can observe the existing workspace state"), true, nil
 	}
-	decision, err := validationDecision(base, facts)
+	decision, err := validationDecision(base, facts, proofLineage)
 	return decision, true, err
 }
 
@@ -267,9 +267,16 @@ func hasStateChangeNoOpWithoutProvenance(facts runtimecontract.RuntimeFacts) boo
 	return false
 }
 
-func hasAcceptedCurrentFocusValidationEvidence(facts runtimecontract.RuntimeFacts) bool {
+func hasAcceptedCurrentFocusValidationEvidence(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	for _, evidence := range facts.Evidence.Accepted {
-		if evidence.Kind == runtimecontract.EvidenceKindValidation && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) && !weakRuntimeEvidence(evidence) {
+		if evidence.Kind != runtimecontract.EvidenceKindValidation || weakRuntimeEvidence(evidence) {
+			continue
+		}
+		if len(evidence.CoverageWorkItemIDs) == 0 && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			return true
+		}
+		if runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
 			return true
 		}
 	}
@@ -348,7 +355,7 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 	}
 }
 
-func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts) bool {
+func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {
 	if facts.Feasibility == nil {
 		return false
 	}
@@ -356,12 +363,12 @@ func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts) bool {
 	if fact.FocusID != facts.Focus.ID || len(fact.FeasibleOperationKinds) != 0 {
 		return false
 	}
-	missing := missingEvidenceKinds(facts)
+	missing := missingEvidenceKinds(facts, proofLineage)
 	return (fact.State == runtimecontract.ConvergenceStateNeedStateChange && contains(missing, runtimecontract.EvidenceKindStateChange)) ||
 		(fact.State == runtimecontract.ConvergenceStateNeedValidation && contains(missing, runtimecontract.EvidenceKindValidation))
 }
 
-func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts) bool {
+func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts, _ ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
 	for _, id := range facts.Focus.CoverageWorkItemIDs {
 		for _, item := range facts.Coverage {
 			if item.ID == id && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
@@ -564,8 +571,8 @@ func requiredCapabilityStateSequence(facts runtimecontract.RuntimeFacts, accepte
 	return ret
 }
 
-func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
-	if decision, blocked, err := targetGroundingDecision(base, facts, true); err != nil || blocked {
+func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
+	if decision, blocked, err := targetGroundingDecision(base, facts, true, proofLineages...); err != nil || blocked {
 		return decision, err
 	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
@@ -606,9 +613,9 @@ func currentRepairClosureID(facts runtimecontract.RuntimeFacts) string {
 // only re-enter this same gate and create a ticket loop. The reducer therefore
 // always closes this path with a typed terminal. Capability owners and the
 // shared contract package only carry observations; SM-2 owns the terminal.
-func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool) (runtimecontract.RuntimeDecision, bool, error) {
+func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
 	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedProspectiveCreationScope(facts) || hasOwnerGroundedTargetScope(facts) || hasSemanticOwnerGroundedTargetScope(facts) ||
-		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts)) {
+		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts, proofLineages...)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	const summary = "direct-evidence focus requires an owner-grounded target; workspace discovery alone did not select one"
@@ -749,9 +756,11 @@ func targetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSel
 	return selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) != 0
 }
 
-func hasCurrentFocusTargetBoundStateChangeEvidence(facts runtimecontract.RuntimeFacts) bool {
+func hasCurrentFocusTargetBoundStateChangeEvidence(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	for _, evidence := range facts.Evidence.Accepted {
-		if evidence.Kind == runtimecontract.EvidenceKindStateChange && len(evidence.TargetRefs) != 0 && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		if evidence.Kind == runtimecontract.EvidenceKindStateChange && len(evidence.TargetRefs) != 0 && !weakRuntimeEvidence(evidence) &&
+			runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
 			return true
 		}
 	}
@@ -846,8 +855,39 @@ func terminalDecision(base runtimecontract.RuntimeDecision, state runtimecontrac
 	return base
 }
 
-func missingEvidenceKinds(facts runtimecontract.RuntimeFacts) []string {
-	return runtimecontract.MissingRequiredEvidenceKinds(facts)
+func missingEvidenceKinds(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) []string {
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
+	if len(proofLineage) == 0 {
+		return runtimecontract.MissingRequiredEvidenceKinds(facts)
+	}
+	facts = facts.Normalized()
+	missing := make([]string, 0, len(facts.Focus.RequiredEvidenceKinds))
+	for _, evidenceKind := range facts.Focus.RequiredEvidenceKinds {
+		evidenceKind = strings.TrimSpace(evidenceKind)
+		if evidenceKind == "" || runtimeCurrentFocusHasEvidenceKindWithLineage(facts, evidenceKind, proofLineage) {
+			continue
+		}
+		missing = append(missing, evidenceKind)
+	}
+	return missing
+}
+
+func runtimeCurrentFocusHasEvidenceKindWithLineage(facts runtimecontract.RuntimeFacts, evidenceKind string, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {
+	if len(facts.Focus.CoverageWorkItemIDs) == 0 {
+		return false
+	}
+	for _, evidence := range facts.Evidence.Accepted {
+		if strings.TrimSpace(evidence.Kind) != evidenceKind {
+			continue
+		}
+		if len(evidence.CoverageWorkItemIDs) == 0 && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			return true
+		}
+		if runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
+			return true
+		}
+	}
+	return false
 }
 
 // needsStateChangeForOwnerGroundedFailure is the only SM-2 bridge from a
@@ -877,9 +917,9 @@ func evidenceRevisionAfter(left string, right string) bool {
 	return runtimecontract.EvidenceRevisionAfter(left, right)
 }
 
-func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
-	if len(missingEvidenceKinds(facts)) != 0 || !currentFocusCoverageSatisfied(facts) || len(facts.RemainingFocuses) == 0 {
+	if len(missingEvidenceKinds(facts, proofLineages...)) != 0 || !currentFocusCoverageSatisfied(facts, proofLineages...) || len(facts.RemainingFocuses) == 0 {
 		return facts
 	}
 	completedFocusID := facts.Focus.ID
@@ -950,26 +990,26 @@ func retireFocusScopedPrerequisites(facts *runtimecontract.RuntimeFacts, focusID
 // branch exclusively from owner-confirmed persisted facts. Assessment gap
 // fields remain audit observations: an LLM must not choose a repair action,
 // target, validation-only budget or terminal by naming a missing evidence kind.
-func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, assessment runtimecontract.RuntimeAssessmentFact) (runtimecontract.RuntimeDecision, error) {
+func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, assessment runtimecontract.RuntimeAssessmentFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
 	policy := facts.ConvergencePolicy.Normalized()
 	ledger := facts.Repair.Normalized()
 	if ledger.Exhausted || ledger.RepairAttempts >= policy.MaxRepairAttemptsPerFocus {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
 	}
-	if !hasAcceptedCurrentFocusValidationEvidence(facts) {
-		return validationOnlyRepairDecision(base, facts, policy, ledger)
+	if !hasAcceptedCurrentFocusValidationEvidence(facts, proofLineage) {
+		return validationOnlyRepairDecision(base, facts, policy, ledger, proofLineage)
 	}
 	if focusRequiresDurableStateChangeRepair(facts) {
 		return stateChangeDecision(base, facts)
 	}
-	return validationOnlyRepairDecision(base, facts, policy, ledger)
+	return validationOnlyRepairDecision(base, facts, policy, ledger, proofLineage)
 }
 
-func validationOnlyRepairDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, policy runtimecontract.RuntimeConvergencePolicy, ledger runtimecontract.RuntimeRepairLedger) (runtimecontract.RuntimeDecision, error) {
+func validationOnlyRepairDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, policy runtimecontract.RuntimeConvergencePolicy, ledger runtimecontract.RuntimeRepairLedger, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
 	if policy.MaxValidationOnlyRetriesPerFocus > 0 && ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
 	}
-	return validationDecision(base, facts)
+	return validationDecision(base, facts, proofLineages...)
 }
 
 // focusRequiresDurableStateChangeRepair is a neutral policy read: it does not
@@ -1010,10 +1050,6 @@ func assessmentForCurrentFocus(facts runtimecontract.RuntimeFacts) (runtimecontr
 		return runtimecontract.RuntimeAssessmentFact{}, false
 	}
 	return latest, true
-}
-
-func evidenceAppliesToCurrentFocus(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact) bool {
-	return runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence)
 }
 
 func contains(values []string, target string) bool {

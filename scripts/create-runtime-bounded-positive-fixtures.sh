@@ -72,30 +72,22 @@ provider_id = (target.get("providerId") or "").strip()
 model_id = (target.get("modelId") or "").strip()
 if not provider_id or not model_id:
     raise SystemExit("deployed configuration has no usable defaultChat target; set WORKORCH_E2E_PROVIDER_ID and WORKORCH_E2E_MODEL_ID explicitly")
+if provider_id != "ai-proxy":
+    raise SystemExit(f"selected terminal target provider must be ai-proxy, got {provider_id!r}")
 
 catalog = llm.get("catalog") or {}
 ready = False
-source = ""
-if provider_id == (catalog.get("providerId") or "").strip():
-    source = "catalog"
-    if catalog.get("state") != "fresh" or catalog.get("stale"):
-        raise SystemExit(f"provider catalog for {provider_id!r} is not fresh: state={catalog.get('state')!r} stale={catalog.get('stale')!r}")
-    for model in catalog.get("models") or []:
-        if model.get("providerId") == provider_id and model.get("modelId") == model_id:
-            ready = bool(model.get("capabilityReady")) and "chat_completions" in (model.get("operations") or [])
-            break
-else:
-    source = "custom_provider_config"
-    for provider in llm.get("customProviders") or []:
-        if provider.get("id") != provider_id:
-            continue
-        for model in provider.get("models") or []:
-            if model.get("id") == model_id:
-                ready = "chat_completions" in (model.get("operations") or [])
-                break
+source = "ai_proxy_catalog"
+if (catalog.get("providerId") or "").strip() != provider_id:
+    raise SystemExit(f"ai-proxy catalog owner mismatch: {catalog.get('providerId')!r}")
+if catalog.get("state") != "fresh" or catalog.get("stale"):
+    raise SystemExit(f"provider catalog for {provider_id!r} is not fresh: state={catalog.get('state')!r} stale={catalog.get('stale')!r}")
+for model in catalog.get("models") or []:
+    if model.get("providerId") == provider_id and model.get("modelId") == model_id:
+        ready = bool(model.get("capabilityReady")) and "responses" in (model.get("operations") or [])
         break
 if not ready:
-    raise SystemExit(f"selected terminal target {provider_id}/{model_id} is not a ready chat-completions target ({source})")
+    raise SystemExit(f"selected terminal target {provider_id}/{model_id} is not a ready Responses target ({source})")
 
 payload = {"target": {"providerId": provider_id, "modelId": model_id}, "source": source, "catalog": {"providerId": catalog.get("providerId"), "state": catalog.get("state"), "revision": catalog.get("revision"), "stale": catalog.get("stale")}}
 with open(os.path.join(artifact_dir, "provider-target-preflight.json"), "w", encoding="utf-8") as handle:

@@ -119,11 +119,15 @@ type RuntimeStateRecord struct {
 	// Reconciliation is the Orchestrator-owned SM-2 request/batch lineage. It
 	// is kept separate from Facts so owner observations never become coverage
 	// credit by deserialization alone.
-	Reconciliation      RuntimeCWIReconciliationLedger
-	Decision            RuntimeDecision
-	ActiveDispatch      *RuntimeDispatchRecord
-	CompletedDispatches []RuntimeDispatchRecord
-	ProcessedEventIDs   []string
+	Reconciliation RuntimeCWIReconciliationLedger
+	// CoverageProofLineage is the aggregate-local SM-2 receipt-to-reseal audit
+	// ledger. Run persists it opaquely; only Orchestrator may resolve an old
+	// accepted proof against a newly sealed binding.
+	CoverageProofLineage []RuntimeCoverageProofLineage
+	Decision             RuntimeDecision
+	ActiveDispatch       *RuntimeDispatchRecord
+	CompletedDispatches  []RuntimeDispatchRecord
+	ProcessedEventIDs    []string
 	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for owner
 	// confirmation facts; it is intentionally not folded into ProcessedEventIDs.
 	RepairSurfaceConfirmations []RuntimeRepairSurfaceConfirmationRecord
@@ -205,6 +209,9 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := r.Reconciliation.Validate(); err != nil {
 		return fmt.Errorf("runtime reconciliation ledger: %w", err)
+	}
+	if err := ValidateRuntimeCoverageProofLineage(r.CoverageProofLineage); err != nil {
+		return fmt.Errorf("runtime coverage proof lineage: %w", err)
 	}
 	for _, focus := range append(append([]CoverageFocus{r.Facts.Focus}, r.Facts.RemainingFocuses...), r.Facts.CompletedFocuses...) {
 		if err := ValidateCoverageEvidenceBindingsForFocus(focus, r.Facts.DefinitionRevision); err != nil {
@@ -641,6 +648,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret.Facts = r.Facts.Normalized()
 	ret.SemanticPlanning = r.SemanticPlanning.Clone()
 	ret.Reconciliation = r.Reconciliation.Clone()
+	ret.CoverageProofLineage = NormalizeRuntimeCoverageProofLineage(r.CoverageProofLineage)
 	ret.Decision = cloneRuntimeDecision(r.Decision)
 	if r.ActiveDispatch != nil {
 		value := r.ActiveDispatch.Clone()

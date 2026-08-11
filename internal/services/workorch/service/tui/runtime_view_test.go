@@ -131,7 +131,7 @@ func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness
 	text := stripANSI(renderRuntimeProgressCompact(&projectioncontract.RuntimeProgress{
 		FailureClass:             "provider_transport",
 		FailureCode:              "deadline_exceeded",
-		FailureMessage:           "POST /v1/chat/completions: context deadline exceeded",
+		FailureMessage:           "POST /v1/responses: context deadline exceeded",
 		PrerequisiteRefreshState: "prerequisite_refreshing",
 		PrerequisiteRefreshUsed:  1,
 		PrerequisiteRefreshLimit: 3,
@@ -141,7 +141,7 @@ func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness
 	}, 180))
 	if !strings.Contains(text, "prerequisite refresh prerequisite_refreshing | stale 1/3") ||
 		!strings.Contains(text, "execution_receipt_stale | llm | provider_config:ai-proxy/model-a") ||
-		!strings.Contains(text, "failure POST /v1/chat/completions: context deadline exceeded") {
+		!strings.Contains(text, "failure POST /v1/responses: context deadline exceeded") {
 		t.Fatalf("runtime display conflated provider transport and freshness: %q", text)
 	}
 	if strings.Contains(text, "candidate attempts 1") {

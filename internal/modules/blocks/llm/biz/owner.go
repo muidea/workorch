@@ -31,9 +31,13 @@ const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 
 type Biz struct {
 	basebiz.Base
-	catalogService    *CatalogService
-	candidateProvider llmruntime.CandidateProvider
-	topics            []string
+	catalogService                    *CatalogService
+	candidateProvider                 llmruntime.CandidateProvider
+	loadLLMConfig                     func() (workorchconfig.LLMConfig, error)
+	activeLLMConfig                   workorchconfig.LLMConfig
+	activeLLMConfigurationRevision    string
+	activeLLMConfigurationInitialized bool
+	topics                            []string
 }
 
 type Dependencies struct {
@@ -41,6 +45,7 @@ type Dependencies struct {
 	BackgroundRoutine task.BackgroundRoutine
 	CatalogService    *CatalogService
 	CandidateProvider llmruntime.CandidateProvider
+	LoadLLMConfig     func() (workorchconfig.LLMConfig, error)
 }
 
 func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps ...Dependencies) (*Biz, error) {
@@ -51,12 +56,22 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 	if len(deps) > 0 {
 		m.catalogService = deps[0].CatalogService
 		m.candidateProvider = deps[0].CandidateProvider
+		m.loadLLMConfig = deps[0].LoadLLMConfig
 	}
 	if m.catalogService == nil {
 		m.catalogService = NewCatalogService()
 	}
 	if m.candidateProvider == nil {
 		m.candidateProvider = m
+	}
+	if m.loadLLMConfig == nil {
+		m.loadLLMConfig = func() (workorchconfig.LLMConfig, error) {
+			cfg, err := workorchconfig.Current()
+			if err != nil {
+				return workorchconfig.LLMConfig{}, err
+			}
+			return cfg.LLM, nil
+		}
 	}
 	return m, nil
 }
@@ -65,9 +80,15 @@ func (m *Biz) Start() error {
 	if m == nil || m.catalogService == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	if !m.activeLLMConfigurationInitialized {
+		if err := m.captureActiveLLMConfiguration(); err != nil {
+			return err
+		}
+	}
 	m.topics = []string{
 		llmevents.TopicLLMCommandCompleteProvider,
 		llmevents.TopicLLMCommandGenerateEmbedding,
+		llmevents.TopicLLMCommandGetActiveConfiguration,
 		llmevents.TopicLLMCommandGetProviderModelCatalog,
 		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
 		llmevents.TopicLLMCommandValidateInferenceSelection,
@@ -85,6 +106,49 @@ func (m *Biz) Start() error {
 	}
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, llmevents.TopicAcquireProviderCeiling, m.handleProviderCeilingPrerequisite)
 	return nil
+}
+
+// captureActiveLLMConfiguration freezes the provider settings for this LLM
+// owner lifecycle. The framework configuration watcher may reload TOML later,
+// but it cannot rotate credentials, models, or budget policy underneath an
+// active owner or a sealed Runtime request.
+func (m *Biz) captureActiveLLMConfiguration() error {
+	if m == nil || m.loadLLMConfig == nil {
+		return common.ErrInvalidArgument
+	}
+	configured, err := m.loadLLMConfig()
+	if err != nil {
+		return err
+	}
+	configured, err = workorchconfig.NormalizeLLMConfig(configured)
+	if err != nil {
+		return err
+	}
+	revision, err := workorchconfig.LLMConfigurationRevision(configured)
+	if err != nil {
+		return err
+	}
+	m.activeLLMConfig = workorchconfig.CloneLLMConfig(configured)
+	m.activeLLMConfigurationRevision = revision
+	m.activeLLMConfigurationInitialized = true
+	return nil
+}
+
+func (m *Biz) activeConfiguration() (workorchconfig.LLMConfig, error) {
+	if m == nil || !m.activeLLMConfigurationInitialized || m.activeLLMConfigurationRevision == "" {
+		return workorchconfig.LLMConfig{}, fmt.Errorf("%w: llm owner configuration is not initialized", common.ErrInvalidArgument)
+	}
+	return workorchconfig.CloneLLMConfig(m.activeLLMConfig), nil
+}
+
+func (m *Biz) activeConfigurationStatus() (llmevents.GetActiveConfigurationResult, error) {
+	if _, err := m.activeConfiguration(); err != nil {
+		return llmevents.GetActiveConfigurationResult{}, err
+	}
+	return llmevents.GetActiveConfigurationResult{
+		ProviderID:            runtimecontract.BuiltinAIProxyProviderID,
+		ConfigurationRevision: m.activeLLMConfigurationRevision,
+	}, nil
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
@@ -112,6 +176,9 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", llmevents.TopicAcquireProviderCeiling)
 	m.catalogService = nil
 	m.candidateProvider = nil
+	m.activeLLMConfig = workorchconfig.LLMConfig{}
+	m.activeLLMConfigurationRevision = ""
+	m.activeLLMConfigurationInitialized = false
 }
 
 // handleRuntimeCandidatePreflight renders the sealed C0-C5 request and runs
@@ -655,13 +722,25 @@ func setPrerequisiteMagicError(result magicevent.Result, err error) {
 
 func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	switch ev.ID() {
+	case llmevents.TopicLLMCommandGetActiveConfiguration:
+		if _, ok := ev.Data().(llmevents.GetActiveConfigurationCommand); !ok {
+			setLLMMagicError(result, common.ErrInvalidArgument)
+			return
+		}
+		status, err := m.activeConfigurationStatus()
+		if err != nil {
+			setLLMMagicError(result, err)
+			return
+		}
+		result.Set(status, nil)
+		return
 	case llmevents.TopicLLMCommandGetProviderModelCatalog:
-		cmd, ok := ev.Data().(llmevents.GetProviderModelCatalogCommand)
+		_, ok := ev.Data().(llmevents.GetProviderModelCatalogCommand)
 		if !ok {
 			setLLMMagicError(result, common.ErrInvalidArgument)
 			return
 		}
-		catalog, err := m.getCatalog(ev.Context(), cmd.ProviderID, false)
+		catalog, err := m.getCatalog(ev.Context(), false)
 		if err != nil {
 			setLLMMagicError(result, err)
 			return
@@ -669,12 +748,12 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		result.Set(llmevents.GetProviderModelCatalogResult{Catalog: catalog}, nil)
 		return
 	case llmevents.TopicLLMCommandRefreshProviderModelCatalog:
-		cmd, ok := ev.Data().(llmevents.RefreshProviderModelCatalogCommand)
+		_, ok := ev.Data().(llmevents.RefreshProviderModelCatalogCommand)
 		if !ok {
 			setLLMMagicError(result, common.ErrInvalidArgument)
 			return
 		}
-		catalog, err := m.getCatalog(ev.Context(), cmd.ProviderID, true)
+		catalog, err := m.getCatalog(ev.Context(), true)
 		if err != nil {
 			setLLMMagicError(result, err)
 			return
@@ -712,7 +791,7 @@ func (m *Biz) validateInferenceSelection(ctx context.Context, selection runtimec
 	if selection.ReasoningEffort == "" {
 		return selection, profile.CapabilityRevision, nil
 	}
-	catalog, err := m.getCatalog(ctx, selection.Target.ProviderID, false)
+	catalog, err := m.getCatalog(ctx, false)
 	if err != nil {
 		return runtimecontract.ProviderInferenceSelection{}, "", err
 	}
@@ -804,11 +883,11 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}
-	cfg, err := workorchconfig.Current()
+	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}
-	runtime, err := ResolveProviderClient(cfg.LLM, target, profile)
+	runtime, err := ResolveProviderClient(cfg, target, profile)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}
@@ -845,11 +924,11 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	if model := strings.TrimSpace(request.Model); model != "" && model != ceiling.Selection.Target.ModelID {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider request model %q conflicts with sealed ceiling model %q", common.ErrInvalidArgument, model, ceiling.Selection.Target.ModelID)
 	}
-	cfg, err := workorchconfig.Current()
+	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	runtime, profile, err := ResolveProviderClientForSealedCeiling(cfg.LLM, ceiling)
+	runtime, profile, err := ResolveProviderClientForSealedCeiling(cfg, ceiling)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -907,11 +986,11 @@ func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.Prov
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
-	cfg, err := workorchconfig.Current()
+	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
-	runtime, err := ResolveProviderClient(cfg.LLM, target, profile)
+	runtime, err := ResolveProviderClient(cfg, target, profile)
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
@@ -919,36 +998,29 @@ func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.Prov
 }
 
 func (m *Biz) resolveTarget(ctx context.Context, target runtimecontract.ProviderModelTarget, operation string) (llmmodels.ResolvedProviderModelProfile, error) {
-	cfg, err := workorchconfig.Current()
+	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ResolvedProviderModelProfile{}, err
 	}
 	target = target.Normalized()
 	var catalog *llmmodels.ProviderModelCatalog
 	if target.ProviderID == runtimecontract.BuiltinAIProxyProviderID {
-		current, catalogErr := m.getCatalog(ctx, target.ProviderID, false)
+		current, catalogErr := m.getCatalog(ctx, false)
 		if catalogErr != nil && current.State == llmmodels.ProviderCatalogStateUnavailable {
 			return llmmodels.ResolvedProviderModelProfile{}, catalogErr
 		}
 		catalog = &current
 	}
-	return ResolveProviderModelTarget(cfg.LLM, catalog, target, operation)
+	return ResolveProviderModelTarget(cfg, catalog, target, operation)
 }
 
-func (m *Biz) getCatalog(ctx context.Context, providerID string, forceRefresh bool) (llmmodels.ProviderModelCatalog, error) {
-	providerID = strings.TrimSpace(providerID)
-	if providerID == "" {
-		providerID = runtimecontract.BuiltinAIProxyProviderID
-	}
-	if providerID != runtimecontract.BuiltinAIProxyProviderID {
-		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog is only available for built-in ai-proxy", common.ErrInvalidArgument)
-	}
+func (m *Biz) getCatalog(ctx context.Context, forceRefresh bool) (llmmodels.ProviderModelCatalog, error) {
 	if m == nil || m.catalogService == nil {
 		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
 	}
-	cfg, err := workorchconfig.Current()
+	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ProviderModelCatalog{}, err
 	}
-	return m.catalogService.GetCatalog(ctx, cfg.LLM, forceRefresh)
+	return m.catalogService.GetCatalog(ctx, cfg, forceRefresh)
 }

@@ -83,11 +83,15 @@ type RuntimeAggregate struct {
 	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
 	// observations enter only through RuntimeInternalEvent and never mutate
 	// Facts directly.
-	Reconciliation      runtimecontract.RuntimeCWIReconciliationLedger
-	Decision            runtimecontract.RuntimeDecision
-	ActiveDispatch      *SealedDispatch
-	CompletedDispatches []SealedDispatch
-	ProcessedEventIDs   []string
+	Reconciliation runtimecontract.RuntimeCWIReconciliationLedger
+	// CoverageProofLineage is the bounded SM-2 receipt-to-reseal audit ledger.
+	// It records source proof and current-binding resolutions without changing
+	// immutable EvidenceFact binding refs or granting a capability owner credit.
+	CoverageProofLineage []runtimecontract.RuntimeCoverageProofLineage
+	Decision             runtimecontract.RuntimeDecision
+	ActiveDispatch       *SealedDispatch
+	CompletedDispatches  []SealedDispatch
+	ProcessedEventIDs    []string
 	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for File-owner
 	// repair-surface facts.  It is separate from generic event IDs so owner
 	// confirmation idempotency cannot become a global event index.
@@ -397,6 +401,11 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 	switch evidence.Status {
 	case ExecutionEvidenceStatusAccepted:
 		aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
+		if evidence.Receipt != nil {
+			if err := appendAcceptedCoverageProofLineage(&aggregate, fact, *evidence.Receipt); err != nil {
+				return EvidenceCommitResult{}, err
+			}
+		}
 		// An operation that selected one or more sealed bindings was authorized to
 		// close coverage only through those exact proofs.  If its persisted owner
 		// receipt earns no credit at all, another provider request cannot repair
@@ -583,7 +592,7 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 		canAdvanceFocus := !dispatchInvalidated && len(aggregate.Facts.Prerequisites.Pending) == 0
 		previousFocusID := aggregate.Facts.Focus.ID
 		if canAdvanceFocus {
-			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts, aggregate.CoverageProofLineage)
 			if aggregate.Facts.Focus.ID != previousFocusID {
 				// Only the Orchestrator-owned evidence commit may advance SM-2.
 				// When that reaches an unbound placeholder, reopen the retained
@@ -597,7 +606,7 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 		if canAdvanceFocus {
 			previousSnapshot = &aggregate.Decision.AuthoritySnapshot
 		}
-		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, previousSnapshot)
+		facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, previousSnapshot, aggregate.CoverageProofLineage)
 		if err != nil {
 			return EvidenceCommitResult{}, err
 		}
@@ -1061,6 +1070,9 @@ func (a RuntimeAggregate) Validate() error {
 	}
 	if err := a.Reconciliation.Validate(); err != nil {
 		return fmt.Errorf("runtime aggregate reconciliation ledger: %w", err)
+	}
+	if err := runtimecontract.ValidateRuntimeCoverageProofLineage(a.CoverageProofLineage); err != nil {
+		return fmt.Errorf("runtime aggregate coverage proof lineage: %w", err)
 	}
 	if err := a.Definition.Validate(); err != nil {
 		return err

@@ -16,8 +16,9 @@ import (
 // must not discard the continuation: once acquisition commits, the reducer
 // has to return to the sealed repair action rather than infer a new action
 // from raw missing-evidence kinds.
-func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeFacts {
+func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	decision.RequiredOutput = decision.RequiredOutput.Normalized()
 	focusID := strings.TrimSpace(facts.Focus.ID)
 	if focusID == "" {
@@ -33,14 +34,14 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	// state-change -> validation handoff in the same reduction.
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == focusID &&
 		facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange &&
-		acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
+		acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective, proofLineage) {
 		directive := facts.RepairDirective.Clone()
 		// A repair directive's mutable supersedes revision is the evidence
 		// barrier for its *next* required action. The closure keeps its original
 		// baseline and identity; after the durable repair succeeds, validation
 		// must be newer than that exact repair receipt rather than reusing a
 		// validation fact that preceded it.
-		directive.SupersedesEvidenceRevision = acceptedRepairStateChangeRevision(facts, &directive)
+		directive.SupersedesEvidenceRevision = acceptedRepairStateChangeRevision(facts, &directive, proofLineage)
 		directive.RequiredState = runtimecontract.ConvergenceStateNeedValidation
 		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
 		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
@@ -93,13 +94,14 @@ func repairDirectiveRequired(facts runtimecontract.RuntimeFacts) bool {
 	return needsStateChangeForOwnerGroundedFailure(facts)
 }
 
-func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtimecontract.RuntimeDecision) (runtimecontract.RuntimeDecision, bool, error) {
+func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtimecontract.RuntimeDecision, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
 	facts = facts.Normalized()
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	if facts.RepairDirective == nil {
 		return base, false, nil
 	}
 	directive := facts.RepairDirective.Normalized()
-	if directive.FocusID != facts.Focus.ID || repairDirectiveEvidenceSatisfied(facts, directive) {
+	if directive.FocusID != facts.Focus.ID || repairDirectiveEvidenceSatisfied(facts, directive, proofLineage) {
 		return base, false, nil
 	}
 	switch directive.RequiredState {
@@ -114,7 +116,8 @@ func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtime
 	}
 }
 
-func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, directive runtimecontract.RuntimeRepairDirective) bool {
+func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, directive runtimecontract.RuntimeRepairDirective, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	required := directive.RequiredEvidenceKinds
 	if len(required) == 0 {
 		switch directive.RequiredState {
@@ -129,7 +132,15 @@ func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, direct
 	accepted := map[string]struct{}{}
 	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
 	for _, evidence := range facts.Evidence.Accepted {
-		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		if len(evidence.CoverageWorkItemIDs) == 0 {
+			if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+				continue
+			}
+		} else if len(directive.CoverageWorkItemIDs) != 0 {
+			if !runtimeEvidenceAppliesToCoverageIDsWithLineage(facts, evidence, directive.CoverageWorkItemIDs, proofLineage) {
+				continue
+			}
+		} else if !runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
 			continue
 		}
 		// A directive is a same-focus repair continuation. Evidence admitted
@@ -275,18 +286,19 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	return append([]string(nil), fallback...)
 }
 
-func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) bool {
-	return acceptedRepairStateChangeRevision(facts, directive) != ""
+func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {
+	return acceptedRepairStateChangeRevision(facts, directive, proofLineages...) != ""
 }
 
 // acceptedRepairStateChangeRevision returns the latest accepted durable repair
 // effect that is newer than the directive's barrier and matches its sealed
 // target set. It is an owner-local fact query; the returned revision advances
 // the follow-up validation barrier without changing the immutable closure.
-func acceptedRepairStateChangeRevision(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) string {
+func acceptedRepairStateChangeRevision(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) string {
 	if directive == nil {
 		return ""
 	}
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	// Assessment is the final evidence-quality gate, after every required
 	// evidence kind is present.  It must not keep a state-change repair
 	// directive active when that repair has already produced a later accepted
@@ -298,14 +310,25 @@ func acceptedRepairStateChangeRevision(facts runtimecontract.RuntimeFacts, direc
 	requiredTargets := directive.TargetRefs
 	latest := ""
 	for _, evidence := range facts.Evidence.Accepted {
-		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == runtimecontract.EvidenceKindStateChange &&
-			(baseline == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, baseline)) {
-			if len(requiredTargets) > 0 && !runtimeTargetRefsIntersect(requiredTargets, evidence.TargetRefs) {
+		if evidence.Kind != runtimecontract.EvidenceKindStateChange || weakRuntimeEvidence(evidence) ||
+			(baseline != "" && !runtimecontract.EvidenceRevisionAfter(evidence.Revision, baseline)) {
+			continue
+		}
+		if len(evidence.CoverageWorkItemIDs) == 0 {
+			continue
+		}
+		if len(directive.CoverageWorkItemIDs) != 0 {
+			if !runtimeEvidenceAppliesToCoverageIDsWithLineage(facts, evidence, directive.CoverageWorkItemIDs, proofLineage) {
 				continue
 			}
-			if latest == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, latest) {
-				latest = evidence.Revision
-			}
+		} else if !runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, proofLineage) {
+			continue
+		}
+		if len(requiredTargets) > 0 && !runtimeTargetRefsIntersect(requiredTargets, evidence.TargetRefs) {
+			continue
+		}
+		if latest == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, latest) {
+			latest = evidence.Revision
 		}
 	}
 	return latest

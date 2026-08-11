@@ -107,7 +107,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [loading, setLoading] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
-  const [activationAdvancedLLM, setActivationAdvancedLLM] = useState(false);
   const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
   const [workspaceSetupDraftSession, setWorkspaceSetupDraftSession] = useState<WorkspaceSetupDraftSession | undefined>(undefined);
@@ -218,17 +217,16 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   });
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
-  const activationLLMTargetOptions = helpers.chatTargetOptions(configuration, activationAdvancedLLM);
+  const activationLLMTargetOptions = helpers.chatTargetOptions(configuration);
 	const selectedOption = activationLLMTargetOptions.find((item) => item.value === activationSelectedTargetKey);
   const activationReadyTarget = helpers.activationReadyChatTarget(configuration);
-  const standardActivationLLMTargetOptions = helpers.chatTargetOptions(configuration, false);
   const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
   const defaultChatProviderId = configuration?.llm.defaultChat?.providerId || 'ai-proxy';
-  // Readiness for system default: catalog ready models or custom provider models that declare chat_completions.
+  // Readiness for the system default requires a ready ai-proxy Responses model.
   const defaultChatReady = Boolean(
     defaultChatModelId &&
       (
-        helpers.chatTargetOptions(configuration, true).some(
+        helpers.chatTargetOptions(configuration).some(
           (item) => item.providerId === defaultChatProviderId && item.modelId === defaultChatModelId
         )
       )
@@ -1164,10 +1162,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const requestWorkspaceActivation = (intent: 'resume' | 'restart' = 'resume') => {
     const target = activationReadyTarget;
 	const defaultSelection = snapshot?.workspace.defaultLLMSelection;
-    const standardTargetReady = standardActivationLLMTargetOptions.some(
-      (item) => item.providerId === target?.providerId && item.modelId === target?.modelId
-    );
-    setActivationAdvancedLLM(Boolean(target && !standardTargetReady));
     setActivationIntent(intent);
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
@@ -2848,39 +2842,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name="doDId" label="验收标准" rules={[{ required: true }]}>
             <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
           </Form.Item>
-          <Form.Item label="LLM 模型选择模式">
-            <Space>
-              <Button
-                type={!activationAdvancedLLM ? 'primary' : 'default'}
-                disabled={standardActivationLLMTargetOptions.length === 0}
-                onClick={() => {
-                  setActivationAdvancedLLM(false);
-                  const standardTarget = standardActivationLLMTargetOptions.find(
-                    (item) => item.providerId === activationReadyTarget?.providerId && item.modelId === activationReadyTarget?.modelId
-                  ) ?? standardActivationLLMTargetOptions[0];
-                  activationForm.setFieldsValue({
-                    llmTargetKey: standardTarget?.value,
-                    llmTarget: standardTarget ? { providerId: standardTarget.providerId, modelId: standardTarget.modelId } : undefined
-                  });
-                }}
-              >
-                普通（ai-proxy）
-              </Button>
-              <Button
-                type={activationAdvancedLLM ? 'primary' : 'default'}
-                onClick={() => setActivationAdvancedLLM(true)}
-              >
-                高级（含自定义 Provider）
-              </Button>
-            </Space>
-          </Form.Item>
           <Form.Item
             name="llmTargetKey"
             label="LLM 模型"
             rules={[{ required: true, message: '请选择 ready 的对话模型' }]}
             extra={
               !activationLLMReady
-                ? '当前没有 ready 的对话模型；请先在配置页刷新 catalog 或声明自定义模型 operations'
+                ? '当前没有 ready 的对话模型；请先在配置页刷新 ai-proxy 模型目录'
                 : defaultChatModelId
                   ? `系统默认：${defaultChatProviderId}/${defaultChatModelId}${defaultChatReady ? '' : `（未 ready，已自动选择 ${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}）`}`
                   : `已自动选择 ready 模型：${activationReadyTarget?.providerId}/${activationReadyTarget?.modelId}`

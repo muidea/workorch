@@ -11,7 +11,7 @@ import (
 func TestResolveProviderModelTargetUsesCatalogOutputCapabilityWithoutLocalCap(t *testing.T) {
 	cfg := testCatalogOutputCeilingConfig("large-output-model")
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "large-output-model"}
-	profile, err := ResolveProviderModelTarget(cfg, testCatalogOutputCeiling(target), target, workorchconfig.LLMOperationChatCompletions)
+	profile, err := ResolveProviderModelTarget(cfg, testCatalogOutputCeiling(target), target, workorchconfig.LLMOperationResponses)
 	if err != nil {
 		t.Fatalf("ResolveProviderModelTarget: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestResolveProviderModelTargetDerivesRequestBytesFromSelectedModel(t *testi
 	catalog := testCatalogOutputCeiling(target)
 	catalog.Models[0].ContextWindowTokens = 2_000_000
 
-	profile, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationChatCompletions)
+	profile, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationResponses)
 	if err != nil {
 		t.Fatalf("ResolveProviderModelTarget: %v", err)
 	}
@@ -63,7 +63,7 @@ func testCatalogOutputCeilingConfig(modelID string) workorchconfig.LLMConfig {
 func testCatalogOutputCeiling(target runtimecontract.ProviderModelTarget) *llmmodels.ProviderModelCatalog {
 	return &llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{
 		Target: target, ContextWindowTokens: 1_000_000, MaxOutputTokens: 65_536,
-		Operations: []string{workorchconfig.LLMOperationChatCompletions}, CapabilityReady: true,
+		Operations: []string{workorchconfig.LLMOperationResponses}, CapabilityReady: true,
 		CapabilityRevision: "capability-sha256:test",
 	}}}
 }

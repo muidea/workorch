@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-11
 
 
 ## LLM Provider（2026-07-15）
@@ -129,10 +129,13 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime 单 owner live 收口：RSO-10。** typed semantic correction、proof-batch 最小 wire、
-   exact-active-batch reducer invariant 与 canonical combined Definition projection 已在 RSO-4～RSO-8 完成代码收口，
-   最新增量已通过 fmt/vet/full/boundary/affected-package race/managed。当前用 fresh deployment 执行 LSP Bridge 的
-   order/batch/feasibility/seal/dispatch/receipt/evidence positive matrix，并以独立 fault injection 验证 whole-document recovery。
+1. **必需 Runtime 单 owner live 收口：RSO-22。** typed semantic correction、proof-batch 最小 wire、
+   exact-active-batch reducer invariant、canonical combined Definition projection 与 RSO-26 proof-lineage reconciliation
+   已完成代码收口，最新增量已通过 fmt/vet/full/boundary/affected-package race/managed。RSO-26 由 Orchestrator SM-2
+   封存 source proof identity，并在 re-seal 后仅以 persisted `equivalent` resolution 复用 matching proof-kind credit；
+   `incompatible` resolution 保留旧 audit、写入 typed gap 且零 credit。下一步用 fresh deployment 执行 LSP Bridge 的
+   order/batch/feasibility/seal/dispatch/receipt/equivalent-or-incompatible/evidence positive matrix，并以独立 fault injection
+   验证 whole-document recovery。
    普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
    [RSO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。

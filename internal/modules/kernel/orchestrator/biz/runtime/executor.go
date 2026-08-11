@@ -442,7 +442,7 @@ func (c *RuntimeController) recordOperationGovernanceRequired(ctx context.Contex
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
 	}
-	facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if reduceErr != nil {
 		return RuntimeAggregate{}, reduceErr
 	}

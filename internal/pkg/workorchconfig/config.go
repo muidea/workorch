@@ -93,22 +93,20 @@ const (
 	MaxAIProxyTimeout     = 10 * time.Minute
 )
 
-// Known LLM operations for custom provider model declarations.
+// Known LLM operations for ai-proxy catalog and model override declarations.
 const (
-	LLMOperationChatCompletions = "chat_completions"
-	LLMOperationResponses       = "responses"
-	LLMOperationEmbeddings      = "embeddings"
+	LLMOperationResponses  = "responses"
+	LLMOperationEmbeddings = "embeddings"
 )
 
-// LLMConfig is the canonical ai-proxy-first configuration contract.
-// Old defaultProvider/providers/modelCapabilities fields are intentionally removed
-// and rejected by UnmarshalJSON during startup config loading.
+// LLMConfig is the canonical ai-proxy-only configuration contract.
+// Model access always traverses ai-proxy; direct provider declarations are not
+// part of the configuration surface.
 type LLMConfig struct {
-	AIProxy          AIProxyProviderConfig              `json:"aiProxy" toml:"aiProxy"`
-	DefaultChat      ProviderModelTargetConfig          `json:"defaultChat" toml:"defaultChat"`
-	DefaultEmbedding *ProviderModelTargetConfig         `json:"defaultEmbedding,omitempty" toml:"defaultEmbedding,omitempty"`
-	Budget           LLMContextBudgetPolicyConfig       `json:"budget" toml:"budget"`
-	CustomProviders  map[string]CustomLLMProviderConfig `json:"customProviders,omitempty" toml:"customProviders,omitempty"`
+	AIProxy          AIProxyProviderConfig        `json:"aiProxy" toml:"aiProxy"`
+	DefaultChat      ProviderModelTargetConfig    `json:"defaultChat" toml:"defaultChat"`
+	DefaultEmbedding *ProviderModelTargetConfig   `json:"defaultEmbedding,omitempty" toml:"defaultEmbedding,omitempty"`
+	Budget           LLMContextBudgetPolicyConfig `json:"budget" toml:"budget"`
 }
 
 type AIProxyProviderConfig struct {
@@ -139,32 +137,8 @@ type AIProxyModelOverrideConfig struct {
 	Operations          []string `json:"operations" toml:"operations"`
 }
 
-type CustomLLMProviderConfig struct {
-	Provider   string                          `json:"provider" toml:"provider"`
-	APISurface string                          `json:"apiSurface" toml:"apiSurface"`
-	BaseURL    string                          `json:"baseURL" toml:"baseURL"`
-	APIKey     string                          `json:"apiKey" toml:"apiKey"`
-	Timeout    string                          `json:"timeout" toml:"timeout"`
-	Models     map[string]CustomLLMModelConfig `json:"models" toml:"models"`
-}
-
-type CustomLLMModelConfig struct {
-	ContextWindowTokens  int                 `json:"contextWindowTokens" toml:"contextWindowTokens"`
-	MaxOutputTokens      int                 `json:"maxOutputTokens" toml:"maxOutputTokens"`
-	Operations           []string            `json:"operations" toml:"operations"`
-	Temperature          *float64            `json:"temperature,omitempty" toml:"temperature,omitempty"`
-	ThinkingBudgetTokens int                 `json:"thinkingBudgetTokens,omitempty" toml:"thinkingBudgetTokens,omitempty"`
-	Cache                ProviderCacheConfig `json:"cache,omitempty" toml:"cache,omitempty"`
-}
-
-type ProviderCacheConfig struct {
-	Mode                string   `json:"mode,omitempty" toml:"mode,omitempty"`
-	PromptCacheKey      *bool    `json:"promptCacheKey,omitempty" toml:"promptCacheKey,omitempty"`
-	MessageCacheControl *bool    `json:"messageCacheControl,omitempty" toml:"messageCacheControl,omitempty"`
-	UsageFields         []string `json:"usageFields,omitempty" toml:"usageFields,omitempty"`
-}
-
-// UnmarshalJSON rejects unknown LLM fields so old TOML/JSON contracts fail fast.
+// UnmarshalJSON rejects unknown LLM fields so direct-provider configuration
+// cannot silently re-enter the supported surface.
 func (c *LLMConfig) UnmarshalJSON(data []byte) error {
 	type llmConfigAlias LLMConfig
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -183,8 +157,8 @@ func (c ProviderModelTargetConfig) Normalized() ProviderModelTargetConfig {
 
 func (c ProviderModelTargetConfig) Validate() error {
 	c = c.Normalized()
-	if c.ProviderID == "" {
-		return fmt.Errorf("%w: llm target requires providerID", common.ErrInvalidArgument)
+	if c.ProviderID != BuiltinAIProxyProviderID {
+		return fmt.Errorf("%w: llm target providerID must be %q", common.ErrInvalidArgument, BuiltinAIProxyProviderID)
 	}
 	if c.ModelID == "" {
 		return fmt.Errorf("%w: llm target requires modelID", common.ErrInvalidArgument)
@@ -217,9 +191,8 @@ func DefaultLLMContextBudgetPolicyConfig() LLMContextBudgetPolicyConfig {
 
 func DefaultLLMConfig() LLMConfig {
 	return LLMConfig{
-		AIProxy:         DefaultAIProxyProviderConfig(),
-		Budget:          DefaultLLMContextBudgetPolicyConfig(),
-		CustomProviders: map[string]CustomLLMProviderConfig{},
+		AIProxy: DefaultAIProxyProviderConfig(),
+		Budget:  DefaultLLMContextBudgetPolicyConfig(),
 	}
 }
 
@@ -314,6 +287,31 @@ func Current() (Config, error) {
 	return cfg, nil
 }
 
+// Persisted returns the configuration that will be loaded by the next process
+// start without mutating the active framework configuration manager. It is
+// used by configuration writers whose changes deliberately require restart.
+func Persisted() (Config, error) {
+	configPath, err := ApplicationConfigPath()
+	if err != nil {
+		return Config{}, err
+	}
+	payload, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Current()
+		}
+		return Config{}, err
+	}
+	var cfg Config
+	if err := toml.Unmarshal(payload, &cfg); err != nil {
+		return Config{}, err
+	}
+	if err := normalizeConfig(&cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
 func ApplicationConfigPath() (string, error) {
 	configDir := strings.TrimSpace(os.Getenv(EnvConfigDir))
 	if configDir == "" {
@@ -332,9 +330,6 @@ func Save(next Config) error {
 	}
 	if err := normalizeConfig(&next); err != nil {
 		return err
-	}
-	if next.LLM.CustomProviders == nil {
-		next.LLM.CustomProviders = map[string]CustomLLMProviderConfig{}
 	}
 	if next.LLM.AIProxy.ModelOverrides == nil {
 		next.LLM.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{}
@@ -463,17 +458,9 @@ func NormalizeLLMConfig(cfg LLMConfig) (LLMConfig, error) {
 	if cfg.Budget.EstimatedTokensPerByte <= 0 {
 		cfg.Budget.EstimatedTokensPerByte = defaults.Budget.EstimatedTokensPerByte
 	}
-	if cfg.CustomProviders == nil {
-		cfg.CustomProviders = map[string]CustomLLMProviderConfig{}
-	}
-	// Canonicalize map keys (trim) so readiness/revision/client lookup share one key space.
-	// Model IDs are exact provider protocol values; only trim collisions are invalid.
+	// Model IDs are exact ai-proxy protocol values; only trim collisions are invalid.
 	var err error
 	cfg.AIProxy.ModelOverrides, err = canonicalizeAIProxyModelOverrides(cfg.AIProxy.ModelOverrides)
-	if err != nil {
-		return LLMConfig{}, err
-	}
-	cfg.CustomProviders, err = canonicalizeCustomProviders(cfg.CustomProviders)
 	if err != nil {
 		return LLMConfig{}, err
 	}
@@ -518,66 +505,6 @@ func canonicalizeAIProxyModelOverrides(source map[string]AIProxyModelOverrideCon
 	return ret, nil
 }
 
-func canonicalizeCustomProviders(source map[string]CustomLLMProviderConfig) (map[string]CustomLLMProviderConfig, error) {
-	if len(source) == 0 {
-		return map[string]CustomLLMProviderConfig{}, nil
-	}
-	ret := make(map[string]CustomLLMProviderConfig, len(source))
-	// fold -> first original key (after trim) that claimed this fold.
-	seenProviders := map[string]string{}
-	for providerID, provider := range source {
-		key := strings.TrimSpace(providerID)
-		if key == "" {
-			return nil, fmt.Errorf("%w: llm.customProviders requires non-empty provider id", common.ErrInvalidArgument)
-		}
-		fold := strings.ToLower(key)
-		if prev, ok := seenProviders[fold]; ok {
-			return nil, fmt.Errorf("%w: llm.customProviders has duplicate provider id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, key, prev)
-		}
-		if _, exists := ret[key]; exists {
-			return nil, fmt.Errorf("%w: llm.customProviders has duplicate provider id %q after trim", common.ErrInvalidArgument, key)
-		}
-		seenProviders[fold] = key
-		provider.Provider = strings.TrimSpace(provider.Provider)
-		provider.APISurface = strings.TrimSpace(provider.APISurface)
-		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
-		provider.Timeout = strings.TrimSpace(provider.Timeout)
-		models, err := canonicalizeCustomProviderModels(key, provider.Models)
-		if err != nil {
-			return nil, err
-		}
-		provider.Models = models
-		ret[key] = provider
-	}
-	return ret, nil
-}
-
-func canonicalizeCustomProviderModels(providerID string, source map[string]CustomLLMModelConfig) (map[string]CustomLLMModelConfig, error) {
-	if len(source) == 0 {
-		return map[string]CustomLLMModelConfig{}, nil
-	}
-	ret := make(map[string]CustomLLMModelConfig, len(source))
-	for modelID, model := range source {
-		mKey := strings.TrimSpace(modelID)
-		if mKey == "" {
-			return nil, fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, providerID)
-		}
-		if _, exists := ret[mKey]; exists {
-			return nil, fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q after trim", common.ErrInvalidArgument, providerID, mKey)
-		}
-		ops := make([]string, 0, len(model.Operations))
-		for _, op := range model.Operations {
-			op = strings.TrimSpace(op)
-			if op != "" {
-				ops = append(ops, op)
-			}
-		}
-		model.Operations = ops
-		ret[mKey] = model
-	}
-	return ret, nil
-}
-
 func ValidateLLMConfig(cfg LLMConfig) error {
 	if err := validateAIProxyProviderConfig(cfg.AIProxy); err != nil {
 		return err
@@ -592,36 +519,6 @@ func ValidateLLMConfig(cfg LLMConfig) error {
 	}
 	if err := validateLLMContextBudgetPolicyConfig(cfg.Budget); err != nil {
 		return err
-	}
-	seenProviders := map[string]string{}
-	for id, provider := range cfg.CustomProviders {
-		trimmed := strings.TrimSpace(id)
-		if trimmed == "" {
-			return fmt.Errorf("%w: llm.customProviders requires non-empty provider id", common.ErrInvalidArgument)
-		}
-		fold := strings.ToLower(trimmed)
-		if prev, ok := seenProviders[fold]; ok {
-			return fmt.Errorf("%w: llm.customProviders has duplicate provider id %q (conflicts with %q after trim/case-fold)", common.ErrInvalidArgument, trimmed, prev)
-		}
-		seenProviders[fold] = trimmed
-		if strings.EqualFold(trimmed, BuiltinAIProxyProviderID) {
-			return fmt.Errorf("%w: llm.customProviders id %q is reserved for built-in ai-proxy", common.ErrInvalidArgument, trimmed)
-		}
-		if err := validateCustomLLMProviderConfig(trimmed, provider); err != nil {
-			return err
-		}
-		// Model IDs are case-sensitive protocol values; reject only trim collisions.
-		seenModels := map[string]string{}
-		for modelID := range provider.Models {
-			modelTrim := strings.TrimSpace(modelID)
-			if modelTrim == "" {
-				return fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, trimmed)
-			}
-			if prev, ok := seenModels[modelTrim]; ok {
-				return fmt.Errorf("%w: llm.customProviders[%s].models has duplicate model id %q (conflicts with %q)", common.ErrInvalidArgument, trimmed, modelTrim, prev)
-			}
-			seenModels[modelTrim] = modelTrim
-		}
 	}
 	return nil
 }
@@ -701,7 +598,7 @@ func validateAIProxyProviderConfig(cfg AIProxyProviderConfig) error {
 		for _, operation := range override.Operations {
 			operation = strings.TrimSpace(operation)
 			switch operation {
-			case LLMOperationChatCompletions, LLMOperationResponses, LLMOperationEmbeddings:
+			case LLMOperationResponses, LLMOperationEmbeddings:
 			default:
 				return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s].operations has unknown operation %q", common.ErrInvalidArgument, modelID, operation)
 			}
@@ -720,69 +617,6 @@ func validateLLMContextBudgetPolicyConfig(cfg LLMContextBudgetPolicyConfig) erro
 	}
 	if cfg.EstimatedTokensPerByte <= 0 {
 		return fmt.Errorf("%w: llm.budget.estimatedTokensPerByte must be positive", common.ErrInvalidArgument)
-	}
-	return nil
-}
-
-func validateCustomLLMProviderConfig(id string, cfg CustomLLMProviderConfig) error {
-	if strings.TrimSpace(cfg.Provider) == "" {
-		return fmt.Errorf("%w: llm.customProviders[%s].provider is required", common.ErrInvalidArgument, id)
-	}
-	if strings.TrimSpace(cfg.APISurface) == "" {
-		return fmt.Errorf("%w: llm.customProviders[%s].apiSurface is required", common.ErrInvalidArgument, id)
-	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		return fmt.Errorf("%w: llm.customProviders[%s].baseURL is required", common.ErrInvalidArgument, id)
-	}
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return fmt.Errorf("%w: llm.customProviders[%s].baseURL is invalid: %v", common.ErrInvalidArgument, id, err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("%w: llm.customProviders[%s].baseURL must use http or https", common.ErrInvalidArgument, id)
-	}
-	if parsed.Host == "" {
-		return fmt.Errorf("%w: llm.customProviders[%s].baseURL requires host", common.ErrInvalidArgument, id)
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("%w: llm.customProviders[%s].baseURL must not include userinfo, query or fragment", common.ErrInvalidArgument, id)
-	}
-	if strings.TrimSpace(cfg.Timeout) != "" {
-		if _, err := parsePositiveDuration(fmt.Sprintf("llm.customProviders[%s].timeout", id), cfg.Timeout); err != nil {
-			return err
-		}
-	}
-	if len(cfg.Models) == 0 {
-		return fmt.Errorf("%w: llm.customProviders[%s].models must declare at least one model", common.ErrInvalidArgument, id)
-	}
-	for modelID, model := range cfg.Models {
-		modelID = strings.TrimSpace(modelID)
-		if modelID == "" {
-			return fmt.Errorf("%w: llm.customProviders[%s].models requires non-empty model id", common.ErrInvalidArgument, id)
-		}
-		if model.ContextWindowTokens <= 0 || model.MaxOutputTokens <= 0 {
-			return fmt.Errorf("%w: llm.customProviders[%s].models[%s] requires positive contextWindowTokens and maxOutputTokens", common.ErrInvalidArgument, id, modelID)
-		}
-		if model.MaxOutputTokens >= model.ContextWindowTokens {
-			return fmt.Errorf("%w: llm.customProviders[%s].models[%s] maxOutputTokens must be less than contextWindowTokens", common.ErrInvalidArgument, id, modelID)
-		}
-		if len(model.Operations) == 0 {
-			return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations is required", common.ErrInvalidArgument, id, modelID)
-		}
-		seenOps := map[string]struct{}{}
-		for _, operation := range model.Operations {
-			operation = strings.TrimSpace(operation)
-			switch operation {
-			case LLMOperationChatCompletions, LLMOperationResponses, LLMOperationEmbeddings:
-			default:
-				return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations has unknown operation %q", common.ErrInvalidArgument, id, modelID, operation)
-			}
-			if _, ok := seenOps[operation]; ok {
-				return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations has duplicate operation %q", common.ErrInvalidArgument, id, modelID, operation)
-			}
-			seenOps[operation] = struct{}{}
-		}
 	}
 	return nil
 }

@@ -407,7 +407,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 				recordpayload.PayloadKeyStepID:       "run-bounded-events/step-usage",
 				recordpayload.PayloadKeyProviderID:   "provider-a",
 				recordpayload.PayloadKeyModel:        "model-a",
-				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyOperation:    "responses",
 				recordpayload.PayloadKeyInputTokens:  30,
 				recordpayload.PayloadKeyOutputTokens: 14,
 				recordpayload.PayloadKeyTotalTokens:  44,
@@ -2450,7 +2450,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 				recordpayload.PayloadKeyProviderID:   "provider-a",
 				recordpayload.PayloadKeyProvider:     "compatible",
 				recordpayload.PayloadKeyModel:        "model-a",
-				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyOperation:    "responses",
 				recordpayload.PayloadKeyInputTokens:  120,
 				recordpayload.PayloadKeyOutputTokens: 30,
 				recordpayload.PayloadKeyTotalTokens:  150,
@@ -2480,7 +2480,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 				recordpayload.PayloadKeyProviderID:   "provider-b",
 				recordpayload.PayloadKeyProvider:     "compatible",
 				recordpayload.PayloadKeyModel:        "model-b",
-				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyOperation:    "responses",
 				recordpayload.PayloadKeyInputTokens:  60,
 				recordpayload.PayloadKeyOutputTokens: 10,
 				recordpayload.PayloadKeyTotalTokens:  70,
@@ -2647,7 +2647,7 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 			UsageSource:  llmcommon.UsageSourceEstimated,
 			Estimated:    true,
 			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
-				"providerMode":              llmcommon.ProviderCacheModeAutoPrefix,
+				"providerMode":              "ai_proxy",
 				"autoPrefixCacheExpected":   true,
 				"renderedStablePrefixBytes": 1024,
 			}),
@@ -2664,7 +2664,7 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 			UsageSource:  llmcommon.UsageSourceProviderNative,
 			CacheUsage:   mustReadModelEventPayload(t, map[string]any{"cacheReadTokens": 20, "cacheCreationTokens": 8}),
 			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
-				"providerMode":              llmcommon.ProviderCacheModeAutoPrefix,
+				"providerMode":              "ai_proxy",
 				"autoPrefixCacheExpected":   true,
 				"renderedStablePrefixBytes": 1024,
 			}),
@@ -2676,7 +2676,7 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 	}
 	item := summary.ProviderModelBreakdown[0]
 	if item.APISurface != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
-		item.ProviderMode != llmcommon.ProviderCacheModeAutoPrefix ||
+		item.ProviderMode != "ai_proxy" ||
 		item.EntryTotal != 2 ||
 		item.InputTokens != 300 ||
 		item.OutputTokens != 30 ||
@@ -2689,36 +2689,6 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 		item.CacheCreationCount != 1 ||
 		item.AutoPrefixExpectedCount != 2 {
 		t.Fatalf("provider/model breakdown = %+v, want merged token counters", summary.ProviderModelBreakdown)
-	}
-}
-
-func TestSummarizeLLMUsageDoesNotMergeDifferentSurfacesOrProviderModes(t *testing.T) {
-	summary := readmodelprojection.SummarizeLLMUsage([]projectioncontract.LLMUsageTrace{
-		{
-			ProviderID: "provider-a",
-			Provider:   "compatible",
-			APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
-			Model:      "model-a",
-			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
-				"providerMode": llmcommon.ProviderCacheModeAutoPrefix,
-			}),
-		},
-		{
-			ProviderID: "provider-a",
-			Provider:   "compatible",
-			APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
-			Model:      "model-a",
-			CacheMarkers: mustReadModelEventPayload(t, map[string]any{
-				"providerMode": llmcommon.ProviderCacheModeNone,
-			}),
-		},
-	})
-
-	if len(summary.ProviderModelBreakdown) != 2 {
-		t.Fatalf("provider/model breakdown = %+v, want distinct surface/mode entries", summary.ProviderModelBreakdown)
-	}
-	if summary.ProviderModelBreakdown[0].APISurface == summary.ProviderModelBreakdown[1].APISurface {
-		t.Fatalf("provider/model breakdown = %+v, want surface-specific entries", summary.ProviderModelBreakdown)
 	}
 }
 
@@ -3680,7 +3650,7 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 			recordpayload.PayloadKeyProviderID:   "provider-run-scoped",
 			recordpayload.PayloadKeyProvider:     "compatible",
 			recordpayload.PayloadKeyModel:        "model-run-scoped",
-			recordpayload.PayloadKeyOperation:    "chat_completions",
+			recordpayload.PayloadKeyOperation:    "responses",
 			recordpayload.PayloadKeyInputTokens:  32,
 			recordpayload.PayloadKeyOutputTokens: 8,
 			recordpayload.PayloadKeyTotalTokens:  40,

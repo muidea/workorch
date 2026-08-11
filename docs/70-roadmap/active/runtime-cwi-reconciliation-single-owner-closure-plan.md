@@ -26,8 +26,9 @@ checks, metrics, or per-CWI proof contracts.
 
 ## 2. Latest Live Assessment
 
-Fresh deployed validation of workspace `ws-a8bada88e7b1b5f8`, Runs `run-061` and `run-062`, is the current fact baseline.
-`run-054` through `run-060` observations remain historical regression evidence only.
+Fresh deployed validation, including the latest accepted-receipt and prerequisite-reacquisition lineage, is the current
+fact baseline. `run-054` through `run-069` observations remain historical regression evidence only where they do not
+contradict the latest persisted aggregate.
 
 ### 2.1 Verified Owner-Correct Behavior
 
@@ -332,8 +333,30 @@ never edited in place after its admissibility catalog or prerequisite observatio
 
 The regression matrix covers owner-probe zero-call on missing observation, unchanged-catalog reacquisition,
 retirement-lineage de-duplication, unknown/duplicate private event handling, active-dispatch fencing, and file-backed
-fresh-process reload of the complete retired generation. This is code evidence only; RSO-22 still requires fresh
-deployed positive/zero-dispatch convergence and a separate whole-document recovery fault injection.
+fresh-process reload of the complete retired generation. RSO-26 now closes receipt-to-reacquisition proof lineage in
+code; RSO-22 still requires fresh deployed equivalent/incompatible lineage, positive/zero-dispatch convergence and a
+separate whole-document recovery fault injection.
+
+### 2.15 Binding-lineage counterexample and code closure after receipt-driven prerequisite reacquisition (2026-08-11)
+
+The latest deployed Run reached two accepted File-owner durable `patch/apply` receipts for the same open CWI. Each
+receipt was persisted with an owner-observed durable effect and passed the then-current sealed binding. The subsequent
+resource change correctly invalidated a prerequisite, and SM-2 correctly reacquired it. That reacquisition retired and
+resealed the semantic generation, producing a new current binding reference for the same CWI.
+
+The fault is in the next convergence step, not in File execution, receipt admission, generation retirement, or the
+provider boundary. The existing assessment and receipt-to-credit paths resolve evidence only against
+`Facts.Focus.CoverageEvidenceBindings` of the **current** focus. They therefore lose sight of accepted evidence whose
+immutable audit reference belongs to the retired binding, even when the newly sealed proof is semantically identical.
+The CWI stays open and a later provider document failure safely terminates the Run; service health remains normal and no
+post-terminal drive loop occurs.
+
+This was an RSO-26 single-owner convergence gap. A binding reference, semantic batch ID, manifest/request identity, and
+current prerequisite observation revision are transaction/audit fences; none is itself the semantic identity of an
+already accepted owner proof. The code closure now retains the old receipt and evidence exactly as recorded, then lets
+SM-2 alone persist an `equivalent` or `incompatible` resolution for the newly sealed binding. It does not weaken receipt
+matching, copy coverage from raw CWI IDs, trust an LLM claim, inspect owner state directly, or cause another durable
+operation solely because a binding reference rolled over. Fresh deployed proof of both dispositions remains under RSO-22.
 
 ## 3. Non-Negotiable Ownership Rules
 
@@ -761,20 +784,21 @@ remains open.
 | RSO-19 | code_closed | Unify MCP effective capability catalog and revision | enabled capability/whitelist intersection, capability metadata in snapshot hash, and catalog query boundary tests pass |
 | RSO-20 | code_closed | Enforce MCP recipe/effect feasibility before SM-2 binding seal | schema/evaluator and owner feasibility fail closed on stale/unknown/mismatched owner facts; mismatch creates zero dispatch (provider effect echo remains to be removed by RSO-23) |
 | RSO-21 | code_closed | Make MCP receipt effect owner-observed | receipt derives effect from exact enabled capability; expected effect is never copied into observed effect; receipt integration passes |
-| RSO-22 | pending | Fresh deployed positive convergence after owner-fact effect compilation | semantic seal → owner-fact binding → dispatch → receipt → binding-matched evidence → CWI advance |
+| RSO-22 | pending | Fresh deployed positive convergence using the owner-fact effect and code-closed RSO-26 lineage contracts | semantic seal → owner-fact binding → dispatch → receipt → equivalent-binding credit or typed incompatible gap → binding-matched evidence → CWI advance |
 | RSO-23 | code_closed | Remove provider-owned effect/idempotency echo and compile canonical binding from owner facts | provider schema/DTO/decoder contain no `requiredEffectScopes`; old field is unknown-field rejected; SM-2 binding compilation overwrites intermediate effect with sealed owner-catalog fact |
 | RSO-24 | code_closed | Remove provider-owned validation-check echo and compile canonical checks from owner facts | provider schema/DTO/decoder contain no `requiredCheckRefs`; owner recipe/check feasibility is confirmed before binding seal; unsupported check yields zero dispatch |
-| RSO-25 | code_closed | Close owner feasibility timing, current-focus batching, failure classification and semantic-catalog generation retirement | owner returns one executable feasibility fact; SM-2 seals only matching facts; current focus is isolated from later CWI; stale/missing catalog facts retire only the exact generation with bounded detached history; active dispatch is fail-closed; zero-attempt semantic failures are not `no_progress_exhausted`; local probe, lineage, reload, batch-isolation, failure-class, restart/idempotency and zero-dispatch tests pass. Fresh deployed positive and zero-dispatch paths remain live-open under RSO-22 |
+| RSO-25 | code_closed | Close owner feasibility timing, current-focus batching, failure classification and semantic-catalog generation retirement | owner returns one executable feasibility fact; SM-2 seals only matching facts; current focus is isolated from later CWI; stale/missing catalog facts retire only the exact generation with bounded detached history; active dispatch is fail-closed; zero-attempt semantic failures are not `no_progress_exhausted`; local probe, lineage, reload, batch-isolation, failure-class, restart/idempotency and zero-dispatch tests pass. Receipt-to-reacquisition credit is closed by RSO-26; its positive/zero-dispatch deployed proof remains under RSO-22 |
+| RSO-26 | code_closed | Preserve binding-derived CWI credit across receipt-driven prerequisite reacquisition | SM-2 records immutable source proof lineage with the accepted exact receipt and resolves a newly sealed binding only through persisted proof identity. `equivalent` retains matching proof-kind credit; `incompatible` retains old audit, writes a typed gap and grants zero synthetic credit or duplicate same-shape durable operation. Pure-contract, source/duplicate, equivalent/incompatible, same-ref-new-hash, reducer/assessment/repair/admission, re-seal/reacquisition and opaque reload tests pass; fresh deployed proof is tracked by RSO-22 |
 
 Implementation order is strict: RSO-5 precedes RSO-6; RSO-11 is a prerequisite for RSO-12; RSO-12 precedes RSO-13;
 RSO-13 precedes RSO-14; RSO-16 follows RSO-12 and precedes RSO-17; RSO-8 may run in parallel only if it does not
 change Runtime authority. RSO-9 follows every code change. RSO-19 precedes RSO-20; RSO-20 precedes RSO-21; RSO-23
-precedes RSO-24; RSO-24 precedes RSO-25; RSO-25 precedes RSO-22. RSO-10, RSO-15, RSO-17, RSO-22, RSO-23, RSO-24
-and RSO-25 cannot be replaced by mock provider proof.
+precedes RSO-24; RSO-24 precedes RSO-25; RSO-25 precedes the RSO-26 code closure; RSO-22 owns its deployed lineage
+proof. RSO-10, RSO-15, RSO-17, RSO-22, RSO-23, RSO-24 and RSO-25 cannot be replaced by mock provider proof.
 
 RSO-10 and RSO-15 are retained as historical positive-lineage labels for the earlier semantic/candidate closure. Their
-fresh deployed proof is now executed under RSO-22 together with the MCP effect contract. RSO-17 remains the separate
-target-correction deployed proof and is not satisfied by the RSO-22 positive path.
+fresh deployed proof now follows RSO-26 and is executed under RSO-22 together with the MCP effect contract. RSO-17
+remains the separate target-correction deployed proof and is not satisfied by the RSO-22 positive path.
 
 ### 10.1 2026-08-08 Code-Closure Evidence
 
@@ -909,8 +933,9 @@ lsp_status: effectScope=none, idempotencyClass=safe_to_replay
 `mcp/tool_call/mcp-lsp-bridge/lsp_initialize`, persisted an owner receipt, and committed the operation evidence.
 It did not receive CWI credit because the sealed binding required `none` while the owner receipt observed
 `ephemeral_session`. This is a valid fail-closed proof of the evidence gate, not positive convergence. The workspace
-released `activeRunId` and the terminal delivery completed; RSO-22 remains open until a fresh run reaches
-binding-matched evidence/CWI advance without a post-dispatch mismatch.
+released `activeRunId` and the terminal delivery completed. RSO-26 is now the code baseline for RSO-22: a fresh run
+must prove its persisted equivalent or incompatible binding rollover disposition, then reach binding-matched
+evidence/CWI advance without a post-dispatch mismatch.
 
 Fresh `run-055` and explicitly restarted `run-056` proved that RSO-20 rejects an inverse owner-effect mismatch before dispatch:
 the semantic proposal selected `mcp/tool_call/mcp-lsp-bridge/lsp_status` with `ephemeral_session`, while the effective
@@ -918,8 +943,8 @@ owner catalog declares `none`. Both runs terminated as `semantic_contract_failed
 zero evidence; no post-dispatch `coverage_binding_mismatch` occurred. The follow-up local closure now projects every
 dynamic MCP recipe's exact owner `effectScope` into the request-specific JSON Schema and applies the same check in the
 pure semantic document/catalog evaluator. This is a fail-closed baseline only; it does not make the provider the effect
-authority. RSO-23 must remove this provider-facing echo. RSO-22 remains pending until RSO-23 is deployed and a fresh run
-reaches binding-matched CWI advance.
+authority. RSO-23 has removed this provider-facing echo. Its fresh proof remains under RSO-22, including the
+code-closed receipt-to-reacquisition lineage contract and binding-matched CWI advance.
 
 ### 10.5 Ordered Code-Closure Steps For RSO-23: Remove Provider-Owned Effect Echo
 
@@ -1028,8 +1053,8 @@ RSO-24 closes the `run-063` check mismatch without adding a fifth state machine 
 
 Local code closure is complete. In the current owner-neutral contract, a recipe identity is also the canonical check
 identity when (and only when) it is present in the addressed owner's sealed `ValidationRecipeRefs`/`ValidationRecipes`;
-there is no global check index or provider-supplied alias. Fresh deployed positive convergence remains an RSO-22 live
-verification item.
+there is no global check index or provider-supplied alias. The code-closed RSO-26 binding-lineage contract is part of
+the RSO-22 fresh deployed positive-convergence verification.
 
 ### 10.7 Ordered Code-Closure Steps For RSO-25: Owner Feasibility Transaction Closure
 
@@ -1192,7 +1217,7 @@ make verify-boundary-contract
 RSO-25 is locally `code_closed`: the MCP positive/unsupported probe matrix, current-focus batch isolation, typed
 zero-attempt failure classification, restart/idempotency fencing, full tests, race tests, formatting, vet and boundary
 checks pass. It remains `live-open` until a fresh deployment demonstrates both the zero-dispatch unavailable-recipe
-path and the executable-recipe positive path; those deployed proofs are tracked with RSO-22 and must not be inferred
+path and the executable-recipe positive path; those deployed proofs are tracked under RSO-22 and must not be inferred
 from mock-provider or historical runs.
 
 #### CWI dependency contract closure
@@ -1257,8 +1282,10 @@ coordination owner. `internal/pkg/workorchruntimecontract` remains owner-neutral
    fact may enter catalog refresh. Orchestrator only consumes the fact and seals binding; it never invents missing
    parameters.
 5. **Close dispatch/evidence ownership.** SM-3 seals dispatch before any side effect. Capability owners return factual
-   receipts; SM-2 derives evidence and CWI credit only from binding-matched receipt/check/effect/target/revision.
-   Result → Workspace → Run remains the only terminal delivery order.
+   receipts; SM-2 derives evidence and CWI credit only from binding-matched receipt/check/effect/target/revision. A later
+   prerequisite reacquisition may preserve that credit only through the RSO-26 private proof-lineage equivalence gate;
+   it never rewrites the source receipt or treats a new binding ID as evidence. Result → Workspace → Run remains the
+   only terminal delivery order.
 6. **Close restart and recovery.** Resume rechecks the current Run's sealed CWI/binding scope; restart creates a new
    lineage over the full workspace scope and inherits no credit. EOF/output-limit/timeout recovery restarts the same
    complete document from the beginning and never appends raw suffixes or consumes a semantic correction attempt.
@@ -1306,9 +1333,204 @@ No external component may skip an arrow, submit the destination state, or invoke
 - **Live:** fresh deployed positive lineage, fresh zero-dispatch unavailable-proof lineage, target correction, bounded
   whole-document recovery, TUI/Web workspace isolation and CPU guard.
 
-Only after all deployed evidence is captured may RSO-22 (and the dependent live gates RSO-17/recovery) be marked
-`live_closed`. A fail-closed `mcp_semantic_proof_unavailable` run is retained as required negative evidence, not counted
-as positive convergence.
+RSO-26 is code-closed before RSO-22 can claim fresh positive convergence. Only after RSO-22's deployed evidence,
+including both proof-lineage dispositions, is captured may RSO-22 (and the dependent live gates RSO-17/recovery) be
+marked `live_closed`. A fail-closed
+`mcp_semantic_proof_unavailable` run is retained as required negative evidence, not counted as positive convergence.
+
+### 10.9 Binding-lineage convergence closure (2026-08-11, code-closed / live-open)
+
+RSO-26 closes the code gap between a short-lived sealed binding reference and the long-lived semantic identity of an
+already accepted owner proof. It is deliberately a narrow SM-2 reconciliation change. It does not alter how SM-3 seals
+a dispatch, how a capability owner executes an operation, or how SM-1/SM-4 deliver lifecycle state. RSO-22 retains the
+fresh deployed equivalent/incompatible proof obligation.
+
+#### 10.9.1 Invariant to preserve
+
+The current receipt contract remains strict at the time of execution:
+
+```text
+sealed dispatch + exact BindingRef + owner receipt
+  -> SM-2 exact proof match
+  -> immutable accepted EvidenceFact and receipt audit
+  -> receipt-driven prerequisite invalidation, if any
+```
+
+Only after that receipt is safely committed may a later prerequisite reacquisition change the current semantic
+generation. The re-acquisition path must never reinterpret an old receipt as if it had been issued under the new
+binding. Instead, it performs this separate owner-private calculation:
+
+```text
+old accepted evidence + old binding audit
+  -> SM-2 derives immutable proof identity
+  -> new current binding after re-acquisition
+  -> SM-2 derives immutable proof identity
+  -> equal: retain current CWI credit through a lineage resolution
+  -> unequal: retain old audit evidence and record a typed convergence gap
+```
+
+The source `EvidenceFact.BindingRefs`, receipt, dispatch, execution key/fence, old binding hash, old semantic
+generation, and original diagnostic stay immutable. A lineage resolution is additional SM-2 state; it must not mutate
+an old record merely to make it look current.
+
+#### 10.9.2 Ownership and data boundary
+
+| Component | May write | Must consume | Must not do |
+| --- | --- | --- | --- |
+| `internal/pkg/workorchruntimecontract` | immutable `CoverageEvidenceProofIdentity` value, normalization, validation, stable hash and pure comparison helper | sealed binding/proof plus canonical owner/operation facts supplied by its caller | persist lineage, inspect repositories, call EventHub, decide credit/retry/terminal |
+| `kernel/orchestrator` SM-2 | per-Run `RuntimeCoverageProofLineage` and its equivalent/incompatible resolution; coverage state and next convergence decision | persisted accepted receipt/evidence, old/new sealed binding, completed dispatch and prerequisite facts | call a provider, execute an owner operation, inspect an owner repository, mutate another owner's state |
+| SM-3 | existing dispatch/receipt fences only | sealed candidate and operation outcome | create or resolve lineage credit, choose another operation after a rollover |
+| File/Git/Shell/MCP/SSH/Web | their existing typed prerequisite facts and factual operation receipts | their own resource and sealed execute command | receive a lineage token, grant/revoke CWI credit, compare another owner's bindings |
+| `blocks/llm` | complete provider document and provider audit only | typed request contract | render or decide proof lineage, binding equivalence, correction, retry or terminal |
+| Run/Workspace/Result | their existing SM-1/workspace/result state | immutable terminal delivery facts | store Runtime lineage or infer CWI credit |
+| projection/eventstream/TUI/Web | read-only lineage/credit presentation after an Orchestrator snapshot changes | immutable projection DTOs | create a resolution, trigger re-drive, repair a gap, or overwrite evidence |
+
+`RuntimeCoverageProofLineage` is not a fifth state machine and is not an EventHub contract. It is an ordered,
+normalized, bounded per-Run SM-2 ledger attached to the Runtime aggregate. A source row's deterministic identity is the
+source receipt hash, source evidence ID, old binding hash, and proof-identity hash; each later resolution is separately
+idempotent by that source-row identity plus the examined current binding ref/hash. A named current-schema limit must be
+validated and reject overflow rather than silently pruning a proof record. Each row contains only references and bounded
+facts required to audit a resolution:
+
+- CWI ID and evidence kind;
+- immutable proof-identity hash;
+- source dispatch/operation, execution key/fence, receipt hash and accepted evidence ID;
+- old binding ref/hash and old semantic generation identity;
+- current binding ref/hash examined by a re-acquisition, plus the derived resolution (`equivalent` or
+  `incompatible`) and a bounded typed gap reference when incompatible.
+
+It is a local normalized slice, not a process/global lookup table, event-topic registry, JSON bridge, or cross-owner
+index. Its clone/validate/hash behavior must be exercised together with the Runtime aggregate's existing CAS and
+file-backed reload paths.
+
+#### 10.9.3 Canonical proof identity
+
+`CoverageEvidenceProofIdentity` is calculated from one exact `CoverageEvidenceBinding` proof and the canonical owner
+of its allowed operation. It is not the existing binding ID/hash. The hash must include every field that changes what
+the owner must actually prove:
+
+| Identity input | Canonical source | Reason it is included |
+| --- | --- | --- |
+| Definition revision and CWI ID | sealed binding / Definition seed | prevents credit crossing a changed Goal/DoD definition or a different CWI |
+| evidence kind and canonical owner module ID | sealed proof and operation descriptor/feasibility owner | prevents a state-change, validation, or owner substitution from borrowing credit |
+| allowed operation kind and variant set | sealed proof | preserves operation shape rather than comparing operation prose |
+| target-policy form and exact target/selector/prospective target fields | sealed binding | preserves the owner-authorized resource scope without inferring path similarity |
+| required effect scope | sealed proof | preserves durable versus non-durable proof meaning |
+| declaration ref, validation recipe, required checks, metrics and artifacts | sealed binding/proof | preserves the exact observable proof contract |
+
+The following are explicitly **not** part of proof identity: binding ID/hash, proof-batch ID/sequence, semantic manifest
+hash, logical request ID, provider request/session identity, prerequisite observation ID, catalog snapshot revision, and
+the resource revision caused by the accepted receipt. They remain exact audit and freshness fences. Excluding them does
+not permit target, effect, recipe, check, metric, artifact, owner, CWI, or Definition changes to reuse credit.
+
+The compiler must derive the target-policy form from the sealed binding's exact-target, selector, or prospective-target
+shape. It must reject an ambiguous or multi-owner proof identity rather than selecting an owner by operation name,
+provider text, or a global index. A CWI that needs both state-change and validation has separate identities and separate
+receipt requirements; a durable receipt never substitutes for a validation proof, or vice versa.
+
+#### 10.9.4 Private transition sequence
+
+The only legal transition sequence is below. Each `->` after a cross-owner fact is an existing Orchestrator-private
+event handled by `ApplyInternalEvent` and the single aggregate CAS coordinator.
+
+```text
+capability owner returns accepted typed receipt
+  -> SM-3 persists exact receipt / completes its execution fence
+  -> SM-2 matches the receipt to its source sealed binding
+  -> SM-2 appends accepted evidence plus source proof-lineage record atomically
+  -> receipt resource change invalidates only intersecting prerequisite facts
+  -> active dispatch finishes before any semantic generation retirement
+  -> capability owner returns re-acquired typed prerequisite fact
+  -> SM-2 retires/reseals semantic generation when its catalog identity changed
+  -> SM-2 derives old and current proof identities for the affected CWI/proof kind
+  -> equivalent identity: persist current-binding lineage resolution, retain credit, reduce normally
+  -> incompatible identity: persist typed lineage gap, retain old audit only, reduce normally
+  -> SM-3 is entered again only if the resulting SM-2 decision independently requires a new candidate
+```
+
+The equivalent branch may use the retained state-change credit to derive the normal validation or assessment path when
+the newly sealed focus still requires it. It must not synthesize a validation receipt, mark an unexecuted proof kind
+satisfied, or repeat an already accepted same-shape durable operation solely to replace a binding ID.
+
+The incompatible branch must create a bounded `binding_lineage_incompatible` fact with the affected CWI, old/current
+proof-identity hashes and the first differing identity field category. It preserves the old receipt/evidence as audit,
+grants no current credit, and then invokes the existing SM-2 reducer. It must not select a target state, provider retry,
+operation, governance ticket, terminal outcome, or a capability-specific repair path by itself.
+
+#### 10.9.5 Equivalence rules
+
+| Old versus current sealed proof | Required SM-2 result | Forbidden shortcut |
+| --- | --- | --- |
+| Only binding ref/hash, semantic batch/manifest/request identity, or prerequisite observation/snapshot revision changed | persist `equivalent` lineage resolution; preserve the matching proof-kind credit and continue normal reducer flow | re-execute a durable operation just to obtain a new binding ref |
+| Same CWI and Definition but owner, evidence kind, operation/variant, target-policy target/selector, effect, recipe/check, metric, artifact, or declaration changed | persist `binding_lineage_incompatible`; retain old evidence only and let normal SM-2 reduction decide the next state | copy old CWI credit, treat a generic owner success as proof, or repair the identity with prompt text |
+| Definition revision or CWI changed | never equivalent; old lineage remains audit only | cross-definition or cross-CWI credit reuse |
+| Old receipt is rejected, weak, zero-work, missing its exact source binding, stale, duplicate with different receipt hash, or lacks a persisted execution fence | never create proof credit lineage | convert diagnostic evidence, exit code, file state, Git revision, or LLM claim into a proof |
+| Current binding is absent, invalid, ambiguous, or cannot produce a canonical identity | fail closed through the existing binding/semantic contract path | choose a default owner/target/recipe or accept the old binding as current |
+
+Equivalence is intentionally stricter than a shared CWI ID and intentionally narrower than a semantic-generation reset.
+It preserves evidence only when the proof obligation did not change; it does not make resource freshness, catalog
+history, or active dispatch optional.
+
+#### 10.9.6 Code-closed implementation slices and file landing
+
+1. **Added pure identity and lineage DTO validation.** In
+   `internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go`, introduce
+   `CoverageEvidenceProofIdentity`, its stable hash and exact comparison helper. Extend the relevant pure aggregate
+   DTO/clone/validate files (`canonical_runtime.go` and focused runtime contract files) with the bounded lineage row
+   shape. Add no topic, service, repository, mutable registry, map-based authority, or JSON compatibility bridge.
+2. **Recorded source lineage at the existing receipt bridge.** In
+   `internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go`, keep
+   `coverageEvidenceCreditForReceipt` strict against the source current binding. When it succeeds, derive the proof
+   identity and append the immutable source lineage in the same SM-2 evidence CAS. Existing duplicate receipt and
+   `ExecutionKey + Fence` semantics remain the only side-effect replay fence.
+3. **Reconciled only after reacquisition.** In
+   `internal/modules/kernel/orchestrator/biz/runtime/controller.go` and
+   `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go`, add one owner-private SM-2 helper called
+   after prerequisite freshness is committed and a new binding is available. It resolves only lineage affected by the
+   current focus/CWI/proof kind, is idempotent over an already recorded old/current pair, and never retires an active
+   dispatch. `internal_event.go` may add a private fact kind only when existing prerequisite commit cannot host the
+   same CAS; it must not become an EventHub message or a second mutation API.
+4. **Used resolved lineage at evidence and assessment gates.** In
+   `assessment_evidence_gate.go`, `controller.go`, and `dispatch_commit.go`, make the current focus accept an old
+   `EvidenceFact` only through a current `equivalent` lineage resolution. Keep `BindingRefs` on the old evidence
+   unchanged; do not globally relax `CoverageEvidenceBindingForRef` or `MatchCoverageEvidenceBindingReceipt`.
+5. **Preserved recovery and persistence guarantees.** Runtime aggregate validation, clone, progress signature,
+   in-memory/file repository reload, stale/duplicate/CAS handling, and restart recovery tests. A crash before or after
+   source lineage append or current-resolution append must either retry the same local CAS idempotently or retain one
+   record; it must never repeat the capability side effect.
+6. **Kept capability and presentation owners passive.** File is the primary live regression owner; Git, Shell, MCP,
+   SSH and Web require generic owner-fact coverage. No change should be needed to their Runtime state ownership.
+   Projection/TUI/Web may expose read-only old/current lineage and credit disposition for live audit, but receive no
+   action endpoint and schedule no Runtime work.
+
+#### 10.9.7 Required regression and deployed acceptance matrix
+
+| Scenario | Required proof |
+| --- | --- |
+| accepted receipt -> prerequisite invalidation -> changed semantic binding with equal proof identity | source receipt/evidence remain immutable; exactly one equivalent resolution; CWI credit survives; no duplicate same-shape durable dispatch |
+| accepted receipt -> re-acquisition -> changed target/effect/recipe/check/owner identity | old evidence remains audit; one typed incompatible gap; CWI remains open; zero synthetic credit |
+| retained state-change credit followed by current validation/assessment binding | normal reducer requires and credits only the remaining proof kinds; no state-change receipt is reused as validation |
+| duplicate receipt, duplicate re-acquisition, delayed stale result, CAS conflict, restart before/after either lineage write | no duplicate lineage record, aggregate revision, credit, dispatch, or owner side effect |
+| active multi-operation dispatch with a receipt-driven invalidation | receipt is admitted, sealed operations finish under existing fence, and only then may SM-2 retire/reconcile generation |
+| File, Git, Shell, MCP, SSH and Web factual owner receipts | identical generic lineage contract; no owner-specific path/name/template branch in Orchestrator |
+| invalid or malformed LLM semantic document during/after the path | existing fail-closed behavior remains: no partial document, lineage mutation from provider text, dispatch, retry-policy mutation, or forged credit |
+| fresh deployed Run | audit exposes CWI dispatch count, source/current binding lineage, proof-identity disposition, credit state, and next authoritative convergence state; no raw provider body, prompt, credential, endpoint, or workspace content is exposed |
+
+Code closure is complete: the pure contract, Orchestrator, persistence/restart, generic owner and boundary tests above
+pass. Live closure requires both the equivalent-reacquisition positive proof and the incompatible-reseal zero-credit
+proof on a fresh deployment. RSO-22 remains live-open until those proofs and its existing semantic-to-terminal/recovery
+matrix pass.
+
+#### 10.9.8 Explicit prohibitions
+
+- Do not add a new state machine, public EventHub topic, owner facade, global lineage index, or direct repository read.
+- Do not add `BindingRef` aliases, `map[string]any`, JSON/reflect conversion, string parsing, or raw CWI-ID fallback to
+  make old evidence appear current.
+- Do not let capability owners, LLM, Run, Workspace, Result, projection, TUI, Web, Decision, or Approval decide proof
+  equivalence, CWI credit, retry, candidate, terminal, or lifecycle state.
+- Do not mutate old `EvidenceFact`, receipt, dispatch, or semantic-history snapshots to overwrite their source binding.
+- Do not classify a binding rollover by software-development file names, language, test framework, MCP tool name, or
+  provider explanation; only the typed proof identity is authoritative.
 
 ## 11. Verification Matrix
 
@@ -1361,7 +1583,24 @@ as positive convergence.
 - sealed dispatch, fence, receipt, evidence quality, CWI advance, assessment, and terminal delivery survive restart;
 - stable prefix and request sizes remain bounded within each logical request.
 
-### 11.5 Commands
+### 11.5 Binding-Lineage Reconciliation
+
+- an accepted receipt is matched exactly against its source sealed binding before any lineage record exists;
+- source evidence retains its old binding ref/hash, receipt hash, execution key/fence and semantic-generation audit;
+- an equal proof identity after prerequisite re-acquisition creates one idempotent SM-2 equivalent resolution and
+  preserves only its matching CWI/proof-kind credit;
+- a changed owner, evidence kind, operation/variant, target-policy target/selector, effect, declaration, recipe/check,
+  metric, artifact, CWI or Definition creates a typed incompatible gap and zero synthetic credit;
+- binding ID/hash, semantic batch/manifest/request identity and observation/snapshot revision alone cannot cause a
+  duplicate same-shape durable operation;
+- state-change and validation identities remain distinct, and an equivalent state-change record cannot close a missing
+  validation requirement;
+- duplicate/stale/reordered receipt and prerequisite facts, CAS interruptions, process restart and file-backed reload
+  create neither a duplicate lineage resolution nor a side-effect replay;
+- generic File, Git, Shell, MCP, SSH and Web owner fact fixtures follow the same reducer path with no owner-name branch;
+- projection/read APIs may expose lineage facts but cannot create credit or schedule a drive.
+
+### 11.6 Commands
 
 Run focused checks before the full repository gates:
 
@@ -1401,6 +1640,9 @@ restart/activation intent
   -> operation candidate accepted
   -> sealed dispatch
   -> capability receipt
+  -> receipt/source-binding proof lineage recorded
+  -> prerequisite reacquisition, where the receipt changed a dependency
+  -> SM-2 equivalent-binding reconciliation or typed incompatible gap
   -> binding-matched evidence
   -> focus/CWI progress
   -> durable workspace output
@@ -1425,6 +1667,11 @@ The live proof must also show:
 - an owner-unverifiable check fails during feasibility with zero dispatch;
 - a matching MCP recipe reaches owner-observed receipt, binding-matched evidence, and CWI advance without a
   post-dispatch `coverage_binding_mismatch`.
+- an accepted durable receipt followed by an equivalent re-sealed binding does not execute a second same-shape durable
+  operation solely because the binding reference changed; the retained credit remains attributable to the source
+  receipt and old/current lineage records.
+- an incompatible re-sealed proof preserves the old receipt/evidence audit, emits a bounded typed gap, grants no CWI
+  credit, and does not use provider text, file state, raw CWI IDs, or a projection to repair the mismatch.
 
 Whole-document recovery requires a separate deployed fault-injection proof because a normal complete response does not
 exercise it. Until both positive convergence and recovery fault injection pass, code-closed recovery remains a

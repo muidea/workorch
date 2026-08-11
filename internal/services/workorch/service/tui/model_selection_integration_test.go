@@ -32,7 +32,7 @@ func (modelSelectionTransportBackend) ProjectionEvents() port.WorkspaceProjectio
 func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 	options := []port.ChatModelTargetOption{
 		{ProviderID: "ai-proxy", ModelID: "model-a", DisplayName: "model-a", CapabilityReady: true, Source: "catalog"},
-		{ProviderID: "custom", ModelID: "model-b", DisplayName: "model-b", CapabilityReady: true, Source: "configuration"},
+		{ProviderID: "ai-proxy", ModelID: "model-b", DisplayName: "model-b", CapabilityReady: true, Source: "catalog"},
 	}
 
 	hub := magicevent.NewHub(16)
@@ -62,9 +62,9 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/workorch/configuration":
-			_, _ = w.Write([]byte(`{"configuration":{"llm":{"defaultChat":{"providerId":"ai-proxy","modelId":"model-a"},"aiProxy":{},"budget":{},"customProviders":[{"id":"custom","models":[{"id":"model-b","operations":["chat_completions"]}]}],"catalog":{}}}}`))
+			_, _ = w.Write([]byte(`{"configuration":{"llm":{"defaultChat":{"providerId":"ai-proxy","modelId":"model-a"},"aiProxy":{},"budget":{},"catalog":{}}}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/workorch/configuration/llm/models":
-			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true}]}}`))
+			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["responses"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"model-b","operations":["responses"],"capabilityReady":true}]}}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/workorch/workspaces/ws-model/llm-selection":
 			var target runtimecontract.ProviderModelTarget
 			if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
@@ -98,7 +98,7 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 
 			next, _ = m.Update(loadCmd())
 			m = appModelFromTea(t, next)
-			if len(m.modelSelectOptions) != 2 || m.modelSelectOptions[0].ProviderID != "ai-proxy" || m.modelSelectOptions[1].ProviderID != "custom" {
+			if len(m.modelSelectOptions) != 2 || m.modelSelectOptions[0].ProviderID != "ai-proxy" || m.modelSelectOptions[1].ProviderID != "ai-proxy" {
 				t.Fatalf("listed options = %+v", m.modelSelectOptions)
 			}
 
@@ -113,13 +113,13 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			}
 			next, _ = m.Update(saveCmd())
 			m = appModelFromTea(t, next)
-			if m.modelSelectMode || !strings.Contains(m.result, "custom/model-b") || !strings.Contains(m.result, "current-run sealed target: no active sealed selection") {
+			if m.modelSelectMode || !strings.Contains(m.result, "ai-proxy/model-b") || !strings.Contains(m.result, "current-run sealed target: no active sealed selection") {
 				t.Fatalf("saved selection result = mode:%v result:%q", m.modelSelectMode, m.result)
 			}
-			if name == "embedded" && (embeddedTarget == nil || embeddedTarget.Target.ProviderID != "custom" || embeddedTarget.Target.ModelID != "model-b") {
+			if name == "embedded" && (embeddedTarget == nil || embeddedTarget.Target.ProviderID != "ai-proxy" || embeddedTarget.Target.ModelID != "model-b") {
 				t.Fatalf("embedded persisted target = %+v", embeddedTarget)
 			}
-			if name == "remote" && (remoteTarget == nil || remoteTarget.ProviderID != "custom" || remoteTarget.ModelID != "model-b") {
+			if name == "remote" && (remoteTarget == nil || remoteTarget.ProviderID != "ai-proxy" || remoteTarget.ModelID != "model-b") {
 				t.Fatalf("remote persisted target = %+v", remoteTarget)
 			}
 		})

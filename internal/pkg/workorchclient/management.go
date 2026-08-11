@@ -263,24 +263,16 @@ func (c *Client) GetConfiguration(ctx context.Context) (*workorchconfigurationco
 	return decodeEnvelope[workorchconfigurationcontract.ServiceConfiguration](resp, "configuration")
 }
 
-func (c *Client) GetLLMModelCatalog(ctx context.Context, providerID string) (*workorchmanagementcontract.ProviderCatalogSummary, error) {
-	values := url.Values{}
-	if strings.TrimSpace(providerID) != "" {
-		values.Set("providerId", strings.TrimSpace(providerID))
-	}
-	resp, err := c.do(ctx, "GET", joinQuery("/api/v1/workorch/configuration/llm/models", values), nil)
+func (c *Client) GetLLMModelCatalog(ctx context.Context) (*workorchmanagementcontract.ProviderCatalogSummary, error) {
+	resp, err := c.do(ctx, "GET", "/api/v1/workorch/configuration/llm/models", nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[workorchmanagementcontract.ProviderCatalogSummary](resp, "catalog")
 }
 
-func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) (*workorchmanagementcontract.ProviderCatalogSummary, error) {
-	values := url.Values{}
-	if strings.TrimSpace(providerID) != "" {
-		values.Set("providerId", strings.TrimSpace(providerID))
-	}
-	resp, err := c.do(ctx, "POST", joinQuery("/api/v1/workorch/configuration/llm/models/refresh", values), nil)
+func (c *Client) RefreshLLMModelCatalog(ctx context.Context) (*workorchmanagementcontract.ProviderCatalogSummary, error) {
+	resp, err := c.do(ctx, "POST", "/api/v1/workorch/configuration/llm/models/refresh", nil)
 	if err != nil {
 		return nil, err
 	}

@@ -82,17 +82,23 @@ type GenerateEmbeddingCommand struct {
 	Input  string
 }
 
-type GetProviderModelCatalogCommand struct {
-	ProviderID string
+// GetActiveConfigurationCommand queries the LLM owner's immutable process
+// configuration snapshot. Persisted configuration belongs to the application
+// configuration writer and is intentionally not read by this owner command.
+type GetActiveConfigurationCommand struct{}
+
+type GetActiveConfigurationResult struct {
+	ProviderID            string
+	ConfigurationRevision string
 }
+
+type GetProviderModelCatalogCommand struct{}
 
 type GetProviderModelCatalogResult struct {
 	Catalog llmmodel.ProviderModelCatalog
 }
 
-type RefreshProviderModelCatalogCommand struct {
-	ProviderID string
-}
+type RefreshProviderModelCatalogCommand struct{}
 
 type RefreshProviderModelCatalogResult struct {
 	Catalog llmmodel.ProviderModelCatalog
@@ -232,6 +238,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities),
 		eventcontract.CommandTopic[CompleteProviderCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProvider),
 		eventcontract.CommandTopic[GenerateEmbeddingCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
+		eventcontract.CommandTopic[GetActiveConfigurationCommand, GetActiveConfigurationResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetActiveConfiguration),
 		eventcontract.CommandTopic[GetProviderModelCatalogCommand, GetProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetProviderModelCatalog),
 		eventcontract.CommandTopic[RefreshProviderModelCatalogCommand, RefreshProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandRefreshProviderModelCatalog),
 		eventcontract.CommandTopic[ValidateProviderInferenceSelectionCommand, ValidateProviderInferenceSelectionResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandValidateInferenceSelection),

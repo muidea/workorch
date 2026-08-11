@@ -49,7 +49,7 @@ func eventGenerationResult(payload []byte, err error) (llmmodels.RuntimeCandidat
 			Status:            llmmodels.RuntimeCandidateStatusCompleted,
 			ProviderSubmitted: true,
 			Target:            runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
-			Operation:         "chat_completions",
+			Operation:         "responses",
 		},
 	}, nil
 }
@@ -61,7 +61,8 @@ func TestRequestRuntimeCandidatePreservesSemanticDocumentKindAcrossEventHub(t *t
 	llm := llmmodule.New()
 	providerCalls := 0
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
 			if request.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
@@ -184,7 +185,8 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	defer background.Shutdown(ctx)
 	llm := llmmodule.New()
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return eventGenerationResult(nil, errors.New("provider unavailable"))
 		}),
@@ -264,7 +266,8 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 	llm := llmmodule.New()
 	payload := []byte(`{"operations":[],"unexpected":true}`)
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return eventGenerationResult(payload, nil)
 		}),
@@ -312,7 +315,8 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 		Reason: "provider configuration changed",
 	}
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return llmmodels.RuntimeCandidateGenerationResult{
 				Status: llmmodels.RuntimeCandidateStatusFailed, PrerequisiteStale: &stale,
@@ -352,7 +356,8 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	var captured []llmmodels.RuntimeCandidateRequest
 	llm := llmmodule.New()
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
 			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
@@ -466,7 +471,8 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	providerCalls := 0
 	llm := llmmodule.New()
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
 			return eventGenerationResult(nil, errors.New("provider must not be called by preflight"))
@@ -517,7 +523,8 @@ func TestPreflightRuntimeCandidateOverBudgetPublishesSecretFreeAuditWithoutProvi
 	providerCalls := 0
 	llm := llmmodule.New()
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
 			return eventGenerationResult(nil, errors.New("provider must not be called by preflight"))
@@ -630,7 +637,8 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
 	if err := llm.Configure(llmbiz.Dependencies{
-		EventHub: hub,
+		EventHub:      hub,
+		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return eventGenerationResult([]byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
 		}),

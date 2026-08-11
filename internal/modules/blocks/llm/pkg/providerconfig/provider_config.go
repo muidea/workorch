@@ -15,7 +15,6 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 	capabilities := effectiveProviderCapabilities(cfg.Capabilities)
 	return llmmodels.RedactedProviderConfig{
 		ID:               cfg.ID,
-		Provider:         cfg.Provider,
 		APISurface:       cfg.APISurface,
 		BaseURL:          cfg.BaseURL,
 		Model:            cfg.Model,
@@ -24,13 +23,8 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 		Ready:            !cfg.Unavailable,
 		Reason:           cfg.UnavailableReason,
 		Capabilities:     capabilities,
-		CacheCapability:  cfg.CacheCapability,
 		InferenceProfile: cfg.InferenceProfile,
 		ContextProfile:   cfg.ContextProfile,
-		Failover: llmmodels.ProviderFailoverConfig{
-			Enabled:   cfg.FailoverEnabled,
-			Providers: append([]string(nil), cfg.FailoverProviders...),
-		},
 	}
 }
 
@@ -47,8 +41,8 @@ func RedactSecret(value string) string {
 }
 
 func effectiveProviderCapabilities(capabilities llmmodels.ProviderCapabilities) llmmodels.ProviderCapabilities {
-	if !capabilities.ChatCompletions && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
-		capabilities.ChatCompletions = true
+	if !capabilities.Responses && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
+		capabilities.Responses = true
 	}
 	return capabilities
 }

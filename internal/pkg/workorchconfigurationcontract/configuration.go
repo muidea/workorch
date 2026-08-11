@@ -39,8 +39,8 @@ type LLMConfiguration struct {
 	DefaultChat      runtimecontract.ProviderModelTarget               `json:"defaultChat"`
 	DefaultEmbedding *runtimecontract.ProviderModelTarget              `json:"defaultEmbedding,omitempty"`
 	Budget           workorchconfig.LLMContextBudgetPolicyConfig       `json:"budget"`
-	CustomProviders  []CustomProviderConfigurationView                 `json:"customProviders,omitempty"`
 	Catalog          workorchmanagementcontract.ProviderCatalogSummary `json:"catalog"`
+	RestartRequired  bool                                              `json:"restartRequired"`
 }
 
 type AIProxyConfigurationView struct {
@@ -52,29 +52,6 @@ type AIProxyConfigurationView struct {
 	CatalogMaxStaleAge      string `json:"catalogMaxStaleAge,omitempty"`
 	MaxCatalogResponseBytes int    `json:"maxCatalogResponseBytes,omitempty"`
 	MaxCatalogModels        int    `json:"maxCatalogModels,omitempty"`
-}
-
-type CustomProviderConfigurationView struct {
-	ID               string                    `json:"id"`
-	Provider         string                    `json:"provider"`
-	APISurface       string                    `json:"apiSurface,omitempty"`
-	BaseURL          string                    `json:"baseUrl,omitempty"`
-	Timeout          string                    `json:"timeout,omitempty"`
-	APIKeyConfigured bool                      `json:"apiKeyConfigured"`
-	Models           []CustomProviderModelView `json:"models"`
-}
-
-type CustomProviderModelView struct {
-	ID                   string   `json:"id"`
-	ContextWindowTokens  int      `json:"contextWindowTokens"`
-	MaxOutputTokens      int      `json:"maxOutputTokens"`
-	Operations           []string `json:"operations"`
-	Temperature          *float64 `json:"temperature,omitempty"`
-	ThinkingBudgetTokens int      `json:"thinkingBudgetTokens,omitempty"`
-	CacheMode            string   `json:"cacheMode,omitempty"`
-	PromptCacheKey       *bool    `json:"promptCacheKey,omitempty"`
-	MessageCacheControl  *bool    `json:"messageCacheControl,omitempty"`
-	CacheUsageFields     []string `json:"cacheUsageFields,omitempty"`
 }
 
 type WebSearchConfiguration struct {

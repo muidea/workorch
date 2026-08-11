@@ -113,7 +113,7 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 			recordpayload.PayloadKeyStepID:       "run-observability-usage/step-usage",
 			recordpayload.PayloadKeyProviderID:   "provider-observability",
 			recordpayload.PayloadKeyModel:        "model-observability",
-			recordpayload.PayloadKeyOperation:    "chat_completions",
+			recordpayload.PayloadKeyOperation:    "responses",
 			recordpayload.PayloadKeyInputTokens:  30,
 			recordpayload.PayloadKeyOutputTokens: 14,
 			recordpayload.PayloadKeyTotalTokens:  44,

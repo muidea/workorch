@@ -212,24 +212,6 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 	}
 	cfg.LLM.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4.1"}
 	cfg.LLM.DefaultEmbedding = &ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "text-embedding-3-small"}
-	temperature := 0.0
-	cfg.LLM.CustomProviders = map[string]CustomLLMProviderConfig{
-		"direct-anthropic": {
-			Provider:   "anthropic",
-			APISurface: "anthropic-messages",
-			BaseURL:    "https://api.anthropic.com",
-			APIKey:     "anthropic-key",
-			Timeout:    "180s",
-			Models: map[string]CustomLLMModelConfig{
-				"claude-sonnet-4-20250514": {
-					ContextWindowTokens: 200000,
-					MaxOutputTokens:     8192,
-					Operations:          []string{LLMOperationChatCompletions},
-					Temperature:         &temperature,
-				},
-			},
-		},
-	}
 	cfg.WebSearch.DefaultProvider = "search"
 	cfg.WebSearch.Providers = map[string]WebSearchProviderConfig{
 		"search": {
@@ -274,10 +256,6 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 		next.LLM.DefaultEmbedding == nil ||
 		next.LLM.DefaultEmbedding.ModelID != "text-embedding-3-small" {
 		t.Fatalf("next config = %+v, want saved llm targets", next.LLM)
-	}
-	custom, ok := next.LLM.CustomProviders["direct-anthropic"]
-	if !ok || custom.Models["claude-sonnet-4-20250514"].MaxOutputTokens != 8192 {
-		t.Fatalf("next custom providers = %+v, want saved custom model", next.LLM.CustomProviders)
 	}
 	if next.Runtime.MaxRuntimeRepairAttempts != 15 || next.Runtime.MaxProviderRetryAttempts != 14 || next.Runtime.ShellCommandTimeout != "120s" {
 		t.Fatalf("next runtime config = %+v, want saved runtime settings", next.Runtime)
@@ -415,26 +393,12 @@ estimatedTokensPerByte = 0.25
 	}
 }
 
-func TestValidateLLMConfigRejectsReservedCustomProviderID(t *testing.T) {
+func TestValidateLLMConfigRejectsNonAIProxyTarget(t *testing.T) {
 	cfg := DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
-	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4o"}
-	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
-		BuiltinAIProxyProviderID: {
-			Provider:   "openai",
-			APISurface: "openai-compatible",
-			BaseURL:    "https://api.openai.com",
-			Models: map[string]CustomLLMModelConfig{
-				"gpt-4o": {
-					ContextWindowTokens: 128000,
-					MaxOutputTokens:     4096,
-					Operations:          []string{LLMOperationChatCompletions},
-				},
-			},
-		},
-	}
+	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: "direct-provider", ModelID: "gpt-4o"}
 	if err := ValidateLLMConfig(cfg); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("ValidateLLMConfig error = %v, want reserved custom provider rejection", err)
+		t.Fatalf("ValidateLLMConfig error = %v, want non-ai-proxy target rejection", err)
 	}
 }
 
@@ -456,6 +420,66 @@ func TestDefaultAIProxyTimeoutUsesSharedDefault(t *testing.T) {
 	cfg := DefaultAIProxyProviderConfig()
 	if cfg.Timeout != DefaultAIProxyTimeout {
 		t.Fatalf("default ai-proxy timeout = %q, want %q", cfg.Timeout, DefaultAIProxyTimeout)
+	}
+}
+
+func TestLLMConfigurationRevisionCoversStagedLLMFields(t *testing.T) {
+	cfg := DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = "http://127.0.0.1:8090"
+	cfg.AIProxy.APIKey = "old-key"
+	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "model-a"}
+	cfg.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{
+		"model-a": {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{LLMOperationResponses}},
+	}
+	first, err := LLMConfigurationRevision(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated := CloneLLMConfig(cfg)
+	updated.AIProxy.APIKey = "new-key" // same semantic shape, different secret
+	second, err := LLMConfigurationRevision(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("API key rotation must change LLM configuration revision")
+	}
+
+	updated = CloneLLMConfig(cfg)
+	updated.DefaultChat.ModelID = "model-b"
+	third, err := LLMConfigurationRevision(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == third {
+		t.Fatal("default model change must change LLM configuration revision")
+	}
+
+	updated = CloneLLMConfig(cfg)
+	updated.Budget.ContextUtilizationRatio = 0.7
+	fourth, err := LLMConfigurationRevision(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == fourth {
+		t.Fatal("budget policy change must change LLM configuration revision")
+	}
+}
+
+func TestCloneLLMConfigDoesNotShareMutableValues(t *testing.T) {
+	cfg := DefaultLLMConfig()
+	cfg.DefaultEmbedding = &ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "embed-a"}
+	cfg.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{
+		"model-a": {Operations: []string{LLMOperationResponses}},
+	}
+	cloned := CloneLLMConfig(cfg)
+	cloned.DefaultEmbedding.ModelID = "embed-b"
+	override := cloned.AIProxy.ModelOverrides["model-a"]
+	override.Operations[0] = LLMOperationEmbeddings
+	cloned.AIProxy.ModelOverrides["model-a"] = override
+	if cfg.DefaultEmbedding.ModelID != "embed-a" || cfg.AIProxy.ModelOverrides["model-a"].Operations[0] != LLMOperationResponses {
+		t.Fatalf("CloneLLMConfig retained caller-owned storage: %+v", cfg)
 	}
 }
 
@@ -588,22 +612,7 @@ func TestNormalizeLLMConfigCanonicalizesMapKeys(t *testing.T) {
 		"  gpt-4o  ": {
 			ContextWindowTokens: 128000,
 			MaxOutputTokens:     8192,
-			Operations:          []string{" chat_completions ", "embeddings"},
-		},
-	}
-	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
-		" custom-a ": {
-			Provider:   "compatible",
-			APISurface: "openai_compatible_http",
-			BaseURL:    "http://127.0.0.1:9",
-			Timeout:    "30s",
-			Models: map[string]CustomLLMModelConfig{
-				" model-1 ": {
-					ContextWindowTokens: 128000,
-					MaxOutputTokens:     8192,
-					Operations:          []string{"chat_completions"},
-				},
-			},
+			Operations:          []string{" responses ", "embeddings"},
 		},
 	}
 	normalized, err := NormalizeLLMConfig(cfg)
@@ -613,53 +622,8 @@ func TestNormalizeLLMConfigCanonicalizesMapKeys(t *testing.T) {
 	if _, ok := normalized.AIProxy.ModelOverrides["gpt-4o"]; !ok {
 		t.Fatalf("model overrides keys = %#v, want trimmed gpt-4o", normalized.AIProxy.ModelOverrides)
 	}
-	if ops := normalized.AIProxy.ModelOverrides["gpt-4o"].Operations; len(ops) != 2 || ops[0] != "chat_completions" {
+	if ops := normalized.AIProxy.ModelOverrides["gpt-4o"].Operations; len(ops) != 2 || ops[0] != "responses" {
 		t.Fatalf("override operations = %#v, want trimmed canonical ops", ops)
-	}
-	provider, ok := normalized.CustomProviders["custom-a"]
-	if !ok {
-		t.Fatalf("custom providers keys = %#v, want trimmed custom-a", normalized.CustomProviders)
-	}
-	if _, ok := provider.Models["model-1"]; !ok {
-		t.Fatalf("custom model keys = %#v, want trimmed model-1", provider.Models)
-	}
-}
-
-func TestNormalizeLLMConfigRejectsTrimDuplicateCustomProviderKeys(t *testing.T) {
-	cfg := DefaultLLMConfig()
-	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
-	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4o"}
-	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
-		"custom-a": {
-			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:9", Timeout: "30s",
-			Models: map[string]CustomLLMModelConfig{"model-1": {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"chat_completions"}}},
-		},
-		" custom-a ": {
-			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:10", Timeout: "30s",
-			Models: map[string]CustomLLMModelConfig{"model-2": {ContextWindowTokens: 64000, MaxOutputTokens: 4096, Operations: []string{"chat_completions"}}},
-		},
-	}
-	if _, err := NormalizeLLMConfig(cfg); err == nil {
-		t.Fatal("expected trim-duplicate custom provider keys to fail before overwrite")
-	}
-}
-
-func TestNormalizeLLMConfigRejectsCaseFoldDuplicateCustomProviderKeys(t *testing.T) {
-	cfg := DefaultLLMConfig()
-	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
-	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4o"}
-	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
-		"Custom-A": {
-			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:9", Timeout: "30s",
-			Models: map[string]CustomLLMModelConfig{"model-1": {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"chat_completions"}}},
-		},
-		"custom-a": {
-			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:10", Timeout: "30s",
-			Models: map[string]CustomLLMModelConfig{"model-2": {ContextWindowTokens: 64000, MaxOutputTokens: 4096, Operations: []string{"chat_completions"}}},
-		},
-	}
-	if _, err := NormalizeLLMConfig(cfg); err == nil {
-		t.Fatal("expected case-fold-duplicate custom provider keys to fail before overwrite")
 	}
 }
 
@@ -668,29 +632,11 @@ func TestNormalizeLLMConfigRejectsTrimDuplicateModelOverrideKeys(t *testing.T) {
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
 	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4o"}
 	cfg.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{
-		"gpt-4o":   {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"chat_completions"}},
-		" gpt-4o ": {ContextWindowTokens: 64000, MaxOutputTokens: 4096, Operations: []string{"chat_completions"}},
+		"gpt-4o":   {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"responses"}},
+		" gpt-4o ": {ContextWindowTokens: 64000, MaxOutputTokens: 4096, Operations: []string{"responses"}},
 	}
 	if _, err := NormalizeLLMConfig(cfg); err == nil {
 		t.Fatal("expected trim-duplicate model override keys to fail before overwrite")
-	}
-}
-
-func TestNormalizeLLMConfigRejectsTrimDuplicateCustomModelKeys(t *testing.T) {
-	cfg := DefaultLLMConfig()
-	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
-	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4o"}
-	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
-		"custom-a": {
-			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:9", Timeout: "30s",
-			Models: map[string]CustomLLMModelConfig{
-				"model-1":   {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"chat_completions"}},
-				" model-1 ": {ContextWindowTokens: 64000, MaxOutputTokens: 4096, Operations: []string{"chat_completions"}},
-			},
-		},
-	}
-	if _, err := NormalizeLLMConfig(cfg); err == nil {
-		t.Fatal("expected trim-duplicate custom model keys to fail before overwrite")
 	}
 }
 
@@ -699,24 +645,14 @@ func TestNormalizeLLMConfigPreservesCaseDistinctModelIDs(t *testing.T) {
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"
 	cfg.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "DeepSeek-V4-Flash"}
 	cfg.AIProxy.ModelOverrides = map[string]AIProxyModelOverrideConfig{
-		"DeepSeek-V4-Flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
-		"deepseek-v4-flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
+		"DeepSeek-V4-Flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"responses"}},
+		"deepseek-v4-flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"responses"}},
 	}
-	cfg.CustomProviders = map[string]CustomLLMProviderConfig{
-		"custom-a": {
-			Provider: "compatible", APISurface: "openai_compatible_http", BaseURL: "http://127.0.0.1:9", Timeout: "30s",
-			Models: map[string]CustomLLMModelConfig{
-				"DeepSeek-V4-Flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
-				"deepseek-v4-flash": {ContextWindowTokens: 1000000, MaxOutputTokens: 65536, Operations: []string{"chat_completions"}},
-			},
-		},
-	}
-
 	normalized, err := NormalizeLLMConfig(cfg)
 	if err != nil {
 		t.Fatalf("NormalizeLLMConfig: %v", err)
 	}
-	if len(normalized.AIProxy.ModelOverrides) != 2 || len(normalized.CustomProviders["custom-a"].Models) != 2 {
+	if len(normalized.AIProxy.ModelOverrides) != 2 {
 		t.Fatalf("case-distinct model IDs were collapsed: %+v", normalized)
 	}
 }

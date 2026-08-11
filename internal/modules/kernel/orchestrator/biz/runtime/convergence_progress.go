@@ -28,6 +28,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		FreshnessReacquireCoverage []common.CoverageWorkItemID
 		PrerequisiteObservations   []runtimecontract.RuntimePrerequisiteObservation
 		PrerequisiteInvalidations  []runtimecontract.RuntimePrerequisiteInvalidationRecord
+		CoverageProofLineage       []runtimecontract.RuntimeCoverageProofLineage
 		Coverage                   []runtimecontract.RuntimeCoverageItemFact
 		Feasibility                *runtimecontract.RuntimeFeasibilityFact
 		State                      runtimecontract.ConvergenceState
@@ -46,6 +47,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		FreshnessReacquireCoverage: facts.FreshnessReacquireCoverage,
 		PrerequisiteObservations:   facts.Resources.PrerequisiteObservations,
 		PrerequisiteInvalidations:  append([]runtimecontract.RuntimePrerequisiteInvalidationRecord(nil), aggregate.PrerequisiteInvalidations...),
+		CoverageProofLineage:       runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
 		Coverage:                   facts.Coverage, Feasibility: facts.Feasibility,
 		State:          decision.State,
 		RequiredOutput: decision.RequiredOutput.Normalized(), Terminal: decision.Terminal,

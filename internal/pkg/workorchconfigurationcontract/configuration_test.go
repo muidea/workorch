@@ -3,19 +3,26 @@ package workorchconfigurationcontract
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-func TestServiceConfigurationRoundTripPreservesProviderCapabilities(t *testing.T) {
-	temperature := 0.2
-	enabled := true
-	want := ServiceConfiguration{LLM: LLMConfiguration{CustomProviders: []CustomProviderConfigurationView{{
-		ID: "provider-1", Models: []CustomProviderModelView{{
-			ID: "model-1", ContextWindowTokens: 128000, MaxOutputTokens: 32768,
-			Temperature: &temperature, ThinkingBudgetTokens: 8192,
-			CacheMode: "provider", PromptCacheKey: &enabled, MessageCacheControl: &enabled,
-			CacheUsageFields: []string{"cache_read_input_tokens"},
-		}},
-	}}}}
+func TestServiceConfigurationRoundTripPreservesAIProxyConfiguration(t *testing.T) {
+	want := ServiceConfiguration{LLM: LLMConfiguration{
+		AIProxy: AIProxyConfigurationView{
+			BaseURL:          "http://127.0.0.1:8090",
+			APIKeyConfigured: true,
+			Timeout:          "180s",
+		},
+		DefaultChat: workorchconfig.ProviderModelTargetConfig{
+			ProviderID: "ai-proxy",
+			ModelID:    "model-1",
+		}.ToRuntimeTarget(),
+		Budget: workorchconfig.LLMContextBudgetPolicyConfig{
+			ContextUtilizationRatio: 0.75,
+			EstimatedTokensPerByte:  0.25,
+		},
+	}}
 	data, err := json.Marshal(want)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -24,8 +31,7 @@ func TestServiceConfigurationRoundTripPreservesProviderCapabilities(t *testing.T
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	model := got.LLM.CustomProviders[0].Models[0]
-	if model.Temperature == nil || *model.Temperature != temperature || model.ThinkingBudgetTokens != 8192 || model.CacheMode != "provider" || model.PromptCacheKey == nil || !*model.PromptCacheKey || len(model.CacheUsageFields) != 1 {
-		t.Fatalf("provider capability fields were lost: %+v", model)
+	if got.LLM.AIProxy.BaseURL != want.LLM.AIProxy.BaseURL || !got.LLM.AIProxy.APIKeyConfigured || got.LLM.DefaultChat.ProviderID != "ai-proxy" || got.LLM.DefaultChat.ModelID != "model-1" || got.LLM.Budget.ContextUtilizationRatio != 0.75 {
+		t.Fatalf("ai-proxy configuration fields were lost: %+v", got.LLM)
 	}
 }

@@ -9,9 +9,8 @@ import (
 
 // CapabilitySource values for resolved provider/model profiles.
 const (
-	CapabilitySourceAIProxyCatalog         = "ai_proxy_catalog"
-	CapabilitySourceAIProxyExactOverride   = "ai_proxy_exact_override"
-	CapabilitySourceCustomProviderExplicit = "custom_provider_explicit"
+	CapabilitySourceAIProxyCatalog       = "ai_proxy_catalog"
+	CapabilitySourceAIProxyExactOverride = "ai_proxy_exact_override"
 )
 
 // ProviderCatalogState describes the cache/readiness state of a model catalog.
@@ -25,8 +24,7 @@ const (
 	ProviderCatalogStateUnavailable ProviderCatalogState = "unavailable"
 )
 
-// ProviderModelDescriptor is one model discovered from ai-proxy catalog or declared
-// by a custom provider configuration.
+// ProviderModelDescriptor is one model discovered from the ai-proxy catalog.
 type ProviderModelDescriptor struct {
 	Target              runtimecontract.ProviderModelTarget
 	RouteOwner          string

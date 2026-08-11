@@ -429,7 +429,7 @@ func llmUsageEventRecord(t *testing.T, id string, workspaceID common.WorkspaceID
 			"providerId":   providerID,
 			"provider":     "compatible",
 			"model":        model,
-			"operation":    "chat_completions",
+			"operation":    "responses",
 			"inputTokens":  10,
 			"outputTokens": 5,
 			"totalTokens":  15,

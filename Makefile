@@ -249,7 +249,7 @@ verify-skillhub:
 verify-skillhub-file: verify-skillhub
 
 verify-mcp-stdio:
-	WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18185 ./scripts/verify-mcp-stdio-workspace-execution.sh
+	WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-mcp-stdio-workspace-execution.sh
 
 verify-mcp-stdio-file: verify-mcp-stdio
 

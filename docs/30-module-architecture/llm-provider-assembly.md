@@ -4,19 +4,22 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-11
 
 ## 当前生产合同（2026-07-15 cutover）
 
 WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 
-1. canonical config 使用 `llm.aiProxy` + `llm.defaultChat` + `llm.budget` + 可选 `llm.customProviders`。
+1. canonical config 使用 `llm.aiProxy` + `llm.defaultChat` + 可选 `llm.defaultEmbedding` + `llm.budget`；ai-proxy 是唯一 LLM provider。
 2. `blocks/llm` 通过 `GET /v1/models` 获取精确模型容量，并维护进程内 TTL/LKG catalog cache。
 3. `blocks/llm` 从 catalog 的 `capabilities.reasoning` 发布允许值、provider default 与独立 validity；application 先取得 typed validation fact，再由 Workspace owner CAS 保存 `DefaultLLMSelection`。
 4. fresh Start/Restart 从 Workspace canonical selection 构造 `RuntimeBootstrap.Activation.ProviderSelection`；Run owner封存完整 selection，Resume 与 recovery 不重读 Workspace。
 5. Runtime prerequisite 封存完整 `ProviderCeiling`（selection + token/byte ceiling + capability/configuration revision）；输出上限直接采用 selected model 的 `maxOutputTokens`，输入 token/byte ceiling 由 selected model 的 `contextWindowTokens` 自动派生。
 6. Runtime candidate/semantic-plan request 强制使用 sealed selection；Responses adapter只把非空 effort编码为 `reasoning.effort`，不存在全局 reasoning source、provider fallback 或 provider context 传递。
 7. `llm.aiProxy.apiKey` 是可选客户端身份配置；`/v1/models`、Responses、stream 与 embedding 必须使用同一 header 规则，仅在 key 非空时发送 Bearer credential。
+8. `blocks/llm` 在 `Start()` 冻结完整 active LLM configuration；配置文件 watcher 只能更新下次启动的 persisted
+   configuration。application 通过 LLM owner 的 typed active-revision query 比较 persisted revision，并在不匹配时
+   投影 `restartRequired`、拒绝 catalog refresh。该 query 不传递 API key、base URL 或 owner implementation。
 
 已删除：
 
@@ -44,7 +47,7 @@ provider code/message 选择 correction、retry、governance 或 terminal。
 
 ## Provider 与模型容量
 
-- built-in `ai-proxy` 是唯一默认 provider；`customProviders` 只能由显式 target 使用，不能参与 map fallback。
+- `ai-proxy` 是唯一 LLM provider；所有 target 的 `providerId` 固定为 `ai-proxy`，不提供 direct/custom provider 声明或 fallback。
 - `/v1/models` 返回的 model identity、context window、max output、capability 与 revision 是 catalog SoT；不存在本地
   model pattern、conservative token default 或固定 4096/8192 output fallback。
 - activation 必须把已由 LLM owner校验的完整 inference selection 封入 `RuntimeBootstrap`；后续 request只使用 sealed selection。空 effort表示 provider default，显式 `none` 仍是独立 identity。

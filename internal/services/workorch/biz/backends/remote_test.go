@@ -174,7 +174,7 @@ func TestRuntimeProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *t
 	got := projectioncontract.CloneRuntimeProgress(&projectioncontract.RuntimeProgress{
 		FailureClass:              "provider_transport",
 		FailureCode:               "deadline_exceeded",
-		FailureMessage:            "POST /v1/chat/completions: context deadline exceeded",
+		FailureMessage:            "POST /v1/responses: context deadline exceeded",
 		PrerequisiteRefreshState:  "prerequisite_refreshing",
 		PrerequisiteRefreshUsed:   1,
 		PrerequisiteRefreshLimit:  3,

@@ -210,7 +210,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # production candidate contract; this fixture must not recreate it as a second
 # authority just to select a canned response.
 # Legacy thoughtSummary/completionState/dodAssessment/executionGraph are rejected
-# by DisallowUnknownFields and must never appear in chat content.
+# by DisallowUnknownFields and must never appear in provider output.
 
 run_scenarios = {}
 validation_done = set()
@@ -220,21 +220,34 @@ def last(pattern, text):
     matches = re.findall(pattern, text or "")
     return matches[-1] if matches else ""
 
-def prompt_sections(messages):
+def prompt_sections(input_text):
     # The provider-facing prompt keeps every Runtime authority section
     # explicitly headed.  Parse those sections rather than scanning the whole
     # prompt for lookalike values from C1 (definition), C4 (history), or C5
     # (remaining focuses).  In particular, C5 can legitimately mention a
     # later/earlier cwi-* that is outside the sealed current focus.
     sections = {}
-    for message in messages or []:
-        content = str(message.get("content", ""))
-        for match in re.finditer(r'(?ms)^###\s+([^\n]+)\n(.*?)(?=^###\s+|\Z)', content):
-            section_id = match.group(1).strip()
-            section_content = match.group(2).strip()
-            if section_id and section_content:
-                sections[section_id] = section_content
+    content = str(input_text or "")
+    for match in re.finditer(r'(?ms)^###\s+([^\n]+)\n(.*?)(?=^###\s+|\Z)', content):
+        section_id = match.group(1).strip()
+        section_content = match.group(2).strip()
+        if section_id and section_content:
+            sections[section_id] = section_content
     return sections
+
+def leading_section_json(section_id, content, expected_type):
+    # Responses flattens dynamic prompt turns as "[user]" followed by a
+    # heading.  A section body can consequently include that transport marker
+    # after its JSON value.  Decode only the declared section value, as the
+    # production parser does for a structured document, rather than treating
+    # the next turn marker as part of the value.
+    try:
+        value, _ = json.JSONDecoder().raw_decode((content or "").lstrip())
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid %s JSON: %s" % (section_id, exc)) from exc
+    if not isinstance(value, expected_type):
+        raise ValueError("%s must be a %s" % (section_id, "JSON object" if expected_type is dict else "JSON array"))
+    return value
 
 def object_value(value, *keys):
     if not isinstance(value, dict):
@@ -334,21 +347,14 @@ def fixture_file_content(focus_id):
     return base + "".join("verified by llm e2e focus-%03d\n" % item for item in range(1, ordinal + 1))
 
 def provider_request_from_payload(payload):
-    messages = payload.get("messages") or []
-    content = "\n".join(str(item.get("content", "")) for item in messages)
-    sections = prompt_sections(messages)
+    content = str(payload.get("input", ""))
+    sections = prompt_sections(content)
     authority = None
     semantic_authority = None
     if "C3.semantic-authority" in sections:
-        try:
-            semantic_authority = json.loads(sections["C3.semantic-authority"])
-        except json.JSONDecodeError as exc:
-            raise ValueError("invalid C3.semantic-authority JSON: %s" % exc) from exc
+        semantic_authority = leading_section_json("C3.semantic-authority", sections["C3.semantic-authority"], dict)
     if "C3.runtime-authority" in sections:
-        try:
-            authority = json.loads(sections["C3.runtime-authority"])
-        except json.JSONDecodeError as exc:
-            raise ValueError("invalid C3.runtime-authority JSON: %s" % exc) from exc
+        authority = leading_section_json("C3.runtime-authority", sections["C3.runtime-authority"], dict)
 
     # Probe and historical non-Runtime-V2 checks have no sealed C3 authority.
     # Every Runtime candidate request does: fail closed if it is absent so a
@@ -372,12 +378,7 @@ def provider_request_from_payload(payload):
             raise ValueError("C3.semantic-authority has incomplete proof batch identity")
         semantic_slices = []
         if "C5.acceptance-slices" in sections:
-            try:
-                semantic_slices = json.loads(sections["C5.acceptance-slices"])
-            except json.JSONDecodeError as exc:
-                raise ValueError("invalid C5.acceptance-slices JSON: %s" % exc) from exc
-            if not isinstance(semantic_slices, list):
-                raise ValueError("C5.acceptance-slices must be an array")
+            semantic_slices = leading_section_json("C5.acceptance-slices", sections["C5.acceptance-slices"], list)
         definition_seed = dict(definition_seed)
         definition_seed["slices"] = semantic_slices
         return {
@@ -410,10 +411,7 @@ def provider_request_from_payload(payload):
             raise ValueError("C3.runtime-authority has incomplete scoped focus")
         execution_tail = None
         if "C4.execution-tail" in sections:
-            try:
-                execution_tail = json.loads(sections["C4.execution-tail"])
-            except json.JSONDecodeError as exc:
-                raise ValueError("invalid C4.execution-tail JSON: %s" % exc) from exc
+            execution_tail = leading_section_json("C4.execution-tail", sections["C4.execution-tail"], dict)
         evidence_refs = current_focus_evidence_refs(context, execution_tail, coverage)
         sealed_operation_contracts = operation_contracts(authority)
     else:
@@ -566,14 +564,14 @@ def semantic_plan_payload(request):
     return document
 
 def provider_request_parser_self_test():
-    payload = {"messages": [{"role": "user", "content": """### C3.runtime-authority
+    payload = {"input": """### C3.runtime-authority
 {"transaction":{"authoritySnapshotId":"authority-current"},"outputContract":{"operationContracts":[{"kind":"file/edit","allowedBindingRefs":["binding/cwi-current"],"target":{"allowedTargetRefs":["runtime-validation-source.txt"]}}]},"context":{"workspaceId":"ws-current","runId":"run-current","requiredState":"need_assessment","focus":{"id":"focus-current","coverageWorkItemIds":["cwi-current"]}}}
 
 ### C4.execution-tail
 {"latestAcceptedEvidence":[{"coverageWorkItemIds":["cwi-old"],"evidenceRefs":["workorch://old"]},{"coverageWorkItemIds":["cwi-current"],"evidenceRefs":["workorch://current"]}]}
 
 ### C5.large-refs
-{"remainingFocuses":[{"id":"focus-old"}],"coverageWorkItemIds":["cwi-old"]}"""}]}
+{"remainingFocuses":[{"id":"focus-old"}],"coverageWorkItemIds":["cwi-old"]}"""}
     got = provider_request_from_payload(payload)
     if got["workspaceId"] != "ws-current" or got["runId"] != "run-current" or got["stepId"] != "authority-current":
         raise AssertionError("C3 scope parser did not preserve current authority")
@@ -586,22 +584,34 @@ def provider_request_parser_self_test():
         raise AssertionError("C3 parser lost sealed operation binding refs")
     if operation_validation_recipe_id({"validationRecipeIds": ["recipe-current"]}) != "recipe-current":
         raise AssertionError("C3 parser lost sealed managed validation recipe identity")
-    semantic_order = provider_request_from_payload({"messages": [{"role": "user", "content": """### C3.semantic-authority
+    semantic_order = provider_request_from_payload({"input": """### C3.semantic-authority
 {"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-first"},{"id":"cwi-semantic"}]},"schema":{"properties":{"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"coverage_order"}
-"""}]})
+"""})
     order_document = semantic_plan_payload(semantic_order)
     if order_document.get("planStep") != "coverage_order" or order_document.get("coverageOrder") != ["cwi-first", "cwi-semantic"] or order_document.get("proposals") != []:
         raise AssertionError("semantic order parser did not produce a bounded order: %r" % order_document)
-    semantic_batch = provider_request_from_payload({"messages": [{"role": "user", "content": """### C3.semantic-authority
+    semantic_batch = provider_request_from_payload({"input": """### C3.semantic-authority
 {"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 ### C5.acceptance-slices
-[{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["validation"]}]"""}]})
+[{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["validation"]}]"""})
     semantic_document = semantic_plan_payload(semantic_batch)
     proposals = semantic_document.get("proposals") or []
     if "coverageOrder" in semantic_document or semantic_document.get("planStep") != "proof_batch" or semantic_document.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or len(proposals) != 1 or proposals[0].get("coverageWorkItemId") != "cwi-semantic" or proposals[0].get("validationRecipeId") != "recipe-semantic":
         raise AssertionError("semantic authority parser did not produce a bounded proof batch: %r" % semantic_document)
-    probe = provider_request_from_payload({"messages": [{"role": "user", "content": '{"runId":"probe","stepId":"probe"}'}]})
+    responses_wrapped = provider_request_from_payload({"input": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+
+[user]
+### C4.semantic-tail
+{"attempt":0}
+
+[user]
+### C5.acceptance-slices
+[{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["validation"]}]"""})
+    if semantic_plan_payload(responses_wrapped).get("batchId") != "batch-semantic":
+        raise AssertionError("Responses role wrapper obscured semantic authority")
+    probe = provider_request_from_payload({"input": '{"runId":"probe","stepId":"probe"}'})
     probe_candidate = decision_payload(probe)
     probe_operation = (probe_candidate.get("operations") or [{}])[0]
     if probe_operation.get("kind") != "file/read" or probe_operation.get("id") != "validate-probe":
@@ -836,13 +846,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/v1/models", "/models"):
             models = [
-                {"id": "verify-model", "object": "model", "owned_by": "verify", "operations": ["chat_completions", "embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
-                {"id": "gpt-4o", "object": "model", "owned_by": "openai", "operations": ["chat_completions"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
-                {"id": "text-embedding-3-small", "object": "model", "owned_by": "openai", "operations": ["embeddings"], "contextWindowTokens": 8192, "maxOutputTokens": 1024},
-                {"id": "verify-stream-native-model", "object": "model", "owned_by": "verify", "operations": ["chat_completions", "embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
-                {"id": "verify-stream-estimated-model", "object": "model", "owned_by": "verify", "operations": ["chat_completions", "embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
-                {"id": "web-search-e2e-model", "object": "model", "owned_by": "verify", "operations": ["chat_completions", "embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
-                {"id": "container-verify-model", "object": "model", "owned_by": "verify", "operations": ["chat_completions", "embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
+                {"id": "verify-model", "object": "model", "owned_by": "verify", "supported_endpoints": ["/v1/responses", "/v1/embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
+                {"id": "gpt-4o", "object": "model", "owned_by": "openai", "supported_endpoints": ["/v1/responses"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
+                {"id": "text-embedding-3-small", "object": "model", "owned_by": "openai", "supported_endpoints": ["/v1/embeddings"], "contextWindowTokens": 8192, "maxOutputTokens": 1024},
+                {"id": "verify-stream-native-model", "object": "model", "owned_by": "verify", "supported_endpoints": ["/v1/responses", "/v1/embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
+                {"id": "verify-stream-estimated-model", "object": "model", "owned_by": "verify", "supported_endpoints": ["/v1/responses", "/v1/embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
+                {"id": "web-search-e2e-model", "object": "model", "owned_by": "verify", "supported_endpoints": ["/v1/responses", "/v1/embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
+                {"id": "container-verify-model", "object": "model", "owned_by": "verify", "supported_endpoints": ["/v1/responses", "/v1/embeddings"], "contextWindowTokens": 128000, "maxOutputTokens": 8192},
             ]
             encoded = json.dumps({"object": "list", "data": models}).encode("utf-8")
             self.send_response(200)
@@ -872,7 +882,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(encoded)
             return
-        if self.path != "/v1/chat/completions":
+        if self.path != "/v1/responses":
             self.send_response(404)
             self.end_headers()
             return
@@ -894,20 +904,16 @@ class Handler(BaseHTTPRequestHandler):
             stream_usage = stream_usage_payload(model)
             midpoint = max(1, len(content) // 2)
             chunks = [content[:midpoint], content[midpoint:]]
-            events = []
-            for chunk in chunks:
-                if chunk:
-                    events.append({"choices": [{"delta": {"content": chunk}}]})
+            events = [{"type": "response.output_text.delta", "delta": chunk} for chunk in chunks if chunk]
+            completed = {"type": "response.completed", "response": {"status": "completed", "output": []}}
             if stream_usage is not None:
-                events.append({"choices": [], "usage": stream_usage})
-            events.append("[DONE]")
-            encoded_events = []
-            for item in events:
-                if item == "[DONE]":
-                    encoded_events.append("data: [DONE]\n\n")
-                else:
-                    encoded_events.append("data: " + json.dumps(item, separators=(",", ":")) + "\n\n")
-            encoded = "".join(encoded_events).encode("utf-8")
+                completed["response"]["usage"] = {
+                    "input_tokens": stream_usage["prompt_tokens"],
+                    "output_tokens": stream_usage["completion_tokens"],
+                    "total_tokens": stream_usage["total_tokens"],
+                }
+            events.append(completed)
+            encoded = "".join("data: " + json.dumps(item, separators=(",", ":")) + "\n\n" for item in events).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -916,10 +922,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(encoded)
             return
-        response = {"choices": [{"message": {"content": content}}]}
         usage = usage_payload(provider_request)
+        response = {"status": "completed", "output_text": content, "output": []}
         if usage is not None:
-            response["usage"] = usage
+            response["usage"] = {
+                "input_tokens": usage["prompt_tokens"],
+                "output_tokens": usage["completion_tokens"],
+                "total_tokens": usage["total_tokens"],
+            }
         encoded = json.dumps(response).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -956,16 +966,16 @@ wait_ready() {
 
 wait_mock() {
   for _ in $(seq 1 50); do
-    if curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+    if curl -fsS -X POST "http://$MOCK_ADDR/v1/responses" \
       -H 'Content-Type: application/json' \
-      -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null 2>&1; then
+      -d '{"input":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}' >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+  curl -fsS -X POST "http://$MOCK_ADDR/v1/responses" \
     -H 'Content-Type: application/json' \
-    -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
+    -d '{"input":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}' >/dev/null
 }
 
 write_llm_update_payloads() {
@@ -980,149 +990,34 @@ ai_proxy = llm.get("aiProxy") or {}
 default_chat = llm.get("defaultChat") or {}
 default_embedding = llm.get("defaultEmbedding") or {}
 budget = llm.get("budget") or {}
-custom_providers = llm.get("customProviders") or []
 
-def custom_providers_payload(items, include_api_key=False, mock_base_url=""):
-    payload = {}
-    for item in items:
-        provider_id = (item.get("id") or "").strip()
-        if not provider_id:
-            continue
-        models = {}
-        for model in item.get("models") or []:
-            model_id = (model.get("id") or "").strip()
-            if not model_id:
-                continue
-            models[model_id] = {
-                "contextWindowTokens": int(model.get("contextWindowTokens") or 128000),
-                "maxOutputTokens": int(model.get("maxOutputTokens") or 8192),
-                "operations": list(model.get("operations") or ["chat_completions"]),
-            }
-        if not models:
-            models["verify-model"] = {
-                "contextWindowTokens": 128000,
-                "maxOutputTokens": 8192,
-                "operations": ["chat_completions", "embeddings"],
-            }
-        entry = {
-            "provider": item.get("provider") or "compatible",
-            "apiSurface": item.get("apiSurface") or "openai_compatible_http",
-            "baseURL": item.get("baseUrl") or item.get("baseURL") or mock_base_url,
-            "timeout": item.get("timeout") or "60s",
-            "models": models,
-        }
-        if include_api_key:
-            entry["apiKey"] = "verify-secret"
-        payload[provider_id] = entry
-    return payload
+def normalize_url(value):
+    return str(value or "").strip().rstrip("/")
+
+if normalize_url(ai_proxy.get("baseUrl") or ai_proxy.get("baseURL")) != normalize_url(mock_base_url):
+    raise SystemExit(
+        "managed ai-proxy base URL does not match this mock; set it in the managed TOML before startup "
+        f"(configured={ai_proxy.get('baseUrl')!r}, expected={mock_base_url!r})"
+    )
 
 original = {
-    "aiProxy": {
-        "baseURL": ai_proxy.get("baseUrl") or ai_proxy.get("baseURL") or mock_base_url,
-        "timeout": ai_proxy.get("timeout") or "180s",
-        "catalogRequestTimeout": ai_proxy.get("catalogRequestTimeout") or "5s",
-        "catalogTTL": ai_proxy.get("catalogTTL") or "5m",
-        "catalogMaxStaleAge": ai_proxy.get("catalogMaxStaleAge") or "24h",
-        "maxCatalogResponseBytes": int(ai_proxy.get("maxCatalogResponseBytes") or 1048576),
-        "maxCatalogModels": int(ai_proxy.get("maxCatalogModels") or 1000),
-    },
-    "defaultChat": {
-        "providerID": default_chat.get("providerId") or default_chat.get("providerID") or "verify",
-        "modelID": default_chat.get("modelId") or default_chat.get("modelID") or "verify-model",
-    },
+    "defaultChatModelId": default_chat.get("modelId") or default_chat.get("modelID") or "verify-model",
     "budget": {
         "contextUtilizationRatio": float(budget.get("contextUtilizationRatio") or 0.75),
         "estimatedTokensPerByte": float(budget.get("estimatedTokensPerByte") or 0.25),
     },
-    "customProviders": custom_providers_payload(custom_providers, include_api_key=False, mock_base_url=mock_base_url),
 }
 if default_embedding.get("modelId") or default_embedding.get("modelID"):
-    original["defaultEmbedding"] = {
-        "providerID": default_embedding.get("providerId") or default_embedding.get("providerID") or "verify",
-        "modelID": default_embedding.get("modelId") or default_embedding.get("modelID"),
-    }
-if not original["customProviders"]:
-    original["customProviders"] = {
-        "verify": {
-            "provider": "compatible",
-            "apiSurface": "openai_compatible_http",
-            "baseURL": mock_base_url,
-            "timeout": "60s",
-            "models": {
-                "verify-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                }
-            },
-        }
-    }
-    original["defaultChat"] = {"providerID": "verify", "modelID": "verify-model"}
+    original["defaultEmbeddingModelId"] = default_embedding.get("modelId") or default_embedding.get("modelID")
+else:
+    original["clearDefaultEmbedding"] = True
 with open(original_path, "w", encoding="utf-8") as handle:
     json.dump(original, handle, separators=(",", ":"))
 
 update = {
-    "aiProxy": {
-        "baseURL": mock_base_url,
-        "apiKey": "verify-secret",
-        "timeout": "180s",
-        "catalogRequestTimeout": "5s",
-        "catalogTTL": "5m",
-        "catalogMaxStaleAge": "24h",
-        "maxCatalogResponseBytes": 1048576,
-        "maxCatalogModels": 1000,
-        "modelOverrides": {
-            "verify-model": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
-            "gpt-4o": {"contextWindowTokens": 128000, "maxOutputTokens": 8192, "operations": ["chat_completions", "embeddings"]},
-        },
-    },
-    "defaultChat": {"providerID": "verify", "modelID": "verify-model"},
-    "defaultEmbedding": {"providerID": "verify", "modelID": "verify-model"},
+    "defaultChatModelId": "verify-model",
+    "defaultEmbeddingModelId": "verify-model",
     "budget": original["budget"],
-    "customProviders": {
-        "verify": {
-            "provider": "compatible",
-            "apiSurface": "openai_compatible_http",
-            "baseURL": mock_base_url,
-            "apiKey": "verify-secret",
-            "timeout": "60s",
-            "models": {
-                "verify-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                }
-            },
-        },
-        "verify-stream-native": {
-            "provider": "compatible",
-            "apiSurface": "openai_compatible_http",
-            "baseURL": mock_base_url,
-            "apiKey": "verify-secret",
-            "timeout": "60s",
-            "models": {
-                "verify-stream-native-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                }
-            },
-        },
-        "verify-stream-estimated": {
-            "provider": "compatible",
-            "apiSurface": "openai_compatible_http",
-            "baseURL": mock_base_url,
-            "apiKey": "verify-secret",
-            "timeout": "60s",
-            "models": {
-                "verify-stream-estimated-model": {
-                    "contextWindowTokens": 128000,
-                    "maxOutputTokens": 8192,
-                    "operations": ["chat_completions", "embeddings"],
-                }
-            },
-        },
-    },
 }
 with open(update_path, "w", encoding="utf-8") as handle:
     json.dump(update, handle, separators=(",", ":"))
@@ -1376,7 +1271,7 @@ run_runtime_c7_fixture() {
   # route participates in the proof.
   WORKORCH_BASE_URL="$BASE_URL" \
     WORKORCH_E2E_ARTIFACT_DIR="$fixture_dir" \
-    WORKORCH_E2E_PROVIDER_ID="verify" \
+    WORKORCH_E2E_PROVIDER_ID="ai-proxy" \
     WORKORCH_E2E_MODEL_ID="verify-model" \
     "$ROOT_DIR/scripts/create-runtime-bounded-positive-fixtures.sh"
 
@@ -1384,7 +1279,7 @@ run_runtime_c7_fixture() {
   source "$fixture_dir/terminal-env.sh"
   WORKORCH_BASE_URL="$BASE_URL" \
     WORKORCH_E2E_ARTIFACT_DIR="$fixture_dir/terminal-verification" \
-    WORKORCH_E2E_PROVIDER_ID="verify" \
+    WORKORCH_E2E_PROVIDER_ID="ai-proxy" \
     WORKORCH_E2E_MODEL_ID="verify-model" \
     WORKORCH_E2E_TIMEOUT_SECONDS="${WORKORCH_LLM_VERIFY_C7_TIMEOUT_SECONDS:-180}" \
     "$ROOT_DIR/scripts/verify-runtime-positive-convergence-live.sh"
@@ -1652,9 +1547,9 @@ if not breakdown:
     raise SystemExit(f"workspace llm usage summary missing providerModelBreakdown: {summary}")
 
 required = {
-    ("verify", "verify-model"),
-    ("verify-stream-native", "verify-stream-native-model"),
-    ("verify-stream-estimated", "verify-stream-estimated-model"),
+    ("ai-proxy", "verify-model"),
+    ("ai-proxy", "verify-stream-native-model"),
+    ("ai-proxy", "verify-stream-estimated-model"),
 }
 present = {(item.get("providerId"), item.get("model")) for item in breakdown}
 missing = required - present
@@ -1689,9 +1584,10 @@ wait_ready
 curl -fsS "$BASE_URL/readyz" | json_grep_string_value status ready >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
 write_llm_update_payloads
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/configuration/llm/models/refresh" >"$TMP_DIR/catalog-refreshed.json"
+json_grep_string_value providerId ai-proxy "$TMP_DIR/catalog-refreshed.json" >/dev/null
 curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
-json_grep_bool_value apiKeyConfigured true "$TMP_DIR/configuration-updated.json" >/dev/null
 
 run_runtime_c7_fixture
 create_c12_verification_template
@@ -2008,7 +1904,7 @@ stream_baseline_run_id="$(wait_activation_run "$TMP_DIR/stream-baseline-activati
 wait_run_state "$stream_baseline_run_id" "completed" "$TMP_DIR/stream-baseline-completed-status.json"
 assert_run_recovery_read_models "$stream_baseline_run_id" "stream-baseline" "completed" ""
 
-activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native" "verify-stream-native-model"
+activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "ai-proxy" "verify-stream-native-model"
 stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" ""
@@ -2017,11 +1913,14 @@ assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "complet
 # this deployed-instance verifier must assert the production path actually used.
 assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "false"
 
-activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated" "verify-stream-estimated-model"
+activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "ai-proxy" "verify-stream-estimated-model"
 stream_estimated_run_id="$(wait_activation_run "$TMP_DIR/stream-estimated-activation.json" "$TMP_DIR/stream-estimated-activation-run.json")"
 wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated-completed-status.json"
-assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "provider_native"
-assert_run_llm_usage_semantics "$stream_estimated_run_id" "provider_native" "false"
+# ai-proxy uses one Responses transport for every catalog model. This mock's
+# estimated model deliberately omits usage from the completed event, which
+# must leave an auditable estimated fallback rather than inventing native use.
+assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
+assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "false"
 
 assert_workspace_llm_usage_breakdown "$workspace_id"
 assert_workspace_recovery_read_models "final"

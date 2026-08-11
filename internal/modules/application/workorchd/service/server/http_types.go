@@ -539,8 +539,8 @@ type updateRuntimeConfigurationFunc func(configcore.UpdateRuntimeConfigurationCo
 type updateLLMConfigurationFunc func(configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
 type updateWebSearchConfigurationFunc func(configcore.UpdateWebSearchConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
 
-type getLLMModelCatalogFunc func(context.Context, configcore.GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error)
-type refreshLLMModelCatalogFunc func(context.Context, configcore.RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error)
+type getLLMModelCatalogFunc func(context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error)
+type refreshLLMModelCatalogFunc func(context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error)
 type readConfigurationWithCatalogFunc func(context.Context) (workorchconfigurationcontract.ServiceConfiguration, error)
 
 type serverState struct {
@@ -1204,20 +1204,20 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 	}
 	s.runtimeSessionErr = nil
 	s.setSharedSession(session)
-	s.getLLMModelCatalog = func(ctx context.Context, cmd configcore.GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+	s.getLLMModelCatalog = func(ctx context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 		var ret workorchmanagementcontract.ProviderCatalogSummary
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
-			ret, err = appservice.GetLLMModelCatalogWithSession(ctx, session, cmd)
+			ret, err = appservice.GetLLMModelCatalogWithSession(ctx, session)
 			return err
 		})
 		return ret, err
 	}
-	s.refreshLLMModelCatalog = func(ctx context.Context, cmd configcore.RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+	s.refreshLLMModelCatalog = func(ctx context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 		var ret workorchmanagementcontract.ProviderCatalogSummary
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
-			ret, err = appservice.RefreshLLMModelCatalogWithSession(ctx, session, cmd)
+			ret, err = appservice.RefreshLLMModelCatalogWithSession(ctx, session)
 			return err
 		})
 		return ret, err

@@ -1069,7 +1069,7 @@ func (b *eventHubConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIConfigurationRefreshChatModels, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIConfigurationRefreshChatModelsCommand{ProviderID: runtimecontract.BuiltinAIProxyProviderID})
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIConfigurationRefreshChatModels, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIConfigurationRefreshChatModelsCommand{})
 	bindCLIEvent(event, workorchdevents.TopicCLIConfigurationRefreshChatModels, "configuration", "chat-models", "", "")
 	result, err := cliConfigurationRefreshChatModelsResponse(b.parent.commandHub.Send(event))
 	if err != nil {

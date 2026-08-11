@@ -137,7 +137,7 @@ func TestResolveProviderModelTargetRequiresOperation(t *testing.T) {
 		}},
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embed-1"}
-	_, err := ResolveProviderModelTarget(cfg, catalog, target, "chat_completions")
+	_, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationResponses)
 	if err == nil {
 		t.Fatal("expected operation_unsupported")
 	}
@@ -157,7 +157,7 @@ func TestCatalogConnectionRevisionIgnoresModelOverrides(t *testing.T) {
 		"gpt-4o": {
 			ContextWindowTokens: 200000,
 			MaxOutputTokens:     8192,
-			Operations:          []string{"chat_completions"},
+			Operations:          []string{workorchconfig.LLMOperationResponses},
 		},
 	}
 	second := CatalogConnectionRevision(cfg)
@@ -192,7 +192,7 @@ func TestResolveProviderModelTargetOverrideRequiresOperations(t *testing.T) {
 	cfg.AIProxy.ModelOverrides = map[string]workorchconfig.AIProxyModelOverrideConfig{
 		"gpt-4o": {ContextWindowTokens: 128000, MaxOutputTokens: 8192},
 	}
-	_, err := ResolveProviderModelTarget(cfg, nil, runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, "chat_completions")
+	_, err := ResolveProviderModelTarget(cfg, nil, runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, workorchconfig.LLMOperationResponses)
 	if err == nil {
 		t.Fatal("expected incomplete override without operations")
 	}

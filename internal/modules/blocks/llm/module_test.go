@@ -9,6 +9,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -23,7 +24,15 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(llmbiz.Dependencies{EventHub: rawHub}); err != nil {
+	activeConfig := workorchconfig.DefaultLLMConfig()
+	activeConfig.AIProxy.BaseURL = "http://127.0.0.1:8090"
+	activeConfig.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: workorchconfig.BuiltinAIProxyProviderID, ModelID: "test-model"}
+	if err := module.Configure(llmbiz.Dependencies{
+		EventHub: rawHub,
+		LoadLLMConfig: func() (workorchconfig.LLMConfig, error) {
+			return activeConfig, nil
+		},
+	}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {

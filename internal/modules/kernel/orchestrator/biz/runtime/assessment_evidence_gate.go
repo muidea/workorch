@@ -35,10 +35,10 @@ func canonicalAssessmentEvidenceQualityFailure(aggregate RuntimeAggregate, cover
 		if focus.RequireDirectEvidence && evidence.Kind == "" {
 			continue
 		}
-		if !runtimeEvidenceMatchesCoverageBinding(focus, coverageID, evidence) {
+		if !runtimeEvidenceMatchesCoverageBindingWithLineage(aggregate.Facts, focus, coverageID, evidence, aggregate.CoverageProofLineage) {
 			continue
 		}
-		if focus.RequireExecutableBehaviorEvidence && !runtimeEvidenceShowsExecutableBehavior(focus, coverageID, operation, evidence) {
+		if focus.RequireExecutableBehaviorEvidence && !runtimeEvidenceShowsExecutableBehaviorWithLineage(aggregate.Facts, focus, coverageID, operation, evidence, aggregate.CoverageProofLineage) {
 			continue
 		}
 		sawExecutableBehavior = true
@@ -119,45 +119,39 @@ func weakRuntimeEvidence(evidence runtimecontract.EvidenceFact) bool {
 	return evidence.ZeroWork || quality == common.EvidenceQualityInvalid || quality == common.EvidenceQualityInconclusive || quality == common.EvidenceQualitySkipped
 }
 
-func runtimeEvidenceMatchesCoverageBinding(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, evidence runtimecontract.EvidenceFact) bool {
-	focus = focus.Normalized()
-	if len(focus.CoverageEvidenceBindings) == 0 {
-		return true // only unpersisted, isolated contract fixtures may omit bindings.
-	}
-	for _, ref := range evidence.BindingRefs {
-		binding, found := runtimecontract.CoverageEvidenceBindingForRef(focus.CoverageEvidenceBindings, ref)
-		if found && binding.CoverageWorkItemID == coverageID {
-			_, proofFound := runtimecontract.CoverageEvidenceProofForKind(binding, evidence.Kind)
-			if proofFound {
-				return true
-			}
-		}
-	}
-	return false
+func runtimeEvidenceMatchesCoverageBindingWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {
+	_, found := runtimeEvidenceBindingForCoverageWithLineage(facts, focus, coverageID, evidence, proofLineage)
+	return found
 }
 
-func runtimeEvidenceShowsExecutableBehavior(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact) bool {
-	_ = operation // binding, not operation-name heuristics, defines behavior proof.
+func runtimeEvidenceBindingForCoverageWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.CoverageEvidenceBinding, bool) {
 	focus = focus.Normalized()
-	for _, ref := range evidence.BindingRefs {
-		binding, found := runtimecontract.CoverageEvidenceBindingForRef(focus.CoverageEvidenceBindings, ref)
-		if !found || binding.CoverageWorkItemID != coverageID || evidence.Validation == nil {
-			continue
-		}
+	if len(focus.CoverageEvidenceBindings) == 0 {
+		return runtimecontract.CoverageEvidenceBinding{}, runtimeEvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, proofLineage)
+	}
+	if !runtimeEvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, proofLineage) {
+		return runtimecontract.CoverageEvidenceBinding{}, false
+	}
+	return coverageEvidenceBindingForCoverage(focus, coverageID)
+}
+
+func runtimeEvidenceShowsExecutableBehaviorWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {
+	_ = operation // binding, not operation-name heuristics, defines behavior proof.
+	binding, found := runtimeEvidenceBindingForCoverageWithLineage(facts, focus, coverageID, evidence, proofLineage)
+	if found && evidence.Validation != nil {
 		proof, proofFound := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
-		if !proofFound {
-			continue
-		}
-		observation := evidence.Validation.Normalized()
-		if observation.RecipeID != proof.ValidationRecipeID {
-			continue
-		}
-		for _, required := range proof.RequiredCheckRefs {
-			if !stringIncluded(observation.PassedChecks, required) {
+		if proofFound {
+			observation := evidence.Validation.Normalized()
+			if observation.RecipeID != proof.ValidationRecipeID {
 				return false
 			}
+			for _, required := range proof.RequiredCheckRefs {
+				if !stringIncluded(observation.PassedChecks, required) {
+					return false
+				}
+			}
+			return len(proof.RequiredCheckRefs) != 0
 		}
-		return len(proof.RequiredCheckRefs) != 0
 	}
 	// No non-empty PassedChecks fallback: a behavior proof without a declared
 	// binding recipe/check set is unavailable rather than implicitly satisfied.

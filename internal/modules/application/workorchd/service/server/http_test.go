@@ -93,7 +93,7 @@ func TestWorkspaceLLMSelectionRoutesValidateScopeAndPersistCompleteTarget(t *tes
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMSelection) })
 
 	mux := newMuxWithState(state)
-	put := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"providerId":"custom","modelId":"model-a","reasoningEffort":"none","expectedRevision":1}`))
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"providerId":"ai-proxy","modelId":"model-a","reasoningEffort":"none","expectedRevision":1}`))
 	put.Header.Set("Content-Type", "application/json")
 	putResponse := httptest.NewRecorder()
 	mux.ServeHTTP(putResponse, put)
@@ -104,7 +104,7 @@ func TestWorkspaceLLMSelectionRoutesValidateScopeAndPersistCompleteTarget(t *tes
 	if err := json.NewDecoder(putResponse.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode PUT response: %v", err)
 	}
-	if updated.Workspace.ID != "ws-model" || updated.Workspace.DefaultLLMSelection == nil || updated.Workspace.DefaultLLMSelection.Target.ProviderID != "custom" || updated.Workspace.DefaultLLMSelection.Target.ModelID != "model-a" || updated.Workspace.DefaultLLMSelection.ReasoningEffort != "none" {
+	if updated.Workspace.ID != "ws-model" || updated.Workspace.DefaultLLMSelection == nil || updated.Workspace.DefaultLLMSelection.Target.ProviderID != "ai-proxy" || updated.Workspace.DefaultLLMSelection.Target.ModelID != "model-a" || updated.Workspace.DefaultLLMSelection.ReasoningEffort != "none" {
 		t.Fatalf("PUT workspace = %+v", updated.Workspace)
 	}
 
@@ -122,7 +122,7 @@ func TestWorkspaceLLMSelectionRoutesValidateScopeAndPersistCompleteTarget(t *tes
 		t.Fatalf("owner command CAS/selection = %+v", ownerCommands)
 	}
 
-	invalid := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"providerId":"custom"}`))
+	invalid := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/ws-model/llm-selection", strings.NewReader(`{"providerId":"ai-proxy"}`))
 	invalid.Header.Set("Content-Type", "application/json")
 	invalidResponse := httptest.NewRecorder()
 	mux.ServeHTTP(invalidResponse, invalid)
@@ -315,6 +315,25 @@ type failingWorkspaceRunScheduler struct{ err error }
 
 func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	return workorchdevents.WorkspaceRunRequestedResult{}, p.err
+}
+
+// acceptedRestartWorkspaceRunScheduler isolates HTTP projection tests from
+// restart bootstrap and provider-catalog work. The HTTP adapter only consumes
+// the Workspace owner's typed admission fact.
+type acceptedRestartWorkspaceRunScheduler struct{}
+
+func (acceptedRestartWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
+	if command.Intent != string(runtimecontract.RuntimeExecutionIntentRestart) {
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
+	}
+	return workorchdevents.WorkspaceRunRequestedResult{
+		WorkspaceID: command.WorkspaceID,
+		RunID:       "run-http-restart",
+		RequestID:   command.RequestID,
+		Kind:        runtimecontract.RuntimeExecutionIntentRestart,
+		Outcome:     runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+		Reason:      runtimecontract.RuntimeExecutionIntentReasonNewRunActivated,
+	}, nil
 }
 
 func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
@@ -764,9 +783,8 @@ func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) 
 func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.updateLLMConfiguration = func(cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
-		if cmd.AIProxy == nil || cmd.AIProxy.BaseURL != "http://127.0.0.1:9090" ||
-			cmd.DefaultChat == nil || cmd.DefaultChat.ModelID != "gpt-4.1" {
-			t.Fatalf("update command = %+v, want ai-proxy default chat command", cmd)
+		if cmd.APIKey == nil || *cmd.APIKey != "rotated-key" || cmd.DefaultChatModelID == nil || *cmd.DefaultChatModelID != "gpt-4.1" {
+			t.Fatalf("update command = %+v, want narrow llm update command", cmd)
 		}
 		return workorchconfigurationcontract.ServiceConfiguration{
 			LLM: workorchconfigurationcontract.LLMConfiguration{
@@ -775,13 +793,14 @@ func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T
 					APIKeyConfigured: true,
 					Timeout:          "180s",
 				},
-				DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4.1"},
+				DefaultChat:     runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4.1"},
+				RestartRequired: true,
 			},
 		}, nil
 	}
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/llm", strings.NewReader(`{
-		"aiProxy":{"baseURL":"http://127.0.0.1:9090","timeout":"180s","catalogRequestTimeout":"5s","catalogTTL":"5m","catalogMaxStaleAge":"24h","maxCatalogResponseBytes":1048576,"maxCatalogModels":1000},
-		"defaultChat":{"providerID":"ai-proxy","modelID":"gpt-4.1"}
+		"apiKey":"rotated-key",
+		"defaultChatModelId":"gpt-4.1"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -791,11 +810,27 @@ func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "secret-value") || !strings.Contains(rec.Body.String(), `"apiKeyConfigured":true`) {
-		// accept both spacing styles
-		if strings.Contains(rec.Body.String(), "secret-value") || !strings.Contains(rec.Body.String(), "apiKeyConfigured") {
-			t.Fatalf("body = %s, want redacted updated configuration", rec.Body.String())
-		}
+	var body configurationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal configuration: %v", err)
+	}
+	if strings.Contains(rec.Body.String(), "secret-value") || !body.Configuration.LLM.AIProxy.APIKeyConfigured || !body.Configuration.LLM.RestartRequired {
+		t.Fatalf("body = %s, want redacted restart-pending configuration", rec.Body.String())
+	}
+}
+
+func TestUpdateLLMConfigurationEndpointRejectsFileOwnedAIProxyFields(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/llm", strings.NewReader(`{
+		"aiProxy":{"baseURL":"http://127.0.0.1:9090"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "aiProxy") {
+		t.Fatalf("status=%d body=%s, want rejected file-owned aiProxy field", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1183,24 +1218,17 @@ maxCatalogResponseBytes = 1048576
 maxCatalogModels = 1000
 
 [llm.defaultChat]
-providerID = "custom-test"
+providerID = "ai-proxy"
 modelID = "model-1"
 
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
 
-[llm.customProviders.custom-test]
-provider = "compatible"
-apiSurface = "openai_compatible_http"
-baseURL = "http://127.0.0.1:9"
-apiKey = "secret-value"
-timeout = "1s"
-
-[llm.customProviders.custom-test.models.model-1]
+[llm.aiProxy.modelOverrides.model-1]
 contextWindowTokens = 128000
 maxOutputTokens = 8192
-operations = ["chat_completions"]
+operations = ["responses"]
 `
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write application config: %v", err)
@@ -1245,24 +1273,17 @@ maxCatalogResponseBytes = 1048576
 maxCatalogModels = 1000
 
 [llm.defaultChat]
-providerID = "custom-test"
+providerID = "ai-proxy"
 modelID = "model-1"
 
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
 
-[llm.customProviders.custom-test]
-provider = "compatible"
-apiSurface = "openai_compatible_http"
-baseURL = "http://127.0.0.1:9"
-apiKey = "test-key"
-timeout = "30s"
-
-[llm.customProviders.custom-test.models.model-1]
+[llm.aiProxy.modelOverrides.model-1]
 contextWindowTokens = 128000
 maxOutputTokens = 8192
-operations = ["chat_completions"]
+operations = ["responses"]
 
 `, backend, dataRoot)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
@@ -4546,7 +4567,7 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 				recordpayload.PayloadKeyProviderID:   "provider-compact",
 				recordpayload.PayloadKeyProvider:     "compatible",
 				recordpayload.PayloadKeyModel:        "model-compact",
-				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyOperation:    "responses",
 				recordpayload.PayloadKeyInputTokens:  10 + idx,
 				recordpayload.PayloadKeyOutputTokens: 1,
 				recordpayload.PayloadKeyTotalTokens:  11 + idx,
@@ -5637,6 +5658,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
 	_, _ = defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	state.workspaceRunScheduler = acceptedRestartWorkspaceRunScheduler{}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"restart",

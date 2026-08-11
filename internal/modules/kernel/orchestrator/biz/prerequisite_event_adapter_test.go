@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -313,7 +315,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "model-1"}}},
 	}, []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: filemodule.ModuleID},
 		{Kind: runtimecontract.PrerequisiteKindCapability, SubjectRef: filemodule.ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{filemodule.StepKindPatchApply}},
@@ -346,7 +348,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	}
 	if facts.Resources.ProviderCeiling == nil ||
 		facts.Resources.ProviderCeiling.MaxBytes < 64*1024 ||
-		facts.Resources.ProviderCeiling.Selection.Target.ProviderID != "custom-test" ||
+		facts.Resources.ProviderCeiling.Selection.Target.ProviderID != runtimecontract.BuiltinAIProxyProviderID ||
 		facts.Resources.ProviderCeiling.Selection.Target.ModelID != "model-1" ||
 		facts.Resources.ProviderCeiling.CapabilityRevision == "" ||
 		facts.Resources.ProviderCeiling.ConfigurationRevision == "" {
@@ -385,7 +387,7 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	defer llm.Stop(ctx)
 
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
-		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}}},
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "model-1"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
 	}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
@@ -419,7 +421,7 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 		t.Fatal(err)
 	}
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}}},
+		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "model-1"}}},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",
@@ -449,6 +451,15 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 
 func useTestLLMConfig(t *testing.T, contextWindowTokens int, maxOutputTokens int) {
 	t.Helper()
+	catalog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"object":"list","data":[{"id":"model-1","owned_by":"test","contextWindowTokens":%d,"maxOutputTokens":%d,"supported_endpoints":["/v1/responses"]}]}`+"\n", contextWindowTokens, maxOutputTokens)
+	}))
+	t.Cleanup(catalog.Close)
 	configDir := t.TempDir()
 	content := fmt.Sprintf(`endpointName = "workorch"
 
@@ -460,7 +471,7 @@ backend = "file"
 dataDir = ".workorch-data"
 
 [llm.aiProxy]
-baseURL = "http://127.0.0.1:9"
+baseURL = %q
 timeout = "180s"
 catalogRequestTimeout = "5s"
 catalogTTL = "5m"
@@ -469,24 +480,18 @@ maxCatalogResponseBytes = 1048576
 maxCatalogModels = 1000
 
 [llm.defaultChat]
-providerID = "custom-test"
+providerID = "ai-proxy"
 modelID = "model-1"
 
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
 
-[llm.customProviders.custom-test]
-provider = "compatible"
-apiSurface = "openai_compatible_http"
-baseURL = "http://127.0.0.1:9"
-timeout = "30s"
-
-[llm.customProviders.custom-test.models.model-1]
+[llm.aiProxy.modelOverrides.model-1]
 contextWindowTokens = %d
 maxOutputTokens = %d
-operations = ["chat_completions"]
-`, contextWindowTokens, maxOutputTokens)
+operations = ["responses"]
+	`, catalog.URL+"/v1", contextWindowTokens, maxOutputTokens)
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

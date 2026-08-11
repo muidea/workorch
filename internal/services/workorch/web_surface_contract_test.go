@@ -102,34 +102,38 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	}
 }
 
-func TestWebLLMConfigurationUsesProviderScopedModelTargets(t *testing.T) {
+func TestWebLLMConfigurationUsesAIProxyModelIDsOnly(t *testing.T) {
 	pageData := string(readWebConsoleFile(t, "src/pages/ConfigurationPage.tsx"))
 	for _, forbidden := range []string{
-		`name={['defaultChat', 'providerID']} hidden`,
-		`name={['defaultEmbedding', 'providerID']} hidden`,
-		`value: item.modelId`,
+		`defaultChatTargetKey`,
+		`defaultEmbeddingTargetKey`,
+		`parseProviderModelTargetKey`,
+		`baseURL`,
+		`baseUrl`,
+		`customProviders`,
 	} {
 		if strings.Contains(pageData, forbidden) {
-			t.Fatalf("ConfigurationPage retains provider-blind model selection %q", forbidden)
+			t.Fatalf("ConfigurationPage retains an unsupported LLM configuration surface %q", forbidden)
 		}
 	}
 	for _, want := range []string{
-		`name="defaultChatTargetKey"`,
-		`name="defaultEmbeddingTargetKey"`,
-		`parseProviderModelTargetKey(values.defaultChatTargetKey)`,
-		`item.ready && item.value === values.defaultChatTargetKey`,
+		`label: 'LLM'`,
+		`name="apiKey"`,
+		`name="defaultChatModelId"`,
+		`name="defaultEmbeddingModelId"`,
+		`name={['budget', 'contextUtilizationRatio']}`,
+		`name={['budget', 'estimatedTokensPerByte']}`,
+		`refreshLLMModelCatalog()`,
+		`restartRequired`,
 	} {
 		if !strings.Contains(pageData, want) {
-			t.Fatalf("ConfigurationPage missing provider-scoped model target contract %q", want)
+			t.Fatalf("ConfigurationPage missing ai-proxy-only LLM configuration contract %q", want)
 		}
 	}
 
 	helperData := string(readWebConsoleFile(t, "src/helpers.tsx"))
 	for _, want := range []string{
-		"export function providerModelTargetKey",
-		"export function parseProviderModelTargetKey",
-		"encodeURIComponent(normalizedProviderId)",
-		"decodeURIComponent(normalized.slice(separator + 1))",
+		"export function aiProxyModelOptions",
 		"（已配置但未 ready）",
 		"source: 'configured'",
 		"disabled: true",

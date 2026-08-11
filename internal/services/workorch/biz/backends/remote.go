@@ -552,7 +552,7 @@ func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]port.
 	if err != nil {
 		return nil, err
 	}
-	catalog, err := b.cl.GetLLMModelCatalog(ctx, runtimecontract.BuiltinAIProxyProviderID)
+	catalog, err := b.cl.GetLLMModelCatalog(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -563,7 +563,7 @@ func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]port.
 }
 
 func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
-	if _, err := b.cl.RefreshLLMModelCatalog(ctx, runtimecontract.BuiltinAIProxyProviderID); err != nil {
+	if _, err := b.cl.RefreshLLMModelCatalog(ctx); err != nil {
 		return nil, err
 	}
 	return b.ListChatModelTargets(ctx)

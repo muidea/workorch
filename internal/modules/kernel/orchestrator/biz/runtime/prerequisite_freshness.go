@@ -158,7 +158,7 @@ func (c *RuntimeController) invalidatePrerequisitesForReadOnlyStale(ctx context.
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -260,7 +260,7 @@ func (c *RuntimeController) invalidateCandidateRequestSessionForPrerequisiteStal
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -328,7 +328,7 @@ func (c *RuntimeController) invalidateCandidateAttemptForPrerequisiteStale(ctx c
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -396,7 +396,7 @@ func (c *RuntimeController) invalidateCandidateAttemptForFeasibilityPrerequisite
 	aggregate.CandidateAttempts[idx].Stale = nil
 	requestCopy := request
 	aggregate.CandidateAttempts[idx].PrerequisiteRequest = &requestCopy
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -496,7 +496,7 @@ func (c *RuntimeController) invalidateCandidateAttemptForOwnerInfeasibility(ctx 
 		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage
 	}
 	facts.Failure = &failure
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -637,7 +637,7 @@ func (c *RuntimeController) invalidateActiveDispatchForPrerequisiteStale(ctx con
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

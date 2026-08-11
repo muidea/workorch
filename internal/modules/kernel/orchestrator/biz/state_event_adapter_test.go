@@ -15,7 +15,7 @@ import (
 )
 
 func TestUpdateWorkspaceCommandFromModelExcludesLifecycleFields(t *testing.T) {
-	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}
 	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
 	command, err := updateWorkspaceCommandFromModel(&workspacemodel.Workspace{ID: "ws-model", ActiveRunID: "run-current", DefaultLLMSelection: &selection})
 	if err != nil {

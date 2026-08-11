@@ -2132,7 +2132,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			}
 			runsPath := filepath.Join(root, "runs.json")
 			bootstrap := runtimeBootstrap()
-			bootstrap.Activation.ProviderSelection.Target = runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}
+			bootstrap.Activation.ProviderSelection.Target = runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "model-1"}
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{{
 				Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: llmmodule.ModuleID,
 				MinimumBytes: 32 * 1024, Reason: "sealed provider ceiling",

@@ -28,7 +28,7 @@ func ChatModelTargetOptionsFromConfiguration(item *workorchconfigurationcontract
 	}
 	ret := make([]ChatModelTargetOption, 0)
 	for _, model := range item.LLM.Catalog.Models {
-		if !model.CapabilityReady || (!containsProjectionString(model.Operations, workorchconfig.LLMOperationResponses) && !containsProjectionString(model.Operations, workorchconfig.LLMOperationChatCompletions)) {
+		if !model.CapabilityReady || !containsProjectionString(model.Operations, workorchconfig.LLMOperationResponses) {
 			continue
 		}
 		ret = append(ret, ChatModelTargetOption{
@@ -40,14 +40,6 @@ func ChatModelTargetOptionsFromConfiguration(item *workorchconfigurationcontract
 			ReasoningEfforts:       append([]string(nil), model.Reasoning.Efforts...),
 			ReasoningInvalidReason: model.Reasoning.InvalidReason,
 		})
-	}
-	for _, provider := range item.LLM.CustomProviders {
-		for _, model := range provider.Models {
-			if !containsProjectionString(model.Operations, workorchconfig.LLMOperationResponses) && !containsProjectionString(model.Operations, workorchconfig.LLMOperationChatCompletions) {
-				continue
-			}
-			ret = append(ret, ChatModelTargetOption{ProviderID: provider.ID, ModelID: model.ID, DisplayName: model.ID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, Source: "configuration"})
-		}
 	}
 	return NormalizeChatModelTargetOptions(ret)
 }

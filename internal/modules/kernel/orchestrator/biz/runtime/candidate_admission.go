@@ -155,7 +155,7 @@ func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest
 		// first-failure already selected
 	} else if result = rejectCandidateRepairClosure(aggregate, candidate); !result.Accepted() {
 		// first-failure already selected
-	} else if result = rejectCandidateMissingValidationGap(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
+	} else if result = rejectCandidateMissingValidationGap(aggregate, candidate); !result.Accepted() {
 		// first-failure already selected
 	} else if result = rejectCandidateOutsideGroundedTargets(aggregate.Facts, aggregate.Decision, candidate); !result.Accepted() {
 		// first-failure already selected
@@ -492,7 +492,7 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 	for _, dispatch := range aggregate.CompletedDispatches {
 		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
 	}
-	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts)
+	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts, aggregate.CoverageProofLineage)
 	ret := make([]workorchruntimecontract.RuntimeRejectedOperationShape, 0, len(facts.Evidence.Rejected))
 	for _, evidence := range facts.Evidence.Rejected {
 		if !workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
@@ -587,22 +587,23 @@ func rejectCandidateAttemptSemanticReplay(aggregate RuntimeAggregate, candidate 
 	return acceptedCandidateAdmission()
 }
 
-func rejectCandidateMissingValidationGap(facts workorchruntimecontract.RuntimeFacts, decision workorchruntimecontract.RuntimeDecision, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
-	facts = facts.Normalized()
-	if decision.State != workorchruntimecontract.ConvergenceStateNeedStateChange {
+func rejectCandidateMissingValidationGap(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	facts := aggregate.Facts.Normalized()
+	if aggregate.Decision.State != workorchruntimecontract.ConvergenceStateNeedStateChange {
 		return acceptedCandidateAdmission()
 	}
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID &&
 		facts.RepairDirective.RequiredState == workorchruntimecontract.ConvergenceStateNeedStateChange {
 		return acceptedCandidateAdmission()
 	}
-	missing := workorchruntimecontract.MissingRequiredEvidenceKinds(facts)
+	missing := missingEvidenceKinds(facts, aggregate.CoverageProofLineage)
 	if len(missing) != 1 || missing[0] != workorchruntimecontract.EvidenceKindValidation {
 		return acceptedCandidateAdmission()
 	}
 	hasAcceptedStateChange := false
 	for _, evidence := range facts.Evidence.Accepted {
-		if workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == workorchruntimecontract.EvidenceKindStateChange {
+		if evidence.Kind == workorchruntimecontract.EvidenceKindStateChange &&
+			runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, aggregate.CoverageProofLineage) {
 			hasAcceptedStateChange = true
 			break
 		}
@@ -617,10 +618,11 @@ func rejectCandidateMissingValidationGap(facts workorchruntimecontract.RuntimeFa
 	)
 }
 
-func latestAcceptedEvidenceRevision(facts workorchruntimecontract.RuntimeFacts) string {
+func latestAcceptedEvidenceRevision(facts workorchruntimecontract.RuntimeFacts, proofLineages ...[]workorchruntimecontract.RuntimeCoverageProofLineage) string {
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	latest := ""
 	for _, evidence := range facts.Evidence.Accepted {
-		if !workorchruntimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		if !runtimeAcceptedEvidenceAppliesToCurrentFocusWithLineage(facts, evidence, proofLineage) {
 			continue
 		}
 		if latest == "" || evidenceRevisionAfter(evidence.Revision, latest) {

@@ -19,7 +19,7 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	ctx := context.Background()
 	options := []port.ChatModelTargetOption{
 		{ProviderID: "ai-proxy", ModelID: "model-a", DisplayName: "model-a", CapabilityReady: true, Source: "catalog"},
-		{ProviderID: "custom", ModelID: "model-b", DisplayName: "model-b", CapabilityReady: true, Source: "configuration"},
+		{ProviderID: "ai-proxy", ModelID: "model-b", DisplayName: "model-b", CapabilityReady: true, Source: "catalog"},
 	}
 
 	hub := magicevent.NewHub(16)
@@ -44,11 +44,11 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/workorch/configuration":
-			_, _ = w.Write([]byte(`{"configuration":{"llm":{"defaultChat":{"providerId":"ai-proxy","modelId":"model-a"},"aiProxy":{},"budget":{},"customProviders":[{"id":"custom","apiKeyConfigured":false,"models":[{"id":"model-b","operations":["chat_completions"]},{"id":"embedding-only","operations":["embeddings"]}]}],"catalog":{}}}}`))
+			_, _ = w.Write([]byte(`{"configuration":{"llm":{"defaultChat":{"providerId":"ai-proxy","modelId":"model-a"},"aiProxy":{},"budget":{},"catalog":{}}}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/workorch/configuration/llm/models":
-			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"embedding-only","operations":["embeddings"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"not-ready","operations":["chat_completions"],"capabilityReady":false}]}}`))
+			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["responses"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"model-b","operations":["responses"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"embedding-only","operations":["embeddings"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"not-ready","operations":["responses"],"capabilityReady":false}]}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/workorch/configuration/llm/models/refresh":
-			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"embedding-only","operations":["embeddings"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"not-ready","operations":["chat_completions"],"capabilityReady":false}]}}`))
+			_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","source":"catalog","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["responses"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"model-b","operations":["responses"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"embedding-only","operations":["embeddings"],"capabilityReady":true},{"providerId":"ai-proxy","modelId":"not-ready","operations":["responses"],"capabilityReady":false}]}}`))
 		case (r.Method == http.MethodPut || r.Method == http.MethodDelete) && r.URL.Path == "/api/v1/workorch/workspaces/ws-model/llm-selection":
 			var selection *runtimecontract.ProviderInferenceSelection
 			if r.Method == http.MethodPut {
@@ -79,7 +79,7 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(refreshed, options) {
 				t.Fatalf("refreshed = %+v err=%v", refreshed, err)
 			}
-			target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-b"}
+			target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-b"}
 			selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
 			workspace, err := be.Workspace().UpdateLLMSelection(ctx, "ws-model", &selection, 1)
 			if err != nil || workspace.DefaultLLMSelection == nil || !workspace.DefaultLLMSelection.Same(selection) {

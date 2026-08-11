@@ -4206,6 +4206,35 @@ func TestRuntimeStateRecordPreservesSemanticPlanningLedgerAcrossOpaqueReload(t *
 	}
 }
 
+func TestRuntimeStateRecordPreservesCoverageProofLineageAcrossOpaqueReload(t *testing.T) {
+	aggregate := runtimeAggregate(t, 7)
+	lineage := runtimecontract.NormalizeRuntimeCoverageProofLineage(runtimeCoverageProofLineageForRepositoryTest(t, aggregate))
+	aggregate.CoverageProofLineage = lineage
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("aggregate with proof lineage: %v", err)
+	}
+	record := runtimeStateRecordFromAggregate(aggregate)
+	if err := record.Validate(); err != nil {
+		t.Fatalf("record with proof lineage: %v", err)
+	}
+	reloaded := runtimeAggregateFromRecord(record.Clone())
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("reloaded aggregate with proof lineage: %v", err)
+	}
+	if !reflect.DeepEqual(reloaded.CoverageProofLineage, lineage) {
+		t.Fatalf("proof lineage drifted across opaque reload: before=%+v after=%+v", lineage, reloaded.CoverageProofLineage)
+	}
+
+	record.CoverageProofLineage[0].SourceProofIdentity.TargetRefs[0] = "mutated-record-target"
+	if aggregate.CoverageProofLineage[0].SourceProofIdentity.TargetRefs[0] == "mutated-record-target" {
+		t.Fatal("runtime state record retained source proof identity storage")
+	}
+	reloaded.CoverageProofLineage[1].CurrentProofIdentity.TargetRefs[0] = "mutated-reloaded-target"
+	if record.CoverageProofLineage[1].CurrentProofIdentity.TargetRefs[0] == "mutated-reloaded-target" {
+		t.Fatal("runtime aggregate retained resolution proof identity storage")
+	}
+}
+
 func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueReload(t *testing.T) {
 	aggregate := runtimeAggregate(t, 7)
 	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
@@ -4265,6 +4294,62 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 		t.Fatal(err)
 	}
 	return runtime.RuntimeAggregate{StateRevision: revision, Definition: bootstrap.Definition, Facts: facts, SemanticPlanning: semanticPlanning, Decision: decision}
+}
+
+func runtimeCoverageProofLineageForRepositoryTest(t *testing.T, aggregate runtime.RuntimeAggregate) []runtimecontract.RuntimeCoverageProofLineage {
+	t.Helper()
+	if len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("runtime aggregate fixture requires one current binding: %+v", aggregate.Facts.Focus)
+	}
+	sourceBinding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
+	sourceIdentity, err := runtimecontract.DeriveCoverageEvidenceProofIdentity(sourceBinding, runtimecontract.EvidenceKindStateChange)
+	if err != nil {
+		t.Fatalf("derive source proof identity: %v", err)
+	}
+	source := runtimecontract.RuntimeCoverageProofLineage{
+		Kind:                   runtimecontract.RuntimeCoverageProofLineageKindSource,
+		WorkspaceID:            aggregate.Facts.WorkspaceID,
+		RunID:                  aggregate.Facts.RunID,
+		CoverageWorkItemID:     sourceBinding.CoverageWorkItemID,
+		EvidenceKind:           runtimecontract.EvidenceKindStateChange,
+		SourceEvidenceID:       "evidence-runtime-lineage",
+		SourceDispatchID:       "dispatch-runtime-lineage",
+		SourceOperationID:      "operation-runtime-lineage",
+		SourceExecutionKey:     "execution-runtime-lineage",
+		SourceFence:            1,
+		SourceReceiptHash:      "receipt-runtime-lineage",
+		SourceBindingRef:       sourceBinding.ID,
+		SourceBindingHash:      sourceBinding.Hash,
+		SourceManifestHash:     "manifest-runtime-lineage",
+		SourceLogicalRequestID: "request-runtime-lineage",
+		SourceProofIdentity:    sourceIdentity,
+	}
+	source.ID = runtimecontract.StableRuntimeCoverageProofLineageSourceID(source.SourceReceiptHash, source.SourceEvidenceID, source.SourceBindingHash, source.SourceProofIdentity.Hash)
+	currentBinding := sourceBinding.Clone()
+	currentBinding.ID = sourceBinding.ID + "/reacquired"
+	currentBinding.PrerequisiteRefs = []string{"operation-admissibility/file/revision-2"}
+	currentBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(currentBinding)
+	currentIdentity, err := runtimecontract.DeriveCoverageEvidenceProofIdentity(currentBinding, runtimecontract.EvidenceKindStateChange)
+	if err != nil {
+		t.Fatalf("derive current proof identity: %v", err)
+	}
+	resolution := runtimecontract.RuntimeCoverageProofLineage{
+		Kind:                 runtimecontract.RuntimeCoverageProofLineageKindResolution,
+		WorkspaceID:          aggregate.Facts.WorkspaceID,
+		RunID:                aggregate.Facts.RunID,
+		CoverageWorkItemID:   sourceBinding.CoverageWorkItemID,
+		EvidenceKind:         runtimecontract.EvidenceKindStateChange,
+		SourceLineageID:      source.ID,
+		CurrentBindingRef:    currentBinding.ID,
+		CurrentBindingHash:   currentBinding.Hash,
+		CurrentProofIdentity: currentIdentity,
+		Disposition:          runtimecontract.RuntimeCoverageProofLineageDispositionEquivalent,
+	}
+	resolution.ID = runtimecontract.StableRuntimeCoverageProofLineageResolutionID(resolution.SourceLineageID, resolution.CurrentBindingRef, resolution.CurrentBindingHash)
+	if err := runtimecontract.ValidateRuntimeCoverageProofLineage([]runtimecontract.RuntimeCoverageProofLineage{source, resolution}); err != nil {
+		t.Fatalf("build runtime proof lineage: %v", err)
+	}
+	return []runtimecontract.RuntimeCoverageProofLineage{source, resolution}
 }
 
 func runtimeCandidateRequestContentID(t *testing.T, aggregate runtime.RuntimeAggregate, stablePrefixHash string, attempt int) common.ArtifactContinuationID {

@@ -85,10 +85,9 @@ type Observer interface {
 	Notify(event Event, result Result)
 }
 
-// destinationMatcher is intentionally internal to the EventHub. Observer.ID
-// is its subscription identity; a matcher, when present, only controls
-// destination routing. Keeping those concerns separate lets independent
-// consumers share a destination pattern without replacing one another.
+// destinationMatcher keeps an observer's subscription identity separate from
+// the destination pattern it accepts. Multiple owners may intentionally share
+// one pattern without replacing each other in an event subscription.
 type destinationMatcher interface {
 	MatchID() string
 }
@@ -681,11 +680,8 @@ func (s *hubImpl) Subscribe(eventID string, observer Observer) {
 	}
 
 	replay := make(chan bool, 1)
-	// Subscription is control-plane work. Do not route it through Execute: a
-	// saturated worker pool can let the old short fallback race with the hub
-	// action, leaving the caller blocked on replay forever. Keep both hops
-	// bounded. replay intentionally remains open because the hub action may
-	// complete after the caller has timed out.
+	// Subscription is control-plane work. Keeping it outside Execute prevents a
+	// saturated data-plane worker pool from blocking owner lifecycle changes.
 	select {
 	case s.hubActionChannel <- &subscribeData{eventID: eventID, observer: observer, result: replay}:
 	case <-time.After(controlActionTimeout):

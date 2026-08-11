@@ -1,13 +1,16 @@
 package appservice
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -134,7 +137,7 @@ maxRepeatedSamePrompt = 1
 	}
 }
 
-func TestUpdateLLMConfigurationPersistsAIProxyAndDefaultTarget(t *testing.T) {
+func TestUpdateLLMConfigurationPersistsModelAndPreservesFileOwnedAIProxy(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
@@ -153,42 +156,42 @@ dataDir = ".workorch-data"
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	baseURL := "http://127.0.0.1:9090"
 	modelID := "gpt-4.1"
 	cfg, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		AIProxy: &workorchconfig.AIProxyProviderConfig{
-			BaseURL:                 baseURL,
-			Timeout:                 "180s",
-			CatalogRequestTimeout:   "5s",
-			CatalogTTL:              "5m",
-			CatalogMaxStaleAge:      "24h",
-			MaxCatalogResponseBytes: 1048576,
-			MaxCatalogModels:        1000,
-		},
-		DefaultChat: &workorchconfig.ProviderModelTargetConfig{
-			ProviderID: "ai-proxy",
-			ModelID:    modelID,
-		},
+		DefaultChatModelID: &modelID,
 	})
 	if err != nil {
 		t.Fatalf("update llm configuration: %v", err)
 	}
-	if cfg.LLM.AIProxy.BaseURL != baseURL || cfg.LLM.DefaultChat.ModelID != modelID {
-		t.Fatalf("updated llm = %+v, want persisted ai-proxy target", cfg.LLM)
+	if cfg.LLM.AIProxy.BaseURL != "http://127.0.0.1:8080" || cfg.LLM.DefaultChat.ModelID != modelID {
+		t.Fatalf("updated llm = %+v, want file-owned ai-proxy and persisted model", cfg.LLM)
 	}
 	if !cfg.LLM.AIProxy.APIKeyConfigured {
 		t.Fatalf("api key should remain configured after partial update")
 	}
+	if !cfg.LLM.RestartRequired {
+		t.Fatal("LLM model update must remain staged until restart")
+	}
+	persistedConfig, err := workorchconfig.Persisted()
+	if err != nil {
+		t.Fatalf("persisted: %v", err)
+	}
+	if persistedConfig.LLM.AIProxy.BaseURL != "http://127.0.0.1:8080" || persistedConfig.LLM.AIProxy.Timeout != "180s" || persistedConfig.LLM.AIProxy.APIKey != "test-key" || persistedConfig.LLM.DefaultChat.ProviderID != "ai-proxy" || persistedConfig.LLM.DefaultChat.ModelID != modelID {
+		t.Fatalf("persisted llm = %+v, want staged provider settings", persistedConfig.LLM)
+	}
+	if err := workorchconfig.Reload(); err != nil {
+		t.Fatalf("restart reload: %v", err)
+	}
 	current, err := workorchconfig.Current()
 	if err != nil {
-		t.Fatalf("current: %v", err)
+		t.Fatalf("current after restart: %v", err)
 	}
-	if current.LLM.AIProxy.APIKey != "test-key" || current.LLM.DefaultChat.ModelID != modelID {
-		t.Fatalf("canonical llm = %+v, want preserved api key and new model", current.LLM)
+	if current.LLM.DefaultChat.ModelID != modelID {
+		t.Fatalf("restarted llm = %+v, want persisted model", current.LLM)
 	}
 }
 
-func TestUpdateLLMConfigurationRotatesAIProxyAPIKeyImmediately(t *testing.T) {
+func TestUpdateLLMConfigurationStagesAIProxyAPIKeyUntilRestart(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
@@ -208,22 +211,33 @@ dataDir = ".workorch-data"
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	nextAIProxy := workorchconfig.DefaultLLMConfig().AIProxy
-	nextAIProxy.BaseURL = "http://127.0.0.1:8080"
-	nextAIProxy.APIKey = "rotated-key"
-	updated, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{AIProxy: &nextAIProxy})
+	apiKey := "rotated-key"
+	updated, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{APIKey: &apiKey})
 	if err != nil {
 		t.Fatalf("rotate ai-proxy api key: %v", err)
 	}
 	if !updated.LLM.AIProxy.APIKeyConfigured {
 		t.Fatal("rotated api key is not reported as configured")
 	}
+	if !updated.LLM.RestartRequired {
+		t.Fatal("rotated api key must require restart")
+	}
+	persistedConfig, err := workorchconfig.Persisted()
+	if err != nil {
+		t.Fatalf("persisted after rotation: %v", err)
+	}
+	if persistedConfig.LLM.AIProxy.APIKey != "rotated-key" {
+		t.Fatalf("persisted api key = %q, want staged key", persistedConfig.LLM.AIProxy.APIKey)
+	}
+	if err := workorchconfig.Reload(); err != nil {
+		t.Fatalf("restart reload: %v", err)
+	}
 	current, err := workorchconfig.Current()
 	if err != nil {
-		t.Fatalf("current after rotation: %v", err)
+		t.Fatalf("current after restart: %v", err)
 	}
 	if current.LLM.AIProxy.APIKey != "rotated-key" {
-		t.Fatalf("current api key was not replaced after reload")
+		t.Fatalf("restarted api key = %q, want rotated key", current.LLM.AIProxy.APIKey)
 	}
 	persisted, err := os.ReadFile(configPath)
 	if err != nil {
@@ -234,38 +248,46 @@ dataDir = ".workorch-data"
 	}
 }
 
-func TestUpdateLLMConfigurationRejectsReservedCustomProviderID(t *testing.T) {
-	configDir := t.TempDir()
-	content := `
-endpointName = "workorch"
-
-[server]
-addr = "127.0.0.1:18080"
-
-[repository]
-backend = "file"
-dataDir = ".workorch-data"
-` + validLLMTOML()
-	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+func TestLLMConfigurationProjectionAndCatalogRefreshUseActiveOwnerRevision(t *testing.T) {
+	useWorkorchTestConfig(t, "file", t.TempDir())
+	ctx := context.Background()
+	active, err := workorchconfig.Current()
+	if err != nil {
+		t.Fatal(err)
 	}
-	_ = workorchconfig.Close()
-	t.Setenv(workorchconfig.EnvConfigDir, configDir)
-	t.Cleanup(func() { _ = workorchconfig.Close() })
-
-	custom := map[string]workorchconfig.CustomLLMProviderConfig{
-		"ai-proxy": {
-			Provider:   "openai",
-			APISurface: "openai_compatible_http",
-			BaseURL:    "https://api.openai.com",
-			Models: map[string]workorchconfig.CustomLLMModelConfig{
-				"gpt-4o": {ContextWindowTokens: 128000, MaxOutputTokens: 4096, Operations: []string{workorchconfig.LLMOperationChatCompletions}},
-			},
-		},
+	activeRevision, err := workorchconfig.LLMConfigurationRevision(active.LLM)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{CustomProviders: &custom})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("UpdateLLMConfiguration error = %v, want reserved provider rejection", err)
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+	observer.Subscribe(llmevents.TopicLLMCommandGetActiveConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(llmevents.GetActiveConfigurationResult{
+			ProviderID:            workorchconfig.BuiltinAIProxyProviderID,
+			ConfigurationRevision: activeRevision,
+		}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration) })
+
+	apiKey := "staged-key"
+	updated, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{APIKey: &apiKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.LLM.RestartRequired {
+		t.Fatal("LLM update response must be restart-pending")
+	}
+
+	projection, err := ReadServiceConfigurationWithCatalog(ctx, hub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !projection.LLM.RestartRequired {
+		t.Fatal("configuration projection must compare persisted config with owner snapshot")
+	}
+	if _, err := RefreshLLMModelCatalog(ctx, hub); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("refresh error = %v, want restart-required invalid argument", err)
 	}
 }
 
@@ -581,36 +603,15 @@ func webSearchProviderUpdates(values ...configcore.UpdateWebSearchProviderConfig
 func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
 	useWorkorchTestConfig(t, "file", t.TempDir())
 	// Seed an API key via update.
-	baseURL := "http://127.0.0.1:18080"
+	apiKey := "secret-to-clear"
 	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		AIProxy: &workorchconfig.AIProxyProviderConfig{
-			BaseURL:                 baseURL,
-			APIKey:                  "secret-to-clear",
-			Timeout:                 "180s",
-			CatalogRequestTimeout:   "5s",
-			CatalogTTL:              "5m",
-			CatalogMaxStaleAge:      "24h",
-			MaxCatalogResponseBytes: 1048576,
-			MaxCatalogModels:        1000,
-		},
-		DefaultChat: &workorchconfig.ProviderModelTargetConfig{ProviderID: "custom-test", ModelID: "model-1"},
+		APIKey: &apiKey,
 	})
 	if err != nil {
-		// custom-test may already be present from useWorkorchTestConfig; still try clear path with current config.
-		t.Logf("seed update: %v", err)
+		t.Fatalf("seed api key: %v", err)
 	}
 	cfg, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		AIProxy: &workorchconfig.AIProxyProviderConfig{
-			BaseURL:                 baseURL,
-			Timeout:                 "180s",
-			CatalogRequestTimeout:   "5s",
-			CatalogTTL:              "5m",
-			CatalogMaxStaleAge:      "24h",
-			MaxCatalogResponseBytes: 1048576,
-			MaxCatalogModels:        1000,
-		},
-		ClearAIProxyAPIKey: true,
-		DefaultChat:        &workorchconfig.ProviderModelTargetConfig{ProviderID: "custom-test", ModelID: "model-1"},
+		ClearAPIKey: true,
 	})
 	if err != nil {
 		t.Fatalf("clear api key update: %v", err)
@@ -618,57 +619,36 @@ func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
 	if cfg.LLM.AIProxy.APIKeyConfigured {
 		t.Fatalf("apiKeyConfigured = true after clear, want false")
 	}
+	if !cfg.LLM.RestartRequired {
+		t.Fatal("cleared api key must require restart")
+	}
+	persistedConfig, err := workorchconfig.Persisted()
+	if err != nil {
+		t.Fatalf("persisted: %v", err)
+	}
+	if strings.TrimSpace(persistedConfig.LLM.AIProxy.APIKey) != "" {
+		t.Fatalf("persisted api key = %q, want cleared staged key", persistedConfig.LLM.AIProxy.APIKey)
+	}
+	if err := workorchconfig.Reload(); err != nil {
+		t.Fatalf("restart reload: %v", err)
+	}
 	current, err := workorchconfig.Current()
 	if err != nil {
-		t.Fatalf("current: %v", err)
+		t.Fatalf("current after restart: %v", err)
 	}
 	if strings.TrimSpace(current.LLM.AIProxy.APIKey) != "" {
-		t.Fatalf("persisted api key = %q, want empty after clear", current.LLM.AIProxy.APIKey)
+		t.Fatalf("restarted api key = %q, want empty", current.LLM.AIProxy.APIKey)
 	}
 }
 
 func TestUpdateLLMConfigurationRejectsClearWithNonEmptyAIProxyAPIKey(t *testing.T) {
 	useWorkorchTestConfig(t, "file", t.TempDir())
-	baseURL := "http://127.0.0.1:18080"
+	apiKey := "new-secret"
 	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		AIProxy: &workorchconfig.AIProxyProviderConfig{
-			BaseURL:                 baseURL,
-			APIKey:                  "new-secret",
-			Timeout:                 "180s",
-			CatalogRequestTimeout:   "5s",
-			CatalogTTL:              "5m",
-			CatalogMaxStaleAge:      "24h",
-			MaxCatalogResponseBytes: 1048576,
-			MaxCatalogModels:        1000,
-		},
-		ClearAIProxyAPIKey: true,
-		DefaultChat:        &workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		APIKey:      &apiKey,
+		ClearAPIKey: true,
 	})
 	if err == nil {
-		t.Fatal("expected clearAIProxyApiKey with non-empty apiKey to fail")
-	}
-}
-
-func TestUpdateLLMConfigurationRejectsClearWithNonEmptyCustomProviderAPIKey(t *testing.T) {
-	useWorkorchTestConfig(t, "file", t.TempDir())
-	custom := map[string]workorchconfig.CustomLLMProviderConfig{
-		"custom-clear": {
-			Provider:   "compatible",
-			APISurface: "openai_compatible_http",
-			BaseURL:    "http://127.0.0.1:9",
-			APIKey:     "new-custom-secret",
-			Timeout:    "30s",
-			Models: map[string]workorchconfig.CustomLLMModelConfig{
-				"model-1": {ContextWindowTokens: 128000, MaxOutputTokens: 8192, Operations: []string{"chat_completions"}},
-			},
-		},
-	}
-	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
-		CustomProviders:            &custom,
-		ClearCustomProviderAPIKeys: []string{"custom-clear"},
-		DefaultChat:                &workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
-	})
-	if err == nil {
-		t.Fatal("expected clearCustomProviderApiKeys with non-empty custom apiKey to fail")
+		t.Fatal("expected clearApiKey with non-empty apiKey to fail")
 	}
 }

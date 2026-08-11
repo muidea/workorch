@@ -35,6 +35,7 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-repair", Kind: runtimecontract.EvidenceKindStateChange,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000002",
+		BindingRefs: []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID},
 	}}
 	if shapes := ActiveRejectedOperationShapes(aggregate); len(shapes) != 0 {
 		t.Fatalf("accepted repair must clear active rejected shape: %+v", shapes)
@@ -342,6 +343,7 @@ func TestRepairableAssessmentSameGapRecordsAcceptedOperationShapeForAdmission(t 
 		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange,
 		DispatchID: "dispatch-accepted-state", OperationID: operation.ID,
 		CoverageWorkItemIDs: aggregate.Facts.Focus.CoverageWorkItemIDs,
+		BindingRefs:         []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID},
 	}}
 	ledger := runtimecontract.RuntimeRepairLedger{
 		FocusID: aggregate.Facts.Focus.ID,

@@ -75,7 +75,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 def parse_provider_request(payload):
-    user_content = payload.get("messages", [{}])[-1].get("content", "")
+    user_content = payload.get("input")
+    if not isinstance(user_content, str):
+        messages = payload.get("messages", [])
+        user_content = messages[-1].get("content", "") if messages else ""
     try:
         request = json.loads(user_content)
     except Exception:
@@ -151,13 +154,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/v1/models", "/models"):
-            # WorkOrch catalog expects explicit capacity + operations; without these models stay not-ready.
+            # WorkOrch derives supported operations from the exact ai-proxy endpoints.
             models = [
                 {
                     "id": "verify-model",
                     "object": "model",
                     "owned_by": "verify",
-                    "operations": ["chat_completions", "embeddings"],
+                    "supported_endpoints": ["/v1/responses", "/v1/embeddings"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -165,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "gpt-4o",
                     "object": "model",
                     "owned_by": "openai",
-                    "operations": ["chat_completions"],
+                    "supported_endpoints": ["/v1/responses"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -173,16 +176,14 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "text-embedding-3-small",
                     "object": "model",
                     "owned_by": "openai",
-                    "operations": ["embeddings"],
-                    "contextWindowTokens": 8192,
-                    "maxOutputTokens": 1024,
+                    "supported_endpoints": ["/v1/embeddings"],
                 },
 
                 {
                     "id": "verify-stream-native-model",
                     "object": "model",
                     "owned_by": "verify",
-                    "operations": ["chat_completions", "embeddings"],
+                    "supported_endpoints": ["/v1/responses", "/v1/embeddings"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -190,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "verify-stream-estimated-model",
                     "object": "model",
                     "owned_by": "verify",
-                    "operations": ["chat_completions", "embeddings"],
+                    "supported_endpoints": ["/v1/responses", "/v1/embeddings"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -198,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "web-search-e2e-model",
                     "object": "model",
                     "owned_by": "verify",
-                    "operations": ["chat_completions", "embeddings"],
+                    "supported_endpoints": ["/v1/responses", "/v1/embeddings"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -206,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "container-verify-model",
                     "object": "model",
                     "owned_by": "verify",
-                    "operations": ["chat_completions", "embeddings"],
+                    "supported_endpoints": ["/v1/responses", "/v1/embeddings"],
                     "contextWindowTokens": 128000,
                     "maxOutputTokens": 8192,
                 },
@@ -227,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(size)
         if self.path == "/v1/embeddings":
             response = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
-        elif self.path == "/v1/chat/completions":
+        elif self.path == "/v1/responses":
             payload = json.loads(body or b"{}")
             request = parse_provider_request(payload)
             decision = decision_payload(request)
@@ -240,7 +241,15 @@ class Handler(BaseHTTPRequestHandler):
                 flush=True,
             )
             content = json.dumps(decision, separators=(",", ":"))
-            response = {"choices": [{"message": {"content": content}}]}
+            response = {"status": "completed", "output_text": content, "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+            if payload.get("stream"):
+                encoded = ("data: " + json.dumps({"type": "response.completed", "response": response}) + "\n\n").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
         else:
             self.send_response(404)
             self.end_headers()
@@ -265,16 +274,16 @@ PY
 
 wait_mock() {
   for _ in $(seq 1 50); do
-    if curl -fsS -X POST "http://127.0.0.1:$MOCK_PORT/v1/chat/completions" \
+    if curl -fsS -X POST "http://127.0.0.1:$MOCK_PORT/v1/responses" \
       -H "Content-Type: application/json" \
-      -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null 2>&1; then
+      -d '{"model":"container-verify-model","input":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}' >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl -fsS -X POST "http://127.0.0.1:$MOCK_PORT/v1/chat/completions" \
+  curl -fsS -X POST "http://127.0.0.1:$MOCK_PORT/v1/responses" \
     -H "Content-Type: application/json" \
-    -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
+    -d '{"model":"container-verify-model","input":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}' >/dev/null
 }
 
 start_container() {
@@ -307,24 +316,13 @@ maxCatalogResponseBytes = 1048576
 maxCatalogModels = 1000
 
 [llm.defaultChat]
-providerID = "verify"
+providerID = "ai-proxy"
 modelID = "container-verify-model"
 
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
 
-[llm.customProviders.verify]
-provider = "compatible"
-apiSurface = "openai_compatible_http"
-baseURL = "$MOCK_BASE_URL"
-apiKey = "container-verify-key"
-timeout = "60s"
-
-[llm.customProviders.verify.models.container-verify-model]
-contextWindowTokens = 128000
-maxOutputTokens = 8192
-operations = ["chat_completions", "embeddings"]
 EOF
   local docker_args=(run -d --add-host=host.docker.internal:host-gateway -p "$ADDR_PORT:8080" -v "$CONFIG_DIR/application.toml:/etc/workorch/application.toml:ro")
   if [[ "$BACKEND" == "file" ]]; then

@@ -359,7 +359,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 				FailureClass: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), FailureReason: limitErr.Error(), ReachedProviderLimit: true,
 			}, err
 		}
-		stale := providerCeilingConfigurationStale(request, err)
+		stale := m.providerCeilingConfigurationStale(request, err)
 		// Provider may have been contacted; mark submitted when the sealed path reached Complete.
 		// completeProviderWithSealedCeiling only returns after client construction; treat as submitted
 		// once we leave that call with a non-config error. For pre-dispatch errors ProviderSubmitted stays false.
@@ -407,7 +407,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 // provider configuration no longer matches the provider-ceiling prerequisite.
 // The returned detail is consumed only by Orchestrator's generic invalidation
 // path; this owner neither retries nor changes the sealed target.
-func providerCeilingConfigurationStale(request llmmodels.RuntimeCandidateRequest, err error) *runtimecontract.RuntimePrerequisiteStale {
+func (m *Biz) providerCeilingConfigurationStale(request llmmodels.RuntimeCandidateRequest, err error) *runtimecontract.RuntimePrerequisiteStale {
 	var failure llmmodels.ProviderModelFailure
 	if !errors.As(err, &failure) || failure.Code != llmmodels.ProviderModelFailureConfigurationDrift {
 		return nil
@@ -425,11 +425,11 @@ func providerCeilingConfigurationStale(request llmmodels.RuntimeCandidateRequest
 			if dependency.Domain != runtimecontract.RuntimeResourceProviderConfig || dependency.OwnerModuleID != ModuleID || dependency.Revision != ceiling.ConfigurationRevision {
 				continue
 			}
-			cfg, configErr := workorchconfig.Current()
+			cfg, configErr := m.activeConfiguration()
 			if configErr != nil {
 				return nil
 			}
-			observed := TargetConfigurationRevision(cfg.LLM, ceiling.Selection.Target)
+			observed := TargetConfigurationRevision(cfg, ceiling.Selection.Target)
 			if observed == "" || observed == dependency.Revision {
 				return nil
 			}

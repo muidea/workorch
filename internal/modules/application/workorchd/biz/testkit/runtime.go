@@ -280,7 +280,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 }
 
 func ensureTestLLMConfig() {
-	if cfg, err := workorchconfig.Current(); err == nil && cfg.LLM.AIProxy.BaseURL != "" && cfg.LLM.DefaultChat.ModelID != "" && (cfg.LLM.DefaultChat.ProviderID != "ai-proxy" || len(cfg.LLM.CustomProviders) > 0 || true) {
+	if cfg, err := workorchconfig.Current(); err == nil && cfg.LLM.AIProxy.BaseURL != "" && cfg.LLM.DefaultChat.ProviderID == "ai-proxy" && cfg.LLM.DefaultChat.ModelID != "" {
 		return
 	}
 	configDir, err := os.MkdirTemp("", "workorch-testkit-config-*")
@@ -306,23 +306,17 @@ maxCatalogResponseBytes = 1048576
 maxCatalogModels = 1000
 
 [llm.defaultChat]
-providerID = "custom-test"
+providerID = "ai-proxy"
 modelID = "model-1"
 
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
 
-[llm.customProviders.custom-test]
-provider = "compatible"
-apiSurface = "openai_compatible_http"
-baseURL = "http://127.0.0.1:9"
-timeout = "30s"
-
-[llm.customProviders.custom-test.models.model-1]
+[llm.aiProxy.modelOverrides.model-1]
 contextWindowTokens = 128000
 maxOutputTokens = 8192
-operations = ["chat_completions"]
+operations = ["responses"]
 `
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		panic(fmt.Errorf("write testkit config: %w", err))

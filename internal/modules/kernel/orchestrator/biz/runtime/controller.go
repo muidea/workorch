@@ -159,7 +159,7 @@ func (c *RuntimeController) reconcileAuthorityBeforeCandidate(ctx context.Contex
 	if requirements := activeProviderCeilingRequirements(facts); len(requirements) != 0 {
 		facts = PreflightRuntimeFacts(facts, requirements)
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -206,7 +206,7 @@ func (c *RuntimeController) recordFeasibilityFact(ctx context.Context, workspace
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.Facts.Feasibility = &fact
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -271,7 +271,7 @@ func (c *RuntimeController) commitFailureFact(ctx context.Context, workspaceID c
 	if requirements := activeFailureTargetRequirements(facts); len(requirements) != 0 {
 		facts = PreflightRuntimeFacts(facts, requirements)
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -376,16 +376,8 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	// A single-operation durable dispatch may have completed its current
-	// coverage before its receipt invalidated mutable prerequisites. Once the
-	// last affected prerequisite has been reacquired, preserve the accepted
-	// evidence and advance the satisfied focus exactly as a non-invalidated
-	// dispatch would. Partial dispatches keep FreshnessReacquireCoverage and
-	// therefore cannot skip their required fresh replacement work.
-	if len(facts.Prerequisites.Pending) == 0 && len(facts.FreshnessReacquireCoverage) == 0 {
-		facts = advanceSatisfiedCoverageFocus(facts)
-	}
 	aggregate.Facts = facts
+	semanticGenerationRetired := false
 	// A receipt-driven owner catalog change can invalidate the sealed semantic
 	// generation even when the current focus ID remains unchanged (for example
 	// a partial dispatch or a target refresh). Reopen semantic planning before
@@ -407,6 +399,19 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 				}
 			}
 		}
+		semanticGenerationRetired = retired
+	}
+	// A single-operation durable dispatch may have completed its current
+	// coverage before its receipt invalidated mutable prerequisites. A changed
+	// catalog must first re-seal the current binding and let SM-2 persist its
+	// proof-lineage resolution; advancing under the retired binding would skip
+	// the equivalent/incompatible gate. When re-acquisition retained the same
+	// catalog identity, the existing exact binding remains current and ordinary
+	// focus advancement is still valid.
+	facts = aggregate.Facts
+	if !semanticGenerationRetired && len(facts.Prerequisites.Pending) == 0 && len(facts.FreshnessReacquireCoverage) == 0 {
+		facts = advanceSatisfiedCoverageFocus(facts, aggregate.CoverageProofLineage)
+		aggregate.Facts = facts
 	}
 	if aggregate.Facts.Focus.ID != previousFocusID {
 		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
@@ -414,7 +419,7 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 		}
 		facts = aggregate.Facts
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1161,7 +1166,7 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 		needsReduce = true
 	}
 	if needsReduce {
-		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 		if reduceErr != nil {
 			return reduceErr
 		}
@@ -1374,7 +1379,7 @@ func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID co
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
 	previousFocusID := aggregate.Facts.Focus.ID
-	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts, aggregate.CoverageProofLineage)
 	if aggregate.Facts.Focus.ID != previousFocusID {
 		// Reaching an unbound placeholder is a local SM-2 transition, not a
 		// continuation chosen by the assessment. Retire only the just-sealed
@@ -1383,7 +1388,7 @@ func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID co
 			return RuntimeAggregate{}, err
 		}
 	}
-	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1405,7 +1410,7 @@ func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID co
 
 func recordAcceptedNoProgressShapes(aggregate RuntimeAggregate, ledger runtimecontract.RuntimeRepairLedger, signature string) runtimecontract.RuntimeRepairLedger {
 	for _, evidence := range aggregate.Facts.Evidence.Accepted {
-		if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, evidence) {
+		if !runtimeEvidenceAppliesToCurrentCoverageWithLineage(aggregate.Facts, evidence, aggregate.CoverageProofLineage) {
 			continue
 		}
 		if evidence.Kind != runtimecontract.EvidenceKindStateChange {
@@ -1490,11 +1495,11 @@ func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverage
 	seenKinds := make(map[string]struct{}, len(needed))
 	refs := make([]string, 0)
 	for _, evidence := range aggregate.Facts.Evidence.Accepted {
-		if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, evidence) ||
-			!coverageWorkItemIDIncluded(evidence.CoverageWorkItemIDs, coverageID) || weakRuntimeEvidence(evidence) {
+		if weakRuntimeEvidence(evidence) ||
+			!runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, evidence, coverageID, aggregate.CoverageProofLineage) {
 			continue
 		}
-		if !runtimeEvidenceMatchesCoverageBinding(focus, coverageID, evidence) {
+		if !runtimeEvidenceMatchesCoverageBindingWithLineage(aggregate.Facts, focus, coverageID, evidence, aggregate.CoverageProofLineage) {
 			continue
 		}
 		if bound || assessmentFocusRequiresOperationEvidence(focus) {

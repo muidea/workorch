@@ -89,7 +89,7 @@ func TestWorkspaceChangedNotificationClonesDefaultLLMSelection(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workspaceevents.TopicWorkspaceStateChanged) })
-	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}
 	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
 	current, _ := workspaces.Get(context.Background(), "ws-notify")
 	sendWorkspaceTestCommand(t, context.Background(), hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: "ws-notify", Selection: &selection, ExpectedRevision: current.Revision})
@@ -119,7 +119,7 @@ func TestUpdateWorkspaceLLMSelectionCommandPersistsCompleteTargetAndClears(t *te
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	target := runtimecontract.ProviderModelTarget{ProviderID: "custom-provider", ModelID: "model-a"}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}
 	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "none"}
 	current, _ := repo.Get(ctx, workspaceID)
 	result := sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{WorkspaceID: workspaceID, Selection: &selection, ExpectedRevision: current.Revision})
@@ -145,7 +145,7 @@ func TestUpdateWorkspaceLLMSelectionCommandPersistsCompleteTargetAndClears(t *te
 		workspaceevents.UpdateWorkspaceLLMSelectionCommand{
 			WorkspaceID: workspaceID,
 			Selection: &runtimecontract.ProviderInferenceSelection{
-				Target: runtimecontract.ProviderModelTarget{ProviderID: "custom-provider", ModelID: "stale-model"},
+				Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "stale-model"},
 			},
 			ExpectedRevision: current.Revision,
 		},

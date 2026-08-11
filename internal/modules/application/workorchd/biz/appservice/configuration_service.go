@@ -35,11 +35,11 @@ func UpdateWebSearchConfiguration(cmd configcore.UpdateWebSearchConfigurationCom
 	return configcore.UpdateWebSearchConfiguration(cmd)
 }
 
-func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd configcore.GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
-	return configcore.GetLLMModelCatalog(ctx, hub, cmd)
+func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+	return configcore.GetLLMModelCatalog(ctx, hub)
 }
 
-func GetLLMModelCatalogWithSession(ctx context.Context, session *runtimecore.Session, cmd configcore.GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+func GetLLMModelCatalogWithSession(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 	if session == nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, common.ErrInvalidArgument
 	}
@@ -47,14 +47,14 @@ func GetLLMModelCatalogWithSession(ctx context.Context, session *runtimecore.Ses
 	if err != nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
-	return GetLLMModelCatalog(ctx, hub, cmd)
+	return GetLLMModelCatalog(ctx, hub)
 }
 
-func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd configcore.RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
-	return configcore.RefreshLLMModelCatalog(ctx, hub, cmd)
+func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+	return configcore.RefreshLLMModelCatalog(ctx, hub)
 }
 
-func RefreshLLMModelCatalogWithSession(ctx context.Context, session *runtimecore.Session, cmd configcore.RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+func RefreshLLMModelCatalogWithSession(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 	if session == nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, common.ErrInvalidArgument
 	}
@@ -62,7 +62,7 @@ func RefreshLLMModelCatalogWithSession(ctx context.Context, session *runtimecore
 	if err != nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
-	return RefreshLLMModelCatalog(ctx, hub, cmd)
+	return RefreshLLMModelCatalog(ctx, hub)
 }
 
 func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (workorchconfigurationcontract.ServiceConfiguration, error) {

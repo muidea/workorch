@@ -81,7 +81,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := llmmodule.New()
-				if err := owner.Configure(llmbiz.Dependencies{EventHub: hub}); err != nil {
+				if err := owner.Configure(llmbiz.Dependencies{EventHub: hub, LoadLLMConfig: testLLMConfigurationSnapshot}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {

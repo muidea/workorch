@@ -28,11 +28,14 @@ func ResolveProviderModelTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels
 	}
 	operation = normalizeRequestedOperation(operation)
 	configRevision := TargetConfigurationRevision(cfg, target)
-
-	if target.ProviderID == runtimecontract.BuiltinAIProxyProviderID {
-		return resolveAIProxyTarget(cfg, catalog, target, operation, configRevision)
+	if target.ProviderID != runtimecontract.BuiltinAIProxyProviderID {
+		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
+			Code:    llmmodels.ProviderModelFailureProviderNotFound,
+			Message: "WorkOrch only supports the ai-proxy provider",
+			Target:  target,
+		}
 	}
-	return resolveCustomProviderTarget(cfg, target, operation, configRevision)
+	return resolveAIProxyTarget(cfg, catalog, target, operation, configRevision)
 }
 
 func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.ProviderModelCatalog, target runtimecontract.ProviderModelTarget, operation string, configRevision string) (llmmodels.ResolvedProviderModelProfile, error) {
@@ -118,46 +121,6 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 		Message: fmt.Sprintf("model %q was not found in ai-proxy catalog", target.ModelID),
 		Target:  target,
 	}
-}
-
-func resolveCustomProviderTarget(cfg workorchconfig.LLMConfig, target runtimecontract.ProviderModelTarget, operation string, configRevision string) (llmmodels.ResolvedProviderModelProfile, error) {
-	// Exact map lookup only. NormalizeLLMConfig rejects trim collisions and rewrites
-	// keys to trimmed form; model casing remains part of the provider contract.
-	provider, ok := cfg.CustomProviders[target.ProviderID]
-	if !ok {
-		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
-			Code:    llmmodels.ProviderModelFailureProviderNotFound,
-			Message: fmt.Sprintf("custom provider %q was not found", target.ProviderID),
-			Target:  target,
-		}
-	}
-	model, ok := provider.Models[target.ModelID]
-	if !ok {
-		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
-			Code:    llmmodels.ProviderModelFailureModelNotFound,
-			Message: fmt.Sprintf("model %q was not found on custom provider %q", target.ModelID, target.ProviderID),
-			Target:  target,
-		}
-	}
-	if model.ContextWindowTokens <= 0 || model.MaxOutputTokens <= 0 {
-		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
-			Code:    llmmodels.ProviderModelFailureCapabilityIncomplete,
-			Message: "custom provider model capability is incomplete",
-			Target:  target,
-		}
-	}
-	if !containsOperation(model.Operations, operation) && !(operation == workorchconfig.LLMOperationResponses && containsOperation(model.Operations, workorchconfig.LLMOperationChatCompletions)) {
-		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
-			Code:    llmmodels.ProviderModelFailureOperationUnsupported,
-			Message: fmt.Sprintf("custom model %q does not support operation %q", target.ModelID, operation),
-			Target:  target,
-		}
-	}
-	apiSurface := strings.TrimSpace(provider.APISurface)
-	if apiSurface == "" {
-		apiSurface = defaultProviderAPISurface(provider.Provider)
-	}
-	return deriveBudgetProfile(target, operation, apiSurface, model.ContextWindowTokens, model.MaxOutputTokens, cfg.Budget, llmmodels.CapabilitySourceCustomProviderExplicit, configRevision, "")
 }
 
 func deriveBudgetProfile(
@@ -259,86 +222,35 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 	if !profile.Target.Same(target) {
 		return llmmodels.ProviderConfig{}, fmt.Errorf("%w: resolved profile target mismatch", common.ErrInvalidArgument)
 	}
-	if target.ProviderID == runtimecontract.BuiltinAIProxyProviderID {
-		timeout, err := parseProviderTimeout(cfg.AIProxy.Timeout)
-		if err != nil {
-			return llmmodels.ProviderConfig{}, err
-		}
-		return withAvailability(llmmodels.ProviderConfig{
-			ID:         target.ProviderID,
-			Provider:   llmcommon.ProviderCompatible,
-			APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
-			BaseURL:    strings.TrimSpace(cfg.AIProxy.BaseURL),
-			APIKey:     strings.TrimSpace(cfg.AIProxy.APIKey),
-			Model:      target.ModelID,
-			Timeout:    timeout,
-			Capabilities: llmmodels.ProviderCapabilities{
-				ChatCompletions: true,
-				Responses:       true,
-				Streaming:       true,
-				// ai-proxy's Responses integration supports the base text
-				// contract only.  It does not advertise or forward JSON Schema
-				// response formatting to upstream providers such as DeepSeek.
-				// Candidate JSON is still validated locally by the Runtime
-				// boundary after the textual response is received.
-				JSONSchemaResponse: false,
-				NonChatOperations:  []string{workorchconfig.LLMOperationEmbeddings},
-			},
-			InferenceProfile: llmmodels.ProviderInferenceProfile{
-				MaxOutputTokens: profile.EffectiveMaxOutputTokens,
-			},
-			ContextProfile: llmmodels.ProviderContextProfile{
-				CapabilitySource:        profile.CapabilitySource,
-				ContextWindowTokens:     profile.ContextWindowTokens,
-				MaxInputTokens:          profile.MaxInputTokens,
-				ReservedOutputTokens:    profile.EffectiveMaxOutputTokens,
-				ContextUtilizationRatio: cfg.Budget.ContextUtilizationRatio,
-				MaxRequestBytes:         profile.MaxRequestBytes,
-				EstimatedTokensPerByte:  profile.EstimatedTokensPerByte,
-			},
-		}), nil
-	}
-	provider, ok := cfg.CustomProviders[target.ProviderID]
-	if !ok {
+	if target.ProviderID != runtimecontract.BuiltinAIProxyProviderID {
 		return llmmodels.ProviderConfig{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureProviderNotFound,
-			Message: fmt.Sprintf("custom provider %q was not found", target.ProviderID),
+			Message: "WorkOrch only supports the ai-proxy provider",
 			Target:  target,
 		}
 	}
-	model, ok := provider.Models[target.ModelID]
-	if !ok {
-		return llmmodels.ProviderConfig{}, llmmodels.ProviderModelFailure{
-			Code:    llmmodels.ProviderModelFailureModelNotFound,
-			Message: fmt.Sprintf("model %q was not found on custom provider %q", target.ModelID, target.ProviderID),
-			Target:  target,
-		}
-	}
-	timeout, err := parseProviderTimeout(provider.Timeout)
+	timeout, err := parseProviderTimeout(cfg.AIProxy.Timeout)
 	if err != nil {
 		return llmmodels.ProviderConfig{}, err
 	}
-	apiSurface := strings.TrimSpace(provider.APISurface)
-	if apiSurface == "" {
-		apiSurface = defaultProviderAPISurface(provider.Provider)
-	}
 	return withAvailability(llmmodels.ProviderConfig{
 		ID:         target.ProviderID,
-		Provider:   strings.TrimSpace(provider.Provider),
-		APISurface: apiSurface,
-		BaseURL:    strings.TrimSpace(provider.BaseURL),
-		APIKey:     strings.TrimSpace(provider.APIKey),
+		APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+		BaseURL:    strings.TrimSpace(cfg.AIProxy.BaseURL),
+		APIKey:     strings.TrimSpace(cfg.AIProxy.APIKey),
 		Model:      target.ModelID,
 		Timeout:    timeout,
 		Capabilities: llmmodels.ProviderCapabilities{
-			ChatCompletions:   containsOperation(model.Operations, workorchconfig.LLMOperationChatCompletions),
-			Responses:         containsOperation(model.Operations, workorchconfig.LLMOperationResponses),
-			NonChatOperations: nonChatOperations(model.Operations),
+			Responses: true,
+			Streaming: true,
+			// ai-proxy's Responses integration supports the base text
+			// contract only. It does not advertise JSON Schema response
+			// formatting to upstream providers.
+			JSONSchemaResponse: false,
+			NonChatOperations:  []string{workorchconfig.LLMOperationEmbeddings},
 		},
 		InferenceProfile: llmmodels.ProviderInferenceProfile{
-			Temperature:          model.Temperature,
-			MaxOutputTokens:      profile.EffectiveMaxOutputTokens,
-			ThinkingBudgetTokens: model.ThinkingBudgetTokens,
+			MaxOutputTokens: profile.EffectiveMaxOutputTokens,
 		},
 		ContextProfile: llmmodels.ProviderContextProfile{
 			CapabilitySource:        profile.CapabilitySource,
@@ -348,13 +260,6 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 			ContextUtilizationRatio: cfg.Budget.ContextUtilizationRatio,
 			MaxRequestBytes:         profile.MaxRequestBytes,
 			EstimatedTokensPerByte:  profile.EstimatedTokensPerByte,
-		},
-		CacheCapability: llmmodels.ProviderCacheCapability{
-			Surface:             apiSurface,
-			Mode:                model.Cache.Mode,
-			PromptCacheKey:      boolValue(model.Cache.PromptCacheKey),
-			MessageCacheControl: boolValue(model.Cache.MessageCacheControl),
-			UsageFields:         append([]string(nil), model.Cache.UsageFields...),
 		},
 	}), nil
 }
@@ -406,22 +311,6 @@ func containsOperation(operations []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func nonChatOperations(operations []string) []string {
-	ret := make([]string, 0, len(operations))
-	for _, operation := range operations {
-		operation = strings.TrimSpace(operation)
-		if operation == "" || operation == workorchconfig.LLMOperationChatCompletions {
-			continue
-		}
-		ret = append(ret, operation)
-	}
-	return ret
-}
-
-func boolValue(value *bool) bool {
-	return value != nil && *value
 }
 
 func withAvailability(cfg llmmodels.ProviderConfig) llmmodels.ProviderConfig {

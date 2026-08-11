@@ -4,10 +4,11 @@ workorch is a local-first workspace orchestration agent and service for defining
 
 **Production runtime path = Runtime only.** Application constructs a typed `RuntimeBootstrap` and issues Start/Resume; `kernel/orchestrator` is the sole convergence authority (`DriveRuntime` + reducer + sealed dispatch + evidence commit). Capability blocks only execute and return typed results; Result stores already-judged outcomes. Design contract: `docs/00-core/runtime-stage-contract.md`. Implementation SoT: `internal/modules/kernel/orchestrator/readme.md` and `internal/pkg/workorchruntimecontract`.
 
-Current LLM provider management supports explicit provider capabilities for
-chat completions, streaming, and declared non-chat operations. Streaming output
-is recorded as observability evidence and non-chat operations remain
-capability-gated rather than implicitly selected by the orchestrator.
+Current LLM access is ai-proxy-only: inference uses OpenAI-compatible
+`/v1/responses`, embeddings use `/v1/embeddings`, and model readiness comes
+from `/v1/models`. Streaming output is recorded as observability evidence;
+model operations remain capability-gated rather than implicitly selected by
+the orchestrator.
 
 Memory records support embedding metadata and vector readiness fields. Existing
 workspace-scoped list/search remains deterministic, and repositories can rank
@@ -304,10 +305,12 @@ Available endpoints:
 - `POST /api/v1/workorch/approvals/{approvalId}/reject`
 - `POST /api/v1/workorch/approvals/resolve-batch` with `approvalIds` and one shared `action`: `approve` or `reject`
 
-The Web Console Configuration page can update LLM providers. The service writes
-the change to `application.toml`, reloads magicCommon framework configuration,
-and the next LLM runtime step resolves providers from the latest config without
-restarting `workorch --server`. Read responses redact provider API keys.
+The Web Console **LLM** configuration page only stages the ai-proxy API key,
+default inference/embedding models, and context budget settings. The ai-proxy
+address remains file-owned. Saving writes `application.toml` for the next
+process start; `blocks/llm` keeps its startup configuration snapshot, so a
+WorkOrch restart is required before newly saved LLM settings are used. Read
+responses redact API keys.
 
 Minimal deployment verification:
 

@@ -14,11 +14,16 @@ func ReadServiceConfiguration() (workorchconfigurationcontract.ServiceConfigurat
 	if err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
+	persisted, err := workorchconfig.Persisted()
+	if err != nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
+	}
+	cfg.LLM = persisted.LLM
 	defaultWebProviderID, webProviders, err := webSearchProviderConfigurations(cfg)
 	if err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
-	return workorchconfigurationcontract.ServiceConfiguration{
+	item := workorchconfigurationcontract.ServiceConfiguration{
 		Server:     serverConfiguration(cfg),
 		Repository: repositoryConfiguration(cfg),
 		Runtime:    runtimeConfiguration(cfg),
@@ -29,7 +34,8 @@ func ReadServiceConfiguration() (workorchconfigurationcontract.ServiceConfigurat
 			ProviderTemplates: DefaultWebSearchProviderTemplates(),
 		},
 		Governance: governanceConfiguration(cfg),
-	}, nil
+	}
+	return item, nil
 }
 
 func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanagementcontract.ProviderCatalogSummary) workorchconfigurationcontract.LLMConfiguration {
@@ -37,43 +43,6 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanageme
 	if cfg.DefaultEmbedding != nil {
 		target := cfg.DefaultEmbedding.ToRuntimeTarget()
 		defaultEmbedding = &target
-	}
-	customProviders := make([]workorchconfigurationcontract.CustomProviderConfigurationView, 0, len(cfg.CustomProviders))
-	for id, provider := range cfg.CustomProviders {
-		models := make([]workorchconfigurationcontract.CustomProviderModelView, 0, len(provider.Models))
-		for modelID, model := range provider.Models {
-			view := workorchconfigurationcontract.CustomProviderModelView{
-				ID:                   modelID,
-				ContextWindowTokens:  model.ContextWindowTokens,
-				MaxOutputTokens:      model.MaxOutputTokens,
-				Operations:           append([]string(nil), model.Operations...),
-				ThinkingBudgetTokens: model.ThinkingBudgetTokens,
-				CacheMode:            model.Cache.Mode,
-				CacheUsageFields:     append([]string(nil), model.Cache.UsageFields...),
-			}
-			if model.Temperature != nil {
-				value := *model.Temperature
-				view.Temperature = &value
-			}
-			if model.Cache.PromptCacheKey != nil {
-				value := *model.Cache.PromptCacheKey
-				view.PromptCacheKey = &value
-			}
-			if model.Cache.MessageCacheControl != nil {
-				value := *model.Cache.MessageCacheControl
-				view.MessageCacheControl = &value
-			}
-			models = append(models, view)
-		}
-		customProviders = append(customProviders, workorchconfigurationcontract.CustomProviderConfigurationView{
-			ID:               id,
-			Provider:         provider.Provider,
-			APISurface:       provider.APISurface,
-			BaseURL:          provider.BaseURL,
-			Timeout:          provider.Timeout,
-			APIKeyConfigured: strings.TrimSpace(provider.APIKey) != "",
-			Models:           models,
-		})
 	}
 	return workorchconfigurationcontract.LLMConfiguration{
 		AIProxy: workorchconfigurationcontract.AIProxyConfigurationView{
@@ -89,7 +58,6 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanageme
 		DefaultChat:      cfg.DefaultChat.ToRuntimeTarget(),
 		DefaultEmbedding: defaultEmbedding,
 		Budget:           cfg.Budget,
-		CustomProviders:  customProviders,
 		Catalog:          catalog,
 	}
 }

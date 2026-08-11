@@ -221,23 +221,17 @@ maxCatalogResponseBytes = 1048576
 maxCatalogModels = 1000
 
 [llm.defaultChat]
-providerID = "custom-test"
+providerID = "ai-proxy"
 modelID = "model-1"
 
 [llm.budget]
 contextUtilizationRatio = 0.75
 estimatedTokensPerByte = 0.25
 
-[llm.customProviders.custom-test]
-provider = "compatible"
-apiSurface = "openai_compatible_http"
-baseURL = "http://127.0.0.1:9"
-timeout = "30s"
-
-[llm.customProviders.custom-test.models.model-1]
+[llm.aiProxy.modelOverrides.model-1]
 contextWindowTokens = 128000
 maxOutputTokens = 8192
-operations = ["chat_completions"]
+operations = ["responses"]
 
 
 `, backend, dataRoot)

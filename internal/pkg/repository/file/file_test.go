@@ -59,7 +59,7 @@ func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.json")
 	repo := NewWorkspaceRepository(path)
-	target := orchestratormodel.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
+	target := orchestratormodel.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}
 	item := &workspacemodel.Workspace{ID: "ws-model-target", Title: "workspace", State: common.WorkspaceStateActive, DefaultLLMSelection: &orchestratormodel.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -69,7 +69,7 @@ func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if stored.DefaultLLMSelection == nil || stored.DefaultLLMSelection.Target.ProviderID != "custom" || stored.DefaultLLMSelection.Target.ModelID != "model-a" {
+	if stored.DefaultLLMSelection == nil || stored.DefaultLLMSelection.Target.ProviderID != "ai-proxy" || stored.DefaultLLMSelection.Target.ModelID != "model-a" {
 		t.Fatalf("stored target = %+v", stored.DefaultLLMSelection)
 	}
 	stored.DefaultLLMSelection.Target.ProviderID = "mutated"
@@ -77,7 +77,7 @@ func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Get: %v", err)
 	}
-	if again.DefaultLLMSelection == nil || again.DefaultLLMSelection.Target.ProviderID != "custom" {
+	if again.DefaultLLMSelection == nil || again.DefaultLLMSelection.Target.ProviderID != "ai-proxy" {
 		t.Fatalf("cloned target = %+v", again.DefaultLLMSelection)
 	}
 }

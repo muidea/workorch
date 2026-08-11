@@ -26,30 +26,14 @@ const (
 )
 
 const (
-	ProviderOpenAI     = "openai"
-	ProviderCompatible = "compatible"
-	ProviderAnthropic  = "anthropic"
+	// ProviderAIProxy is the only LLM route owner supported by WorkOrch.
+	ProviderAIProxy = "ai-proxy"
+	// ProviderSurfaceOpenAICompatibleHTTP is the ai-proxy OpenAI protocol
+	// adapter. Runtime calls are always sent to /v1/responses.
+	ProviderSurfaceOpenAICompatibleHTTP = "openai_compatible_http"
 )
 
-const (
-	ProviderSurfaceOpenAISDK               = "openai_sdk"
-	ProviderSurfaceAnthropicSDK            = "anthropic_sdk"
-	ProviderSurfaceOpenAICompatibleHTTP    = "openai_compatible_http"
-	ProviderSurfaceAnthropicCompatibleHTTP = "anthropic_compatible_http"
-)
-
-const (
-	ProviderCacheModeNone                  = "none"
-	ProviderCacheModeAutoPrefix            = "auto_prefix"
-	ProviderCacheModePromptCacheKey        = "prompt_cache_key"
-	ProviderCacheModeAnthropicCacheControl = "anthropic_cache_control"
-	ProviderCacheModeCompatibleDeclared    = "compatible_declared"
-)
-
-const (
-	ProviderOperationChatCompletions = "chat_completions"
-	ProviderOperationEmbeddings      = "embeddings"
-)
+const ProviderOperationEmbeddings = "embeddings"
 
 const (
 	UsageSourceEstimated      = "estimated"

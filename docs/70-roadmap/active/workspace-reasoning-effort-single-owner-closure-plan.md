@@ -56,7 +56,7 @@ ai-proxy /v1/models
 3. ai-proxy catalog DTO 没有解析 `capabilities.reasoning`。
 4. catalog、management view、backend option、Web/TUI 类型均未暴露 reasoning capability。
 5. Responses adapter 使用顶层 `reasoning_effort`，与最新 ai-proxy OpenAI Responses 合同不一致。
-6. `ReasoningEffort` 仍来自全局/custom-provider inference profile，可能让一个进程配置影响所有 workspace。
+6. `ReasoningEffort` 仍来自全局 inference profile，可能让一个进程配置影响所有 workspace。
 7. Web activation 当前先写 `/llm-target` 再提交 execution activation，且 activation body 仍携带 form-derived
    `llmTarget`；canonical owner result 与本次 Run 封存来源没有形成唯一链。
 8. TUI `/model` 只选择 target，无法显示 provider default、允许 efforts 和当前 Run sealed effort。
@@ -475,10 +475,13 @@ WorkOrch 仅通过 ai-proxy OpenAI `/v1/responses` 访问模型；不得为 reas
 - [x] 删除旧 alias、forwarder、compatibility/fallback、Web失效自定义 Provider编辑器和全局 provider reasoning配置。
 - [x] 同步刷新 `current-state`、`service-api`、LLM assembly、orchestrator readme；request/cache规则无需改变，effort不进入稳定 prefix。
 - [x] 更新 active overview、未收口矩阵和 todo 索引状态。
-- [ ] 完成 focused、全仓、boundary、console 和 managed deployed 验证。
+- [x] 完成 focused、全仓、boundary、console 和 managed verifier 验证。
 
-当前验证状态：focused、全仓、`fmt-check`、`vet`、console build 与 boundary已通过；
-`make verify-ci-mvp-file` 实际连接已部署 `127.0.0.1:8080`，本次因实例未运行而无法完成，deployed/live matrix保留未关。
+当前验证状态：focused、全仓、`fmt-check`、`vet`、console build、boundary，以及
+`make verify-managed-full` 已通过。managed verifier 在一次性本地部署实例上完成 HTTP、LLM 与 MCP stdio
+验证，覆盖本项的编译、owner 合同和进程装配基线；它不替代真实部署实例上的 Web Start/Restart、TUI
+`/model reasoning`、Resume sealed selection 与双 workspace 隔离交互矩阵。因此 WRE 仍为
+`code-closed / live-open`，直到该专门 live 矩阵取得新证据。
 
 完成门槛：代码、owner readme、核心从属文档和产品接口只描述一套正式合同。
 

@@ -3,7 +3,6 @@ package configcore
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -19,71 +18,97 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type GetLLMModelCatalogCommand struct {
-	ProviderID string `json:"providerId,omitempty"`
-}
-
-type RefreshLLMModelCatalogCommand struct {
-	ProviderID string `json:"providerId,omitempty"`
-}
-
-func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 	if hub == nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, common.ErrInvalidArgument
 	}
-	providerID := catalogProviderID(cmd.ProviderID)
+	providerID := runtimecontract.BuiltinAIProxyProviderID
 	ev := magicevent.NewEventWithContext(
 		llmevents.TopicLLMCommandGetProviderModelCatalog,
 		modulecommon.ModuleID,
 		llmevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		llmevents.GetProviderModelCatalogCommand{ProviderID: providerID},
+		llmevents.GetProviderModelCatalogCommand{},
 	)
 	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGetProviderModelCatalog, eventcontract.LaneScope{
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
-	response, err := sendLLMCatalogCommand[llmevents.GetProviderModelCatalogResult](hub, ev)
+	response, err := sendLLMCommand[llmevents.GetProviderModelCatalogResult](hub, ev)
 	if err != nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
 	return catalogSummaryFromModel(response.Catalog), nil
 }
 
-func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 	if hub == nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, common.ErrInvalidArgument
 	}
-	providerID := catalogProviderID(cmd.ProviderID)
+	persisted, err := workorchconfig.Persisted()
+	if err != nil {
+		return workorchmanagementcontract.ProviderCatalogSummary{}, err
+	}
+	persistedRevision, err := workorchconfig.LLMConfigurationRevision(persisted.LLM)
+	if err != nil {
+		return workorchmanagementcontract.ProviderCatalogSummary{}, err
+	}
+	active, err := getActiveLLMConfiguration(ctx, hub)
+	if err != nil {
+		return workorchmanagementcontract.ProviderCatalogSummary{}, err
+	}
+	if active.ConfigurationRevision != persistedRevision {
+		return workorchmanagementcontract.ProviderCatalogSummary{}, fmt.Errorf("%w: llm configuration was saved and requires a WorkOrch restart before catalog refresh", common.ErrInvalidArgument)
+	}
+	providerID := runtimecontract.BuiltinAIProxyProviderID
 	ev := magicevent.NewEventWithContext(
 		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
 		modulecommon.ModuleID,
 		llmevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		llmevents.RefreshProviderModelCatalogCommand{ProviderID: providerID},
+		llmevents.RefreshProviderModelCatalogCommand{},
 	)
 	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandRefreshProviderModelCatalog, eventcontract.LaneScope{
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
-	response, err := sendLLMCatalogCommand[llmevents.RefreshProviderModelCatalogResult](hub, ev)
+	response, err := sendLLMCommand[llmevents.RefreshProviderModelCatalogResult](hub, ev)
 	if err != nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
 	return catalogSummaryFromModel(response.Catalog), nil
 }
 
-func catalogProviderID(providerID string) string {
-	providerID = strings.TrimSpace(providerID)
-	if providerID == "" {
-		return runtimecontract.BuiltinAIProxyProviderID
+func getActiveLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmevents.GetActiveConfigurationResult, error) {
+	if hub == nil {
+		return llmevents.GetActiveConfigurationResult{}, common.ErrInvalidArgument
 	}
-	return providerID
+	providerID := runtimecontract.BuiltinAIProxyProviderID
+	ev := magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandGetActiveConfiguration,
+		modulecommon.ModuleID,
+		llmevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		llmevents.GetActiveConfigurationCommand{},
+	)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGetActiveConfiguration, eventcontract.LaneScope{
+		SubjectType: "llm_configuration",
+		SubjectID:   providerID,
+	}))
+	response, err := sendLLMCommand[llmevents.GetActiveConfigurationResult](hub, ev)
+	if err != nil {
+		return llmevents.GetActiveConfigurationResult{}, err
+	}
+	if response.ProviderID != providerID || response.ConfigurationRevision == "" {
+		return llmevents.GetActiveConfigurationResult{}, fmt.Errorf("%w: invalid active LLM configuration status", common.ErrInvalidArgument)
+	}
+	return response, nil
 }
 
-func sendLLMCatalogCommand[Response any](hub magicevent.Hub, ev magicevent.Event) (Response, error) {
+func sendLLMCommand[Response any](hub magicevent.Hub, ev magicevent.Event) (Response, error) {
 	var zero Response
 	if hub == nil || ev == nil {
 		return zero, common.ErrInvalidArgument
@@ -163,7 +188,24 @@ func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub
 	if hub == nil {
 		return item, nil
 	}
-	catalog, catalogErr := GetLLMModelCatalog(ctx, hub, GetLLMModelCatalogCommand{ProviderID: runtimecontract.BuiltinAIProxyProviderID})
+	persisted, err := workorchconfig.Persisted()
+	if err != nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
+	}
+	persistedRevision, err := workorchconfig.LLMConfigurationRevision(persisted.LLM)
+	if err != nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
+	}
+	active, activeErr := getActiveLLMConfiguration(ctx, hub)
+	if activeErr != nil {
+		// We cannot prove the persisted configuration is active. Treat the
+		// process as restart-pending so callers cannot refresh a catalog with
+		// newly saved credentials against an unknown owner snapshot.
+		item.LLM.RestartRequired = true
+	} else {
+		item.LLM.RestartRequired = active.ConfigurationRevision != persistedRevision
+	}
+	catalog, catalogErr := GetLLMModelCatalog(ctx, hub)
 	if catalogErr != nil {
 		item.LLM.Catalog = workorchmanagementcontract.ProviderCatalogSummary{
 			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
@@ -176,6 +218,3 @@ func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub
 	item.LLM.Catalog = catalog
 	return item, nil
 }
-
-// Ensure package reference for workorchconfig in this file is not required; keep for future.
-var _ = workorchconfig.BuiltinAIProxyProviderID

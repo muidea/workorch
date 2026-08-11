@@ -25,6 +25,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -296,7 +297,15 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	// the observation or mutate the authority. The controller remains the only
 	// component that seals the resulting candidate.
 	provider := &runtimeCapturedCandidateProvider{payloadFor: runtimeObservedCandidatePayload}
-	llmOwner, err := llmbiz.New(hub, nil, llmbiz.Dependencies{CandidateProvider: provider})
+	llmConfig := workorchconfig.DefaultLLMConfig()
+	llmConfig.AIProxy.BaseURL = "http://127.0.0.1:8090"
+	llmConfig.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: workorchconfig.BuiltinAIProxyProviderID, ModelID: "test-model"}
+	llmOwner, err := llmbiz.New(hub, nil, llmbiz.Dependencies{
+		CandidateProvider: provider,
+		LoadLLMConfig: func() (workorchconfig.LLMConfig, error) {
+			return llmConfig, nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -74,10 +74,10 @@ func TestClientWorkspaceLLMSelectionRoutesCarryProviderAndModel(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode target: %v", err)
 			}
-			if request.ProviderID != "custom" || request.ModelID != "model-a" || request.ReasoningEffort != "high" || request.ExpectedRevision != 7 {
+			if request.ProviderID != "ai-proxy" || request.ModelID != "model-a" || request.ReasoningEffort != "high" || request.ExpectedRevision != 7 {
 				t.Fatalf("request = %+v", request)
 			}
-			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","revision":8,"title":"Model","state":"active","defaultLLMSelection":{"target":{"providerId":"custom","modelId":"model-a"},"reasoningEffort":"high"}}}`))
+			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","revision":8,"title":"Model","state":"active","defaultLLMSelection":{"target":{"providerId":"ai-proxy","modelId":"model-a"},"reasoningEffort":"high"}}}`))
 		case http.MethodDelete:
 			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-model","title":"Model","state":"active"}}`))
 		default:
@@ -87,11 +87,11 @@ func TestClientWorkspaceLLMSelectionRoutesCarryProviderAndModel(t *testing.T) {
 	defer server.Close()
 
 	cl := New(server.URL)
-	updated, err := cl.UpdateWorkspaceLLMSelection(context.Background(), "ws-model", runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}, ReasoningEffort: "high"}, 7)
+	updated, err := cl.UpdateWorkspaceLLMSelection(context.Background(), "ws-model", runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ReasoningEffort: "high"}, 7)
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceLLMSelection: %v", err)
 	}
-	if updated.DefaultLLMSelection == nil || updated.DefaultLLMSelection.Target.ProviderID != "custom" || updated.DefaultLLMSelection.Target.ModelID != "model-a" {
+	if updated.DefaultLLMSelection == nil || updated.DefaultLLMSelection.Target.ProviderID != "ai-proxy" || updated.DefaultLLMSelection.Target.ModelID != "model-a" {
 		t.Fatalf("updated workspace = %+v", updated)
 	}
 	cleared, err := cl.ClearWorkspaceLLMSelection(context.Background(), "ws-model", 8)
@@ -103,31 +103,31 @@ func TestClientWorkspaceLLMSelectionRoutesCarryProviderAndModel(t *testing.T) {
 	}
 }
 
-func TestClientLLMModelCatalogRoutesUseProviderScope(t *testing.T) {
+func TestClientLLMModelCatalogRoutesUseAIProxyScope(t *testing.T) {
 	requests := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI())
-		_, _ = w.Write([]byte(`{"catalog":{"providerId":"custom-provider","state":"ready","models":[{"providerId":"custom-provider","modelId":"model-a","operations":["chat_completions"],"capabilityReady":true}]}}`))
+		_, _ = w.Write([]byte(`{"catalog":{"providerId":"ai-proxy","state":"ready","models":[{"providerId":"ai-proxy","modelId":"model-a","operations":["responses"],"capabilityReady":true}]}}`))
 	}))
 	defer server.Close()
 	cl := New(server.URL)
 	for _, call := range []func() (*workorchmanagementcontract.ProviderCatalogSummary, error){
 		func() (*workorchmanagementcontract.ProviderCatalogSummary, error) {
-			return cl.GetLLMModelCatalog(context.Background(), "custom-provider")
+			return cl.GetLLMModelCatalog(context.Background())
 		},
 		func() (*workorchmanagementcontract.ProviderCatalogSummary, error) {
-			return cl.RefreshLLMModelCatalog(context.Background(), "custom-provider")
+			return cl.RefreshLLMModelCatalog(context.Background())
 		},
 	} {
 		catalog, err := call()
 		if err != nil {
 			t.Fatalf("catalog call: %v", err)
 		}
-		if catalog.ProviderID != "custom-provider" || len(catalog.Models) != 1 || catalog.Models[0].ModelID != "model-a" {
+		if catalog.ProviderID != "ai-proxy" || len(catalog.Models) != 1 || catalog.Models[0].ModelID != "model-a" {
 			t.Fatalf("catalog = %+v", catalog)
 		}
 	}
-	if len(requests) != 2 || requests[0] != "GET /api/v1/workorch/configuration/llm/models?providerId=custom-provider" || requests[1] != "POST /api/v1/workorch/configuration/llm/models/refresh?providerId=custom-provider" {
+	if len(requests) != 2 || requests[0] != "GET /api/v1/workorch/configuration/llm/models" || requests[1] != "POST /api/v1/workorch/configuration/llm/models/refresh" {
 		t.Fatalf("requests = %+v", requests)
 	}
 }

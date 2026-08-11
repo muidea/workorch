@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-10
+Last Updated: 2026-08-11
 
 ## Purpose
 
@@ -55,11 +55,12 @@ semantic failure 的错误分类已在本地代码中收口：MCP 缺失 catalog
 owner-local behavior probe、focus/dependency batch admission、typed failure class、restart/idempotency 和 zero-dispatch
 回归均通过。最新 fresh deployment `run-066` 在缺少 MCP 行为探针必需事实时以
 `candidate_infeasible/mcp_semantic_proof_unavailable` fail-closed，`dispatch/receipt/evidence=0`，证明了负向防线
-但不是正向收敛。RSO-25 当前为 **code-closed / live-open**；其 semantic catalog generation retirement/history、missing
-observation 私有 SM-2 reset、active-dispatch fence、same-identity reacquisition 与 file-backed reload/zero-owner-probe
-回归已补齐；RSO-22 的 fresh binding-matched positive convergence、
-zero-dispatch deployed proof 和 whole-document recovery fault injection 仍未完成。逐组件 owner 矩阵与实施顺序
-见 [Runtime plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md#108-detailed-single-owner-implementation-closure-2026-08-10)。
+但不是正向收敛。RSO-25 与 RSO-26 当前均为 **code-closed / live-open**；RSO-26 已在 Orchestrator SM-2 封存
+accepted receipt 的 source proof identity，并在 re-seal 后仅以 persisted `equivalent` resolution 保留 current
+matching proof-kind credit；identity 不兼容时保留旧 audit 并产生 typed gap，零 synthetic credit 或 duplicate durable
+operation。RSO-22 的 fresh binding-matched positive convergence、equivalent/incompatible deployed proof、zero-dispatch
+proof 和 whole-document recovery fault injection 仍需验证。逐组件 owner 矩阵与实施顺序见
+[Runtime plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 
 语义 owner feasibility 的 `stale` 与 `prerequisite_required` 已明确分流：只有真实 revision-stale 才能退休
 matching catalog 并消耗有界 refresh budget；当前没有 typed semantic prerequisite request 时，
@@ -75,7 +76,8 @@ matching catalog 并消耗有界 refresh budget；当前没有 typed semantic pr
 - validation/behavior CWI 保持单 CWI focus 与独立 binding/proof；slice 只表达展示和排序；
 - template/profile 只声明可复用 capability/selector/recipe family 与质量门禁，不写用户 workspace 的业务答案；
 - 普通 TUI/Web create/edit 删除 raw contract JSON；semantic planning 失败返回完整逐 CWI diagnostic，零 operation/ticket/effect；
-- capability owner 只给 observation/receipt，只有 SM-2 能 retain/reopen coverage（File/Shell/Git/MCP 已增加不足证据回归）；
+- capability owner 只给 observation/receipt，只有 SM-2 能 retain/reopen coverage 并在 re-acquisition 后解析 proof lineage
+  （File/Shell/Git/MCP 已增加不足证据回归）；
 - 每个跨 owner topic/Command/Result 由接收方 owner 的 `pkg/events` 定义；Orchestrator 只消费合同并将校验后的 fact 转换为
   private internal event；
 - `workorchruntimecontract` 只保留 owner-neutral value，跨 owner feedback 使用有限 stable outcome 并完整保留 producer
@@ -130,16 +132,15 @@ workspace 隔离；未执行 live 前不宣称完整关闭。
   feasibility 是正交 typed fact。C12 是必须保持的 SM-2 evidence/coverage 回归基线：只有 sealed binding + owner receipt
   才能关闭 CWI，LLM/raw check 不得越权；已收口的 semantic correction 与 projection 不能绕过或改写该基线。
 - **正向收敛基础**：CAS、sealed authorization、三种 TargetPolicy、request session、whole-document recovery、receipt、
-  binding-derived CWI credit、single-owner lifecycle/SM-4 producer trust 与 terminal delivery 均为 R3 回归基线；当前 active
-  typed semantic correction directive、proof-batch wire、terminal-consistent canonical projection 与 RSO-23～RSO-25 provider
-  authority/owner-feasibility closure 已 code-closed；RSO-22 deployed semantic positive/zero-dispatch matrix 仍未完成，recovery
-  fault injection 独立保留。latest persisted
+  binding-derived CWI credit、single-owner lifecycle/SM-4 producer trust、terminal delivery 与 RSO-26
+  receipt-to-reacquisition proof-lineage closure 均为 R3 回归基线；RSO-22 deployed semantic
+  positive/zero-dispatch/equivalent-or-incompatible matrix 仍需验证，recovery fault injection 独立保留。latest persisted
   aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；CWI 主线实施顺序由 R3 active plan 定义，workspace
   reasoning effort 实施顺序由 WRE active plan 定义，archive 不得推导新实现约束。
 - **Active roadmap**：RSO 当前包含 typed semantic correction、canonical projection、MCP effective capability/effect
-  feasibility、provider effect/idempotency echo removal、provider recipe/check authority、fresh LSP positive convergence 与
-  whole-document recovery fault injection；restart ordering 和
+  feasibility、provider effect/idempotency echo removal、provider recipe/check authority与 receipt-driven binding-lineage
+  reconciliation 的代码基线，以及 fresh LSP positive convergence 与 whole-document recovery fault injection；restart ordering 和
   complete-document recovery 是必须保持的代码回归基线。WRE 是独立必需收口项，用于 workspace reasoning
   capability/selection/seal/request/UI 合同。EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞
   可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、

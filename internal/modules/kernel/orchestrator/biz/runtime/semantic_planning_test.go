@@ -940,6 +940,96 @@ func TestRuntimeSemanticCatalogReacquisitionRetiresOnlyCurrentGeneration(t *test
 	}
 }
 
+func TestRuntimeSemanticCatalogReacquisitionResealsCoverageProofLineageBeforeCredit(t *testing.T) {
+	for _, testCase := range []struct {
+		name                string
+		currentTarget       string
+		wantDisposition     runtimecontract.RuntimeCoverageProofLineageDisposition
+		wantCurrentCredit   bool
+		wantMissingEvidence bool
+	}{
+		{
+			name:              "equivalent proof",
+			currentTarget:     "target.txt",
+			wantDisposition:   runtimecontract.RuntimeCoverageProofLineageDispositionEquivalent,
+			wantCurrentCredit: true,
+		},
+		{
+			name:                "incompatible target",
+			currentTarget:       "other.txt",
+			wantDisposition:     runtimecontract.RuntimeCoverageProofLineageDispositionIncompatible,
+			wantCurrentCredit:   false,
+			wantMissingEvidence: true,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
+			oldBinding := aggregate.Facts.Focus.CoverageEvidenceBindings[0]
+			accepted := seedAcceptedCoverageProofLineageForSemanticReseal(t, &aggregate, oldBinding)
+
+			changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-lineage-reseal", "operation-lineage-reseal", runtimecontract.RuntimeOperationReceipt{
+				ExecutionKey: "execution/lineage-reseal", Fence: 1, OperationID: "operation-lineage-reseal",
+				ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+					Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef: "workspace_deliverable", BeforeRevision: catalog.ObservedRevision, AfterRevision: "file-revision-2",
+				}},
+			})
+			if err != nil || !changed || !semanticCatalogPrerequisitePending(aggregate, prerequisite.ID) {
+				t.Fatalf("receipt invalidation did not reopen semantic acquisition: changed=%t err=%v aggregate=%+v", changed, err, aggregate)
+			}
+			facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			aggregate.Facts, aggregate.Decision = facts, decision
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			repository.aggregate = &aggregate
+
+			currentCatalog := catalog.Normalized()
+			currentCatalog.TargetRefs = []string{testCase.currentTarget}
+			currentCatalog.ObservedRevision = "file-revision-2"
+			currentCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(currentCatalog)
+			currentObservation := observation.Normalized()
+			currentObservation.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), currentObservation.Dependencies...)
+			currentObservation.ContentHash = currentCatalog.SnapshotID
+			currentObservation.Dependencies[0].Revision = currentCatalog.ObservedRevision
+			currentObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(currentObservation)
+			reacquired, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+				PrerequisiteID: prerequisite.ID, OperationAdmissibility: &currentCatalog, Observation: &currentObservation,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reacquired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(reacquired.CoverageProofLineage) != 1 {
+				t.Fatalf("reacquisition advanced before a re-seal: phase=%s lineage=%+v", reacquired.SemanticPlanning.Phase, reacquired.CoverageProofLineage)
+			}
+			if got := reacquired.Facts.Evidence.Accepted[0].BindingRefs; len(got) != 1 || got[0] != oldBinding.ID {
+				t.Fatalf("reacquisition rewrote immutable source evidence: %v", got)
+			}
+
+			resealed := resealSemanticPlanningGenerationForLineageTest(t, controller, reacquired, currentCatalog, currentObservation, testCase.currentTarget)
+			if len(resealed.CoverageProofLineage) != 2 {
+				t.Fatalf("re-seal lineage rows = %+v", resealed.CoverageProofLineage)
+			}
+			resolution := resealed.CoverageProofLineage[1]
+			if resolution.Disposition != testCase.wantDisposition {
+				t.Fatalf("resolution disposition = %q, want %q; resolution=%+v", resolution.Disposition, testCase.wantDisposition, resolution)
+			}
+			if got := runtimeEvidenceAppliesToCurrentCoverageWithLineage(resealed.Facts, accepted, resealed.CoverageProofLineage); got != testCase.wantCurrentCredit {
+				t.Fatalf("current proof credit = %t, want %t; lineage=%+v", got, testCase.wantCurrentCredit, resealed.CoverageProofLineage)
+			}
+			missing := missingEvidenceKinds(resealed.Facts, resealed.CoverageProofLineage)
+			if (len(missing) != 0) != testCase.wantMissingEvidence {
+				t.Fatalf("missing evidence = %v, wantMissing=%t", missing, testCase.wantMissingEvidence)
+			}
+		})
+	}
+}
+
 func TestRuntimeSemanticCatalogReacquisitionWithUnchangedIdentityKeepsGeneration(t *testing.T) {
 	ctx := context.Background()
 	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
@@ -1551,6 +1641,191 @@ func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *control
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
 	return controller, repository, aggregate, catalog, prerequisite, observation
+}
+
+// seedAcceptedCoverageProofLineageForSemanticReseal prepares a receipt that
+// was accepted under the source binding before a later catalog re-acquisition.
+// The test then drives the new binding through the normal semantic seal path;
+// it never rewrites the source evidence to make it appear current.
+func seedAcceptedCoverageProofLineageForSemanticReseal(t *testing.T, aggregate *RuntimeAggregate, binding runtimecontract.CoverageEvidenceBinding) runtimecontract.EvidenceFact {
+	t.Helper()
+	if aggregate == nil || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+		t.Fatal("coverage proof lineage source requires a sealed semantic aggregate")
+	}
+	binding = binding.Normalized()
+	if _, found := runtimecontract.CoverageEvidenceBindingForRef(aggregate.Facts.Focus.CoverageEvidenceBindings, binding.ID); !found {
+		t.Fatalf("source binding %q is not current before re-acquisition", binding.ID)
+	}
+
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey:        "execution/semantic-lineage-source",
+		Fence:               1,
+		OperationID:         "operation-semantic-lineage-source",
+		Outcome:             runtimecontract.RuntimeOperationOutcomeAccepted,
+		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		Changed:             true,
+		TargetRefs:          append([]string(nil), binding.TargetRefs...),
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Quality: common.EvidenceQualityValid,
+		},
+	}.Normalized()
+	receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+	fact := runtimecontract.EvidenceFact{
+		ID:                  "evidence-semantic-lineage-source",
+		Kind:                runtimecontract.EvidenceKindStateChange,
+		SubjectRef:          "semantic-lineage-source",
+		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+		DispatchID:          "dispatch-semantic-lineage-source",
+		OperationID:         receipt.OperationID,
+		Revision:            nextEvidenceRevision(aggregate.EvidenceSequence + 1),
+		Summary:             "accepted source proof before semantic re-seal",
+		TargetRefs:          append([]string(nil), binding.TargetRefs...),
+		BindingRefs:         []string{binding.ID},
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID},
+		Quality:             common.EvidenceQualityValid,
+	}
+	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, SealedDispatch{
+		ID: fact.DispatchID,
+		OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
+			OperationID:      receipt.OperationID,
+			ExecutionKey:     receipt.ExecutionKey,
+			Fence:            receipt.Fence,
+			OwnerReceiptHash: receiptHash,
+			State:            runtimecontract.OperationExecutionEvidenceCommitted,
+		}},
+	})
+	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt)
+	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
+	aggregate.EvidenceSequence++
+	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
+	for index := range aggregate.Facts.Coverage {
+		if aggregate.Facts.Coverage[index].ID == binding.CoverageWorkItemID {
+			aggregate.Facts.Coverage[index].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+		}
+	}
+	if err := appendAcceptedCoverageProofLineage(aggregate, fact, receipt); err != nil {
+		t.Fatalf("append source coverage proof lineage: %v", err)
+	}
+	return fact
+}
+
+// resealSemanticPlanningGenerationForLineageTest follows the same private
+// order, bounded-batch, owner-feasibility, merge and seal sequence as Runtime.
+// It keeps the source evidence untouched so the test observes only the SM-2
+// current-binding resolution written by semantic contract sealing.
+func resealSemanticPlanningGenerationForLineageTest(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, catalog runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation, target string) RuntimeAggregate {
+	t.Helper()
+	if controller == nil || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		t.Fatalf("semantic re-seal requires one pending current focus: %+v", aggregate)
+	}
+	catalog = catalog.Normalized()
+	observation = observation.Normalized()
+	coverageID := aggregate.Facts.Focus.CoverageWorkItemIDs[0]
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion:             runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:               aggregate.Facts.WorkspaceID,
+		RunID:                     aggregate.Facts.RunID,
+		DefinitionRevision:        aggregate.Facts.DefinitionRevision,
+		DefinitionSeedHash:        aggregate.Facts.DefinitionSeed.Hash,
+		OperationContractRevision: aggregate.Facts.Activation.ExecutionContract.OperationContractRevision,
+		CoverageItems:             append([]runtimecontract.RuntimeCoverageItem(nil), aggregate.Facts.DefinitionSeed.CoverageItems...),
+		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile},
+		AllowedOperationKinds:     []string{runtimecontract.StepKindFileWrite},
+		AllowedTargetPolicies:     []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("new semantic manifest: %v", err)
+	}
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID:    coverageID,
+		OwnerModuleID:         runtimecontract.RuntimeModuleFile,
+		OperationKind:         runtimecontract.StepKindFileWrite,
+		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target}},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		DeclarationRef:        "semantic/" + string(coverageID),
+	}
+	order := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion:      runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:       manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep:           runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder:      []common.CoverageWorkItemID{coverageID},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("new semantic coverage order: %v", err)
+	}
+	apply := func(event RuntimeInternalEvent) {
+		t.Helper()
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, err := controller.ApplyInternalEvent(context.Background(), event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{
+		Kind:             RuntimeInternalEventSemanticPlanRequestStarted,
+		SemanticManifest: &manifest,
+		StablePrefixHash: "semantic-lineage-reseal-prefix",
+		LogicalRequestID: "semantic-lineage-reseal-order",
+	})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-lineage-reseal-order"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest,
+		order,
+		0,
+		"semantic-lineage-reseal-batch",
+		aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("compile re-seal semantic batch: %v", err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatalf("persist re-seal semantic batch: %v", err)
+	}
+	proof := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion:            runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:             manifest.Hash,
+		DefinitionSeedHash:       manifest.DefinitionSeedHash,
+		PlanStep:                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:                  batch.BatchID,
+		BatchSequence:            batch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
+	}
+	if err := proof.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("new semantic proof batch: %v", err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
+		SchemaVersion:        runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
+		ManifestHash:         manifest.Hash,
+		DefinitionSeedHash:   manifest.DefinitionSeedHash,
+		CoverageWorkItemID:   coverageID,
+		ProposalHash:         runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
+		OwnerModuleID:        proposal.OwnerModuleID,
+		CatalogSnapshotID:    catalog.SnapshotID,
+		CatalogObservationID: observation.ObservationID,
+		Status:               runtimecontract.RuntimeSemanticFeasibilityFeasible,
+		ObservedRevision:     catalog.ObservedRevision,
+		TargetRefs:           []string{target},
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility})
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
+	if err != nil {
+		t.Fatalf("merge re-seal semantic proof batch: %v", err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	return aggregate
 }
 
 func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate) {

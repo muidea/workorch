@@ -179,7 +179,7 @@ func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, reso
 	if grantedBindingIndex < 0 {
 		aggregate.Facts.RepairDirective = nil
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}

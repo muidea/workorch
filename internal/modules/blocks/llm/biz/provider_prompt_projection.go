@@ -188,7 +188,3 @@ func nilIfEmptyStrings(values []string) []string {
 	}
 	return values
 }
-
-func cacheControlSentForRequest(config llmmodels.ProviderConfig, prompt providerFacingPrompt) bool {
-	return config.CacheCapability.MessageCacheControl && strings.TrimSpace(prompt.StablePrefix) != ""
-}

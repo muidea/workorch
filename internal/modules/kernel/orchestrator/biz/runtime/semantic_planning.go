@@ -404,7 +404,7 @@ func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspa
 	if !retired {
 		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh cannot retire an active dispatch", common.ErrConflict)
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -468,7 +468,7 @@ func (c *RuntimeController) invalidateSemanticCatalogGeneration(ctx context.Cont
 	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1221,7 +1221,17 @@ func (c *RuntimeController) sealSemanticContract(ctx context.Context, workspaceI
 	aggregate.Facts.Feasibility = nil
 	aggregate.Facts.Failure = nil
 	aggregate.Facts = aggregate.Facts.Normalized()
-	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, nil)
+	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	previousFocusID := aggregate.Facts.Focus.ID
+	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts, aggregate.CoverageProofLineage)
+	if aggregate.Facts.Focus.ID != previousFocusID {
+		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	}
+	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1425,7 +1435,7 @@ func (c *RuntimeController) failSemanticContract(ctx context.Context, workspaceI
 		Message:            failure.OriginalMessage,
 		OriginalDiagnostic: failure.CloneOriginal(),
 	}
-	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
+	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

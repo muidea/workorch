@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"strings"
 	"time"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -12,44 +11,27 @@ import (
 const defaultProviderTimeout = 60 * time.Second
 
 func normalizedProviderConfigForRuntime(config llmmodels.ProviderConfig) llmmodels.ProviderConfig {
-	if strings.TrimSpace(config.APISurface) == "" {
-		config.APISurface = defaultProviderAPISurface(config.Provider)
-	}
-	if strings.TrimSpace(config.CacheCapability.Surface) == "" {
-		config.CacheCapability.Surface = config.APISurface
-	}
-	if strings.TrimSpace(config.CacheCapability.Mode) == "" {
-		config.CacheCapability.Mode = defaultRuntimeProviderCacheMode(config.APISurface)
-	}
-	if config.CacheCapability.Mode == llmcommon.ProviderCacheModePromptCacheKey && !config.CacheCapability.PromptCacheKey {
-		config.CacheCapability.PromptCacheKey = true
-	}
-	if config.CacheCapability.Mode == llmcommon.ProviderCacheModeAnthropicCacheControl && !config.CacheCapability.MessageCacheControl {
-		config.CacheCapability.MessageCacheControl = true
-	}
+	config.APISurface = llmcommon.ProviderSurfaceOpenAICompatibleHTTP
 	return config
 }
 
-func defaultProviderAPISurface(provider string) string {
-	switch strings.TrimSpace(provider) {
-	case llmcommon.ProviderOpenAI:
-		return llmcommon.ProviderSurfaceOpenAISDK
-	case llmcommon.ProviderAnthropic:
-		return llmcommon.ProviderSurfaceAnthropicSDK
-	case llmcommon.ProviderCompatible:
-		return llmcommon.ProviderSurfaceOpenAICompatibleHTTP
-	default:
-		return ""
+func providerTemperature(config llmmodels.ProviderConfig) float64 {
+	if config.InferenceProfile.Temperature == nil {
+		return 0
 	}
+	return *config.InferenceProfile.Temperature
 }
 
-func defaultRuntimeProviderCacheMode(surface string) string {
-	switch strings.TrimSpace(surface) {
-	case llmcommon.ProviderSurfaceOpenAISDK:
-		return llmcommon.ProviderCacheModePromptCacheKey
-	case llmcommon.ProviderSurfaceAnthropicSDK:
-		return llmcommon.ProviderCacheModeAnthropicCacheControl
-	default:
-		return llmcommon.ProviderCacheModeNone
+func maxOutputTokens(config llmmodels.ProviderConfig) int64 {
+	if config.InferenceProfile.MaxOutputTokens <= 0 {
+		return 0
 	}
+	return int64(config.InferenceProfile.MaxOutputTokens)
+}
+
+func maxOutputTokensForRequest(config llmmodels.ProviderConfig, request llmmodels.ProviderRequest) int64 {
+	if request.MaxOutputTokens > 0 && (config.InferenceProfile.MaxOutputTokens <= 0 || request.MaxOutputTokens < config.InferenceProfile.MaxOutputTokens) {
+		return int64(request.MaxOutputTokens)
+	}
+	return maxOutputTokens(config)
 }

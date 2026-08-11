@@ -65,10 +65,13 @@ def string_list(value: Any) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
-def prompt_sections(messages: Any) -> dict[str, str]:
-    content = "\n".join(
-        str(item.get("content", "")) for item in messages or [] if isinstance(item, dict)
-    )
+def prompt_sections(input_value: Any) -> dict[str, str]:
+    if isinstance(input_value, str):
+        content = input_value
+    else:
+        content = "\n".join(
+            str(item.get("content", "")) for item in input_value or [] if isinstance(item, dict)
+        )
     result: dict[str, str] = {}
     marker = "### "
     parts = content.split(marker)
@@ -283,7 +286,7 @@ class MockState:
 
 
 def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    sections = prompt_sections(payload.get("messages"))
+    sections = prompt_sections(payload.get("input", payload.get("messages")))
     semantic_raw = sections.get("C3.semantic-authority")
     if semantic_raw:
         authority = json.loads(semantic_raw)
@@ -453,18 +456,28 @@ def start_mock_server(state: MockState, host: str, port: int) -> ThreadingHTTPSe
                 return
             self._json(200, {"object": "list", "data": [{
                 "id": "verify-model", "object": "model", "owned_by": "verify",
-                "operations": ["chat_completions"], "contextWindowTokens": 128000, "maxOutputTokens": 8192,
+                "supported_endpoints": ["/v1/responses"], "contextWindowTokens": 128000, "maxOutputTokens": 8192,
             }]})
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] not in ("/v1/chat/completions", "/chat/completions"):
+            if self.path.split("?", 1)[0] not in ("/v1/responses", "/responses"):
                 self._json(404, {"error": "not found"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 request = json.loads(self.rfile.read(length))
                 candidate, _mode = candidate_payload(state, request)
-                self._json(200, {"choices": [{"message": {"content": json.dumps(candidate, ensure_ascii=False)}}]})
+                content = json.dumps(candidate, ensure_ascii=False)
+                response = {"status": "completed", "output_text": content, "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+                if request.get("stream"):
+                    raw = ("data: " + json.dumps({"type": "response.completed", "response": response}, ensure_ascii=False) + "\n\n").encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                else:
+                    self._json(200, response)
             except (ValueError, json.JSONDecodeError) as exc:
                 # Keep the mock's own contract-parser failure in the managed
                 # artifact.  The Runtime only sees a normal provider HTTP
@@ -490,7 +503,7 @@ class Harness:
         self.host, self.port = free_addr()
         self.mock_host, self.mock_port = free_addr()
         self.base_url = f"http://{self.host}:{self.port}"
-        self.mock_url = f"http://{self.mock_host}:{self.mock_port}"
+        self.mock_url = f"http://{self.mock_host}:{self.mock_port}/v1"
         self.server: subprocess.Popen[bytes] | None = None
         self.mock_state = MockState(artifact_dir, self.shell_release)
         self.mock = start_mock_server(self.mock_state, self.mock_host, self.mock_port)
@@ -506,7 +519,7 @@ class Harness:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.config_dir / "application.toml").write_text(
-            f'''endpointName = "workorch"\n\n[server]\naddr = "{self.host}:{self.port}"\nreadHeaderTimeout = "5s"\nreadTimeout = "15s"\nwriteTimeout = "180s"\nidleTimeout = "60s"\nshutdownTimeout = "5s"\nmaxConcurrentRuns = 3\nstaleDispatchedStepMinAge = "10m"\n\n[repository]\nbackend = "file"\ndataDir = "{self.data_dir}"\n\n[runtime.git]\ndefaultTimeout = "30s"\n\n[llm.aiProxy]\nbaseURL = "{self.mock_url}"\napiKey = "restart-harness-secret"\ntimeout = "60s"\ncatalogRequestTimeout = "5s"\ncatalogTTL = "5m"\ncatalogMaxStaleAge = "24h"\nmaxCatalogResponseBytes = 1048576\nmaxCatalogModels = 1000\n\n[llm.defaultChat]\nproviderID = "verify"\nmodelID = "verify-model"\n\n[llm.customProviders.verify]\nprovider = "compatible"\napiSurface = "openai_compatible_http"\nbaseURL = "{self.mock_url}"\napiKey = "restart-harness-secret"\ntimeout = "60s"\n\n[llm.customProviders.verify.models.verify-model]\ncontextWindowTokens = 128000\nmaxOutputTokens = 8192\noperations = ["chat_completions"]\n''',
+            f'''endpointName = "workorch"\n\n[server]\naddr = "{self.host}:{self.port}"\nreadHeaderTimeout = "5s"\nreadTimeout = "15s"\nwriteTimeout = "180s"\nidleTimeout = "60s"\nshutdownTimeout = "5s"\nmaxConcurrentRuns = 3\nstaleDispatchedStepMinAge = "10m"\n\n[repository]\nbackend = "file"\ndataDir = "{self.data_dir}"\n\n[runtime.git]\ndefaultTimeout = "30s"\n\n[llm.aiProxy]\nbaseURL = "{self.mock_url}"\napiKey = "restart-harness-secret"\ntimeout = "60s"\ncatalogRequestTimeout = "5s"\ncatalogTTL = "5m"\ncatalogMaxStaleAge = "24h"\nmaxCatalogResponseBytes = 1048576\nmaxCatalogModels = 1000\n\n[llm.defaultChat]\nproviderID = "ai-proxy"\nmodelID = "verify-model"\n''',
             encoding="utf-8",
         )
 

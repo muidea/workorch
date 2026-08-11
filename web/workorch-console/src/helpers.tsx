@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -2580,17 +2580,14 @@ export function runPriority(item: Run) {
   return direct !== undefined && direct !== null ? direct : '-';
 }
 
-export type LLMConfigurationFormValues = Omit<UpdateLLMConfigurationRequest, 'defaultChat' | 'defaultEmbedding'> & {
-  defaultChatTargetKey?: string;
-  defaultEmbeddingTargetKey?: string;
-};
+export type LLMConfigurationFormValues = UpdateLLMConfigurationRequest;
 
 export type ProviderModelTargetOption = {
   value: string;
   label: string;
   providerId: string;
   modelId: string;
-  source: 'catalog' | 'custom' | 'configured';
+  source: 'catalog' | 'configured';
   ready: boolean;
   disabled?: boolean;
   reasoningSupported?: boolean;
@@ -2608,43 +2605,12 @@ export function providerModelTargetKey(providerId?: string, modelId?: string) {
   return `${encodeURIComponent(normalizedProviderId)}/${encodeURIComponent(normalizedModelId)}`;
 }
 
-export function parseProviderModelTargetKey(value?: string): ProviderModelTarget | undefined {
-  const normalized = value?.trim();
-  if (!normalized) {
-    return undefined;
-  }
-  const separator = normalized.indexOf('/');
-  if (separator <= 0 || separator === normalized.length - 1) {
-    return undefined;
-  }
-  try {
-    const providerId = decodeURIComponent(normalized.slice(0, separator)).trim();
-    const modelId = decodeURIComponent(normalized.slice(separator + 1)).trim();
-    return providerId && modelId ? { providerId, modelId } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function llmConfigurationFormValues(configuration: ServiceConfiguration): LLMConfigurationFormValues {
   return {
-    aiProxy: {
-      baseURL: configuration.llm.aiProxy?.baseUrl,
-      timeout: configuration.llm.aiProxy?.timeout,
-      catalogRequestTimeout: configuration.llm.aiProxy?.catalogRequestTimeout,
-      catalogTTL: configuration.llm.aiProxy?.catalogTTL,
-      catalogMaxStaleAge: configuration.llm.aiProxy?.catalogMaxStaleAge,
-      maxCatalogResponseBytes: configuration.llm.aiProxy?.maxCatalogResponseBytes,
-      maxCatalogModels: configuration.llm.aiProxy?.maxCatalogModels
-    },
-    defaultChatTargetKey: providerModelTargetKey(
-      configuration.llm.defaultChat?.providerId,
-      configuration.llm.defaultChat?.modelId
-    ),
-    defaultEmbeddingTargetKey: providerModelTargetKey(
-      configuration.llm.defaultEmbedding?.providerId,
-      configuration.llm.defaultEmbedding?.modelId
-    ),
+    apiKey: undefined,
+    clearApiKey: false,
+    defaultChatModelId: configuration.llm.defaultChat?.modelId,
+    defaultEmbeddingModelId: configuration.llm.defaultEmbedding?.modelId,
     budget: {
       contextUtilizationRatio: configuration.llm.budget?.contextUtilizationRatio,
       estimatedTokensPerByte: configuration.llm.budget?.estimatedTokensPerByte
@@ -2653,8 +2619,11 @@ export function llmConfigurationFormValues(configuration: ServiceConfiguration):
 }
 
 export function readyCatalogModels(configuration?: ServiceConfiguration, operation?: string) {
-  // ai-proxy is the sole provider; readiness is derived from its catalog.
   const models = (configuration?.llm.catalog?.models ?? []).filter((item) => {
+	const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
+	if (providerId !== 'ai-proxy') {
+		return false;
+	}
     if (!item.capabilityReady) {
       return false;
     }
@@ -2672,7 +2641,7 @@ export function readyCatalogModels(configuration?: ServiceConfiguration, operati
 
 export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, operation?: string): ProviderModelTargetOption[] {
   return readyCatalogModels(configuration, operation).flatMap((item) => {
-    const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
+    const providerId = 'ai-proxy';
     const modelId = item.modelId?.trim();
     const value = providerModelTargetKey(providerId, modelId);
     if (!value || !modelId) {
@@ -2680,7 +2649,7 @@ export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, 
     }
     return [{
       value,
-      label: `${providerId}/${modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`,
+      label: `${modelId}${item.routeOwner ? ` (${item.routeOwner})` : ''}`,
       providerId,
       modelId,
       source: 'catalog' as const,
@@ -2693,164 +2662,31 @@ export function readyCatalogTargetOptions(configuration?: ServiceConfiguration, 
   });
 }
 
-export function customProviderDraftTargetOptions(drafts: CustomProviderDraft[], operation?: string): ProviderModelTargetOption[] {
-  const options: ProviderModelTargetOption[] = [];
-  for (const provider of drafts) {
-    const providerId = provider.id?.trim();
-    if (!providerId) {
-      continue;
-    }
-    for (const model of provider.models ?? []) {
-      const modelId = model.id?.trim();
-      const ops = model.operations ?? [];
-      if (!modelId || ops.length === 0 || (operation && !ops.includes(operation))) {
-        continue;
-      }
-      const value = providerModelTargetKey(providerId, modelId);
-      if (!value) {
-        continue;
-      }
-      options.push({
-        value,
-        label: `[custom] ${providerId}/${modelId}`,
-        providerId,
-        modelId,
-        source: 'custom',
-        ready: true
-      });
-    }
-  }
-  return options;
-}
-
-export function configurationModelTargetOptions(
+export function aiProxyModelOptions(
   configuration: ServiceConfiguration | undefined,
   operation: string,
-  configuredTarget: ProviderModelTarget | undefined
+  configuredModelId: string | undefined
 ): ProviderModelTargetOption[] {
-  const options = [
-    ...readyCatalogTargetOptions(configuration, operation)
-  ];
+  const options = readyCatalogTargetOptions(configuration, operation).map((item) => ({
+    ...item,
+    value: item.modelId
+  }));
   const unique = new Map(options.map((item) => [item.value, item]));
-  const configuredValue = providerModelTargetKey(configuredTarget?.providerId, configuredTarget?.modelId);
-  if (configuredValue && !unique.has(configuredValue)) {
-    const providerId = configuredTarget?.providerId?.trim();
-    const modelId = configuredTarget?.modelId?.trim();
-    if (providerId && modelId) {
-      unique.set(configuredValue, {
-        value: configuredValue,
-        label: `${providerId}/${modelId}（已配置但未 ready）`,
-        providerId,
-        modelId,
-        source: 'configured',
-        ready: false,
-        disabled: true
-      });
-    }
+  const modelId = configuredModelId?.trim();
+  if (modelId && !unique.has(modelId)) {
+    unique.set(modelId, {
+      value: modelId,
+      label: `${modelId}（已配置但未 ready）`,
+      providerId: 'ai-proxy',
+      modelId,
+      source: 'configured',
+      ready: false,
+      disabled: true
+    });
   }
   return Array.from(unique.values());
 }
-
-export function customProviderDraftsFromConfiguration(configuration?: ServiceConfiguration): CustomProviderDraft[] {
-  return (configuration?.llm.customProviders ?? []).map((provider) => ({
-    id: provider.id,
-    provider: provider.provider || 'openai-compatible',
-    apiSurface: provider.apiSurface || 'openai_compatible_http',
-    baseUrl: provider.baseUrl,
-    apiKey: '',
-    timeout: provider.timeout,
-    models: (provider.models ?? []).map((model) => ({
-      id: model.id,
-      contextWindowTokens: model.contextWindowTokens,
-      maxOutputTokens: model.maxOutputTokens,
-      operations: [...(model.operations ?? [])],
-      temperature: model.temperature,
-      thinkingBudgetTokens: model.thinkingBudgetTokens,
-      cacheMode: model.cacheMode,
-      promptCacheKey: model.promptCacheKey,
-      messageCacheControl: model.messageCacheControl,
-      cacheUsageFields: [...(model.cacheUsageFields ?? [])]
-    }))
-  }));
-}
-
-export function nextCustomProviderDraft(existing: CustomProviderDraft[]): CustomProviderDraft {
-  const used = new Set(existing.map((item) => item.id));
-  let index = existing.length + 1;
-  let id = `custom-${index}`;
-  while (used.has(id)) {
-    index += 1;
-    id = `custom-${index}`;
-  }
-  return {
-    id,
-    provider: 'openai-compatible',
-    apiSurface: 'openai_compatible_http',
-    baseUrl: '',
-    apiKey: '',
-    timeout: '60s',
-    models: [nextCustomProviderModelDraft([])]
-  };
-}
-
-export function nextCustomProviderModelDraft(existing: CustomProviderModelDraft[]): CustomProviderModelDraft {
-  const used = new Set(existing.map((item) => item.id));
-  let index = existing.length + 1;
-  let id = `model-${index}`;
-  while (used.has(id)) {
-    index += 1;
-    id = `model-${index}`;
-  }
-  return {
-    id,
-    contextWindowTokens: 128000,
-    maxOutputTokens: 8192,
-    // Strict: operations must be declared by the admin; never auto-fill chat_completions.
-    operations: [],
-    cacheMode: 'none'
-  };
-}
-
-export function customProvidersUpdatePayload(drafts: CustomProviderDraft[]): NonNullable<UpdateLLMConfigurationRequest['customProviders']> {
-  const payload: NonNullable<UpdateLLMConfigurationRequest['customProviders']> = {};
-  for (const provider of drafts) {
-    const providerID = provider.id?.trim();
-    if (!providerID) {
-      continue;
-    }
-    const models: NonNullable<NonNullable<UpdateLLMConfigurationRequest['customProviders']>[string]['models']> = {};
-    for (const model of provider.models ?? []) {
-      const modelID = model.id?.trim();
-      if (!modelID) {
-        continue;
-      }
-      models[modelID] = {
-        contextWindowTokens: model.contextWindowTokens,
-        maxOutputTokens: model.maxOutputTokens,
-        operations: model.operations ?? [],
-        temperature: model.temperature,
-        thinkingBudgetTokens: model.thinkingBudgetTokens,
-        cache: (model.cacheMode || model.promptCacheKey !== undefined || model.messageCacheControl !== undefined || (model.cacheUsageFields?.length ?? 0) > 0) ? {
-          mode: model.cacheMode?.trim() || undefined,
-          promptCacheKey: model.promptCacheKey,
-          messageCacheControl: model.messageCacheControl,
-          usageFields: model.cacheUsageFields?.length ? model.cacheUsageFields : undefined
-        } : undefined
-      };
-    }
-    payload[providerID] = {
-      provider: provider.provider?.trim() || 'openai-compatible',
-      apiSurface: provider.apiSurface?.trim() || 'openai_compatible_http',
-      baseURL: provider.baseUrl?.trim(),
-      apiKey: provider.apiKey?.trim() || undefined,
-      timeout: provider.timeout?.trim(),
-      models
-    };
-  }
-  return payload;
-}
-
-export function chatTargetOptions(configuration?: ServiceConfiguration, _includeCustom = false) {
+export function chatTargetOptions(configuration?: ServiceConfiguration) {
   return readyCatalogTargetOptions(configuration, 'responses').map((item) => ({
     value: item.value,
     label: item.label,

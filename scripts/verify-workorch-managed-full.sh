@@ -26,6 +26,10 @@ STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:
 LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
 PRECREATE_WORKSPACE_COUNT="${WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT:-0}"
 SKIP_PREFLIGHT="${WORKORCH_MANAGED_SKIP_PREFLIGHT:-0}"
+# The managed verifier owns this TOML value before WorkOrch starts. Child
+# verification scripts may select catalog models, but never rewrite this
+# endpoint through the configuration HTTP API.
+AI_PROXY_BASE_URL="${WORKORCH_MANAGED_AI_PROXY_BASE_URL:-http://127.0.0.1:18181/v1}"
 
 select_addr() {
   if [[ -n "${WORKORCH_MANAGED_ADDR:-}" ]]; then
@@ -166,7 +170,7 @@ dataDir = "$DATA_DIR"
 defaultTimeout = "30s"
 
 [llm.aiProxy]
-baseURL = "http://127.0.0.1:9"
+baseURL = "$AI_PROXY_BASE_URL"
 
 [llm.defaultChat]
 providerID = "ai-proxy"

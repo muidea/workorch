@@ -11,427 +11,68 @@ import (
 	"testing"
 	"time"
 
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T) {
+func TestHTTPProviderCompleteUsesAIProxyResponses(t *testing.T) {
 	var gotPath string
 	var gotAuthorization string
-	var gotPayload chatCompletionRequest
-	var gotRawPayload map[string]any
+	var got responsesRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuthorization = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotRawPayload); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		raw, _ := json.Marshal(gotRawPayload)
-		if err := json.Unmarshal(raw, &gotPayload); err != nil {
-			t.Fatalf("unmarshal request: %v", err)
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"done with evidence\",\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}}]
-		}`))
+		_, _ = w.Write([]byte(`{"status":"completed","output_text":"{\"ok\":true}","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`))
 	}))
 	defer server.Close()
 
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-		InferenceProfile: llmmodels.ProviderInferenceProfile{
-			MaxOutputTokens:      65536,
-			ThinkingBudgetTokens: 32768,
-		},
-	})
+	provider := NewHTTPProvider(testAIProxyProviderConfig(server.URL + "/v1"))
 	request := llmProviderRequest()
+	request.ReasoningEffort = "high"
+	request.MaxOutputTokens = 8
 	result, err := provider.Complete(context.Background(), request)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-
-	if gotPath != "/v1/chat/completions" {
-		t.Fatalf("path = %q, want /v1/chat/completions", gotPath)
+	if gotPath != "/v1/responses" {
+		t.Fatalf("path = %q, want /v1/responses", gotPath)
 	}
 	if gotAuthorization != "Bearer secret-value" {
-		t.Fatalf("authorization = %q, want bearer secret", gotAuthorization)
+		t.Fatalf("authorization = %q, want bearer token", gotAuthorization)
 	}
-	if gotPayload.Model != "test-model" || len(gotPayload.Messages) != 2 {
-		t.Fatalf("payload = %+v, want chat completion request", gotPayload)
-	}
-	if _, ok := gotRawPayload["response_format"]; ok {
-		t.Fatalf("payload = %+v, undeclared compatible provider capability must omit response_format", gotRawPayload)
-	}
-	if gotPayload.MaxCompletionTokens != 65536 ||
-		gotPayload.Thinking == nil ||
-		gotPayload.Thinking.BudgetTokens != 32768 {
-		t.Fatalf("payload = %+v, want configured inference profile", gotPayload)
-	}
-	if _, ok := gotRawPayload["prompt_cache_key"]; ok {
-		t.Fatalf("payload = %+v, compatible default must not send prompt_cache_key", gotRawPayload)
-	}
-	joined := ""
-	for _, message := range gotPayload.Messages {
-		joined += "\n" + message.Content
-	}
-	if gotPayload.Messages[0].Role != "system" ||
-		!strings.Contains(gotPayload.Messages[0].Content, "C0.runtime-candidate-contract") ||
-		!strings.Contains(gotPayload.Messages[0].Content, "C1.goal-dod") {
-		t.Fatalf("first message = %+v, want stable provider prefix", gotPayload.Messages[0])
-	}
-	if strings.Contains(gotPayload.Messages[0].Content, "C3.runtime-authority") {
-		t.Fatalf("first message leaked dynamic sections: %s", gotPayload.Messages[0].Content)
-	}
-	if !strings.Contains(joined, "C3.runtime-authority") {
-		t.Fatalf("messages = %+v, want dynamic tail after stable prefix", gotPayload.Messages)
-	}
-	if !strings.Contains(joined, `"goal":"goal-1"`) ||
-		!strings.Contains(joined, `"action":"produce_assessment"`) {
-		t.Fatalf("messages = %+v, want typed Runtime prompt sections", gotPayload.Messages)
-	}
-	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {
-		t.Fatalf("payload = %s, want decision json", result.Payload)
-	}
-	if result.Usage != nil {
-		t.Fatalf("usage = %+v, want nil when provider response has no usage", result.Usage)
-	}
-}
-
-func TestHTTPProviderResponsesAdapter(t *testing.T) {
-	var got responsesRequest
-	var raw map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/responses" {
-			t.Fatalf("path = %q, want /v1/responses", r.URL.Path)
-		}
-		payload, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read request: %v", err)
-		}
-		if err := json.Unmarshal(payload, &got); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if err := json.Unmarshal(payload, &raw); err != nil {
-			t.Fatalf("decode raw request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`))
-	}))
-	defer server.Close()
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: "compatible", APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, BaseURL: server.URL + "/v1", Model: "gpt-5.5", Capabilities: llmmodels.ProviderCapabilities{Responses: true}, InferenceProfile: llmmodels.ProviderInferenceProfile{MaxOutputTokens: 16}})
-	request := llmProviderRequest()
-	request.MaxOutputTokens = 8
-	request.ReasoningEffort = "high"
-	result, err := provider.Complete(context.Background(), request)
-	if err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	if got.Model != "gpt-5.5" || strings.TrimSpace(got.Input) == "" || got.MaxOutputTokens != 8 {
+	if got.Model != "test-model" || got.MaxOutputTokens != 8 || got.Reasoning == nil || got.Reasoning.Effort != "high" {
 		t.Fatalf("request = %+v", got)
 	}
-	if got.Reasoning == nil || got.Reasoning.Effort != "high" {
-		t.Fatalf("reasoning = %+v, want nested high effort", got.Reasoning)
-	}
-	if _, exists := raw["reasoning_effort"]; exists {
-		t.Fatalf("Responses request contains obsolete reasoning_effort: %+v", raw)
-	}
-	if got.Text != nil {
-		t.Fatalf("Responses request unexpectedly contains text.format: %+v", got.Text)
+	if !strings.Contains(got.Input, "C0.runtime-candidate-contract") || !strings.Contains(got.Input, "C3.runtime-authority") {
+		t.Fatalf("Responses input = %q, want rendered Runtime prompt sections", got.Input)
 	}
 	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
 		t.Fatalf("result = %+v", result)
 	}
 }
 
-func TestHTTPProviderResponsesReasoningDisposition(t *testing.T) {
-	requests := make(chan map[string]any, 2)
+func TestHTTPProviderStreamUsesAIProxyResponses(t *testing.T) {
+	var got responsesRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode request: %v", err)
-			return
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %q, want /v1/responses", r.URL.Path)
 		}
-		requests <- payload
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: "compatible", APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, BaseURL: server.URL + "/v1", Model: "model", Capabilities: llmmodels.ProviderCapabilities{Responses: true}})
-	for _, effort := range []string{"", "none"} {
-		request := llmProviderRequest()
-		request.ReasoningEffort = effort
-		if _, err := provider.Complete(context.Background(), request); err != nil {
-			t.Fatalf("complete effort %q: %v", effort, err)
-		}
-		payload := <-requests
-		reasoning, exists := payload["reasoning"]
-		if effort == "" {
-			if exists {
-				t.Fatalf("empty effort encoded reasoning: %+v", reasoning)
-			}
-			continue
-		}
-		object, ok := reasoning.(map[string]any)
-		if !ok || object["effort"] != "none" {
-			t.Fatalf("explicit none reasoning = %+v", reasoning)
-		}
-	}
-}
-
-func TestHTTPProviderCompleteCancelsConfiguredDeadline(t *testing.T) {
-	started := make(chan struct{})
-	cancelled := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		// Drain the bounded JSON request before waiting for cancellation. The
-		// server otherwise keeps the client connection occupied by an unread
-		// request body, which masks the request-context cancellation being
-		// asserted here.
-		_, _ = io.Copy(io.Discard, r.Body)
-		_ = r.Body.Close()
-		close(started)
-		<-r.Context().Done()
-		close(cancelled)
-	}))
-	defer server.Close()
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		Model:    "test-model",
-		// Keep the provider deadline short while leaving enough scheduling
-		// margin for the request to reach the httptest handler under the full
-		// package suite. The test synchronizes on started before asserting
-		// deadline cancellation, so it never conflates dispatch latency with
-		// request-context behavior.
-		Timeout: 100 * time.Millisecond,
-	})
-	completion := make(chan error, 1)
-	go func() {
-		_, err := provider.Complete(context.Background(), llmProviderRequest())
-		completion <- err
-	}()
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("provider request did not reach test server")
-	}
-	var err error
-	select {
-	case err = <-completion:
-	case <-time.After(2 * time.Second):
-		t.Fatal("provider completion did not return after configured deadline")
-	}
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "timeout") {
-		t.Fatalf("completion error = %v, want configured deadline timeout", err)
-	}
-	select {
-	case <-cancelled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("provider request context was not cancelled after configured deadline")
-	}
-}
-
-func TestHTTPProviderOmitsBearerAuthorizationWhenAPIKeyIsBlank(t *testing.T) {
-	var authorizations []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorizations = append(authorizations, r.Header.Get("Authorization"))
-		switch r.URL.Path {
-		case "/v1/chat/completions":
-			var payload chatCompletionRequest
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				t.Fatalf("decode chat request: %v", err)
-			}
-			if payload.Stream {
-				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"}\"}}]}\n\n"))
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"completionState\":\"continue\"}"}}]}`))
-		case "/v1/embeddings":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2]}]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		ID: "ai-proxy", Provider: llmcommon.ProviderCompatible, APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
-		BaseURL: server.URL + "/v1", APIKey: "  ", Model: "test-model", Timeout: 5 * time.Second,
-	})
-	if _, err := provider.Complete(context.Background(), llmProviderRequest()); err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	if _, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil); err != nil {
-		t.Fatalf("stream complete: %v", err)
-	}
-	if _, err := provider.Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal"}); err != nil {
-		t.Fatalf("embed: %v", err)
-	}
-	if len(authorizations) != 3 {
-		t.Fatalf("authorization observations = %v, want chat/stream/embedding", authorizations)
-	}
-	for idx, value := range authorizations {
-		if value != "" {
-			t.Fatalf("authorization[%d] = %q, want omitted for blank api key", idx, value)
-		}
-	}
-}
-
-func TestHTTPProviderCompleteUsesAnthropicMessagesShapeAndDeclaredCacheControl(t *testing.T) {
-	var gotPath string
-	var gotAPIKey string
-	var gotVersion string
-	var gotPayload map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAPIKey = r.Header.Get("x-api-key")
-		gotVersion = r.Header.Get("anthropic-version")
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"type":"message",
-			"role":"assistant",
-			"model":"claude-test",
-			"content":[{"type":"text","text":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"anthropic http done\",\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}],
-			"usage":{"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":5,"cache_creation_input_tokens":6}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider:   llmcommon.ProviderCompatible,
-		APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
-		BaseURL:    server.URL + "/v1",
-		APIKey:     "secret-value",
-		Model:      "claude-test",
-		Timeout:    5 * time.Second,
-		CacheCapability: llmmodels.ProviderCacheCapability{
-			Surface:             llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
-			Mode:                llmcommon.ProviderCacheModeCompatibleDeclared,
-			MessageCacheControl: true,
-		},
-	})
-	result, err := provider.Complete(context.Background(), llmProviderRequest())
-	if err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	if gotPath != "/v1/messages" {
-		t.Fatalf("path = %q, want /v1/messages", gotPath)
-	}
-	if gotAPIKey != "secret-value" || gotVersion != "2023-06-01" {
-		t.Fatalf("headers = %q/%q, want anthropic headers", gotAPIKey, gotVersion)
-	}
-	if gotPayload["model"] != "claude-test" || gotPayload["max_tokens"] == nil || gotPayload["system"] == nil {
-		t.Fatalf("payload = %+v, want anthropic messages request", gotPayload)
-	}
-	systemBlocks, ok := gotPayload["system"].([]any)
-	if !ok || len(systemBlocks) == 0 {
-		t.Fatalf("system = %#v, want text block array", gotPayload["system"])
-	}
-	firstSystem, ok := systemBlocks[0].(map[string]any)
-	if !ok {
-		t.Fatalf("first system block = %#v, want object", systemBlocks[0])
-	}
-	if cacheControl, ok := firstSystem["cache_control"].(map[string]any); !ok || cacheControl["type"] != "ephemeral" {
-		t.Fatalf("system block = %+v, want declared anthropic cache_control", firstSystem)
-	}
-	messages, _ := json.Marshal(gotPayload["messages"])
-	if !strings.Contains(string(messages), "C3.runtime-authority") {
-		t.Fatalf("messages = %s, want dynamic tail after stable prefix", messages)
-	}
-	if !strings.Contains(string(result.Payload), `"summary":"anthropic http done"`) {
-		t.Fatalf("payload = %s, want anthropic decision content", result.Payload)
-	}
-	if result.Usage == nil ||
-		result.Usage.InputTokens != 11 ||
-		result.Usage.OutputTokens != 7 ||
-		result.Usage.TotalTokens != 18 ||
-		result.Usage.CacheReadTokens != 5 ||
-		result.Usage.CacheWriteTokens != 6 ||
-		result.Usage.CacheCreationTokens != 6 {
-		t.Fatalf("usage = %+v, want parsed anthropic usage", result.Usage)
-	}
-}
-
-func TestHTTPProviderAnthropicCompatibleDefaultDoesNotSendCacheControl(t *testing.T) {
-	var gotPayload map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"type":"message",
-			"role":"assistant",
-			"model":"claude-test",
-			"content":[{"type":"text","text":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"ok\",\"items\":[]}}"}],
-			"usage":{"input_tokens":1,"output_tokens":1}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider:   llmcommon.ProviderCompatible,
-		APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
-		BaseURL:    server.URL + "/v1",
-		APIKey:     "secret-value",
-		Model:      "claude-test",
-		Timeout:    5 * time.Second,
-	})
-	if _, err := provider.Complete(context.Background(), llmProviderRequest()); err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	systemBlocks, ok := gotPayload["system"].([]any)
-	if !ok || len(systemBlocks) == 0 {
-		t.Fatalf("system = %#v, want text block array", gotPayload["system"])
-	}
-	firstSystem, ok := systemBlocks[0].(map[string]any)
-	if !ok {
-		t.Fatalf("first system block = %#v, want object", systemBlocks[0])
-	}
-	if _, ok := firstSystem["cache_control"]; ok {
-		t.Fatalf("system block = %+v, cache_control must not be sent by default", firstSystem)
-	}
-}
-
-func TestHTTPProviderStreamCompleteParsesAnthropicMessagesDeltas(t *testing.T) {
-	var gotPayload map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\",\\\"nextAction\\\":{\\\"kind\\\":\\\"continue_run\\\"}}\"}}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_creation_input_tokens\":6}}\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"hidden reasoning\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"ok\\\":\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"true}\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n"))
 	}))
 	defer server.Close()
 
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider:   llmcommon.ProviderCompatible,
-		APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
-		BaseURL:    server.URL + "/v1",
-		APIKey:     "secret-value",
-		Model:      "claude-test",
-		Timeout:    5 * time.Second,
-		CacheCapability: llmmodels.ProviderCacheCapability{
-			Surface:             llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
-			Mode:                llmcommon.ProviderCacheModeCompatibleDeclared,
-			MessageCacheControl: true,
-		},
-	})
+	provider := NewHTTPProvider(testAIProxyProviderConfig(server.URL + "/v1"))
 	events := []llmmodels.ProviderStreamEvent{}
 	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
 		events = append(events, event)
@@ -440,501 +81,44 @@ func TestHTTPProviderStreamCompleteParsesAnthropicMessagesDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stream complete: %v", err)
 	}
-	if gotPayload["stream"] != true {
-		t.Fatalf("payload = %+v, want stream=true", gotPayload)
+	if !got.Stream {
+		t.Fatal("stream = false, want true")
 	}
-	if gotPayload["system"] == nil {
-		t.Fatalf("payload = %+v, want system prompt", gotPayload)
+	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
+		t.Fatalf("result = %+v", result)
 	}
-	if !strings.Contains(string(result.Payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
-		t.Fatalf("payload=%s events=%+v, want streamed anthropic decision and done event", result.Payload, events)
-	}
-	if result.Usage == nil ||
-		result.Usage.InputTokens != 11 ||
-		result.Usage.OutputTokens != 7 ||
-		result.Usage.TotalTokens != 18 ||
-		result.Usage.CacheReadTokens != 5 ||
-		result.Usage.CacheWriteTokens != 6 {
-		t.Fatalf("usage = %+v, want stream usage", result.Usage)
+	if len(events) != 3 || events[0].Delta != `{"ok":` || events[2].Type != "done" {
+		t.Fatalf("events = %+v", events)
 	}
 }
 
-func TestHTTPProviderSendsPromptCacheKeyOnlyWhenCapabilityDeclared(t *testing.T) {
-	var gotPayload chatCompletionRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"done\",\"items\":[]}}"}}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-		CacheCapability: llmmodels.ProviderCacheCapability{
-			Surface:        llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
-			Mode:           llmcommon.ProviderCacheModeCompatibleDeclared,
-			PromptCacheKey: true,
-		},
-	})
-	request := llmProviderRequest()
-	request.ContextBudget = &llmmodels.ProviderContextBudget{
-		CachePlan: &llmmodels.ProviderCachePlan{CacheKey: "sha256:stable-cache-key"},
-	}
-
-	if _, err := provider.Complete(context.Background(), request); err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	if gotPayload.PromptCacheKey != "sha256:stable-cache-key" {
-		t.Fatalf("prompt_cache_key = %q, want declared cache key", gotPayload.PromptCacheKey)
-	}
-}
-
-func TestHTTPProviderRejectsUnknownHTTPSurfaceBeforeSubmitting(t *testing.T) {
-	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider:   llmcommon.ProviderCompatible,
-		APISurface: "unsupported_surface",
-		BaseURL:    server.URL + "/v1",
-		APIKey:     "secret-value",
-		Model:      "test-model",
-		Timeout:    5 * time.Second,
-	})
-	_, err := provider.Complete(context.Background(), llmProviderRequest())
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("complete err = %v, want invalid argument", err)
-	}
-	if called {
-		t.Fatalf("unsupported surface should fail before submitting request")
-	}
-}
-
-func TestHTTPProviderCompleteParsesNonStreamingUsage(t *testing.T) {
-	var gotPayload chatCompletionRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"usage parsed\",\"items\":[{\"item\":\"usage parsed\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}}],
-			"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":6}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	result, err := provider.Complete(context.Background(), llmProviderRequest())
-	if err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	if gotPayload.Stream {
-		t.Fatalf("stream flag = true, want false")
-	}
-	if gotPayload.ResponseFormat != nil {
-		t.Fatalf("payload response_format = %+v, want omitted without declared capability", gotPayload.ResponseFormat)
-	}
-	if result.Usage == nil ||
-		result.Usage.InputTokens != 11 ||
-		result.Usage.OutputTokens != 7 ||
-		result.Usage.TotalTokens != 18 ||
-		result.Usage.CacheReadTokens != 5 ||
-		result.Usage.CacheWriteTokens != 6 {
-		t.Fatalf("usage = %+v, want parsed non-stream usage", result.Usage)
-	}
-}
-
-func TestHTTPProviderCompleteSendsDeclaredJSONSchemaWhenSupported(t *testing.T) {
-	var gotPayload map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}]}`))
-	}))
-	defer server.Close()
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", APIKey: "secret-value", Model: "test-model", Timeout: 5 * time.Second,
-		Capabilities: llmmodels.ProviderCapabilities{ChatCompletions: true, JSONSchemaResponse: true},
-	})
-	request := llmProviderRequest()
-	request.Schema = `{"type":"object","additionalProperties":false,"properties":{"operations":{"type":"array"}},"required":["operations"]}`
-	if _, err := provider.Complete(context.Background(), request); err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	format, ok := gotPayload["response_format"].(map[string]any)
-	if !ok || format["type"] != "json_schema" {
-		t.Fatalf("response_format = %#v, want json_schema", gotPayload["response_format"])
-	}
-	definition, ok := format["json_schema"].(map[string]any)
-	if !ok || definition["name"] != "workorch_runtime_candidate" {
-		t.Fatalf("json_schema definition = %#v", format["json_schema"])
-	}
-	schema, ok := definition["schema"].(map[string]any)
-	if !ok || schema["type"] != "object" {
-		t.Fatalf("submitted schema = %#v", definition["schema"])
-	}
-}
-
-func TestHTTPProviderCompleteReportsProviderErrorWithoutLeakingSecret(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "upstream rejected secret-value", http.StatusUnauthorized)
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL,
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	_, err := provider.Complete(context.Background(), llmProviderRequest())
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("complete err = %v, want invalid argument", err)
-	}
-	if strings.Contains(err.Error(), "secret-value") || !strings.Contains(err.Error(), "secr...alue") {
-		t.Fatalf("error = %q, want redacted provider body", err.Error())
-	}
-}
-
-func TestHTTPProviderCompleteRejectsProviderErrorObjectWithHTTP200(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"error":{"message":"model overloaded","type":"server_error","code":"upstream_failed"}}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL,
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	_, err := provider.Complete(context.Background(), llmProviderRequest())
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "llm provider protocol invalid") ||
-		!strings.Contains(err.Error(), "model overloaded") {
-		t.Fatalf("complete err = %v, want provider protocol invalid error object", err)
-	}
-}
-
-func TestHTTPProviderCompleteRejectsMissingChoicesAsProviderSchemaInvalid(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-empty","choices":[]}`))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL,
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	_, err := provider.Complete(context.Background(), llmProviderRequest())
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "llm provider response schema invalid") {
-		t.Fatalf("complete err = %v, want response schema invalid", err)
-	}
-}
-
-func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
-	var gotPayload chatCompletionRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\",\\\"shellCommands\\\":[{\\\"command\\\":\\\"echo\\\",\\\"args\\\":[\\\"ok\\\"]}]}\"}}]}\n\n"))
-		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_cache_hit_tokens\":5,\"prompt_cache_miss_tokens\":6}}\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	events := []llmmodels.ProviderStreamEvent{}
-	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
-		events = append(events, event)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("stream complete: %v", err)
-	}
-	if !gotPayload.Stream {
-		t.Fatalf("stream flag = false, want true")
-	}
-	if gotPayload.StreamOptions == nil || !gotPayload.StreamOptions.IncludeUsage {
-		t.Fatalf("stream options = %+v, want include_usage=true", gotPayload.StreamOptions)
-	}
-	if !strings.Contains(string(result.Payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
-		t.Fatalf("payload=%s events=%+v, want streamed decision and done event", result.Payload, events)
-	}
-	if result.Usage == nil ||
-		result.Usage.InputTokens != 11 ||
-		result.Usage.OutputTokens != 7 ||
-		result.Usage.TotalTokens != 18 ||
-		result.Usage.CacheReadTokens != 5 ||
-		result.Usage.CacheWriteTokens != 6 {
-		t.Fatalf("usage = %+v, want stream usage", result.Usage)
-	}
-}
-
-func TestHTTPProviderResponsesOutputLimitPreservesPartialPayload(t *testing.T) {
+func TestHTTPProviderOutputLimitPreservesOnlyOutputText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"hidden reasoning\"}\n\n"))
 		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"operations\\\":[\"}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":19960,\"output_tokens\":8192,\"total_tokens\":28152}}}\n\n"))
-	}))
-	defer server.Close()
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", APIKey: "secret", Model: "test-model", Timeout: 5 * time.Second, Capabilities: llmmodels.ProviderCapabilities{Responses: true, Streaming: true}})
-	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
-	var limitErr *ProviderOutputLimitError
-	if !errors.As(err, &limitErr) {
-		t.Fatalf("error = %v, want typed output limit", err)
-	}
-	if string(result.Payload) != `{"operations":[` || len(limitErr.Payload) == 0 {
-		t.Fatalf("partial payload result=%q error=%q", result.Payload, limitErr.Payload)
-	}
-	if result.Usage == nil || result.Usage.OutputTokens != 8192 {
-		t.Fatalf("usage = %+v, want preserved usage", result.Usage)
-	}
-}
-
-func TestHTTPProviderResponsesStreamSeparatesReasoningFromFinalOutput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"The user wants a semantic plan.\"}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"documentKind\\\":\\\"semantic_plan\\\"}\"}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
-	}))
-	defer server.Close()
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", Model: "test-model", Timeout: 5 * time.Second, Capabilities: llmmodels.ProviderCapabilities{Responses: true, Streaming: true}})
-	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
-	if err != nil {
-		t.Fatalf("stream complete: %v", err)
-	}
-	if string(result.Payload) != `{"documentKind":"semantic_plan"}` {
-		t.Fatalf("payload = %q, want final output_text only", result.Payload)
-	}
-}
-
-func TestHTTPProviderResponsesOutputLimitDoesNotExposeReasoningAsPartialPayload(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"The user wants a semantic plan.\"}\n\n"))
 		_, _ = w.Write([]byte("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":20,\"output_tokens\":8,\"total_tokens\":28}}}\n\n"))
 	}))
 	defer server.Close()
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: llmcommon.ProviderCompatible, BaseURL: server.URL + "/v1", Model: "test-model", Timeout: 5 * time.Second, Capabilities: llmmodels.ProviderCapabilities{Responses: true, Streaming: true}})
-	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+
+	result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).StreamComplete(context.Background(), llmProviderRequest(), nil)
 	var limitErr *ProviderOutputLimitError
 	if !errors.As(err, &limitErr) {
-		t.Fatalf("error = %v, want typed output limit", err)
+		t.Fatalf("error = %v, want output limit", err)
 	}
-	if len(result.Payload) != 0 || len(limitErr.Payload) != 0 {
-		t.Fatalf("reasoning leaked into partial payload: result=%q error=%q", result.Payload, limitErr.Payload)
-	}
-}
-
-func TestHTTPProviderStreamCompleteRejectsProviderErrorEvent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(`data: {"error":{"message":"stream rejected","type":"server_error"}}` + "\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	_, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "llm provider protocol invalid") ||
-		!strings.Contains(err.Error(), "stream rejected") {
-		t.Fatalf("stream complete err = %v, want provider protocol invalid event", err)
+	if string(result.Payload) != `{"operations":[` || string(limitErr.Payload) != `{"operations":[` {
+		t.Fatalf("partial payload result=%q error=%q", result.Payload, limitErr.Payload)
 	}
 }
 
-func TestHTTPProviderStreamCompleteAcceptsLargeSSELine(t *testing.T) {
-	largeDecision := `{"completionState":"continue","executionGraph":{"nodes":[{"id":"write-large","kind":"patch/apply","input":{"patchType":"file_write","targetRef":"large.txt","content":"` + strings.Repeat("x", 2*1024*1024) + `"}}]}}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		payload, err := json.Marshal(map[string]any{
-			"choices": []map[string]any{{
-				"delta": map[string]any{"content": largeDecision},
-			}},
-		})
-		if err != nil {
-			t.Fatalf("marshal stream chunk: %v", err)
-		}
-		_, _ = w.Write([]byte("data: "))
-		_, _ = w.Write(payload)
-		_, _ = w.Write([]byte("\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
-	if err != nil {
-		t.Fatalf("stream complete: %v", err)
-	}
-	if !strings.Contains(string(result.Payload), strings.Repeat("x", 1024)) {
-		t.Fatalf("payload missing large streamed content")
-	}
-}
-
-func TestHTTPProviderStreamCompleteRejectsEOFBeforeDone(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	events := []llmmodels.ProviderStreamEvent{}
-	_, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
-		events = append(events, event)
-		return nil
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "stream incomplete") {
-		t.Fatalf("stream complete err = %v, want stream incomplete invalid argument", err)
-	}
-	if len(events) != 1 || events[0].Type != "delta" {
-		t.Fatalf("events = %+v, want only partial delta without done", events)
-	}
-}
-
-func TestHTTPProviderStreamCompleteRejectsContentBeyondLimit(t *testing.T) {
-	stream := strings.NewReader(
-		"data: {\"choices\":[{\"delta\":{\"content\":\"12345\"}}]}\n\n" +
-			"data: {\"choices\":[{\"delta\":{\"content\":\"67890\"}}]}\n\n" +
-			"data: [DONE]\n\n",
-	)
-	events := []llmmodels.ProviderStreamEvent{}
-	_, _, err := readChatCompletionStreamWithLimits(stream, func(event llmmodels.ProviderStreamEvent) error {
-		events = append(events, event)
-		return nil
-	}, providerStreamLimits{MaxContentBytes: 8, MaxDataEvents: 16})
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "stream incomplete") ||
-		!strings.Contains(err.Error(), "content byte limit") {
-		t.Fatalf("stream err = %v, want content byte limit stream incomplete", err)
-	}
-	if len(events) != 1 || events[0].Delta != "12345" {
-		t.Fatalf("events = %+v, want only emitted content before limit breach", events)
-	}
-}
-
-func TestHTTPProviderStreamCompleteRejectsDataEventsBeyondLimit(t *testing.T) {
-	stream := strings.NewReader(
-		"data: {\"choices\":[]}\n\n" +
-			"data: {\"choices\":[]}\n\n" +
-			"data: {\"choices\":[]}\n\n" +
-			"data: [DONE]\n\n",
-	)
-	_, _, err := readChatCompletionStreamWithLimits(stream, nil, providerStreamLimits{MaxContentBytes: 1024, MaxDataEvents: 2})
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "stream incomplete") ||
-		!strings.Contains(err.Error(), "data event limit") {
-		t.Fatalf("stream err = %v, want data event limit stream incomplete", err)
-	}
-}
-
-func TestHTTPProviderAnthropicStreamRejectsContentBeyondLimit(t *testing.T) {
-	stream := strings.NewReader(
-		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"12345\"}}\n\n" +
-			"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"67890\"}}\n\n" +
-			"data: [DONE]\n\n",
-	)
-	_, _, err := readAnthropicHTTPStreamWithLimits(stream, nil, providerStreamLimits{MaxContentBytes: 8, MaxDataEvents: 16})
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "stream incomplete") ||
-		!strings.Contains(err.Error(), "content byte limit") {
-		t.Fatalf("stream err = %v, want content byte limit stream incomplete", err)
-	}
-}
-
-func TestHTTPProviderStreamCompleteTreatsTruncatedChunkAsIncomplete(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}\n\n"))
-	}))
-	defer server.Close()
-
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "test-model",
-		Timeout:  5 * time.Second,
-	})
-	_, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
-	if !errors.Is(err, common.ErrInvalidArgument) ||
-		!strings.Contains(err.Error(), "stream incomplete") ||
-		!strings.Contains(err.Error(), "truncated stream chunk json") {
-		t.Fatalf("stream complete err = %v, want truncated stream incomplete", err)
-	}
-	if strings.Contains(err.Error(), "provider protocol invalid") {
-		t.Fatalf("stream complete err = %v, truncated chunk should not be protocol invalid", err)
-	}
-}
-
-func TestHTTPProviderEmbedUsesEmbeddingsEndpoint(t *testing.T) {
+func TestHTTPProviderEmbedsThroughAIProxy(t *testing.T) {
 	var gotPath string
 	var gotAuthorization string
-	var gotPayload embeddingRequest
+	var got embeddingRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuthorization = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -942,79 +126,113 @@ func TestHTTPProviderEmbedUsesEmbeddingsEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewHTTPProvider(llmmodels.ProviderConfig{
-		ID:       "embedding",
-		Provider: llmcommon.ProviderCompatible,
-		BaseURL:  server.URL + "/v1",
-		APIKey:   "secret-value",
-		Model:    "embedding-model",
-		Timeout:  5 * time.Second,
-	})
-	result, err := provider.Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal"})
+	result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL+"/v1")).Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal", Model: "embedding-model"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
-	if gotPath != "/v1/embeddings" {
-		t.Fatalf("path = %q, want /v1/embeddings", gotPath)
+	if gotPath != "/v1/embeddings" || gotAuthorization != "Bearer secret-value" || got.Model != "embedding-model" || got.Input != "workspace goal" {
+		t.Fatalf("request path=%q authorization=%q payload=%+v", gotPath, gotAuthorization, got)
 	}
-	if gotAuthorization != "Bearer secret-value" {
-		t.Fatalf("authorization = %q, want bearer secret", gotAuthorization)
-	}
-	if gotPayload.Model != "embedding-model" || gotPayload.Input != "workspace goal" {
-		t.Fatalf("payload = %+v, want embedding request", gotPayload)
-	}
-	if result.ProviderID != "embedding" || result.Model != "embedding-model" || len(result.Vector) != 3 {
-		t.Fatalf("embedding result = %+v, want vector", result)
+	if result.ProviderID != "ai-proxy" || result.Model != "embedding-model" || len(result.Vector) != 3 {
+		t.Fatalf("result = %+v", result)
 	}
 }
 
-func TestChatCompletionsURLAcceptsFullEndpoint(t *testing.T) {
-	got, err := chatCompletionsURL("http://127.0.0.1:11434/v1/chat/completions")
-	if err != nil {
-		t.Fatalf("chat completions url: %v", err)
-	}
-	if got != "http://127.0.0.1:11434/v1/chat/completions" {
-		t.Fatalf("url = %q, want unchanged endpoint", got)
+func TestHTTPProviderOmitsBlankAPIKeyAndRedactsProviderErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Fatalf("authorization = %q, want omitted", r.Header.Get("Authorization"))
+		}
+		http.Error(w, "upstream rejected secret-value", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	config := testAIProxyProviderConfig(server.URL)
+	config.APIKey = "  "
+	_, err := NewHTTPProvider(config).Complete(context.Background(), llmProviderRequest())
+	var statusErr *ProviderHTTPStatusError
+	if !errors.Is(err, common.ErrInvalidArgument) || !errors.As(err, &statusErr) || statusErr.Body != http.StatusText(http.StatusUnauthorized) || strings.Contains(err.Error(), "secret-value") {
+		t.Fatalf("error = %v, want status-only provider error", err)
 	}
 }
 
-func TestOpenAICompatibleURLsNormalizeHostOnlyBase(t *testing.T) {
-	chat, err := chatCompletionsURL("http://127.0.0.1:8080")
-	if err != nil {
-		t.Fatalf("chat completions url: %v", err)
+func TestHTTPProviderCancelsConfiguredDeadline(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// Draining the bounded JSON request lets the transport observe request
+		// context cancellation instead of holding the connection on an unread
+		// request body.
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer server.Close()
+
+	config := testAIProxyProviderConfig(server.URL)
+	config.Timeout = 100 * time.Millisecond
+	completion := make(chan error, 1)
+	go func() {
+		_, err := NewHTTPProvider(config).Complete(context.Background(), llmProviderRequest())
+		completion <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not reach server")
 	}
-	if chat != "http://127.0.0.1:8080/v1/chat/completions" {
-		t.Fatalf("chat url = %q, want host-only base normalized with /v1", chat)
+	select {
+	case err := <-completion:
+		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "timeout") {
+			t.Fatalf("error = %v, want deadline timeout", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not return after deadline")
 	}
-	embed, err := embeddingsURL("http://127.0.0.1:8080")
-	if err != nil {
-		t.Fatalf("embeddings url: %v", err)
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request context was not cancelled")
 	}
-	if embed != "http://127.0.0.1:8080/v1/embeddings" {
-		t.Fatalf("embeddings url = %q, want host-only base normalized with /v1", embed)
+}
+
+func TestAIProxyURLsNormalizeHostOnlyBase(t *testing.T) {
+	responses, err := responsesURL("http://127.0.0.1:8080")
+	if err != nil || responses != "http://127.0.0.1:8080/v1/responses" {
+		t.Fatalf("responses URL = %q, %v", responses, err)
 	}
-	chatV1, err := chatCompletionsURL("http://127.0.0.1:18181/v1")
-	if err != nil {
-		t.Fatalf("chat completions /v1 url: %v", err)
+	embeddings, err := embeddingsURL("http://127.0.0.1:8080")
+	if err != nil || embeddings != "http://127.0.0.1:8080/v1/embeddings" {
+		t.Fatalf("embeddings URL = %q, %v", embeddings, err)
 	}
-	if chatV1 != "http://127.0.0.1:18181/v1/chat/completions" {
-		t.Fatalf("chat /v1 url = %q, want unchanged /v1 root", chatV1)
+}
+
+func testAIProxyProviderConfig(baseURL string) llmmodels.ProviderConfig {
+	return llmmodels.ProviderConfig{
+		ID:      "ai-proxy",
+		BaseURL: baseURL,
+		APIKey:  "secret-value",
+		Model:   "test-model",
+		Timeout: 5 * time.Second,
+		Capabilities: llmmodels.ProviderCapabilities{
+			Responses:         true,
+			Streaming:         true,
+			NonChatOperations: []string{"embeddings"},
+		},
 	}
 }
 
 func llmProviderRequest() llmmodels.ProviderRequest {
 	return llmmodels.ProviderRequest{
-		WorkspaceID:    "workspace-1",
-		RunID:          "run-1",
-		StepID:         "run-1/step-1",
-		Kind:           "runtime_candidate",
-		Model:          "test-model",
-		SystemLocale:   "zh_CN.UTF-8",
-		DialogLanguage: "Chinese (Simplified)",
-		Schema:         "workorch.runtime_candidate.test",
+		WorkspaceID: "workspace-1",
+		RunID:       "run-1",
+		StepID:      "run-1/step-1",
+		Kind:        "runtime_candidate",
+		Model:       "test-model",
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: "Return one JSON object."},
-			{ID: "C1.goal-dod", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, Content: `{"goal":"goal-1","dod":"dod-1"}`},
 			{ID: "C3.runtime-authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: `{"action":"produce_assessment"}`},
 		}},
 	}

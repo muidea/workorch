@@ -12,12 +12,10 @@ import type {
 } from '../types';
 import { workorchApi } from '../api';
 import {
-  configurationModelTargetOptions,
+  aiProxyModelOptions,
   errorMessage,
   llmConfigurationFormValues,
   nextWebSearchProviderDraft,
-  parseProviderModelTargetKey,
-  providerModelTargetKey,
   splitHeaderLines,
   SoulDefinitionManager,
   validateHeaderLines,
@@ -31,36 +29,6 @@ import {
 
 function configNumberText(value: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '-';
-}
-
-const maxAIProxyTimeoutMillis = 10 * 60 * 1000;
-
-function goDurationMillis(raw: string | undefined): number | undefined {
-  const value = raw?.trim();
-  if (!value) return undefined;
-  const parts = Array.from(value.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)/g));
-  if (parts.length === 0 || parts.map((part) => part[0]).join('') !== value) return undefined;
-  const unitMillis: Record<string, number> = {
-    ns: 1e-6,
-    us: 1e-3,
-    'µs': 1e-3,
-    ms: 1,
-    s: 1000,
-    m: 60 * 1000,
-    h: 60 * 60 * 1000
-  };
-  return parts.reduce((total, part) => total + Number(part[1]) * unitMillis[part[2]], 0);
-}
-
-function validateAIProxyTimeout(_: unknown, raw: string | undefined) {
-  const timeoutMillis = goDurationMillis(raw);
-  if (timeoutMillis === undefined || timeoutMillis <= 0) {
-    return Promise.reject(new Error('请输入正数 Go duration，例如 180s 或 3m'));
-  }
-  if (timeoutMillis > maxAIProxyTimeoutMillis) {
-    return Promise.reject(new Error('请求超时不得超过 10m'));
-  }
-  return Promise.resolve();
 }
 
 export function ConfigurationPage() {
@@ -90,6 +58,7 @@ export function ConfigurationPage() {
     setSelectedWebSearchProviderIndex(0);
     setSelectedWebSearchTemplateId(nextConfiguration.webSearch.providerTemplates?.[0]?.templateId);
     serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
+    llmForm.resetFields();
     llmForm.setFieldsValue(nextFormValues);
     webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextWebSearchFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
   };
@@ -132,72 +101,39 @@ export function ConfigurationPage() {
   const saveLLMConfiguration = async (values: LLMConfigurationFormValues) => {
     setSaving(true);
     try {
-      const selectableChatTargets = configurationModelTargetOptions(configuration, 'responses', configuration?.llm.defaultChat);
-      const defaultChat = parseProviderModelTargetKey(values.defaultChatTargetKey);
-      const currentChatTargetKey = providerModelTargetKey(
-        configuration?.llm.defaultChat?.providerId,
-        configuration?.llm.defaultChat?.modelId
-      );
+      const defaultChatModelId = values.defaultChatModelId?.trim();
+      const currentChatModelId = configuration?.llm.defaultChat?.modelId;
       // A credential rotation must remain possible when the old key has
       // already expired and the catalog therefore contains no ready target.
-      // A changed target still has to be ready; the currently configured
-      // target is allowed so the connection can be repaired first.
-      if (!defaultChat || (!selectableChatTargets.some((item) => item.ready && item.value === values.defaultChatTargetKey) && values.defaultChatTargetKey !== currentChatTargetKey)) {
-        message.error('请选择完整且 ready 的默认对话模型（Provider/Model）');
+      // A changed model still has to be ready; the configured model is
+      // allowed so its credential can be repaired first.
+      if (!defaultChatModelId || (!chatModelOptions.some((item) => item.ready && item.value === defaultChatModelId) && defaultChatModelId !== currentChatModelId)) {
+        message.error('请选择 ready 的默认对话模型');
         return;
       }
-      const selectableEmbeddingTargets = configurationModelTargetOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding);
-      const defaultEmbedding = parseProviderModelTargetKey(values.defaultEmbeddingTargetKey);
-      const currentEmbeddingTargetKey = providerModelTargetKey(
-        configuration?.llm.defaultEmbedding?.providerId,
-        configuration?.llm.defaultEmbedding?.modelId
-      );
-      if (values.defaultEmbeddingTargetKey && (
-        !defaultEmbedding ||
-        (!selectableEmbeddingTargets.some((item) => item.ready && item.value === values.defaultEmbeddingTargetKey) && values.defaultEmbeddingTargetKey !== currentEmbeddingTargetKey)
+      const defaultEmbeddingModelId = values.defaultEmbeddingModelId?.trim();
+      const currentEmbeddingModelId = configuration?.llm.defaultEmbedding?.modelId;
+      if (defaultEmbeddingModelId && (
+        !embeddingModelOptions.some((item) => item.ready && item.value === defaultEmbeddingModelId) && defaultEmbeddingModelId !== currentEmbeddingModelId
       )) {
-        message.error('请选择完整且 ready 的默认 Embedding 模型（Provider/Model）');
+        message.error('请选择 ready 的默认 Embedding 模型');
         return;
       }
       const payload: UpdateLLMConfigurationRequest = {
-        aiProxy: {
-          baseURL: values.aiProxy?.baseURL?.trim(),
-          apiKey: values.aiProxy?.apiKey?.trim() || undefined,
-          timeout: values.aiProxy?.timeout?.trim(),
-          catalogRequestTimeout: values.aiProxy?.catalogRequestTimeout?.trim(),
-          catalogTTL: values.aiProxy?.catalogTTL?.trim(),
-          catalogMaxStaleAge: values.aiProxy?.catalogMaxStaleAge?.trim(),
-          maxCatalogResponseBytes: values.aiProxy?.maxCatalogResponseBytes,
-          maxCatalogModels: values.aiProxy?.maxCatalogModels
-        },
-        defaultChat: {
-          providerID: defaultChat.providerId,
-          modelID: defaultChat.modelId
-        },
-        defaultEmbedding: defaultEmbedding ? {
-          providerID: defaultEmbedding.providerId,
-          modelID: defaultEmbedding.modelId
-        } : undefined,
-        clearDefaultEmbedding: !defaultEmbedding,
-        clearAIProxyApiKey: Boolean(values.clearAIProxyApiKey),
+        apiKey: values.apiKey?.trim() || undefined,
+        defaultChatModelId,
+        defaultEmbeddingModelId: defaultEmbeddingModelId || undefined,
+        clearDefaultEmbedding: !defaultEmbeddingModelId,
+        clearApiKey: Boolean(values.clearApiKey),
         budget: values.budget
       };
-      if (payload.clearAIProxyApiKey) {
-        if (payload.aiProxy) {
-          // Frontend fail-fast: clear and non-empty new secret cannot both be present.
-          if (payload.aiProxy.apiKey) {
-            message.error('清空 ai-proxy API 密钥时不能同时填写新密钥');
-            return;
-          }
-          payload.aiProxy.apiKey = undefined;
-        }
+      if (payload.clearApiKey && payload.apiKey) {
+        message.error('清空 ai-proxy API 密钥时不能同时填写新密钥');
+        return;
       }
       const nextConfiguration = await workorchApi.updateLLMConfiguration(payload);
       applyConfiguration(nextConfiguration);
-      // Config reload is immediate on the server; refresh the effective
-      // ai-proxy catalog so readiness reflects the new key without restart.
-      await refreshCatalog();
-      message.success('LLM 配置已更新');
+      message.success('LLM 配置已保存，重启 WorkOrch 后生效');
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -208,46 +144,11 @@ export function ConfigurationPage() {
   async function refreshCatalog() {
     setCatalogRefreshing(true);
     try {
-      // The refresh action is also a recovery path for an expired credential.
-      // If the form contains a new connection value, persist that value before
-      // issuing /v1/models; otherwise refresh would deterministically reuse the
-      // old server-side key and report a misleading 401.
-      const values = llmForm.getFieldsValue();
-      const currentAIProxy = configuration?.llm.aiProxy;
-      const pendingAPIKey = values.aiProxy?.apiKey?.trim();
-      const pendingBaseURL = values.aiProxy?.baseURL?.trim();
-      const pendingTimeout = values.aiProxy?.timeout?.trim();
-      const pendingCatalogRequestTimeout = values.aiProxy?.catalogRequestTimeout?.trim();
-      const pendingCatalogTTL = values.aiProxy?.catalogTTL?.trim();
-      const pendingCatalogMaxStaleAge = values.aiProxy?.catalogMaxStaleAge?.trim();
-      const connectionChanged = Boolean(
-        pendingAPIKey ||
-        (pendingBaseURL && pendingBaseURL !== currentAIProxy?.baseUrl) ||
-        values.clearAIProxyApiKey ||
-        pendingTimeout !== currentAIProxy?.timeout ||
-        pendingCatalogRequestTimeout !== currentAIProxy?.catalogRequestTimeout ||
-        pendingCatalogTTL !== currentAIProxy?.catalogTTL ||
-        pendingCatalogMaxStaleAge !== currentAIProxy?.catalogMaxStaleAge ||
-        values.aiProxy?.maxCatalogResponseBytes !== currentAIProxy?.maxCatalogResponseBytes ||
-        values.aiProxy?.maxCatalogModels !== currentAIProxy?.maxCatalogModels
-      );
-      if (connectionChanged) {
-        const nextConfiguration = await workorchApi.updateLLMConfiguration({
-          aiProxy: {
-            baseURL: pendingBaseURL,
-            apiKey: pendingAPIKey || undefined,
-            timeout: pendingTimeout,
-            catalogRequestTimeout: pendingCatalogRequestTimeout,
-            catalogTTL: pendingCatalogTTL,
-            catalogMaxStaleAge: pendingCatalogMaxStaleAge,
-            maxCatalogResponseBytes: values.aiProxy?.maxCatalogResponseBytes,
-            maxCatalogModels: values.aiProxy?.maxCatalogModels
-          },
-          clearAIProxyApiKey: Boolean(values.clearAIProxyApiKey)
-        });
-        applyConfiguration(nextConfiguration);
+      if (configuration?.llm.restartRequired) {
+        message.error('LLM 配置等待重启后生效');
+        return;
       }
-      const catalog = await workorchApi.refreshLLMModelCatalog('ai-proxy');
+      const catalog = await workorchApi.refreshLLMModelCatalog();
       setConfiguration((current) => current ? {
         ...current,
         llm: {
@@ -286,8 +187,14 @@ export function ConfigurationPage() {
   const runtimeGit = configuration?.runtime.git;
   const llmOutput = configuration?.runtime.llmOutput;
   const catalog = configuration?.llm.catalog;
-  const chatModelOptions = useMemo(() => configurationModelTargetOptions(configuration, 'responses', configuration?.llm.defaultChat), [configuration]);
-  const embeddingModelOptions = useMemo(() => configurationModelTargetOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding), [configuration]);
+  const chatModelOptions = useMemo(
+    () => aiProxyModelOptions(configuration, 'responses', configuration?.llm.defaultChat?.modelId),
+    [configuration]
+  );
+  const embeddingModelOptions = useMemo(
+    () => aiProxyModelOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding?.modelId),
+    [configuration]
+  );
 
   const selectWebSearchProvider = (index: number) => {
     setSelectedWebSearchProviderIndex(index);
@@ -457,45 +364,39 @@ export function ConfigurationPage() {
           },
           {
             key: 'llm',
-            label: 'LLM / ai-proxy',
+            label: 'LLM',
             children: (
               <ProCard
-                title="ai-proxy 首选 LLM"
+                title="LLM"
                 className="workorch-section"
                 extra={(
                   <Space>
-                    <Button onClick={() => void llmForm.validateFields([['aiProxy', 'timeout']]).then(() => refreshCatalog())} loading={catalogRefreshing}>刷新模型</Button>
+                    <Button onClick={() => void refreshCatalog()} loading={catalogRefreshing} disabled={configuration?.llm.restartRequired}>刷新模型</Button>
                     <Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>
                   </Space>
                 )}
               >
                 <Typography.Paragraph type="secondary">
-                  WorkOrch 只通过 ai-proxy 的 OpenAI 协议访问模型。可选模型来自 `/v1/models` 精确目录；默认目标按 Provider/Model 完整选择，不会静默匹配同名模型。
+                  WorkOrch 只通过 ai-proxy 的 OpenAI 协议访问模型。ai-proxy 地址、超时和目录策略由配置文件管理；此处仅管理 API 密钥、模型选择和请求预算。
                 </Typography.Paragraph>
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                  <ProCard title="连接与默认模型">
+                  <ProCard title="模型与预算">
                     <Form form={llmForm} layout="vertical" onFinish={(values) => void saveLLMConfiguration(values)}>
-                      <Form.Item name={['aiProxy', 'baseURL']} label="ai-proxy BaseURL" rules={[{ required: true, message: '请填写 ai-proxy BaseURL' }]}>
-                        <Input placeholder="http://127.0.0.1:8080" />
-                      </Form.Item>
-                      <Form.Item name={['aiProxy', 'apiKey']} label="API 密钥">
+                      <Form.Item name="apiKey" label="ai-proxy API 密钥">
                         <Input.Password placeholder={configuration?.llm.aiProxy?.apiKeyConfigured ? '已配置，留空表示保留' : '可选'} autoComplete="new-password" />
                       </Form.Item>
-                      <Form.Item name="clearAIProxyApiKey" valuePropName="checked">
+                      <Form.Item name="clearApiKey" valuePropName="checked">
                         <Checkbox>显式清空 ai-proxy API 密钥</Checkbox>
                       </Form.Item>
-                      <Form.Item name={['aiProxy', 'timeout']} label="请求超时" rules={[{ validator: validateAIProxyTimeout }]} extra="默认 180s，最大 10m；应大于 ai-proxy body-idle timeout 并小于 Runtime 恢复预算。">
-                        <Input placeholder="180s" />
-                      </Form.Item>
                       <Form.Item
-                        name="defaultChatTargetKey"
+                        name="defaultChatModelId"
                         label="默认对话模型"
                         rules={[
                           { required: true, message: '请选择默认对话模型' },
                           {
-                            validator: (_, value?: string) => chatModelOptions.some((item) => item.ready && item.value === value)
+                            validator: (_, value?: string) => value === configuration?.llm.defaultChat?.modelId || chatModelOptions.some((item) => item.ready && item.value === value)
                               ? Promise.resolve()
-                              : Promise.reject(new Error('已配置目标当前未 ready，请选择 ready 的 Provider/Model'))
+                              : Promise.reject(new Error('已配置模型当前未 ready，请选择 ready 的模型'))
                           }
                         ]}
                       >
@@ -506,13 +407,13 @@ export function ConfigurationPage() {
                         />
                       </Form.Item>
                       <Form.Item
-                        name="defaultEmbeddingTargetKey"
+                        name="defaultEmbeddingModelId"
                         label="默认 Embedding 模型"
                         rules={[
                           {
-                            validator: (_, value?: string) => !value || embeddingModelOptions.some((item) => item.ready && item.value === value)
+                            validator: (_, value?: string) => !value || value === configuration?.llm.defaultEmbedding?.modelId || embeddingModelOptions.some((item) => item.ready && item.value === value)
                               ? Promise.resolve()
-                              : Promise.reject(new Error('已配置目标当前未 ready，请选择 ready 的 Provider/Model 或清空'))
+                              : Promise.reject(new Error('已配置模型当前未 ready，请选择 ready 的模型或清空'))
                           }
                         ]}
                       >
@@ -540,6 +441,7 @@ export function ConfigurationPage() {
                         { key: 'fetchedAt', label: '最近刷新', children: catalog?.fetchedAt || '-' },
                         { key: 'stale', label: 'Stale', children: catalog?.stale ? <Tag color="orange">stale</Tag> : <Tag color="green">fresh</Tag> },
                         { key: 'apiKey', label: 'API 密钥', children: configuration?.llm.aiProxy?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
+                        { key: 'restart', label: '生效状态', children: configuration?.llm.restartRequired ? <Tag color="orange">待重启</Tag> : <Tag color="green">已生效</Tag> },
                         { key: 'error', label: '刷新错误', children: catalog?.errorMessage || '-' }
                       ]}
                     />

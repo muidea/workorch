@@ -22,7 +22,7 @@ func TestCatalogServiceMergesConcurrentRefreshPerKey(t *testing.T) {
 			"object": "list",
 			"data": []map[string]any{{
 				"id": "gpt-4o", "object": "model", "owned_by": "openai",
-				"operations":          []string{"chat_completions"},
+				"supported_endpoints": []string{"/v1/responses"},
 				"contextWindowTokens": 128000, "maxOutputTokens": 16384,
 			}},
 		})
@@ -62,7 +62,7 @@ func TestCatalogServiceDoesNotMergeAcrossDifferentKeys(t *testing.T) {
 			"object": "list",
 			"data": []map[string]any{{
 				"id": "gpt-4o", "object": "model", "owned_by": "openai",
-				"operations":          []string{"chat_completions"},
+				"supported_endpoints": []string{"/v1/responses"},
 				"contextWindowTokens": 128000, "maxOutputTokens": 16384,
 			}},
 		})
@@ -149,8 +149,8 @@ func TestBuildCatalogFromWirePreservesCaseDistinctModelIDs(t *testing.T) {
 	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "DeepSeek-V4-Flash"}
 
 	catalog, err := buildCatalogFromWire(aiProxyModelsResponse{Object: "list", Data: []aiProxyModelRecord{
-		{ID: "DeepSeek-V4-Flash", OwnedBy: "proxy", Operations: []string{"chat_completions"}, ContextWindowTokens: 1000000, MaxOutputTokens: 65536},
-		{ID: "deepseek-v4-flash", OwnedBy: "proxy", Operations: []string{"chat_completions"}, ContextWindowTokens: 1000000, MaxOutputTokens: 65536},
+		{ID: "DeepSeek-V4-Flash", OwnedBy: "proxy", SupportedEndpoints: []string{"/v1/responses"}, ContextWindowTokens: 1000000, MaxOutputTokens: 65536},
+		{ID: "deepseek-v4-flash", OwnedBy: "proxy", SupportedEndpoints: []string{"/v1/responses"}, ContextWindowTokens: 1000000, MaxOutputTokens: 65536},
 	}}, cfg, time.Now())
 	if err != nil {
 		t.Fatalf("buildCatalogFromWire: %v", err)

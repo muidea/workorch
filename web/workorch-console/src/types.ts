@@ -73,55 +73,6 @@ export type LLMContextBudgetPolicyView = {
   estimatedTokensPerByte?: number;
 };
 
-export type CustomProviderModelView = {
-  id: string;
-  contextWindowTokens: number;
-  maxOutputTokens: number;
-  operations: string[];
-  temperature?: number;
-  thinkingBudgetTokens?: number;
-  cacheMode?: string;
-  promptCacheKey?: boolean;
-  messageCacheControl?: boolean;
-  cacheUsageFields?: string[];
-};
-
-export type CustomProviderConfigurationView = {
-  id: string;
-  provider: string;
-  apiSurface?: string;
-  baseUrl?: string;
-  timeout?: string;
-  apiKeyConfigured: boolean;
-  models: CustomProviderModelView[];
-};
-
-export type CustomProviderModelDraft = {
-  id: string;
-  contextWindowTokens?: number;
-  maxOutputTokens?: number;
-  supportedEndpoints?: string[];
-  operations?: string[];
-  temperature?: number;
-  thinkingBudgetTokens?: number;
-  cacheMode?: string;
-  promptCacheKey?: boolean;
-  messageCacheControl?: boolean;
-  cacheUsageFields?: string[];
-};
-
-export type CustomProviderDraft = {
-  id: string;
-  provider: string;
-  apiSurface?: string;
-  baseUrl?: string;
-  apiKey?: string;
-  /** When true, explicitly clear the saved API key for this provider. */
-  clearApiKey?: boolean;
-  timeout?: string;
-  models: CustomProviderModelDraft[];
-};
-
 export type ProviderModelDescriptorView = {
   providerId: string;
   modelId: string;
@@ -159,56 +110,20 @@ export type LLMConfiguration = {
   defaultChat: ProviderModelTarget;
   defaultEmbedding?: ProviderModelTarget;
   budget: LLMContextBudgetPolicyView;
-  customProviders?: CustomProviderConfigurationView[];
   catalog?: ProviderCatalogSummary;
+  restartRequired: boolean;
 };
 
 export type UpdateLLMConfigurationRequest = {
-  aiProxy?: {
-    baseURL?: string;
-    apiKey?: string;
-    timeout?: string;
-    catalogRequestTimeout?: string;
-    catalogTTL?: string;
-    catalogMaxStaleAge?: string;
-    maxCatalogResponseBytes?: number;
-    maxCatalogModels?: number;
-  };
-  defaultChat?: {
-    providerID?: string;
-    modelID?: string;
-  };
-  defaultEmbedding?: {
-    providerID?: string;
-    modelID?: string;
-  };
+  apiKey?: string;
+  clearApiKey?: boolean;
+  defaultChatModelId?: string;
+  defaultEmbeddingModelId?: string;
   clearDefaultEmbedding?: boolean;
-  clearAIProxyApiKey?: boolean;
-  clearCustomProviderApiKeys?: string[];
   budget?: {
     contextUtilizationRatio?: number;
     estimatedTokensPerByte?: number;
   };
-  customProviders?: Record<string, {
-    provider?: string;
-    apiSurface?: string;
-    baseURL?: string;
-    apiKey?: string;
-    timeout?: string;
-    models?: Record<string, {
-      contextWindowTokens?: number;
-      maxOutputTokens?: number;
-      operations?: string[];
-      temperature?: number;
-      thinkingBudgetTokens?: number;
-      cache?: {
-        mode?: string;
-        promptCacheKey?: boolean;
-        messageCacheControl?: boolean;
-        usageFields?: string[];
-      };
-    }>;
-  }>;
 };
 
 export type UpdateServerConfigurationRequest = {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -36,14 +35,7 @@ func providerCompletionContent(request llmmodels.ProviderRequest, content string
 }
 
 func NewProviderFromConfig(config llmmodels.ProviderConfig) Provider {
-	switch strings.TrimSpace(config.Provider) {
-	case llmcommon.ProviderOpenAI:
-		return NewOpenAIProvider(config)
-	case llmcommon.ProviderAnthropic:
-		return NewAnthropicProvider(config)
-	default:
-		return NewHTTPProvider(config)
-	}
+	return NewHTTPProvider(config)
 }
 
 func GenerateEmbedding(ctx context.Context, providerID string, config llmmodels.ProviderConfig, input string) (llmmodels.ProviderEmbeddingResult, error) {
@@ -52,8 +44,8 @@ func GenerateEmbedding(ctx context.Context, providerID string, config llmmodels.
 	if providerID == "" || input == "" || config.Unavailable {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
-	if !providerSupportsNonChatOperation(config.Capabilities, llmcommon.ProviderOperationEmbeddings) {
-		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider operation %q is not declared by provider capabilities", common.ErrInvalidArgument, llmcommon.ProviderOperationEmbeddings)
+	if !providerSupportsNonChatOperation(config.Capabilities, "embeddings") {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider operation %q is not declared by provider capabilities", common.ErrInvalidArgument, "embeddings")
 	}
 	provider, ok := NewProviderFromConfig(config).(EmbeddingProvider)
 	if !ok {
@@ -81,8 +73,8 @@ func providerSupportsNonChatOperation(capabilities llmmodels.ProviderCapabilitie
 }
 
 func effectiveProviderCapabilities(capabilities llmmodels.ProviderCapabilities) llmmodels.ProviderCapabilities {
-	if !capabilities.ChatCompletions && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
-		capabilities.ChatCompletions = true
+	if !capabilities.Responses && !capabilities.Streaming && len(capabilities.NonChatOperations) == 0 {
+		capabilities.Responses = true
 	}
 	return capabilities
 }

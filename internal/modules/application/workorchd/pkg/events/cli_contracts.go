@@ -265,7 +265,7 @@ type CLITemplateDeleteResult struct{ Deleted bool }
 
 type CLIConfigurationGetCommand struct{}
 type CLIConfigurationGetResult struct{ Configuration workorchport.ServiceConfig }
-type CLIConfigurationRefreshChatModelsCommand struct{ ProviderID string }
+type CLIConfigurationRefreshChatModelsCommand struct{}
 type CLIConfigurationRefreshChatModelsResult struct{ Configuration workorchport.ServiceConfig }
 
 func CLIMessageContracts() []eventcontract.MessageContract {

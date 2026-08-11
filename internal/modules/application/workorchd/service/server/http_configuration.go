@@ -3,12 +3,10 @@ package server
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState) {
@@ -85,15 +83,11 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm/models", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationReadRequests.Add(1)
-		providerID := strings.TrimSpace(r.URL.Query().Get("providerId"))
-		if providerID == "" {
-			providerID = runtimecontract.BuiltinAIProxyProviderID
-		}
 		if state.getLLMModelCatalog == nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "llm model catalog handler is not configured"})
 			return
 		}
-		catalog, err := state.getLLMModelCatalog(r.Context(), configcore.GetLLMModelCatalogCommand{ProviderID: providerID})
+		catalog, err := state.getLLMModelCatalog(r.Context())
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -105,23 +99,11 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm/models/refresh", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationUpdateRequests.Add(1)
-		providerID := strings.TrimSpace(r.URL.Query().Get("providerId"))
-		if providerID == "" {
-			// Optional JSON body may also carry providerId.
-			var body struct {
-				ProviderID string `json:"providerId"`
-			}
-			_ = decodeJSON(r, &body)
-			providerID = strings.TrimSpace(body.ProviderID)
-		}
-		if providerID == "" {
-			providerID = runtimecontract.BuiltinAIProxyProviderID
-		}
 		if state.refreshLLMModelCatalog == nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "llm model catalog refresh handler is not configured"})
 			return
 		}
-		catalog, err := state.refreshLLMModelCatalog(r.Context(), configcore.RefreshLLMModelCatalogCommand{ProviderID: providerID})
+		catalog, err := state.refreshLLMModelCatalog(r.Context())
 		if err != nil {
 			writeBusinessError(w, err)
 			return

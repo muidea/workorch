@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 )
@@ -20,9 +19,9 @@ func TestRedactSecret(t *testing.T) {
 
 func TestRedactedProviderConfigOmitsSecrets(t *testing.T) {
 	cfg := llmmodels.ProviderConfig{
-		ID: "ai-proxy", Provider: llmcommon.ProviderCompatible, APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+		ID: "ai-proxy", APISurface: "openai_compatible_http",
 		BaseURL: "http://127.0.0.1:8080", APIKey: "super-secret-key", Model: "gpt-4o", Timeout: 30 * time.Second,
-		Capabilities: llmmodels.ProviderCapabilities{ChatCompletions: true},
+		Capabilities: llmmodels.ProviderCapabilities{Responses: true},
 		ContextProfile: llmmodels.ProviderContextProfile{
 			CapabilitySource: "ai_proxy_catalog", ContextWindowTokens: 128000, MaxInputTokens: 120000,
 		},
