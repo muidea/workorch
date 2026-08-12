@@ -573,6 +573,11 @@ func TestMCPOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	if initialized.Decision.AuthoritySnapshot.PrerequisiteFreshnessHash == "" {
 		t.Fatal("MCP owner-catalog observation was not sealed into authority")
 	}
+	// The failure above is fixture input for the catalog-freshness path, not an
+	// already-persisted repair continuation. It predates the semantic focus
+	// projection, so discard the placeholder-focus directive before the helper
+	// seals the canonical binding and derives a current-focus directive.
+	repository.aggregate.Facts.RepairDirective = nil
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}

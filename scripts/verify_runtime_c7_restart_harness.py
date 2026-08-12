@@ -73,12 +73,13 @@ def prompt_sections(input_value: Any) -> dict[str, str]:
             str(item.get("content", "")) for item in input_value or [] if isinstance(item, dict)
         )
     result: dict[str, str] = {}
-    marker = "### "
-    parts = content.split(marker)
-    for part in parts[1:]:
-        title, sep, body = part.partition("\n")
-        if sep and title.strip():
-            result[title.strip()] = body.strip()
+    # Responses may join multiple role turns with markers such as "[user]".
+    # Match only complete headed sections so C3's JSON cannot consume C4/C5.
+    for match in re.finditer(r"(?ms)^###\s+([^\n]+)\n(.*?)(?=^\[[^\]\n]+\]\n^###\s+|^###\s+|\Z)", content):
+        title = match.group(1).strip()
+        body = match.group(2).strip()
+        if title and body:
+            result[title] = body
     return result
 
 
@@ -95,6 +96,12 @@ def contract_target(contract: dict[str, Any]) -> str:
         refs = string_list(json_value(target, key))
         if refs:
             return refs[0]
+    # A prospective owner target is already a concrete, sealed target ref.
+    # The fixture must echo it; it must not derive a replacement from the
+    # selector or the owner catalog.
+    prospective = str(json_value(target, "prospectiveTargetRef", "ProspectiveTargetRef") or "").strip()
+    if prospective:
+        return prospective
     raise ValueError("sealed operation contract has no concrete target")
 
 
@@ -120,13 +127,21 @@ def semantic_catalogs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def semantic_evidence_kinds(seed: dict[str, Any], coverage_id: str) -> list[str]:
-    for item in json_value(seed, "slices", "Slices") or []:
-        if coverage_id in string_list(json_value(item, "coverageWorkItemIds", "CoverageWorkItemIDs")):
-            kinds = string_list(json_value(item, "requiredEvidenceKinds", "RequiredEvidenceKinds"))
-            if kinds:
-                return kinds
-    raise ValueError(f"semantic definition seed has no evidence requirement for {coverage_id!r}")
+def semantic_evidence_kinds(acceptance_slices: list[Any], coverage_id: str) -> list[str]:
+    kinds: list[str] = []
+    for item in acceptance_slices:
+        if not isinstance(item, dict):
+            continue
+        if coverage_id not in string_list(json_value(item, "coverageWorkItemIds", "CoverageWorkItemIDs")):
+            continue
+        kinds.extend(string_list(json_value(item, "requiredEvidenceKinds", "RequiredEvidenceKinds")))
+    unique: list[str] = []
+    for value in kinds:
+        if value not in unique:
+            unique.append(value)
+    if not unique:
+        raise ValueError(f"C5.acceptance-slices has no evidence requirement for {coverage_id!r}")
+    return unique
 
 
 def semantic_target(catalog: dict[str, Any]) -> dict[str, Any]:
@@ -151,81 +166,122 @@ def semantic_target(catalog: dict[str, Any]) -> dict[str, Any]:
     raise ValueError("semantic owner catalog has no bounded target or selector")
 
 
+def catalog_allows_target_policy(catalog: dict[str, Any], kind: str, policy: str) -> bool:
+    variants = json_value(catalog, "operationVariants", "OperationVariants") or []
+    matching = [item for item in variants if isinstance(item, dict) and json_value(item, "kind", "Kind") == kind]
+    if matching:
+        return all(policy in string_list(json_value(item, "allowedTargetPolicies", "AllowedTargetPolicies")) for item in matching)
+    # A variant-less inventory can authoritatively describe exact/existing
+    # scope, but prospective creation requires an explicit kind/variant fact.
+    return policy in {"exact_target", "existing_owner_scope"}
+
+
 def semantic_proposal(
     coverage_id: str,
-    evidence_kinds: list[str],
+    evidence_kind: str,
     catalogs: list[dict[str, Any]],
     preferred_state_change_kinds: tuple[str, ...] = ("file/edit", "patch/apply", "file/write", "shell/command"),
 ) -> dict[str, Any]:
-    # The crash fixtures require one primary state-changing proof per CWI. If
-    # a validation-only fixture is added later, it must use an owner-declared
-    # managed recipe rather than treating a read or provider claim as proof.
-    if "state_change" in evidence_kinds:
+    if evidence_kind == "state_change":
         for kind in preferred_state_change_kinds:
             for catalog in catalogs:
                 if kind not in string_list(json_value(catalog, "operationKinds", "OperationKinds")):
+                    continue
+                target = semantic_target(catalog)
+                if not catalog_allows_target_policy(catalog, kind, target["policy"]):
                     continue
                 return {
                     "coverageWorkItemId": coverage_id,
                     "ownerModuleId": json_value(catalog, "ownerModuleId", "OwnerModuleID"),
                     "operationKind": kind,
-                    "target": semantic_target(catalog),
+                    "target": target,
                     "requiredEvidenceKinds": ["state_change"],
                     "declarationRef": "runtime-c7/" + coverage_id,
                 }
-    if evidence_kinds == ["validation"]:
+    if evidence_kind == "validation":
         for catalog in catalogs:
             kinds = string_list(json_value(catalog, "operationKinds", "OperationKinds"))
             recipes = json_value(catalog, "validationRecipes", "ValidationRecipes") or []
             if "validation/managed_session" not in kinds or not recipes:
                 continue
             recipe_id = str(json_value(recipes[0], "id", "ID") or "").strip()
-            if recipe_id:
+            target = semantic_target(catalog)
+            if recipe_id and catalog_allows_target_policy(catalog, "validation/managed_session", target["policy"]):
                 return {
                     "coverageWorkItemId": coverage_id,
                     "ownerModuleId": json_value(catalog, "ownerModuleId", "OwnerModuleID"),
                     "operationKind": "validation/managed_session",
-                    "target": semantic_target(catalog),
+                    "target": target,
                     "requiredEvidenceKinds": ["validation"],
                     "validationRecipeId": recipe_id,
                     "declarationRef": "runtime-c7/" + coverage_id,
                 }
     raise ValueError(
-        f"semantic manifest has no bounded owner proof for {coverage_id!r} evidence={evidence_kinds!r}"
+        f"semantic manifest has no bounded owner proof for {coverage_id!r} evidence={evidence_kind!r}"
     )
 
 
 def semantic_plan_payload(
     authority: dict[str, Any],
+    acceptance_slices: list[Any],
     preferred_state_change_kinds: tuple[str, ...] = ("file/edit", "patch/apply", "file/write", "shell/command"),
 ) -> tuple[dict[str, Any], str, str]:
     manifest = json_value(authority, "manifest", "Manifest") or {}
     seed = json_value(authority, "definitionSeed", "DefinitionSeed") or {}
+    schema = json_value(authority, "schema", "Schema") or {}
+    properties = json_value(schema, "properties", "Properties") or {}
+    document_schema = json_value(properties, "schemaVersion", "SchemaVersion") or {}
+    document_schema_version = json_value(document_schema, "const", "Const")
     workspace_id = str(json_value(authority, "workspaceId", "WorkspaceID") or "").strip()
     run_id = str(json_value(authority, "runId", "RunID") or "").strip()
-    if not workspace_id or not run_id or not manifest or not seed:
+    manifest_hash = str(json_value(manifest, "hash", "Hash") or "").strip()
+    definition_seed_hash = str(json_value(manifest, "definitionSeedHash", "DefinitionSeedHash") or "").strip()
+    plan_step = str(json_value(authority, "planStep", "PlanStep") or "").strip()
+    if not workspace_id or not run_id or not manifest or not seed or not manifest_hash or not definition_seed_hash:
         raise ValueError("C3.semantic-authority has incomplete scoped manifest")
-    proposals = []
-    catalogs = semantic_catalogs(manifest)
-    for item in json_value(manifest, "coverageItems", "CoverageItems") or []:
-        coverage_id = str(json_value(item, "id", "ID") or "").strip()
-        if not coverage_id:
-            raise ValueError("semantic manifest coverage item has no identity")
-        proposals.append(semantic_proposal(
-            coverage_id,
-            semantic_evidence_kinds(seed, coverage_id),
-            catalogs,
-            preferred_state_change_kinds,
-        ))
-    if not proposals:
-        raise ValueError("semantic manifest has no coverage proposals")
-    return {
+    if not isinstance(document_schema_version, str) or not document_schema_version:
+        raise ValueError("C3.semantic-authority has no sealed document schema version")
+    document = {
         "documentKind": "semantic_plan",
-        "schemaVersion": "workorch.runtime_semantic_plan_document",
-        "manifestHash": json_value(manifest, "hash", "Hash"),
-        "definitionSeedHash": json_value(manifest, "definitionSeedHash", "DefinitionSeedHash"),
-        "proposals": proposals,
-    }, workspace_id, run_id
+        "schemaVersion": document_schema_version,
+        "manifestHash": manifest_hash,
+        "definitionSeedHash": definition_seed_hash,
+        "planStep": plan_step,
+        "proposals": [],
+    }
+    coverage_items = json_value(manifest, "coverageItems", "CoverageItems") or []
+    manifest_coverage = [str(json_value(item, "id", "ID") or "").strip() for item in coverage_items if isinstance(item, dict)]
+    if not manifest_coverage or any(not coverage_id for coverage_id in manifest_coverage) or len(set(manifest_coverage)) != len(manifest_coverage):
+        raise ValueError("semantic manifest coverage has invalid identity")
+    if plan_step == "coverage_order":
+        coverage_schema = json_value(properties, "coverageOrder", "CoverageOrder") or {}
+        order_items = json_value(coverage_schema, "items", "Items") or {}
+        coverage_order = string_list(json_value(order_items, "enum", "Enum"))
+        if len(coverage_order) != len(set(coverage_order)) or set(coverage_order) != set(manifest_coverage):
+            raise ValueError("semantic coverage-order schema does not match sealed manifest coverage")
+        document["coverageOrder"] = coverage_order
+        return document, workspace_id, run_id
+    if plan_step != "proof_batch":
+        raise ValueError(f"C3.semantic-authority has invalid semantic plan step {plan_step!r}")
+    batch_id = str(json_value(authority, "batchId", "BatchID") or "").strip()
+    batch_sequence = json_value(authority, "batchSequence", "BatchSequence")
+    batch_coverage = string_list(json_value(authority, "batchCoverageWorkItemIds", "BatchCoverageWorkItemIDs"))
+    if not batch_id or not isinstance(batch_sequence, int) or isinstance(batch_sequence, bool) or not batch_coverage or len(batch_coverage) != len(set(batch_coverage)):
+        raise ValueError("C3.semantic-authority has incomplete proof batch identity")
+    if set(batch_coverage) != set(manifest_coverage):
+        raise ValueError("semantic proof manifest does not match bounded batch coverage")
+    catalogs = semantic_catalogs(manifest)
+    proposals = []
+    for coverage_id in batch_coverage:
+        for evidence_kind in semantic_evidence_kinds(acceptance_slices, coverage_id):
+            proposals.append(semantic_proposal(coverage_id, evidence_kind, catalogs, preferred_state_change_kinds))
+    if not proposals:
+        raise ValueError("semantic proof batch has no proposals")
+    document["batchId"] = batch_id
+    document["batchSequence"] = batch_sequence
+    document["batchCoverageWorkItemIds"] = batch_coverage
+    document["proposals"] = proposals
+    return document, workspace_id, run_id
 
 
 def focus_ordinal(focus_id: str) -> int:
@@ -280,6 +336,22 @@ class MockState:
                 if item.get("workspaceId") == workspace_id and item.get("documentKind") == document_kind
             )
 
+    def semantic_events(self, workspace_id: str, run_id: str = "") -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                copy.deepcopy(item)
+                for item in self._events
+                if item.get("workspaceId") == workspace_id
+                and item.get("documentKind") == "semantic_plan"
+                and (not run_id or item.get("runId") == run_id)
+            ]
+
+    def count_semantic_step(self, workspace_id: str, plan_step: str, run_id: str = "") -> int:
+        return sum(
+            1 for item in self.semantic_events(workspace_id, run_id)
+            if item.get("planStep") == plan_step
+        )
+
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return copy.deepcopy(self._events)
@@ -290,6 +362,12 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
     semantic_raw = sections.get("C3.semantic-authority")
     if semantic_raw:
         authority = json.loads(semantic_raw)
+        acceptance_slices_raw = sections.get("C5.acceptance-slices")
+        if not acceptance_slices_raw:
+            raise ValueError("semantic request has no C5.acceptance-slices")
+        acceptance_slices = json.loads(acceptance_slices_raw)
+        if not isinstance(acceptance_slices, list):
+            raise ValueError("C5.acceptance-slices must be an array")
         workspace_id = str(json_value(authority, "workspaceId", "WorkspaceID") or "").strip()
         mode = state.mode_for(workspace_id)
         if mode == "shell_wait":
@@ -298,11 +376,15 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
             preferred = ("file/write", "patch/apply", "file/edit", "shell/command")
         else:
             preferred = ("file/edit", "patch/apply", "file/write", "shell/command")
-        semantic, workspace_id, run_id = semantic_plan_payload(authority, preferred)
+        semantic, workspace_id, run_id = semantic_plan_payload(authority, acceptance_slices, preferred)
         state.record({
             "workspaceId": workspace_id,
             "runId": run_id,
             "documentKind": "semantic_plan",
+            "planStep": semantic.get("planStep"),
+            "batchId": semantic.get("batchId", ""),
+            "batchSequence": semantic.get("batchSequence"),
+            "batchCoverageWorkItemIds": list(semantic.get("batchCoverageWorkItemIds") or []),
             "mode": mode,
             "stablePrefixPresent": "C0.runtime-contract" in sections,
         })
@@ -762,17 +844,49 @@ def persisted_runtime_progress(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def semantic_request_lineage(harness: Harness, workspace_id: str, run_id: str = "") -> list[dict[str, Any]]:
+    return [
+        {
+            "runId": item.get("runId"),
+            "planStep": item.get("planStep"),
+            "batchId": item.get("batchId", ""),
+            "batchSequence": item.get("batchSequence"),
+            "batchCoverageWorkItemIds": list(item.get("batchCoverageWorkItemIds") or []),
+        }
+        for item in harness.mock_state.semantic_events(workspace_id, run_id)
+    ]
+
+
+def assert_semantic_request_pair(harness: Harness, workspace_id: str, run_id: str, description: str) -> list[dict[str, Any]]:
+    events = semantic_request_lineage(harness, workspace_id, run_id)
+    orders = [item for item in events if item["planStep"] == "coverage_order"]
+    batches = [item for item in events if item["planStep"] == "proof_batch"]
+    if len(orders) != 1 or len(batches) != 1 or len(events) != 2:
+        raise RuntimeError(f"{description} semantic request lineage={events!r}, want one coverage_order and one proof_batch")
+    order = orders[0]
+    batch = batches[0]
+    if order["batchId"] or order["batchSequence"] is not None or order["batchCoverageWorkItemIds"]:
+        raise RuntimeError(f"{description} coverage-order request carried proof-batch identity: {order!r}")
+    if not batch["batchId"] or not isinstance(batch["batchSequence"], int) or isinstance(batch["batchSequence"], bool) or not batch["batchCoverageWorkItemIds"]:
+        raise RuntimeError(f"{description} proof-batch request lacks sealed batch identity: {batch!r}")
+    return events
+
+
 def exercise_resume_restart_drift(harness: Harness) -> dict[str, Any]:
     fixture = harness.create_fixture("resume-restart-drift", seed_file=False)
     workspace_id = fixture["workspaceId"]
     harness.mock_state.set_control({workspace_id: "operations_hold"})
     harness.activate(fixture)
     harness.wait_for(
-        "initial semantic and operation provider requests",
-        lambda: harness.mock_state.count_kind(workspace_id, "semantic_plan") == 1
+        "initial coverage-order, proof-batch and operation provider requests",
+        lambda: harness.mock_state.count_semantic_step(workspace_id, "coverage_order") == 1
+        and harness.mock_state.count_semantic_step(workspace_id, "proof_batch") == 1
         and harness.mock_state.count_kind(workspace_id, "operations") == 1,
     )
     original_run_id = harness.wait_for("initial active Run", lambda: current_run_id(harness, fixture))
+    initial_semantic_requests = assert_semantic_request_pair(
+        harness, workspace_id, original_run_id, "initial Run",
+    )
     before_resume = harness.mock_state.snapshot()
 
     resume_id = "c7-resume-same-run"
@@ -784,8 +898,8 @@ def exercise_resume_restart_drift(harness: Harness) -> dict[str, Any]:
     save_json(harness.artifact_dir / "lifecycle-resume.json", resume_snapshot)
     if current_run_id(harness, fixture) != original_run_id:
         raise RuntimeError("resume replaced the current Run")
-    if harness.mock_state.count_kind(workspace_id, "semantic_plan") != 1:
-        raise RuntimeError("resume created a second semantic planning request")
+    if semantic_request_lineage(harness, workspace_id, original_run_id) != initial_semantic_requests:
+        raise RuntimeError("resume created or changed the current Run semantic request lineage")
 
     updated_goal = harness.request(
         "POST",
@@ -817,14 +931,13 @@ def exercise_resume_restart_drift(harness: Harness) -> dict[str, Any]:
         timeout=120,
     )
     harness.wait_for(
-        "replacement semantic planning request",
-        lambda: any(
-            item.get("workspaceId") == workspace_id
-            and item.get("runId") == replacement_run_id
-            and item.get("documentKind") == "semantic_plan"
-            for item in harness.mock_state.snapshot()
-        ),
+        "replacement coverage-order and proof-batch requests",
+        lambda: harness.mock_state.count_semantic_step(workspace_id, "coverage_order", replacement_run_id) == 1
+        and harness.mock_state.count_semantic_step(workspace_id, "proof_batch", replacement_run_id) == 1,
         timeout=120,
+    )
+    replacement_semantic_requests = assert_semantic_request_pair(
+        harness, workspace_id, replacement_run_id, "replacement Run",
     )
     predecessor_after_restart: dict[str, Any] = {}
     for _ in range(20):
@@ -853,12 +966,14 @@ def exercise_resume_restart_drift(harness: Harness) -> dict[str, Any]:
         "originalRunId": original_run_id,
         "replacementRunId": replacement_run_id,
         "semanticRequests": harness.mock_state.count_kind(workspace_id, "semantic_plan"),
+        "initialSemanticRequests": initial_semantic_requests,
+        "replacementSemanticRequests": replacement_semantic_requests,
         "operationRequests": harness.mock_state.count_kind(workspace_id, "operations"),
         "providerEventsBeforeResume": len(before_resume),
         "guarantees": [
-            "resume reused current Run and semantic contract",
+            "resume reused the current Run coverage-order and proof-batch request lineage",
             "definition drift resume returned definition_changed_requires_restart without provider I/O",
-            "restart created a workspace_full replacement with a new semantic request",
+            "restart created a workspace_full replacement with one coverage-order and one proof-batch request",
             "the superseded predecessor rejected its released provider response without candidate, dispatch, receipt, or evidence progress",
         ],
     }
@@ -1041,6 +1156,19 @@ def run_harness(artifact_dir: Path, binary: Path) -> None:
 
 def self_test() -> None:
     state = MockState(Path("/tmp"), Path("/tmp/release"))
+    wrapped_sections = prompt_sections("""### C3.semantic-authority
+{"planStep":"coverage_order"}
+
+[user]
+### C4.semantic-tail
+{"attempt":0}
+
+[user]
+### C5.acceptance-slices
+[]
+""")
+    if wrapped_sections.get("C3.semantic-authority") != '{"planStep":"coverage_order"}' or wrapped_sections.get("C5.acceptance-slices") != "[]":
+        raise AssertionError(f"Responses role wrapper obscured C3/C5 section boundaries: {wrapped_sections!r}")
     payload = {"messages": [{"content": """### C3.runtime-authority
 {"transaction":{"authoritySnapshotId":"authority-1"},"outputContract":{"operationContracts":[{"kind":"file/edit","allowedBindingRefs":["binding-1"],"target":{"allowedTargetRefs":["target.txt"]}}]},"context":{"workspaceId":"ws-1","runId":"run-1","requiredState":"need_state_change","focus":{"id":"focus-001","coverageWorkItemIds":["cwi-1"]}}}
 
@@ -1051,16 +1179,47 @@ stable
     operation = (candidate.get("operations") or [{}])[0]
     if mode != "normal" or operation.get("kind") != "file/edit" or operation.get("targetRefs") != ["target.txt"] or operation.get("bindingRefs") != ["binding-1"]:
         raise AssertionError(f"C3 mock parser produced {candidate!r} mode={mode!r}")
-    semantic_payload = {"messages": [{"content": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"Slices":[{"CoverageWorkItemIDs":["cwi-semantic"],"RequiredEvidenceKinds":["state_change"]}]},"manifest":{"Hash":"manifest-semantic","DefinitionSeedHash":"seed-semantic","CoverageItems":[{"ID":"cwi-semantic"}],"OwnerCatalogs":[{"OwnerModuleID":"blocks/file","OperationKinds":["file/edit"],"TargetRefs":["target.txt"]}]}}
+    if contract_target({"target": {"policy": "prospective_owner_target", "prospectiveTargetRef": "created.txt"}}) != "created.txt":
+        raise AssertionError("prospective target was not echoed from the sealed operation contract")
+    prospective_catalog = {
+        "OperationKinds": ["file/edit", "file/write"],
+        "SelectorRefs": ["workspace-relative-new-file-target"],
+        "ConstraintRefs": ["new-target-requires-owner-selector", "workspace-relative-path"],
+        "OperationVariants": [
+            {"Kind": "file/edit", "AllowedTargetPolicies": ["exact_target", "existing_owner_scope"]},
+            {"Kind": "file/write", "AllowedTargetPolicies": ["exact_target", "existing_owner_scope", "prospective_owner_target"]},
+        ],
+    }
+    if catalog_allows_target_policy(prospective_catalog, "file/edit", "prospective_owner_target"):
+        raise AssertionError("semantic mock widened a sealed file/edit target policy")
+    if not catalog_allows_target_policy(prospective_catalog, "file/write", "prospective_owner_target"):
+        raise AssertionError("semantic mock rejected the sealed file/write prospective policy")
+    semantic_order_payload = {"messages": [{"content": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"Hash":"seed-semantic"},"manifest":{"Hash":"manifest-order","DefinitionSeedHash":"seed-semantic","CoverageItems":[{"ID":"cwi-first"},{"ID":"cwi-semantic"}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"},"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"coverage_order"}
+
+### C5.acceptance-slices
+[{"CoverageWorkItemIDs":["cwi-first"],"RequiredEvidenceKinds":["state_change"]},{"CoverageWorkItemIDs":["cwi-semantic"],"RequiredEvidenceKinds":["state_change","validation"]}]
 
 ### C0.runtime-contract
 stable
 """}]}
-    semantic, semantic_mode = candidate_payload(state, semantic_payload)
-    proposal = (semantic.get("proposals") or [{}])[0]
-    if semantic_mode != "semantic_plan" or proposal.get("ownerModuleId") != "blocks/file" or proposal.get("target", {}).get("exactTargetRefs") != ["target.txt"]:
-        raise AssertionError(f"semantic parser produced {semantic!r} mode={semantic_mode!r}")
+    order, order_mode = candidate_payload(state, semantic_order_payload)
+    if order_mode != "semantic_plan" or order.get("planStep") != "coverage_order" or order.get("coverageOrder") != ["cwi-first", "cwi-semantic"] or order.get("proposals") != []:
+        raise AssertionError(f"semantic coverage-order parser produced {order!r} mode={order_mode!r}")
+    semantic_batch_payload = {"messages": [{"content": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"Hash":"seed-semantic"},"manifest":{"Hash":"manifest-semantic","DefinitionSeedHash":"seed-semantic","CoverageItems":[{"ID":"cwi-semantic"}],"OwnerCatalogs":[{"OwnerModuleID":"blocks/file","OperationKinds":["file/edit"],"TargetRefs":["target.txt"]},{"OwnerModuleID":"blocks/shell","OperationKinds":["validation/managed_session"],"TargetRefs":["target.txt"],"ValidationRecipes":[{"ID":"recipe-semantic"}]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":0,"batchCoverageWorkItemIds":["cwi-semantic"]}
+
+### C5.acceptance-slices
+[{"CoverageWorkItemIDs":["cwi-semantic"],"RequiredEvidenceKinds":["state_change","validation"]}]
+
+### C0.runtime-contract
+stable
+"""}]}
+    semantic, semantic_mode = candidate_payload(state, semantic_batch_payload)
+    proposals = semantic.get("proposals") or []
+    proposal_kinds = [(proposal.get("ownerModuleId"), proposal.get("requiredEvidenceKinds")) for proposal in proposals]
+    if semantic_mode != "semantic_plan" or semantic.get("planStep") != "proof_batch" or semantic.get("batchId") != "batch-semantic" or semantic.get("batchSequence") != 0 or semantic.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or proposal_kinds != [("blocks/file", ["state_change"]), ("blocks/shell", ["validation"])]:
+        raise AssertionError(f"semantic proof-batch parser produced {semantic!r} mode={semantic_mode!r}")
     print("runtime C7 restart harness self-test passed")
 
 

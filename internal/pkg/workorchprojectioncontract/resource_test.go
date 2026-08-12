@@ -63,12 +63,22 @@ func TestCloneRunDetachesSealedTargetAndRuntimeActivation(t *testing.T) {
 	source := Run{
 		ID:                 "run-clone",
 		SealedLLMSelection: &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-a", ModelID: "model-a"}},
-		RuntimeActivation:  &RuntimeActivationStatus{Disposition: "fresh_activation_required"},
+		RuntimeActivation: &RuntimeActivationStatus{
+			Disposition:            "fresh_activation_required",
+			Reason:                 string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid),
+			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
+			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		},
 	}
 	cloned := CloneRun(source)
 	cloned.SealedLLMSelection.Target.ModelID = "mutated"
 	cloned.RuntimeActivation.Disposition = "mutated"
-	if source.SealedLLMSelection.Target.ModelID != "model-a" || source.RuntimeActivation.Disposition != "fresh_activation_required" {
+	cloned.RuntimeActivation.Reason = "mutated-reason"
+	cloned.RuntimeActivation.ActualSchemaVersion = 0
+	if source.SealedLLMSelection.Target.ModelID != "model-a" || source.RuntimeActivation.Disposition != "fresh_activation_required" ||
+		source.RuntimeActivation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) ||
+		source.RuntimeActivation.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		source.RuntimeActivation.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
 		t.Fatal("run projection clone shares nested storage")
 	}
 	if CloneRuns(nil) != nil {

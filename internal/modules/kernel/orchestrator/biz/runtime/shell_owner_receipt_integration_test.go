@@ -201,6 +201,11 @@ func TestShellOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
+	// This pre-semantic fixture failure is used only to verify catalog
+	// invalidation. Do not carry its placeholder-focus repair continuation into
+	// the canonical semantic focus; the helper will derive fresh authority from
+	// the sealed binding.
+	repository.aggregate.Facts.RepairDirective = nil
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}

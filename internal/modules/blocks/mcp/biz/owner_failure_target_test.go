@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -63,7 +64,9 @@ func TestMCPFailureTargetObservationRequiresBoundedOwnerFields(t *testing.T) {
 // while only the explicit MCP response field becomes a related failure target.
 func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *testing.T) {
 	ctx := context.Background()
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"content":        []map[string]any{{"type": "text", "text": "implementation failed"}},
 			"failureTargets": []string{"implementation.go"},
@@ -88,14 +91,22 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	t.Cleanup(func() { owner.Teardown(ctx) })
 
 	var committed runtimecontract.RuntimeOperationReceipt
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
 	receiptOwner := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: false}, nil)
+	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
 	})
 	receiptOwner.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		if receipt, found := receipts[command.Receipt.ExecutionKey]; found {
+			result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt, StateRevision: 7}, nil)
+			return
+		}
 		committed = command.Receipt.Clone()
-		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt, StateRevision: 7}, nil)
+		receipts[command.Receipt.ExecutionKey] = committed
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: committed, StateRevision: 7}, nil)
 	})
 	t.Cleanup(func() {
 		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
@@ -159,6 +170,18 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		response.Receipt.Feedback.OriginalDiagnostic.OperationID != command.OperationID || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode ||
 		response.Receipt.Feedback.OriginalDiagnostic.OriginalMessage != diagnostic.OriginalMessage {
 		t.Fatalf("MCP owner receipt lost scoped original feedback: %+v", response.Receipt.Feedback)
+	}
+	duplicateResult := hub.Send(magicevent.NewEventWithContext(
+		mcpevents.TopicExecuteOperation, "mcp-owner-test", ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	))
+	duplicateData, duplicateErr := duplicateResult.Get()
+	if duplicateErr != nil {
+		t.Fatalf("duplicate MCP owner execution: %v", duplicateErr)
+	}
+	duplicate, ok := duplicateData.(mcpevents.ExecuteOperationResult)
+	if !ok || !runtimecontract.SameRuntimeOperationReceipt(duplicate.Receipt, response.Receipt) || requests.Load() != 1 {
+		t.Fatalf("duplicate MCP receipt repeated owner effect: response=%+v requests=%d", duplicate, requests.Load())
 	}
 }
 

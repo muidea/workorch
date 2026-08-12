@@ -211,76 +211,116 @@ func TestStaleEvidenceOnlyEntersDiagnosticLineage(t *testing.T) {
 	}
 }
 
-func TestReopenCoverageDependenciesForAcceptedEvidencePreservesLineage(t *testing.T) {
-	coverage := []runtimecontract.RuntimeCoverageItemFact{
-		{ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"state-before"}, ReopenDependencies: []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}},
-		{ID: "cwi-validation", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"validation-before"}, LastAssessmentID: "assessment-before"},
-		{ID: "cwi-other", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"other-before"}},
+func TestReopenRuntimeCWIsPreservesAuditAndCanonicalQueueProjection(t *testing.T) {
+	facts := canonicalReopenFixtureFacts(t)
+	updated, reopened, err := reopenRuntimeCWIs(facts, []runtimeCWIReopenTrigger{{
+		CoverageWorkItemID: "cwi-validation", TriggerRef: "state-after", Reason: "accepted state-change invalidated dependent validation",
+	}})
+	if err != nil || len(reopened) != 1 || reopened[0] != "cwi-validation" {
+		t.Fatalf("canonical reopen = facts=%+v reopened=%v err=%v", updated, reopened, err)
 	}
-	evidence := runtimecontract.EvidenceFact{ID: "state-after", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}}
-	updated, reopened := reopenCoverageDependenciesForEvidence(coverage, evidence)
-	if len(reopened) != 1 || reopened[0] != "cwi-validation" {
-		t.Fatalf("reopened coverage = %v, want cwi-validation", reopened)
-	}
-	byID := map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact{}
-	for _, item := range updated {
-		byID[item.ID] = item
-	}
+	byID := runtimeCoverageByID(updated.Coverage)
 	dependent := byID["cwi-validation"]
-	if dependent.State != runtimecontract.RuntimeCoverageItemStateOpen || dependent.LastAssessmentID != "" || len(dependent.EvidenceRefs) != 1 || dependent.EvidenceRefs[0] != "validation-before" || len(dependent.ReopenedByEvidenceRefs) != 1 || dependent.ReopenedByEvidenceRefs[0] != "state-after" {
-		t.Fatalf("dependent after reopen = %+v", dependent)
+	if dependent.State != runtimecontract.RuntimeCoverageItemStateOpen || dependent.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
+		dependent.CurrentBindingRef != nil || dependent.LastAssessmentID != "" || len(dependent.EvidenceRefs) != 1 || dependent.EvidenceRefs[0] != "validation-before" ||
+		len(dependent.ReopenedByEvidenceRefs) != 1 || dependent.ReopenedByEvidenceRefs[0] != "state-after" || len(dependent.ReopenLineage) != 1 {
+		t.Fatalf("dependent after canonical reopen = %+v", dependent)
 	}
-	if byID["cwi-other"].State != runtimecontract.RuntimeCoverageItemStateSatisfied || byID["cwi-source"].State != runtimecontract.RuntimeCoverageItemStateSatisfied {
-		t.Fatalf("unrelated/source coverage changed: %+v", byID)
+	if byID["cwi-unrelated"].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled || byID["cwi-source"].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateUnbound {
+		t.Fatalf("unrelated/source CWI changed: %+v", byID)
 	}
-	updated, reopened = reopenCoverageDependenciesForEvidence(updated, runtimecontract.EvidenceFact{ID: "validation-after", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}})
-	byID = map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact{}
-	for _, item := range updated {
-		byID[item.ID] = item
+	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(reopened) != 0 || byID["cwi-validation"].State != runtimecontract.RuntimeCoverageItemStateOpen {
-		t.Fatalf("non-trigger evidence reopened coverage: reopened=%v coverage=%+v", reopened, updated)
+	updated.ReconciliationContract = contract
+	if err := runtimecontract.ValidateRuntimeCWILedger(updated); err != nil {
+		t.Fatalf("reopened canonical ledger is invalid: %v", err)
 	}
 }
 
-func TestRequeueReopenedCoverageFocusesRestoresCompletedFocusAheadOfPendingQueue(t *testing.T) {
-	facts := runtimecontract.RuntimeFacts{
-		Focus:            runtimecontract.CoverageFocus{ID: "focus-source", SliceID: "slice-source", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}},
-		RemainingFocuses: []runtimecontract.CoverageFocus{{ID: "focus-pending", SliceID: "slice-pending", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-pending"}}},
-		CompletedFocuses: []runtimecontract.CoverageFocus{
-			{ID: "focus-validation", SliceID: "slice-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-validation"}},
-			{ID: "focus-unrelated", SliceID: "slice-unrelated", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-unrelated"}},
-		},
-		Coverage: []runtimecontract.RuntimeCoverageItemFact{
-			{ID: "cwi-source", State: runtimecontract.RuntimeCoverageItemStateOpen}, {ID: "cwi-pending", State: runtimecontract.RuntimeCoverageItemStateOpen},
-			{ID: "cwi-validation", State: runtimecontract.RuntimeCoverageItemStateOpen}, {ID: "cwi-unrelated", State: runtimecontract.RuntimeCoverageItemStateSatisfied},
-		},
+func TestReopenRuntimeCWIsRequeuesCompletedFocusAheadOfPendingQueue(t *testing.T) {
+	facts := canonicalReopenFixtureFacts(t)
+	updated, reopened, err := reopenRuntimeCWIs(facts, []runtimeCWIReopenTrigger{{
+		CoverageWorkItemID: "cwi-validation", TriggerRef: "state-after", Reason: "accepted state-change invalidated dependent validation",
+	}})
+	if err != nil || len(reopened) != 1 {
+		t.Fatalf("canonical reopen = reopened=%v err=%v", reopened, err)
 	}
-	updated := requeueReopenedCoverageFocuses(facts, []common.CoverageWorkItemID{"cwi-validation"})
-	if len(updated.RemainingFocuses) != 2 || updated.RemainingFocuses[0].ID != "focus-validation" || updated.RemainingFocuses[1].ID != "focus-pending" || len(updated.CompletedFocuses) != 1 || updated.CompletedFocuses[0].ID != "focus-unrelated" {
-		t.Fatalf("requeued focus queues = current=%+v remaining=%+v completed=%+v", updated.Focus, updated.RemainingFocuses, updated.CompletedFocuses)
+	if len(updated.RemainingFocuses) != 2 || updated.RemainingFocuses[0].ID != "semantic-pending/cwi-validation" || updated.RemainingFocuses[1].ID != "focus-pending" ||
+		len(updated.CompletedFocuses) != 1 || updated.CompletedFocuses[0].ID != "focus-unrelated" {
+		t.Fatalf("canonical requeued focus queues = current=%+v remaining=%+v completed=%+v", updated.Focus, updated.RemainingFocuses, updated.CompletedFocuses)
 	}
-	// Normalization models the persisted/reloaded aggregate shape; the queue
-	// must retain the same reactivation ordering across restart.
+	// Normalization models the persisted/reloaded aggregate shape; the pending
+	// focus remains a stable CWI projection rather than a recursive old ID.
 	reloaded := updated.Normalized()
-	if len(reloaded.RemainingFocuses) != 2 || reloaded.RemainingFocuses[0].ID != "focus-validation" || len(reloaded.CompletedFocuses) != 1 || reloaded.CompletedFocuses[0].ID != "focus-unrelated" {
-		t.Fatalf("reloaded focus queues = %+v", reloaded)
+	if len(reloaded.RemainingFocuses) != 2 || reloaded.RemainingFocuses[0].ID != "semantic-pending/cwi-validation" || len(reloaded.CompletedFocuses) != 1 || reloaded.CompletedFocuses[0].ID != "focus-unrelated" {
+		t.Fatalf("reloaded canonical focus queues = %+v", reloaded)
 	}
+}
+
+func canonicalReopenFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
+	t.Helper()
+	newBoundFocus := func(id, sliceID string, coverageID common.CoverageWorkItemID, target string) (runtimecontract.CoverageFocus, runtimecontract.RuntimeCWIBindingRef) {
+		focus := runtimecontract.CoverageFocus{
+			ID: id, SliceID: sliceID, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{target},
+		}
+		binding := runtimecontract.CoverageEvidenceBinding{
+			ID: "binding/test/" + id + "/" + string(coverageID), CoverageWorkItemID: coverageID,
+			FocusID: id, DefinitionRevision: "definition-reopen",
+			Proofs: []runtimecontract.CoverageEvidenceProof{{
+				EvidenceKind: runtimecontract.EvidenceKindStateChange, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+				AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			}},
+			TargetRefs: []string{target}, DeclarationRef: "test/canonical-reopen",
+		}.Normalized()
+		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+		focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+		return focus, runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, "manifest-reopen")
+	}
+	validationFocus, validationRef := newBoundFocus("focus-validation", "slice-validation", "cwi-validation", "validation.txt")
+	otherFocus, otherRef := newBoundFocus("focus-unrelated", "slice-other", "cwi-unrelated", "other.txt")
+	facts := runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-reopen", RunID: "run-reopen", DefinitionRevision: "definition-reopen", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		CWILedgerSchemaVersion: runtimecontract.RuntimeCWILedgerSchemaCurrent,
+		Focus:                  runtimecontract.CoverageFocus{ID: "focus-source", SliceID: "slice-source", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
+		RemainingFocuses:       []runtimecontract.CoverageFocus{{ID: "focus-pending", SliceID: "slice-pending", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-pending"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
+		CompletedFocuses:       []runtimecontract.CoverageFocus{validationFocus, otherFocus},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{
+			{ID: "cwi-source", SliceID: "slice-source", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound, FocusID: "focus-source"},
+			{ID: "cwi-pending", SliceID: "slice-pending", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound, FocusID: "focus-pending"},
+			{ID: "cwi-validation", SliceID: "slice-validation", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"validation-before"}, LastAssessmentID: "assessment-before", CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateSettled, CurrentBindingRef: &validationRef, BindingLineage: []runtimecontract.RuntimeCWIBindingRef{validationRef}, FocusID: "focus-validation"},
+			{ID: "cwi-unrelated", SliceID: "slice-other", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"other-before"}, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateSettled, CurrentBindingRef: &otherRef, BindingLineage: []runtimecontract.RuntimeCWIBindingRef{otherRef}, FocusID: "focus-unrelated"},
+		},
+	}
+	contract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, []runtimecontract.CoverageFocus{validationFocus, otherFocus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.ReconciliationContract = contract
+	if err := runtimecontract.ValidateRuntimeCWILedger(facts); err != nil {
+		t.Fatalf("canonical reopen fixture ledger: %v", err)
+	}
+	return facts
 }
 
 func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
-	aggregate.Facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
-		{ID: "cwi-1", SliceID: "slice-source", State: runtimecontract.RuntimeCoverageItemStateOpen, ReopenDependencies: []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}},
-		{ID: "cwi-validation", SliceID: "slice-validation", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"validation-before"}, LastAssessmentID: "assessment-before"},
-	}
+	aggregate.Facts.Coverage[0].SliceID = "slice-source"
+	aggregate.Facts.Coverage[0].ReopenDependencies = []runtimecontract.RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}}
 	aggregate.Facts.Focus.SliceID = "slice-source"
-	aggregate.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{{ID: "focus-validation", SliceID: "slice-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-validation"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}}}
-	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	aggregate.Decision = decision
+	validationFocus := runtimecontract.CoverageFocus{ID: "focus-validation", SliceID: "slice-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-validation"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, TargetRefs: []string{"validation.txt"}}
+	validationBinding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/test/focus-validation/cwi-validation", CoverageWorkItemID: "cwi-validation", FocusID: validationFocus.ID,
+		DefinitionRevision: aggregate.Facts.DefinitionRevision,
+		Proofs:             []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "test-runtime-validation-recipe"}},
+		TargetRefs:         []string{"validation.txt"}, DeclarationRef: "test/receipt-driven-reopen",
+	}.Normalized()
+	validationBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(validationBinding)
+	validationFocus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{validationBinding}
+	aggregate.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{validationFocus}
+	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{ID: "cwi-validation", SliceID: "slice-validation", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"validation-before"}, LastAssessmentID: "assessment-before"})
 	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, err := NewDispatchCoordinator(repository)
@@ -295,7 +335,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if committed.Aggregate.StateRevision <= sealed.StateRevision || len(committed.Aggregate.Facts.RemainingFocuses) != 1 || committed.Aggregate.Facts.RemainingFocuses[0].ID != "focus-validation" || len(committed.Aggregate.Facts.CompletedFocuses) != 0 {
+	if committed.Aggregate.StateRevision <= sealed.StateRevision || len(committed.Aggregate.Facts.RemainingFocuses) != 1 || committed.Aggregate.Facts.RemainingFocuses[0].ID != "semantic-pending/cwi-validation" || len(committed.Aggregate.Facts.CompletedFocuses) != 0 {
 		t.Fatalf("dependency reopen was not atomically requeued: %+v", committed.Aggregate.Facts)
 	}
 	for _, item := range committed.Aggregate.Facts.Coverage {
@@ -306,7 +346,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 	// The repository load is the restart boundary used by the coordinator. The
 	// persisted queue and reopen lineage must survive it unchanged.
 	reloaded, err := repository.Load(context.Background(), "ws-1", "run-1")
-	if err != nil || len(reloaded.Facts.RemainingFocuses) != 1 || reloaded.Facts.RemainingFocuses[0].ID != "focus-validation" {
+	if err != nil || len(reloaded.Facts.RemainingFocuses) != 1 || reloaded.Facts.RemainingFocuses[0].ID != "semantic-pending/cwi-validation" {
 		t.Fatalf("reloaded dependency queue = %+v err=%v", reloaded.Facts, err)
 	}
 	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
@@ -768,7 +808,14 @@ func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testi
 }
 
 func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(t *testing.T) {
-	repository := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
+	// This dispatch has one CWI-crediting state change followed by an unrelated
+	// sealed operation. The first receipt may settle the CWI, but SM-3 must keep
+	// the dispatch active until the second receipt commits.
+	facts := baseDispatchFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
+	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
@@ -796,6 +843,14 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 	}
 	if first.Aggregate.Decision.AuthoritySnapshot.ID != sealed.Decision.AuthoritySnapshot.ID {
 		t.Fatalf("decision changed before dispatch completion")
+	}
+	for _, coverage := range first.Aggregate.Facts.Coverage {
+		if coverage.ID == "cwi-1" && (coverage.State != runtimecontract.RuntimeCoverageItemStateSatisfied || coverage.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled) {
+			t.Fatalf("first crediting receipt did not atomically settle canonical CWI: %+v", coverage)
+		}
+	}
+	if err := first.Aggregate.Validate(); err != nil {
+		t.Fatalf("first multi-operation receipt left an invalid aggregate: %v", err)
 	}
 	secondEvidence := ExecutionEvidence{
 		EventID: "event-write-2", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,

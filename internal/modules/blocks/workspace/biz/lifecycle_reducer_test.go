@@ -94,15 +94,18 @@ func TestWorkspaceFreshActivationNotificationDoesNotReleaseSlotWithoutExplicitRe
 	biz.handleRunStateChanged(magicevent.NewEventWithContext(
 		runevents.TopicRunStateChanged, runevents.CommandDestination, runevents.NotificationDestination, magicevent.NewHeader(), ctx,
 		runevents.RunStateChangedData{
-			WorkspaceID:                        "ws-1",
-			RunID:                              "run-old",
-			State:                              common.RunStateActive,
-			CausationID:                        "run-state/run-old/7/fresh_activation_required",
-			RuntimeStateRevision:               7,
-			RuntimeStateRef:                    "runtime-state/ws-1/run-old/7",
-			RuntimeActivationDisposition:       runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			ActualRuntimeStateSchemaVersion:    2,
-			SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			WorkspaceID:                  "ws-1",
+			RunID:                        "run-old",
+			State:                        common.RunStateActive,
+			CausationID:                  "run-state/run-old/7/fresh_activation_required",
+			RuntimeStateRevision:         7,
+			RuntimeStateRef:              "runtime-state/ws-1/run-old/7",
+			RuntimeActivationDisposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
+			RuntimeStateIncompatibility: runtimecontract.RuntimeStateIncompatibility{
+				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
+				ActualSchemaVersion:    2,
+				SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			},
 		},
 	), nil)
 	stored, err := workspaces.Get(ctx, "ws-1")

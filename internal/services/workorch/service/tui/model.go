@@ -2451,8 +2451,11 @@ func freshActivationInstruction(run *projectioncontract.Run) string {
 		return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
 	}
 	status := run.RuntimeActivation
-	if status.ActualSchemaVersion > 0 && status.SupportedSchemaVersion > 0 {
+	if status.Reason == string(runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported) && status.ActualSchemaVersion > 0 && status.SupportedSchemaVersion > 0 {
 		return fmt.Sprintf("This run uses persisted runtime schema v%d, while this binary supports v%d. It is intentionally not resumed. Use /run restart to create a fresh activation.", status.ActualSchemaVersion, status.SupportedSchemaVersion)
+	}
+	if status.Reason == string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) {
+		return "This run has an ambiguous persisted CWI ledger and cannot be resumed safely. Use /run restart to create a fresh activation."
 	}
 	return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
 }

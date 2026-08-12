@@ -4,13 +4,13 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 
 // RuntimeActivationStatus records why this Run cannot be resumed by the
 // current binary. RuntimeState remains opaque to Run: the status stores only
-// its persisted identity and the producer's bounded diagnostic.
+// its persisted identity, bounded incompatibility kind, and producer's
+// bounded diagnostic.
 type RuntimeActivationStatus struct {
-	Disposition            runtimecontract.RuntimeActivationDisposition
-	RuntimeStateRef        string
-	ActualSchemaVersion    uint32
-	SupportedSchemaVersion uint32
-	Feedback               *runtimecontract.RuntimeFeedback
+	Disposition     runtimecontract.RuntimeActivationDisposition
+	RuntimeStateRef string
+	Incompatibility runtimecontract.RuntimeStateIncompatibility
+	Feedback        *runtimecontract.RuntimeFeedback
 }
 
 // Clone returns an independent exact copy without normalizing the original

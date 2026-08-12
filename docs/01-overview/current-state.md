@@ -129,19 +129,18 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime 单 owner live 收口：RSO-22。** typed semantic correction、proof-batch 最小 wire、
-   exact-active-batch reducer invariant、canonical combined Definition projection 与 RSO-26 proof-lineage reconciliation
-   已完成代码收口，最新增量已通过 fmt/vet/full/boundary/affected-package race/managed。RSO-26 由 Orchestrator SM-2
-   封存 source proof identity，并在 re-seal 后仅以 persisted `equivalent` resolution 复用 matching proof-kind credit；
-   `incompatible` resolution 保留旧 audit、写入 typed gap 且零 credit。下一步用 fresh deployment 执行 LSP Bridge 的
-   order/batch/feasibility/seal/dispatch/receipt/equivalent-or-incompatible/evidence positive matrix，并以独立 fault injection
-   验证 whole-document recovery。
-   普通用户仍只提供
+1. **必需 Runtime CWI 单 owner 收口：CWI-SO-1～CWI-SO-4 与 CWI-SO-6；CWI-SO-5 已代码收口。** 旧 schema 或当前
+   schema 但 CWI ledger 歧义的 aggregate 已经由 Run owner 持久化 `fresh_activation_required`，不迁移、不重建、不触发
+   LLM/capability/retry/replay。`run-073` 已证实：catalog generation 切换可让
+   已处理 CWI 重新进入 pending，形成第二条 binding 和 durable effect；当前 reconciliation request 也可滞后于最新
+   sealed contract。后续收口以 Orchestrator 内部、基于既有 coverage row 的 canonical CWI ledger 为唯一权威，统一
+   binding、focus、coverage、reopen 与 reconciliation generation，不新增全局索引或第五状态机。普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
-   [RSO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
+   [CWI-SO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 2. **回归基线**：predecessor-owned restart、release-before-successor、sealed complete document、whole-document recovery、
-   immutable binding、strict candidate、receipt match、owner-local terminal delivery、replay/CAS 与双 workspace regressions
-   必须持续通过；历史 managed/deployed 绿灯不能覆盖最新 persisted aggregate/provider/projection 反例。
+   strict candidate、receipt match、owner-local terminal delivery、replay/CAS 与双 workspace regressions 必须持续通过。
+   另外，CWI-SO 必须新增跨 generation settled-CWI、explicit reopen、request supersession、legacy schema 和 duplicate
+   durable-effect 回归；历史 managed/deployed 绿灯不能覆盖最新 persisted aggregate/provider/projection 反例。
 3. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
 

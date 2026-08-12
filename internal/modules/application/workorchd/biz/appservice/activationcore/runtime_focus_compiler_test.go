@@ -737,7 +737,7 @@ func TestCompileRuntimeCoverageFocusesSplitsIncompatibleTargetBindingsWithinSlic
 	}
 }
 
-func TestCompileRuntimeCoverageFocusesPreservesSharedTargetBindingWithinSlice(t *testing.T) {
+func TestCompileRuntimeCoverageFocusesPreservesTargetContractAcrossIndependentFocusesInSlice(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -767,12 +767,13 @@ func TestCompileRuntimeCoverageFocusesPreservesSharedTargetBindingWithinSlice(t 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"},
 		activation,
 	)
-	if err != nil || len(compiled.Focuses) != 1 {
-		t.Fatalf("compile shared binding = %+v err=%v", compiled, err)
+	if err != nil || len(compiled.Focuses) != 2 || len(compiled.Slices) != 1 {
+		t.Fatalf("compile independent bindings = %+v err=%v", compiled, err)
 	}
-	focus := compiled.Focuses[0]
-	if focus.TargetRole != "implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" || !focus.RequireTargetGrounding || len(focus.TargetDiscoverySources) != 1 {
-		t.Fatalf("shared target binding was not preserved: %+v", focus)
+	for _, focus := range compiled.Focuses {
+		if len(focus.CoverageWorkItemIDs) != 1 || focus.TargetRole != "implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" || !focus.RequireTargetGrounding || len(focus.TargetDiscoverySources) != 1 {
+			t.Fatalf("per-CWI target binding was not preserved: %+v", focus)
+		}
 	}
 }
 

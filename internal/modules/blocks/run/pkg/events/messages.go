@@ -222,11 +222,10 @@ type RunStateChangedData struct {
 	// does not expose or derive an Orchestrator action, focus, dispatch, or
 	// recovery classification.
 	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
-	// ActualRuntimeStateSchemaVersion and SupportedRuntimeStateSchemaVersion
-	// are emitted only with a Run-owned fresh-activation-required fact. They
-	// identify an opaque persisted record; they do not expose aggregate state.
-	ActualRuntimeStateSchemaVersion    uint32
-	SupportedRuntimeStateSchemaVersion uint32
+	// RuntimeStateIncompatibility is emitted only with a Run-owned
+	// fresh-activation-required fact. It identifies an opaque persisted record
+	// without exposing aggregate authority.
+	RuntimeStateIncompatibility runtimecontract.RuntimeStateIncompatibility
 	// ReconciliationRequestID is present only when this active transition was
 	// accepted for a pending Run resume. It is an immutable correlation fact,
 	// not a requested lifecycle target.
@@ -302,8 +301,7 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	}
 	if run.RuntimeActivationStatus != nil {
 		ret.RuntimeActivationDisposition = run.RuntimeActivationStatus.Disposition
-		ret.ActualRuntimeStateSchemaVersion = run.RuntimeActivationStatus.ActualSchemaVersion
-		ret.SupportedRuntimeStateSchemaVersion = run.RuntimeActivationStatus.SupportedSchemaVersion
+		ret.RuntimeStateIncompatibility = run.RuntimeActivationStatus.Incompatibility.Normalized()
 	}
 	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
 	if ret.RuntimeActivationDisposition != "" {
@@ -345,9 +343,8 @@ func (d RunStateChangedData) Validate() error {
 	}
 	if d.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired &&
 		(d.RuntimeStateRevision == 0 || strings.TrimSpace(d.RuntimeStateRef) == "" ||
-			d.ActualRuntimeStateSchemaVersion == 0 || d.SupportedRuntimeStateSchemaVersion == 0 ||
-			d.ActualRuntimeStateSchemaVersion == d.SupportedRuntimeStateSchemaVersion) {
-		return fmt.Errorf("%w: fresh activation run state fact requires incompatible persisted schema identity", common.ErrInvalidArgument)
+			d.RuntimeStateIncompatibility.Validate() != nil) {
+		return fmt.Errorf("%w: fresh activation run state fact requires incompatible persisted state identity", common.ErrInvalidArgument)
 	}
 	return nil
 }

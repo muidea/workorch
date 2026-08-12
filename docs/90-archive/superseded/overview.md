@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-28
+Last Updated: 2026-08-11
 
 ## Purpose
 
@@ -31,6 +31,12 @@ Last Updated: 2026-07-28
 - [refactor-archive.md](refactor-archive.md)
 - [workorch-status.md](workorch-status.md)
 - [workspace-data-layout-plan.md](workspace-data-layout-plan.md)
+
+### 2026-08-11: Replaced Runtime CWI plan
+
+| Document | Replacement entry |
+| --- | --- |
+| [runtime-cwi-reconciliation-single-owner-closure-plan-pre-cwi-ledger-2026-08-11.md](runtime-cwi-reconciliation-single-owner-closure-plan-pre-cwi-ledger-2026-08-11.md) | `00-core` + Orchestrator readme + active canonical CWI ledger plan; its historical RSO code-closed claims were disproved by persisted `run-073` evidence. |
 
 ### 2026-07-14：被 Runtime 正式文档替代的 module 设计
 

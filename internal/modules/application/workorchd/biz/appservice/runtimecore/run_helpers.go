@@ -97,8 +97,9 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 	if item.RuntimeActivationStatus != nil {
 		ret.RuntimeActivation = &projectioncontract.RuntimeActivationStatus{
 			Disposition:            string(item.RuntimeActivationStatus.Disposition),
-			ActualSchemaVersion:    item.RuntimeActivationStatus.ActualSchemaVersion,
-			SupportedSchemaVersion: item.RuntimeActivationStatus.SupportedSchemaVersion,
+			Reason:                 string(item.RuntimeActivationStatus.Incompatibility.Reason),
+			ActualSchemaVersion:    item.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion,
+			SupportedSchemaVersion: item.RuntimeActivationStatus.Incompatibility.SupportedSchemaVersion,
 		}
 	}
 	return ret

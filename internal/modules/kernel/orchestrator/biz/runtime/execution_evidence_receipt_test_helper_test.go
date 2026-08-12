@@ -13,12 +13,99 @@ import (
 func runtimeTestEnsureCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggregate) {
 	t.Helper()
 	runtimeTestSealCurrentFocusBindings(t, aggregate)
+	runtimeTestSealCanonicalCWILedger(t, aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatalf("reduce test fixture with sealed coverage binding: %v", err)
 	}
 	aggregate.Decision = decision
+}
+
+// runtimeTestSealCanonicalCWILedger projects direct post-semantic test facts
+// into the same single CWI ledger shape that production obtains through the
+// private semantic seal. It is test-only setup, not a second Runtime path.
+func runtimeTestSealCanonicalCWILedger(t *testing.T, aggregate *RuntimeAggregate) {
+	t.Helper()
+	if aggregate == nil {
+		return
+	}
+	facts := aggregate.Facts.Normalized()
+	focusByCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus)
+	for _, focus := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
+		focus = focus.Normalized()
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			if _, duplicate := focusByCoverage[coverageID]; duplicate {
+				t.Fatalf("test CWI ledger duplicates focus projection for %q", coverageID)
+			}
+			focusByCoverage[coverageID] = focus
+		}
+	}
+	for index := range facts.Coverage {
+		item := &facts.Coverage[index]
+		focus, found := focusByCoverage[item.ID]
+		if !found {
+			t.Fatalf("test CWI ledger has no focus projection for %q", item.ID)
+		}
+		item.FocusID = focus.ID
+		binding, bound := coverageBindingForRuntimeCWI(focus, item.ID)
+		if !bound {
+			if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+				t.Fatalf("test CWI ledger cannot synthesize settled lineage for %q", item.ID)
+			}
+			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateUnbound
+			item.CurrentBindingRef = nil
+			item.BindingLineage = nil
+			item.ReopenLineage = nil
+			continue
+		}
+		ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, "test-semantic-manifest/"+focus.ID)
+		item.CurrentBindingRef = &ref
+		item.BindingLineage = []runtimecontract.RuntimeCWIBindingRef{ref}
+		item.ReopenLineage = nil
+		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateSettled
+		} else {
+			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateBound
+		}
+	}
+	facts.CWILedgerSchemaVersion = runtimecontract.RuntimeCWILedgerSchemaCurrent
+	boundFocuses := make([]runtimecontract.CoverageFocus, 0, 1+len(facts.RemainingFocuses)+len(facts.CompletedFocuses))
+	for _, focus := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
+		if len(focus.CoverageEvidenceBindings) != 0 {
+			boundFocuses = append(boundFocuses, focus)
+		}
+	}
+	if len(boundFocuses) == 0 {
+		facts.ReconciliationContract = runtimecontract.RuntimeCWIReconciliationContract{}
+	} else {
+		contract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, boundFocuses)
+		if err != nil {
+			t.Fatalf("compile test CWI reconciliation contract: %v", err)
+		}
+		facts.ReconciliationContract = contract
+	}
+	if err := runtimecontract.ValidateRuntimeCWILedger(facts); err != nil {
+		t.Fatalf("validate test canonical CWI ledger: %v", err)
+	}
+	aggregate.Facts = facts
+}
+
+// runtimeTestSynchronizeCanonicalCWILedger projects a deliberately edited
+// test focus/binding shape back into the persisted CWI rows before a fixture
+// enters a controller or reducer. It is test construction only: production
+// reaches the same shape exclusively through the private semantic seal/reopen
+// transitions.
+func runtimeTestSynchronizeCanonicalCWILedger(t *testing.T, aggregate *RuntimeAggregate) {
+	t.Helper()
+	runtimeTestSealCanonicalCWILedger(t, aggregate)
+}
+
+func runtimeTestFactsWithCanonicalCWIProjection(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	t.Helper()
+	aggregate := RuntimeAggregate{Facts: facts}
+	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
+	return aggregate.Facts
 }
 
 func runtimeTestSealCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggregate) {
@@ -238,10 +325,7 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 	if err != nil {
 		return runtimecontract.RuntimeSemanticPlanningLedger{}, err
 	}
-	testTargets := make([]string, 0, len(seed.CoverageItems))
-	for idx := range seed.CoverageItems {
-		testTargets = append(testTargets, fmt.Sprintf("semantic-test-target-%d", idx+1))
-	}
+	testTargets := runtimeTestSemanticTargets(aggregate.Facts, seed)
 	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: testTargets, ObservedRevision: "test-semantic-revision"}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	operationContractRevision := aggregate.Facts.Activation.ExecutionContract.OperationContractRevision
@@ -312,7 +396,7 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 		if _, ok := selected[item.ID]; !ok {
 			continue
 		}
-		target := fmt.Sprintf("semantic-test-target-%d", idx+1)
+		target := testTargets[idx]
 		proposal := runtimecontract.RuntimeSemanticProofProposal{
 			CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OperationKind:         runtimecontract.StepKindFileWrite,
@@ -375,6 +459,34 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 	return ledger, nil
 }
 
+// runtimeTestSemanticTargets retains the declaration target from each direct
+// test focus when one exists. The production semantic provider receives the
+// same owner-admissible vocabulary; a synthetic target is used only when a
+// focused fixture deliberately models a selector-only declaration.
+func runtimeTestSemanticTargets(facts runtimecontract.RuntimeFacts, seed runtimecontract.RuntimeDefinitionSeed) []string {
+	byCoverage := make(map[common.CoverageWorkItemID]string, len(seed.CoverageItems))
+	for _, focus := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
+		focus = focus.Normalized()
+		if len(focus.TargetRefs) == 0 {
+			continue
+		}
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			if _, found := byCoverage[coverageID]; !found {
+				byCoverage[coverageID] = focus.TargetRefs[0]
+			}
+		}
+	}
+	targets := make([]string, 0, len(seed.CoverageItems))
+	for index, item := range seed.CoverageItems {
+		target := byCoverage[item.ID]
+		if target == "" {
+			target = fmt.Sprintf("semantic-test-target-%d", index+1)
+		}
+		targets = append(targets, target)
+	}
+	return targets
+}
+
 // runtimeTestSemanticCoverageOrder derives a dependency-valid provider-order
 // fixture without introducing an authority path in production.  The real
 // order is provider-authored; this helper only makes the synthetic sealed
@@ -426,6 +538,7 @@ func runtimeTestFactsWithCurrentFocusBindings(t *testing.T, facts runtimecontrac
 	t.Helper()
 	aggregate := RuntimeAggregate{Facts: facts, Definition: definition}
 	runtimeTestSealCurrentFocusBindings(t, &aggregate)
+	runtimeTestSealCanonicalCWILedger(t, &aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, &aggregate)
 	return aggregate.Facts
 }

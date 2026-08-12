@@ -292,19 +292,10 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 }
 
 func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *testing.T) {
-	controller, _, aggregate := newSemanticPlanningController(t)
-	manifest, order, _ := semanticPlanningFixture(t, aggregate)
-	manifest.CoverageItems = append(manifest.CoverageItems, runtimecontract.RuntimeCoverageItem{
-		ID: "cwi-later", SliceID: "slice-later", SourceScope: "dodItem", SourceID: "dod-later", TargetText: "later item",
-	})
-	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
-	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
-	order.ManifestHash = manifest.Hash
-	order.BatchID = ""
-	order.BatchSequence = 0
-	order.BatchCoverageWorkItemIDs = nil
-	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID, "cwi-later"}
-	order.Proposals = nil
+	// The out-of-batch CWI must be part of the immutable Definition seed and
+	// canonical ledger. Appending it to a provider manifest would only test the
+	// manifest-identity fence, not proof-batch scope.
+	controller, _, aggregate, manifest, order, _, _ := newTwoItemSemanticBatchFixture(t)
 	apply := func(event RuntimeInternalEvent) {
 		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
 		result, err := controller.ApplyInternalEvent(context.Background(), event)
@@ -332,7 +323,7 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 		Signature: "semantic-plan/batch/invalid-document", FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "invalid"}},
 		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{
 			Kind: runtimecontract.RuntimeSemanticContractViolationProofBatchDocument, Path: "$.proposals",
-			RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-later"},
+			RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2-second"},
 		}},
 	}
 	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
@@ -384,24 +375,55 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stale manifest error = %v", err)
 	}
+	manifest, document, _ = semanticPlanningFixture(t, aggregate)
 
-	manifest, _, _ = semanticPlanningFixture(t, aggregate)
-	manifest = manifest.Clone()
-	manifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-prerequisite"}
-	manifest.CoverageItems = append(manifest.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: "cwi-prerequisite", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-prerequisite", TargetText: "prerequisite"})
-	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
-	started, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticPlanRequestStarted, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+	// A correction must be tied to an already-issued proof batch. The previous
+	// fixture manufactured a prerequisite CWI in the manifest, which is now
+	// correctly rejected because it does not exist in the Definition seed.
+	apply := func(event RuntimeInternalEvent) RuntimeAggregate {
+		t.Helper()
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, err := controller.ApplyInternalEvent(ctx, event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+		return aggregate
+	}
+	apply(RuntimeInternalEvent{
+		Kind:             RuntimeInternalEventSemanticPlanRequestStarted,
 		SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-1",
 	})
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
+	order.Proposals = nil
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-request-1"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rejection := semanticPlanningDiagnostic()
-	rejection.FieldViolations = []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-v2 before cwi-prerequisite", Required: []string{"cwi-prerequisite before cwi-v2"}}}
-	rejection.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-prerequisite", RequiredAfterID: "cwi-v2", ActualBeforePosition: 1, ActualAfterPosition: 0}}
-	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-1", runtimecontract.RuntimeSemanticPlanStepCoverageOrder, rejection)
+	rejection.FieldViolations = []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals[0].requiredEffectScopes", Actual: "empty_array", Required: []string{"workspace_durable"}}}
+	rejection.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{
+		Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint,
+		Path: "$.proposals[0].requiredEffectScopes", CoverageWorkItemID: manifest.CoverageItems[0].ID,
+		ProposalIndex: 0, Rule: runtimecontract.RuntimeSemanticConstraintNonEmpty,
+		Actual: "empty_array", Required: []string{"workspace_durable"},
+	}}
+	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-1", runtimecontract.RuntimeSemanticPlanStepProofBatch, rejection)
 	expectedCorrection := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
+	beforeCorrection := aggregate.StateRevision
 	corrected, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", ExpectedDocument: &expectedCorrection, SemanticDiagnostic: &rejection,
@@ -409,7 +431,8 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if corrected.Aggregate.SemanticPlanning.Attempt != 1 || len(corrected.Aggregate.SemanticPlanning.Rejections) != 1 || corrected.Aggregate.StateRevision != started.Aggregate.StateRevision+1 {
+	aggregate = corrected.Aggregate
+	if corrected.Aggregate.SemanticPlanning.Attempt != 1 || len(corrected.Aggregate.SemanticPlanning.Rejections) != 1 || corrected.Aggregate.StateRevision != beforeCorrection+1 {
 		t.Fatalf("correction lineage = %+v", corrected.Aggregate.SemanticPlanning)
 	}
 	replayed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
@@ -429,38 +452,21 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("third semantic request error = %v", err)
 	}
-	correctedOrder := runtimecontract.RuntimeSemanticPlanDocument{
-		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
-		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
-		CoverageOrder: []common.CoverageWorkItemID{"cwi-prerequisite", "cwi-v2"},
-	}
+	correctedProof := document.Clone()
+	correctedProof.BatchID = batch.BatchID
+	correctedProof.BatchSequence = batch.Sequence
+	correctedProof.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
 	accepted, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanEvaluated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		LogicalRequestID: "semantic-request-2", SemanticDocument: &correctedOrder,
+		LogicalRequestID: "semantic-request-2", SemanticDocument: &correctedProof,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
-		manifest, correctedOrder, 0, "proof-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
-		aggregate.SemanticPlanning.PendingCoverageIDs, 2,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := batch.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-prerequisite", "cwi-v2"}; !sameOrderedSemanticCoverageIDs(got, want) {
-		t.Fatalf("focus batch dependency closure = %v, want %v", got, want)
-	}
-	if len(batch.PendingCoverageWorkItemIDs) != 0 {
-		t.Fatalf("dependency closure left pending IDs: %v", batch.PendingCoverageWorkItemIDs)
-	}
-	batched, err := controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if batched.SemanticPlanning.Attempt != 0 || batched.SemanticPlanning.CorrectionDirective != nil || len(batched.SemanticPlanning.Rejections) != 0 || accepted.Aggregate.SemanticPlanning.CorrectionDirective == nil {
-		t.Fatalf("new proof document inherited order correction lineage: %+v", batched.SemanticPlanning)
+	if accepted.Aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted ||
+		accepted.Aggregate.SemanticPlanning.Attempt != 1 || accepted.Aggregate.SemanticPlanning.CorrectionDirective == nil ||
+		len(accepted.Aggregate.SemanticPlanning.Rejections) != 1 {
+		t.Fatalf("corrected proof document lost bounded correction lineage: %+v", accepted.Aggregate.SemanticPlanning)
 	}
 }
 
@@ -1240,10 +1246,6 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	definition := controllerDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, runtimecontract.StepKindGitWrite)
-	aggregate, err := controller.initialize(ctx, facts, definition, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"first.txt"}, ObservedRevision: "file-revision-1",
@@ -1254,27 +1256,23 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 		OperationKinds: []string{runtimecontract.StepKindGitWrite}, TargetRefs: []string{"workspace_deliverable"}, ObservedRevision: "repository-revision-1",
 	}
 	gitCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(gitCatalog)
-	manifest := runtimecontract.RuntimeSemanticPlanManifest{
-		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
-		WorkspaceID:   aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
-		OperationContractRevision: aggregate.Facts.Activation.ExecutionContract.OperationContractRevision,
-		CoverageItems:             aggregate.Facts.DefinitionSeed.CoverageItems,
-		AllowedOwnerModuleIDs: []string{
-			runtimecontract.RuntimeModuleFile,
-			runtimecontract.RuntimeModuleGit,
-		},
-		AllowedOperationKinds: []string{
-			runtimecontract.StepKindFileWrite,
-			runtimecontract.StepKindGitWrite,
-		},
-		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
-		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{
-			fileCatalog,
-			gitCatalog,
-		},
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, gitCatalog}
+	aggregate, err := controller.initialize(ctx, facts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Definition,
+		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.Activation.ExecutionContract,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	order := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
@@ -1449,7 +1447,7 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 		t.Fatal(err)
 	}
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted ||
-		aggregate.Facts.Focus.ID != "semantic-pending/focus-v2-second/cwi-v2-second" {
+		aggregate.Facts.Focus.ID != "semantic-pending/cwi-v2-second" {
 		t.Fatalf("next focus did not reopen retained order lineage: phase=%s focus=%+v", aggregate.SemanticPlanning.Phase, aggregate.Facts.Focus)
 	}
 	secondBatch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
@@ -1509,6 +1507,147 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 	}
 }
 
+// Catalog invalidation retires only the authority that remains eligible for a
+// new semantic generation. A CWI already settled by a receipt remains out of
+// the provider-facing plan and retains its immutable binding/evidence audit.
+func TestRuntimeSemanticCatalogInvalidationDoesNotReplanSettledCWI(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, manifest, order, proposals, feasibilities := newTwoItemSemanticBatchFixture(t)
+	aggregate = sealFirstTwoItemSemanticBatch(t, controller, aggregate, manifest, order, proposals, feasibilities)
+	if err := runtimeTestAdvanceSemanticFocus(t, repository, &aggregate); err != nil {
+		t.Fatal(err)
+	}
+
+	settledID := common.CoverageWorkItemID("cwi-v2")
+	pendingID := common.CoverageWorkItemID("cwi-v2-second")
+	settled, found := runtimeCoverageByID(aggregate.Facts.Coverage)[settledID]
+	if !found || settled.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled || settled.CurrentBindingRef == nil {
+		t.Fatalf("first CWI was not settled before catalog invalidation: %+v", aggregate.Facts.Coverage)
+	}
+	settledBinding := settled.CurrentBindingRef.Clone()
+	if aggregate.Facts.Focus.ID != "semantic-pending/"+string(pendingID) || len(aggregate.Facts.CompletedFocuses) != 1 {
+		t.Fatalf("fixture did not advance to the second pending CWI: focus=%+v completed=%+v", aggregate.Facts.Focus, aggregate.Facts.CompletedFocuses)
+	}
+
+	// A missing current catalog observation makes the active semantic generation
+	// stale. The old manifest remains in history, but the settled CWI must not be
+	// moved back into the new generation's pending projection.
+	aggregate.Facts.Resources.PrerequisiteObservations = nil
+	repository.aggregate = &aggregate
+	beforeSessions := len(aggregate.CandidateRequestSessions)
+	beforeEvidence := len(aggregate.Facts.Evidence.Accepted)
+	beforeDispatches := len(aggregate.CompletedDispatches)
+	result, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:             RuntimeInternalEventSemanticCatalogInvalidated,
+		WorkspaceID:      aggregate.Facts.WorkspaceID,
+		RunID:            aggregate.Facts.RunID,
+		ManifestHash:     aggregate.SemanticPlanning.Manifest.Hash,
+		LogicalRequestID: aggregate.SemanticPlanning.LogicalRequestID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = result.Aggregate
+
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(aggregate.SemanticPlanning.History) != 1 {
+		t.Fatalf("catalog invalidation did not retire exactly the active generation: %+v", aggregate.SemanticPlanning)
+	}
+	settled, found = runtimeCoverageByID(aggregate.Facts.Coverage)[settledID]
+	if !found || settled.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled ||
+		settled.State != runtimecontract.RuntimeCoverageItemStateSatisfied || settled.CurrentBindingRef == nil ||
+		!runtimecontract.SameRuntimeCWIBindingRef(*settled.CurrentBindingRef, settledBinding) {
+		t.Fatalf("catalog invalidation rewrote settled CWI authority: %+v", settled)
+	}
+	if len(aggregate.Facts.CompletedFocuses) != 1 || aggregate.Facts.CompletedFocuses[0].CoverageWorkItemIDs[0] != settledID ||
+		aggregate.Facts.Focus.ID != "semantic-pending/"+string(pendingID) || len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 0 {
+		t.Fatalf("catalog invalidation rebuilt settled/pending focus projection: focus=%+v completed=%+v", aggregate.Facts.Focus, aggregate.Facts.CompletedFocuses)
+	}
+	if len(aggregate.CandidateRequestSessions) != beforeSessions || len(aggregate.Facts.Evidence.Accepted) != beforeEvidence ||
+		len(aggregate.CompletedDispatches) != beforeDispatches || aggregate.ActiveDispatch != nil {
+		t.Fatalf("catalog invalidation created an operation/provider side effect: sessions=%+v evidence=%+v dispatches=%+v active=%+v", aggregate.CandidateRequestSessions, aggregate.Facts.Evidence.Accepted, aggregate.CompletedDispatches, aggregate.ActiveDispatch)
+	}
+	if bindings := aggregate.Facts.ReconciliationContract.Bindings; len(bindings) != 1 || bindings[0].CoverageWorkItemID != settledID || bindings[0].BindingID != settledBinding.BindingID {
+		t.Fatalf("current reconciliation contract did not retain only settled CWI binding: %+v", aggregate.Facts.ReconciliationContract)
+	}
+
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
+	if !sameOrderedSemanticCoverageIDs(eligible, []common.CoverageWorkItemID{pendingID}) {
+		t.Fatalf("new semantic generation eligibility = %v, want only %q", eligible, pendingID)
+	}
+	freshManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition, aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.Activation.ExecutionContract, aggregate.Facts.Resources.OperationAdmissibilities, eligible,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(freshManifest.CoverageItems) != 1 || freshManifest.CoverageItems[0].ID != pendingID {
+		t.Fatalf("fresh semantic manifest reintroduced settled CWI: %+v", freshManifest.CoverageItems)
+	}
+}
+
+// sealFirstTwoItemSemanticBatch leaves the first CWI under a sealed binding and
+// the second as the persisted pending projection from the same semantic order.
+// It is test construction only; all mutations still go through the private
+// controller event/CAS boundary used in production.
+func sealFirstTwoItemSemanticBatch(
+	t *testing.T,
+	controller *RuntimeController,
+	aggregate RuntimeAggregate,
+	manifest runtimecontract.RuntimeSemanticPlanManifest,
+	order runtimecontract.RuntimeSemanticPlanDocument,
+	proposals []runtimecontract.RuntimeSemanticProofProposal,
+	feasibilities []runtimecontract.RuntimeSemanticProofFeasibility,
+) RuntimeAggregate {
+	t.Helper()
+	if controller == nil || len(proposals) < 1 || len(feasibilities) < 1 {
+		t.Fatal("two-item semantic batch fixture is incomplete")
+	}
+	ctx := context.Background()
+	apply := func(event RuntimeInternalEvent) {
+		t.Helper()
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, err := controller.ApplyInternalEvent(ctx, event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", event.Kind, err)
+		}
+		aggregate = result.Aggregate
+	}
+
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "settled-cwi-catalog-prefix", LogicalRequestID: "settled-cwi-order-request"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "settled-cwi-order-request"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
+		manifest, order, 0, "settled-cwi-batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs,
+		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		BatchID:  batch.BatchID, BatchSequence: batch.Sequence,
+		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
+		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposals[0]},
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: batch.RequestLogicalID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibilities[0]})
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	return aggregate
+}
+
 func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate, runtimecontract.RuntimeSemanticPlanManifest, runtimecontract.RuntimeSemanticPlanDocument, []runtimecontract.RuntimeSemanticProofProposal, []runtimecontract.RuntimeSemanticProofFeasibility) {
 	t.Helper()
 	repository := &controllerRepository{}
@@ -1538,8 +1677,18 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest := runtimecontract.RuntimeSemanticPlanManifest{SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash, OperationContractRevision: aggregate.Facts.Activation.ExecutionContract.OperationContractRevision, CoverageItems: aggregate.Facts.DefinitionSeed.CoverageItems, AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog}}
-	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Definition,
+		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.Activation.ExecutionContract,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	baseProposal := runtimecontract.RuntimeSemanticProofProposal{CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "semantic/" + string(manifest.CoverageItems[0].ID)}
 	baseFeasibility := runtimecontract.RuntimeSemanticProofFeasibility{SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: baseProposal.CoverageWorkItemID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(baseProposal), OwnerModuleID: baseProposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision, TargetRefs: baseProposal.Target.ExactTargetRefs}
 	secondProposal := baseProposal.Clone()
@@ -1698,11 +1847,10 @@ func seedAcceptedCoverageProofLineageForSemanticReseal(t *testing.T, aggregate *
 	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
 	aggregate.EvidenceSequence++
 	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
-	for index := range aggregate.Facts.Coverage {
-		if aggregate.Facts.Coverage[index].ID == binding.CoverageWorkItemID {
-			aggregate.Facts.Coverage[index].State = runtimecontract.RuntimeCoverageItemStateSatisfied
-		}
-	}
+	// The source receipt is audit evidence only. It cannot directly mark the
+	// CWI satisfied: only the normal SM-2 evidence/assessment transition may
+	// settle the canonical ledger. Keeping it open lets this fixture prove that
+	// a new binding resolves old evidence before any credit is considered.
 	if err := appendAcceptedCoverageProofLineage(aggregate, fact, receipt); err != nil {
 		t.Fatalf("append source coverage proof lineage: %v", err)
 	}
@@ -1721,22 +1869,17 @@ func resealSemanticPlanningGenerationForLineageTest(t *testing.T, controller *Ru
 	catalog = catalog.Normalized()
 	observation = observation.Normalized()
 	coverageID := aggregate.Facts.Focus.CoverageWorkItemIDs[0]
-	manifest := runtimecontract.RuntimeSemanticPlanManifest{
-		SchemaVersion:             runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
-		WorkspaceID:               aggregate.Facts.WorkspaceID,
-		RunID:                     aggregate.Facts.RunID,
-		DefinitionRevision:        aggregate.Facts.DefinitionRevision,
-		DefinitionSeedHash:        aggregate.Facts.DefinitionSeed.Hash,
-		OperationContractRevision: aggregate.Facts.Activation.ExecutionContract.OperationContractRevision,
-		CoverageItems:             append([]runtimecontract.RuntimeCoverageItem(nil), aggregate.Facts.DefinitionSeed.CoverageItems...),
-		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile},
-		AllowedOperationKinds:     []string{runtimecontract.StepKindFileWrite},
-		AllowedTargetPolicies:     []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
-		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
-	}
-	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
-	if err := manifest.Validate(); err != nil {
-		t.Fatalf("new semantic manifest: %v", err)
+	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Definition,
+		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.Activation.ExecutionContract,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
+	)
+	if err != nil {
+		t.Fatalf("compile new semantic manifest: %v", err)
 	}
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID:    coverageID,
@@ -1844,23 +1987,19 @@ func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controlle
 
 func semanticPlanningFixture(t *testing.T, aggregate RuntimeAggregate) (runtimecontract.RuntimeSemanticPlanManifest, runtimecontract.RuntimeSemanticPlanDocument, runtimecontract.RuntimeSemanticProofFeasibility) {
 	t.Helper()
-	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-revision-1"}
-	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-	manifest := runtimecontract.RuntimeSemanticPlanManifest{
-		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
-		WorkspaceID:   aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
-		OperationContractRevision: aggregate.Facts.Activation.ExecutionContract.OperationContractRevision,
-		CoverageItems:             aggregate.Facts.DefinitionSeed.CoverageItems,
-		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile},
-		AllowedOperationKinds:     []string{runtimecontract.StepKindFileWrite},
-		AllowedTargetPolicies:     []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
-		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
-	}
-	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
-	if err := manifest.Validate(); err != nil {
+	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Definition,
+		aggregate.Facts.DefinitionSeed,
+		aggregate.Facts.Activation.ExecutionContract,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
+	)
+	if err != nil {
 		t.Fatal(err)
 	}
+	catalog := manifest.OwnerCatalogs[0]
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-v2", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
 		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
@@ -1961,7 +2100,11 @@ func runtimeTestAdvanceSemanticFocus(t *testing.T, repository *controllerReposit
 			}
 		}
 	}
-	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts)
+	advanced, err := advanceRuntimeCWIFocus(aggregate.Facts)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts = advanced
 	if err := prepareSemanticPlanningForAdvancedFocus(aggregate); err != nil {
 		return err
 	}

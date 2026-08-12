@@ -61,6 +61,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	facts.Focus.RequiredCheckRefs = []string{"repair-verification"}
 	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{runtimePositiveConvergenceBinding(facts)}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}

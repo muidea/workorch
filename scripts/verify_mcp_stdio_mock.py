@@ -91,6 +91,10 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
     plan_step = _object(authority, "planStep", "PlanStep")
     schema = _object(authority, "schema", "Schema") or {}
     properties = _object(schema, "properties", "Properties") or {}
+    document_schema = _object(properties, "schemaVersion", "SchemaVersion") or {}
+    document_schema_version = _object(document_schema, "const", "Const")
+    if not isinstance(document_schema_version, str) or not document_schema_version:
+        raise MockContractError("semantic request has no sealed document schema version")
     order_schema = _object(properties, "coverageOrder", "CoverageOrder") or {}
     order_items = _object(order_schema, "items", "Items") or {}
     coverage_order = _unique(_strings(_object(order_items, "enum", "Enum")))
@@ -104,7 +108,7 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
         raise MockContractError("semantic request has no bounded coverage order")
     document = {
         "documentKind": "semantic_plan",
-        "schemaVersion": "workorch.runtime_semantic_plan_document",
+        "schemaVersion": document_schema_version,
         "manifestHash": _object(manifest, "hash", "Hash"),
         "definitionSeedHash": _object(manifest, "definitionSeedHash", "DefinitionSeedHash") or _object(seed, "hash", "Hash"),
         "planStep": plan_step,
@@ -323,7 +327,9 @@ def self_test() -> None:
     }
     order = semantic_plan_payload(_prompt(("C3.semantic-authority", {
         "Manifest": order_manifest, "DefinitionSeed": {"Hash": "seed-test"},
-        "Schema": {"properties": {}},
+        "Schema": {"properties": {
+            "schemaVersion": {"const": "workorch.runtime_semantic_plan_document.v2"},
+        }},
         "PlanStep": "coverage_order",
     })), "mcp-test")
     if order.get("coverageOrder") != ["cwi-first", "cwi-test"] or order.get("proposals") != []:
@@ -338,7 +344,10 @@ def self_test() -> None:
     }
     semantic = semantic_plan_payload(_prompt(("C3.semantic-authority", {
         "Manifest": semantic_manifest, "DefinitionSeed": {"Hash": "seed-test"},
-        "Schema": {"properties": {"coverageOrder": {"items": {"enum": ["cwi-first", "cwi-test"]}}}},
+        "Schema": {"properties": {
+            "schemaVersion": {"const": "workorch.runtime_semantic_plan_document.v2"},
+            "coverageOrder": {"items": {"enum": ["cwi-first", "cwi-test"]}},
+        }},
         "PlanStep": "proof_batch", "BatchID": "batch-test", "BatchSequence": 1,
         "BatchCoverageWorkItemIDs": ["cwi-test"],
     })), "mcp-test")

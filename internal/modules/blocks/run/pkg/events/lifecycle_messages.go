@@ -184,25 +184,25 @@ type RuntimeTerminalDeliveryFact struct {
 	runtimecontract.RuntimeTerminalDeliveryFact
 }
 
-// RuntimeStateIncompatibleFact is an immutable SM-4 observation
-// that an existing opaque Runtime state cannot be read by this binary. It
-// carries no requested Run state: Run owner converts it to its private SM-1
-// lifecycle event and persists fresh_activation_required itself.
+// RuntimeStateIncompatibleFact is an immutable SM-4 observation that an
+// existing opaque Runtime state cannot safely enter DriveRuntime. It carries
+// no requested Run state: Run owner converts it to its private SM-1 lifecycle
+// event and persists fresh_activation_required itself.
 type RuntimeStateIncompatibleFact struct {
-	WorkspaceID            common.WorkspaceID
-	RunID                  common.RunID
-	SourceOwner            string
-	CausationID            string
-	RuntimeStateRef        string
-	ActualSchemaVersion    uint32
-	SupportedSchemaVersion uint32
-	Feedback               runtimecontract.RuntimeFeedback
+	WorkspaceID     common.WorkspaceID
+	RunID           common.RunID
+	SourceOwner     string
+	CausationID     string
+	RuntimeStateRef string
+	Incompatibility runtimecontract.RuntimeStateIncompatibility
+	Feedback        runtimecontract.RuntimeFeedback
 }
 
 func (c RuntimeStateIncompatibleFact) Normalized() RuntimeStateIncompatibleFact {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
 	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
+	c.Incompatibility = c.Incompatibility.Normalized()
 	c.Feedback = c.Feedback.CloneOriginal()
 	return c
 }
@@ -212,12 +212,16 @@ func (c RuntimeStateIncompatibleFact) Validate() error {
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" || c.RuntimeStateRef == "" {
 		return fmt.Errorf("%w: runtime state incompatibility fact requires scope, source, causation and state reference", common.ErrInvalidArgument)
 	}
-	if c.ActualSchemaVersion == 0 || c.SupportedSchemaVersion == 0 || c.ActualSchemaVersion == c.SupportedSchemaVersion {
-		return fmt.Errorf("%w: runtime state incompatibility requires distinct actual and supported schema versions", common.ErrInvalidArgument)
+	if err := c.Incompatibility.Validate(); err != nil {
+		return fmt.Errorf("%w: runtime state incompatibility: %v", common.ErrInvalidArgument, err)
 	}
-	if c.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || c.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported ||
+	category := runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported
+	if c.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid {
+		category = runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid
+	}
+	if c.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || c.Feedback.StableCategory != category ||
 		c.Feedback.WorkspaceID != c.WorkspaceID || c.Feedback.RunID != c.RunID || c.Feedback.OriginalDiagnostic == nil {
-		return fmt.Errorf("%w: runtime state incompatibility requires scoped schema feedback", common.ErrInvalidArgument)
+		return fmt.Errorf("%w: runtime state incompatibility requires scoped persisted-state feedback", common.ErrInvalidArgument)
 	}
 	if err := c.Feedback.Validate(); err != nil {
 		return fmt.Errorf("%w: runtime state incompatibility feedback: %v", common.ErrInvalidArgument, err)

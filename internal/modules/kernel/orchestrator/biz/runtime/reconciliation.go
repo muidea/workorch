@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -31,29 +30,61 @@ func (c *RuntimeController) ensureReconciliationRequest(ctx context.Context, req
 		return RuntimeAggregate{}, false, err
 	}
 	requestHash := runtimecontract.StableRuntimeCWIReconciliationRequestHash(request)
+	expectedRevision := aggregate.StateRevision
 	if aggregate.Reconciliation.Request != nil {
 		current := aggregate.Reconciliation.Request.Normalized()
-		if current.RequestID == request.RequestID && aggregate.Reconciliation.RequestHash == requestHash {
-			return aggregate, false, nil
-		}
-		for _, history := range aggregate.Reconciliation.History {
-			history = history.Normalized()
-			if history.Request.RequestID == request.RequestID && history.RequestHash == requestHash {
-				// A duplicate resume may arrive after a later generation has
-				// already been sealed.  The historical generation is immutable;
-				// reusing it must not rewind the current ledger or trigger a second
-				// owner query.
-				return aggregate, false, nil
+		if err := current.ValidateAgainstContract(aggregate.Facts.ReconciliationContract); err != nil {
+			// An active row may only be retired by the Runtime owner. Do this
+			// before request idempotency checks so an old binding set can never
+			// suppress the current generation.
+			if _, supersedeErr := supersedeActiveReconciliationForCurrentContract(&aggregate); supersedeErr != nil {
+				return RuntimeAggregate{}, false, supersedeErr
 			}
 		}
-		if request.Generation <= current.Generation {
-			return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation request generation is not newer than current generation", common.ErrConflict)
+	}
+	for _, history := range aggregate.Reconciliation.History {
+		history = history.Normalized()
+		if history.Request.RequestID == request.RequestID && history.RequestHash == requestHash {
+			// Historical generations are audit only. They may acknowledge a
+			// duplicate while a current exact request is active, but must never
+			// be resurrected when the active row was cleared or superseded.
+			if aggregate.Reconciliation.Request != nil {
+				current := aggregate.Reconciliation.Request.Normalized()
+				if current.ValidateAgainstContract(aggregate.Facts.ReconciliationContract) == nil {
+					return aggregate, false, nil
+				}
+			}
+			return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation request was superseded and cannot be reactivated", common.ErrConflict)
 		}
 	}
-	expectedRevision := aggregate.StateRevision
 	ledger := aggregate.Reconciliation.Clone()
 	if ledger.Request != nil {
+		current := ledger.Request.Normalized()
+		if current.RequestID == request.RequestID && ledger.RequestHash == requestHash {
+			return aggregate, false, nil
+		}
+	}
+	highestGeneration := uint64(0)
+	for _, history := range ledger.History {
+		if history.Request.Generation > highestGeneration {
+			highestGeneration = history.Request.Generation
+		}
+	}
+	if ledger.Request != nil && ledger.Request.Generation > highestGeneration {
+		highestGeneration = ledger.Request.Generation
+	}
+	if request.Generation <= highestGeneration {
+		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation request generation is not newer than current generation", common.ErrConflict)
+	}
+	if ledger.Request != nil {
+		if len(ledger.History) >= runtimecontract.RuntimeCWIReconciliationHistoryLimit {
+			// Reject before replacing the active generation.  The immutable
+			// history is an audit bound, not a rolling cache: discarding an old
+			// request would make a later duplicate/restart ambiguous.
+			return RuntimeAggregate{}, false, fmt.Errorf("%w: runtime reconciliation history exceeds bounded limit %d", common.ErrConflict, runtimecontract.RuntimeCWIReconciliationHistoryLimit)
+		}
 		previous := runtimecontract.RuntimeCWIReconciliationGeneration{
+			Superseded:  true,
 			Request:     *ledger.Request,
 			RequestHash: ledger.RequestHash,
 			Batch:       ledger.Batch,
@@ -90,11 +121,26 @@ func (c *RuntimeController) commitReconciliationBatch(ctx context.Context, works
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
+	batch = batch.Clone()
 	if aggregate.Reconciliation.Request == nil {
+		if reconciliationHistoryContainsExactBatch(aggregate.Reconciliation.History, batch) {
+			// A reopen supersedes and clears the active generation in the same
+			// SM-2 CAS. A delayed replay of that exact owner batch is audit-only;
+			// it must not recreate a request, reopen again, or fail the drive.
+			return aggregate, false, nil
+		}
 		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation request is not sealed", common.ErrConflict)
 	}
+	if aggregate.ActiveDispatch != nil {
+		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation cannot mutate CWI while a sealed dispatch is active", common.ErrConflict)
+	}
 	request := aggregate.Reconciliation.Request.Clone()
-	batch = batch.Clone()
+	if err := request.ValidateAgainstContract(aggregate.Facts.ReconciliationContract); err != nil {
+		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation batch targets a superseded request: %v", common.ErrConflict, err)
+	}
+	if reconciliationHistoryContainsExactBatch(aggregate.Reconciliation.History, batch) {
+		return aggregate, false, nil
+	}
 	if err := batch.ValidateForRequest(request); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -108,22 +154,47 @@ func (c *RuntimeController) commitReconciliationBatch(ctx context.Context, works
 		}
 	}
 	expectedRevision := aggregate.StateRevision
-	results, reopened := reconcileCoverage(aggregate.Facts, request, batch)
-	aggregate.Facts.Coverage = runtimecontract.NormalizeRuntimeCoverageFacts(aggregate.Facts.Coverage)
+	results, reopened, triggers, reconcileErr := reconcileCoverage(aggregate.Facts, request, batch)
+	if reconcileErr != nil {
+		return RuntimeAggregate{}, false, reconcileErr
+	}
+	actualReopened, reopenErr := applyRuntimeCWIReopen(&aggregate, triggers)
+	if reopenErr != nil {
+		return RuntimeAggregate{}, false, reopenErr
+	}
+	if len(actualReopened) != len(reopened) {
+		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation reopen lineage does not match canonical CWI transition", common.ErrConflict)
+	}
 	for _, lineage := range reopened {
-		for index := range aggregate.Facts.Coverage {
-			if aggregate.Facts.Coverage[index].ID != lineage.CoverageWorkItemID {
-				continue
+		found := false
+		for _, coverageID := range actualReopened {
+			if coverageID == lineage.CoverageWorkItemID {
+				found = true
+				break
 			}
-			aggregate.Facts.Coverage[index].State = runtimecontract.RuntimeCoverageItemStateOpen
-			aggregate.Facts.Coverage[index].ReopenedByEvidenceRefs = appendUniqueRuntimeString(aggregate.Facts.Coverage[index].ReopenedByEvidenceRefs, lineage.ObservationRef)
+		}
+		if !found {
+			return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation reopen %q was not applied", common.ErrConflict, lineage.CoverageWorkItemID)
 		}
 	}
-	aggregate.Facts.Coverage = runtimecontract.NormalizeRuntimeCoverageFacts(aggregate.Facts.Coverage)
 	aggregate.Reconciliation.Batch = &batch
 	aggregate.Reconciliation.Results = results
 	aggregate.Reconciliation.Reopened = append(aggregate.Reconciliation.Reopened, reopened...)
 	aggregate.Reconciliation = aggregate.Reconciliation.Normalized()
+	if len(reopened) != 0 {
+		if _, supersedeErr := supersedeActiveReconciliationForCurrentContract(&aggregate); supersedeErr != nil {
+			return RuntimeAggregate{}, false, supersedeErr
+		}
+		if retireErr := retireSemanticPlanningForCurrentReopenedCWIs(&aggregate); retireErr != nil {
+			return RuntimeAggregate{}, false, retireErr
+		}
+	}
+	nextFacts, nextDecision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	if reduceErr != nil {
+		return RuntimeAggregate{}, false, reduceErr
+	}
+	aggregate.Facts = nextFacts
+	aggregate.Decision = nextDecision
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, false, err
@@ -134,19 +205,44 @@ func (c *RuntimeController) commitReconciliationBatch(ctx context.Context, works
 	return aggregate, true, nil
 }
 
+func reconciliationHistoryContainsExactBatch(history []runtimecontract.RuntimeCWIReconciliationGeneration, batch runtimecontract.RuntimeCWIReconciliationBatch) bool {
+	batch = batch.Normalized()
+	if batch.Hash == "" {
+		return false
+	}
+	for _, generation := range history {
+		generation = generation.Normalized()
+		if generation.Batch == nil || generation.Batch.Hash != batch.Hash {
+			continue
+		}
+		if batch.ValidateForRequest(generation.Request) == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func reconcileCoverage(
 	facts runtimecontract.RuntimeFacts,
 	request runtimecontract.RuntimeCWIReconciliationRequest,
 	batch runtimecontract.RuntimeCWIReconciliationBatch,
-) ([]runtimecontract.RuntimeCWIReconciliationResult, []runtimecontract.RuntimeCWIReconciliationReopenedLineage) {
+) ([]runtimecontract.RuntimeCWIReconciliationResult, []runtimecontract.RuntimeCWIReconciliationReopenedLineage, []runtimeCWIReopenTrigger, error) {
 	facts = facts.Normalized()
+	if err := runtimecontract.ValidateRuntimeCWILedger(facts); err != nil {
+		return nil, nil, nil, err
+	}
 	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact, len(facts.Coverage))
 	for _, item := range facts.Coverage {
 		byCoverage[item.ID] = item
 	}
 	results := make([]runtimecontract.RuntimeCWIReconciliationResult, 0, len(request.Bindings))
 	var reopened []runtimecontract.RuntimeCWIReconciliationReopenedLineage
+	triggers := make([]runtimeCWIReopenTrigger, 0)
 	for _, binding := range request.Bindings {
+		item, found := byCoverage[binding.CoverageWorkItemID]
+		if !found || item.CurrentBindingRef == nil || item.CurrentBindingRef.BindingID != binding.BindingID || item.CurrentBindingRef.BindingHash != binding.BindingHash {
+			return nil, nil, nil, fmt.Errorf("%w: reconciliation binding %q is no longer current for CWI %q", common.ErrConflict, binding.BindingID, binding.CoverageWorkItemID)
+		}
 		observations := make([]runtimecontract.RuntimeCWIReconciliationObservation, 0, len(binding.OwnerModuleIDs))
 		for _, observation := range batch.Observations {
 			if observation.CoverageWorkItemID == binding.CoverageWorkItemID && observation.BindingID == binding.BindingID {
@@ -159,7 +255,6 @@ func reconcileCoverage(
 				allSatisfied = false
 			}
 		}
-		item := byCoverage[binding.CoverageWorkItemID]
 		disposition := runtimecontract.RuntimeCWIReconciliationDispositionPrerequisite
 		if request.Scope == runtimecontract.RuntimeCWIReconciliationScopeCurrentRun && allSatisfied && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			disposition = runtimecontract.RuntimeCWIReconciliationDispositionRetain
@@ -173,16 +268,22 @@ func reconcileCoverage(
 			BindingID: binding.BindingID, Disposition: disposition, ObservationRef: observationRef,
 		})
 		if disposition == runtimecontract.RuntimeCWIReconciliationDispositionReopen {
-			reopened = append(reopened, runtimecontract.RuntimeCWIReconciliationReopenedLineage{
+			lineage := runtimecontract.RuntimeCWIReconciliationReopenedLineage{
 				RequestID: request.RequestID, WorkspaceID: request.WorkspaceID, RunID: request.RunID,
 				Generation: request.Generation, BatchHash: batch.Hash, CoverageWorkItemID: binding.CoverageWorkItemID,
 				BindingID: binding.BindingID, ObservationRef: observationRef,
 				PreviousEvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 				Reason:               reconciliationReopenReason(request.Scope, observations),
+			}
+			reopened = append(reopened, lineage)
+			triggers = append(triggers, runtimeCWIReopenTrigger{
+				CoverageWorkItemID: binding.CoverageWorkItemID,
+				TriggerRef:         lineage.ObservationRef,
+				Reason:             lineage.Reason,
 			})
 		}
 	}
-	return results, reopened
+	return results, reopened, triggers, nil
 }
 
 func reconciliationReopenReason(scope runtimecontract.RuntimeCWIReconciliationScope, observations []runtimecontract.RuntimeCWIReconciliationObservation) string {
@@ -198,17 +299,4 @@ func reconciliationReopenReason(scope runtimecontract.RuntimeCWIReconciliationSc
 		}
 	}
 	return "current-run owner observation no longer satisfies the sealed proof"
-}
-
-func appendUniqueRuntimeString(values []string, value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return values
-	}
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
 }

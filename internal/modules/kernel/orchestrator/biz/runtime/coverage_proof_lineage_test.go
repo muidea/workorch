@@ -60,10 +60,52 @@ func TestDispatchCommitRecordsCoverageProofLineageExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestCoverageProofLineageRequiresCurrentCWILedgerBindingForCredit(t *testing.T) {
+	binding := coverageProofLineageTestBinding("binding/current", "main.go")
+	aggregate, fact, _ := coverageProofLineageTestAggregate(binding)
+
+	// A focus binding alone is not authority. A legacy aggregate cannot use an
+	// otherwise exact evidence fact to earn CWI credit.
+	if runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, fact, "cwi-lineage", nil) {
+		t.Fatal("schema-less aggregate evidence received CWI credit")
+	}
+	if runtimeEvidenceAppliesToCoverageIDsWithLineage(aggregate.Facts, fact, []common.CoverageWorkItemID{"cwi-lineage"}, nil) {
+		t.Fatal("schema-less aggregate evidence passed the CWI set attribution gate")
+	}
+
+	// The same exact fact becomes eligible only after the test fixture projects
+	// the sealed focus into the current canonical CWI row.
+	aggregate.Facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{
+		ID: "cwi-lineage", State: runtimecontract.RuntimeCoverageItemStateOpen,
+	}}
+	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
+	if !runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, fact, "cwi-lineage", nil) {
+		t.Fatal("exact current CWI binding did not receive credit")
+	}
+	if !runtimeEvidenceMatchesCoverageBindingWithLineage(aggregate.Facts, aggregate.Facts.Focus, "cwi-lineage", fact, nil) {
+		t.Fatal("exact current CWI binding did not pass the assessment attribution gate")
+	}
+
+	// Removing the persisted current binding must close both attribution gates,
+	// even though the focus/evidence still carry the old textual binding ref.
+	aggregate.Facts.Focus.CoverageEvidenceBindings = nil
+	aggregate.Facts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateUnbound
+	aggregate.Facts.Coverage[0].CurrentBindingRef = nil
+	aggregate.Facts.Coverage[0].BindingLineage = nil
+	aggregate.Facts.ReconciliationContract = runtimecontract.RuntimeCWIReconciliationContract{}
+	if runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, fact, "cwi-lineage", nil) {
+		t.Fatal("unbound CWI evidence received credit")
+	}
+	if runtimeEvidenceMatchesCoverageBindingWithLineage(aggregate.Facts, aggregate.Facts.Focus, "cwi-lineage", fact, nil) {
+		t.Fatal("unbound CWI evidence passed the assessment attribution gate")
+	}
+}
+
 func TestCoverageProofLineageEquivalentResealRetainsOnlyMatchingProofKind(t *testing.T) {
 	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
 	currentBinding := coverageProofLineageTestBinding("binding/current", "main.go")
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 
 	if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
 		t.Fatalf("append source lineage: %v", err)
@@ -73,6 +115,7 @@ func TestCoverageProofLineageEquivalentResealRetainsOnlyMatchingProofKind(t *tes
 	}
 	aggregate.ActiveDispatch = nil
 	aggregate.Facts.Focus = coverageProofLineageTestFocus(currentBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
 		t.Fatalf("resolve equivalent lineage: %v", err)
 	}
@@ -116,11 +159,13 @@ func TestCoverageProofLineageReSealDoesNotTreatSameBindingIDWithNewHashAsExactCr
 		t.Fatalf("test binding did not retain ref while changing hash: old=%+v current=%+v", oldBinding, currentBinding)
 	}
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
 		t.Fatalf("append source lineage: %v", err)
 	}
 	aggregate.ActiveDispatch = nil
 	aggregate.Facts.Focus = coverageProofLineageTestFocus(currentBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	if runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, fact, "cwi-lineage", aggregate.CoverageProofLineage) {
 		t.Fatal("same binding ID with a new hash bypassed lineage resolution")
 	}
@@ -142,11 +187,13 @@ func TestCoverageProofLineageIncompatibleResealRecordsGapWithoutCredit(t *testin
 	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
 	incompatibleBinding := coverageProofLineageTestBinding("binding/current", "other.go")
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
 		t.Fatalf("append source lineage: %v", err)
 	}
 	aggregate.ActiveDispatch = nil
 	aggregate.Facts.Focus = coverageProofLineageTestFocus(incompatibleBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
 		t.Fatalf("resolve incompatible lineage: %v", err)
 	}
@@ -177,6 +224,7 @@ func TestCoverageProofLineageEquivalentResolutionUnlocksOnlyCurrentTargetAndRepa
 	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
 	currentBinding := coverageProofLineageTestBinding("binding/current", "main.go")
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	fact.TargetRefs = []string{"main.go"}
 	fact.Revision = "evidence-v1-00000000000000000001"
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{fact}
@@ -186,6 +234,7 @@ func TestCoverageProofLineageEquivalentResolutionUnlocksOnlyCurrentTargetAndRepa
 	aggregate.ActiveDispatch = nil
 	aggregate.Facts.Focus = coverageProofLineageTestFocus(currentBinding)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	directive := runtimecontract.RuntimeRepairDirective{
 		ID:                    "repair-lineage",
 		FocusID:               aggregate.Facts.Focus.ID,
@@ -231,6 +280,7 @@ func TestCoverageProofLineageIncompatibleResolutionCannotUnlockTargetOrRepairGat
 	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
 	incompatibleBinding := coverageProofLineageTestBinding("binding/current", "other.go")
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	fact.TargetRefs = []string{"main.go"}
 	fact.Revision = "evidence-v1-00000000000000000001"
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{fact}
@@ -240,6 +290,7 @@ func TestCoverageProofLineageIncompatibleResolutionCannotUnlockTargetOrRepairGat
 	aggregate.ActiveDispatch = nil
 	aggregate.Facts.Focus = coverageProofLineageTestFocus(incompatibleBinding)
 	aggregate.Facts.Focus.RequireTargetGrounding = true
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
 		t.Fatalf("resolve incompatible lineage: %v", err)
 	}
@@ -269,6 +320,7 @@ func TestCoverageProofLineageCandidateAdmissionRequiresEquivalentCurrentCredit(t
 		oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
 		currentBinding := coverageProofLineageTestBinding("binding/current", currentTarget)
 		aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+		coverageProofLineageSynchronizeLedger(t, &aggregate)
 		fact.TargetRefs = []string{"main.go"}
 		aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{fact}
 		if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
@@ -276,6 +328,7 @@ func TestCoverageProofLineageCandidateAdmissionRequiresEquivalentCurrentCredit(t
 		}
 		aggregate.ActiveDispatch = nil
 		aggregate.Facts.Focus = coverageProofLineageTestFocus(currentBinding)
+		coverageProofLineageSynchronizeLedger(t, &aggregate)
 		aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 			ID: "rejected-state", Kind: runtimecontract.EvidenceKindStateChange,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-lineage"}, Revision: "evidence-v1-00000000000000000002",
@@ -347,6 +400,22 @@ func coverageProofLineageTestAggregate(binding runtimecontract.CoverageEvidenceB
 	}, fact, receipt
 }
 
+// coverageProofLineageSynchronizeLedger models the SM-2 half of a re-seal in
+// a direct unit fixture: focus projection and canonical CWI binding change
+// together before proof-lineage resolution is evaluated.
+func coverageProofLineageSynchronizeLedger(t *testing.T, aggregate *RuntimeAggregate) {
+	t.Helper()
+	if aggregate == nil {
+		t.Fatal("nil coverage proof lineage aggregate")
+	}
+	if len(aggregate.Facts.Coverage) == 0 {
+		aggregate.Facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{
+			ID: "cwi-lineage", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		}}
+	}
+	runtimeTestSynchronizeCanonicalCWILedger(t, aggregate)
+}
+
 func coverageProofLineageTestFocus(binding runtimecontract.CoverageEvidenceBinding) runtimecontract.CoverageFocus {
 	return runtimecontract.CoverageFocus{
 		ID: "focus-lineage", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-lineage"},
@@ -392,6 +461,7 @@ func coverageProofLineageRestrictStateProofToPatchApply(t *testing.T, aggregate 
 	binding = binding.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+	runtimeTestSynchronizeCanonicalCWILedger(t, aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatalf("reduce narrowed lineage fixture: %v", err)

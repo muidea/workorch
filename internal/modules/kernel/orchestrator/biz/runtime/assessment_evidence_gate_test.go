@@ -9,7 +9,7 @@ import (
 )
 
 func TestCanonicalAssessmentCoverageRejectsWeakAcceptedEvidence(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("behavior is verified", "TestBehavior")
+	aggregate, _ := assessmentGateFixture(t, "behavior is verified", "TestBehavior")
 	aggregate.Facts.Evidence.Accepted[0].Quality = common.EvidenceQualityInconclusive
 	aggregate.Facts.Evidence.Accepted[0].ZeroWork = true
 	if refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); satisfied || len(refs) != 0 {
@@ -18,42 +18,42 @@ func TestCanonicalAssessmentCoverageRejectsWeakAcceptedEvidence(t *testing.T) {
 }
 
 func TestCanonicalAssessmentCoverageRejectsManagedValidationWithoutPassedChecks(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("behavior is verified", "")
+	aggregate, _ := assessmentGateFixture(t, "behavior is verified", "")
 	if refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); satisfied || len(refs) != 0 {
 		t.Fatalf("zero-check owner evidence closed canonical coverage: refs=%v satisfied=%t", refs, satisfied)
 	}
 }
 
 func TestCanonicalAssessmentCoverageDoesNotUseClaimText(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
+	aggregate, _ := assessmentGateFixture(t, "complete LSP tool implementation", "TestLSPToolExistence")
 	if refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied || len(refs) != 1 || refs[0] != "evidence-claim" {
 		t.Fatalf("structured owner evidence did not close coverage: refs=%v satisfied=%t", refs, satisfied)
 	}
 }
 
 func TestCanonicalAssessmentCoverageDoesNotUseNumericClaimText(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatency")
+	aggregate, _ := assessmentGateFixture(t, "request latency stays under 50ms", "TestRequestLatency")
 	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
 		t.Fatal("numeric claim text altered owner-evidence coverage decision")
 	}
 }
 
 func TestCanonicalAssessmentCoverageAcceptsStructuredExecutedEvidence(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatencyUnder50ms")
+	aggregate, _ := assessmentGateFixture(t, "request latency stays under 50ms", "TestRequestLatencyUnder50ms")
 	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
 		t.Fatal("structured executable owner evidence did not close coverage")
 	}
 }
 
 func TestCanonicalAssessmentCoverageAcceptsCrossLanguageStructuredEvidence(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("LSP 工具", "TestToolBehavior")
+	aggregate, _ := assessmentGateFixture(t, "LSP 工具", "TestToolBehavior")
 	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
 		t.Fatal("cross-language structured owner evidence did not close coverage")
 	}
 }
 
 func TestCanonicalAssessmentCoveragePreservesNeutralBehaviorWhenStrictFlagsAreDisabled(t *testing.T) {
-	aggregate, _ := assessmentGateFixture("unrelated concrete claim", "")
+	aggregate, _ := assessmentGateFixture(t, "unrelated concrete claim", "")
 	aggregate.Facts.Focus.RequireClaimEvidence = false
 	aggregate.Facts.Focus.RequireExecutableBehaviorEvidence = false
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
@@ -73,7 +73,7 @@ func TestCanonicalAssessmentCoveragePreservesNeutralBehaviorWhenStrictFlagsAreDi
 }
 
 func TestCanonicalAssessmentCoverageDoesNotRewriteProducerObservation(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
+	aggregate, assessment := assessmentGateFixture(t, "complete LSP tool implementation", "TestLSPToolExistence")
 	aggregate.Facts.Evidence.Accepted[0].Validation.PassedChecks = nil
 	assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
 	assessment.Gap = &runtimecontract.RuntimeAssessmentGap{
@@ -104,6 +104,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 		[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"},
 		runtimeManagedValidationEvidencePolicy().ID, []string{"TestLSPToolExistence"},
 	)}
+	facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +153,8 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	}
 }
 
-func assessmentGateFixture(claim, passedCheck string) (RuntimeAggregate, runtimecontract.AssessmentCandidate) {
+func assessmentGateFixture(t *testing.T, claim, passedCheck string) (RuntimeAggregate, runtimecontract.AssessmentCandidate) {
+	t.Helper()
 	const bindingRef = "binding/cwi-claim"
 	operation := runtimecontract.RuntimeOperation{
 		ID: "validate-claim", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
@@ -163,37 +165,40 @@ func assessmentGateFixture(claim, passedCheck string) (RuntimeAggregate, runtime
 	if passedCheck != "" {
 		requiredChecks = []string{passedCheck}
 	}
-	return RuntimeAggregate{
-			Facts: runtimecontract.RuntimeFacts{
-				DefinitionRevision: "definition-claim",
-				Focus: runtimecontract.CoverageFocus{
-					ID: "focus-claim", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
-					AcceptedStepKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-					RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
-					CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
-						bindingRef, "cwi-claim", "focus-claim", "definition-claim",
-						[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
-						[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"}, "test-recipe", requiredChecks,
-					)},
-				},
-				Coverage: []runtimecontract.RuntimeCoverageItemFact{{
-					ID: "cwi-claim", State: runtimecontract.RuntimeCoverageItemStateOpen, TargetText: claim,
-				}},
-				Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
-					ID: "evidence-claim", Kind: runtimecontract.EvidenceKindValidation, DispatchID: "dispatch-validation", OperationID: "validate-claim",
-					SourceRef: "runtime://validate-claim", BindingRefs: []string{bindingRef}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
-					Quality: common.EvidenceQualityValid, Summary: "validation completed", Validation: observation,
-				}}},
+	aggregate := RuntimeAggregate{
+		Facts: runtimecontract.RuntimeFacts{
+			DefinitionRevision: "definition-claim",
+			Focus: runtimecontract.CoverageFocus{
+				ID: "focus-claim", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
+				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+				AcceptedStepKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+				RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
+				CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
+					bindingRef, "cwi-claim", "focus-claim", "definition-claim",
+					[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+					[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"}, "test-recipe", requiredChecks,
+				)},
 			},
-			CompletedDispatches: []SealedDispatch{{
-				ID:        "dispatch-validation",
-				Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}},
+			Coverage: []runtimecontract.RuntimeCoverageItemFact{{
+				ID: "cwi-claim", State: runtimecontract.RuntimeCoverageItemStateOpen, TargetText: claim,
 			}},
-		}, runtimecontract.AssessmentCandidate{
-			FocusID: "focus-claim", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
-			Disposition: runtimecontract.AssessmentDispositionSatisfied, EvidenceRefs: []string{"evidence-claim"},
-			Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-claim", Satisfied: true, EvidenceRefs: []string{"evidence-claim"}}},
-		}
+			Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
+				ID: "evidence-claim", Kind: runtimecontract.EvidenceKindValidation, DispatchID: "dispatch-validation", OperationID: "validate-claim",
+				SourceRef: "runtime://validate-claim", BindingRefs: []string{bindingRef}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
+				Quality: common.EvidenceQualityValid, Summary: "validation completed", Validation: observation,
+			}}},
+		},
+		CompletedDispatches: []SealedDispatch{{
+			ID:        "dispatch-validation",
+			Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}},
+		}},
+	}
+	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
+	return aggregate, runtimecontract.AssessmentCandidate{
+		FocusID: "focus-claim", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, EvidenceRefs: []string{"evidence-claim"},
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-claim", Satisfied: true, EvidenceRefs: []string{"evidence-claim"}}},
+	}
 }
 
 func assessmentTestBinding(id string, coverageID common.CoverageWorkItemID, focusID, definitionRevision string, _ []string, scopes []runtimecontract.RuntimeEffectScope, operationKinds, targetRefs []string, recipeID string, checks []string) runtimecontract.CoverageEvidenceBinding {

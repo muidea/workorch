@@ -80,6 +80,35 @@ func TestFileOwnerReconciliationRejectsUnmappedArtifactReference(t *testing.T) {
 	}
 }
 
+func TestFileOwnerReconciliationReplaysSealedProfileSelectorCandidates(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := fileReconciliationQueryCommand(workspace, runtimecontract.RuntimeCWIReconciliationBindingRef{
+		CoverageWorkItemID: common.CoverageWorkItemID("cwi-file-selector"), BindingID: "binding-file-selector", BindingHash: "binding-hash-file-selector",
+		OwnerModuleIDs: []string{modulecommon.ModuleID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetSelectorRef: "file/profile_declared_candidates",
+		TargetSelectorOwnerRef: modulecommon.ModuleID, TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"main.go"},
+	})
+	result := sendFileReconciliationQuery(t, ctx, hub, command)
+	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied || len(result.Observation.TargetRefs) != 1 || result.Observation.TargetRefs[0] != "main.go" {
+		t.Fatalf("profile selector observation = %+v", result.Observation)
+	}
+}
+
 func fileReconciliationQueryCommand(workspace string, binding runtimecontract.RuntimeCWIReconciliationBindingRef) fileevents.QueryRuntimeCWIReconciliationCommand {
 	return fileevents.QueryRuntimeCWIReconciliationCommand{
 		WorkspaceID:                   "ws-file-reconciliation",

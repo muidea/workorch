@@ -1,10 +1,52 @@
 package workorchruntimecontract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+func TestCompileRuntimeSemanticBindingsCombinesIndependentProofsForOneCWI(t *testing.T) {
+	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	focuses, contract, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || len(focuses[0].CoverageEvidenceBindings) != 1 || len(contract.Bindings) != 1 {
+		t.Fatalf("independent proofs did not compile to one canonical CWI binding: focuses=%+v contract=%+v", focuses, contract)
+	}
+	binding := focuses[0].CoverageEvidenceBindings[0]
+	if len(binding.Proofs) != 2 || !sameStrings(binding.EvidenceKinds(), []string{EvidenceKindStateChange, EvidenceKindValidation}) {
+		t.Fatalf("binding did not retain both independent proofs: %+v", binding)
+	}
+	validation, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
+	if !found || validation.ValidationRecipeID != "recipe/validate" || !sameStrings(validation.RequiredCheckRefs, []string{"check/validate"}) {
+		t.Fatalf("binding lost validation proof detail: %+v", binding)
+	}
+}
+
+func TestCompileRuntimeSemanticBindingsRejectsMissingSourceRequiredValidationProof(t *testing.T) {
+	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	document.Proposals = document.Proposals[:1]
+	facts = facts[:1]
+	if _, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source}); err == nil ||
+		!strings.Contains(err.Error(), "does not cover source required evidence kinds") {
+		t.Fatalf("semantic plan without source-required validation proof was accepted: %v", err)
+	}
+}
+
+func TestRuntimeSemanticFeasibilitySetUsesProposalIdentityWithinOneCWI(t *testing.T) {
+	manifest, document, facts, _ := semanticIndependentProofSetFixture(t)
+	if err := ValidateRuntimeSemanticFeasibilitySet(manifest, document, facts, true); err != nil {
+		t.Fatalf("independent proof feasibility facts for one CWI must be accepted: %v", err)
+	}
+	duplicate := append(append([]RuntimeSemanticProofFeasibility(nil), facts...), facts[0])
+	if err := ValidateRuntimeSemanticFeasibilitySet(manifest, document, duplicate, true); err == nil ||
+		!strings.Contains(err.Error(), "duplicates proof") {
+		t.Fatalf("duplicate proposal feasibility was accepted: %v", err)
+	}
+}
 
 func TestCompileRuntimeSemanticBindingsSealsOneBindingPerCWI(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
@@ -30,6 +72,44 @@ func TestCompileRuntimeSemanticBindingsSealsOneBindingPerCWI(t *testing.T) {
 	}
 	if len(contract.Bindings) != 1 || contract.BindingSetHash == "" || contract.Bindings[0].BindingHash != focuses[0].CoverageEvidenceBindings[0].Hash {
 		t.Fatalf("compiled reconciliation = %+v", contract)
+	}
+}
+
+func TestCompileRuntimeSemanticBindingsRetainsSourceSelectorCandidates(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	proposal := semanticContractTestProposal("cwi-001")
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-selector", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		Proposals: []RuntimeSemanticProofProposal{proposal},
+	}
+	fact := RuntimeSemanticProofFeasibility{
+		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
+		CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
+		ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: []string{proposal.Target.ProspectiveTargetRef},
+	}
+	source := CoverageFocus{
+		ID: "source-selector", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		TargetRole: "deliverable", TargetDiscoverySources: []string{RuntimeValidationDiscoverySourceWorkspaceManifest},
+		TargetSelectorRef: "file/workspace-relative-create", TargetSelectorOwnerRef: "profile-test", TargetSelectorSubjectRef: "deliverable",
+		TargetSelectorCandidateRefs: []string{"main.go"}, RequireTargetGrounding: true,
+	}
+	focuses, contract, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, []RuntimeSemanticProofFeasibility{fact}, []CoverageFocus{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || len(focuses[0].CoverageEvidenceBindings) != 1 {
+		t.Fatalf("compiled focuses = %+v", focuses)
+	}
+	binding := focuses[0].CoverageEvidenceBindings[0]
+	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, []string{"main.go"}) ||
+		!SameRuntimeTargetSelectorCandidateRefs(focuses[0].TargetSelectorCandidateRefs, []string{"main.go"}) {
+		t.Fatalf("compiled selector declaration = binding:%+v focus:%+v", binding, focuses[0])
+	}
+	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{"main.go"}) {
+		t.Fatalf("reconciliation contract lost selector candidates: %+v", contract)
 	}
 }
 
@@ -72,4 +152,106 @@ func TestCompileRuntimeSemanticBindingsRequiresConcreteProspectiveOwnerFact(t *t
 	if _, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact}); err == nil {
 		t.Fatal("feasible prospective owner fact without concrete target was accepted")
 	}
+}
+
+func TestCompileRuntimeSemanticBindingsScopesBindingIdentityToManifestGeneration(t *testing.T) {
+	proposal := semanticContractTestProposal("cwi-001")
+	compile := func(manifest RuntimeSemanticPlanManifest) CoverageEvidenceBinding {
+		t.Helper()
+		document := RuntimeSemanticPlanDocument{
+			SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+			DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+			BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+			Proposals: []RuntimeSemanticProofProposal{proposal},
+		}
+		fact := RuntimeSemanticProofFeasibility{
+			SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+			CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID,
+			CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
+			ObservedRevision: manifest.OwnerCatalogs[0].ObservedRevision, TargetRefs: []string{"main.go"},
+		}
+		focuses, _, err := CompileRuntimeSemanticBindings(manifest, document, []RuntimeSemanticProofFeasibility{fact})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return focuses[0].CoverageEvidenceBindings[0]
+	}
+
+	firstManifest := semanticContractTestManifest(t)
+	first := compile(firstManifest)
+	secondManifest := firstManifest.Clone()
+	secondManifest.OwnerCatalogs[0].ObservedRevision = "workspace-2"
+	secondManifest.OwnerCatalogs[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(secondManifest.OwnerCatalogs[0])
+	secondManifest.Hash = StableRuntimeSemanticPlanManifestHash(secondManifest)
+	second := compile(secondManifest)
+
+	if first.ID == second.ID {
+		t.Fatalf("binding ID %q was reused across semantic generations", first.ID)
+	}
+	if first.FocusID == second.FocusID {
+		t.Fatalf("focus ID %q was reused across semantic generations", first.FocusID)
+	}
+	if first.Hash == second.Hash {
+		t.Fatalf("binding hash %q did not retain changed catalog lineage", first.Hash)
+	}
+}
+
+func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument, []RuntimeSemanticProofFeasibility, CoverageFocus) {
+	t.Helper()
+	manifest := semanticContractTestManifest(t)
+	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
+	shellCatalog.TargetRefs = []string{"main.go"}
+	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate", "check/validate"}
+	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleShell)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
+	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies,
+		RuntimeOperationTargetPolicyExactTarget,
+		RuntimeOperationTargetPolicyExistingOwnerScope,
+	)
+	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, shellCatalog)
+	manifest = sealSemanticTestManifest(t, manifest)
+
+	stateChange := semanticContractTestProposal("cwi-001")
+	stateChange.Target = RuntimeOperationTargetAuthorization{
+		Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"},
+	}
+	validation := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+		Target: RuntimeOperationTargetAuthorization{
+			Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"main.go"},
+		},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+		ValidationRecipeID: "recipe/validate", DeclarationRef: stateChange.DeclarationRef,
+	}
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-independent-proofs", BatchSequence: 0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{stateChange, validation},
+	}
+	facts := []RuntimeSemanticProofFeasibility{
+		semanticFeasibilityForTest(t, manifest, stateChange, []string{"main.go"}, "", nil),
+		semanticFeasibilityForTest(t, manifest, validation, []string{"main.go"}, "recipe/validate", []string{"check/validate"}),
+	}
+	source := CoverageFocus{
+		ID: "source-independent-proofs", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation}, ValidationRecipeID: "recipe/validate",
+	}
+	return manifest, document, facts, source
+}
+
+func semanticFeasibilityForTest(t *testing.T, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, targetRefs []string, recipeID string, checkRefs []string) RuntimeSemanticProofFeasibility {
+	t.Helper()
+	for _, catalog := range manifest.OwnerCatalogs {
+		if catalog.OwnerModuleID != proposal.OwnerModuleID {
+			continue
+		}
+		return RuntimeSemanticProofFeasibility{
+			SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+			CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: StableRuntimeSemanticProofProposalHash(proposal),
+			OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, Status: RuntimeSemanticFeasibilityFeasible,
+			ObservedRevision: catalog.ObservedRevision, TargetRefs: targetRefs, ValidationRecipeID: recipeID, RequiredCheckRefs: checkRefs,
+		}
+	}
+	t.Fatalf("missing owner catalog %q", proposal.OwnerModuleID)
+	return RuntimeSemanticProofFeasibility{}
 }

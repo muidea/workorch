@@ -47,6 +47,7 @@ type RuntimeFeedbackCategory string
 const (
 	RuntimeFeedbackCategoryAccepted                  RuntimeFeedbackCategory = "accepted"
 	RuntimeFeedbackCategoryStateSchemaUnsupported    RuntimeFeedbackCategory = "state_schema_unsupported"
+	RuntimeFeedbackCategoryStateCWILedgerInvalid     RuntimeFeedbackCategory = "state_cwi_ledger_invalid"
 	RuntimeFeedbackCategoryAggregateRevisionMismatch RuntimeFeedbackCategory = "aggregate_revision_mismatch"
 	RuntimeFeedbackCategorySemanticRejection         RuntimeFeedbackCategory = "semantic_rejection"
 	RuntimeFeedbackCategoryOwnerTransient            RuntimeFeedbackCategory = "owner_transient"

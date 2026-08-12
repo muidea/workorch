@@ -27,6 +27,35 @@ func TestCompileRuntimeCWIReconciliationContractBuildsScopedOwnerRefs(t *testing
 	}
 }
 
+func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T) {
+	focus := runtimeCWIReconciliationFocus()
+	focus.CoverageEvidenceBindings[0].TargetRefs = nil
+	focus.CoverageEvidenceBindings[0].TargetSelectorRef = "file/profile_declared_candidates"
+	focus.CoverageEvidenceBindings[0].TargetSelectorOwnerRef = RuntimeModuleFile
+	focus.CoverageEvidenceBindings[0].TargetSelectorSubjectRef = "deliverable"
+	focus.CoverageEvidenceBindings[0].TargetSelectorCandidateRefs = []string{"main.go"}
+	focus.CoverageEvidenceBindings[0].Hash = StableCoverageEvidenceBindingHash(focus.CoverageEvidenceBindings[0])
+	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{focus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contract.Bindings) != 1 || !SameRuntimeTargetSelectorCandidateRefs(contract.Bindings[0].TargetSelectorCandidateRefs, []string{"main.go"}) {
+		t.Fatalf("reconciliation binding lost selector candidates: %+v", contract)
+	}
+	request := RuntimeCWIReconciliationRequest{
+		RequestID: "reconcile-selector", WorkspaceID: "ws-selector", RunID: "run-selector", Scope: RuntimeCWIReconciliationScopeCurrentRun,
+		DefinitionRevision: contract.DefinitionRevision, BindingSetHash: contract.BindingSetHash, Bindings: contract.Bindings,
+		WorkspaceBaselineRevision: "tree-selector", WorkspaceBaselineRef: "workspace-tree/tree-selector", Generation: 1,
+	}
+	if err := request.ValidateAgainstContract(contract); err != nil {
+		t.Fatal(err)
+	}
+	request.Bindings[0].TargetSelectorCandidateRefs[0] = "other.go"
+	if err := request.ValidateAgainstContract(contract); err == nil {
+		t.Fatal("reconciliation request accepted selector candidate drift")
+	}
+}
+
 func TestRuntimeCWIReconciliationRequestAndBatchRejectScopeAndCompletenessDrift(t *testing.T) {
 	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus()})
 	if err != nil {

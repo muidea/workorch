@@ -60,6 +60,14 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 	predecessor := &runmodel.Run{
 		ID: "run-001", WorkspaceID: "ws-restart", GoalID: "goal-old", DoDID: "dod-old", DefinitionRevision: "def-old",
 		State: common.RunStateActive, ReplacementIntent: &intent,
+		ReconciliationRequestID: "resume-predecessor",
+		RuntimeState: &runtimecontract.RuntimeStateRecord{
+			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			StateRevision: 17,
+			// Run stores this opaque aggregate marker but must never transfer it
+			// into a fresh restart successor.
+			ProcessedEventIDs: []string{"cwi-ledger/settled/cwi-1"},
+		},
 	}
 	if err := runs.Create(ctx, predecessor); err != nil {
 		t.Fatal(err)
@@ -88,6 +96,10 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 	created, err = runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, created.ID)
 	if err != nil || created.State != common.RunStateActive || created.Lineage.PredecessorRunID != predecessor.ID || created.ActivationRequestID != intent.RequestID {
 		t.Fatalf("created successor = %+v", created)
+	}
+	if created.RuntimeState != nil || created.RuntimeActivationStatus != nil || created.ReconciliationRequestID != "" ||
+		created.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull {
+		t.Fatalf("restart successor inherited predecessor Runtime authority: %+v", created)
 	}
 	again, err := biz.materializeReplacementAfterTerminalDelivery(ctx, predecessor, terminal.TerminalDeliveryID)
 	if err != nil || again.ID != created.ID {

@@ -1018,9 +1018,12 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 		BeforeHash: baseHash, AfterHash: sha256Hex([]byte("after\n")), AdmissibilitySnapshotID: "admissibility-1",
 	}
 	commitCalls := 0
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
 	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: false}, nil)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
 	})
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		commitCalls++
@@ -1029,6 +1032,11 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 			return
 		}
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		if receipt, found := receipts[command.Receipt.ExecutionKey]; found {
+			result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt}, nil)
+			return
+		}
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
 		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
 	})
 	t.Cleanup(func() {
@@ -1067,6 +1075,22 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	content, err = os.ReadFile(filepath.Join(workspace, "README.md"))
 	if err != nil || string(content) != "after\n" {
 		t.Fatalf("replay rewrote sealed postcondition: content=%q err=%v", content, err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("external-change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command.Data.Content = "must-not-be-applied\n"
+	data, resultErr = send().Get()
+	if resultErr != nil {
+		t.Fatalf("duplicate persisted receipt: %v", resultErr)
+	}
+	duplicate, ok := data.(fileevents.ExecuteOperationResult)
+	if !ok || !runtimecontract.SameRuntimeOperationReceipt(duplicate.Receipt, response.Receipt) || commitCalls != 2 {
+		t.Fatalf("duplicate delivery did not reuse persisted receipt: response=%+v calls=%d", duplicate, commitCalls)
+	}
+	content, err = os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil || string(content) != "external-change\n" {
+		t.Fatalf("duplicate persisted receipt applied a second file effect: content=%q err=%v", content, err)
 	}
 }
 

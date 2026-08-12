@@ -38,7 +38,7 @@ const (
 	RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent       RuntimeExecutionIntentReason = "workspace_active_run_absent"
 	RuntimeExecutionIntentReasonSelectedRunAbsent              RuntimeExecutionIntentReason = "selected_run_absent"
 	RuntimeExecutionIntentReasonSelectedRunTerminal            RuntimeExecutionIntentReason = "selected_run_terminal"
-	RuntimeExecutionIntentReasonRuntimeSchemaIncompatible      RuntimeExecutionIntentReason = "runtime_schema_incompatible"
+	RuntimeExecutionIntentReasonRuntimeStateIncompatible       RuntimeExecutionIntentReason = "runtime_state_incompatible"
 	RuntimeExecutionIntentReasonDefinitionChanged              RuntimeExecutionIntentReason = "definition_changed"
 	RuntimeExecutionIntentReasonRuntimeBootstrapMissing        RuntimeExecutionIntentReason = "runtime_bootstrap_missing"
 	RuntimeExecutionIntentReasonCurrentRunContinuationAccepted RuntimeExecutionIntentReason = "current_run_continuation_accepted"
@@ -105,7 +105,7 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 			valid = true
 		}
 	case RuntimeExecutionIntentFreshActivationRequired:
-		valid = reason == RuntimeExecutionIntentReasonRuntimeSchemaIncompatible || reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing
+		valid = reason == RuntimeExecutionIntentReasonRuntimeStateIncompatible || reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing
 	case RuntimeExecutionIntentDefinitionChanged:
 		valid = reason == RuntimeExecutionIntentReasonDefinitionChanged
 	case RuntimeExecutionIntentGovernanceRequired:
@@ -127,7 +127,7 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "Workspace selected Run is absent"
 	case RuntimeExecutionIntentReasonSelectedRunTerminal:
 		return "Workspace selected Run is terminal"
-	case RuntimeExecutionIntentReasonRuntimeSchemaIncompatible:
+	case RuntimeExecutionIntentReasonRuntimeStateIncompatible:
 		return "Runtime aggregate requires fresh activation"
 	case RuntimeExecutionIntentReasonDefinitionChanged:
 		return "Workspace Goal/DoD definition differs from sealed Run"

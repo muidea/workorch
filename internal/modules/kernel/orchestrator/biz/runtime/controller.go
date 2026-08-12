@@ -49,6 +49,13 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	facts = facts.Normalized()
+	if facts.CWILedgerSchemaVersion == "" {
+		var ledgerErr error
+		facts, ledgerErr = runtimecontract.InitializeRuntimeCWILedgerForActivation(facts)
+		if ledgerErr != nil {
+			return RuntimeAggregate{}, ledgerErr
+		}
+	}
 	definition = definition.Normalized()
 	if err := facts.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -410,7 +417,11 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 	// focus advancement is still valid.
 	facts = aggregate.Facts
 	if !semanticGenerationRetired && len(facts.Prerequisites.Pending) == 0 && len(facts.FreshnessReacquireCoverage) == 0 {
-		facts = advanceSatisfiedCoverageFocus(facts, aggregate.CoverageProofLineage)
+		advanced, advanceErr := advanceRuntimeCWIFocus(facts, aggregate.CoverageProofLineage)
+		if advanceErr != nil {
+			return RuntimeAggregate{}, advanceErr
+		}
+		facts = advanced
 		aggregate.Facts = facts
 	}
 	if aggregate.Facts.Focus.ID != previousFocusID {
@@ -450,6 +461,9 @@ func (c *RuntimeController) beginCandidateAttempt(ctx context.Context, workspace
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+	}
+	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate request binding fence: %v", common.ErrConflict, err)
 	}
 	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
@@ -617,6 +631,9 @@ func (c *RuntimeController) admitCandidateProposal(ctx context.Context, workspac
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
+	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal binding fence: %v", common.ErrConflict, err)
+	}
 	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal does not match pending request-session binding", common.ErrConflict)
 	}
@@ -767,6 +784,9 @@ func (c *RuntimeController) admitAndSealCandidateAttempt(ctx context.Context, wo
 	}
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
 		return CandidateAdmissionCommitResult{}, err
+	}
+	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate dispatch binding fence: %v", common.ErrConflict, err)
 	}
 	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate seal does not match pending request-session binding", common.ErrConflict)
@@ -1238,12 +1258,14 @@ func pendingCandidateAttempt(values []runtimecontract.RuntimeCandidateAttemptRec
 // consume another attempt or reconstruct authority from the current decision.
 func duplicateRejectedCandidateAdmission(aggregate RuntimeAggregate, attempt int, manifestHash, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionResult, bool) {
 	candidateHash := runtimecontract.StableRuntimeCandidateHash(candidate)
+	candidateShape := runtimecontract.StableRuntimeCandidateSemanticShape(candidate)
 	for _, record := range aggregate.CandidateAttempts {
 		if record.Attempt != attempt || record.ManifestHash != manifestHash || record.LogicalRequestID != logicalRequestID || record.State != runtimecontract.RuntimeCandidateAttemptStateFailed || record.Failure == nil {
 			continue
 		}
 		if record.Proposal != nil {
-			if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != candidateHash {
+			if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != candidateHash &&
+				!sameRejectedCandidateSemanticShape(record.Failure, candidateShape) {
 				continue
 			}
 		} else if record.Failure.Code != candidateAdmissionCodeInvalid || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil || record.Failure.Signature != candidateAdmissionInvalidSignature(candidate) {
@@ -1253,6 +1275,19 @@ func duplicateRejectedCandidateAdmission(aggregate RuntimeAggregate, attempt int
 		return CandidateAdmissionResult{Disposition: CandidateAdmissionRejectedContract, Failure: &failure}, true
 	}
 	return CandidateAdmissionResult{}, false
+}
+
+// sameRejectedCandidateSemanticShape recognizes an equivalent complete provider
+// replay after SM-3 has already recorded its rejection. Provider operation IDs
+// and JSON field order are wire details, whereas RejectedShapeHash retains the
+// persisted semantic identity. The caller has already fenced this comparison by
+// attempt, manifest, and logical request identity, so it cannot merge distinct
+// authority transactions.
+func sameRejectedCandidateSemanticShape(failure *runtimecontract.RuntimeCandidateFailure, candidateShape string) bool {
+	if failure == nil || failure.Diagnostic == nil || strings.TrimSpace(candidateShape) == "" {
+		return false
+	}
+	return strings.TrimSpace(failure.Diagnostic.RejectedShapeHash) == candidateShape
 }
 
 // acceptedCandidateAdmissionDuplicate proves that an already sealed candidate
@@ -1317,6 +1352,15 @@ func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID co
 		canonicalDisposition = runtimecontract.AssessmentDispositionRepairableGap
 	}
 	aggregate.Facts.Coverage = canonicalCoverage
+	// Coverage credit and its canonical CWI convergence state are one SM-2
+	// transaction. Current-schema projection permits exactly one CWI per focus,
+	// so an accepted assessment cannot leave a satisfied CWI paired with an
+	// unresolved sibling's focus or repair state.
+	settledCoverage, settleErr := settleRuntimeCWIsForCurrentFocus(aggregate.Facts)
+	if settleErr != nil {
+		return RuntimeAggregate{}, settleErr
+	}
+	aggregate.Facts = settledCoverage
 	expectedRevision := aggregate.StateRevision
 	fact := runtimecontract.RuntimeAssessmentFact{
 		ID: aggregate.ActiveDispatch.ID, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, aggregate.Facts.Focus.SliceID),
@@ -1379,7 +1423,11 @@ func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID co
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
 	previousFocusID := aggregate.Facts.Focus.ID
-	aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts, aggregate.CoverageProofLineage)
+	advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
+	if advanceErr != nil {
+		return RuntimeAggregate{}, advanceErr
+	}
+	aggregate.Facts = advanced
 	if aggregate.Facts.Focus.ID != previousFocusID {
 		// Reaching an unbound placeholder is a local SM-2 transition, not a
 		// continuation chosen by the assessment. Retire only the just-sealed
@@ -1485,9 +1533,8 @@ func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverage
 	focus := aggregate.Facts.Focus.Normalized()
 	binding, bound := coverageEvidenceBindingForCoverage(focus, coverageID)
 	// Current-schema bootstrap and state validation require a binding for every
-	// focus CWI. Retaining the old focus-level shape solely for schema-less pure
-	// reducer fixtures prevents those fixtures from becoming a second production
-	// path; no persisted V6 record can reach it.
+	// CWI that may receive credit. An unbound focus can retain its action-level
+	// requirements for diagnostic/repair presentation, but cannot close coverage.
 	needed := stringSet(focus.RequiredEvidenceKinds)
 	if bound {
 		needed = stringSet(binding.EvidenceKinds())

@@ -3822,7 +3822,9 @@ func TestRunSnapshotEndpointPreservesRunScopedSemanticPlanningDiagnostic(t *test
 				State: "feasibility", Phase: string(runtimecontract.RuntimeSemanticPlanningFeasibilityRequired),
 				Items: []projectioncontract.RuntimeSemanticPlanningItem{{
 					CoverageWorkItemID: "cwi-current", Status: string(runtimecontract.RuntimeSemanticFeasibilityInfeasible),
-					OwnerModuleID: runtimecontract.RuntimeModuleFile, Diagnostic: &diagnostic,
+					Proofs: []projectioncontract.RuntimeSemanticPlanningProof{{
+						OwnerModuleID: runtimecontract.RuntimeModuleFile, Status: string(runtimecontract.RuntimeSemanticFeasibilityInfeasible), Diagnostic: &diagnostic,
+					}},
 				}},
 				Failure: &diagnostic,
 			}},
@@ -3842,10 +3844,11 @@ func TestRunSnapshotEndpointPreservesRunScopedSemanticPlanningDiagnostic(t *test
 	semantic := body.Snapshot.Acceptance.SemanticPlanning
 	if semantic == nil || semantic.WorkspaceID != "ws-semantic" || semantic.RunID != "run-semantic-current" ||
 		semantic.DefinitionRevision != "definition-current" || semantic.StateRevision != 41 || len(semantic.Items) != 1 ||
-		semantic.Items[0].CoverageWorkItemID != "cwi-current" || semantic.Items[0].Diagnostic == nil || semantic.Failure == nil {
+		semantic.Items[0].CoverageWorkItemID != "cwi-current" || len(semantic.Items[0].Proofs) != 1 ||
+		semantic.Items[0].Proofs[0].Diagnostic == nil || semantic.Failure == nil {
 		t.Fatalf("semantic planning snapshot = %+v", semantic)
 	}
-	diagnostic := semantic.Items[0].Diagnostic
+	diagnostic := semantic.Items[0].Proofs[0].Diagnostic
 	if diagnostic.OriginalMessage != "owner diagnostic" || len(diagnostic.FieldViolations) != 1 ||
 		diagnostic.FieldViolations[0].Path != "$.operations[0]" || diagnostic.FieldViolations[0].Actual != "summary" ||
 		diagnostic.FieldViolations[0].Allowed[0] != "targetRef" || diagnostic.FieldViolations[0].Required[0] != "content" ||

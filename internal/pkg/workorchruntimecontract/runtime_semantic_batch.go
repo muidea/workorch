@@ -482,7 +482,7 @@ func MergeRuntimeSemanticPlanBatchDocuments(manifest RuntimeSemanticPlanManifest
 	}
 	documents = append([]RuntimeSemanticPlanDocument(nil), documents...)
 	sort.SliceStable(documents, func(i, j int) bool { return documents[i].BatchSequence < documents[j].BatchSequence })
-	seen := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
+	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
 	proposals := make([]RuntimeSemanticProofProposal, 0, len(manifest.CoverageItems))
 	for idx, document := range documents {
 		document = document.Normalized()
@@ -492,15 +492,24 @@ func MergeRuntimeSemanticPlanBatchDocuments(manifest RuntimeSemanticPlanManifest
 		if err := document.ValidateAgainstManifest(manifest); err != nil {
 			return RuntimeSemanticPlanDocument{}, err
 		}
-		for _, proposal := range document.Proposals {
-			if _, duplicate := seen[proposal.CoverageWorkItemID]; duplicate {
-				return RuntimeSemanticPlanDocument{}, fmt.Errorf("runtime semantic merge duplicates coverage %q", proposal.CoverageWorkItemID)
+		batchCoverage := make(map[common.CoverageWorkItemID]struct{}, len(document.BatchCoverageWorkItemIDs))
+		for _, coverageID := range document.BatchCoverageWorkItemIDs {
+			if _, duplicate := seenCoverage[coverageID]; duplicate {
+				return RuntimeSemanticPlanDocument{}, fmt.Errorf("runtime semantic merge duplicates coverage %q", coverageID)
 			}
-			seen[proposal.CoverageWorkItemID] = struct{}{}
+			batchCoverage[coverageID] = struct{}{}
+		}
+		for _, coverageID := range document.BatchCoverageWorkItemIDs {
+			seenCoverage[coverageID] = struct{}{}
+		}
+		for _, proposal := range document.Proposals {
+			if _, found := batchCoverage[proposal.CoverageWorkItemID]; !found {
+				return RuntimeSemanticPlanDocument{}, fmt.Errorf("runtime semantic merge proof coverage %q is outside batch", proposal.CoverageWorkItemID)
+			}
 			proposals = append(proposals, proposal.Clone())
 		}
 	}
-	if len(seen) != len(manifest.CoverageItems) {
+	if len(seenCoverage) != len(manifest.CoverageItems) {
 		return RuntimeSemanticPlanDocument{}, fmt.Errorf("runtime semantic merge does not cover full manifest")
 	}
 	merged := RuntimeSemanticPlanDocument{
@@ -512,7 +521,7 @@ func MergeRuntimeSemanticPlanBatchDocuments(manifest RuntimeSemanticPlanManifest
 
 // ValidateRuntimeSemanticPlanBatchFeasibilities validates one bounded owner
 // feasibility fan-out. It does not decide whether the facts are feasible; it
-// only enforces one exact observation per proposal in this batch.
+// only enforces one exact observation per independently feasible proof.
 func ValidateRuntimeSemanticPlanBatchFeasibilities(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, values []RuntimeSemanticProofFeasibility) error {
 	manifest = manifest.Normalized()
 	document = document.Normalized()
@@ -522,23 +531,23 @@ func ValidateRuntimeSemanticPlanBatchFeasibilities(manifest RuntimeSemanticPlanM
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		return err
 	}
-	proposals := make(map[common.CoverageWorkItemID]RuntimeSemanticProofProposal, len(document.Proposals))
+	proposals := make(map[string]RuntimeSemanticProofProposal, len(document.Proposals))
 	for _, proposal := range document.Proposals {
-		proposals[proposal.CoverageWorkItemID] = proposal
+		proposals[StableRuntimeSemanticProofProposalHash(proposal)] = proposal
 	}
-	seen := make(map[common.CoverageWorkItemID]struct{}, len(values))
+	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		proposal, ok := proposals[value.CoverageWorkItemID]
+		proposal, ok := proposals[value.ProposalHash]
 		if !ok {
-			return fmt.Errorf("runtime semantic batch feasibility coverage %q is outside batch", value.CoverageWorkItemID)
+			return fmt.Errorf("runtime semantic batch feasibility proof %q is outside batch", value.ProposalHash)
 		}
-		if _, duplicate := seen[value.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime semantic batch feasibility duplicates coverage %q", value.CoverageWorkItemID)
+		if _, duplicate := seen[value.ProposalHash]; duplicate {
+			return fmt.Errorf("runtime semantic batch feasibility duplicates proof %q", value.ProposalHash)
 		}
 		if err := value.ValidateForProposal(manifest, proposal); err != nil {
 			return err
 		}
-		seen[value.CoverageWorkItemID] = struct{}{}
+		seen[value.ProposalHash] = struct{}{}
 	}
 	if len(seen) != len(proposals) {
 		return fmt.Errorf("runtime semantic batch feasibility does not cover every proposal")
@@ -602,7 +611,7 @@ func MergeRuntimeSemanticPlanBatchFeasibilityResults(manifest RuntimeSemanticPla
 		byID[batch.BatchID] = batch
 	}
 	seenBatch := make(map[string]struct{}, len(results))
-	seenCoverage := make(map[common.CoverageWorkItemID]struct{})
+	seenProofs := make(map[string]struct{})
 	merged := make([]RuntimeSemanticProofFeasibility, 0)
 	for _, rawResult := range results {
 		result := rawResult.Normalized()
@@ -625,31 +634,32 @@ func MergeRuntimeSemanticPlanBatchFeasibilityResults(manifest RuntimeSemanticPla
 			return nil, err
 		}
 		for _, value := range result.Feasibilities {
-			if _, duplicate := seenCoverage[value.CoverageWorkItemID]; duplicate {
-				return nil, fmt.Errorf("runtime semantic feasibility duplicates coverage %q", value.CoverageWorkItemID)
+			if _, duplicate := seenProofs[value.ProposalHash]; duplicate {
+				return nil, fmt.Errorf("runtime semantic feasibility duplicates proof %q", value.ProposalHash)
 			}
-			seenCoverage[value.CoverageWorkItemID] = struct{}{}
+			seenProofs[value.ProposalHash] = struct{}{}
 			merged = append(merged, value.Clone())
 		}
 	}
 	if len(seenBatch) != len(byID) {
 		return nil, fmt.Errorf("runtime semantic feasibility merge is missing a batch result")
 	}
-	expectedCoverage := make(map[common.CoverageWorkItemID]struct{})
+	expectedProofs := make(map[string]struct{})
 	for _, document := range documentsByBatchID {
 		for _, proposal := range document.Proposals {
-			if _, duplicate := expectedCoverage[proposal.CoverageWorkItemID]; duplicate {
-				return nil, fmt.Errorf("runtime semantic feasibility merge duplicates proposal coverage %q", proposal.CoverageWorkItemID)
+			proposalHash := StableRuntimeSemanticProofProposalHash(proposal)
+			if _, duplicate := expectedProofs[proposalHash]; duplicate {
+				return nil, fmt.Errorf("runtime semantic feasibility merge duplicates proposal proof %q", proposalHash)
 			}
-			expectedCoverage[proposal.CoverageWorkItemID] = struct{}{}
+			expectedProofs[proposalHash] = struct{}{}
 		}
 	}
-	if len(seenCoverage) != len(expectedCoverage) {
+	if len(seenProofs) != len(expectedProofs) {
 		return nil, fmt.Errorf("runtime semantic feasibility results do not cover every batch proposal")
 	}
-	for coverageID := range expectedCoverage {
-		if _, found := seenCoverage[coverageID]; !found {
-			return nil, fmt.Errorf("runtime semantic feasibility results are missing coverage %q", coverageID)
+	for proposalHash := range expectedProofs {
+		if _, found := seenProofs[proposalHash]; !found {
+			return nil, fmt.Errorf("runtime semantic feasibility results are missing proof %q", proposalHash)
 		}
 	}
 	return merged, nil

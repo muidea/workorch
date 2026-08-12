@@ -222,12 +222,7 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	facts := controllerFacts()
-	// This test covers dispatch ordering. Recompile the fixture's declaration
-	// as an owner selector so its a.txt/b.txt writes do not borrow the default
-	// exact target.txt binding.
-	facts.Focus.TargetRefs = nil
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	facts := multiOperationFixtureFacts(t)
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}}
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
@@ -263,9 +258,7 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := controllerFacts()
-	facts.Focus.TargetRefs = nil
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	facts := multiOperationFixtureFacts(t)
 	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -369,11 +362,8 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	facts := controllerFacts()
 	// This test stops a rejected operation before it can close coverage.
-	// Recompile an owner-selector binding for its a.txt/b.txt fixture targets.
-	facts.Focus.TargetRefs = nil
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	facts := multiOperationFixtureFacts(t)
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -451,7 +441,12 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	// Response-loss recovery is an SM-3 receipt fence test. Keep the fixture on
+	// an explicitly sealed non-assessment focus so this test does not conflate
+	// it with the separate SM-2 assessment transition of semantic planning.
+	facts := runtimeTestFactsWithCurrentFocusBindings(t, controllerFacts(), controllerDefinition())
+	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,6 +590,11 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+	// This isolates the policy that follows a no-op durable operation. A
+	// semantic focus requires assessment after a valid state change, which is
+	// outside this bounded validation-path assertion.
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -926,6 +926,24 @@ func multiOperationCandidate() runtimecontract.RuntimeCandidate {
 		{Operation: runtimecontract.RuntimeOperation{ID: "write-b", Kind: "file/write", DependsOn: []string{"write-a"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"b.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentB}}}},
 		{Operation: runtimecontract.RuntimeOperation{ID: "write-a", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"a.txt"}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &contentA}}}},
 	}}}
+}
+
+// multiOperationFixtureFacts gives the File owner an explicit bounded catalog
+// for both fixture targets. A selector on the proof binding does not grant
+// authority outside the owner catalog, so these tests must not inherit the
+// generic target.txt inventory.
+func multiOperationFixtureFacts(t *testing.T) runtimecontract.RuntimeFacts {
+	t.Helper()
+	facts := controllerFacts()
+	facts.Focus.TargetRefs = nil
+	if len(facts.Resources.OperationAdmissibilities) != 1 {
+		t.Fatalf("multi-operation fixture requires one File catalog: %+v", facts.Resources.OperationAdmissibilities)
+	}
+	catalog := facts.Resources.OperationAdmissibilities[0].Normalized()
+	catalog.TargetRefs = []string{"a.txt", "b.txt"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	return runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 }
 
 func validationQualityFacts(t *testing.T) runtimecontract.RuntimeFacts {

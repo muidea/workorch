@@ -61,6 +61,41 @@ func TestRuntimeOperationKindSupportsCoverageEvidenceRequiresOwnerProofCapabilit
 	}
 }
 
+func TestCoverageEvidenceBindingSealsSelectorCandidateRefs(t *testing.T) {
+	binding := CoverageEvidenceBinding{
+		ID: "binding-selector", CoverageWorkItemID: "cwi-selector", FocusID: "focus-selector", DefinitionRevision: "definition-selector",
+		Proofs: []CoverageEvidenceProof{{
+			EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			AllowedOperationKinds: []string{StepKindFileWrite},
+		}},
+		TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: RuntimeModuleFile,
+		TargetSelectorSubjectRef: "deliverable", TargetSelectorCandidateRefs: []string{"internal/main.go", "go.mod", "go.mod"},
+		DeclarationRef: "profile/selector",
+	}.Normalized()
+	binding.Hash = StableCoverageEvidenceBindingHash(binding)
+	if err := binding.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !SameRuntimeTargetSelectorCandidateRefs(binding.TargetSelectorCandidateRefs, []string{"go.mod", "internal/main.go"}) {
+		t.Fatalf("normalized selector candidates = %#v", binding.TargetSelectorCandidateRefs)
+	}
+	cloned := binding.Clone()
+	cloned.TargetSelectorCandidateRefs[0] = "mutated.go"
+	if binding.TargetSelectorCandidateRefs[0] == "mutated.go" {
+		t.Fatal("binding clone aliases selector candidate refs")
+	}
+	changed := binding.Clone()
+	changed.TargetSelectorCandidateRefs = []string{"other.go"}
+	if StableCoverageEvidenceBindingHash(changed) == binding.Hash {
+		t.Fatal("binding hash did not retain selector candidate refs")
+	}
+	invalid := binding.Clone()
+	invalid.TargetSelectorRef = ""
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("selector candidates without a selector were accepted")
+	}
+}
+
 func TestValidateCoverageEvidenceBindingsForFocusRejectsSharedSemanticProof(t *testing.T) {
 	focus := CoverageFocus{
 		ID: "focus-shared", SliceID: "slice-presentation", EvidenceDeclarationRef: "profile/dodItem/dod-001",

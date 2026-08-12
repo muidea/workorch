@@ -64,16 +64,17 @@ type RuntimeCWIReconciliationBindingRef struct {
 	// are copied from CoverageEvidenceBinding at activation; an owner may use
 	// them to inspect its own resource, but it must not infer semantics from
 	// Goal/DoD text or from a candidate.
-	AllowedOperationKinds    []string
-	TargetRefs               []string
-	TargetSelectorRef        string
-	TargetSelectorOwnerRef   string
-	TargetSelectorSubjectRef string
-	ProspectiveTargetRef     string
-	ValidationRecipeIDs      []string
-	RequiredCheckRefs        []string
-	MetricConstraints        []string
-	ArtifactRefs             []string
+	AllowedOperationKinds       []string
+	TargetRefs                  []string
+	TargetSelectorRef           string
+	TargetSelectorOwnerRef      string
+	TargetSelectorSubjectRef    string
+	TargetSelectorCandidateRefs []string
+	ProspectiveTargetRef        string
+	ValidationRecipeIDs         []string
+	RequiredCheckRefs           []string
+	MetricConstraints           []string
+	ArtifactRefs                []string
 }
 
 func (r RuntimeCWIReconciliationBindingRef) Normalized() RuntimeCWIReconciliationBindingRef {
@@ -87,6 +88,7 @@ func (r RuntimeCWIReconciliationBindingRef) Normalized() RuntimeCWIReconciliatio
 	r.TargetSelectorRef = strings.TrimSpace(r.TargetSelectorRef)
 	r.TargetSelectorOwnerRef = strings.TrimSpace(r.TargetSelectorOwnerRef)
 	r.TargetSelectorSubjectRef = strings.TrimSpace(r.TargetSelectorSubjectRef)
+	r.TargetSelectorCandidateRefs = normalizeStrings(r.TargetSelectorCandidateRefs)
 	r.ProspectiveTargetRef = strings.TrimSpace(r.ProspectiveTargetRef)
 	r.ValidationRecipeIDs = normalizeStrings(r.ValidationRecipeIDs)
 	r.RequiredCheckRefs = normalizeStrings(r.RequiredCheckRefs)
@@ -101,6 +103,7 @@ func (r RuntimeCWIReconciliationBindingRef) Clone() RuntimeCWIReconciliationBind
 	r.RequiredEvidenceKinds = append([]string(nil), r.RequiredEvidenceKinds...)
 	r.AllowedOperationKinds = append([]string(nil), r.AllowedOperationKinds...)
 	r.TargetRefs = append([]string(nil), r.TargetRefs...)
+	r.TargetSelectorCandidateRefs = append([]string(nil), r.TargetSelectorCandidateRefs...)
 	r.ValidationRecipeIDs = append([]string(nil), r.ValidationRecipeIDs...)
 	r.RequiredCheckRefs = append([]string(nil), r.RequiredCheckRefs...)
 	r.MetricConstraints = append([]string(nil), r.MetricConstraints...)
@@ -120,6 +123,9 @@ func (r RuntimeCWIReconciliationBindingRef) Validate() error {
 		if kind != EvidenceKindStateChange && kind != EvidenceKindValidation {
 			return fmt.Errorf("reconciliation binding ref %q has unsupported evidence kind %q", r.BindingID, kind)
 		}
+	}
+	if len(r.TargetSelectorCandidateRefs) != 0 && r.TargetSelectorRef == "" {
+		return fmt.Errorf("reconciliation binding ref %q selector candidates require a selector", r.BindingID)
 	}
 	return nil
 }
@@ -222,21 +228,22 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 				}
 			}
 			ref := RuntimeCWIReconciliationBindingRef{
-				CoverageWorkItemID:       binding.CoverageWorkItemID,
-				BindingID:                binding.ID,
-				BindingHash:              binding.Hash,
-				OwnerModuleIDs:           owners,
-				RequiredEvidenceKinds:    binding.EvidenceKinds(),
-				AllowedOperationKinds:    operationKinds,
-				TargetRefs:               binding.TargetRefs,
-				TargetSelectorRef:        binding.TargetSelectorRef,
-				TargetSelectorOwnerRef:   binding.TargetSelectorOwnerRef,
-				TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-				ProspectiveTargetRef:     binding.ProspectiveTargetRef,
-				ValidationRecipeIDs:      recipeIDs,
-				RequiredCheckRefs:        checkRefs,
-				MetricConstraints:        metricConstraints,
-				ArtifactRefs:             artifactRefs,
+				CoverageWorkItemID:          binding.CoverageWorkItemID,
+				BindingID:                   binding.ID,
+				BindingHash:                 binding.Hash,
+				OwnerModuleIDs:              owners,
+				RequiredEvidenceKinds:       binding.EvidenceKinds(),
+				AllowedOperationKinds:       operationKinds,
+				TargetRefs:                  binding.TargetRefs,
+				TargetSelectorRef:           binding.TargetSelectorRef,
+				TargetSelectorOwnerRef:      binding.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef:    binding.TargetSelectorSubjectRef,
+				TargetSelectorCandidateRefs: binding.TargetSelectorCandidateRefs,
+				ProspectiveTargetRef:        binding.ProspectiveTargetRef,
+				ValidationRecipeIDs:         recipeIDs,
+				RequiredCheckRefs:           checkRefs,
+				MetricConstraints:           metricConstraints,
+				ArtifactRefs:                artifactRefs,
 			}.Normalized()
 			if err := ref.Validate(); err != nil {
 				return RuntimeCWIReconciliationContract{}, err
@@ -274,6 +281,7 @@ func StableRuntimeCWIReconciliationContractHash(contract RuntimeCWIReconciliatio
 		writeHashString(h, binding.TargetSelectorRef)
 		writeHashString(h, binding.TargetSelectorOwnerRef)
 		writeHashString(h, binding.TargetSelectorSubjectRef)
+		writeHashStrings(h, binding.TargetSelectorCandidateRefs)
 		writeHashString(h, binding.ProspectiveTargetRef)
 		writeHashStrings(h, binding.ValidationRecipeIDs)
 		writeHashStrings(h, binding.RequiredCheckRefs)
@@ -718,10 +726,20 @@ type RuntimeCWIReconciliationLedger struct {
 	History []RuntimeCWIReconciliationGeneration
 }
 
+// RuntimeCWIReconciliationHistoryLimit keeps superseded SM-4 request
+// generations bounded. The active request is intentionally not part of this
+// count, so a full history remains auditable while one current generation can
+// still be scheduled by the Orchestrator.
+const RuntimeCWIReconciliationHistoryLimit = 16
+
 // RuntimeCWIReconciliationGeneration is an immutable historical snapshot of
 // one reconciliation request and its owner response.  It is pure contract
 // data; only the Orchestrator reducer decides when a generation is superseded.
 type RuntimeCWIReconciliationGeneration struct {
+	// Superseded is explicit because a historical request may carry a binding
+	// set that no longer equals the current SM-2 contract. History is audit
+	// only and must never be selected as an active reconciliation generation.
+	Superseded  bool
 	Request     RuntimeCWIReconciliationRequest
 	RequestHash string
 	Batch       *RuntimeCWIReconciliationBatch
@@ -769,6 +787,9 @@ func (g RuntimeCWIReconciliationGeneration) Clone() RuntimeCWIReconciliationGene
 
 func (g RuntimeCWIReconciliationGeneration) Validate() error {
 	g = g.Normalized()
+	if !g.Superseded {
+		return fmt.Errorf("reconciliation history generation is not marked superseded")
+	}
 	if err := g.Request.Validate(); err != nil {
 		return fmt.Errorf("reconciliation history request: %w", err)
 	}
@@ -861,8 +882,34 @@ func (l RuntimeCWIReconciliationLedger) Clone() RuntimeCWIReconciliationLedger {
 
 func (l RuntimeCWIReconciliationLedger) Validate() error {
 	l = l.Normalized()
+	if len(l.History) > RuntimeCWIReconciliationHistoryLimit {
+		return fmt.Errorf("reconciliation history exceeds bounded limit %d", RuntimeCWIReconciliationHistoryLimit)
+	}
+	seenHistoryGeneration := make(map[uint64]struct{}, len(l.History))
+	seenHistoryRequest := make(map[string]struct{}, len(l.History))
+	var historyWorkspaceID common.WorkspaceID
+	var historyRunID common.RunID
+	for _, history := range l.History {
+		history = history.Normalized()
+		if err := history.Validate(); err != nil {
+			return err
+		}
+		if historyWorkspaceID == "" {
+			historyWorkspaceID, historyRunID = history.Request.WorkspaceID, history.Request.RunID
+		} else if history.Request.WorkspaceID != historyWorkspaceID || history.Request.RunID != historyRunID {
+			return fmt.Errorf("reconciliation history mixes runtime scopes")
+		}
+		if _, duplicate := seenHistoryGeneration[history.Request.Generation]; duplicate {
+			return fmt.Errorf("reconciliation history duplicates generation %d", history.Request.Generation)
+		}
+		if _, duplicate := seenHistoryRequest[history.Request.RequestID]; duplicate {
+			return fmt.Errorf("reconciliation history duplicates request %q", history.Request.RequestID)
+		}
+		seenHistoryGeneration[history.Request.Generation] = struct{}{}
+		seenHistoryRequest[history.Request.RequestID] = struct{}{}
+	}
 	if l.Request == nil {
-		if l.RequestHash != "" || l.Batch != nil || len(l.Results) != 0 || len(l.Reopened) != 0 || len(l.History) != 0 {
+		if l.RequestHash != "" || l.Batch != nil || len(l.Results) != 0 || len(l.Reopened) != 0 {
 			return fmt.Errorf("reconciliation ledger has data without request")
 		}
 		return nil
@@ -873,6 +920,9 @@ func (l RuntimeCWIReconciliationLedger) Validate() error {
 	}
 	if l.RequestHash == "" || l.RequestHash != StableRuntimeCWIReconciliationRequestHash(request) {
 		return fmt.Errorf("reconciliation ledger request hash does not match request")
+	}
+	if historyWorkspaceID != "" && (historyWorkspaceID != request.WorkspaceID || historyRunID != request.RunID) {
+		return fmt.Errorf("reconciliation history request scope mismatch")
 	}
 	if l.Batch != nil {
 		batch := l.Batch.Clone()
@@ -910,28 +960,17 @@ func (l RuntimeCWIReconciliationLedger) Validate() error {
 				return fmt.Errorf("reconciliation ledger result references unknown observation %q", result.ObservationRef)
 			}
 		}
+	} else if len(l.Results) != 0 || len(l.Reopened) != 0 {
+		return fmt.Errorf("reconciliation ledger has derived data without batch")
 	}
-	seenHistoryGeneration := make(map[uint64]struct{}, len(l.History))
-	seenHistoryRequest := make(map[string]struct{}, len(l.History))
 	for _, history := range l.History {
 		history = history.Normalized()
-		if err := history.Validate(); err != nil {
-			return err
-		}
-		if history.Request.WorkspaceID != request.WorkspaceID || history.Request.RunID != request.RunID || history.Request.DefinitionRevision != request.DefinitionRevision || history.Request.BindingSetHash != request.BindingSetHash {
-			return fmt.Errorf("reconciliation history request contract mismatch")
+		if history.Request.WorkspaceID != request.WorkspaceID || history.Request.RunID != request.RunID {
+			return fmt.Errorf("reconciliation history request scope mismatch")
 		}
 		if history.Request.Generation >= request.Generation {
 			return fmt.Errorf("reconciliation history generation is not older than current request")
 		}
-		if _, duplicate := seenHistoryGeneration[history.Request.Generation]; duplicate {
-			return fmt.Errorf("reconciliation history duplicates generation %d", history.Request.Generation)
-		}
-		if _, duplicate := seenHistoryRequest[history.Request.RequestID]; duplicate {
-			return fmt.Errorf("reconciliation history duplicates request %q", history.Request.RequestID)
-		}
-		seenHistoryGeneration[history.Request.Generation] = struct{}{}
-		seenHistoryRequest[history.Request.RequestID] = struct{}{}
 	}
 	if _, duplicate := seenHistoryGeneration[request.Generation]; duplicate {
 		return fmt.Errorf("reconciliation history duplicates current generation %d", request.Generation)
@@ -1020,6 +1059,7 @@ func sameRuntimeCWIReconciliationBindingRefs(left, right []RuntimeCWIReconciliat
 			left[index].TargetSelectorRef != right[index].TargetSelectorRef ||
 			left[index].TargetSelectorOwnerRef != right[index].TargetSelectorOwnerRef ||
 			left[index].TargetSelectorSubjectRef != right[index].TargetSelectorSubjectRef ||
+			!sameStrings(left[index].TargetSelectorCandidateRefs, right[index].TargetSelectorCandidateRefs) ||
 			left[index].ProspectiveTargetRef != right[index].ProspectiveTargetRef ||
 			!sameStrings(left[index].ValidationRecipeIDs, right[index].ValidationRecipeIDs) ||
 			!sameStrings(left[index].RequiredCheckRefs, right[index].RequiredCheckRefs) ||

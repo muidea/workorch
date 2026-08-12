@@ -74,10 +74,11 @@ const (
 )
 
 type runtimeStartupRecoveryAction struct {
-	Kind      runtimeStartupRecoveryActionKind
-	Item      runevents.RuntimeRecoveryInventoryItem
-	Source    string
-	SchemaErr *runtimecontract.RuntimeStateSchemaVersionError
+	Kind            runtimeStartupRecoveryActionKind
+	Item            runevents.RuntimeRecoveryInventoryItem
+	Source          string
+	Incompatibility runtimecontract.RuntimeStateIncompatibility
+	Diagnostic      error
 }
 
 func New() *Biz { return &Biz{} }
@@ -233,9 +234,8 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 
 		aggregate, loadErr := (runtimeStateRepository{hub: m.EventHub()}).LoadRuntimeRecoveryRecord(ctx, item)
 		if loadErr != nil {
-			var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
-			if errors.As(loadErr, &schemaErr) {
-				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionIncompatible, Item: item, Source: "startup_recovery:schema_incompatible", SchemaErr: schemaErr})
+			if incompatibility, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(loadErr); incompatible {
+				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionIncompatible, Item: item, Source: "startup_recovery:state_incompatible", Incompatibility: incompatibility, Diagnostic: loadErr})
 				continue
 			}
 			return fmt.Errorf("Runtime startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
@@ -348,8 +348,8 @@ func (m *Biz) releaseRuntimeStartupRecoveryActions(ctx context.Context, actions 
 				return fmt.Errorf("lease timer workspace=%s run=%s was not accepted", item.WorkspaceID, item.RunID)
 			}
 		case runtimeStartupRecoveryActionIncompatible:
-			if err := m.applyRunRuntimeStateIncompatible(ctx, item, action.SchemaErr); err != nil {
-				return fmt.Errorf("schema incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+			if err := m.applyRunRuntimeStateIncompatible(ctx, item.WorkspaceID, item.RunID, item.RuntimeStateRef, action.Incompatibility, action.Diagnostic); err != nil {
+				return fmt.Errorf("runtime state incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 			}
 		default:
 			return common.ErrInvalidArgument
@@ -628,6 +628,7 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 	})
 	drive := func(driveCtx context.Context) {
 		var retry *runtimeRecoveryLeaseRequest
+		freshActivationRequired := false
 		// Keep the Runtime authority and its EventHub-backed dependencies
 		// alive until this entire drive/projection/recovery branch returns.
 		// A task that starts after Stop observes nil and exits without effects.
@@ -650,7 +651,7 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 				// waiting. The aggregate lease remains the cross-process authority.
 				return
 			}
-			if leaseGeneration != 0 {
+			if !freshActivationRequired && leaseGeneration != 0 {
 				if _, err := m.runtimeReleaseDriveLease(driveCtx, workspaceID, runID, leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
 					slog.Warn("workorch Runtime drive lease release failed", "workspaceID", workspaceID, "runID", runID, "generation", leaseGeneration, "err", err)
 				}
@@ -660,6 +661,11 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 		if err := m.driveAndProjectRuntimeLockedWithCommand(driveCtx, orchestratorevents.DriveRuntimeCommand{
 			WorkspaceID: workspaceID, RunID: runID, ReconciliationRequestID: reconciliationRequestID, ReconciliationGeneration: reconciliationGeneration,
 		}); err != nil && !errors.Is(err, context.Canceled) {
+			var fresh *runtimeFreshActivationRequiredError
+			if errors.As(err, &fresh) {
+				freshActivationRequired = true
+				return
+			}
 			var persistedPending *runtimePersistedDrivePendingError
 			if errors.As(err, &persistedPending) {
 				slog.Debug("workorch Runtime persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)

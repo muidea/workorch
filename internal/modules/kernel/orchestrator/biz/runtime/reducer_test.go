@@ -405,7 +405,7 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 		facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
 		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
-		return facts
+		return runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 	}
 
 	t.Run("matching prospective binding enters state change", func(t *testing.T) {
@@ -478,6 +478,7 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		t.Run(test.name, func(t *testing.T) {
 			facts := newFacts()
 			test.mutate(&facts)
+			facts = runtimeTestFactsWithCanonicalCWIProjection(t, facts)
 			if hasSemanticOwnerGroundedTargetScope(facts) || hasOwnerGroundedProspectiveCreationScope(facts) {
 				t.Fatal("unsealed or mismatched File prospective scope was accepted")
 			}

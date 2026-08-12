@@ -861,11 +861,28 @@ func TestModelFreshActivationStatusExplainsRestartInsteadOfRunning(t *testing.T)
 	m.applyRunControlState(&projectioncontract.Run{
 		ID: "run-schema-v2", WorkspaceID: "ws-1", State: string(common.RunStateActive),
 		RuntimeActivation: &projectioncontract.RuntimeActivationStatus{
-			Disposition: "fresh_activation_required", ActualSchemaVersion: 2, SupportedSchemaVersion: 4,
+			Disposition: "fresh_activation_required", Reason: "schema_unsupported", ActualSchemaVersion: 2, SupportedSchemaVersion: 4,
 		},
 	}, "")
 	if m.running || m.progress != progressIdle || !strings.Contains(m.result, "/run restart") || !strings.Contains(m.result, "v2") {
 		t.Fatalf("fresh activation display running=%v progress=%s result=%q", m.running, m.progress, m.result)
+	}
+}
+
+func TestModelCWILedgerFreshActivationExplainsRestartWithoutSchemaMismatch(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.applyRunControlState(&projectioncontract.Run{
+		ID: "run-invalid-cwi-ledger", WorkspaceID: "ws-1", State: string(common.RunStateActive),
+		RuntimeActivation: &projectioncontract.RuntimeActivationStatus{
+			Disposition:            string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired),
+			Reason:                 string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid),
+			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
+			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		},
+	}, "")
+	if m.running || m.progress != progressIdle || !strings.Contains(m.result, "ambiguous persisted CWI ledger") ||
+		!strings.Contains(m.result, "/run restart") || strings.Contains(m.result, "schema v") {
+		t.Fatalf("CWI ledger fresh activation display running=%v progress=%s result=%q", m.running, m.progress, m.result)
 	}
 }
 

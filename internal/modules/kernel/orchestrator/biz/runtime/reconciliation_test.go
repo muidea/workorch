@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -64,6 +66,86 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 	}
 }
 
+func TestRuntimeControllerReconciliationHistoryLimitRejectsNewGenerationWithoutCAS(t *testing.T) {
+	ctx := context.Background()
+	repository, controller, template := reconciliationControllerFixture(t, runtimecontract.RuntimeCWIReconciliationScopeCurrentRun)
+
+	for generation := uint64(1); generation <= runtimecontract.RuntimeCWIReconciliationHistoryLimit+1; generation++ {
+		request := template.Clone()
+		request.RequestID = fmt.Sprintf("reconcile-history-%d", generation)
+		request.Generation = generation
+		if _, changed, err := controller.ensureReconciliationRequest(ctx, request); err != nil || !changed {
+			t.Fatalf("seal generation %d = changed=%v err=%v", generation, changed, err)
+		}
+	}
+
+	beforeRevision := repository.aggregate.StateRevision
+	beforeSaves := repository.saves
+	beforeHistory := len(repository.aggregate.Reconciliation.History)
+	beforeRequest := repository.aggregate.Reconciliation.Request.Clone()
+	overflow := template.Clone()
+	overflow.RequestID = "reconcile-history-overflow"
+	overflow.Generation = runtimecontract.RuntimeCWIReconciliationHistoryLimit + 2
+	if _, changed, err := controller.ensureReconciliationRequest(ctx, overflow); !errors.Is(err, common.ErrConflict) || changed {
+		t.Fatalf("history overflow was accepted: changed=%v err=%v", changed, err)
+	}
+	if repository.saves != beforeSaves || repository.aggregate.StateRevision != beforeRevision ||
+		len(repository.aggregate.Reconciliation.History) != beforeHistory ||
+		repository.aggregate.Reconciliation.Request == nil ||
+		repository.aggregate.Reconciliation.Request.RequestID != beforeRequest.RequestID {
+		t.Fatalf("history overflow performed a partial CAS: saves=%d/%d aggregate=%+v", repository.saves, beforeSaves, repository.aggregate.Reconciliation)
+	}
+}
+
+func TestRuntimeControllerStaleReconciliationBatchIsZeroMutation(t *testing.T) {
+	ctx := context.Background()
+	repository, controller, firstRequest := reconciliationControllerFixture(t, runtimecontract.RuntimeCWIReconciliationScopeCurrentRun)
+	repository.aggregate.Facts.Coverage[0].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+	repository.aggregate.Facts.Coverage[0].EvidenceRefs = []string{"current-run-receipt"}
+	runtimeTestSynchronizeCanonicalCWILedger(t, repository.aggregate)
+	if err := repository.aggregate.Validate(); err != nil {
+		t.Fatalf("fixture aggregate: %v", err)
+	}
+
+	if _, changed, err := controller.ensureReconciliationRequest(ctx, firstRequest); err != nil || !changed {
+		t.Fatalf("seal generation 1 = changed=%v err=%v", changed, err)
+	}
+	firstBatch := reconciliationBatchForRequest(t, firstRequest, runtimecontract.RuntimeCWIReconciliationObservationSatisfied)
+	if _, changed, err := controller.commitReconciliationBatch(ctx, firstRequest.WorkspaceID, firstRequest.RunID, firstBatch); err != nil || !changed {
+		t.Fatalf("commit generation 1 = changed=%v err=%v", changed, err)
+	}
+
+	secondRequest := firstRequest.Clone()
+	secondRequest.RequestID = "reconcile-generation-2"
+	secondRequest.Generation = 2
+	secondRequest.WorkspaceBaselineRevision = "tree-2"
+	secondRequest.WorkspaceBaselineRef = "workspace-tree/tree-2"
+	if _, changed, err := controller.ensureReconciliationRequest(ctx, secondRequest); err != nil || !changed {
+		t.Fatalf("seal generation 2 = changed=%v err=%v", changed, err)
+	}
+
+	before := repository.aggregate
+	beforeFacts := before.Facts.Normalized()
+	beforeRequest := before.Reconciliation.Request.Clone()
+	beforeContract := before.Facts.ReconciliationContract.Clone()
+	beforeRevision := before.StateRevision
+	beforeSaves := repository.saves
+	beforeSessions := len(before.CandidateRequestSessions)
+	beforeReceipts := len(before.OperationReceipts)
+
+	delayed, changed, err := controller.commitReconciliationBatch(ctx, firstRequest.WorkspaceID, firstRequest.RunID, firstBatch)
+	if err != nil || changed {
+		t.Fatalf("delayed historical batch = changed=%v err=%v", changed, err)
+	}
+	if delayed.StateRevision != beforeRevision || repository.saves != beforeSaves ||
+		!reflect.DeepEqual(delayed.Facts.Normalized(), beforeFacts) ||
+		delayed.Reconciliation.Request == nil || !reflect.DeepEqual(delayed.Reconciliation.Request.Clone(), beforeRequest) ||
+		!reflect.DeepEqual(delayed.Facts.ReconciliationContract.Clone(), beforeContract) ||
+		len(delayed.CandidateRequestSessions) != beforeSessions || len(delayed.OperationReceipts) != beforeReceipts || delayed.ActiveDispatch != nil {
+		t.Fatalf("stale reconciliation batch mutated Runtime authority or execution ledger: aggregate=%+v saves=%d/%d", delayed, repository.saves, beforeSaves)
+	}
+}
+
 func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrantingCredit(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -84,6 +166,7 @@ func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrant
 			if tc.initialState == runtimecontract.RuntimeCoverageItemStateSatisfied {
 				repository.aggregate.Facts.Coverage[0].EvidenceRefs = []string{"old-run-receipt"}
 			}
+			runtimeTestSynchronizeCanonicalCWILedger(t, repository.aggregate)
 			if err := repository.aggregate.Validate(); err != nil {
 				t.Fatalf("fixture aggregate: %v", err)
 			}
@@ -96,15 +179,25 @@ func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrant
 			if err != nil || !changed {
 				t.Fatalf("commit batch = aggregate=%+v changed=%v err=%v", committed, changed, err)
 			}
-			if got := committed.Reconciliation.Results[0].Disposition; got != tc.wantDisposition {
-				t.Fatalf("disposition = %q, want %q", got, tc.wantDisposition)
+			results := committed.Reconciliation.Results
+			reopened := committed.Reconciliation.Reopened
+			if tc.wantDisposition == runtimecontract.RuntimeCWIReconciliationDispositionReopen {
+				if len(committed.Reconciliation.History) == 0 {
+					t.Fatalf("reopen did not archive its superseded reconciliation generation: %+v", committed.Reconciliation)
+				}
+				history := committed.Reconciliation.History[len(committed.Reconciliation.History)-1]
+				results = history.Results
+				reopened = history.Reopened
+			}
+			if len(results) != 1 || results[0].Disposition != tc.wantDisposition {
+				t.Fatalf("reconciliation results = %+v, want disposition %q", results, tc.wantDisposition)
 			}
 			if got := committed.Facts.Coverage[0].State; got != tc.wantState {
 				t.Fatalf("coverage state = %q, want %q", got, tc.wantState)
 			}
 			if tc.wantDisposition == runtimecontract.RuntimeCWIReconciliationDispositionReopen {
-				if len(committed.Reconciliation.Reopened) != 1 || len(committed.Reconciliation.Reopened[0].PreviousEvidenceRefs) != 1 || committed.Reconciliation.Reopened[0].PreviousEvidenceRefs[0] != "old-run-receipt" {
-					t.Fatalf("reopened lineage lost old receipt: %+v", committed.Reconciliation.Reopened)
+				if len(reopened) != 1 || len(reopened[0].PreviousEvidenceRefs) != 1 || reopened[0].PreviousEvidenceRefs[0] != "old-run-receipt" {
+					t.Fatalf("reopened lineage lost old receipt: %+v", reopened)
 				}
 			}
 			duplicate, changed, err := controller.commitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)

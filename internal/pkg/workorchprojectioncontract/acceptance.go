@@ -116,7 +116,17 @@ type RuntimeSemanticPlanning struct {
 }
 
 type RuntimeSemanticPlanningItem struct {
-	CoverageWorkItemID string                     `json:"coverageWorkItemId"`
+	CoverageWorkItemID string                         `json:"coverageWorkItemId"`
+	Status             string                         `json:"status"`
+	Proofs             []RuntimeSemanticPlanningProof `json:"proofs,omitempty"`
+}
+
+// RuntimeSemanticPlanningProof is one independent provider proposal plus its
+// owner feasibility fact. It is display-only and remains grouped under the
+// canonical CWI row, so a state-change proof cannot overwrite a validation
+// proof for the same CWI in a projection.
+type RuntimeSemanticPlanningProof struct {
+	EvidenceKind       string                     `json:"evidenceKind,omitempty"`
 	ProposalHash       string                     `json:"proposalHash,omitempty"`
 	OwnerModuleID      string                     `json:"ownerModuleId,omitempty"`
 	OperationKind      string                     `json:"operationKind,omitempty"`

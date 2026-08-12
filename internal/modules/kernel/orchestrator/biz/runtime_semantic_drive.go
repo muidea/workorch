@@ -30,10 +30,14 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 		if aggregate.Facts.Resources.ProviderCeiling == nil {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
 		}
-		manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifest(
+		eligibleCoverage := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
+		if len(eligibleCoverage) == 0 {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_no_eligible_cwi", "semantic planning was requested without an eligible canonical CWI", nil)
+		}
+		manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
 			aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition,
 			aggregate.Facts.DefinitionSeed, aggregate.Facts.Activation.ExecutionContract,
-			aggregate.Facts.Resources.OperationAdmissibilities,
+			aggregate.Facts.Resources.OperationAdmissibilities, eligibleCoverage,
 		)
 		if err != nil {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
@@ -568,12 +572,12 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 			return m.failRuntimeSemanticContract(ctx, aggregate, semanticOwnerFeasibilityTerminalCode(fact), fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
 		}
 	}
-	observed := make(map[common.CoverageWorkItemID]struct{}, len(ledger.Feasibilities))
+	observed := make(map[string]struct{}, len(ledger.Feasibilities))
 	for _, fact := range ledger.Feasibilities {
-		observed[fact.CoverageWorkItemID] = struct{}{}
+		observed[fact.ProposalHash] = struct{}{}
 	}
 	for _, proposal := range feasibilityDocument.Proposals {
-		if _, done := observed[proposal.CoverageWorkItemID]; done {
+		if _, done := observed[runtimecontract.StableRuntimeSemanticProofProposalHash(proposal)]; done {
 			continue
 		}
 		return m.probeRuntimeSemanticProposal(ctx, aggregate, proposal)

@@ -22,12 +22,13 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | Runtime deployed positive convergence (RSO-22) | RSO-26 code closure is complete; a fresh deployment must prove semantic correction → proof batch → owner feasibility → sealed binding → operation → receipt → equivalent-binding credit or typed incompatible gap → evidence/assessment → terminal, plus whole-document recovery fault injection | [RSO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A1 | Runtime CWI canonical ledger and deployed convergence (CWI-SO) | `run-073` proved duplicate CWI binding/effect across semantic generations. Complete CWI-SO-1～CWI-SO-4 and CWI-SO-6: canonical coverage-ledger identity, catalog retirement, reconciliation request supersession, atomic reopen/requeue, then fresh deployed invalidation/reopen/restart proof. CWI-SO-5 current-schema fail-closed boundary is code-closed. | [CWI-SO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | A2 | Workspace reasoning effort deployed proof | 代码与正式合同已收口；剩余重新部署后的 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection 和双 workspace 隔离验证 | [WRE plan](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md) |
 
-Predecessor-owned restart、release-before-successor、complete-document recovery、immutable binding、strict decoder、
-receipt matcher、owner-local terminal delivery、replay/CAS、CPU guard 与 dual-workspace matrix 继续作为 A1 的代码回归
-基线；未实际执行的 recovery 和 downstream path 不能因本地绿灯标记为 live closed。
+Predecessor-owned restart、release-before-successor、complete-document recovery、strict decoder、receipt matcher、
+owner-local terminal delivery、replay/CAS、CPU guard 与 dual-workspace matrix 继续作为 A1 的代码回归基线。A1 还必须
+证明 settled CWI 不会因 catalog invalidation 重入 planning，且 stale reconciliation generation 和 duplicate owner facts
+不会产生额外 durable effect；本地绿灯不能据此标记为 live closed。
 
 ## C. 可选验证
 

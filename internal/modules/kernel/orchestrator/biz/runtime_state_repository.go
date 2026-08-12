@@ -71,6 +71,9 @@ func (r runtimeStateRepository) loadRuntimeStateRecord(ctx context.Context, work
 	if err := runtimecontract.ValidateRuntimeStateSchemaVersion(record.SchemaVersion); err != nil {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("load Runtime state: %w", err)
 	}
+	if err := record.Validate(); err != nil {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("load Runtime state: %w", err)
+	}
 	aggregate := runtimeAggregateFromRecord(record)
 	if err := aggregate.Validate(); err != nil {
 		return runtime.RuntimeAggregate{}, err

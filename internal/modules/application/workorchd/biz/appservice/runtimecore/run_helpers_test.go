@@ -64,10 +64,13 @@ func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
 		WorkspaceID: "ws-incompatible-schema",
 		State:       common.RunStateActive,
 		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:            runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			RuntimeStateRef:        "runtime-state/ws-incompatible-schema/run-incompatible-schema",
-			ActualSchemaVersion:    2,
-			SupportedSchemaVersion: 4,
+			Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
+			RuntimeStateRef: "runtime-state/ws-incompatible-schema/run-incompatible-schema",
+			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
+				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
+				ActualSchemaVersion:    2,
+				SupportedSchemaVersion: 4,
+			},
 		},
 	}
 
@@ -77,6 +80,35 @@ func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
 		got.RuntimeActivation.ActualSchemaVersion != 2 ||
 		got.RuntimeActivation.SupportedSchemaVersion != 4 {
 		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)
+	}
+	if got.RuntimeState != nil {
+		t.Fatalf("runtime state = %+v, want opaque state excluded from read model", got.RuntimeState)
+	}
+}
+
+func TestMapRunProjectsCWILedgerFreshActivationReasonWithoutRuntimeState(t *testing.T) {
+	item := &runmodel.Run{
+		ID:          "run-invalid-cwi-ledger",
+		WorkspaceID: "ws-invalid-cwi-ledger",
+		State:       common.RunStateActive,
+		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
+			Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
+			RuntimeStateRef: "runtime-state/ws-invalid-cwi-ledger/run-invalid-cwi-ledger/4",
+			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
+				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid,
+				ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
+				SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			},
+		},
+	}
+
+	got := MapRun(item)
+	if got.RuntimeActivation == nil ||
+		got.RuntimeActivation.Disposition != string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired) ||
+		got.RuntimeActivation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) ||
+		got.RuntimeActivation.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		got.RuntimeActivation.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("runtime activation = %+v, want CWI ledger fresh-activation projection", got.RuntimeActivation)
 	}
 	if got.RuntimeState != nil {
 		t.Fatalf("runtime state = %+v, want opaque state excluded from read model", got.RuntimeState)

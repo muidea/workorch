@@ -480,6 +480,10 @@ type RuntimeFacts struct {
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID
 	DefinitionRevision string
+	// CWILedgerSchemaVersion gates the canonical CWI row fields in Coverage.
+	// Fresh activation writes it; persisted records without it are rejected by
+	// the current RuntimeStateRecord schema rather than being inferred.
+	CWILedgerSchemaVersion string
 	// DefinitionSeed is the persisted, non-authoritative semantic planning
 	// input. Only the Orchestrator semantic planning ledger may turn it into
 	// proof bindings.
@@ -1336,6 +1340,7 @@ type AuthorityTransaction struct {
 
 func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.DefinitionRevision = strings.TrimSpace(f.DefinitionRevision)
+	f.CWILedgerSchemaVersion = strings.TrimSpace(f.CWILedgerSchemaVersion)
 	f.DefinitionSeed = f.DefinitionSeed.Clone()
 	f.EvidenceRevision = strings.TrimSpace(f.EvidenceRevision)
 	f.Focus = f.Focus.Normalized()
@@ -1384,12 +1389,21 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 }
 
 func (f RuntimeFacts) Validate() error {
+	raw := f
 	f = f.Normalized()
 	if f.WorkspaceID == "" || f.RunID == "" {
 		return fmt.Errorf("runtime facts require workspace and run scope")
 	}
 	if f.DefinitionRevision == "" || f.EvidenceRevision == "" {
 		return fmt.Errorf("runtime facts require definition and evidence revisions")
+	}
+	if raw.CWILedgerSchemaVersion != "" {
+		if err := ValidateRuntimeCWILedger(raw); err != nil {
+			return err
+		}
+		if err := ValidateRuntimeCWIFocusBindings(f); err != nil {
+			return err
+		}
 	}
 	if f.DefinitionSeed.SchemaVersion != "" {
 		if err := f.DefinitionSeed.Validate(); err != nil {

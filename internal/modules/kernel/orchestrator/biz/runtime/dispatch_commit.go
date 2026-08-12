@@ -332,6 +332,9 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 	if !candidateContainsOperation(aggregate.ActiveDispatch.Candidate, evidence.OperationID) {
 		return EvidenceCommitResult{}, fmt.Errorf("execution evidence operation %q is not present in the sealed candidate", evidence.OperationID)
 	}
+	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+		return EvidenceCommitResult{}, fmt.Errorf("%w: execution evidence binding fence: %v", common.ErrConflict, err)
+	}
 	if evidence.Receipt != nil {
 		persisted, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, evidence.Receipt.ExecutionKey, evidence.Receipt.Fence)
 		if !found || !runtimecontract.SameRuntimeOperationReceipt(persisted, *evidence.Receipt) {
@@ -421,15 +424,34 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 		}
 		if !aggregate.Facts.Focus.RequireAssessment {
 			aggregate.Facts.Coverage = closeCoverageForAcceptedEvidence(aggregate)
+			// A non-assessment focus obtains its credit from this exact receipt.
+			// Persist the matching SM-2 CWI convergence transition in the same
+			// CAS; otherwise a multi-operation dispatch can leave an illegal
+			// bound+satisfied row between its first and final receipt.
+			settledFacts, settleErr := settleRuntimeCWIsForCurrentFocus(aggregate.Facts)
+			if settleErr != nil {
+				return EvidenceCommitResult{}, settleErr
+			}
+			aggregate.Facts = settledFacts
 		}
 		// A profile-declared dependency is the only authority for invalidating a
 		// previously accepted validation/assessment coverage item after a source
 		// effect changes.  Keep both evidence lineages: a reopen means that the
 		// earlier proof is stale for convergence, not that the owner receipt was
 		// false.  This happens inside the same aggregate CAS as evidence admission.
-		var reopenedCoverage []common.CoverageWorkItemID
-		aggregate.Facts.Coverage, reopenedCoverage = reopenCoverageDependenciesForEvidence(aggregate.Facts.Coverage, fact)
-		aggregate.Facts = requeueReopenedCoverageFocuses(aggregate.Facts, reopenedCoverage)
+		reopenTriggers := runtimeCWIReopenTriggersForEvidence(aggregate.Facts, fact)
+		reopened, reopenErr := applyRuntimeCWIReopen(&aggregate, reopenTriggers)
+		if reopenErr != nil {
+			return EvidenceCommitResult{}, reopenErr
+		}
+		if len(reopened) != 0 {
+			// A receipt can retire a previously current binding before the final
+			// operation of this sealed dispatch. The old SM-4 request cannot remain
+			// current against the replacement contract; archive it in this same CAS.
+			if _, supersedeErr := supersedeActiveReconciliationForCurrentContract(&aggregate); supersedeErr != nil {
+				return EvidenceCommitResult{}, supersedeErr
+			}
+		}
 		if fact.Kind == runtimecontract.EvidenceKindStateChange {
 			currentCoverage := append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
 			for _, focus := range aggregate.Facts.RemainingFocuses {
@@ -587,12 +609,19 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 		}
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
+		if err := retireSemanticPlanningForCurrentReopenedCWIs(&aggregate); err != nil {
+			return EvidenceCommitResult{}, err
+		}
 		// A completed transaction remains durable audit/provenance evidence, but
 		// SM-2 must reacquire changed owner facts before advancing this focus.
 		canAdvanceFocus := !dispatchInvalidated && len(aggregate.Facts.Prerequisites.Pending) == 0
 		previousFocusID := aggregate.Facts.Focus.ID
 		if canAdvanceFocus {
-			aggregate.Facts = advanceSatisfiedCoverageFocus(aggregate.Facts, aggregate.CoverageProofLineage)
+			advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
+			if advanceErr != nil {
+				return EvidenceCommitResult{}, advanceErr
+			}
+			aggregate.Facts = advanced
 			if aggregate.Facts.Focus.ID != previousFocusID {
 				// Only the Orchestrator-owned evidence commit may advance SM-2.
 				// When that reaches an unbound placeholder, reopen the retained
@@ -950,12 +979,11 @@ func closeCoverageForAcceptedEvidence(aggregate RuntimeAggregate) []runtimecontr
 	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
 }
 
-// reopenCoverageDependenciesForEvidence applies compiled profile dependency
-// edges to the coverage ledger.  The edges and trigger kinds were sealed at
-// activation, so this reducer helper remains neutral to target paths, owner
-// names, languages and command semantics.  It preserves all accepted evidence
-// references and records why the dependent was reopened for restart/audit.
-func reopenCoverageDependenciesForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact) ([]runtimecontract.RuntimeCoverageItemFact, []common.CoverageWorkItemID) {
+// runtimeCWIReopenTriggersForEvidence derives only typed local transition
+// inputs from activation-sealed dependency declarations. The shared CWI helper
+// owns the actual coverage, focus, binding and lineage mutation so receipt- and
+// reconciliation-driven reopens cannot diverge.
+func runtimeCWIReopenTriggersForEvidence(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact) []runtimeCWIReopenTrigger {
 	sourceIDs := map[common.CoverageWorkItemID]struct{}{}
 	for _, id := range evidence.CoverageWorkItemIDs {
 		if id != "" {
@@ -963,10 +991,10 @@ func reopenCoverageDependenciesForEvidence(coverage []runtimecontract.RuntimeCov
 		}
 	}
 	if len(sourceIDs) == 0 || strings.TrimSpace(evidence.Kind) == "" {
-		return runtimecontract.NormalizeRuntimeCoverageFacts(coverage), nil
+		return nil
 	}
 	reopen := map[common.CoverageWorkItemID]struct{}{}
-	for _, source := range coverage {
+	for _, source := range facts.Coverage {
 		if _, matches := sourceIDs[source.ID]; !matches {
 			continue
 		}
@@ -980,73 +1008,30 @@ func reopenCoverageDependenciesForEvidence(coverage []runtimecontract.RuntimeCov
 		}
 	}
 	if len(reopen) == 0 {
-		return runtimecontract.NormalizeRuntimeCoverageFacts(coverage), nil
+		return nil
 	}
-	reopened := make([]common.CoverageWorkItemID, 0, len(reopen))
-	for idx := range coverage {
-		item := &coverage[idx]
-		if _, matches := reopen[item.ID]; !matches || item.State == runtimecontract.RuntimeCoverageItemStateOpen {
-			continue
-		}
-		item.State = runtimecontract.RuntimeCoverageItemStateOpen
-		item.LastAssessmentID = ""
-		item.ReopenedByEvidenceRefs = append(item.ReopenedByEvidenceRefs, string(evidence.ID))
-		reopened = append(reopened, item.ID)
+	coverageIDs := make([]common.CoverageWorkItemID, 0, len(reopen))
+	for coverageID := range reopen {
+		coverageIDs = append(coverageIDs, coverageID)
 	}
-	coverage = runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
-	if len(reopened) == 0 {
-		return coverage, nil
+	sort.SliceStable(coverageIDs, func(i, j int) bool { return string(coverageIDs[i]) < string(coverageIDs[j]) })
+	triggers := make([]runtimeCWIReopenTrigger, 0, len(coverageIDs))
+	for _, coverageID := range coverageIDs {
+		triggers = append(triggers, runtimeCWIReopenTrigger{
+			CoverageWorkItemID: coverageID,
+			TriggerRef:         string(evidence.ID),
+			Reason:             "declared coverage dependency observed " + strings.TrimSpace(evidence.Kind),
+		})
 	}
-	// Normalization orders ledger facts, not this return value.  Preserve a
-	// deterministic coverage-ID result for diagnostics and focused tests.
-	sort.Slice(reopened, func(i, j int) bool { return string(reopened[i]) < string(reopened[j]) })
-	return coverage, reopened
-}
-
-// requeueReopenedCoverageFocuses restores completed focus contracts before the
-// still-pending queue when a dependency reopened one of their coverage items.
-// It uses only persisted focus/coverage identities and therefore introduces no
-// action choice or domain interpretation into the reducer.
-func requeueReopenedCoverageFocuses(facts runtimecontract.RuntimeFacts, reopened []common.CoverageWorkItemID) runtimecontract.RuntimeFacts {
-	if len(reopened) == 0 || len(facts.CompletedFocuses) == 0 {
-		return facts
-	}
-	needed := map[common.CoverageWorkItemID]struct{}{}
-	for _, id := range reopened {
-		if id != "" {
-			needed[id] = struct{}{}
-		}
-	}
-	if len(needed) == 0 {
-		return facts
-	}
-	requeued := make([]runtimecontract.CoverageFocus, 0, len(facts.CompletedFocuses))
-	completed := make([]runtimecontract.CoverageFocus, 0, len(facts.CompletedFocuses))
-	for _, focus := range facts.CompletedFocuses {
-		match := false
-		for _, id := range focus.CoverageWorkItemIDs {
-			if _, ok := needed[id]; ok {
-				match = true
-				break
-			}
-		}
-		if match {
-			requeued = append(requeued, focus)
-			continue
-		}
-		completed = append(completed, focus)
-	}
-	if len(requeued) == 0 {
-		return facts
-	}
-	facts.CompletedFocuses = completed
-	facts.RemainingFocuses = append(requeued, facts.RemainingFocuses...)
-	return facts.Normalized()
+	return triggers
 }
 
 func (a RuntimeAggregate) Validate() error {
 	if a.Facts.WorkspaceID == "" || a.Facts.RunID == "" {
 		return fmt.Errorf("runtime aggregate requires workspace and run scope")
+	}
+	if err := runtimecontract.ValidateRuntimeStateCWILedger(a.Facts, a.Reconciliation); err != nil {
+		return err
 	}
 	if err := a.Facts.Validate(); err != nil {
 		return err

@@ -12,12 +12,26 @@ import (
 // bindings and a reconciliation contract. It does not mutate an aggregate or
 // choose a Runtime action; only the SM-2 reducer may persist its output.
 func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
+	return CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, feasibilities, nil)
+}
+
+// CompileRuntimeSemanticBindingsWithSourceFocuses compiles one complete
+// semantic document with the persisted source focus declarations that remain
+// relevant to its eligible CWI rows. Semantic proposals choose only within the
+// sealed manifest; source declarations supply bounded selector replay data
+// that capability owners require after the source focus is replaced by the
+// newly sealed semantic focus.
+func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility, sourceFocuses []CoverageFocus) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest = manifest.Normalized()
 	document = document.Normalized()
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	if err := validateRuntimeSemanticFeasibilitySet(manifest, document, feasibilities, true); err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, err
+	}
+	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
+	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	items := make(map[string]RuntimeCoverageItem, len(manifest.CoverageItems))
@@ -30,33 +44,36 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 		if fact.Status != RuntimeSemanticFeasibilityFeasible {
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding requires a complete feasible owner batch")
 		}
-		facts[string(fact.CoverageWorkItemID)] = fact
+		facts[fact.ProposalHash] = fact
 	}
-	proposals, err := OrderedRuntimeSemanticProofProposals(document)
+	proofSets, err := OrderedRuntimeSemanticCWIProofSets(document)
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	focuses := make([]CoverageFocus, 0, len(proposals))
-	for _, proposal := range proposals {
-		proposal = proposal.Normalized()
-		// Effect/idempotency authority is compiled from the sealed owner catalog
-		// at the SM-2 binding boundary. Any provider-shaped or stale intermediate
-		// value is ignored here; the resulting binding is the canonical source
-		// consumed by SM-3 dispatch and SM-4 evidence admission.
-		proposal.RequiredEffectScopes = deriveRuntimeSemanticProposalEffects(manifest, runtimeSemanticProposalPayload{
-			OwnerModuleID: proposal.OwnerModuleID, OperationKind: proposal.OperationKind,
-			OperationVariantID: proposal.OperationVariantID, RequiredEvidenceKinds: proposal.RequiredEvidenceKinds,
-			ValidationRecipeID: proposal.ValidationRecipeID,
-		})
-		item, found := items[string(proposal.CoverageWorkItemID)]
+	focuses := make([]CoverageFocus, 0, len(proofSets))
+	for _, proofSet := range proofSets {
+		item, found := items[string(proofSet.CoverageWorkItemID)]
 		if !found {
-			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding references unknown coverage %q", proposal.CoverageWorkItemID)
+			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding references unknown coverage %q", proofSet.CoverageWorkItemID)
 		}
-		fact, found := facts[string(proposal.CoverageWorkItemID)]
-		if !found {
-			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding lacks owner fact for coverage %q", proposal.CoverageWorkItemID)
+		proofFacts := make(map[string]RuntimeSemanticProofFeasibility, len(proofSet.Proposals))
+		for _, proposal := range proofSet.Proposals {
+			proposalHash := StableRuntimeSemanticProofProposalHash(proposal)
+			fact, found := facts[proposalHash]
+			if !found {
+				return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding lacks owner fact for proof %q", proposalHash)
+			}
+			proofFacts[proposalHash] = fact
 		}
-		focus, err := compileRuntimeSemanticFocus(manifest.DefinitionRevision, item, proposal, fact)
+		var source *CoverageFocus
+		if value, found := sourceByCoverage[proofSet.CoverageWorkItemID]; found {
+			value := value
+			source = &value
+		}
+		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
+			return nil, RuntimeCWIReconciliationContract{}, err
+		}
+		focus, err := compileRuntimeSemanticFocus(manifest, item, proofSet, proofFacts, source)
 		if err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
@@ -72,75 +89,135 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 	return focuses, contract, nil
 }
 
-// OrderedRuntimeSemanticProofProposals returns the proof proposals in the
-// exact persisted batch order when present.  A full legacy document without
-// batch membership remains deterministically ordered by its normalized
-// proposal list.  This helper is pure and never treats provider order as
-// execution authority; the Orchestrator alone seals the resulting focuses.
-func OrderedRuntimeSemanticProofProposals(document RuntimeSemanticPlanDocument) ([]RuntimeSemanticProofProposal, error) {
-	document = document.Normalized()
-	if len(document.BatchCoverageWorkItemIDs) == 0 {
-		return append([]RuntimeSemanticProofProposal(nil), document.Proposals...), nil
-	}
-	byCoverage := make(map[common.CoverageWorkItemID]RuntimeSemanticProofProposal, len(document.Proposals))
-	for _, proposal := range document.Proposals {
-		if _, duplicate := byCoverage[proposal.CoverageWorkItemID]; duplicate {
-			return nil, fmt.Errorf("runtime semantic proposal order duplicates coverage %q", proposal.CoverageWorkItemID)
+func runtimeSemanticBindingSourceFocuses(values []CoverageFocus) (map[common.CoverageWorkItemID]CoverageFocus, error) {
+	ret := make(map[common.CoverageWorkItemID]CoverageFocus, len(values))
+	for _, value := range values {
+		value = value.Normalized()
+		for _, coverageID := range value.CoverageWorkItemIDs {
+			if coverageID == "" {
+				return nil, fmt.Errorf("runtime semantic source focus %q has an empty coverage item", value.ID)
+			}
+			if prior, duplicate := ret[coverageID]; duplicate && prior.ID != value.ID {
+				return nil, fmt.Errorf("runtime semantic source focuses duplicate coverage %q", coverageID)
+			}
+			ret[coverageID] = value
 		}
-		byCoverage[proposal.CoverageWorkItemID] = proposal.Clone()
 	}
-	ordered := make([]RuntimeSemanticProofProposal, 0, len(document.BatchCoverageWorkItemIDs))
-	for _, id := range document.BatchCoverageWorkItemIDs {
-		proposal, found := byCoverage[id]
-		if !found {
-			return nil, fmt.Errorf("runtime semantic proposal order has no coverage %q", id)
-		}
-		ordered = append(ordered, proposal)
-		delete(byCoverage, id)
-	}
-	if len(byCoverage) != 0 {
-		return nil, fmt.Errorf("runtime semantic proposal order contains coverage outside batch")
-	}
-	return ordered, nil
+	return ret, nil
 }
 
-func compileRuntimeSemanticFocus(definitionRevision string, item RuntimeCoverageItem, proposal RuntimeSemanticProofProposal, fact RuntimeSemanticProofFeasibility) (CoverageFocus, error) {
-	proposalHash := StableRuntimeSemanticProofProposalHash(proposal)
-	idSuffix := strings.TrimPrefix(proposalHash, "runtime-semantic-proposal-")
-	focusID := "semantic-focus-" + idSuffix
-	bindingID := "semantic-binding-" + idSuffix
-	proofs := make([]CoverageEvidenceProof, 0, len(proposal.RequiredEvidenceKinds))
-	for _, evidenceKind := range proposal.RequiredEvidenceKinds {
-		effects := semanticProofEffectsForEvidenceKind(proposal.RequiredEffectScopes, evidenceKind)
+// validateRuntimeSemanticProofSetSource ensures semantic planning cannot
+// weaken the exact evidence contract that activation/profile already declared
+// for a CWI. It is a pure SM-2 pre-seal check; it does not choose a proof.
+func validateRuntimeSemanticProofSetSource(proofSet RuntimeSemanticCWIProofSet, source *CoverageFocus) error {
+	if source == nil {
+		return nil
+	}
+	declaration := source.Normalized()
+	if len(declaration.RequiredEvidenceKinds) != 0 && !sameStrings(proofSet.EvidenceKinds(), declaration.RequiredEvidenceKinds) {
+		return fmt.Errorf("runtime semantic proof set for coverage %q does not cover source required evidence kinds", proofSet.CoverageWorkItemID)
+	}
+	for _, proposal := range proofSet.Proposals {
+		proposal = proposal.Normalized()
+		if len(proposal.RequiredEvidenceKinds) != 1 || proposal.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+			continue
+		}
+		if declaration.ValidationRecipeID != "" && proposal.ValidationRecipeID != declaration.ValidationRecipeID {
+			return fmt.Errorf("runtime semantic validation proof for coverage %q does not match source recipe", proofSet.CoverageWorkItemID)
+		}
+	}
+	return nil
+}
+
+func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus) (CoverageFocus, error) {
+	manifest = manifest.Normalized()
+	proofSetHash := StableRuntimeSemanticCWIProofSetHash(proofSet.CoverageWorkItemID, proofSet.Proposals)
+	idSuffix := strings.TrimPrefix(proofSetHash, "runtime-semantic-cwi-proof-set-")
+	manifestSuffix := strings.TrimPrefix(strings.TrimSpace(manifest.Hash), "runtime-semantic-manifest-")
+	if manifestSuffix == "" {
+		return CoverageFocus{}, fmt.Errorf("runtime semantic focus requires a manifest generation identity")
+	}
+	// The proposal set is CWI-scoped. A generation-specific focus/binding ID
+	// therefore cannot be reused after catalog re-acquisition, even when every
+	// provider proof text happens to be identical.
+	focusID := "semantic-focus-" + idSuffix + "-" + manifestSuffix
+	bindingID := "semantic-binding-" + idSuffix + "-" + manifestSuffix
+
+	proofs := make([]CoverageEvidenceProof, 0, len(proofSet.Proposals))
+	acceptedKinds := make([]string, 0, len(proofSet.Proposals))
+	acceptedVariants := make([]RuntimeOperationVariantRef, 0, len(proofSet.Proposals))
+	metricConstraints := make([]string, 0)
+	artifactRefs := make([]string, 0)
+	prerequisiteRefs := make([]string, 0, len(proofSet.Proposals)*2)
+	var targetRefs []string
+	var selectorRef, prospectiveTargetRef, declarationRef, selectorOwner string
+	var validationRecipeID string
+	validationChecks := make([]string, 0)
+	for proofIndex, rawProposal := range proofSet.Proposals {
+		proposal := rawProposal.Normalized()
+		proposal.RequiredEffectScopes = deriveRuntimeSemanticProposalEffects(manifest, runtimeSemanticProposalPayload{
+			OwnerModuleID: proposal.OwnerModuleID, OperationKind: proposal.OperationKind,
+			OperationVariantID: proposal.OperationVariantID, RequiredEvidenceKinds: proposal.RequiredEvidenceKinds,
+			ValidationRecipeID: proposal.ValidationRecipeID,
+		})
+		proposalHash := StableRuntimeSemanticProofProposalHash(rawProposal)
+		fact, found := facts[proposalHash]
+		if !found {
+			return CoverageFocus{}, fmt.Errorf("runtime semantic proof set for coverage %q lacks fact %q", proofSet.CoverageWorkItemID, proposalHash)
+		}
+		if err := fact.ValidateForProposal(manifest, rawProposal); err != nil {
+			return CoverageFocus{}, err
+		}
+		evidenceKind := proposal.RequiredEvidenceKinds[0]
 		proof := CoverageEvidenceProof{
-			EvidenceKind: evidenceKind, RequiredEffectScopes: effects, AllowedOperationKinds: []string{proposal.OperationKind},
-			MetricConstraints: append([]string(nil), proposal.MetricConstraints...), ArtifactRefs: append([]string(nil), proposal.ArtifactRefs...),
+			EvidenceKind: evidenceKind, RequiredEffectScopes: semanticProofEffectsForEvidenceKind(proposal.RequiredEffectScopes, evidenceKind),
+			AllowedOperationKinds: []string{proposal.OperationKind}, MetricConstraints: append([]string(nil), proposal.MetricConstraints...),
+			ArtifactRefs: append([]string(nil), proposal.ArtifactRefs...),
 		}
 		if proposal.OperationVariantID != "" {
 			proof.AllowedOperationVariants = []RuntimeOperationVariantRef{{Kind: proposal.OperationKind, VariantID: proposal.OperationVariantID}}
+			acceptedVariants = append(acceptedVariants, proof.AllowedOperationVariants[0])
 		}
 		if evidenceKind == EvidenceKindValidation {
 			proof.ValidationRecipeID = fact.ValidationRecipeID
 			proof.RequiredCheckRefs = append([]string(nil), fact.RequiredCheckRefs...)
+			validationRecipeID = fact.ValidationRecipeID
+			validationChecks = append(validationChecks, fact.RequiredCheckRefs...)
 		}
 		if err := proof.Validate(); err != nil {
-			return CoverageFocus{}, fmt.Errorf("runtime semantic proposal %q proof: %w", proposal.CoverageWorkItemID, err)
+			return CoverageFocus{}, fmt.Errorf("runtime semantic proof %q for coverage %q: %w", proposalHash, proofSet.CoverageWorkItemID, err)
 		}
+		currentTargets, currentSelector, currentProspective, err := semanticBindingTarget(proposal, fact)
+		if err != nil {
+			return CoverageFocus{}, fmt.Errorf("runtime semantic proof %q target: %w", proposalHash, err)
+		}
+		if proofIndex == 0 {
+			targetRefs, selectorRef, prospectiveTargetRef = currentTargets, currentSelector, currentProspective
+			declarationRef, selectorOwner = proposal.DeclarationRef, proposal.OwnerModuleID
+		} else if !sameStrings(targetRefs, currentTargets) || selectorRef != currentSelector || prospectiveTargetRef != currentProspective || declarationRef != proposal.DeclarationRef {
+			return CoverageFocus{}, fmt.Errorf("runtime semantic proofs for coverage %q do not share one target and declaration surface", proofSet.CoverageWorkItemID)
+		}
+		acceptedKinds = append(acceptedKinds, proposal.OperationKind)
+		metricConstraints = append(metricConstraints, proposal.MetricConstraints...)
+		artifactRefs = append(artifactRefs, proposal.ArtifactRefs...)
+		prerequisiteRefs = append(prerequisiteRefs, fact.CatalogSnapshotID)
+		prerequisiteRefs = append(prerequisiteRefs, "semantic-feasibility/"+strings.TrimPrefix(StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{fact}), "runtime-semantic-feasibility-set-"))
 		proofs = append(proofs, proof)
 	}
-	targetRefs, selectorRef, prospectiveTargetRef, err := semanticBindingTarget(proposal, fact)
-	if err != nil {
-		return CoverageFocus{}, fmt.Errorf("runtime semantic proposal %q target: %w", proposal.CoverageWorkItemID, err)
-	}
 	binding := CoverageEvidenceBinding{
-		ID: bindingID, CoverageWorkItemID: proposal.CoverageWorkItemID, FocusID: focusID, DefinitionRevision: definitionRevision,
-		Proofs: proofs, TargetRefs: targetRefs, TargetSelectorRef: selectorRef, DeclarationRef: proposal.DeclarationRef,
-		ProspectiveTargetRef: prospectiveTargetRef,
-		PrerequisiteRefs:     []string{fact.CatalogSnapshotID, "semantic-feasibility/" + strings.TrimPrefix(StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{fact}), "runtime-semantic-feasibility-set-")},
+		ID: bindingID, CoverageWorkItemID: proofSet.CoverageWorkItemID, FocusID: focusID, DefinitionRevision: manifest.DefinitionRevision,
+		Proofs: proofs, TargetRefs: targetRefs, TargetSelectorRef: selectorRef, DeclarationRef: declarationRef,
+		ProspectiveTargetRef: prospectiveTargetRef, PrerequisiteRefs: prerequisiteRefs,
 	}
 	if selectorRef != "" {
-		binding.TargetSelectorOwnerRef = proposal.OwnerModuleID
+		binding.TargetSelectorOwnerRef = selectorOwner
 		binding.TargetSelectorSubjectRef = "workspace_deliverable"
+		if source != nil {
+			declaration := source.Normalized()
+			if declaration.TargetSelectorRef == selectorRef {
+				binding.TargetSelectorCandidateRefs = append([]string(nil), declaration.TargetSelectorCandidateRefs...)
+			}
+		}
 	}
 	binding = binding.Normalized()
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
@@ -149,20 +226,28 @@ func compileRuntimeSemanticFocus(definitionRevision string, item RuntimeCoverage
 	}
 	focus := CoverageFocus{
 		ID: focusID, SliceID: item.SliceID, AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{proposal.CoverageWorkItemID}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
-		EvidenceDeclarationRef: proposal.DeclarationRef, RequiredEvidenceKinds: append([]string(nil), proposal.RequiredEvidenceKinds...),
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{proofSet.CoverageWorkItemID}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
+		EvidenceDeclarationRef: declarationRef, RequiredEvidenceKinds: binding.EvidenceKinds(),
 		TargetRefs: targetRefs, TargetRole: "semantic_proof_target", TargetSelectorRef: selectorRef,
 		TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
 		ProspectiveTargetRef: prospectiveTargetRef, RequireTargetGrounding: true,
-		AcceptedStepKinds: []string{proposal.OperationKind}, RequireDirectEvidence: true, RequireAssessment: true,
-		ValidationRecipeID: fact.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), fact.RequiredCheckRefs...),
-		MetricConstraints: append([]string(nil), proposal.MetricConstraints...), ArtifactRefs: append([]string(nil), proposal.ArtifactRefs...),
+		AcceptedStepKinds: acceptedKinds, AcceptedOperationVariants: acceptedVariants, RequireDirectEvidence: true, RequireAssessment: true,
+		ValidationRecipeID: validationRecipeID, RequiredCheckRefs: validationChecks,
+		MetricConstraints: metricConstraints, ArtifactRefs: artifactRefs,
 	}
-	if proposal.OperationVariantID != "" {
-		focus.AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: proposal.OperationKind, VariantID: proposal.OperationVariantID}}
+	if source != nil {
+		declaration := source.Normalized()
+		if selectorRef != "" && declaration.TargetSelectorRef == selectorRef {
+			focus.TargetRole = declaration.TargetRole
+			focus.TargetDiscoverySources = append([]string(nil), declaration.TargetDiscoverySources...)
+			focus.TargetSelectorOwnerRef = declaration.TargetSelectorOwnerRef
+			focus.TargetSelectorSubjectRef = declaration.TargetSelectorSubjectRef
+			focus.TargetSelectorCandidateRefs = append([]string(nil), declaration.TargetSelectorCandidateRefs...)
+			focus.RequireTargetGrounding = declaration.RequireTargetGrounding
+		}
 	}
 	focus = focus.Normalized()
-	if err := ValidateCoverageEvidenceBindingsForFocus(focus, definitionRevision); err != nil {
+	if err := ValidateCoverageEvidenceBindingsForFocus(focus, manifest.DefinitionRevision); err != nil {
 		return CoverageFocus{}, err
 	}
 	return focus, nil

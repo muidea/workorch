@@ -451,13 +451,13 @@ def semantic_catalogs_by_owner(manifest):
     return catalogs
 
 def semantic_required_evidence(seed, coverage_id):
+    values = []
     for slice_value in object_value(seed, "slices", "Slices") or []:
         coverage = string_list(object_value(slice_value, "coverageWorkItemIds", "CoverageWorkItemIDs"))
         if coverage_id in coverage:
-            values = string_list(object_value(slice_value, "requiredEvidenceKinds", "RequiredEvidenceKinds"))
-            if values:
-                return values
-    return ["validation"]
+            values.extend(string_list(object_value(slice_value, "requiredEvidenceKinds", "RequiredEvidenceKinds")))
+    values = unique_strings(values)
+    return values or ["validation"]
 
 def semantic_exact_target(catalog):
     targets = string_list(object_value(catalog, "targetRefs", "TargetRefs"))
@@ -521,13 +521,21 @@ def semantic_coverage_order(request):
 def semantic_plan_payload(request):
     manifest = request["semanticManifest"]
     seed = request["definitionSeed"]
+    schema = request["semanticSchema"]
     plan_step = request.get("planStep") or ""
     coverage_order = semantic_coverage_order(request)
     if not coverage_order:
         raise ValueError("semantic request has no bounded coverage order")
+    schema_version = object_value(
+        object_value(schema, "properties", "Properties") or {},
+        "schemaVersion", "SchemaVersion",
+    ) or {}
+    document_schema_version = object_value(schema_version, "const", "Const")
+    if not isinstance(document_schema_version, str) or not document_schema_version:
+        raise ValueError("semantic request has no sealed document schema version")
     document = {
         "documentKind": "semantic_plan",
-        "schemaVersion": "workorch.runtime_semantic_plan_document",
+        "schemaVersion": document_schema_version,
         "manifestHash": object_value(manifest, "hash", "Hash"),
         "definitionSeedHash": object_value(manifest, "definitionSeedHash", "DefinitionSeedHash"),
         "planStep": plan_step,
@@ -550,13 +558,13 @@ def semantic_plan_payload(request):
     if set(manifest_coverage) != set(batch_coverage):
         raise ValueError("semantic proof manifest does not match bounded batch coverage")
     for coverage_id in batch_coverage:
-        evidence = semantic_required_evidence(seed, coverage_id)
-        if evidence == ["validation"]:
-            proposals.append(semantic_validation_proposal(coverage_id, catalogs))
-        elif evidence == ["state_change"]:
-            proposals.append(semantic_state_change_proposal(coverage_id, catalogs))
-        else:
-            raise ValueError("mock semantic planner does not have one owner operation for evidence %r" % evidence)
+        for evidence_kind in semantic_required_evidence(seed, coverage_id):
+            if evidence_kind == "validation":
+                proposals.append(semantic_validation_proposal(coverage_id, catalogs))
+            elif evidence_kind == "state_change":
+                proposals.append(semantic_state_change_proposal(coverage_id, catalogs))
+            else:
+                raise ValueError("mock semantic planner has no bounded owner operation for evidence %r" % evidence_kind)
     document["batchId"] = request["batchId"]
     document["batchSequence"] = request["batchSequence"]
     document["batchCoverageWorkItemIds"] = list(batch_coverage)
@@ -585,13 +593,13 @@ def provider_request_parser_self_test():
     if operation_validation_recipe_id({"validationRecipeIds": ["recipe-current"]}) != "recipe-current":
         raise AssertionError("C3 parser lost sealed managed validation recipe identity")
     semantic_order = provider_request_from_payload({"input": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-first"},{"id":"cwi-semantic"}]},"schema":{"properties":{"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"coverage_order"}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-first"},{"id":"cwi-semantic"}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"},"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"coverage_order"}
 """})
     order_document = semantic_plan_payload(semantic_order)
     if order_document.get("planStep") != "coverage_order" or order_document.get("coverageOrder") != ["cwi-first", "cwi-semantic"] or order_document.get("proposals") != []:
         raise AssertionError("semantic order parser did not produce a bounded order: %r" % order_document)
     semantic_batch = provider_request_from_payload({"input": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 ### C5.acceptance-slices
 [{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["validation"]}]"""})
@@ -599,8 +607,20 @@ def provider_request_parser_self_test():
     proposals = semantic_document.get("proposals") or []
     if "coverageOrder" in semantic_document or semantic_document.get("planStep") != "proof_batch" or semantic_document.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or len(proposals) != 1 or proposals[0].get("coverageWorkItemId") != "cwi-semantic" or proposals[0].get("validationRecipeId") != "recipe-semantic":
         raise AssertionError("semantic authority parser did not produce a bounded proof batch: %r" % semantic_document)
+    independent_proofs = provider_request_from_payload({"input": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/file","operationKinds":["file/edit"],"targetRefs":["fixture.txt"]},{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+
+### C5.acceptance-slices
+[{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["state_change","validation"]}]"""})
+    independent_document = semantic_plan_payload(independent_proofs)
+    independent_kinds = [
+        (proposal.get("coverageWorkItemId"), tuple(proposal.get("requiredEvidenceKinds") or []))
+        for proposal in independent_document.get("proposals") or []
+    ]
+    if independent_kinds != [("cwi-semantic", ("state_change",)), ("cwi-semantic", ("validation",))]:
+        raise AssertionError("semantic authority parser did not emit one independent proof per evidence kind: %r" % independent_document)
     responses_wrapped = provider_request_from_payload({"input": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipes":[{"id":"recipe-semantic"}]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 [user]
 ### C4.semantic-tail

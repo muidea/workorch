@@ -346,7 +346,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			"batchSequence":            map[string]any{"type": "integer", "minimum": 0},
 			"batchCoverageWorkItemIds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": coverageIDs}},
 			"coverageOrder":            map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "items": map[string]any{"type": "string", "enum": coverageIDs}},
-			"proposals": map[string]any{"type": "array", "minItems": 0, "maxItems": len(coverageIDs), "items": map[string]any{
+			"proposals": map[string]any{"type": "array", "minItems": 0, "maxItems": len(coverageIDs) * 2, "items": map[string]any{
 				"type": "object", "additionalProperties": false,
 				"required": []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "declarationRef"},
 				"properties": map[string]any{
@@ -590,7 +590,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposals are missing")
 		}
 		proposals["minItems"] = len(coverageIDs)
-		proposals["maxItems"] = len(coverageIDs)
+		proposals["maxItems"] = len(coverageIDs) * 2
 		items, ok := proposals["items"].(map[string]any)
 		if !ok {
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposal items are missing")
@@ -636,6 +636,7 @@ func stringEnumArraySchema(values []string) map[string]any {
 func stringEnumArraySchemaWithMinimum(values []string, minimum int) map[string]any {
 	schema := stringEnumArraySchema(values)
 	schema["minItems"] = minimum
+	schema["maxItems"] = minimum
 	schema["uniqueItems"] = true
 	return schema
 }

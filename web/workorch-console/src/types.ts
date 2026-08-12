@@ -304,6 +304,7 @@ export type Run = {
 
 export type RuntimeActivationStatus = {
   disposition: string;
+  reason: string;
   actualSchemaVersion: number;
   supportedSchemaVersion: number;
 };
@@ -1209,6 +1210,12 @@ export type RuntimeSemanticPlanning = {
 
 export type RuntimeSemanticPlanningItem = {
   coverageWorkItemId: string;
+  status: string;
+  proofs?: RuntimeSemanticPlanningProof[];
+};
+
+export type RuntimeSemanticPlanningProof = {
+  evidenceKind?: string;
   proposalHash?: string;
   ownerModuleId?: string;
   operationKind?: string;

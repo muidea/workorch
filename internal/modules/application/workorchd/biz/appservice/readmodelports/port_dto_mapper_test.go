@@ -226,15 +226,19 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		LogicalRequestID: "request-1", ManifestHash: "manifest-1", DocumentHash: "document-1",
 		FeasibilityBatchID: "batch-1", FeasibilitySetHash: "set-1", SealedBindingSetHash: "binding-set-1",
 		Items: []projectioncontract.RuntimeSemanticPlanningItem{{
-			CoverageWorkItemID: "cwi-1", ProposalHash: "proposal-1", OwnerModuleID: "blocks/file", OperationKind: "file/write",
-			Status: "prerequisite_required", TargetRefs: []string{"source/a.go"}, ValidationRecipeID: "recipe-1",
-			RequiredCheckRefs: []string{"check-1"}, ObservedRevision: "tree-2", Diagnostic: &diagnostic,
+			CoverageWorkItemID: "cwi-1", Status: "prerequisite_required", Proofs: []projectioncontract.RuntimeSemanticPlanningProof{{
+				ProposalHash: "proposal-1", OwnerModuleID: "blocks/file", OperationKind: "file/write",
+				Status: "prerequisite_required", TargetRefs: []string{"source/a.go"}, ValidationRecipeID: "recipe-1",
+				RequiredCheckRefs: []string{"check-1"}, ObservedRevision: "tree-2", Diagnostic: &diagnostic,
+			}},
 		}},
 		Rejections: []projectioncontract.RuntimeSemanticDiagnostic{diagnostic},
 		FeasibilityGaps: []projectioncontract.RuntimeSemanticFeasibilityGap{{
 			RefreshGeneration: 1, ManifestHash: "manifest-old", DocumentHash: "document-old",
 			FeasibilityBatchID: "batch-old", FeasibilitySetHash: "set-old",
-			Items:      []projectioncontract.RuntimeSemanticPlanningItem{{CoverageWorkItemID: "cwi-1", Status: "stale", ObservedRevision: "tree-1"}},
+			Items: []projectioncontract.RuntimeSemanticPlanningItem{{CoverageWorkItemID: "cwi-1", Status: "stale", Proofs: []projectioncontract.RuntimeSemanticPlanningProof{{
+				Status: "stale", ObservedRevision: "tree-1",
+			}}}},
 			Rejections: []projectioncontract.RuntimeSemanticDiagnostic{diagnostic},
 		}},
 		Failure: &diagnostic,
@@ -249,8 +253,9 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		semantic.FeasibilityBatchID != "batch-1" || semantic.FeasibilitySetHash != "set-1" || semantic.SealedBindingSetHash != "binding-set-1" {
 		t.Fatalf("semantic planning port scope = %+v", semantic)
 	}
-	if len(semantic.Items) != 1 || semantic.Items[0].CoverageWorkItemID != "cwi-1" || semantic.Items[0].OwnerModuleID != "blocks/file" ||
-		semantic.Items[0].TargetRefs[0] != "source/a.go" || semantic.Items[0].RequiredCheckRefs[0] != "check-1" || semantic.Items[0].Diagnostic == nil {
+	if len(semantic.Items) != 1 || semantic.Items[0].CoverageWorkItemID != "cwi-1" || len(semantic.Items[0].Proofs) != 1 ||
+		semantic.Items[0].Proofs[0].OwnerModuleID != "blocks/file" || semantic.Items[0].Proofs[0].TargetRefs[0] != "source/a.go" ||
+		semantic.Items[0].Proofs[0].RequiredCheckRefs[0] != "check-1" || semantic.Items[0].Proofs[0].Diagnostic == nil {
 		t.Fatalf("semantic planning port item = %+v", semantic.Items)
 	}
 	if len(semantic.FeasibilityGaps) != 1 || semantic.FeasibilityGaps[0].RefreshGeneration != 1 ||
@@ -258,7 +263,7 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		semantic.Failure == nil || len(semantic.Rejections) != 1 {
 		t.Fatalf("semantic planning port lineage = %+v", semantic)
 	}
-	portDiagnostic := semantic.Items[0].Diagnostic
+	portDiagnostic := semantic.Items[0].Proofs[0].Diagnostic
 	if portDiagnostic.OriginalMessage != "owner message" || len(portDiagnostic.FieldViolations) != 1 ||
 		portDiagnostic.FieldViolations[0].Actual != "summary" || portDiagnostic.FieldViolations[0].Allowed[0] != "targetRef" ||
 		portDiagnostic.FieldViolations[0].Required[0] != "content" || portDiagnostic.FieldViolations[0].Forbidden[1] != "summary" ||
@@ -268,9 +273,9 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		t.Fatalf("semantic planning port diagnostic = %+v", portDiagnostic)
 	}
 
-	semantic.Items[0].TargetRefs[0] = "mutated"
-	semantic.Items[0].Diagnostic.FieldViolations[0].Allowed[0] = "mutated"
-	if input.SemanticPlanning.Items[0].TargetRefs[0] != "source/a.go" || input.SemanticPlanning.Items[0].Diagnostic.FieldViolations[0].Allowed[0] != "targetRef" {
+	semantic.Items[0].Proofs[0].TargetRefs[0] = "mutated"
+	semantic.Items[0].Proofs[0].Diagnostic.FieldViolations[0].Allowed[0] = "mutated"
+	if input.SemanticPlanning.Items[0].Proofs[0].TargetRefs[0] != "source/a.go" || input.SemanticPlanning.Items[0].Proofs[0].Diagnostic.FieldViolations[0].Allowed[0] != "targetRef" {
 		t.Fatalf("semantic planning port mapping aliases read model: %+v", input.SemanticPlanning)
 	}
 }
@@ -278,6 +283,7 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 func TestRunProjectionProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 	activation := &projectioncontract.RuntimeActivationStatus{
 		Disposition:            "fresh_activation_required",
+		Reason:                 "schema_unsupported",
 		ActualSchemaVersion:    2,
 		SupportedSchemaVersion: 4,
 	}
@@ -294,6 +300,31 @@ func TestRunProjectionProjectsFreshActivationStatusWithoutAliasing(t *testing.T)
 	}
 	got.RuntimeActivation.Disposition = "mutated-port-value"
 	if activation.Disposition != "fresh_activation_required" {
+		t.Fatalf("port mapping aliases app model activation: %+v", activation)
+	}
+}
+
+func TestRunProjectionPreservesCWILedgerFreshActivationReasonWithoutAliasing(t *testing.T) {
+	activation := &projectioncontract.RuntimeActivationStatus{
+		Disposition:            string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired),
+		Reason:                 string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid),
+		ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
+		SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+	}
+	got := appmodelcore.ProjectRun(appmodelcore.Run{
+		ID:                "run-invalid-cwi-ledger",
+		WorkspaceID:       "ws-invalid-cwi-ledger",
+		RuntimeActivation: activation,
+	})
+	if got.RuntimeActivation == nil ||
+		got.RuntimeActivation.Disposition != string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired) ||
+		got.RuntimeActivation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) ||
+		got.RuntimeActivation.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		got.RuntimeActivation.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("runtime activation = %+v, want CWI ledger fresh-activation projection", got.RuntimeActivation)
+	}
+	got.RuntimeActivation.Reason = "mutated-port-value"
+	if activation.Reason != string(runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid) {
 		t.Fatalf("port mapping aliases app model activation: %+v", activation)
 	}
 }

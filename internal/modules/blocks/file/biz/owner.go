@@ -541,7 +541,10 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 			command.Binding.TargetSelectorRef,
 			command.Binding.ProspectiveTargetRef,
 			runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
-			runtimeTargetSelectionBinding{ownerRef: command.Binding.TargetSelectorOwnerRef, subjectRef: command.Binding.TargetSelectorSubjectRef},
+			runtimeTargetSelectionBinding{
+				ownerRef: command.Binding.TargetSelectorOwnerRef, subjectRef: command.Binding.TargetSelectorSubjectRef,
+				candidateRefs: command.Binding.TargetSelectorCandidateRefs,
+			},
 		)
 		if selectionErr == nil {
 			selection = selection.Normalized()

@@ -33,6 +33,12 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 // with RepairDirective synchronized to the sealed decision (INV-05).
 func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
 	facts = facts.Normalized()
+	// Every SM-2 reduction is a defensive repair-ledger boundary. Focus changes
+	// normally reset this state atomically, while semantic re-seal, retirement,
+	// and delayed facts can reach the reducer through a different persisted
+	// path. Do not let a prior CWI's gap, budget, or directive choose this
+	// focus's next action.
+	facts = rebindRepairForCurrentFocus(facts)
 	// A delayed prerequisite result from a completed focus is never current
 	// authority. Retire it before ordinary preflight: otherwise the raw resource
 	// pointer makes RuntimeFacts invalid and a drive can surface a process error

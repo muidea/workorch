@@ -119,36 +119,52 @@ func (m *Biz) applyRunContinuationEligible(
 // governance work for that record.
 func (m *Biz) applyRunRuntimeStateIncompatible(
 	ctx context.Context,
-	item runevents.RuntimeRecoveryInventoryItem,
-	schemaErr *runtimecontract.RuntimeStateSchemaVersionError,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	runtimeStateRef string,
+	incompatibility runtimecontract.RuntimeStateIncompatibility,
+	diagnostic error,
 ) error {
-	if m == nil || m.EventHub() == nil || schemaErr == nil || item.WorkspaceID == "" || item.RunID == "" || item.RuntimeStateRef == "" {
+	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || runtimeStateRef == "" || incompatibility.Validate() != nil {
 		return common.ErrInvalidArgument
+	}
+	incompatibility = incompatibility.Normalized()
+	category := runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported
+	originalClass := "runtime_state_schema"
+	originalCode := "unsupported_runtime_state_schema"
+	originalMessage := "runtime state schema is unsupported by this binary"
+	if incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid {
+		category = runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid
+		originalClass = "runtime_cwi_ledger"
+		originalCode = "invalid_runtime_cwi_ledger"
+		originalMessage = "runtime state CWI ledger is invalid and cannot be resumed"
+	}
+	if diagnostic != nil {
+		originalMessage = diagnostic.Error()
 	}
 	feedback := runtimecontract.RuntimeFeedback{
 		Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
-		StableCategory: runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported,
-		WorkspaceID:    item.WorkspaceID,
-		RunID:          item.RunID,
+		StableCategory: category,
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
 		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
 			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 			OwnerModuleID:    ModuleID,
-			OriginalClass:    "runtime_state_schema",
-			OriginalCode:     "unsupported_runtime_state_schema",
-			OriginalMessage:  "runtime state schema is unsupported by this binary",
-			Signature:        fmt.Sprintf("runtime-state-schema/%d/%d/%s", schemaErr.Actual, schemaErr.Supported, item.RuntimeStateRef),
-			ObservedRevision: item.RuntimeStateRef,
+			OriginalClass:    originalClass,
+			OriginalCode:     originalCode,
+			OriginalMessage:  originalMessage,
+			Signature:        fmt.Sprintf("runtime-state-incompatible/%s/%d/%d/%s", incompatibility.Reason, incompatibility.ActualSchemaVersion, incompatibility.SupportedSchemaVersion, runtimeStateRef),
+			ObservedRevision: runtimeStateRef,
 		},
 	}
 	cmd := runevents.RuntimeStateIncompatibleFact{
-		WorkspaceID:            item.WorkspaceID,
-		RunID:                  item.RunID,
-		SourceOwner:            ModuleID,
-		CausationID:            fmt.Sprintf("runtime-state-incompatible/%s/%d/%d", item.RuntimeStateRef, schemaErr.Actual, schemaErr.Supported),
-		RuntimeStateRef:        item.RuntimeStateRef,
-		ActualSchemaVersion:    schemaErr.Actual,
-		SupportedSchemaVersion: schemaErr.Supported,
-		Feedback:               feedback,
+		WorkspaceID:     workspaceID,
+		RunID:           runID,
+		SourceOwner:     ModuleID,
+		CausationID:     fmt.Sprintf("runtime-state-incompatible/%s/%s/%d/%d", runtimeStateRef, incompatibility.Reason, incompatibility.ActualSchemaVersion, incompatibility.SupportedSchemaVersion),
+		RuntimeStateRef: runtimeStateRef,
+		Incompatibility: incompatibility,
+		Feedback:        feedback,
 	}.Normalized()
 	if err := cmd.Validate(); err != nil {
 		return err
@@ -161,7 +177,7 @@ func (m *Biz) applyRunRuntimeStateIncompatible(
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactRuntimeStateIncompatible, "run", string(item.RunID), item.WorkspaceID, item.RunID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactRuntimeStateIncompatible, "run", string(runID), workspaceID, runID)
 	_, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunFactRuntimeStateIncompatible)
 	return err
 }

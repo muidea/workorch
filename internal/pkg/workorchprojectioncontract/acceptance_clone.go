@@ -78,13 +78,25 @@ func cloneRuntimeSemanticPlanningItems(items []RuntimeSemanticPlanningItem) []Ru
 	}
 	ret := make([]RuntimeSemanticPlanningItem, 0, len(items))
 	for _, item := range items {
-		item.TargetRefs = append([]string(nil), item.TargetRefs...)
-		item.RequiredCheckRefs = append([]string(nil), item.RequiredCheckRefs...)
-		if item.Diagnostic != nil {
-			diagnostic := cloneRuntimeSemanticDiagnostic(*item.Diagnostic)
-			item.Diagnostic = &diagnostic
-		}
+		item.Proofs = cloneRuntimeSemanticPlanningProofs(item.Proofs)
 		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneRuntimeSemanticPlanningProofs(proofs []RuntimeSemanticPlanningProof) []RuntimeSemanticPlanningProof {
+	if proofs == nil {
+		return nil
+	}
+	ret := make([]RuntimeSemanticPlanningProof, 0, len(proofs))
+	for _, proof := range proofs {
+		proof.TargetRefs = append([]string(nil), proof.TargetRefs...)
+		proof.RequiredCheckRefs = append([]string(nil), proof.RequiredCheckRefs...)
+		if proof.Diagnostic != nil {
+			diagnostic := cloneRuntimeSemanticDiagnostic(*proof.Diagnostic)
+			proof.Diagnostic = &diagnostic
+		}
+		ret = append(ret, proof)
 	}
 	return ret
 }

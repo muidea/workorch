@@ -44,12 +44,15 @@ func TestRuntimeSemanticPlanningProjectionPreservesProposalOwnerFactsAndOriginal
 	state.SemanticPlanning.CatalogRefreshAttempts = 1
 	state.SemanticPlanning.LogicalRequestID = "semantic-request-1"
 	state.SemanticPlanning.Manifest = &runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-current"}
-	state.SemanticPlanning.Document = &runtimecontract.RuntimeSemanticPlanDocument{Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposalA, proposalB}}
+	state.SemanticPlanning.Document = &runtimecontract.RuntimeSemanticPlanDocument{
+		PlanStep:  runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposalA, proposalB},
+	}
 	state.SemanticPlanning.DocumentHash = "document-current"
 	state.SemanticPlanning.FeasibilityBatchID = "batch-current"
 	state.SemanticPlanning.FeasibilitySetHash = "set-current"
 	state.SemanticPlanning.Feasibilities = []runtimecontract.RuntimeSemanticProofFeasibility{{
-		CoverageWorkItemID: "cwi-a", ProposalHash: "proposal-a", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		CoverageWorkItemID: "cwi-a", ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposalA), OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		Status: runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, ObservedRevision: "tree-9",
 		TargetRefs: []string{"source/a.go"}, ValidationRecipeID: "recipe-a", RequiredCheckRefs: []string{"check-a"},
 		OriginalDiagnostic: &diagnostic,
@@ -75,17 +78,22 @@ func TestRuntimeSemanticPlanningProjectionPreservesProposalOwnerFactsAndOriginal
 		t.Fatalf("semantic items = %+v", got.Items)
 	}
 	first := got.Items[0]
-	if first.Status != string(runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired) || first.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
-		first.OperationKind != runtimecontract.StepKindFileWrite || len(first.TargetRefs) != 1 || first.TargetRefs[0] != "source/a.go" ||
-		first.ValidationRecipeID != "recipe-a" || len(first.RequiredCheckRefs) != 1 || first.RequiredCheckRefs[0] != "check-a" ||
-		first.ObservedRevision != "tree-9" || first.Diagnostic == nil {
+	if first.Status != string(runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired) || len(first.Proofs) != 1 {
 		t.Fatalf("observed semantic item = %+v", first)
 	}
+	firstProof := first.Proofs[0]
+	if firstProof.OwnerModuleID != runtimecontract.RuntimeModuleFile || firstProof.OperationKind != runtimecontract.StepKindFileWrite ||
+		len(firstProof.TargetRefs) != 1 || firstProof.TargetRefs[0] != "source/a.go" ||
+		firstProof.ValidationRecipeID != "recipe-a" || len(firstProof.RequiredCheckRefs) != 1 || firstProof.RequiredCheckRefs[0] != "check-a" ||
+		firstProof.ObservedRevision != "tree-9" || firstProof.Diagnostic == nil {
+		t.Fatalf("observed semantic proof = %+v", firstProof)
+	}
 	second := got.Items[1]
-	if second.Status != "awaiting_feasibility" || second.OwnerModuleID != runtimecontract.RuntimeModuleGit || second.OperationKind != runtimecontract.StepKindGitWrite {
+	if second.Status != "awaiting_feasibility" || len(second.Proofs) != 1 ||
+		second.Proofs[0].OwnerModuleID != runtimecontract.RuntimeModuleGit || second.Proofs[0].OperationKind != runtimecontract.StepKindGitWrite {
 		t.Fatalf("awaiting semantic item = %+v", second)
 	}
-	assertSemanticProjectionDiagnostic(t, *first.Diagnostic)
+	assertSemanticProjectionDiagnostic(t, *firstProof.Diagnostic)
 	if len(got.Rejections) != 1 {
 		t.Fatalf("semantic rejections = %+v", got.Rejections)
 	}
@@ -93,9 +101,50 @@ func TestRuntimeSemanticPlanningProjectionPreservesProposalOwnerFactsAndOriginal
 	if len(got.FeasibilityGaps) != 1 || got.FeasibilityGaps[0].RefreshGeneration != 1 ||
 		got.FeasibilityGaps[0].ManifestHash != "manifest-old" || got.FeasibilityGaps[0].DocumentHash != "document-old" ||
 		got.FeasibilityGaps[0].FeasibilityBatchID != "batch-old" || got.FeasibilityGaps[0].FeasibilitySetHash != "set-old" ||
-		len(got.FeasibilityGaps[0].Items) != 1 || got.FeasibilityGaps[0].Items[0].ObservedRevision != "repo-3" ||
+		len(got.FeasibilityGaps[0].Items) != 1 || len(got.FeasibilityGaps[0].Items[0].Proofs) != 1 ||
+		got.FeasibilityGaps[0].Items[0].Proofs[0].ObservedRevision != "repo-3" ||
 		len(got.FeasibilityGaps[0].Rejections) != 1 {
 		t.Fatalf("semantic gap history = %+v", got.FeasibilityGaps)
+	}
+}
+
+func TestRuntimeSemanticPlanningProjectionRetainsIndependentProofsForOneCWI(t *testing.T) {
+	state := semanticPlanningProjectionState("ws-semantic", "run-semantic", 25)
+	state.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
+	stateChange := semanticPlanningProjectionProposal("cwi-a", runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileWrite, "source/a.go")
+	stateChange.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	validation := semanticPlanningProjectionProposal("cwi-a", runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, "source/a.go")
+	validation.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	validation.ValidationRecipeID = "recipe-validate"
+	validation.RequiredCheckRefs = []string{"check-validate"}
+	state.SemanticPlanning.Document = &runtimecontract.RuntimeSemanticPlanDocument{
+		PlanStep:  runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		Proposals: []runtimecontract.RuntimeSemanticProofProposal{stateChange, validation},
+	}
+	state.SemanticPlanning.Feasibilities = []runtimecontract.RuntimeSemanticProofFeasibility{
+		{
+			CoverageWorkItemID: "cwi-a", ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(stateChange),
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
+			ObservedRevision: "tree-10", TargetRefs: []string{"source/a.go"},
+		},
+		{
+			CoverageWorkItemID: "cwi-a", ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(validation),
+			OwnerModuleID: runtimecontract.RuntimeModuleShell, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
+			ObservedRevision: "validation-10", TargetRefs: []string{"source/a.go"},
+			ValidationRecipeID: "recipe-validate", RequiredCheckRefs: []string{"check-validate"},
+		},
+	}
+
+	got := runtimeSemanticPlanningProjection(state)
+	if got == nil || len(got.Items) != 2 || got.Items[0].CoverageWorkItemID != "cwi-a" ||
+		len(got.Items[0].Proofs) != 2 || got.Items[0].Status != string(runtimecontract.RuntimeSemanticFeasibilityFeasible) {
+		t.Fatalf("independent semantic proofs were collapsed: %+v", got)
+	}
+	proofs := got.Items[0].Proofs
+	if proofs[0].EvidenceKind != runtimecontract.EvidenceKindStateChange || proofs[0].OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		proofs[1].EvidenceKind != runtimecontract.EvidenceKindValidation || proofs[1].OwnerModuleID != runtimecontract.RuntimeModuleShell ||
+		proofs[1].ValidationRecipeID != "recipe-validate" || len(proofs[1].RequiredCheckRefs) != 1 || proofs[1].RequiredCheckRefs[0] != "check-validate" {
+		t.Fatalf("independent semantic proof details = %+v", proofs)
 	}
 }
 
@@ -138,6 +187,7 @@ func semanticPlanningProjectionProposal(coverageID, owner, kind, targetRef strin
 		ValidationRecipeID: "recipe-proposal", RequiredCheckRefs: []string{"check-proposal"},
 	}
 	if targetRef != "" {
+		proposal.Target.Policy = runtimecontract.RuntimeOperationTargetPolicyExactTarget
 		proposal.Target.ExactTargetRefs = []string{targetRef}
 	}
 	return proposal

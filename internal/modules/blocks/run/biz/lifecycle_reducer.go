@@ -173,10 +173,10 @@ func reduceContinuationEligible(current *runmodel.Run, cmd runevents.RuntimeCont
 	}, nil
 }
 
-// reduceRuntimeStateIncompatible converts the immutable Orchestrator schema
-// observation into Run-owned administrative state. The Runtime aggregate stays
-// opaque: only its stored ref/version are compared and no authority, dispatch,
-// governance, or delivery value is decoded here.
+// reduceRuntimeStateIncompatible converts the immutable Orchestrator
+// persisted-state observation into Run-owned administrative state. The Runtime
+// aggregate stays opaque: only its stored ref/schema identity are compared and
+// no authority, dispatch, governance, or delivery value is decoded here.
 func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.RuntimeStateIncompatibleFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
@@ -194,16 +194,15 @@ func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.Runtime
 		return lifecycleTransition{}, fmt.Errorf("%w: runtime state incompatibility requires persisted runtime state", common.ErrConflict)
 	}
 	if runevents.RuntimeStateRef(current.WorkspaceID, current.ID, current.RuntimeState.StateRevision) != cmd.RuntimeStateRef ||
-		current.RuntimeState.SchemaVersion != cmd.ActualSchemaVersion {
+		current.RuntimeState.SchemaVersion != cmd.Incompatibility.ActualSchemaVersion {
 		return lifecycleTransition{}, fmt.Errorf("%w: runtime state incompatibility identity mismatch", common.ErrConflict)
 	}
 	feedback := cmd.Feedback.CloneOriginal()
 	status := &runmodel.RuntimeActivationStatus{
-		Disposition:            runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-		RuntimeStateRef:        cmd.RuntimeStateRef,
-		ActualSchemaVersion:    cmd.ActualSchemaVersion,
-		SupportedSchemaVersion: cmd.SupportedSchemaVersion,
-		Feedback:               &feedback,
+		Disposition:     runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
+		RuntimeStateRef: cmd.RuntimeStateRef,
+		Incompatibility: cmd.Incompatibility.Normalized(),
+		Feedback:        &feedback,
 	}
 	if current.RuntimeActivationStatus != nil {
 		if sameRuntimeActivationStatus(current.RuntimeActivationStatus, status) {
@@ -414,8 +413,10 @@ func sameRuntimeActivationStatus(left, right *runmodel.RuntimeActivationStatus) 
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
+	leftIncompatibility := left.Incompatibility.Normalized()
+	rightIncompatibility := right.Incompatibility.Normalized()
 	if left.Disposition != right.Disposition || left.RuntimeStateRef != right.RuntimeStateRef ||
-		left.ActualSchemaVersion != right.ActualSchemaVersion || left.SupportedSchemaVersion != right.SupportedSchemaVersion {
+		leftIncompatibility != rightIncompatibility {
 		return false
 	}
 	if left.Feedback == nil || right.Feedback == nil {

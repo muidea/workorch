@@ -413,15 +413,15 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
               columns={[
                 { title: 'CWI', dataIndex: 'coverageWorkItemId', ellipsis: true },
                 { title: 'State', dataIndex: 'status', width: 150, render: (_, item) => stateTag(item.status) },
-                { title: 'Owner / Kind', dataIndex: 'ownerModuleId', ellipsis: true, render: (_, item) => [item.ownerModuleId, item.operationKind].filter(Boolean).join(' / ') || '-' },
-                { title: 'Targets', dataIndex: 'targetRefs', ellipsis: true, render: (_, item) => compactTags(item.targetRefs ?? [], 3) },
-                { title: 'Recipe / Checks', dataIndex: 'validationRecipeId', ellipsis: true, render: (_, item) => compactTags([item.validationRecipeId, ...(item.requiredCheckRefs ?? [])].filter(Boolean) as string[], 3) },
-                { title: 'Observed Revision', dataIndex: 'observedRevision', ellipsis: true },
-                { title: 'Diagnostic', dataIndex: 'diagnostic', ellipsis: true, render: (_, item) => item.diagnostic?.originalMessage || item.diagnostic?.omittedReason || '-' }
+                { title: 'Proofs', dataIndex: 'proofs', ellipsis: true, render: (_, item) => compactTags((item.proofs ?? []).map((proof) => [proof.evidenceKind, proof.ownerModuleId, proof.operationKind].filter(Boolean).join(' / ')).filter(Boolean), 3) },
+                { title: 'Targets', dataIndex: 'proofs', ellipsis: true, render: (_, item) => compactTags((item.proofs ?? []).flatMap((proof) => proof.targetRefs ?? []).filter(Boolean), 3) },
+                { title: 'Recipe / Checks', dataIndex: 'proofs', ellipsis: true, render: (_, item) => compactTags((item.proofs ?? []).flatMap((proof) => [proof.validationRecipeId, ...(proof.requiredCheckRefs ?? [])]).filter(Boolean) as string[], 3) },
+                { title: 'Observed Revision', dataIndex: 'proofs', ellipsis: true, render: (_, item) => compactTags((item.proofs ?? []).map((proof) => proof.observedRevision).filter(Boolean) as string[], 3) },
+                { title: 'Diagnostic', dataIndex: 'proofs', ellipsis: true, render: (_, item) => (item.proofs ?? []).map((proof) => proof.diagnostic?.originalMessage || proof.diagnostic?.omittedReason).filter(Boolean).join(' | ') || '-' }
               ]}
               expandable={{
-                rowExpandable: (item) => Boolean(item.diagnostic),
-                expandedRowRender: (item) => <pre className="json-panel">{compactJSON(item.diagnostic)}</pre>
+                rowExpandable: (item) => Boolean(item.proofs?.some((proof) => proof.diagnostic)),
+                expandedRowRender: (item) => <pre className="json-panel">{compactJSON(item.proofs)}</pre>
               }}
               dataSource={semantic.items}
             />

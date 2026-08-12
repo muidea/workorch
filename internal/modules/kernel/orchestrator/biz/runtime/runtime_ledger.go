@@ -132,6 +132,31 @@ func resetRepairForFocus(focusID, sliceID, revision string) runtimecontract.Runt
 	return runtimecontract.RuntimeRepairLedger{FocusID: strings.TrimSpace(focusID), SliceID: strings.TrimSpace(sliceID), LastProgressRevision: strings.TrimSpace(revision)}
 }
 
+// rebindRepairForCurrentFocus is the SM-2 boundary for repair state that was
+// persisted for a prior focus. A repair ledger and its directive are local
+// Orchestrator authority, so a semantic projection, retirement, or delayed
+// reduction may clear/rebind them here without involving a capability owner,
+// Run lifecycle, or projection component.
+//
+// An empty ledger is the valid initial state and must stay empty. In
+// particular, it must not clear a valid current-focus directive merely because
+// the first repair cycle has not yet written counters into the ledger.
+func rebindRepairForCurrentFocus(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	facts = facts.Normalized()
+	currentFocusID := strings.TrimSpace(facts.Focus.ID)
+	if currentFocusID == "" {
+		facts.RepairDirective = nil
+		return facts
+	}
+	if facts.Repair.FocusID != "" && facts.Repair.FocusID != currentFocusID {
+		facts.Repair = resetRepairForFocus(currentFocusID, facts.Focus.SliceID, facts.EvidenceRevision)
+	}
+	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != currentFocusID {
+		facts.RepairDirective = nil
+	}
+	return facts.Normalized()
+}
+
 func noteRepairNoProgress(ledger runtimecontract.RuntimeRepairLedger) runtimecontract.RuntimeRepairLedger {
 	ledger = ledger.Normalized()
 	ledger.NoProgressCount++

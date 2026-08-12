@@ -108,6 +108,14 @@ type RuntimeCoverageItemFact struct {
 	PrerequisiteCoverageWorkItemIDs []common.CoverageWorkItemID
 	ReopenDependencies              []RuntimeCoverageReopenDependency
 	ReopenedByEvidenceRefs          []string
+	// CWIConvergenceState, CurrentBindingRef and FocusID form the canonical
+	// persisted CWI ledger. They are owned by the Orchestrator SM-2 reducer;
+	// capability owners only return observations and receipts.
+	CWIConvergenceState RuntimeCWIConvergenceState
+	CurrentBindingRef   *RuntimeCWIBindingRef
+	BindingLineage      []RuntimeCWIBindingRef
+	FocusID             string
+	ReopenLineage       []RuntimeCWIReopenLineage
 }
 
 // InitialRuntimeCoverageFacts materializes the item closure ledger from the
@@ -149,6 +157,7 @@ func NormalizeRuntimeCoverageFacts(values []RuntimeCoverageItemFact) []RuntimeCo
 		value.PrerequisiteCoverageWorkItemIDs = normalizeRuntimeCoveragePrerequisiteIDs(value.PrerequisiteCoverageWorkItemIDs)
 		value.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(value.ReopenDependencies)
 		value.ReopenedByEvidenceRefs = normalizeStrings(value.ReopenedByEvidenceRefs)
+		value = normalizeRuntimeCoverageItemFact(value)
 		if value.ID == "" || value.State == "" {
 			continue
 		}

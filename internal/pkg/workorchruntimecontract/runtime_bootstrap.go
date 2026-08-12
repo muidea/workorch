@@ -100,6 +100,14 @@ func (b RuntimeBootstrap) Validate() error {
 		if focus.ID == "" || len(focus.CoverageWorkItemIDs) == 0 || (len(focus.RequiredEvidenceKinds) == 0 && !focus.RequireAssessment) {
 			return fmt.Errorf("runtime bootstrap focus requires identity, coverage and evidence or assessment")
 		}
+		// A presentation slice may contain multiple CWI, but Runtime authority
+		// deliberately projects one focus per CWI. The later semantic binding,
+		// receipt, evidence, reopen and reconciliation ledgers all use that same
+		// identity, so accepting a shared bootstrap focus would create an
+		// ambiguous current-binding owner before the Run can persist it.
+		if len(focus.CoverageWorkItemIDs) != 1 {
+			return fmt.Errorf("runtime bootstrap focus %s must contain exactly one coverage item", focus.ID)
+		}
 		if err := ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
 			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
 		}
@@ -126,10 +134,12 @@ func (b RuntimeBootstrap) Validate() error {
 			}
 			coveredByFocus[id] = struct{}{}
 		}
+		// A bootstrap seals only the Definition seed and declarative policy.
+		// Per-CWI proof bindings are created later by the Orchestrator after the
+		// bounded semantic-plan and owner-feasibility sequence. Accepting one
+		// here would let activation bypass the canonical CWI ledger.
 		if len(focus.CoverageEvidenceBindings) != 0 {
-			if err := ValidateCoverageEvidenceBindingsForFocus(focus, b.Definition.Revision); err != nil {
-				return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
-			}
+			return fmt.Errorf("runtime bootstrap focus %s must not contain sealed coverage evidence bindings", focus.ID)
 		}
 		seen[focus.ID] = struct{}{}
 	}
@@ -188,7 +198,7 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 	if err := b.Validate(); err != nil {
 		return RuntimeFacts{}, err
 	}
-	return RuntimeFacts{
+	facts := RuntimeFacts{
 		WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: b.Definition.Revision,
 		DefinitionSeed: b.DefinitionSeed.Clone(), EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
 		RemainingFocuses:  append([]CoverageFocus(nil), b.Focuses[1:]...),
@@ -200,7 +210,8 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 		Repair:            RuntimeRepairLedger{},
 		Coverage:          InitialRuntimeCoverageFacts(b.CoverageItems),
 		Slices:            append([]RuntimeAcceptanceSlice(nil), b.Slices...),
-	}, nil
+	}
+	return InitializeRuntimeCWILedgerForActivation(facts)
 }
 
 func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {

@@ -175,10 +175,15 @@ type CoverageEvidenceBinding struct {
 	TargetSelectorRef        string
 	TargetSelectorOwnerRef   string
 	TargetSelectorSubjectRef string
-	ProspectiveTargetRef     string
-	DeclarationRef           string
-	PrerequisiteRefs         []string
-	Hash                     string
+	// TargetSelectorCandidateRefs is the bounded declaration required by a
+	// selector that cannot be independently replayed from the workspace alone.
+	// It is sealed with the binding so reconciliation can ask the owner to
+	// verify the same target surface after a process restart.
+	TargetSelectorCandidateRefs []string
+	ProspectiveTargetRef        string
+	DeclarationRef              string
+	PrerequisiteRefs            []string
+	Hash                        string
 }
 
 func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
@@ -191,6 +196,7 @@ func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
 	b.TargetSelectorRef = strings.TrimSpace(b.TargetSelectorRef)
 	b.TargetSelectorOwnerRef = strings.TrimSpace(b.TargetSelectorOwnerRef)
 	b.TargetSelectorSubjectRef = strings.TrimSpace(b.TargetSelectorSubjectRef)
+	b.TargetSelectorCandidateRefs = normalizeStrings(b.TargetSelectorCandidateRefs)
 	b.ProspectiveTargetRef = strings.TrimSpace(b.ProspectiveTargetRef)
 	b.DeclarationRef = strings.TrimSpace(b.DeclarationRef)
 	b.PrerequisiteRefs = normalizeStrings(b.PrerequisiteRefs)
@@ -205,6 +211,7 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 		b.Proofs[index] = b.Proofs[index].Clone()
 	}
 	b.TargetRefs = append([]string(nil), b.TargetRefs...)
+	b.TargetSelectorCandidateRefs = append([]string(nil), b.TargetSelectorCandidateRefs...)
 	b.PrerequisiteRefs = append([]string(nil), b.PrerequisiteRefs...)
 	return b
 }
@@ -227,6 +234,9 @@ func (b CoverageEvidenceBinding) Validate() error {
 	}
 	if b.TargetSelectorRef != "" && (b.TargetSelectorOwnerRef == "" || b.TargetSelectorSubjectRef == "") {
 		return fmt.Errorf("coverage evidence binding %q selector requires owner and subject", b.ID)
+	}
+	if len(b.TargetSelectorCandidateRefs) != 0 && b.TargetSelectorRef == "" {
+		return fmt.Errorf("coverage evidence binding %q selector candidates require a selector", b.ID)
 	}
 	if b.Hash != "" && b.Hash != StableCoverageEvidenceBindingHash(b) {
 		return fmt.Errorf("coverage evidence binding %q hash does not match contents", b.ID)
@@ -261,6 +271,7 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 	writeHashString(h, binding.TargetSelectorRef)
 	writeHashString(h, binding.TargetSelectorOwnerRef)
 	writeHashString(h, binding.TargetSelectorSubjectRef)
+	writeHashStrings(h, binding.TargetSelectorCandidateRefs)
 	writeHashString(h, binding.ProspectiveTargetRef)
 	writeHashString(h, binding.DeclarationRef)
 	writeHashStrings(h, binding.PrerequisiteRefs)

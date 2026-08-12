@@ -13,10 +13,10 @@ import (
 
 const (
 	RuntimeDefinitionSeedSchemaCurrent         = "workorch.runtime_definition_seed"
-	RuntimeSemanticPlanManifestSchemaCurrent   = "workorch.runtime_semantic_plan_manifest"
-	RuntimeSemanticPlanDocumentSchemaCurrent   = "workorch.runtime_semantic_plan_document"
-	RuntimeSemanticFeasibilitySchemaCurrent    = "workorch.runtime_semantic_feasibility"
-	RuntimeSemanticPlanningLedgerSchemaCurrent = "workorch.runtime_semantic_planning_ledger"
+	RuntimeSemanticPlanManifestSchemaCurrent   = "workorch.runtime_semantic_plan_manifest.v2"
+	RuntimeSemanticPlanDocumentSchemaCurrent   = "workorch.runtime_semantic_plan_document.v2"
+	RuntimeSemanticFeasibilitySchemaCurrent    = "workorch.runtime_semantic_feasibility.v2"
+	RuntimeSemanticPlanningLedgerSchemaCurrent = "workorch.runtime_semantic_planning_ledger.v2"
 )
 
 // RuntimeProviderDocumentKind selects one of the two mutually exclusive
@@ -173,6 +173,20 @@ type RuntimeSemanticPlanManifest struct {
 // is deliberately pure: owner resource availability is established later by
 // typed feasibility observations and is never inferred here.
 func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility) (RuntimeSemanticPlanManifest, error) {
+	seed = seed.Clone()
+	coverageIDs := make([]common.CoverageWorkItemID, 0, len(seed.CoverageItems))
+	for _, item := range seed.CoverageItems {
+		coverageIDs = append(coverageIDs, item.ID)
+	}
+	return CompileRuntimeSemanticPlanManifestForCoverage(workspaceID, runID, definition, seed, execution, admissibilities, coverageIDs)
+}
+
+// CompileRuntimeSemanticPlanManifestForCoverage compiles a manifest for the
+// exact canonical CWI rows that remain eligible for semantic planning. The
+// Definition seed hash stays whole-run identity; only provider-visible work
+// items are narrowed. This is not a compatibility path and never recreates a
+// settled CWI from historical focus state.
+func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceID, runID common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, execution RuntimeExecutionContract, admissibilities []RuntimeOperationAdmissibility, coverageIDs []common.CoverageWorkItemID) (RuntimeSemanticPlanManifest, error) {
 	definition = definition.Normalized()
 	seed = seed.Clone()
 	execution = execution.Normalized()
@@ -190,6 +204,33 @@ func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID co
 	}
 	if seed.DefinitionRevision != definition.Revision || execution.OperationContractRevision == "" {
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest inputs have mismatched definition or operation contract identity")
+	}
+	wantedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(coverageIDs))
+	for _, coverageID := range coverageIDs {
+		coverageID = common.CoverageWorkItemID(strings.TrimSpace(string(coverageID)))
+		if coverageID == "" {
+			return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest has an empty eligible coverage item")
+		}
+		if _, duplicate := wantedCoverage[coverageID]; duplicate {
+			return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest duplicates eligible coverage item %q", coverageID)
+		}
+		wantedCoverage[coverageID] = struct{}{}
+	}
+	if len(wantedCoverage) == 0 {
+		return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest has no eligible coverage items")
+	}
+	coverageItems := make([]RuntimeCoverageItem, 0, len(wantedCoverage))
+	for _, item := range seed.CoverageItems {
+		if _, found := wantedCoverage[item.ID]; !found {
+			continue
+		}
+		coverageItems = append(coverageItems, item)
+		delete(wantedCoverage, item.ID)
+	}
+	if len(wantedCoverage) != 0 {
+		for coverageID := range wantedCoverage {
+			return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest eligible coverage %q is outside definition seed", coverageID)
+		}
 	}
 
 	canonicalOwners := map[string]struct{}{
@@ -298,7 +339,7 @@ func CompileRuntimeSemanticPlanManifest(workspaceID common.WorkspaceID, runID co
 		WorkspaceID:   workspaceID, RunID: runID,
 		DefinitionRevision: definition.Revision, DefinitionSeedHash: seed.Hash,
 		OperationContractRevision: execution.OperationContractRevision,
-		CoverageItems:             seed.CoverageItems,
+		CoverageItems:             coverageItems,
 		AllowedOwnerModuleIDs:     owners, AllowedOperationKinds: kinds,
 		AllowedTargetPolicies: policies, OwnerCatalogs: sealedCatalogs,
 	}
@@ -581,6 +622,7 @@ func (p RuntimeSemanticProofProposal) Clone() RuntimeSemanticProofProposal {
 }
 
 func (p RuntimeSemanticProofProposal) Validate() error {
+	rawEvidenceKinds := append([]string(nil), p.RequiredEvidenceKinds...)
 	p = p.Normalized()
 	for _, value := range []struct {
 		field string
@@ -595,8 +637,8 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 			return runtimeSemanticProposalConstraint(value.field, RuntimeSemanticConstraintNonEmpty, "empty", []string{"non-empty string"}, nil)
 		}
 	}
-	if len(p.RequiredEvidenceKinds) == 0 {
-		return runtimeSemanticProposalConstraint("requiredEvidenceKinds", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one evidence kind"}, nil)
+	if len(rawEvidenceKinds) != len(p.RequiredEvidenceKinds) || len(p.RequiredEvidenceKinds) != 1 {
+		return runtimeSemanticProposalConstraint("requiredEvidenceKinds", RuntimeSemanticConstraintRelational, strings.Join(p.RequiredEvidenceKinds, ","), []string{"exactly one evidence kind per proof"}, nil)
 	}
 	if len(p.RequiredEffectScopes) == 0 {
 		return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintNonEmpty, "empty_array", []string{"at least one effect scope"}, nil)
@@ -763,12 +805,9 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 			if _, ok := batchCoverage[proposal.CoverageWorkItemID]; !ok {
 				return fmt.Errorf("runtime semantic batch document proposal %q is outside batch", proposal.CoverageWorkItemID)
 			}
-			if _, duplicate := seenProposalCoverage[proposal.CoverageWorkItemID]; duplicate {
-				return fmt.Errorf("runtime semantic document duplicates coverage %q", proposal.CoverageWorkItemID)
-			}
 			seenProposalCoverage[proposal.CoverageWorkItemID] = struct{}{}
 		}
-		if len(batchCoverage) != len(d.Proposals) {
+		if len(batchCoverage) != len(seenProposalCoverage) {
 			return fmt.Errorf("runtime semantic batch document does not cover its batch exactly")
 		}
 	}
@@ -782,7 +821,8 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 	for _, policy := range manifest.AllowedTargetPolicies {
 		policies[policy] = struct{}{}
 	}
-	seen := make(map[common.CoverageWorkItemID]struct{}, len(d.Proposals))
+	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(d.Proposals))
+	seenProofKinds := make(map[string]struct{}, len(d.Proposals))
 	for proposalIndex, proposal := range d.Proposals {
 		if err := proposal.Validate(); err != nil {
 			var constraint *RuntimeSemanticProposalConstraintError
@@ -813,10 +853,15 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 		if _, found := items[proposal.CoverageWorkItemID]; !found {
 			return fmt.Errorf("runtime semantic document proposal coverage %q is outside manifest", proposal.CoverageWorkItemID)
 		}
-		if _, duplicate := seen[proposal.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime semantic document duplicates coverage %q", proposal.CoverageWorkItemID)
+		proofKind := proposal.RequiredEvidenceKinds[0]
+		proofKey := string(proposal.CoverageWorkItemID) + "\x00" + proofKind
+		if _, duplicate := seenProofKinds[proofKey]; duplicate {
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEvidenceKinds", RuntimeSemanticConstraintRelational,
+				proofKind, []string{"one proof per evidence kind for each CWI"}, nil,
+				fmt.Errorf("runtime semantic document duplicates proof kind %q for coverage %q", proofKind, proposal.CoverageWorkItemID))
 		}
-		seen[proposal.CoverageWorkItemID] = struct{}{}
+		seenProofKinds[proofKey] = struct{}{}
+		seenCoverage[proposal.CoverageWorkItemID] = struct{}{}
 		if _, allowed := owners[proposal.OwnerModuleID]; !allowed {
 			return runtimeSemanticProposalViolation(proposal, proposalIndex, "ownerModuleId", RuntimeSemanticConstraintAllowedValue, proposal.OwnerModuleID, nil, manifest.AllowedOwnerModuleIDs, fmt.Errorf("runtime semantic document owner %q is outside manifest", proposal.OwnerModuleID))
 		}
@@ -850,7 +895,7 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 	if d.PlanStep == RuntimeSemanticPlanStepCoverageOrder {
 		// The order step intentionally carries no proof proposal.
 	} else if d.BatchID == "" {
-		if len(seen) != len(items) {
+		if len(seenCoverage) != len(items) {
 			return fmt.Errorf("runtime semantic document does not cover every required CWI")
 		}
 	}
@@ -1093,6 +1138,11 @@ type RuntimeSemanticPlanningRetirementReason string
 const (
 	RuntimeSemanticPlanningRetirementResourceInvalidated RuntimeSemanticPlanningRetirementReason = "resource_invalidated"
 	RuntimeSemanticPlanningRetirementCatalogRefresh      RuntimeSemanticPlanningRetirementReason = "catalog_refresh"
+	// RuntimeSemanticPlanningRetirementCWIReopened records a deliberate SM-2
+	// credit invalidation. It is distinct from catalog invalidation: the owner
+	// facts can remain current while exactly one settled CWI needs a successor
+	// proof binding.
+	RuntimeSemanticPlanningRetirementCWIReopened RuntimeSemanticPlanningRetirementReason = "cwi_reopened"
 )
 
 // RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
@@ -1196,13 +1246,20 @@ type RuntimeSemanticPlanningGeneration struct {
 	Reason                 RuntimeSemanticPlanningRetirementReason
 	InvalidationSignatures []string
 	PrerequisiteIDs        []string
-	Snapshot               RuntimeSemanticPlanningLedger
+	// ReopenedCoverageIDs and ReopenTriggerRefs bind a CWI-reopen retirement
+	// to the owner-local SM-2 facts that invalidated prior credit. They are
+	// audit lineage only and never select an operation or a recovery action.
+	ReopenedCoverageIDs []common.CoverageWorkItemID
+	ReopenTriggerRefs   []string
+	Snapshot            RuntimeSemanticPlanningLedger
 }
 
 func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningGeneration {
 	g.Reason = RuntimeSemanticPlanningRetirementReason(strings.TrimSpace(string(g.Reason)))
 	g.InvalidationSignatures = normalizeStrings(g.InvalidationSignatures)
 	g.PrerequisiteIDs = normalizeStrings(g.PrerequisiteIDs)
+	g.ReopenedCoverageIDs = normalizeOrderedCoverageWorkItemIDs(g.ReopenedCoverageIDs)
+	g.ReopenTriggerRefs = normalizeStrings(g.ReopenTriggerRefs)
 	// Detach the generation snapshot without recursively walking a malformed
 	// nested History tree.  Validation below rejects any non-nil nested history;
 	// normalization must remain bounded so a corrupt persisted record cannot
@@ -1223,14 +1280,22 @@ func (g RuntimeSemanticPlanningGeneration) Clone() RuntimeSemanticPlanningGenera
 func (g RuntimeSemanticPlanningGeneration) Validate() error {
 	raw := g
 	g = g.Normalized()
-	if len(raw.InvalidationSignatures) != len(g.InvalidationSignatures) || len(raw.PrerequisiteIDs) != len(g.PrerequisiteIDs) {
+	if len(raw.InvalidationSignatures) != len(g.InvalidationSignatures) || len(raw.PrerequisiteIDs) != len(g.PrerequisiteIDs) ||
+		len(raw.ReopenedCoverageIDs) != len(g.ReopenedCoverageIDs) || len(raw.ReopenTriggerRefs) != len(g.ReopenTriggerRefs) {
 		return fmt.Errorf("runtime semantic planning generation contains duplicate or empty lineage values")
 	}
-	if g.RetiredAtStateRevision == 0 || g.Reason == "" || len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 {
+	if g.RetiredAtStateRevision == 0 || g.Reason == "" {
 		return fmt.Errorf("runtime semantic planning generation requires retirement identity and reason")
 	}
 	switch g.Reason {
 	case RuntimeSemanticPlanningRetirementResourceInvalidated, RuntimeSemanticPlanningRetirementCatalogRefresh:
+		if len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 {
+			return fmt.Errorf("runtime semantic catalog retirement requires only catalog lineage")
+		}
+	case RuntimeSemanticPlanningRetirementCWIReopened:
+		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) == 0 || len(g.ReopenTriggerRefs) == 0 {
+			return fmt.Errorf("runtime semantic CWI reopen retirement requires only CWI lineage")
+		}
 	default:
 		return fmt.Errorf("runtime semantic planning generation has unsupported retirement reason %q", g.Reason)
 	}
@@ -1258,6 +1323,17 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 		seenPrerequisites[prerequisiteID] = struct{}{}
 		if _, found := manifestPrerequisites[prerequisiteID]; !found {
 			return fmt.Errorf("runtime semantic planning generation prerequisite %q is outside snapshot manifest", prerequisiteID)
+		}
+	}
+	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened {
+		seedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(g.Snapshot.DefinitionSeed.CoverageItems))
+		for _, item := range g.Snapshot.DefinitionSeed.CoverageItems {
+			seedCoverage[item.ID] = struct{}{}
+		}
+		for _, coverageID := range g.ReopenedCoverageIDs {
+			if _, found := seedCoverage[coverageID]; !found {
+				return fmt.Errorf("runtime semantic CWI reopen %q is outside snapshot definition seed", coverageID)
+			}
 		}
 	}
 	return nil
@@ -2245,20 +2321,20 @@ func StableRuntimeSemanticFeasibilitySetHash(values []RuntimeSemanticProofFeasib
 }
 
 func validateRuntimeSemanticFeasibilitySet(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, values []RuntimeSemanticProofFeasibility, complete bool) error {
-	proposals := make(map[common.CoverageWorkItemID]RuntimeSemanticProofProposal, len(document.Proposals))
+	proposals := make(map[string]RuntimeSemanticProofProposal, len(document.Proposals))
 	for _, proposal := range document.Normalized().Proposals {
-		proposals[proposal.CoverageWorkItemID] = proposal
+		proposals[StableRuntimeSemanticProofProposalHash(proposal)] = proposal
 	}
-	seen := make(map[common.CoverageWorkItemID]struct{}, len(values))
+	seen := make(map[string]struct{}, len(values))
 	for _, feasibility := range normalizeRuntimeSemanticFeasibilities(values) {
-		proposal, found := proposals[feasibility.CoverageWorkItemID]
+		proposal, found := proposals[feasibility.ProposalHash]
 		if !found {
-			return fmt.Errorf("runtime semantic feasibility references unknown coverage %q", feasibility.CoverageWorkItemID)
+			return fmt.Errorf("runtime semantic feasibility references unknown proof %q", feasibility.ProposalHash)
 		}
-		if _, duplicate := seen[feasibility.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime semantic feasibility duplicates coverage %q", feasibility.CoverageWorkItemID)
+		if _, duplicate := seen[feasibility.ProposalHash]; duplicate {
+			return fmt.Errorf("runtime semantic feasibility duplicates proof %q", feasibility.ProposalHash)
 		}
-		seen[feasibility.CoverageWorkItemID] = struct{}{}
+		seen[feasibility.ProposalHash] = struct{}{}
 		if err := feasibility.ValidateForProposal(manifest, proposal); err != nil {
 			return err
 		}
@@ -2278,6 +2354,97 @@ func ValidateRuntimeSemanticFeasibilitySet(manifest RuntimeSemanticPlanManifest,
 	return validateRuntimeSemanticFeasibilitySet(manifest, document, values, complete)
 }
 
+// RuntimeSemanticCWIProofSet is the bounded proof group for one canonical
+// CWI. It is an ephemeral contract value used while compiling an SM-2 binding;
+// the CWI itself remains the single persisted ledger row.
+type RuntimeSemanticCWIProofSet struct {
+	CoverageWorkItemID common.CoverageWorkItemID
+	Proposals          []RuntimeSemanticProofProposal
+}
+
+func (s RuntimeSemanticCWIProofSet) EvidenceKinds() []string {
+	values := make([]string, 0, len(s.Proposals))
+	for _, proposal := range s.Proposals {
+		proposal = proposal.Normalized()
+		if len(proposal.RequiredEvidenceKinds) == 1 {
+			values = append(values, proposal.RequiredEvidenceKinds[0])
+		}
+	}
+	return normalizeStrings(values)
+}
+
+// OrderedRuntimeSemanticCWIProofSets groups independently feasible proof
+// proposals under their CWI while retaining the persisted batch order. The
+// helper creates no authority index and never changes a Runtime aggregate.
+func OrderedRuntimeSemanticCWIProofSets(document RuntimeSemanticPlanDocument) ([]RuntimeSemanticCWIProofSet, error) {
+	document = document.Normalized()
+	byCoverage := make(map[common.CoverageWorkItemID][]RuntimeSemanticProofProposal, len(document.Proposals))
+	for _, proposal := range document.Proposals {
+		proposal = proposal.Clone()
+		byCoverage[proposal.CoverageWorkItemID] = append(byCoverage[proposal.CoverageWorkItemID], proposal)
+	}
+	order := append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...)
+	if len(order) == 0 {
+		order = append(order, document.CoverageOrder...)
+	}
+	if len(order) == 0 {
+		for coverageID := range byCoverage {
+			order = append(order, coverageID)
+		}
+		sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+	}
+	sets := make([]RuntimeSemanticCWIProofSet, 0, len(order))
+	for _, coverageID := range order {
+		proofs := byCoverage[coverageID]
+		if len(proofs) == 0 {
+			return nil, fmt.Errorf("runtime semantic proof set has no proposal for coverage %q", coverageID)
+		}
+		sort.SliceStable(proofs, func(i, j int) bool {
+			return StableRuntimeSemanticProofProposalHash(proofs[i]) < StableRuntimeSemanticProofProposalHash(proofs[j])
+		})
+		sets = append(sets, RuntimeSemanticCWIProofSet{
+			CoverageWorkItemID: coverageID,
+			Proposals:          append([]RuntimeSemanticProofProposal(nil), proofs...),
+		})
+		delete(byCoverage, coverageID)
+	}
+	if len(byCoverage) != 0 {
+		return nil, fmt.Errorf("runtime semantic proof set contains coverage outside declared order")
+	}
+	return sets, nil
+}
+
+// StableRuntimeSemanticCWIProofSetHash gives a generation-independent identity
+// to the independent proof declarations that jointly close one CWI. The
+// caller validates shape before using this value as a binding suffix.
+func StableRuntimeSemanticCWIProofSetHash(coverageID common.CoverageWorkItemID, proposals []RuntimeSemanticProofProposal) string {
+	coverageID = common.CoverageWorkItemID(strings.TrimSpace(string(coverageID)))
+	values := append([]RuntimeSemanticProofProposal(nil), proposals...)
+	sort.SliceStable(values, func(i, j int) bool {
+		return StableRuntimeSemanticProofProposalHash(values[i]) < StableRuntimeSemanticProofProposalHash(values[j])
+	})
+	h := sha256.New()
+	writeHashString(h, "runtime-semantic-cwi-proof-set")
+	writeHashString(h, string(coverageID))
+	for _, proposal := range values {
+		writeHashString(h, StableRuntimeSemanticProofProposalHash(proposal))
+	}
+	return "runtime-semantic-cwi-proof-set-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+// RuntimeSemanticProofProposalForHash resolves one proposal only within its
+// supplied immutable document. It is intentionally a local scan so semantic
+// proof identity never becomes a global registry.
+func RuntimeSemanticProofProposalForHash(document RuntimeSemanticPlanDocument, proposalHash string) (RuntimeSemanticProofProposal, bool) {
+	proposalHash = strings.TrimSpace(proposalHash)
+	for _, proposal := range document.Normalized().Proposals {
+		if StableRuntimeSemanticProofProposalHash(proposal) == proposalHash {
+			return proposal.Clone(), true
+		}
+	}
+	return RuntimeSemanticProofProposal{}, false
+}
+
 func normalizeRuntimeSemanticProofProposals(values []RuntimeSemanticProofProposal) []RuntimeSemanticProofProposal {
 	ret := make([]RuntimeSemanticProofProposal, 0, len(values))
 	for _, value := range values {
@@ -2286,7 +2453,12 @@ func normalizeRuntimeSemanticProofProposals(values []RuntimeSemanticProofProposa
 			ret = append(ret, value)
 		}
 	}
-	sort.SliceStable(ret, func(i, j int) bool { return ret[i].CoverageWorkItemID < ret[j].CoverageWorkItemID })
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].CoverageWorkItemID != ret[j].CoverageWorkItemID {
+			return ret[i].CoverageWorkItemID < ret[j].CoverageWorkItemID
+		}
+		return StableRuntimeSemanticProofProposalHash(ret[i]) < StableRuntimeSemanticProofProposalHash(ret[j])
+	})
 	if len(ret) == 0 {
 		return nil
 	}
@@ -2356,6 +2528,9 @@ func normalizeRuntimeSemanticFeasibilities(values []RuntimeSemanticProofFeasibil
 	sort.SliceStable(ret, func(i, j int) bool {
 		if ret[i].CoverageWorkItemID != ret[j].CoverageWorkItemID {
 			return ret[i].CoverageWorkItemID < ret[j].CoverageWorkItemID
+		}
+		if ret[i].ProposalHash != ret[j].ProposalHash {
+			return ret[i].ProposalHash < ret[j].ProposalHash
 		}
 		return ret[i].OwnerModuleID < ret[j].OwnerModuleID
 	})

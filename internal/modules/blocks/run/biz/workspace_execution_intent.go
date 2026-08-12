@@ -101,7 +101,7 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonSelectedRunTerminal), nil
 	}
 	if runtimeActivationDispositionForRun(current) == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeSchemaIncompatible), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeStateIncompatible), nil
 	}
 	if current.GoalID != cmd.GoalID || current.DoDID != cmd.DoDID || strings.TrimSpace(current.DefinitionRevision) != cmd.DefinitionRevision {
 		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged), nil

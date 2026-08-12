@@ -9,6 +9,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -31,6 +32,24 @@ func (e *runtimePersistedDrivePendingError) Error() string {
 		return "Runtime has persisted pending drive work"
 	}
 	return fmt.Sprintf("Runtime has persisted pending drive work at revision %d", e.Revision)
+}
+
+// runtimeFreshActivationRequiredError marks a Run-owned, persisted
+// administrative outcome. It is intentionally private to the Orchestrator
+// scheduler: the Run owner exposes the user-facing typed resume admission,
+// while SM-4 must stop without classifying this as a drive failure or creating
+// a recovery lease.
+type runtimeFreshActivationRequiredError struct {
+	WorkspaceID     common.WorkspaceID
+	RunID           common.RunID
+	RuntimeStateRef string
+}
+
+func (e *runtimeFreshActivationRequiredError) Error() string {
+	if e == nil {
+		return "Runtime requires fresh activation"
+	}
+	return fmt.Sprintf("Runtime requires fresh activation workspace=%s run=%s", e.WorkspaceID, e.RunID)
 }
 
 type runtimeInvariantError struct {
@@ -139,8 +158,22 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 	if err != nil {
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
+	if run.RuntimeActivationStatus != nil && run.RuntimeActivationStatus.Disposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
+		return orchestratorevents.DriveRuntimeResult{}, &runtimeFreshActivationRequiredError{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, RuntimeStateRef: run.RuntimeActivationStatus.RuntimeStateRef,
+		}
+	}
 	aggregate, err := m.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
+		if incompatibility, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(err); incompatible && run.RuntimeState != nil {
+			runtimeStateRef := runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
+			if factErr := m.applyRunRuntimeStateIncompatible(ctx, run.WorkspaceID, run.ID, runtimeStateRef, incompatibility, err); factErr != nil {
+				return orchestratorevents.DriveRuntimeResult{}, factErr
+			}
+			return orchestratorevents.DriveRuntimeResult{}, &runtimeFreshActivationRequiredError{
+				WorkspaceID: run.WorkspaceID, RunID: run.ID, RuntimeStateRef: runtimeStateRef,
+			}
+		}
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
@@ -179,7 +212,7 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 		// owner-observation batch are persisted through the same internal-event
 		// CAS boundary before any candidate, operation or governance path runs.
 		if aggregate.Facts.ReconciliationContract.SchemaVersion != "" &&
-			(aggregate.Reconciliation.Batch == nil || reconciliationRequestNeedsRefresh(aggregate, command)) &&
+			(aggregate.Reconciliation.Batch == nil || reconciliationRequestNeedsRefresh(run, aggregate, command)) &&
 			aggregate.ActiveDispatch == nil && aggregate.Decision.State != runtimecontract.ConvergenceStateComplete && aggregate.Decision.State != runtimecontract.ConvergenceStateFailed {
 			updated, changed, reconciliationErr := m.reconcileRuntimeWorkspaceWithCommand(ctx, run, aggregate, command)
 			if reconciliationErr != nil {

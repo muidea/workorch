@@ -308,27 +308,32 @@ func runtimeRequiredKindsContain(values []string, wanted string) bool {
 	return false
 }
 
-// runtimeOrderedPrerequisites makes an owner capability-state acquisition
-// available before that same owner's admissibility acquisition. It does not
-// encode Git sequence semantics: it only preserves the generic fact dependency
-// that an opaque binding must already be persisted before another prerequisite
-// can reference it.
+// runtimeOrderedPrerequisites makes prerequisite fact dependencies available
+// before a dependent owner inventory is acquired. In particular, pre-seal Shell
+// managed-validation inventories consume the already persisted File catalog as
+// their bounded target vocabulary. This is dispatcher ordering only: both
+// owners still return facts and SM-2 commits each one through its internal
+// event/CAS path.
 func runtimeOrderedPrerequisites(values []runtimecontract.RuntimePrerequisite) []runtimecontract.RuntimePrerequisite {
 	ret := append([]runtimecontract.RuntimePrerequisite(nil), values...)
 	sort.SliceStable(ret, func(i, j int) bool {
-		rank := func(value runtimecontract.RuntimePrerequisite) int {
-			switch value.Kind {
-			case runtimecontract.PrerequisiteKindCapabilityState:
-				return 0
-			case runtimecontract.PrerequisiteKindOperationAdmissibility:
-				return 1
-			default:
-				return 0
-			}
-		}
-		return rank(ret[i]) < rank(ret[j])
+		return runtimePrerequisiteAcquisitionRank(ret[i]) < runtimePrerequisiteAcquisitionRank(ret[j])
 	})
 	return ret
+}
+
+func runtimePrerequisiteAcquisitionRank(value runtimecontract.RuntimePrerequisite) int {
+	switch value.Kind {
+	case runtimecontract.PrerequisiteKindCapabilityState:
+		return 0
+	case runtimecontract.PrerequisiteKindOperationAdmissibility:
+		if value.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			return 2
+		}
+		return 3
+	default:
+		return 1
+	}
 }
 
 // runtimeCapabilityStateBinding returns the only opaque acquisition binding

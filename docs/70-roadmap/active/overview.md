@@ -8,62 +8,50 @@ Last Updated: 2026-08-11
 
 ## Purpose
 
-仅索引 **当前仍未关闭** 的工作项。已完成 / code-closed / 过程日记 / 被 Runtime 吸收的计划一律在 [90-archive/completed](../../90-archive/completed/overview.md) 检索，**不得**再从 archive 推导新实现约束。
+This document indexes only work that is currently open. Historical plans, dated live records, and prior code-closure
+claims are archived and cannot override a current persisted aggregate counterexample.
 
-## Runtime Code Status
+## Runtime Status
 
-| 主题 | 状态 |
+| Topic | Current status |
 | --- | --- |
-| Runtime 生产主链 | **Runtime-only**（`WorkspaceExecutionIntent → owner-local Run fact → DriveRuntime`）；application direct lifecycle、Run source guard、owner outcome forwarding 与 SM-4 producer trust 均为已关闭回归基线。 |
-| Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
-| Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（RSO-1～RSO-26）**；RSO-1～RSO-9、RSO-11～RSO-14、RSO-16、RSO-18～RSO-26 均已 code-closed。RSO-26 已让 Orchestrator SM-2 为 accepted receipt 封存 immutable source proof identity，并在 prerequisite re-acquisition 后只以 persisted `equivalent` resolution 保留 current CWI credit；`incompatible` resolution 保留旧 audit、写入 typed gap 且零 synthetic credit/duplicate durable operation。RSO-22 仍为 live-open，负责 fresh equivalent/incompatible lineage、positive/zero-dispatch 及 whole-document recovery fault-injection deployed matrix。见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
-| Workspace reasoning effort | **code-closed，待 deployed**；canonical selection、owner CAS、Run seal、Responses `reasoning.effort`、Web 与 TUI 合同已落地，剩余 live matrix，见 [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md)。 |
-| 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
-| 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 261 个 Topic（含 LLM owner 的 active-configuration typed query），全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
-| 禁止的 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
-| 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
+| Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
+| Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
+| CWI reconciliation | **active: CWI-SO-1 through CWI-SO-4 and CWI-SO-6; CWI-SO-5 code-closed.** `run-073` proved duplicate CWI binding/effect across semantic generations, stale reconciliation request binding, and focus queue inconsistency. |
+| Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
+| 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
-## Residual Mandatory Work
+## Mandatory Work
 
-当前 Runtime CWI 主线的代码增量已覆盖 typed semantic correction、proof-batch 最小 wire、exact-active-batch reducer
-invariant 与 canonical combined Definition projection，且 RSO-9 增量 race/managed 已通过。`run-054` 已证明新部署
-可以加载 MCP typed metadata，并推进至 semantic seal、dispatch、receipt/evidence commit；`run-055`/`run-056` 又证明
-不匹配 recipe/effect 会在 dispatch 前以零副作用拒绝，但这只是 fail-closed 防线。`run-061`/`run-062` 证明 provider
-仍提交 `requiredEffectScopes` 并在 recipe 间交换 effect；RSO-23 已删除 provider effect/idempotency echo，由 owner
-feasibility fact 经 Orchestrator 私有事件和 SM-2 编译 binding。`run-063` 又证明 provider 可提交 owner 无法执行的
-`requiredCheckRefs`，RSO-24 已完成代码收口；`run-064`/`run-065` 暴露的 owner feasibility timing、MCP behavior probe、focus batch 与 failure classification 已完成 RSO-25 本地代码收口。`run-066` 已补充缺失 MCP proof 的零 dispatch 负向证据。receipt/reacquisition 反例对应的 RSO-26 proof-lineage code closure 已完成：旧 evidence 不改写，只有 SM-2 persisted `equivalent` resolution 才可恢复 current credit，`incompatible` resolution 保留 audit 并零 credit。下一步执行 RSO-22 fresh positive/zero-dispatch convergence，并通过单独 fault injection 证明 whole-document recovery。此前 restart release-before-create、
-complete-document、22 组件 EventHub 合同回迁、owner-local terminal delivery、typed diagnostic、single mutation surface、
-managed verifier 与 reasoning selection 仍是回归基线，但不能替代最新 persisted aggregate/provider/projection 反例。
-
-语义 catalog freshness 只允许由带 expected/observed revision fence 的 `stale` owner fact 触发；generation retirement
-保留有界完整历史，missing/mismatched observation 只通过 Orchestrator 私有 SM-2 reset 且 owner probe 为零；当前没有 typed
-semantic prerequisite acquisition 合同时，`prerequisite_required` observation 保留原始诊断和既有 catalog，直接
-fail-closed，不创建第二条 refresh/状态机路径。
-
-| ID | 项 | 说明 | 历史过程稿 |
+| ID | Work | Required result | Plan |
 | --- | --- | --- | --- |
-| RSO | typed semantic correction + canonical projection + single-owner CWI convergence | SM-3-sealed correction directive、provider-safe C4、terminal-first outcome/activity 与 receipt-to-reacquisition proof lineage（RSO-26）均为 code baseline；RSO-22 继续承担 fresh deployed equivalent/incompatible lineage、feasibility/seal/dispatch/evidence/recovery closure | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| WRE | Workspace reasoning effort deployed proof | 代码收口完成；验证 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection与双 workspace隔离 | [active plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
-| OPT-1 | file-patch deployed live（可选） | 可补一次 `patch apply + validation + DoD closeout` deployed live；不阻塞 Runtime 收口 | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
+| CWI-SO | Canonical CWI ledger and single-owner generation/reconciliation closure | A settled CWI cannot be re-planned or re-executed without an explicit typed reopen lineage; current reconciliation request matches current sealed binding set. | [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
+| OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。
+`CWI-SO` is sequential: contract/validator, SM-2 generation seal, reconciliation generation, SM-3 fences,
+current-schema boundary, then full/deployed verification. A provider, capability owner, UI, or projection change cannot
+substitute for any of those steps.
 
-统一清单：[current-unclosed-matrix.md](../../01-overview/current-unclosed-matrix.md)、[unfinished-todo-index.md](../../01-overview/unfinished-todo-index.md)。
+## Active Documentation Rules
 
-## Active 文档清理规则
+1. Runtime authority is defined by `00-core`, the Orchestrator readme, and typed runtime contracts; active plans only
+   describe remaining implementation work.
+2. A current persisted aggregate or deployed counterexample overrides a prior local test or historical code-closed
+   statement.
+3. Completed, superseded, and process-only plans belong in `90-archive/`; they are searchable but not implementation
+   authority.
+4. Active documents must not retain a parallel Runtime state machine, global authority registry, V1 fallback, or dated
+   live-log narrative.
+5. The CWI chain remains `Definition CWI -> SM-2 sealed binding -> SM-3 sealed operation -> owner receipt -> SM-2
+   evidence/credit`; a raw candidate claim, provider summary, file existence, Git revision, or terminal result never
+   substitutes for it.
 
-1. Runtime 的正式约束只来自 `00-core`、Orchestrator readme 与 typed contract；所有 completed record 都仅作
-   回归基线，不得从历史记录另行推导状态迁移、lifecycle 或 live 修复队列。
-2. current-schema completed Run 必须有 CWI→binding→sealed operation→owner receipt→evidence 链；并且 binding
-   必须声明该 CWI 的独立语义 proof。机械执行绿灯、TODO test、泛化 command success、candidate raw CWI、assessment
-   claim、`PassedChecks` 或 terminal 都不能替代该链。
-3. 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准。
-4. 某项 code-closed 且无运维/产品尾巴时，应 `git mv` 至 `90-archive/completed/` 并更新本 overview。
-5. active 不存放过程日记、历史文件清单或 live 原始产物；过程细节只在 archive 检索。
-6. 清理失效内容：禁止的 主链术语、重复 audit、假活跃 Status 不得继续占用 active。
-7. 旧 `RUNTIME-SMO-R2` 与 `OPS-1` 均已归 archive；其中 OPS-1 只是假定存在 production maintenance command
-   的历史记录，不能作为维护窗口任务。
-8. C12、slice/focus 分离、普通用户 raw contract JSON 删除、owner contract 回迁、restart release-before-create、
-   complete-document recovery 与 RSO-26 proof-lineage reconciliation 均为有效代码基线。最新 live gate 是 RSO-22 的
-   fresh equivalent/incompatible lineage、positive/zero-dispatch convergence；whole-document recovery 仍缺 deployed fault injection。
-   不得以 raw message、prompt overlay、ticket、budget/decoder 放宽、字符串清理、合同 alias/forwarder 或历史绿灯绕过 RSO。
+## Navigation
+
+- [Current state](../../01-overview/current-state.md)
+- [Current unclosed matrix](../../01-overview/current-unclosed-matrix.md)
+- [Unfinished todo index](../../01-overview/unfinished-todo-index.md)
+- [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)
+- [Completed archive](../../90-archive/completed/overview.md)
+- [Superseded archive](../../90-archive/superseded/overview.md)

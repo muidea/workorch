@@ -138,7 +138,7 @@ func containsSemanticTargetPolicy(values []RuntimeOperationTargetPolicy, wanted 
 	return false
 }
 
-func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
+func TestRuntimeSemanticDocumentRequiresOneBoundedProofPerEvidenceKind(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent,
@@ -152,7 +152,7 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
 	}
 	duplicate := document.Clone()
 	duplicate.Proposals = append(duplicate.Proposals, duplicate.Proposals[0])
-	if err := duplicate.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "duplicates coverage") {
+	if err := duplicate.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "duplicates proof kind") {
 		t.Fatalf("duplicate proposal error = %v", err)
 	}
 	missing := document.Clone()
@@ -173,6 +173,35 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProposalPerCWI(t *testing.T) {
 	emptyDocument.ManifestHash = emptyInventory.Hash
 	if err := emptyDocument.ValidateAgainstManifest(emptyInventory); err != nil {
 		t.Fatalf("prospective target must be admitted by sealed selector/constraint before owner feasibility: %v", err)
+	}
+}
+
+func TestRuntimeSemanticDocumentAllowsIndependentProofsForOneCWI(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
+	shellCatalog.SelectorRefs = []string{"file/workspace-relative-create"}
+	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate"}
+	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleShell)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
+	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
+	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, shellCatalog)
+	manifest = sealSemanticTestManifest(t, manifest)
+
+	stateChange := semanticContractTestProposal("cwi-001")
+	validation := RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"file/workspace-relative-create"}},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+		ValidationRecipeID: "recipe/validate", DeclarationRef: stateChange.DeclarationRef,
+	}
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{stateChange, validation},
+	}
+	if err := document.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("independent state-change and validation proofs for one CWI must be valid: %v", err)
 	}
 }
 
@@ -575,6 +604,22 @@ func semanticContractTestManifest(t *testing.T) RuntimeSemanticPlanManifest {
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	return manifest
+}
+
+// sealSemanticTestManifest recreates the immutable catalog and manifest
+// identities after a test intentionally changes its fixture facts.
+func sealSemanticTestManifest(t *testing.T, manifest RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
+	t.Helper()
+	manifest = manifest.Normalized()
+	for index := range manifest.OwnerCatalogs {
+		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
+	}
+	manifest = manifest.Normalized()
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("seal semantic test manifest: %v", err)
 	}
 	return manifest
 }

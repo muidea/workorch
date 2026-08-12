@@ -63,6 +63,14 @@ func (c *RuntimeController) commitOperationReceipt(ctx context.Context, workspac
 		}
 		return aggregate, existing, nil
 	}
+	// A receipt is an owner fact, but accepting it into the Runtime aggregate is
+	// still an SM-3 admission. Do not persist a new receipt once the focus has
+	// lost its canonical binding: evidence cannot legally attribute it and a
+	// later retry must not turn that stale fact into a second execution path.
+	// Existing matching receipts remain idempotent above.
+	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: operation receipt binding fence: %v", common.ErrConflict, err)
+	}
 	if err := validateOperationReceiptFeedback(aggregate, workspaceID, runID, dispatchID, receipt); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}

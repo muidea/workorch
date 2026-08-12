@@ -98,13 +98,27 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 	facts.Focus.TargetRefs = []string{"target.txt"}
 	facts.Focus.AcceptedStepKinds = []string{RuntimeBlockKindPatchApply}
 	facts.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}
-	facts.Coverage = []RuntimeCoverageItemFact{{ID: common.CoverageWorkItemID("cwi-1"), State: RuntimeCoverageItemStateOpen}}
+	currentBinding := RuntimeCWIBindingRefForCoverageBinding(binding, "manifest-1")
+	facts.CWILedgerSchemaVersion = RuntimeCWILedgerSchemaCurrent
+	facts.Coverage = []RuntimeCoverageItemFact{{
+		ID:                  common.CoverageWorkItemID("cwi-1"),
+		State:               RuntimeCoverageItemStateOpen,
+		CWIConvergenceState: RuntimeCWIConvergenceStateBound,
+		CurrentBindingRef:   &currentBinding,
+		BindingLineage:      []RuntimeCWIBindingRef{currentBinding},
+		FocusID:             facts.Focus.ID,
+	}}
 	facts.DefinitionSeed = RuntimeDefinitionSeed{
 		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision, PolicyHash: "policy-1",
 		CoverageItems: []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "deliver"}},
 		Slices:        []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
 	}
 	facts.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	reconciliation, err := CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, []CoverageFocus{facts.Focus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.ReconciliationContract = reconciliation
 	decision := validDecisionForState(ConvergenceStateFailed)
 	transaction := decision.AuthorityTransaction()
 	semanticPlanning, err := NewRuntimeSemanticPlanningLedger(facts.DefinitionSeed)

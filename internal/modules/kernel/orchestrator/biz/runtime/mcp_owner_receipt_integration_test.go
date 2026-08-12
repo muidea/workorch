@@ -171,6 +171,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
 	addCurrentMCPFailureObservationFreshness(t, &aggregate, catalogRevision)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,

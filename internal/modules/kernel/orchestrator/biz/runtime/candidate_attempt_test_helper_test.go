@@ -22,7 +22,7 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	switch aggregate.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
-		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action %q does not request a candidate (prerequisites=%+v)", common.ErrConflict, aggregate.Decision.State, aggregate.Decision.Prerequisites)
 	}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		aggregate.Decision,
@@ -105,8 +105,76 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if runtimeTestFactsAlreadyHaveCurrentCWIBindings(aggregate.Facts) {
+		// Some focused reducer fixtures explicitly project a post-semantic
+		// authority before entering this helper. Keep that tested binding rather
+		// than creating a second semantic generation over the same CWI.
+		ledger.SealedBindingSetHash = aggregate.Facts.ReconciliationContract.BindingSetHash
+		if len(ledger.SealedLineageRefs) == 0 {
+			return RuntimeAggregate{}, fmt.Errorf("test semantic ledger has no seal lineage")
+		}
+		ledger.SealedLineageRefs[len(ledger.SealedLineageRefs)-1] = ledger.SealedBindingSetHash
+		if err := ledger.Validate(); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+		if reduceErr != nil {
+			return RuntimeAggregate{}, reduceErr
+		}
+		expectedRevision := aggregate.StateRevision
+		aggregate.SemanticPlanning = ledger
+		aggregate.Facts = facts
+		aggregate.Decision = decision
+		aggregate.StateRevision++
+		if err := aggregate.Validate(); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		return aggregate, nil
+	}
+	sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
+	sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
+	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, *ledger.Document, ledger.Feasibilities, sourceFocuses)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	pending, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	facts, err := sealRuntimeCWIBindings(aggregate.Facts, ledger.Manifest.Hash, focuses, pending)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	reconciliation, err := canonicalRuntimeCWIReconciliationContract(facts)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger.SealedBindingSetHash = reconciliation.BindingSetHash
+	if len(ledger.SealedLineageRefs) == 0 {
+		return RuntimeAggregate{}, fmt.Errorf("test semantic ledger has no seal lineage")
+	}
+	ledger.SealedLineageRefs[len(ledger.SealedLineageRefs)-1] = reconciliation.BindingSetHash
+	if err := ledger.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	facts.Capabilities = runtimeCapabilitiesWithSemanticProofs(facts.Capabilities, focuses)
+	facts.ReconciliationContract = reconciliation
+	// Production acquires target snapshots through the File owner before an
+	// operation request. Focused operation tests deliberately bypass that
+	// EventHub round-trip, so seed the same owner fact here rather than letting
+	// a synthetic semantic focus leave SM-2 in prerequisite state.
+	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.SemanticPlanning = ledger
+	aggregate.Facts = facts
+	aggregate.Decision = decision
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -115,6 +183,44 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func runtimeTestSeedSemanticTargetSnapshots(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	facts = facts.Normalized()
+	existing := make(map[string]struct{}, len(facts.Resources.TargetSnapshots))
+	for _, snapshot := range facts.Resources.TargetSnapshots {
+		if snapshot.Complete() {
+			existing[snapshot.TargetRef] = struct{}{}
+		}
+	}
+	// A current failure target is as authoritative as a declarative focus target
+	// for candidate admission. Production obtains both through the File owner;
+	// focused tests seed the same bounded fact so they do not bypass the
+	// target-snapshot prerequisite merely because a semantic fixture is direct.
+	targetRefs := append([]string(nil), facts.Focus.TargetRefs...)
+	targetRefs = append(targetRefs, GroundedRepairTargets(facts)...)
+	for _, targetRef := range targetRefs {
+		if _, found := existing[targetRef]; found {
+			continue
+		}
+		facts.Resources.TargetSnapshots = append(facts.Resources.TargetSnapshots, runtimecontract.TargetSnapshot{
+			TargetRef: targetRef, Content: "test semantic target", ContentHash: "test-semantic-snapshot/" + targetRef,
+			ContentState: runtimecontract.SnapshotContentStateComplete,
+		})
+	}
+	return facts.Normalized()
+}
+
+func runtimeTestFactsAlreadyHaveCurrentCWIBindings(facts runtimecontract.RuntimeFacts) bool {
+	if facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent || facts.ReconciliationContract.SchemaVersion == "" {
+		return false
+	}
+	for _, item := range facts.Coverage {
+		if item.CurrentBindingRef != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *RuntimeController) AdmitCandidateProposalForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {

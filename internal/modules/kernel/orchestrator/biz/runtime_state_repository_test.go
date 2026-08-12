@@ -513,12 +513,14 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	}
 }
 
-func TestRuntimeStateRepositoryRejectsHistoricalAggregateSchema(t *testing.T) {
+func TestRuntimeStateRepositoryRejectsPreCWILedgerAggregateSchema(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
 	run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
 	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 1))
-	record.SchemaVersion = 2
+	// Schema v3 predates the canonical CWI ledger. It must enter the
+	// fresh-activation boundary, never a best-effort migration path.
+	record.SchemaVersion = 3
 	run.RuntimeState = &record
 	if err := runs.Create(ctx, run); err != nil {
 		t.Fatal(err)
@@ -540,8 +542,53 @@ func TestRuntimeStateRepositoryRejectsHistoricalAggregateSchema(t *testing.T) {
 		t.Fatalf("historical aggregate load error = %v, want typed unsupported-schema error", err)
 	}
 	var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
-	if !errors.As(err, &schemaErr) || schemaErr.Actual != 2 || schemaErr.Supported != runtimecontract.RuntimeStateSchemaVersionCurrent {
+	if !errors.As(err, &schemaErr) || schemaErr.Actual != 3 || schemaErr.Supported != runtimecontract.RuntimeStateSchemaVersionCurrent {
 		t.Fatalf("historical aggregate schema detail = %+v", schemaErr)
+	}
+}
+
+func TestRuntimeStateRepositoryRejectsCurrentSchemaDuplicateCWILedger(t *testing.T) {
+	ctx := context.Background()
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+	run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
+	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 9))
+	// This record carries the current schema number but cannot be resumed: the
+	// same canonical CWI is projected in both active and completed focus queues.
+	// Loading must classify it without repairing or rewriting opaque authority.
+	record.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{record.Facts.Focus.Normalized()}
+	run.RuntimeState = &record
+	if err := runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := runmodule.New()
+	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	_, err := (runtimeStateRepository{hub: hub}).Load(ctx, run.WorkspaceID, run.ID)
+	if !errors.Is(err, runtimecontract.ErrRuntimeStateIncompatible) {
+		t.Fatalf("current-schema duplicate CWI load error = %v, want typed incompatibility", err)
+	}
+	incompatibility, ok := runtimecontract.RuntimeStateIncompatibilityFromError(err)
+	if !ok || incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid ||
+		incompatibility.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		incompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("current-schema duplicate CWI classification = %+v, ok=%v", incompatibility, ok)
+	}
+	stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RuntimeState == nil || stored.RuntimeState.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		stored.RuntimeState.StateRevision != record.StateRevision || len(stored.RuntimeState.Facts.CompletedFocuses) != 1 {
+		t.Fatalf("load rewrote opaque current-schema record: %+v", stored.RuntimeState)
 	}
 }
 
@@ -2749,7 +2796,6 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 		ActiveGap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...), Reason: "same gap"},
 	}
 	facts = runtimeFactsWithFileBackedManagedValidationContract(facts)
-	facts = runtimeTestFactsWithReboundBindings(facts, runtimeDefinition())
 	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2798,7 +2844,7 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 		t.Fatal(err)
 	}
 	assessmentCandidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap,
+		FocusID: afterValidation.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary: "same gap persists", Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Reason: "same gap"},
 	}}
 	assessmentDispatch, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, assessmentCandidate)
@@ -3050,11 +3096,11 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeRuntimeActiveDispatch: %v", err)
 	}
-	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete {
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("completed aggregate = %+v", completed)
 	}
 	loaded, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || loaded.ActiveDispatch != nil || loaded.Decision.State != runtimecontract.ConvergenceStateComplete {
+	if err != nil || loaded.ActiveDispatch != nil || loaded.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("persisted completed aggregate = %+v err=%v", loaded, err)
 	}
 }
@@ -3104,8 +3150,9 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
 			Parameters: runtimeFileEditParameters("target.txt"),
 		}}}}}
-		equivalent := wrong
-		equivalent.StateChange.Operations = append([]runtimecontract.StateChangingOperation(nil), wrong.StateChange.Operations...)
+		equivalent := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{
+			Operations: append([]runtimecontract.StateChangingOperation(nil), wrong.StateChange.Operations...),
+		}}
 		equivalent.StateChange.Operations[0].Operation.ID = "provider-second-id"
 		parameters := append([]runtimecontract.OperationParameter(nil), equivalent.StateChange.Operations[0].Operation.Parameters...)
 		for left, right := 0, len(parameters)-1; left < right; left, right = left+1, right-1 {
@@ -3116,7 +3163,9 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatal(err)
 		}
 		first, err := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, wrong)
-		if err != nil || first.Admission.Failure == nil || first.Admission.Failure.Code != "candidate_target_outside_grounding" || first.Aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
+		if err != nil || first.Admission.Failure == nil || first.Admission.Failure.Code != "candidate_contract_invalid" ||
+			first.Admission.Failure.Diagnostic == nil || first.Admission.Failure.Diagnostic.Path != "$.operations[0].targetRefs" ||
+			first.Aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
 			t.Fatalf("first complete candidate rejection = %+v err=%v", first, err)
 		}
 		if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 1, "semantic-replay-prefix"); err != nil {
@@ -3145,7 +3194,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatalf("pre-CAS restart did not retain only pending correction: aggregate=%+v err=%v", loaded, err)
 		}
 		committed, err := admitRuntimeCandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, equivalent)
-		if err != nil || committed.Admission.Failure == nil || committed.Admission.Failure.Code != "candidate_replays_rejected_candidate_shape" ||
+		if err != nil || committed.Admission.Failure == nil || committed.Admission.Failure.Code != "candidate_contract_invalid" ||
 			committed.Aggregate.Decision.Terminal == nil || committed.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" || committed.Aggregate.ActiveDispatch != nil {
 			t.Fatalf("restarted semantic exhaustion = %+v err=%v", committed, err)
 		}
@@ -3183,8 +3232,26 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatalf("post-CAS restart did not preserve terminal semantic exhaustion: aggregate=%+v err=%v", loaded, err)
 		}
 		revision := loaded.StateRevision
-		duplicate, err := admitRuntimeCandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, equivalent)
-		if err != nil || duplicate.Admission.Failure == nil || duplicate.Admission.Failure.Code != "candidate_replays_rejected_candidate_shape" || duplicate.Aggregate.StateRevision != revision {
+		// A response can be re-rendered by a provider after the terminal CAS. The
+		// operation ID and parameter wire order are not authority, so this is the
+		// same rejected semantic shape without being the same byte-level proposal.
+		replayed := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{
+			Operations: append([]runtimecontract.StateChangingOperation(nil), equivalent.StateChange.Operations...),
+		}}
+		replayed.StateChange.Operations[0].Operation.ID = "provider-terminal-replay-id"
+		replayParameters := append([]runtimecontract.OperationParameter(nil), replayed.StateChange.Operations[0].Operation.Parameters...)
+		for left, right := 0, len(replayParameters)-1; left < right; left, right = left+1, right-1 {
+			replayParameters[left], replayParameters[right] = replayParameters[right], replayParameters[left]
+		}
+		replayed.StateChange.Operations[0].Operation.Parameters = replayParameters
+		persisted := loaded.CandidateAttempts[1].Proposal
+		if persisted == nil ||
+			runtimecontract.StableRuntimeCandidateHash(*persisted) == runtimecontract.StableRuntimeCandidateHash(replayed) ||
+			runtimecontract.StableRuntimeCandidateSemanticShape(*persisted) != runtimecontract.StableRuntimeCandidateSemanticShape(replayed) {
+			t.Fatalf("terminal replay fixture is not an ID/wire-only semantic equivalent: persisted=%+v replayed=%+v", persisted, replayed)
+		}
+		duplicate, err := admitRuntimeCandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, replayed)
+		if err != nil || duplicate.Admission.Failure == nil || duplicate.Admission.Failure.Code != loaded.CandidateAttempts[1].Failure.Code || duplicate.Aggregate.StateRevision != revision {
 			t.Fatalf("post-CAS duplicate changed terminal authority: result=%+v err=%v", duplicate, err)
 		}
 	})
@@ -4207,7 +4274,7 @@ func TestRuntimeStateRecordPreservesSemanticPlanningLedgerAcrossOpaqueReload(t *
 }
 
 func TestRuntimeStateRecordPreservesCoverageProofLineageAcrossOpaqueReload(t *testing.T) {
-	aggregate := runtimeAggregate(t, 7)
+	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 7))
 	lineage := runtimecontract.NormalizeRuntimeCoverageProofLineage(runtimeCoverageProofLineageForRepositoryTest(t, aggregate))
 	aggregate.CoverageProofLineage = lineage
 	if err := aggregate.Validate(); err != nil {
@@ -4271,10 +4338,9 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 
 func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	t.Helper()
-	// Keep aggregate-only fixtures on the same current-schema activation
-	// boundary as persisted Run fixtures.  C12 deliberately has no runtime
-	// fallback that can invent a CoverageEvidenceBinding after activation, so
-	// hand-built facts must carry the already sealed test declaration too.
+	// Keep aggregate-only fixtures on the same current-schema activation path as
+	// persisted Run fixtures. The fixture deliberately remains before semantic
+	// seal so tests can exercise the persisted planning ledger itself.
 	bootstrap := runtimeBootstrap()
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  bootstrap.Activation,
@@ -4285,7 +4351,11 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 		ConvergencePolicy: runtimeTestConvergencePolicy(),
 		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
-	decision, err := runtime.ReduceRuntimeState(facts, nil)
+	initialized, err := runtimecontract.InitializeRuntimeCWILedgerForActivation(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := runtime.ReduceRuntimeState(initialized, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4293,7 +4363,17 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtime.RuntimeAggregate{StateRevision: revision, Definition: bootstrap.Definition, Facts: facts, SemanticPlanning: semanticPlanning, Decision: decision}
+	aggregate := runtime.RuntimeAggregate{
+		StateRevision:    revision,
+		Definition:       bootstrap.Definition,
+		Facts:            initialized,
+		SemanticPlanning: semanticPlanning,
+		Decision:         decision,
+	}
+	if err := aggregate.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return aggregate
 }
 
 func runtimeCoverageProofLineageForRepositoryTest(t *testing.T, aggregate runtime.RuntimeAggregate) []runtimecontract.RuntimeCoverageProofLineage {

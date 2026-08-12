@@ -12,6 +12,7 @@ type RunLineage struct {
 // administrative activation disposition. Owner diagnostics remain private.
 type RuntimeActivationStatus struct {
 	Disposition            string `json:"disposition"`
+	Reason                 string `json:"reason"`
 	ActualSchemaVersion    uint32 `json:"actualSchemaVersion"`
 	SupportedSchemaVersion uint32 `json:"supportedSchemaVersion"`
 }

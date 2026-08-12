@@ -1248,9 +1248,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId)
     : undefined;
   const activeRunRequiresFreshActivation = activeRun?.runtimeActivation?.disposition === 'fresh_activation_required';
-  const activeRunSchemaTransition = activeRunRequiresFreshActivation
+  const activeRunSchemaTransition = activeRunRequiresFreshActivation && activeRun.runtimeActivation?.reason === 'schema_unsupported'
     ? `Runtime schema v${activeRun.runtimeActivation?.actualSchemaVersion} → v${activeRun.runtimeActivation?.supportedSchemaVersion}`
     : undefined;
+  const activeRunFreshActivationDetail = activeRunSchemaTransition
+    ? `当前二进制不支持已持久化的 ${activeRunSchemaTransition}；该运行不能恢复，请显式创建新执行。`
+    : activeRun?.runtimeActivation?.reason === 'cwi_ledger_invalid'
+      ? '当前运行的已持久化 CWI 台账存在歧义，不能安全恢复；请显式创建新执行。'
+      : '当前运行不能安全恢复；请显式创建新执行。';
   const runSummary = runStateSummary(snapshot?.runs);
   const outcomeRun = runSnapshot?.run;
   const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
@@ -1304,7 +1309,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <div className="workspace-header-actions-main">
             {activeRunRequiresFreshActivation ? (
               <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation('restart')}>
-                创建新执行（{activeRunSchemaTransition}）
+                创建新执行{activeRunSchemaTransition ? `（${activeRunSchemaTransition}）` : ''}
               </Button>
             ) : (
               <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation('resume')}>提交执行</Button>
@@ -1360,7 +1365,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 ...(activeRunRequiresFreshActivation ? [{
                   key: 'activeRunRuntimeActivation',
                   label: '运行恢复状态',
-                  children: `当前二进制不支持已持久化的 ${activeRunSchemaTransition}；该运行不能恢复，请显式创建新执行。`
+                  children: activeRunFreshActivationDetail
                 }] : []),
                 { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
                 { key: 'projection', label: '投影摘要', children: projectionStatusSummary(workspaceProjection) },

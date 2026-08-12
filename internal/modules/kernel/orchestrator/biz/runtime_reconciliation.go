@@ -29,26 +29,37 @@ func (m *Biz) reconcileRuntimeWorkspaceWithCommand(ctx context.Context, run *run
 	if m == nil || run == nil || aggregate.Facts.ReconciliationContract.SchemaVersion == "" {
 		return aggregate, false, nil
 	}
-	request := runtimeReconciliationRequestForRun(run, aggregate, command.ReconciliationRequestID, command.ReconciliationGeneration)
-	// Once the request has been sealed, subsequent transitions of the same
-	// drive must keep using that exact generation until its batch commits.  A
-	// continuation command only creates a new generation when its request ID
-	// differs from the current persisted request.
+	desired := runtimeReconciliationRequestForRun(run, aggregate, command.ReconciliationRequestID, command.ReconciliationGeneration)
+	desiredBase, _ := runtimeReconciliationRequestBaseIdentityForRun(run, aggregate, command.ReconciliationRequestID)
+	request := desired
+	sealRequest := aggregate.Reconciliation.Request == nil
 	if aggregate.Reconciliation.Request != nil {
 		current := aggregate.Reconciliation.Request.Normalized()
-		if strings.TrimSpace(command.ReconciliationRequestID) == "" || current.RequestID == request.RequestID {
+		if current.ValidateAgainstContract(aggregate.Facts.ReconciliationContract) != nil {
+			// A stale active row must be retired by the Runtime owner before any
+			// owner query.  It cannot suppress the request derived from the
+			// current SM-2 binding projection.
+			sealRequest = true
+		} else if strings.TrimSpace(command.ReconciliationRequestID) == "" || current.RequestID == desired.RequestID {
 			request = current
+		} else if runtimeReconciliationHistoryContainsIntent(aggregate, desiredBase) {
+			// The continuation was already consumed and later superseded. Keep
+			// driving the current generation rather than reviving historical
+			// bindings merely because an old notification was redelivered.
+			request = current
+		} else {
+			sealRequest = true
 		}
 	}
-	if aggregate.Reconciliation.Request == nil {
+	if sealRequest {
 		result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind:        runtime.RuntimeInternalEventReconciliationRequested,
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			ReconciliationRequest: &request,
+			ReconciliationRequest: &desired,
 		})
 		return result.Aggregate, true, err
 	}
-	if aggregate.Reconciliation.Batch != nil && !reconciliationRequestNeedsRefresh(aggregate, command) {
+	if aggregate.Reconciliation.Batch != nil && !reconciliationRequestNeedsRefresh(run, aggregate, command) {
 		return aggregate, false, nil
 	}
 	var deliverableDirectory, internalDirectory string
@@ -66,29 +77,23 @@ func (m *Biz) reconcileRuntimeWorkspaceWithCommand(ctx context.Context, run *run
 	return result.Aggregate, true, err
 }
 
-func reconciliationRequestNeedsRefresh(aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand) bool {
-	requestID := strings.TrimSpace(command.ReconciliationRequestID)
-	if requestID == "" {
-		return false
-	}
-	scope := runtimecontract.RuntimeCWIReconciliationScopeCurrentRun
-	if aggregate.Reconciliation.Request != nil && aggregate.Reconciliation.Request.Scope != "" {
-		scope = aggregate.Reconciliation.Request.Scope
-	}
-	requestedID := "runtime-reconciliation/resume/" + requestID + "/" + string(scope)
-	for _, history := range aggregate.Reconciliation.History {
-		if history.Request.RequestID == requestedID {
-			// This continuation was already sealed in an older generation. A
-			// duplicate must not rewind the current ledger or query owners with
-			// an obsolete request identity.
-			return false
-		}
-	}
-	if aggregate.Reconciliation.Request == nil {
+func reconciliationRequestNeedsRefresh(run *runmodel.Run, aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand) bool {
+	if run == nil || aggregate.Reconciliation.Request == nil {
 		return true
 	}
 	current := aggregate.Reconciliation.Request.Normalized()
-	return current.RequestID != requestedID || (command.ReconciliationGeneration != 0 && current.Generation != command.ReconciliationGeneration)
+	if current.ValidateAgainstContract(aggregate.Facts.ReconciliationContract) != nil {
+		return true
+	}
+	if strings.TrimSpace(command.ReconciliationRequestID) == "" {
+		return false
+	}
+	desired := runtimeReconciliationRequestForRun(run, aggregate, command.ReconciliationRequestID, command.ReconciliationGeneration)
+	if current.RequestID == desired.RequestID {
+		return false
+	}
+	desiredBase, _ := runtimeReconciliationRequestBaseIdentityForRun(run, aggregate, command.ReconciliationRequestID)
+	return !runtimeReconciliationHistoryContainsIntent(aggregate, desiredBase)
 }
 
 // queryRuntimeReconciliationBatch asks each declared binding owner for one
@@ -224,6 +229,36 @@ func normalizeRuntimeCWIReconciliationOwnerResult(owner string, data any) (runti
 }
 
 func runtimeReconciliationRequestForRun(run *runmodel.Run, aggregate runtime.RuntimeAggregate, requestedID string, requestedGeneration uint64) runtimecontract.RuntimeCWIReconciliationRequest {
+	baseID, scope := runtimeReconciliationRequestBaseIdentityForRun(run, aggregate, requestedID)
+	contract := aggregate.Facts.ReconciliationContract.Normalized()
+	if aggregate.Reconciliation.Request != nil {
+		current := aggregate.Reconciliation.Request.Normalized()
+		if runtimeReconciliationRequestBaseIdentity(current.RequestID) == baseID && current.ValidateAgainstContract(contract) == nil &&
+			(requestedGeneration == 0 || current.Generation == requestedGeneration) {
+			return current
+		}
+	}
+	baselineRevision, baselineRef := runtimeReconciliationBaseline(aggregate.Facts)
+	generation := runtimeReconciliationGenerationHighWatermark(aggregate) + 1
+	if requestedGeneration > generation {
+		generation = requestedGeneration
+	}
+	return runtimecontract.RuntimeCWIReconciliationRequest{
+		RequestID: runtimeReconciliationRequestIdentityForGeneration(baseID, generation), WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Scope: scope, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+		BindingSetHash:            contract.BindingSetHash,
+		Bindings:                  contract.Bindings,
+		WorkspaceBaselineRevision: baselineRevision, WorkspaceBaselineRef: baselineRef,
+		Generation: generation,
+	}
+}
+
+// runtimeReconciliationRequestBaseIdentityForRun derives the stable portion
+// of a durable SM-4 request identity from the Run-owned continuation intent
+// and current SM-2 binding set. The sealed request adds a monotonic generation
+// suffix below, so history can never be reactivated when a binding set happens
+// to recur.
+func runtimeReconciliationRequestBaseIdentityForRun(run *runmodel.Run, aggregate runtime.RuntimeAggregate, requestedID string) (string, runtimecontract.RuntimeCWIReconciliationScope) {
 	scope := run.ReconciliationScope
 	if scope == "" {
 		scope = runtimecontract.RuntimeCWIReconciliationScopeCurrentRun
@@ -243,32 +278,58 @@ func runtimeReconciliationRequestForRun(run *runmodel.Run, aggregate runtime.Run
 	if requestID == "" {
 		requestID = fmt.Sprintf("%s/%s", aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	}
-	requestID = "runtime-reconciliation/" + requestID + "/" + string(scope)
-	if requestedID != "" {
-		for _, history := range aggregate.Reconciliation.History {
-			if history.Request.RequestID == requestID {
-				// Preserve the original generation for a duplicate continuation;
-				// the caller will treat it as an already-sealed request.
-				return history.Request.Clone()
-			}
+	bindingSetHash := strings.TrimSpace(aggregate.Facts.ReconciliationContract.BindingSetHash)
+	return "runtime-reconciliation/" + requestID + "/" + string(scope) + "/binding-set/" + bindingSetHash, scope
+}
+
+func runtimeReconciliationRequestIdentityForGeneration(baseID string, generation uint64) string {
+	return strings.TrimRight(strings.TrimSpace(baseID), "/") + fmt.Sprintf("/generation/%d", generation)
+}
+
+func runtimeReconciliationRequestBaseIdentity(requestID string) string {
+	requestID = strings.TrimSpace(requestID)
+	marker := "/generation/"
+	index := strings.LastIndex(requestID, marker)
+	if index < 0 {
+		return requestID
+	}
+	return requestID[:index]
+}
+
+func runtimeReconciliationGenerationHighWatermark(aggregate runtime.RuntimeAggregate) uint64 {
+	highest := uint64(0)
+	if aggregate.Reconciliation.Request != nil && aggregate.Reconciliation.Request.Generation > highest {
+		highest = aggregate.Reconciliation.Request.Generation
+	}
+	for _, history := range aggregate.Reconciliation.History {
+		if history.Request.Generation > highest {
+			highest = history.Request.Generation
 		}
 	}
-	baselineRevision, baselineRef := runtimeReconciliationBaseline(aggregate.Facts)
-	generation := requestedGeneration
-	if generation == 0 {
-		generation = 1
-		if aggregate.Reconciliation.Request != nil && aggregate.Reconciliation.Request.Generation >= generation {
-			generation = aggregate.Reconciliation.Request.Generation + 1
+	return highest
+}
+
+func runtimeReconciliationHistoryContainsIntent(aggregate runtime.RuntimeAggregate, baseID string) bool {
+	intentID := runtimeReconciliationRequestIntentIdentity(baseID)
+	if intentID == "" {
+		return false
+	}
+	for _, history := range aggregate.Reconciliation.History {
+		candidate := history.Request.Normalized()
+		if runtimeReconciliationRequestIntentIdentity(candidate.RequestID) == intentID {
+			return true
 		}
 	}
-	return runtimecontract.RuntimeCWIReconciliationRequest{
-		RequestID: requestID, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		Scope: scope, DefinitionRevision: aggregate.Facts.DefinitionRevision,
-		BindingSetHash:            aggregate.Facts.ReconciliationContract.BindingSetHash,
-		Bindings:                  aggregate.Facts.ReconciliationContract.Bindings,
-		WorkspaceBaselineRevision: baselineRevision, WorkspaceBaselineRef: baselineRef,
-		Generation: generation,
+	return false
+}
+
+func runtimeReconciliationRequestIntentIdentity(requestID string) string {
+	baseID := runtimeReconciliationRequestBaseIdentity(requestID)
+	marker := "/binding-set/"
+	if index := strings.LastIndex(baseID, marker); index >= 0 {
+		return baseID[:index]
 	}
+	return baseID
 }
 
 func runtimeReconciliationBaseline(facts runtimecontract.RuntimeFacts) (string, string) {

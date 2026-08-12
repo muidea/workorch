@@ -31,9 +31,12 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
 		RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 7},
 		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:            runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
-			ActualSchemaVersion:    2,
-			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			Disposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
+			Incompatibility: runtimecontract.RuntimeStateIncompatibility{
+				Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
+				ActualSchemaVersion:    2,
+				SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			},
 		},
 	}
 	data := RunStateChangedDataFromModel(run)
@@ -43,8 +46,10 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 	if err := data.Validate(); err != nil {
 		t.Fatalf("validate run state fact: %v", err)
 	}
-	if data.ActualRuntimeStateSchemaVersion != 2 || data.SupportedRuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("fresh activation schema identity=%+v", data)
+	if data.RuntimeStateIncompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported ||
+		data.RuntimeStateIncompatibility.ActualSchemaVersion != 2 ||
+		data.RuntimeStateIncompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("fresh activation persisted-state identity=%+v", data)
 	}
 }
 

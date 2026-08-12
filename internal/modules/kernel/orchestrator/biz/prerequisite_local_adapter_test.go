@@ -274,13 +274,14 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	// requires grounding; they are deliberately absent from the static bootstrap.
 	groundingFacts := facts
 	groundingFacts.Focus = runtimecontract.CoverageFocus{
-		ID: "focus-ground", SliceID: "slice-ground", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-ground"},
+		ID: "focus-ground", SliceID: "slice-default-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequireTargetGrounding: true,
 		TargetRole: "implementation", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 		TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-inventory",
 		TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"implementation.go"},
 	}
-	groundingFacts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-ground", SliceID: "slice-ground", State: runtimecontract.RuntimeCoverageItemStateOpen}}
+	groundingFacts.Coverage[0].FocusID = groundingFacts.Focus.ID
+	groundingFacts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateUnbound
 	grounded, decision, err := runtime.ReduceRuntimeStateWithDirective(groundingFacts, nil)
 	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("reducer did not generate target selection prerequisite: facts=%+v decision=%+v err=%v", grounded, decision, err)

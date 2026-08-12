@@ -114,13 +114,16 @@ func TestReduceActivateRunTerminalIsNoop(t *testing.T) {
 func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64, actualSchema uint32) runevents.RuntimeStateIncompatibleFact {
 	stateRef := runevents.RuntimeStateRef(workspaceID, runID, revision)
 	return runevents.RuntimeStateIncompatibleFact{
-		WorkspaceID:            workspaceID,
-		RunID:                  runID,
-		SourceOwner:            "kernel/orchestrator",
-		CausationID:            "runtime-state-incompatible/" + stateRef,
-		RuntimeStateRef:        stateRef,
-		ActualSchemaVersion:    actualSchema,
-		SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		WorkspaceID:     workspaceID,
+		RunID:           runID,
+		SourceOwner:     "kernel/orchestrator",
+		CausationID:     "runtime-state-incompatible/" + stateRef,
+		RuntimeStateRef: stateRef,
+		Incompatibility: runtimecontract.RuntimeStateIncompatibility{
+			Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported,
+			ActualSchemaVersion:    actualSchema,
+			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		},
 		Feedback: runtimecontract.RuntimeFeedback{
 			Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
 			StableCategory: runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported,
@@ -133,6 +136,37 @@ func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, 
 				OriginalCode:     "unsupported_runtime_state_schema",
 				OriginalMessage:  "runtime state schema is unsupported by this binary",
 				Signature:        "runtime-state-schema/fixture",
+				ObservedRevision: stateRef,
+			},
+		},
+	}
+}
+
+func cwiLedgerIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, revision uint64) runevents.RuntimeStateIncompatibleFact {
+	stateRef := runevents.RuntimeStateRef(workspaceID, runID, revision)
+	return runevents.RuntimeStateIncompatibleFact{
+		WorkspaceID:     workspaceID,
+		RunID:           runID,
+		SourceOwner:     "kernel/orchestrator",
+		CausationID:     "runtime-state-incompatible/" + stateRef + "/cwi-ledger-invalid",
+		RuntimeStateRef: stateRef,
+		Incompatibility: runtimecontract.RuntimeStateIncompatibility{
+			Reason:                 runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid,
+			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionCurrent,
+			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		},
+		Feedback: runtimecontract.RuntimeFeedback{
+			Domain:         runtimecontract.RuntimeFeedbackDomainDrive,
+			StableCategory: runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid,
+			WorkspaceID:    workspaceID,
+			RunID:          runID,
+			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+				OwnerModuleID:    "kernel/orchestrator",
+				OriginalClass:    "runtime_cwi_ledger",
+				OriginalCode:     "invalid_runtime_cwi_ledger",
+				OriginalMessage:  "runtime state CWI ledger is ambiguous and cannot be resumed",
+				Signature:        "runtime-cwi-ledger/fixture",
 				ObservedRevision: stateRef,
 			},
 		},
@@ -152,7 +186,8 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 	}
 	next := applyLifecycleTransition(current, transition)
 	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
-		next.RuntimeActivationStatus.ActualSchemaVersion != 2 || next.RuntimeActivationStatus.Feedback == nil ||
+		next.RuntimeActivationStatus.Incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported ||
+		next.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion != 2 || next.RuntimeActivationStatus.Feedback == nil ||
 		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil || next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-state-schema/fixture" {
 		t.Fatalf("fresh-activation status=%+v", next.RuntimeActivationStatus)
 	}
@@ -166,9 +201,40 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 		t.Fatalf("mismatched ref error=%v", err)
 	}
 	wrongSchema := cmd
-	wrongSchema.ActualSchemaVersion = 3
+	wrongSchema.Incompatibility.ActualSchemaVersion = 3
 	if _, err := reduceRuntimeStateIncompatible(current, wrongSchema); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("mismatched schema error=%v", err)
+	}
+}
+
+func TestReduceRuntimeStateIncompatiblePreservesCurrentSchemaCWILedgerReason(t *testing.T) {
+	current := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeState: &runtimecontract.RuntimeStateRecord{
+			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+			StateRevision: 7,
+		},
+	}
+	cmd := cwiLedgerIncompatibleFact("ws-1", "run-1", 7)
+	transition, err := reduceRuntimeStateIncompatible(current, cmd)
+	if err != nil || transition.Noop || transition.Target != common.RunStateActive || transition.RuntimeActivationStatus == nil {
+		t.Fatalf("transition=%+v err=%v", transition, err)
+	}
+	next := applyLifecycleTransition(current, transition)
+	if next.RuntimeActivationStatus == nil ||
+		next.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
+		next.RuntimeActivationStatus.Incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid ||
+		next.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		next.RuntimeActivationStatus.Incompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
+		next.RuntimeActivationStatus.Feedback == nil ||
+		next.RuntimeActivationStatus.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid ||
+		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil ||
+		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-cwi-ledger/fixture" {
+		t.Fatalf("CWI ledger fresh-activation status=%+v", next.RuntimeActivationStatus)
+	}
+	duplicate, err := reduceRuntimeStateIncompatible(next, cmd)
+	if err != nil || !duplicate.Noop {
+		t.Fatalf("duplicate transition=%+v err=%v", duplicate, err)
 	}
 }
 

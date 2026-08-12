@@ -278,6 +278,7 @@ func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t 
 		ID: "changed-target", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
+	facts = repairDirectiveFactsWithCanonicalCWI(t, facts)
 	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus})
 	if updated.RepairDirective == nil || updated.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		updated.RepairDirective.SupersedesEvidenceRevision != "evidence-v1-00000000000000000001" {
@@ -303,6 +304,7 @@ func TestNormalStateChangeDoesNotCreateRepairDirective(t *testing.T) {
 func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.TargetRefs = []string{"implementation.go", "implementation_test.go"}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: facts.Focus.ID,
 		ActiveGap: &runtimecontract.RuntimeAssessmentGap{
@@ -347,11 +349,20 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 		Revision: "evidence-v1-00000000000000000002", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
+	facts = repairDirectiveFactsWithCanonicalCWI(t, facts)
 	next := syncRepairDirective(facts, decision)
 	if next.RepairDirective == nil || next.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		next.RepairDirective.Closure == nil || next.RepairDirective.Closure.ID != directive.Closure.ID {
 		t.Fatalf("accepted repair state change did not preserve closure into validation: %+v", next.RepairDirective)
 	}
+}
+
+func repairDirectiveFactsWithCanonicalCWI(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	t.Helper()
+	aggregate := RuntimeAggregate{Facts: facts}
+	runtimeTestSealCurrentFocusBindings(t, &aggregate)
+	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
+	return aggregate.Facts
 }
 
 func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {

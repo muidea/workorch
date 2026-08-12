@@ -125,14 +125,16 @@ func runtimeEvidenceMatchesCoverageBindingWithLineage(facts runtimecontract.Runt
 }
 
 func runtimeEvidenceBindingForCoverageWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.CoverageEvidenceBinding, bool) {
+	facts = facts.Normalized()
 	focus = focus.Normalized()
-	if len(focus.CoverageEvidenceBindings) == 0 {
-		return runtimecontract.CoverageEvidenceBinding{}, runtimeEvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, proofLineage)
+	currentFocus := facts.Focus.Normalized()
+	if focus.ID == "" || focus.ID != currentFocus.ID {
+		return runtimecontract.CoverageEvidenceBinding{}, false
 	}
 	if !runtimeEvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, proofLineage) {
 		return runtimecontract.CoverageEvidenceBinding{}, false
 	}
-	return coverageEvidenceBindingForCoverage(focus, coverageID)
+	return coverageEvidenceBindingForCoverage(currentFocus, coverageID)
 }
 
 func runtimeEvidenceShowsExecutableBehaviorWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {

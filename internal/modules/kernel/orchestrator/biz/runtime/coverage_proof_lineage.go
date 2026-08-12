@@ -195,6 +195,12 @@ func runtimeEvidenceAppliesToCoverageWorkItemWithLineage(
 	coverageID common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
+	facts = facts.Normalized()
+	item, bound := currentRuntimeCWIBindingForFocus(facts, coverageID)
+	if !bound || (item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound &&
+		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled) {
+		return false
+	}
 	if runtimecontract.EvidenceAppliesToCoverageWorkItem(facts.Focus, evidence, coverageID) {
 		// Binding references are stable identifiers, while a re-seal may keep
 		// that identifier and replace its hash after a catalog refresh. A source
@@ -230,9 +236,8 @@ func runtimeEvidenceAppliesToCurrentCoverageWithLineage(
 }
 
 // runtimeEvidenceAppliesToCoverageIDsWithLineage narrows the same predicate to
-// a sealed action's explicit CWI set. The schema-less fallback exists only for
-// isolated legacy fixtures; persisted current-schema focuses always carry
-// bindings and therefore use exact or equivalent proof attribution.
+// a sealed action's explicit CWI set. CWI credit is unavailable unless the
+// current Runtime ledger and exact current binding are both present.
 func runtimeEvidenceAppliesToCoverageIDsWithLineage(
 	facts runtimecontract.RuntimeFacts,
 	evidence runtimecontract.EvidenceFact,
@@ -240,18 +245,7 @@ func runtimeEvidenceAppliesToCoverageIDsWithLineage(
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
 	facts = facts.Normalized()
-	if len(coverageIDs) == 0 {
-		return false
-	}
-	if len(facts.Focus.CoverageEvidenceBindings) == 0 {
-		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
-			return false
-		}
-		for _, coverageID := range coverageIDs {
-			if coverageWorkItemIDIncluded(evidence.CoverageWorkItemIDs, coverageID) {
-				return true
-			}
-		}
+	if len(coverageIDs) == 0 || facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent {
 		return false
 	}
 	for _, coverageID := range coverageIDs {

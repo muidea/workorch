@@ -663,6 +663,15 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	if preparedDecision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("prepared decision = %+v", preparedDecision)
 	}
+	preparedAggregate := RuntimeAggregate{
+		StateRevision: 7,
+		Definition:    controllerDefinition(),
+		Facts:         preparedFacts,
+		Decision:      preparedDecision,
+	}
+	runtimeTestEnsureCurrentFocusBindings(t, &preparedAggregate)
+	preparedFacts = preparedAggregate.Facts
+	preparedDecision = preparedAggregate.Decision
 
 	historicalSelection := runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "selection-old-go-mod", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -690,13 +699,9 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 		TargetRef: "go.mod", ContentHash: "go-mod-old", ContentState: runtimecontract.SnapshotContentStateComplete,
 	}}
 	preparedFacts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{historicalObservation}
-	repository.aggregate = &RuntimeAggregate{
-		StateRevision: 7,
-		Definition:    controllerDefinition(),
-		Facts:         preparedFacts,
-		Decision:      preparedDecision,
-	}
-	runtimeTestEnsureSemanticPlanningLedger(t, repository.aggregate)
+	preparedAggregate.Facts = preparedFacts
+	preparedAggregate.Decision = preparedDecision
+	repository.aggregate = &preparedAggregate
 
 	reconciled, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
@@ -845,7 +850,12 @@ func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges
 func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	_, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	// This unit test exercises the post-semantic dispatch/evidence path. Seed a
+	// complete, non-assessment focus rather than implicitly compiling a new
+	// semantic focus, whose contract intentionally requires an assessment.
+	facts := runtimeTestFactsWithCurrentFocusBindings(t, controllerFacts(), controllerDefinition())
+	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
+	_, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -965,11 +975,28 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
-	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-a", "cwi-b"}
+	facts.Focus.ID = "focus-cwi-a"
+	facts.Focus.SliceID = "slice-cwi-a"
+	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-a"}
+	facts.Focus.TargetRefs = []string{"a.txt"}
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-cwi-b", SliceID: "slice-cwi-b", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-b"},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"b.txt"}, RequireAssessment: true,
+	}}
 	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
-		{ID: "cwi-a", State: runtimecontract.RuntimeCoverageItemStateOpen},
-		{ID: "cwi-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		{ID: "cwi-a", SliceID: "slice-cwi-a", SourceScope: "dodItem", SourceID: "dod-a", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		{ID: "cwi-b", SliceID: "slice-cwi-b", SourceScope: "dodItem", SourceID: "dod-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
 	}
+	facts.Slices = []runtimecontract.RuntimeAcceptanceSlice{
+		{ID: "slice-cwi-a", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a"}},
+		{ID: "slice-cwi-b", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-b"}},
+	}
+	facts.DefinitionSeed.CoverageItems = []runtimecontract.RuntimeCoverageItem{
+		{ID: "cwi-a", SliceID: "slice-cwi-a", SourceScope: "dodItem", SourceID: "dod-a", TargetText: "deliver a"},
+		{ID: "cwi-b", SliceID: "slice-cwi-b", SourceScope: "dodItem", SourceID: "dod-b", TargetText: "deliver b"},
+	}
+	facts.DefinitionSeed.Slices = facts.Slices
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
@@ -980,7 +1007,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeTestBindCandidateToFacts(t, facts, runtimecontract.RuntimeCandidate{
 		StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-both", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a"},
-			TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("state"),
+			TargetRefs: []string{"a.txt"}, Parameters: runtimeFileWriteParameters("state"),
 		}}}},
 	}))
 	if err != nil {
@@ -996,28 +1023,35 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("state evidence did not reach assessment: aggregate=%+v err=%v", committed.Aggregate, err)
 	}
-	// Model a persisted prior repairable gap. The assessment below closes cwi-a
-	// with current-run evidence and leaves cwi-b open, so it must reset only the
-	// no-progress window, not erase the remaining repair target.
+	// Model a persisted repairable gap for cwi-a. Its accepted assessment moves
+	// to cwi-b, which must receive a fresh repair ledger rather than inheriting
+	// cwi-a's counters, shape history, gap, or repair directive.
 	repository.aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: repository.aggregate.Facts.Focus.ID, SliceID: repository.aggregate.Facts.Focus.SliceID,
 		RepairAttempts: 2, ValidationOnlyRetries: 1, NoProgressCount: 2, LastCycleID: "prior-cycle",
 		SignatureCounts:           []runtimecontract.RuntimeFailureSignatureCount{{Signature: "prior-gap", Count: 2}},
 		NoProgressOperationShapes: []runtimecontract.RuntimeRejectedOperationShape{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite}}},
-		ActiveGap:                 &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, Reason: "both remain open"},
+		ActiveGap:                 &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, Reason: "cwi-a remains open"},
+	}
+	repository.aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-cwi-a", FocusID: repository.aggregate.Facts.Focus.ID, Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap,
+		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-a"},
+		TargetRefs:            []string{"a.txt"},
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		Assessment: &runtimecontract.AssessmentCandidate{
-			FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"},
-			Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "one remaining item",
+			FocusID: "focus-cwi-a", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a"},
+			Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "cwi-a satisfied",
 			Items: []runtimecontract.RuntimeAssessmentItemFact{
 				{CoverageWorkItemID: "cwi-a", Satisfied: true, EvidenceRefs: []string{"event-state"}},
-				{CoverageWorkItemID: "cwi-b", Satisfied: false, Reason: "still open"},
 			},
-			Gap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-b"}, Reason: "one remaining item"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -1027,10 +1061,16 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 		t.Fatal(err)
 	}
 	ledger := progressed.Facts.Repair
-	if ledger.RepairAttempts != 3 || ledger.ValidationOnlyRetries != 0 || ledger.NoProgressCount != 0 || len(ledger.SignatureCounts) != 0 ||
-		len(ledger.NoProgressOperationShapes) != 0 || ledger.LastCycleID != "" || ledger.ActiveGap == nil ||
-		len(ledger.ActiveGap.CoverageWorkItemIDs) != 1 || ledger.ActiveGap.CoverageWorkItemIDs[0] != "cwi-b" || ledger.LastProgressRevision == "" {
-		t.Fatalf("partial assessment delta did not preserve the remaining gap while resetting the window: %+v", ledger)
+	if progressed.Facts.Focus.ID != "focus-cwi-b" || ledger.FocusID != "focus-cwi-b" || ledger.SliceID != "slice-cwi-b" ||
+		ledger.RepairAttempts != 0 || ledger.ValidationOnlyRetries != 0 || ledger.NoProgressCount != 0 || len(ledger.SignatureCounts) != 0 ||
+		len(ledger.NoProgressOperationShapes) != 0 || ledger.LastCycleID != "" || ledger.ActiveGap != nil || ledger.LastProgressRevision == "" ||
+		progressed.Facts.RepairDirective != nil {
+		t.Fatalf("focus transition retained cwi-a repair authority in cwi-b: facts=%+v", progressed.Facts)
+	}
+	for _, coverage := range progressed.Facts.Coverage {
+		if coverage.ID == "cwi-a" && coverage.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled {
+			t.Fatalf("satisfied cwi-a was not settled atomically: %+v", coverage)
+		}
 	}
 	restarted, err := NewRuntimeController(repository)
 	if err != nil {
@@ -1038,7 +1078,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	}
 	reloaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
 	if err != nil || reloaded.StateRevision != progressed.StateRevision || !reflect.DeepEqual(reloaded.Facts.Repair, ledger) {
-		t.Fatalf("restart did not preserve partial assessment progress transition: aggregate=%+v err=%v", reloaded, err)
+		t.Fatalf("restart did not preserve CWI-isolated repair transition: aggregate=%+v err=%v", reloaded, err)
 	}
 }
 
@@ -1313,6 +1353,11 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 		Signature: "patch-base-hash", Message: "patch baseHash mismatch",
 	}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1}
+	// Keep this candidate-attempt fixture at a pre-sealed current focus. The
+	// assertion is about preserving an existing execution failure, not about
+	// recompiling a semantic generation with a different focus identity.
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	facts = runtimeTestSeedSemanticTargetSnapshots(facts)
 	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1642,16 +1687,12 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Slices: facts.Slices,
 	}
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
-	binding := runtimecontract.CoverageEvidenceBinding{
-		ID: "binding/test/runtime/focus-v2/cwi-v2", CoverageWorkItemID: "cwi-v2", FocusID: "focus-v2", DefinitionRevision: "definition-v2",
-		Proofs: []runtimecontract.CoverageEvidenceProof{{
-			EvidenceKind: runtimecontract.EvidenceKindStateChange, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
-		}},
-		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/runtime-controller-fixture",
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"}, ObservedRevision: "test-semantic-revision",
 	}
-	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	return facts
 }
 
