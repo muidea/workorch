@@ -12,7 +12,7 @@ import (
 
 var (
 	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "documentKind", "manifestHash", "planStep", "proposals", "schemaVersion"}
-	runtimeSemanticProposalFields = []string{"artifactRefs", "coverageWorkItemId", "declarationRef", "metricConstraints", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
+	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRef"}
 )
 
@@ -37,8 +37,6 @@ type runtimeSemanticProposalPayload struct {
 	Target                runtimeSemanticTargetPayload `json:"target"`
 	RequiredEvidenceKinds []string                     `json:"requiredEvidenceKinds"`
 	ValidationRecipeID    string                       `json:"validationRecipeId,omitempty"`
-	MetricConstraints     []string                     `json:"metricConstraints,omitempty"`
-	ArtifactRefs          []string                     `json:"artifactRefs,omitempty"`
 	DeclarationRef        string                       `json:"declarationRef"`
 }
 
@@ -138,7 +136,7 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: deriveRuntimeSemanticProposalEffects(manifest, value),
 			ValidationRecipeID: value.ValidationRecipeID,
-			MetricConstraints:  value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
+			DeclarationRef:     value.DeclarationRef,
 		})
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
@@ -199,7 +197,7 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds,
 			ValidationRecipeID:    value.ValidationRecipeID,
-			MetricConstraints:     value.MetricConstraints, ArtifactRefs: value.ArtifactRefs, DeclarationRef: value.DeclarationRef,
+			DeclarationRef:        value.DeclarationRef,
 		})
 	}
 	return json.Marshal(wire)
@@ -361,7 +359,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					}},
 					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
 					"validationRecipeId":    stringEnumSchema(recipeIDs),
-					"metricConstraints":     stringArraySchema(), "artifactRefs": stringArraySchema(), "declarationRef": map[string]any{"type": "string", "minLength": 1},
+					"declarationRef":        map[string]any{"type": "string", "minLength": 1},
 				},
 			}},
 		},

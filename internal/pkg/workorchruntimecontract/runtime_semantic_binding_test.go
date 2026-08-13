@@ -26,6 +26,63 @@ func TestCompileRuntimeSemanticBindingsCombinesIndependentProofsForOneCWI(t *tes
 	}
 }
 
+func TestCompileRuntimeSemanticBindingsDoesNotPromoteTargetToArtifact(t *testing.T) {
+	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || len(focuses[0].CoverageEvidenceBindings) != 1 {
+		t.Fatalf("compiled focuses = %+v", focuses)
+	}
+	binding := focuses[0].CoverageEvidenceBindings[0]
+	if !sameStrings(binding.TargetRefs, []string{"main.go"}) {
+		t.Fatalf("binding targets = %v", binding.TargetRefs)
+	}
+	if len(focuses[0].ArtifactRefs) != 0 {
+		t.Fatalf("focus target was promoted to artifact: %v", focuses[0].ArtifactRefs)
+	}
+	for _, proof := range binding.Proofs {
+		if len(proof.ArtifactRefs) != 0 {
+			t.Fatalf("proof target was promoted to artifact: %+v", proof)
+		}
+	}
+}
+
+func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValidationProof(t *testing.T) {
+	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	source.MetricConstraints = []string{"metric/latency"}
+	source.ArtifactRefs = []string{"workorch://artifact/validation-report"}
+	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := focuses[0].CoverageEvidenceBindings[0]
+	stateChange, found := CoverageEvidenceProofForKind(binding, EvidenceKindStateChange)
+	if !found || len(stateChange.MetricConstraints) != 0 || len(stateChange.ArtifactRefs) != 0 {
+		t.Fatalf("source proof requirements leaked to state-change owner: %+v", stateChange)
+	}
+	validation, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
+	if !found || !sameStrings(validation.MetricConstraints, source.MetricConstraints) || !sameStrings(validation.ArtifactRefs, source.ArtifactRefs) {
+		t.Fatalf("validation proof lost source requirements: %+v", validation)
+	}
+	if !sameStrings(focuses[0].MetricConstraints, source.MetricConstraints) || !sameStrings(focuses[0].ArtifactRefs, source.ArtifactRefs) {
+		t.Fatalf("compiled focus lost source requirements: %+v", focuses[0])
+	}
+}
+
+func TestCompileRuntimeSemanticBindingsRejectsAmbiguousSourceProofRequirementOwner(t *testing.T) {
+	proofSet := RuntimeSemanticCWIProofSet{CoverageWorkItemID: "cwi-001", Proposals: []RuntimeSemanticProofProposal{
+		{RequiredEvidenceKinds: []string{EvidenceKindValidation}},
+		{RequiredEvidenceKinds: []string{EvidenceKindValidation}},
+	}}
+	source := CoverageFocus{ArtifactRefs: []string{"workorch://artifact/validation-report"}}
+	_, err := runtimeSemanticSourceProofRequirementIndex(proofSet, &source)
+	if err == nil || !strings.Contains(err.Error(), "cannot uniquely assign source metric or artifact requirements") {
+		t.Fatalf("ambiguous source proof requirement owner was accepted: %v", err)
+	}
+}
+
 func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValidation(t *testing.T) {
 	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
 	document.Proposals[0].Target = RuntimeOperationTargetAuthorization{

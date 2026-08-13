@@ -328,6 +328,8 @@ func TestRuntimeSemanticPlanPayloadRejectsUnknownMissingAndWrongKind(t *testing.
 		path    string
 	}{
 		{name: "unknown proposal", payload: strings.Replace(base, `"declarationRef":"dod/cwi-001"`, `"declarationRef":"dod/cwi-001","dependsOn":[]`, 1), path: "$.proposals[0].dependsOn"},
+		{name: "provider artifact authority", payload: strings.Replace(base, `"declarationRef":"dod/cwi-001"`, `"artifactRefs":["main.go"],"declarationRef":"dod/cwi-001"`, 1), path: "$.proposals[0].artifactRefs"},
+		{name: "provider metric authority", payload: strings.Replace(base, `"declarationRef":"dod/cwi-001"`, `"metricConstraints":["metric/latency"],"declarationRef":"dod/cwi-001"`, 1), path: "$.proposals[0].metricConstraints"},
 		{name: "repeated global order", payload: strings.Replace(base, `"proposals":`, `"coverageOrder":["cwi-001"],"proposals":`, 1), path: "$.coverageOrder"},
 		{name: "missing target", payload: strings.Replace(base, `"target":{"policy":"exact_target","exactTargetRefs":["main.go"]},`, "", 1), path: "$.proposals[0]"},
 		{name: "wrong kind", payload: strings.Replace(base, `"documentKind":"semantic_plan"`, `"documentKind":"operations"`, 1), path: "$.documentKind"},

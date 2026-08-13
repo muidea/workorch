@@ -579,8 +579,6 @@ type RuntimeSemanticProofProposal struct {
 	RequiredEffectScopes  []RuntimeEffectScope
 	ValidationRecipeID    string
 	RequiredCheckRefs     []string
-	MetricConstraints     []string
-	ArtifactRefs          []string
 	DeclarationRef        string
 }
 
@@ -618,8 +616,6 @@ func (p RuntimeSemanticProofProposal) Normalized() RuntimeSemanticProofProposal 
 	p.RequiredEffectScopes = NormalizeRuntimeEffectScopes(p.RequiredEffectScopes)
 	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
 	p.RequiredCheckRefs = normalizeStrings(p.RequiredCheckRefs)
-	p.MetricConstraints = normalizeStrings(p.MetricConstraints)
-	p.ArtifactRefs = normalizeStrings(p.ArtifactRefs)
 	p.DeclarationRef = strings.TrimSpace(p.DeclarationRef)
 	return p
 }
@@ -630,8 +626,6 @@ func (p RuntimeSemanticProofProposal) Clone() RuntimeSemanticProofProposal {
 	p.RequiredEvidenceKinds = append([]string(nil), p.RequiredEvidenceKinds...)
 	p.RequiredEffectScopes = append([]RuntimeEffectScope(nil), p.RequiredEffectScopes...)
 	p.RequiredCheckRefs = append([]string(nil), p.RequiredCheckRefs...)
-	p.MetricConstraints = append([]string(nil), p.MetricConstraints...)
-	p.ArtifactRefs = append([]string(nil), p.ArtifactRefs...)
 	return p
 }
 
@@ -719,8 +713,6 @@ func StableRuntimeSemanticProofProposalHash(proposal RuntimeSemanticProofProposa
 	writeHashStrings(h, proposal.RequiredEvidenceKinds)
 	writeHashStrings(h, RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes))
 	writeHashString(h, proposal.ValidationRecipeID)
-	writeHashStrings(h, proposal.MetricConstraints)
-	writeHashStrings(h, proposal.ArtifactRefs)
 	writeHashString(h, proposal.DeclarationRef)
 	return "runtime-semantic-proposal-" + hex.EncodeToString(h.Sum(nil))[:20]
 }

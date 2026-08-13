@@ -194,13 +194,15 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 	proofs := make([]CoverageEvidenceProof, 0, len(proofSet.Proposals))
 	acceptedKinds := make([]string, 0, len(proofSet.Proposals))
 	acceptedVariants := make([]RuntimeOperationVariantRef, 0, len(proofSet.Proposals))
-	metricConstraints := make([]string, 0)
-	artifactRefs := make([]string, 0)
 	prerequisiteRefs := make([]string, 0, len(proofSet.Proposals)*2)
 	var targetRefs []string
 	var selectorRef, prospectiveTargetRef, declarationRef, selectorOwner string
 	var validationRecipeID string
 	validationChecks := make([]string, 0)
+	proofRequirementIndex, err := runtimeSemanticSourceProofRequirementIndex(proofSet, source)
+	if err != nil {
+		return CoverageFocus{}, err
+	}
 	for proofIndex, rawProposal := range proofSet.Proposals {
 		proposal := rawProposal.Normalized()
 		proposal.RequiredEffectScopes = deriveRuntimeSemanticProposalEffects(manifest, runtimeSemanticProposalPayload{
@@ -219,8 +221,12 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 		evidenceKind := proposal.RequiredEvidenceKinds[0]
 		proof := CoverageEvidenceProof{
 			EvidenceKind: evidenceKind, RequiredEffectScopes: semanticProofEffectsForEvidenceKind(proposal.RequiredEffectScopes, evidenceKind),
-			AllowedOperationKinds: []string{proposal.OperationKind}, MetricConstraints: append([]string(nil), proposal.MetricConstraints...),
-			ArtifactRefs: append([]string(nil), proposal.ArtifactRefs...),
+			AllowedOperationKinds: []string{proposal.OperationKind},
+		}
+		if source != nil && proofIndex == proofRequirementIndex {
+			declaration := source.Normalized()
+			proof.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
+			proof.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
 		}
 		if proposal.OperationVariantID != "" {
 			proof.AllowedOperationVariants = []RuntimeOperationVariantRef{{Kind: proposal.OperationKind, VariantID: proposal.OperationVariantID}}
@@ -262,8 +268,6 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 			}
 		}
 		acceptedKinds = append(acceptedKinds, proposal.OperationKind)
-		metricConstraints = append(metricConstraints, proposal.MetricConstraints...)
-		artifactRefs = append(artifactRefs, proposal.ArtifactRefs...)
 		prerequisiteRefs = append(prerequisiteRefs, fact.CatalogSnapshotID)
 		prerequisiteRefs = append(prerequisiteRefs, "semantic-feasibility/"+strings.TrimPrefix(StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{fact}), "runtime-semantic-feasibility-set-"))
 		proofs = append(proofs, proof)
@@ -297,7 +301,11 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 		ProspectiveTargetRef: prospectiveTargetRef, RequireTargetGrounding: true,
 		AcceptedStepKinds: acceptedKinds, AcceptedOperationVariants: acceptedVariants, RequireDirectEvidence: true, RequireAssessment: true,
 		ValidationRecipeID: validationRecipeID, RequiredCheckRefs: validationChecks,
-		MetricConstraints: metricConstraints, ArtifactRefs: artifactRefs,
+	}
+	if source != nil {
+		declaration := source.Normalized()
+		focus.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
+		focus.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
 	}
 	if source != nil {
 		declaration := source.Normalized()
@@ -315,6 +323,39 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 		return CoverageFocus{}, err
 	}
 	return focus, nil
+}
+
+// runtimeSemanticSourceProofRequirementIndex assigns profile-sealed metric and
+// artifact requirements to one proof owner. Provider output cannot create or
+// route these requirements. A validation proof is preferred because metrics
+// and formal artifacts are observations; otherwise the proof set must contain
+// exactly one proof so ownership remains unambiguous.
+func runtimeSemanticSourceProofRequirementIndex(proofSet RuntimeSemanticCWIProofSet, source *CoverageFocus) (int, error) {
+	if source == nil {
+		return -1, nil
+	}
+	declaration := source.Normalized()
+	if len(declaration.MetricConstraints) == 0 && len(declaration.ArtifactRefs) == 0 {
+		return -1, nil
+	}
+	validationIndex := -1
+	for index, proposal := range proofSet.Proposals {
+		proposal = proposal.Normalized()
+		if len(proposal.RequiredEvidenceKinds) != 1 || proposal.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+			continue
+		}
+		if validationIndex >= 0 {
+			return -1, fmt.Errorf("runtime semantic proof set for coverage %q cannot uniquely assign source metric or artifact requirements", proofSet.CoverageWorkItemID)
+		}
+		validationIndex = index
+	}
+	if validationIndex >= 0 {
+		return validationIndex, nil
+	}
+	if len(proofSet.Proposals) == 1 {
+		return 0, nil
+	}
+	return -1, fmt.Errorf("runtime semantic proof set for coverage %q cannot uniquely assign source metric or artifact requirements", proofSet.CoverageWorkItemID)
 }
 
 // mergeRuntimeSemanticBindingTarget preserves one logical target surface for

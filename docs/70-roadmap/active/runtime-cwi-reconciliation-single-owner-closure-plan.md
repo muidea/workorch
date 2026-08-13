@@ -9,9 +9,9 @@ Last Updated: 2026-08-13
 ## 1. Purpose And Authority
 
 This is the sole active implementation queue for Runtime CWI identity, semantic-generation retirement, focus
-projection, reconciliation generation, semantic target-policy, dependency admission, and bounded current-focus
-request closure. It is derived from the current Runtime contract and the persisted `run-073`, `run-077`, `run-078`,
-`run-080`, and `run-081` counterexamples. The prior plan was moved to
+projection, reconciliation generation, semantic target-policy, proof-requirement authority, dependency admission,
+and bounded current-focus request closure. It is derived from the current Runtime contract and the persisted
+`run-073`, `run-077`, `run-078`, `run-080`, `run-081`, and `run-082` counterexamples. The prior plan was moved to
 [`90-archive/superseded`](../../90-archive/superseded/runtime-cwi-reconciliation-single-owner-closure-plan-pre-cwi-ledger-2026-08-11.md);
 its historical RSO status claims are not implementation authority.
 
@@ -468,7 +468,26 @@ All items are sequential. A later item may not compensate for an earlier missing
 | CWI-SO-9 | code-closed; automated-verified | Activation/profile compilation | Selected template/profile compiles validation preparation, validation, assessment/report, and final snapshot into stable CWI edges without domain logic entering Runtime core. |
 | CWI-SO-10 | code-closed; automated-verified | SM-2 dependency admission | Only state-eligible CWI whose declared prerequisites are settled may enter ordering, semantic batch, feasibility, binding, or dispatch; blocked CWI cause zero provider/capability work. |
 | CWI-SO-11 | code-closed; automated-verified | Dynamic request closure | Semantic-plan C3-C5 contain only current eligible CWI and directly relevant slices/refs while C0-C2 remain stable. |
-| CWI-SO-12 | automated-verified; deployed-live-pending | Full automated and deployed proof | Dependency, invalidation, restart/resume, request-bound, terminal-delivery, race, managed file-backed, and 22-owner boundary matrices pass; a fresh deployed workspace proof remains required. |
+| CWI-SO-12 | live-counterexample-run-082; code-closed; verification-pending | SM-2/SM-3 proof-requirement authority | Semantic provider wire cannot declare metric/artifact requirements. SM-2 compiles them only from the activation-sealed source declaration and assigns them to one unambiguous proof owner before dispatch. |
+| CWI-SO-13 | automated-verified; deployed-live-pending | Full automated and deployed proof | Dependency, invalidation, restart/resume, request-bound, terminal-delivery, race, managed file-backed, and 22-owner boundary matrices pass; a fresh deployed workspace proof remains required. |
+
+### 7.12 CWI-SO-12 detail
+
+`run-082` proved that dependency admission reached the deployed aggregate, but exposed a separate authority defect.
+The provider selected `cmd/lsp-bridge/main.go` as the exact File target and also submitted the same value as an
+`artifactRefs` requirement. File correctly returned a durable target/evidence receipt without inventing a formal
+artifact. The receipt gate then failed after the workspace mutation because the invalid provider-authored artifact
+requirement had already been sealed into the binding.
+
+The closed contract is:
+
+- semantic provider output selects owner, operation, target policy, evidence kind, and an owner-catalog recipe only;
+- `metricConstraints` and `artifactRefs` are not semantic provider fields and unknown-field decoding rejects them;
+- only the activation-sealed source focus may declare metric/artifact proof requirements;
+- SM-2 assigns those declarations to one unique proof, preferring the unique validation proof; ambiguous ownership
+  fails before binding seal and before capability execution; and
+- target refs never imply artifact refs. Capability owners and the receipt fence remain unchanged and must not
+  fabricate evidence to compensate for an invalid binding.
 
 ### 7.1 CWI-SO-1 detail
 
@@ -1006,6 +1025,10 @@ is exported as a topic or accepted from Web, TUI, application, projection, LLM, 
 | missing validation readiness | only a profile-declared prospective preparation operation may run; Runtime core does not infer a path or test framework |
 | state change after accepted validation | only declared validation/report/final-snapshot dependents reopen in one canonical SM-2 transition |
 | final Git snapshot ordering | no Git snapshot dispatch until every declared durable producer is settled; commit alone earns credit |
+| provider repeats a target in `artifactRefs` or submits `metricConstraints` | strict semantic decode rejects the unknown field; zero feasibility, binding, dispatch, receipt, or effect |
+| source-change proof has an exact File target and no profile artifact declaration | target remains only a target; compiled focus/binding contain no artifact requirement |
+| profile declares metric/artifact proof with one validation proof | SM-2 seals the requirement on that validation proof only; state-change owner receives no fabricated requirement |
+| profile metric/artifact requirement has ambiguous proof ownership | semantic seal fails before dispatch; no capability owner is asked to satisfy an invented routing choice |
 | large Goal/DoD with one active dependency closure | C0-C2 stay stable and complete; C3-C5 remain bounded to current closure and protected facts |
 | duplicate semantic document, feasibility, receipt, or batch | no extra CAS, request, binding, dispatch, or operation |
 | restart after each durable CAS | reload yields the same CWI ledger and never repeats owner execution |
@@ -1075,6 +1098,8 @@ This plan is code-closed only when all of the following hold:
 - final version-control snapshot is dependency-terminal and is reopened by every declared later durable producer;
 - C3-C5 request growth is bounded by the active dependency closure while complete C0-C2 and protected P0-P4 facts are
   preserved;
+- metric/artifact proof requirements originate only from activation-sealed declarations, never provider output or
+  target inference, and are assigned to one unambiguous proof before binding seal;
 - no runtime component outside Orchestrator owns or mutates SM-2/SM-3/SM-4 state;
 - legacy/ambiguous aggregates fail closed without fallback or replay; and
 - the regression matrix and deployed fault matrix pass.
@@ -1103,6 +1128,8 @@ The following do not close this issue and must not be introduced:
 - hard-coding Go, `*_test.go`, test harness paths, software-development template IDs, or Git ordering in Orchestrator or
   `workorchruntimecontract`;
 - using slice priority, CWI numeric ID, LLM order, or free-text guidance as a substitute for an explicit prerequisite;
+- allowing the semantic provider to invent metric/artifact requirements, equating a target with an artifact, or
+  changing capability-owner receipts to fabricate proof for a bad binding;
 - allowing final Git snapshot to settle while a declared durable producer remains eligible or unsettled;
 - truncating C0-C2, Goal/DoD, current binding/target/failure, or protected P0-P4 facts merely to meet a byte target;
 - adding a second correction counter, retry loop, target policy, or state machine for semantic feasibility;

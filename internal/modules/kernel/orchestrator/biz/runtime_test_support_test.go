@@ -671,9 +671,7 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				RequiredEvidenceKinds: []string{
 					evidenceKind,
 				},
-				DeclarationRef:    "test/semantic-fixture/" + string(coverageID),
-				MetricConstraints: append([]string(nil), source.MetricConstraints...),
-				ArtifactRefs:      append([]string(nil), source.ArtifactRefs...),
+				DeclarationRef: "test/semantic-fixture/" + string(coverageID),
 			}
 			checks := []string(nil)
 			switch evidenceKind {
