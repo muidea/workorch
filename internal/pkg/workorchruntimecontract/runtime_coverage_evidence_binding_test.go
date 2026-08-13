@@ -243,7 +243,7 @@ func TestCoverageEvidenceBindingManifestOnlyExposesCurrentEvidenceKind(t *testin
 	if err != nil {
 		t.Fatalf("state manifest: %v", err)
 	}
-	if len(stateManifest.Operations) != 1 || !sameStrings(stateManifest.Operations[0].AllowedBindingRefs, []string{binding.ID}) {
+	if len(stateManifest.Operations) != 1 || !sameStrings(runtimeOperationBindingAuthorizationRefs(stateManifest.Operations[0].BindingAuthorizations), []string{binding.ID}) {
 		t.Fatalf("state manifest binding refs = %+v", stateManifest.Operations)
 	}
 
@@ -252,7 +252,7 @@ func TestCoverageEvidenceBindingManifestOnlyExposesCurrentEvidenceKind(t *testin
 	if err != nil {
 		t.Fatalf("validation manifest: %v", err)
 	}
-	if len(validationManifest.Operations) != 1 || !sameStrings(validationManifest.Operations[0].AllowedBindingRefs, []string{binding.ID}) {
+	if len(validationManifest.Operations) != 1 || !sameStrings(runtimeOperationBindingAuthorizationRefs(validationManifest.Operations[0].BindingAuthorizations), []string{binding.ID}) {
 		t.Fatalf("validation manifest binding refs = %+v", validationManifest.Operations)
 	}
 	if refs := CoverageEvidenceBindingRefsForOperationEvidenceKind([]CoverageEvidenceBinding{binding}, StepKindFileWrite, EvidenceKindValidation); len(refs) != 0 {

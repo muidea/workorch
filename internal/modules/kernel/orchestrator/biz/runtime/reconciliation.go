@@ -256,7 +256,12 @@ func reconcileCoverage(
 			}
 		}
 		disposition := runtimecontract.RuntimeCWIReconciliationDispositionPrerequisite
-		if request.Scope == runtimecontract.RuntimeCWIReconciliationScopeCurrentRun && allSatisfied && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+		// Scope selects which CWI bindings are observed; it is not a credit
+		// invalidation policy. A satisfied row belongs to this Runtime aggregate
+		// and remains satisfied when every exact owner observation still holds,
+		// including a workspace_full generation. Fresh restart predecessor credit
+		// is rejected when the new aggregate is formed, not repaired here.
+		if allSatisfied && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			disposition = runtimecontract.RuntimeCWIReconciliationDispositionRetain
 		} else if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			disposition = runtimecontract.RuntimeCWIReconciliationDispositionReopen
@@ -273,7 +278,7 @@ func reconcileCoverage(
 				Generation: request.Generation, BatchHash: batch.Hash, CoverageWorkItemID: binding.CoverageWorkItemID,
 				BindingID: binding.BindingID, ObservationRef: observationRef,
 				PreviousEvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-				Reason:               reconciliationReopenReason(request.Scope, observations),
+				Reason:               reconciliationReopenReason(observations),
 			}
 			reopened = append(reopened, lineage)
 			triggers = append(triggers, runtimeCWIReopenTrigger{
@@ -286,10 +291,7 @@ func reconcileCoverage(
 	return results, reopened, triggers, nil
 }
 
-func reconciliationReopenReason(scope runtimecontract.RuntimeCWIReconciliationScope, observations []runtimecontract.RuntimeCWIReconciliationObservation) string {
-	if scope == runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull {
-		return "workspace_full reconciliation requires a new current-run proof"
-	}
+func reconciliationReopenReason(observations []runtimecontract.RuntimeCWIReconciliationObservation) string {
 	for _, observation := range observations {
 		if observation.Status == runtimecontract.RuntimeCWIReconciliationObservationStale {
 			return "current-run owner observation is stale"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -109,7 +110,7 @@ type runtimeCandidateOperationContractProjection struct {
 	AllowsDynamicParameters     bool                                              `json:"allowsDynamicParameters,omitempty"`
 	DynamicParameterPrefixes    []string                                          `json:"dynamicParameterPrefixes,omitempty"`
 	RequiredOperationReferences []string                                          `json:"requiredOperationReferences,omitempty"`
-	AllowedBindingRefs          []string                                          `json:"allowedBindingRefs,omitempty"`
+	BindingAuthorizations       []runtimeCandidateBindingAuthorizationProjection  `json:"bindingAuthorizations,omitempty"`
 	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"acceptedEffectScopes,omitempty"`
 	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
 	// Target is the sealed TargetPolicy authorization compiled by the single
@@ -123,6 +124,12 @@ type runtimeCandidateOperationContractProjection struct {
 	// provider must never receive a second command-construction interface.
 	ValidationRecipeIDs       []string `json:"validationRecipeIds,omitempty"`
 	OperationContractRevision string   `json:"operationContractRevision,omitempty"`
+}
+
+type runtimeCandidateBindingAuthorizationProjection struct {
+	RequiredOperationRef string   `json:"requiredOperationRef,omitempty"`
+	VariantID            string   `json:"variantId,omitempty"`
+	AllowedBindingRefs   []string `json:"allowedBindingRefs,omitempty"`
 }
 
 // runtimeCandidateOperationTargetProjection is the provider-facing pure view of
@@ -1143,7 +1150,16 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 			delete(itemProperties, "requiredOperationRef")
 		}
 		delete(itemProperties, "coverageWorkItemIds")
-		delete(itemProperties, "bindingRefs")
+		bindingRefs := make([]string, 0)
+		for _, operation := range manifest.Operations {
+			bindingRefs = append(bindingRefs, runtimeCandidateBindingAuthorizationRefs(operation.BindingAuthorizations)...)
+		}
+		bindingRefs = runtimeSortedUniqueStrings(bindingRefs)
+		if len(bindingRefs) == 0 {
+			delete(itemProperties, "bindingRefs")
+		} else {
+			itemProperties["bindingRefs"] = map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "string", "enum": bindingRefs}}
+		}
 		items["required"] = []string{"id", "kind"}
 	}
 	if len(conditions) > 0 {
@@ -1220,12 +1236,38 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
 		requiredFields := make([]string, 0, 3)
-		if len(operation.AllowedBindingRefs) != 0 {
-			thenProperties["bindingRefs"] = map[string]any{
-				"type": "array", "minItems": 1, "maxItems": 1,
-				"items": map[string]any{"type": "string", "enum": append([]string(nil), operation.AllowedBindingRefs...)},
+		bindingConditions := make([]any, 0, len(operation.BindingAuthorizations))
+		for _, authorization := range operation.BindingAuthorizations {
+			authorization = authorization.Normalized()
+			if len(operation.BindingAuthorizations) == 1 && authorization.RequiredOperationRef == "" {
+				if len(authorization.AllowedBindingRefs) != 0 {
+					requiredFields = append(requiredFields, "bindingRefs")
+				}
+				continue
 			}
-			requiredFields = append(requiredFields, "bindingRefs")
+			selectorProperties := make(map[string]any)
+			selectorRequired := make([]string, 0, 1)
+			if authorization.RequiredOperationRef != "" {
+				selectorProperties["requiredOperationRef"] = map[string]any{"const": authorization.RequiredOperationRef}
+				selectorRequired = append(selectorRequired, "requiredOperationRef")
+			} else if variant, found := runtimeCandidateManifestVariantForID(operation.Variants, authorization.VariantID); found {
+				selectorProperties["parameters"] = runtimeOperationVariantParameterSchema(operation.Kind, variant)
+				selectorRequired = append(selectorRequired, "parameters")
+			} else {
+				continue
+			}
+			condition := map[string]any{
+				"if": map[string]any{"properties": selectorProperties, "required": selectorRequired},
+			}
+			if len(authorization.AllowedBindingRefs) != 0 {
+				condition["then"] = map[string]any{
+					"properties": map[string]any{"bindingRefs": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]any{"type": "string", "enum": authorization.AllowedBindingRefs}}},
+					"required":   []string{"bindingRefs"},
+				}
+			} else {
+				condition["then"] = map[string]any{"not": map[string]any{"required": []string{"bindingRefs"}}}
+			}
+			bindingConditions = append(bindingConditions, condition)
 		}
 		if len(parameterRequirements) > 0 || len(operation.Variants) > 0 {
 			requiredFields = append(requiredFields, "parameters")
@@ -1253,6 +1295,9 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 		}
 		if len(requiredFields) != 0 {
 			then["required"] = requiredFields
+		}
+		if len(bindingConditions) != 0 {
+			then["allOf"] = bindingConditions
 		}
 		ret = append(ret, map[string]any{
 			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": operation.Kind}}, "required": []string{"kind"}},
@@ -1509,7 +1554,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
 			DynamicParameterPrefixes:    append([]string(nil), operation.DynamicParameterPrefixes...),
 			RequiredOperationReferences: append([]string(nil), operation.RequiredOperationReferences...),
-			AllowedBindingRefs:          append([]string(nil), operation.AllowedBindingRefs...),
+			BindingAuthorizations:       make([]runtimeCandidateBindingAuthorizationProjection, 0, len(operation.BindingAuthorizations)),
 			AcceptedEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.AcceptedEffectScopes...),
 			RequiredEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.RequiredEffectScopes...),
 			Target: runtimeCandidateOperationTargetProjection{
@@ -1526,6 +1571,13 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			ValidationRecipeIDs:       runtimeValidationRecipeIDs(operation.ValidationRecipes),
 			OperationContractRevision: operation.OperationContractRevision,
 			Parameters:                make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
+		}
+		for _, authorization := range operation.BindingAuthorizations {
+			projection.BindingAuthorizations = append(projection.BindingAuthorizations, runtimeCandidateBindingAuthorizationProjection{
+				RequiredOperationRef: authorization.RequiredOperationRef,
+				VariantID:            authorization.VariantID,
+				AllowedBindingRefs:   append([]string(nil), authorization.AllowedBindingRefs...),
+			})
 		}
 		for _, parameter := range operation.Parameters {
 			projection.Parameters = append(projection.Parameters, runtimeCandidateOperationParameterProjection{
@@ -1561,7 +1613,7 @@ func runtimeValidationRecipeIDs(recipes []runtimecontract.RuntimeValidationRecip
 // makes the LLM-facing wording a consumer rather than a second contract owner.
 func runtimeManifestHasAllowedBindingRefs(manifest runtimecontract.RuntimeCandidateContractManifest) bool {
 	for _, operation := range manifest.Operations {
-		if len(operation.AllowedBindingRefs) != 0 {
+		if len(runtimeCandidateBindingAuthorizationRefs(operation.BindingAuthorizations)) != 0 {
 			return true
 		}
 	}
@@ -1631,8 +1683,17 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 		if len(operation.RequiredOperationReferences) > 0 {
 			line += " requiredOperationRef must be one of: " + runtimeCandidateContractFieldList(operation.RequiredOperationReferences) + "."
 		}
-		if len(operation.AllowedBindingRefs) > 0 {
-			line += " bindingRefs is required with exactly one value from: " + runtimeCandidateContractFieldList(operation.AllowedBindingRefs) + "."
+		for _, authorization := range operation.BindingAuthorizations {
+			authorization = authorization.Normalized()
+			identity := authorization.VariantID
+			if authorization.RequiredOperationRef != "" {
+				identity += "/" + authorization.RequiredOperationRef
+			}
+			if len(authorization.AllowedBindingRefs) > 0 {
+				line += " Variant/ref " + identity + " requires exactly one bindingRefs value from: " + runtimeCandidateContractFieldList(authorization.AllowedBindingRefs) + "."
+			} else {
+				line += " Variant/ref " + identity + " is auxiliary and must omit bindingRefs."
+			}
 		}
 		if len(operation.ForbiddenParameters) > 0 {
 			line += " Forbidden parameters: " + runtimeCandidateContractFieldList(operation.ForbiddenParameters) + "."
@@ -1649,6 +1710,49 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 		lines = append(lines, "dependsOn is not an allowed operation field for this sealed contract.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func runtimeCandidateBindingAuthorizationRefs(values []runtimecontract.RuntimeOperationBindingAuthorization) []string {
+	seen := make(map[string]struct{})
+	ret := make([]string, 0)
+	for _, value := range values {
+		for _, ref := range value.Normalized().AllowedBindingRefs {
+			if _, duplicate := seen[ref]; duplicate {
+				continue
+			}
+			seen[ref] = struct{}{}
+			ret = append(ret, ref)
+		}
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+func runtimeCandidateManifestVariantForID(values []runtimecontract.RuntimeOperationVariantContract, id string) (runtimecontract.RuntimeOperationVariantContract, bool) {
+	for _, value := range values {
+		if value.ID == id {
+			return value, true
+		}
+	}
+	return runtimecontract.RuntimeOperationVariantContract{}, false
+}
+
+func runtimeSortedUniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
 }
 
 func runtimeCandidateContractFieldList(values []string) string {

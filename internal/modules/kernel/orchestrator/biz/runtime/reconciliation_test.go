@@ -146,7 +146,7 @@ func TestRuntimeControllerStaleReconciliationBatchIsZeroMutation(t *testing.T) {
 	}
 }
 
-func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrantingCredit(t *testing.T) {
+func TestRuntimeControllerReconciliationObservationsControlRetainAndReopenWithoutGrantingCredit(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name            string
@@ -157,7 +157,8 @@ func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrant
 		wantState       runtimecontract.RuntimeCoverageItemState
 	}{
 		{name: "current run retains matching existing credit", scope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, observation: runtimecontract.RuntimeCWIReconciliationObservationSatisfied, initialState: runtimecontract.RuntimeCoverageItemStateSatisfied, wantDisposition: runtimecontract.RuntimeCWIReconciliationDispositionRetain, wantState: runtimecontract.RuntimeCoverageItemStateSatisfied},
-		{name: "workspace restart reopens predecessor credit", scope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull, observation: runtimecontract.RuntimeCWIReconciliationObservationSatisfied, initialState: runtimecontract.RuntimeCoverageItemStateSatisfied, wantDisposition: runtimecontract.RuntimeCWIReconciliationDispositionReopen, wantState: runtimecontract.RuntimeCoverageItemStateOpen},
+		{name: "workspace full retains matching current-run credit", scope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull, observation: runtimecontract.RuntimeCWIReconciliationObservationSatisfied, initialState: runtimecontract.RuntimeCoverageItemStateSatisfied, wantDisposition: runtimecontract.RuntimeCWIReconciliationDispositionRetain, wantState: runtimecontract.RuntimeCoverageItemStateSatisfied},
+		{name: "workspace full stale observation reopens exact current-run credit", scope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull, observation: runtimecontract.RuntimeCWIReconciliationObservationStale, initialState: runtimecontract.RuntimeCoverageItemStateSatisfied, wantDisposition: runtimecontract.RuntimeCWIReconciliationDispositionReopen, wantState: runtimecontract.RuntimeCoverageItemStateOpen},
 		{name: "unverifiable observation keeps open coverage at prerequisite", scope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, observation: runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, initialState: runtimecontract.RuntimeCoverageItemStateOpen, wantDisposition: runtimecontract.RuntimeCWIReconciliationDispositionPrerequisite, wantState: runtimecontract.RuntimeCoverageItemStateOpen},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

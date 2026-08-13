@@ -857,7 +857,9 @@ func runtimeObservedCandidateBindingRefsField(request llmmodels.RuntimeCandidate
 	refs := make([]string, 0)
 	for _, authorization := range request.CandidateManifest.Operations {
 		if runtimecontract.CanonicalRuntimeBlockKind(authorization.Kind) == runtimecontract.CanonicalRuntimeBlockKind(kind) {
-			refs = append(refs, authorization.AllowedBindingRefs...)
+			for _, bindingAuthorization := range authorization.BindingAuthorizations {
+				refs = append(refs, bindingAuthorization.AllowedBindingRefs...)
+			}
 			break
 		}
 	}

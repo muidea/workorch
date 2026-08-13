@@ -128,8 +128,9 @@ func TestValidateRuntimeCandidateAgainstManifestRequiresSealedBindingForProofBea
 	if err != nil {
 		t.Fatal(err)
 	}
+	patchType, content := "file_write", "package main"
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{
-		Operation: RuntimeOperation{ID: "patch", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}},
+		Operation: RuntimeOperation{ID: "patch", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}, Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}}},
 	}}}}
 	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
 	if err == nil || !strings.Contains(err.Error(), "proof-bearing operation must select exactly one sealed coverage evidence binding") {
@@ -154,6 +155,10 @@ func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVar
 		},
 	}
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
+	binding := decision.Focus.CoverageEvidenceBindings[0]
+	binding.Proofs[0].AllowedOperationVariants = []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}}
+	binding.Hash = StableCoverageEvidenceBindingHash(binding)
+	decision.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -176,9 +181,36 @@ func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVar
 		!containsManifestString(operation.ForbiddenParameters, "payload") {
 		t.Fatalf("git descriptor parameters were not projected: %+v", operation)
 	}
+	if len(operation.BindingAuthorizations) != 2 ||
+		operation.BindingAuthorizations[0].RequiredOperationRef != "commit" ||
+		!reflect.DeepEqual(operation.BindingAuthorizations[0].AllowedBindingRefs, []string{binding.ID}) ||
+		operation.BindingAuthorizations[1].RequiredOperationRef != "stage" ||
+		len(operation.BindingAuthorizations[1].AllowedBindingRefs) != 0 {
+		t.Fatalf("git sequence binding authorizations = %+v", operation.BindingAuthorizations)
+	}
+	add, commit, message := "add", "commit", "snapshot"
+	pathspecs := []string{"."}
+	valid := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{
+		{Operation: RuntimeOperation{ID: "stage-op", Kind: StepKindGitWrite, RequiredOperationRef: "stage", Parameters: []OperationParameter{{Name: "operation", String: &add}, {Name: "pathspecs", StringList: pathspecs}}}},
+		{Operation: RuntimeOperation{ID: "commit-op", Kind: StepKindGitWrite, RequiredOperationRef: "commit", DependsOn: []string{"stage-op"}, BindingRefs: []string{binding.ID}, Parameters: []OperationParameter{{Name: "operation", String: &commit}, {Name: "message", String: &message}}}},
+	}}}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, valid); err != nil {
+		t.Fatalf("add auxiliary + commit proof candidate: %v", err)
+	}
+	invalid := valid
+	invalid.StateChange = &StateChangeCandidate{Operations: append([]StateChangingOperation(nil), valid.StateChange.Operations...)}
+	invalid.StateChange.Operations[0].Operation.BindingRefs = []string{binding.ID}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, invalid); err == nil || !strings.Contains(err.Error(), "bindingRefs") {
+		t.Fatalf("add operation with proof binding error = %v", err)
+	}
 	cloned := manifest.Clone()
 	if cloned.Hash != manifest.Hash || StableRuntimeCandidateContractManifestHash(cloned) != manifest.Hash {
 		t.Fatalf("clone/hash drifted: original=%+v clone=%+v", manifest, cloned)
+	}
+	mutatedAuthorization := manifest.Clone()
+	mutatedAuthorization.Operations[0].BindingAuthorizations[0].AllowedBindingRefs = nil
+	if StableRuntimeCandidateContractManifestHash(mutatedAuthorization) == manifest.Hash {
+		t.Fatal("manifest hash ignored variant/ref binding authorization")
 	}
 
 	permuted := decision
@@ -188,6 +220,10 @@ func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVar
 		{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
 	}
 	permuted = runtimeCandidateTestDecisionWithBindings(t, permuted)
+	permutedBinding := permuted.Focus.CoverageEvidenceBindings[0]
+	permutedBinding.Proofs[0].AllowedOperationVariants = []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}}
+	permutedBinding.Hash = StableCoverageEvidenceBindingHash(permutedBinding)
+	permuted.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{permutedBinding}
 	again, err := BuildRuntimeCandidateContractManifest(permuted, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil || again.Hash != manifest.Hash {
 		t.Fatalf("manifest canonicalization drifted: first=%+v again=%+v err=%v", manifest, again, err)
@@ -736,7 +772,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 		}
 		operation := manifest.Operations[0]
-		if !reflect.DeepEqual(operation.AllowedBindingRefs, []string{binding.ID}) {
+		if !reflect.DeepEqual(runtimeOperationBindingAuthorizationRefs(operation.BindingAuthorizations), []string{binding.ID}) {
 			t.Fatalf("MCP validation authorization must expose only its exact sealed binding: %+v", operation)
 		}
 		if operation.Target.Policy != RuntimeOperationTargetPolicyExistingOwnerScope ||

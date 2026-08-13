@@ -366,11 +366,6 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 			return &RuntimeCandidatePayloadDiagnostic{Path: path + "." + required, Actual: "missing_" + required, Required: []string{required}, Allowed: operationManifest.AllowedOperationFields}
 		}
 	}
-	for _, bindingRef := range operation.BindingRefs {
-		if !runtimeCandidatePayloadContains(operationManifest.AllowedBindingRefs, bindingRef) {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".bindingRefs", Actual: bindingRef, Allowed: operationManifest.AllowedBindingRefs}
-		}
-	}
 	if operationManifest.RequireTargetRefs && len(operation.TargetRefs) == 0 {
 		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"}, Allowed: operationManifest.AllowedOperationFields}
 	}
@@ -410,7 +405,19 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 	if err := validateRuntimeCandidatePayloadParameters(operationManifest, operation.Parameters, path); err != nil {
 		return err
 	}
-	return validateRuntimeCandidatePayloadVariant(operationManifest, operation, path)
+	if err := validateRuntimeCandidatePayloadVariant(operationManifest, operation, path); err != nil {
+		return err
+	}
+	authorization, err := RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
+	if err != nil {
+		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".bindingRefs", Actual: "unsealed_operation_authorization", Cause: err}
+	}
+	for _, bindingRef := range operation.BindingRefs {
+		if !runtimeCandidatePayloadContains(authorization.AllowedBindingRefs, bindingRef) {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".bindingRefs", Actual: bindingRef, Allowed: authorization.AllowedBindingRefs}
+		}
+	}
+	return nil
 }
 
 func validateRuntimeCandidatePayloadParameters(operationManifest RuntimeCandidateOperationManifest, parameters []OperationParameter, path string) error {

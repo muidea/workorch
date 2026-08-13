@@ -110,6 +110,29 @@ func TestCompileRuntimeSemanticBindingsRejectsMissingSourceRequiredValidationPro
 	}
 }
 
+func TestCompileRuntimeSemanticBindingsRejectsProposalVariantOutsideSourceDeclaration(t *testing.T) {
+	source := CoverageFocus{ID: "focus-source", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, AcceptedStepKinds: []string{StepKindGitWrite}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}}}
+	proofSet := RuntimeSemanticCWIProofSet{CoverageWorkItemID: "cwi-1", Proposals: []RuntimeSemanticProofProposal{{
+		CoverageWorkItemID: "cwi-1", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite,
+		OperationVariantID: "add", RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+	}}}
+	if err := validateRuntimeSemanticProofSetSource(proofSet, &source); err == nil || !strings.Contains(err.Error(), "operation variant \"add\" is outside source declaration") {
+		t.Fatalf("source variant mismatch error = %v", err)
+	}
+}
+
+func TestValidateRuntimeSemanticPlanSourceDeclarationsRejectsVariantBeforeFeasibility(t *testing.T) {
+	_, document, _, source := semanticIndependentProofSetFixture(t)
+	document.Proposals[0].OperationKind = StepKindGitWrite
+	document.Proposals[0].OwnerModuleID = RuntimeModuleGit
+	document.Proposals[0].OperationVariantID = "add"
+	source.AcceptedStepKinds = []string{StepKindGitWrite, RuntimeBlockKindManagedValidationSession}
+	source.AcceptedOperationVariants = []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}}
+	if err := ValidateRuntimeSemanticPlanSourceDeclarations(document, []CoverageFocus{source}); err == nil || !strings.Contains(err.Error(), "operation variant \"add\" is outside source declaration") {
+		t.Fatalf("pre-feasibility source variant mismatch error = %v", err)
+	}
+}
+
 func TestRuntimeSemanticFeasibilitySetUsesProposalIdentityWithinOneCWI(t *testing.T) {
 	manifest, document, facts, _ := semanticIndependentProofSetFixture(t)
 	if err := ValidateRuntimeSemanticFeasibilitySet(manifest, document, facts, true); err != nil {

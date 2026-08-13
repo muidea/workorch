@@ -10,7 +10,7 @@ Last Updated: 2026-08-13
 
 This is the sole active implementation queue for Runtime CWI identity, semantic-generation retirement, focus
 projection, reconciliation generation, and semantic target-policy closure. It is derived from the current Runtime
-contract and the persisted `run-073`, `run-077`, and `run-078` counterexamples. The prior plan was moved to
+contract and the persisted `run-073`, `run-077`, `run-078`, and `run-080` counterexamples. The prior plan was moved to
 [`90-archive/superseded`](../../90-archive/superseded/runtime-cwi-reconciliation-single-owner-closure-plan-pre-cwi-ledger-2026-08-11.md);
 its historical RSO status claims are not implementation authority.
 
@@ -88,6 +88,28 @@ The following concepts are distinct and must have distinct private transitions:
 
 There is no implicit `bound -> planning` transition. In particular, catalog revision drift, provider rejection, process
 restart, reconciliation retry, projection lag, or a changed LLM proposal is not a reopen or binding-retirement cause.
+
+### 2.3 Variant authorization and current-run retention exposed by `run-080`
+
+`run-080` proves that kind-level binding authorization is insufficient for a required owner operation sequence. The
+profile declared `git/write:commit` as the proof-bearing variant, while the owner-required sequence was
+`add -> commit`. A kind-level manifest attached the same binding to both operations: `add` earned credit and the later
+accepted `commit` receipt was rejected because the sealed proof did not allow the commit variant. The Git owner
+correctly executed one commit; the defect was entirely in Orchestrator's SM-2/SM-3 authorization projection.
+
+The final contract is:
+
+- semantic proposal admission intersects the source profile kind/variant declaration before any owner feasibility;
+- the single candidate manifest authorizes binding by `kind + variant + requiredOperationRef`;
+- an auxiliary sequence operation has an explicit empty binding authorization and must omit `bindingRefs`;
+- the proof-bearing operation requires exactly one canonical binding and alone may earn credit; and
+- renderer, decoder, admission, sealed dispatch and receipt matching consume that same manifest identity.
+
+The same Run also showed a later `workspace_full` reconciliation reopening a satisfied CWI even though its proof was
+created by the current Run. Reconciliation scope selects the set of bindings to observe; it does not invalidate credit.
+When all exact owner observations remain satisfied, current-Run credit is retained for both `current_run` and
+`workspace_full`. A fresh restart receives no predecessor credit when its new aggregate is created; reconciliation must
+not attempt to repair illegal predecessor state by reopening every satisfied row.
 
 ### 2.3 Pre-binding target-policy contradiction exposed by `run-078`
 
@@ -332,11 +354,11 @@ cannot create a new binding or focus and must never cause the capability owner t
 
 | Component | Required change | Must not do |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | Preserve canonical coverage/binding validation and add a pure owner-neutral target-policy consistency rule: a prospective target must not be a member of the same sealed catalog's existing target set; return a typed proposal violation suitable for bounded correction | persist state, use EventHub, select retry/action/terminal, inspect the workspace, create a global index, hard-code File/domain semantics |
+| `internal/pkg/workorchruntimecontract` | Preserve canonical coverage/binding validation; enforce source-declared semantic kind/variant membership before feasibility; compile variant/ref-scoped binding authorization into the one candidate manifest | persist state, use EventHub, select retry/action/terminal, inspect the workspace, create a global index, hard-code File/domain semantics |
 | `kernel/orchestrator/biz/runtime/cwi_ledger.go` | Provide the sole canonical CWI eligibility, binding retirement, reopen and focus-projection reducers; lock an accepted-effect binding until explicit reopen | expose a second owner, persist a global lookup, infer lineage from history |
 | `kernel/orchestrator/biz/runtime/semantic_planning.go` | Retire only semantic-generation authority; make order/batch generation consume canonical eligible CWI rows; enforce pre-seal uniqueness; generate stable pending IDs; persist exactly one typed correction transition for an attempt-0 target-policy contradiction | clear bindings as a catalog-retirement side effect, reset all CWI to pending, rebuild credit from text/history, add a second retry state machine |
 | `kernel/orchestrator/biz/runtime_semantic_drive.go` | Route the new pure semantic evaluator rejection through the existing attempt-0/1 correction session and preserve the current terminal handling for owner `infeasible` facts | retry owner infeasibility, refresh a current catalog, let diagnostic text choose action, submit an unbounded provider request |
-| `kernel/orchestrator/biz/runtime/reconciliation.go` | Make reconciliation commit validate the current contract and call the shared reopen/focus transition | directly reopen only coverage without focus, infer new credit |
+| `kernel/orchestrator/biz/runtime/reconciliation.go` | Make reconciliation commit validate the current contract, retain satisfied current-Run proof independently of scope, and call the shared reopen/focus transition only for exact non-satisfied observations | treat `workspace_full` as an implicit reopen policy, directly reopen only coverage without focus, infer new credit |
 | `kernel/orchestrator/biz/runtime/dispatch_commit.go` | Reuse one canonical reopen helper; record accepted effect lineage and gate evidence on current binding/execution/fence refs | create a parallel CWI owner or bypass SM-2 |
 | `kernel/orchestrator/biz/runtime/internal_event.go` | Add only private typed events needed for generation supersession, no-effect binding retirement and atomic CWI transitions | expose these events as EventHub commands or accept target states |
 | `kernel/orchestrator/biz/runtime/transition_coordinator.go` | Validate the complete post-reducer aggregate and perform exactly one semantic CAS per private event | persist partial CWI/focus/request updates or retry an owner effect |
@@ -344,7 +366,7 @@ cannot create a new binding or focus and must never cause the capability owner t
 | `blocks/run` | Persist opaque current-schema Runtime aggregate and preserve semantic CAS behavior; add schema-boundary tests | interpret SM-2/3/4 or choose successor state |
 | File/Git/Shell/MCP capability Blocks | Keep returning scoped feasibility observations and exact receipts; File retains the real-resource prospective/existing fence for post-catalog drift and concurrency; add duplicate/stale response tests where needed | mutate focus, coverage, binding, correction, request generation, or lifecycle; choose exact versus prospective policy for Orchestrator |
 | Workspace/Result | Preserve terminal delivery/acknowledgement tests | write Runtime CWI state |
-| LLM, application, TUI, Web, projection, eventstream | Render/transport typed facts only; optionally display canonical CWI state after it is authoritative | infer/rebuild authority or drive a transition |
+| LLM, application, TUI, Web, projection, eventstream | LLM renders variant/ref binding rules from the sealed manifest; all others transport typed facts or display canonical CWI state after it is authoritative | infer/rebuild authority or drive a transition |
 
 ### 6.1 Registered Component Boundary Matrix
 
@@ -385,8 +407,8 @@ All items are sequential. A later item may not compensate for an earlier missing
 | --- | --- | --- | --- |
 | CWI-SO-1 | code-closed | Contract and validation foundation | The existing coverage row is the canonical binding/focus ledger; queue uniqueness, current binding uniqueness, contract/request coherence and stable pending IDs are aggregate invariants. |
 | CWI-SO-2 | code-closed | SM-2 generation retirement and semantic seal | Generation retirement preserves effect-bearing bindings; planning batches use canonical CWI eligibility; binding seal and focus projection share one aggregate CAS. Typed owner-scope catalogs are distinguished from exact-target catalogs without retry loops. |
-| CWI-SO-3 | code-closed | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history; reconciliation and receipt-driven reopen use the canonical CWI transition. |
-| CWI-SO-4 | code-closed; live-reverification-required | SM-3 admission and evidence fences | A proof-bearing manifest authorization requires exactly one canonical binding ref; candidate, sealed dispatch, receipt and evidence admission preserve the exact binding/execution/fence identity. A current-schema durable receipt that omitted this identity fails closed and cannot authorize destructive binding retirement. |
+| CWI-SO-3 | code-closed; live-reverification-required | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history. Reconciliation scope selects observation coverage and cannot reopen satisfied current-Run proof; exact stale/unverifiable/unsatisfied observations use the canonical reopen transition. |
+| CWI-SO-4 | code-closed; live-reverification-required | SM-3 admission and evidence fences | Source profile variants constrain semantic proposals before feasibility. Binding authorization is exact to kind/variant/required-operation-ref: auxiliary sequence operations omit binding, the proof-bearing operation requires one canonical binding, and dispatch/receipt/evidence preserve its execution/fence identity. |
 | CWI-SO-5 | code-closed | Current-schema boundary and component regressions | Legacy schema and current-schema ambiguous CWI ledgers fail closed through the typed Run-owned `fresh_activation_required` fact. No compatibility reconstruction, Runtime LLM topic, capability-owner I/O, retry lease, or replay occurs. |
 | CWI-SO-6 | code-closed | SM-3 target-policy consistency and bounded correction | A prospective target already present in the same sealed owner catalog is rejected before owner probing; the existing attempt-0/1 correction preserves immutable generation identity; the owner feasibility fence remains unchanged. |
 | CWI-SO-7 | automated-verified; live-pending | Full verification and deployed proof | Focused/full/race/boundary and isolated managed mock-provider suites pass. Complete a fresh positive run and catalog-invalidation/reopen/restart/resume fault matrix. |
@@ -525,9 +547,9 @@ cannot pass through a timing window and erase the binding. Duplicate delivery of
 idempotent fact commit; it cannot invoke the capability owner again. A different receipt for the same execution key or
 fence is a typed conflict.
 
-The operation manifest owns a deterministic binding policy. If an operation authorization has non-empty
-`AllowedBindingRefs`, the candidate must select exactly one of them and SM-3 must preserve it in the sealed operation.
-An auxiliary/non-credit operation is legal only when its operation authorization has no binding refs. The candidate
+The operation manifest owns a deterministic `kind + variant + requiredOperationRef` binding policy. If that exact
+authorization has non-empty `AllowedBindingRefs`, the candidate must select exactly one and SM-3 must preserve it in
+the sealed operation. An auxiliary/non-credit operation is legal only when its exact authorization has no binding refs. The candidate
 cannot turn a proof-bearing operation into auxiliary work by omitting `BindingRefs`; `CoverageWorkItemIDs` remain
 forbidden on the provider wire and SM-2 derives CWI identity only from the sealed binding. A loaded current-schema
 dispatch whose matching-focus accepted durable receipt omitted binding identity is not reconstructed from target or
@@ -721,6 +743,9 @@ is exported as a topic or accepted from Web, TUI, application, projection, LLM, 
 | reconciliation-driven reopen | coverage and focus move in the same CAS; unrelated completed focus remains completed |
 | re-seal after binding-set change | old request/batch become superseded history; new request exactly equals new contract |
 | stale reconciliation batch | zero CWI/coverage/focus/request mutation and zero operation |
+| workspace-full reconciliation after current-Run proof | matching satisfied owner observations retain the exact CWI credit; no reopen, new binding, provider request or operation |
+| required Git `add -> commit` sequence | add is sealed auxiliary without binding; commit carries exactly one commit-authorized binding and alone earns credit |
+| profile declares commit but semantic proposal selects add | proposal is rejected before Git feasibility and before binding/dispatch/receipt/effect; existing bounded semantic correction applies |
 | duplicate semantic document, feasibility, receipt, or batch | no extra CAS, request, binding, dispatch, or operation |
 | restart after each durable CAS | reload yields the same CWI ledger and never repeats owner execution |
 | `/run resume` | retains matching current-run binding/receipt lineage and does not re-plan settled CWI |

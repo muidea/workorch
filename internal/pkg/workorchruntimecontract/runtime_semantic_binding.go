@@ -89,6 +89,33 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 	return focuses, contract, nil
 }
 
+// ValidateRuntimeSemanticPlanSourceDeclarations rejects a provider proposal
+// that weakens the activation/profile declaration before any owner feasibility
+// request is issued. It is the same pure source check used by final binding
+// compilation and owns no correction or state transition.
+func ValidateRuntimeSemanticPlanSourceDeclarations(document RuntimeSemanticPlanDocument, sourceFocuses []CoverageFocus) error {
+	document = document.Normalized()
+	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
+	if err != nil {
+		return err
+	}
+	proofSets, err := OrderedRuntimeSemanticCWIProofSets(document)
+	if err != nil {
+		return err
+	}
+	for _, proofSet := range proofSets {
+		var source *CoverageFocus
+		if value, found := sourceByCoverage[proofSet.CoverageWorkItemID]; found {
+			value := value
+			source = &value
+		}
+		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runtimeSemanticBindingSourceFocuses(values []CoverageFocus) (map[common.CoverageWorkItemID]CoverageFocus, error) {
 	ret := make(map[common.CoverageWorkItemID]CoverageFocus, len(values))
 	for _, value := range values {
@@ -119,6 +146,27 @@ func validateRuntimeSemanticProofSetSource(proofSet RuntimeSemanticCWIProofSet, 
 	}
 	for _, proposal := range proofSet.Proposals {
 		proposal = proposal.Normalized()
+		if len(declaration.AcceptedStepKinds) != 0 && !runtimeOperationKindsContain(declaration.AcceptedStepKinds, proposal.OperationKind) {
+			return fmt.Errorf("runtime semantic proof for coverage %q operation kind %q is outside source declaration", proofSet.CoverageWorkItemID, proposal.OperationKind)
+		}
+		declaredVariants := make([]RuntimeOperationVariantRef, 0)
+		for _, variant := range declaration.AcceptedOperationVariants {
+			if CanonicalRuntimeBlockKind(variant.Kind) == CanonicalRuntimeBlockKind(proposal.OperationKind) {
+				declaredVariants = append(declaredVariants, variant)
+			}
+		}
+		if len(declaredVariants) != 0 {
+			matched := false
+			for _, variant := range declaredVariants {
+				if variant.VariantID == proposal.OperationVariantID {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("runtime semantic proof for coverage %q operation variant %q is outside source declaration", proofSet.CoverageWorkItemID, proposal.OperationVariantID)
+			}
+		}
 		if len(proposal.RequiredEvidenceKinds) != 1 || proposal.RequiredEvidenceKinds[0] != EvidenceKindValidation {
 			continue
 		}

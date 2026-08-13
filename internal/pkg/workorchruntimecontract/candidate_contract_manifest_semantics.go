@@ -130,22 +130,6 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if !found {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".kind", operation.Kind, runtimeCandidatePayloadOperationKinds(manifest), nil, nil, nil)
 	}
-	// A sealed operation may contribute evidence to exactly one CWI binding.
-	// The manifest can expose several bindings because a focus may contain
-	// several independent work items, but choosing more than one would let one
-	// owner receipt fan out coverage credit.  The caller must emit independent
-	// operations (and therefore independent owner receipts) for each binding.
-	// This is a pure candidate-contract invariant; receipt matching and all
-	// coverage state changes remain owned by the orchestrator reducer.
-	if len(operation.BindingRefs) > 1 {
-		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("an operation may select only one coverage evidence binding"))
-	}
-	if len(operationManifest.AllowedBindingRefs) != 0 && len(operation.BindingRefs) != 1 {
-		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("a proof-bearing operation must select exactly one sealed coverage evidence binding"))
-	}
-	if len(operation.BindingRefs) != 0 && !runtimeCandidateManifestBindingRefsAllowed(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
-		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, nil, []string{"bindingRefs"}, nil)
-	}
 	if len(operation.CoverageWorkItemIDs) != 0 {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".coverageWorkItemIds", strings.Join(coverageIDStrings(operation.CoverageWorkItemIDs), ","), nil, nil, []string{"coverageWorkItemIds"}, nil)
 	}
@@ -228,7 +212,47 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 		}
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".parameters[name=recipeId]", actual, allowed, []string{"recipeId"}, nil, err)
 	}
-	return validateRuntimeCandidateVariantAgainstManifest(operationManifest, operation, values, path)
+	if err := validateRuntimeCandidateVariantAgainstManifest(operationManifest, operation, values, path); err != nil {
+		return err
+	}
+	bindingAuthorization, err := RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
+	if err != nil {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".requiredOperationRef", operation.RequiredOperationRef, operationManifest.RequiredOperationReferences, nil, nil, err)
+	}
+	allowedBindingRefs := bindingAuthorization.AllowedBindingRefs
+	if len(operation.BindingRefs) > 1 {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), allowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("an operation may select only one coverage evidence binding"))
+	}
+	if len(allowedBindingRefs) != 0 && len(operation.BindingRefs) != 1 {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), allowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("a proof-bearing operation must select exactly one sealed coverage evidence binding"))
+	}
+	if len(operation.BindingRefs) != 0 && !runtimeCandidateManifestBindingRefsAllowed(allowedBindingRefs, operation.BindingRefs) {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), allowedBindingRefs, nil, []string{"bindingRefs"}, nil)
+	}
+	return nil
+}
+
+// RuntimeCandidateOperationBindingAuthorizationFor resolves the only binding
+// policy applicable to an exact decoded operation. It is pure manifest
+// membership; it neither grants evidence nor mutates Runtime state.
+func RuntimeCandidateOperationBindingAuthorizationFor(manifest RuntimeCandidateOperationManifest, operation RuntimeOperation) (RuntimeOperationBindingAuthorization, error) {
+	manifest = manifest.Normalized()
+	operation = operation.Normalized()
+	contract, found := RuntimeOperationContractForKind(operation.Kind)
+	if !found {
+		return RuntimeOperationBindingAuthorization{}, fmt.Errorf("operation kind %q has no variant contract", operation.Kind)
+	}
+	variant, err := MatchRuntimeOperationVariant(operation, contract)
+	if err != nil {
+		return RuntimeOperationBindingAuthorization{}, err
+	}
+	for _, authorization := range manifest.BindingAuthorizations {
+		authorization = authorization.Normalized()
+		if authorization.RequiredOperationRef == operation.RequiredOperationRef && authorization.VariantID == variant.ID {
+			return authorization, nil
+		}
+	}
+	return RuntimeOperationBindingAuthorization{}, fmt.Errorf("operation variant %q with required operation ref %q has no sealed binding authorization", variant.ID, operation.RequiredOperationRef)
 }
 
 // validateRuntimeCandidateManagedValidationRecipe is a pure manifest

@@ -841,12 +841,19 @@ func (c *RuntimeController) observeSemanticPlanBatchDocument(ctx context.Context
 		document.CoverageOrder = nil
 		document = document.Normalized()
 	}
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil || ledger.Document == nil || document.BatchID == "" {
 			return false, fmt.Errorf("%w: semantic batch document identity is incomplete", common.ErrConflict)
 		}
 		if err := document.ValidateAgainstManifest(*ledger.Manifest); err != nil {
 			return false, err
+		}
+		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+			sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
+			sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
+			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, sourceFocuses); err != nil {
+				return false, err
+			}
 		}
 		if ledger.ActiveBatchID != document.BatchID {
 			return false, fmt.Errorf("%w: semantic batch document is not active", common.ErrConflict)
@@ -1060,7 +1067,7 @@ func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceI
 		document.CoverageOrder = nil
 		document = document.Normalized()
 	}
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		documentHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
 		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && document.BatchID == "" {
 			return false, fmt.Errorf("%w: semantic proof document requires active batch identity", common.ErrConflict)
@@ -1103,6 +1110,13 @@ func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceI
 			}
 		default:
 			return false, fmt.Errorf("%w: semantic plan document cannot be evaluated from phase %q", common.ErrConflict, ledger.Phase)
+		}
+		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+			sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
+			sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
+			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, sourceFocuses); err != nil {
+				return false, err
+			}
 		}
 		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 			// The global provider order is immutable lineage.  It remains separate

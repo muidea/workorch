@@ -1157,7 +1157,11 @@ func runtimeTestManifestBindingRefsForOperation(manifest runtimecontract.Runtime
 	kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
 	for _, operation := range manifest.Normalized().Operations {
 		if operation.Kind == kind {
-			return append([]string(nil), operation.AllowedBindingRefs...)
+			refs := make([]string, 0)
+			for _, authorization := range operation.BindingAuthorizations {
+				refs = append(refs, authorization.AllowedBindingRefs...)
+			}
+			return runtimeTestNormalizeStrings(refs)
 		}
 	}
 	return nil

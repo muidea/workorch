@@ -967,7 +967,7 @@ func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKin
 		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
 			Kind: runtimecontract.RuntimeBlockKindPatchApply, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			AllowedOperationFields: []string{"id", "kind", "bindingRefs", "parameters", "targetRefs"},
-			AllowedBindingRefs:     []string{"binding/cwi-1"},
+			BindingAuthorizations:  []runtimecontract.RuntimeOperationBindingAuthorization{{VariantID: "apply", AllowedBindingRefs: []string{"binding/cwi-1"}}},
 			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
 				Name: "patchType", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
 			}},
@@ -981,7 +981,7 @@ func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKin
 		}
 	}
 	instruction := runtimeCandidateStructuredOutputInstruction(manifest)
-	if !strings.Contains(instruction, "bindingRefs is required with exactly one value") || strings.Contains(instruction, "Optional bindingRefs") || strings.Contains(instruction, "may omit bindingRefs") {
+	if !strings.Contains(instruction, "requires exactly one bindingRefs value") || strings.Contains(instruction, "Optional bindingRefs") || strings.Contains(instruction, "may omit bindingRefs") {
 		t.Fatalf("proof-bearing instruction = %s", instruction)
 	}
 }

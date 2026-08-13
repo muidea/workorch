@@ -13,7 +13,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v1"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v2"
 
 // RuntimeOperationTargetPolicy is the only owner-neutral target authorization
 // vocabulary sealed into a candidate manifest. Concrete File/Git/Shell/MCP
@@ -105,10 +105,13 @@ type RuntimeCandidateOperationManifest struct {
 	AllowsDynamicParameters     bool
 	DynamicParameterPrefixes    []string
 	RequiredOperationReferences []string
-	AllowedBindingRefs          []string
-	AcceptedEffectScopes        []RuntimeEffectScope
-	RequiredEffectScopes        []RuntimeEffectScope
-	Target                      RuntimeOperationTargetAuthorization
+	// BindingAuthorizations bind proof credit to the exact operation variant and
+	// required-sequence reference. An entry with no AllowedBindingRefs is an
+	// explicitly auxiliary operation; callers must not infer credit from Kind.
+	BindingAuthorizations []RuntimeOperationBindingAuthorization
+	AcceptedEffectScopes  []RuntimeEffectScope
+	RequiredEffectScopes  []RuntimeEffectScope
+	Target                RuntimeOperationTargetAuthorization
 	// PrerequisiteSnapshotRefs bind this authorization to owner observations
 	// already sealed into the authority transaction (target selection, etc.).
 	// N1 may seal selection identity; full admissibility compilation is N2.
@@ -121,6 +124,22 @@ type RuntimeCandidateOperationManifest struct {
 	// not a free-form command/argument contract for the provider.
 	ValidationRecipes         []RuntimeValidationRecipe
 	OperationContractRevision string
+}
+
+// RuntimeOperationBindingAuthorization is one immutable proof-credit rule in
+// the sealed candidate manifest. RequiredOperationRef is empty only when the
+// decision has no required operation sequence for this kind.
+type RuntimeOperationBindingAuthorization struct {
+	RequiredOperationRef string
+	VariantID            string
+	AllowedBindingRefs   []string
+}
+
+func (a RuntimeOperationBindingAuthorization) Normalized() RuntimeOperationBindingAuthorization {
+	a.RequiredOperationRef = strings.TrimSpace(a.RequiredOperationRef)
+	a.VariantID = strings.TrimSpace(a.VariantID)
+	a.AllowedBindingRefs = normalizeStrings(a.AllowedBindingRefs)
+	return a
 }
 
 // RuntimeCandidateManifestOwnerFacts are the already-persisted SM-2 owner
@@ -391,7 +410,24 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.Rules = cloneRuntimeCandidateContractStrings(m.Rules)
 	m.DynamicParameterPrefixes = normalizeStrings(m.DynamicParameterPrefixes)
 	m.RequiredOperationReferences = normalizeStrings(m.RequiredOperationReferences)
-	m.AllowedBindingRefs = normalizeStrings(m.AllowedBindingRefs)
+	authorizations := make([]RuntimeOperationBindingAuthorization, 0, len(m.BindingAuthorizations))
+	seenAuthorizations := make(map[string]struct{}, len(m.BindingAuthorizations))
+	for _, authorization := range m.BindingAuthorizations {
+		authorization = authorization.Normalized()
+		key := authorization.RequiredOperationRef + "\x00" + authorization.VariantID
+		if _, duplicate := seenAuthorizations[key]; duplicate {
+			continue
+		}
+		seenAuthorizations[key] = struct{}{}
+		authorizations = append(authorizations, authorization)
+	}
+	sort.Slice(authorizations, func(i, j int) bool {
+		if authorizations[i].RequiredOperationRef != authorizations[j].RequiredOperationRef {
+			return authorizations[i].RequiredOperationRef < authorizations[j].RequiredOperationRef
+		}
+		return authorizations[i].VariantID < authorizations[j].VariantID
+	})
+	m.BindingAuthorizations = authorizations
 	m.AcceptedEffectScopes = NormalizeRuntimeEffectScopes(m.AcceptedEffectScopes)
 	m.RequiredEffectScopes = NormalizeRuntimeEffectScopes(m.RequiredEffectScopes)
 	m.Target = m.Target.Normalized()
@@ -543,7 +579,11 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, fmt.Sprintf("%t", operation.AllowsDynamicParameters))
 		writeHashStrings(h, operation.DynamicParameterPrefixes)
 		writeHashStrings(h, operation.RequiredOperationReferences)
-		writeHashStrings(h, operation.AllowedBindingRefs)
+		for _, authorization := range operation.BindingAuthorizations {
+			writeHashString(h, authorization.RequiredOperationRef)
+			writeHashString(h, authorization.VariantID)
+			writeHashStrings(h, authorization.AllowedBindingRefs)
+		}
 		for _, scope := range operation.AcceptedEffectScopes {
 			writeHashString(h, string(scope))
 		}
@@ -619,14 +659,8 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	case ConvergenceStateNeedValidation:
 		evidenceKind = EvidenceKindValidation
 	}
-	allowedBindingRefs := CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, contract.Kind, evidenceKind)
-	// A manifest operation authorization is either proof-bearing or auxiliary.
-	// When the current sealed focus authorizes this kind for a binding, SM-3
-	// requires the candidate to preserve exactly one such binding through the
-	// sealed dispatch. Auxiliary work must use a kind without binding
-	// authorization; omission must not become a second candidate-controlled
-	// credit policy.
-	if len(allowedBindingRefs) != 0 {
+	bindingAuthorizations := runtimeCandidateOperationBindingAuthorizations(required, contract, bindings, evidenceKind)
+	if runtimeOperationBindingAuthorizationsHaveCredit(bindingAuthorizations) {
 		fields = append(fields, "bindingRefs")
 	}
 	if len(references) != 0 {
@@ -669,15 +703,83 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		AllowsDynamicParameters:     runtimeCandidateManifestAllowsDynamicParameters(contract.Kind),
 		DynamicParameterPrefixes:    runtimeCandidateManifestDynamicParameterPrefixes(contract.Kind),
 		RequiredOperationReferences: references,
-		AllowedBindingRefs:          allowedBindingRefs,
+		BindingAuthorizations:       bindingAuthorizations,
 		AcceptedEffectScopes:        append([]RuntimeEffectScope(nil), required.AcceptedEffectScopes...),
 		RequiredEffectScopes:        append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		Target:                      target,
 		PrerequisiteSnapshotRefs:    prerequisiteRefs,
 		AdmissibilitySnapshotRefs:   admissibilityRefs,
-		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, allowedBindingRefs),
+		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, runtimeOperationBindingAuthorizationRefs(bindingAuthorizations)),
 		OperationContractRevision:   contractRevision,
 	}.Normalized(), nil
+}
+
+func runtimeCandidateOperationBindingAuthorizations(required RequiredOutputContract, contract RuntimeOperationContract, bindings []CoverageEvidenceBinding, evidenceKind string) []RuntimeOperationBindingAuthorization {
+	requirements := make([]RuntimeRequiredOperationVariant, 0)
+	for _, requirement := range required.RequiredOperationSequence {
+		if CanonicalRuntimeBlockKind(requirement.Kind) == contract.Kind {
+			requirements = append(requirements, requirement)
+		}
+	}
+	ret := make([]RuntimeOperationBindingAuthorization, 0)
+	if len(requirements) != 0 {
+		for _, requirement := range requirements {
+			ret = append(ret, RuntimeOperationBindingAuthorization{
+				RequiredOperationRef: requirement.RequirementID,
+				VariantID:            requirement.VariantID,
+				AllowedBindingRefs:   coverageEvidenceBindingRefsForOperationVariant(bindings, contract.Kind, requirement.VariantID, evidenceKind),
+			})
+		}
+		return ret
+	}
+	for _, variant := range contract.Variants {
+		ret = append(ret, RuntimeOperationBindingAuthorization{
+			VariantID:          variant.ID,
+			AllowedBindingRefs: coverageEvidenceBindingRefsForOperationVariant(bindings, contract.Kind, variant.ID, evidenceKind),
+		})
+	}
+	if len(ret) == 0 {
+		ret = append(ret, RuntimeOperationBindingAuthorization{AllowedBindingRefs: CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, contract.Kind, evidenceKind)})
+	}
+	return ret
+}
+
+func coverageEvidenceBindingRefsForOperationVariant(bindings []CoverageEvidenceBinding, kind, variantID, evidenceKind string) []string {
+	kind = CanonicalRuntimeBlockKind(kind)
+	variantID = strings.TrimSpace(variantID)
+	ret := make([]string, 0)
+	for _, binding := range NormalizeCoverageEvidenceBindings(bindings) {
+		proof, found := CoverageEvidenceProofForKind(binding, evidenceKind)
+		if !found || !runtimeOperationKindsContain(proof.AllowedOperationKinds, kind) {
+			continue
+		}
+		if len(proof.AllowedOperationVariants) != 0 {
+			matched := false
+			for _, allowed := range proof.AllowedOperationVariants {
+				if CanonicalRuntimeBlockKind(allowed.Kind) == kind && allowed.VariantID == variantID {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		ret = append(ret, binding.ID)
+	}
+	return normalizeStrings(ret)
+}
+
+func runtimeOperationBindingAuthorizationsHaveCredit(values []RuntimeOperationBindingAuthorization) bool {
+	return len(runtimeOperationBindingAuthorizationRefs(values)) != 0
+}
+
+func runtimeOperationBindingAuthorizationRefs(values []RuntimeOperationBindingAuthorization) []string {
+	ret := make([]string, 0)
+	for _, value := range values {
+		ret = append(ret, value.AllowedBindingRefs...)
+	}
+	return normalizeStrings(ret)
 }
 
 func runtimeCandidateManifestValidationRecipes(kind string, recipes []RuntimeValidationRecipe, bindings []CoverageEvidenceBinding, bindingRefs []string) []RuntimeValidationRecipe {
