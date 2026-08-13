@@ -583,7 +583,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 	}
 	document = document.Normalized()
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
-		t.Fatalf("validate test semantic proof document: %v", err)
+		t.Fatalf("validate test semantic proof document: %v policies=%v proposals=%+v", err, manifest.AllowedTargetPolicies, document.Proposals)
 	}
 	batch.DocumentHash = runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
 	batch.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(batch)
@@ -602,7 +602,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 	sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
 	_, reconciliation, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, feasibilities, sourceFocuses)
 	if err != nil {
-		t.Fatalf("compile test semantic bindings: %v", err)
+		t.Fatalf("compile test semantic bindings: %v proposals=%+v", err, document.Proposals)
 	}
 	ledger.Phase = runtimecontract.RuntimeSemanticPlanningSealed
 	ledger.Manifest = &manifest
@@ -661,7 +661,7 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				t.Fatalf("test semantic fixture operation %q has no descriptor", kind)
 			}
 			variantID := runtimeTestSemanticFixtureVariant(t, source, kind)
-			target, feasibilityRefs, selectorRefs, constraintRefs, catalogTargets := runtimeTestSemanticFixtureTarget(aggregate.Facts, source, coverageID)
+			target, feasibilityRefs, selectorRefs, constraintRefs, catalogTargets := runtimeTestSemanticFixtureTarget(aggregate.Facts, source, coverageID, evidenceKind)
 			proposal := runtimecontract.RuntimeSemanticProofProposal{
 				CoverageWorkItemID: coverageID,
 				OwnerModuleID:      descriptor.OwnerModuleID,
@@ -766,6 +766,7 @@ func runtimeTestSemanticFixtureTarget(
 	facts runtimecontract.RuntimeFacts,
 	source runtimecontract.CoverageFocus,
 	coverageID common.CoverageWorkItemID,
+	evidenceKind string,
 ) (runtimecontract.RuntimeOperationTargetAuthorization, []string, []string, []string, []string) {
 	source = source.Normalized()
 	targets := append([]string(nil), source.TargetRefs...)
@@ -776,7 +777,7 @@ func runtimeTestSemanticFixtureTarget(
 	if selector == "" {
 		selector = "test/fixture-owner-selector/" + string(coverageID)
 	}
-	if source.ProspectiveTargetRef != "" {
+	if source.ProspectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindStateChange {
 		constraint := "test/fixture-prospective-target/" + string(coverageID)
 		return runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
@@ -784,6 +785,11 @@ func runtimeTestSemanticFixtureTarget(
 			ProspectiveConstraintRefs: []string{constraint},
 			ProspectiveTargetRef:      source.ProspectiveTargetRef,
 		}, []string{source.ProspectiveTargetRef}, []string{selector}, []string{constraint}, nil
+	}
+	if source.ProspectiveTargetRef != "" && evidenceKind == runtimecontract.EvidenceKindValidation {
+		return runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{source.ProspectiveTargetRef},
+		}, []string{source.ProspectiveTargetRef}, nil, nil, []string{source.ProspectiveTargetRef}
 	}
 	if len(targets) == 0 && source.TargetSelectorRef != "" {
 		return runtimecontract.RuntimeOperationTargetAuthorization{
@@ -829,13 +835,10 @@ func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanti
 			catalog.ValidationRecipeRefs = append(catalog.ValidationRecipeRefs, proposal.ValidationRecipeID)
 			catalog.ValidationRecipeRefs = append(catalog.ValidationRecipeRefs, spec.validationChecks...)
 		}
-		// Prospective creation must be an explicit owner-published grant even
-		// for a static operation kind such as file/write. Keep the legacy
-		// variant-less fixture shape for exact/existing targets, where the
-		// contract deliberately permits the bounded catalog fallback.
-		if proposal.OperationVariantID == "" && proposal.Target.Policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
-			continue
-		}
+		// Publish one explicit policy fact per kind/variant. This matters when a
+		// single owner catalog mixes a discriminated kind (for example patch/apply)
+		// with a non-variant kind: once any variant facts exist, the broad catalog
+		// union is vocabulary only and cannot authorize the other kind.
 		key := proposal.OperationKind + "|" + proposal.OperationVariantID
 		if index, found := variantIndex[proposal.OwnerModuleID][key]; found {
 			catalog.OperationVariants[index].AllowedTargetPolicies = append(catalog.OperationVariants[index].AllowedTargetPolicies, proposal.Target.Policy)

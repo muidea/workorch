@@ -109,6 +109,11 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 		// Some focused reducer fixtures explicitly project a post-semantic
 		// authority before entering this helper. Keep that tested binding rather
 		// than creating a second semantic generation over the same CWI.
+		facts, rebindErr := runtimeTestBindCurrentCWIRowsToSemanticManifest(aggregate.Facts, ledger.Manifest.Hash)
+		if rebindErr != nil {
+			return RuntimeAggregate{}, rebindErr
+		}
+		aggregate.Facts = facts
 		ledger.SealedBindingSetHash = aggregate.Facts.ReconciliationContract.BindingSetHash
 		if len(ledger.SealedLineageRefs) == 0 {
 			return RuntimeAggregate{}, fmt.Errorf("test semantic ledger has no seal lineage")
@@ -183,6 +188,46 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func runtimeTestBindCurrentCWIRowsToSemanticManifest(facts runtimecontract.RuntimeFacts, manifestHash string) (runtimecontract.RuntimeFacts, error) {
+	facts = facts.Normalized()
+	if manifestHash == "" {
+		return runtimecontract.RuntimeFacts{}, fmt.Errorf("test semantic manifest hash is empty")
+	}
+	focusByCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(facts.Coverage))
+	for _, focus := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
+		focus = focus.Normalized()
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			focusByCoverage[coverageID] = focus
+		}
+	}
+	for index := range facts.Coverage {
+		item := &facts.Coverage[index]
+		if item.CurrentBindingRef == nil {
+			continue
+		}
+		focus, found := focusByCoverage[item.ID]
+		if !found {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("test semantic manifest has no focus for CWI %q", item.ID)
+		}
+		binding, found := coverageBindingForRuntimeCWI(focus, item.ID)
+		if !found {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("test semantic manifest has no binding for CWI %q", item.ID)
+		}
+		ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, manifestHash)
+		item.CurrentBindingRef = &ref
+		if len(item.BindingLineage) == 0 {
+			item.BindingLineage = []runtimecontract.RuntimeCWIBindingRef{ref}
+		} else {
+			item.BindingLineage[len(item.BindingLineage)-1] = ref
+		}
+	}
+	facts.Coverage = runtimecontract.NormalizeRuntimeCoverageFacts(facts.Coverage)
+	if err := runtimecontract.ValidateRuntimeCWILedger(facts); err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	return facts, nil
 }
 
 func runtimeTestSeedSemanticTargetSnapshots(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {

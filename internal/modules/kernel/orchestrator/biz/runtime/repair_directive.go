@@ -345,7 +345,7 @@ func repairStateChangeDecision(base runtimecontract.RuntimeDecision, facts runti
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
 		AcceptedKinds:             acceptedKinds,
-		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, acceptedKinds),
 		AcceptedEffectScopes:      directive.RequiredEffectScopes, RequiredEffectScopes: directive.RequiredEffectScopes,
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
 		CoverageWorkItemIDs:       firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),
@@ -374,7 +374,7 @@ func repairValidationDecision(base runtimecontract.RuntimeDecision, facts runtim
 	base.State = runtimecontract.ConvergenceStateNeedValidation
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
 		AcceptedKinds:             acceptedKinds,
-		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, acceptedKinds),
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 		RequiredEffectScopes:      directive.RequiredEffectScopes, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		CoverageWorkItemIDs: firstRepairCoverage(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs),

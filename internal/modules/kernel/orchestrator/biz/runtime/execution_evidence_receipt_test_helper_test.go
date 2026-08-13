@@ -13,8 +13,8 @@ import (
 func runtimeTestEnsureCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggregate) {
 	t.Helper()
 	runtimeTestSealCurrentFocusBindings(t, aggregate)
-	runtimeTestSealCanonicalCWILedger(t, aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, aggregate)
+	runtimeTestSealCanonicalCWILedger(t, aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatalf("reduce test fixture with sealed coverage binding: %v", err)
@@ -59,7 +59,18 @@ func runtimeTestSealCanonicalCWILedger(t *testing.T, aggregate *RuntimeAggregate
 			item.ReopenLineage = nil
 			continue
 		}
-		ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, "test-semantic-manifest/"+focus.ID)
+		manifestHash := ""
+		if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed && aggregate.SemanticPlanning.Manifest != nil {
+			manifestHash = aggregate.SemanticPlanning.Manifest.Hash
+		}
+		if manifestHash == "" {
+			// Pure reducer fixtures may exercise the canonical row projection
+			// without constructing an aggregate semantic ledger. Operation/receipt
+			// fixtures install the sealed ledger first and therefore cannot use this
+			// test-only placeholder as semantic audit authority.
+			manifestHash = "test-semantic-manifest/" + focus.ID
+		}
+		ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, manifestHash)
 		item.CurrentBindingRef = &ref
 		item.BindingLineage = []runtimecontract.RuntimeCWIBindingRef{ref}
 		item.ReopenLineage = nil
@@ -538,8 +549,8 @@ func runtimeTestFactsWithCurrentFocusBindings(t *testing.T, facts runtimecontrac
 	t.Helper()
 	aggregate := RuntimeAggregate{Facts: facts, Definition: definition}
 	runtimeTestSealCurrentFocusBindings(t, &aggregate)
-	runtimeTestSealCanonicalCWILedger(t, &aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, &aggregate)
+	runtimeTestSealCanonicalCWILedger(t, &aggregate)
 	return aggregate.Facts
 }
 

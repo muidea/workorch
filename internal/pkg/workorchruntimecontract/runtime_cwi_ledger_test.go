@@ -141,6 +141,114 @@ func TestValidateRuntimeCWILedgerAllowsOneReopenedSuccessorAndBoundsLineage(t *t
 	}
 }
 
+func TestValidateRuntimeCWILedgerRequiresExplicitBindingRetirementOrReopen(t *testing.T) {
+	facts := runtimeCWILedgerFacts(t)
+	previous := facts.Coverage[0].CurrentBindingRef.Clone()
+	facts.Focus.ID = "semantic-pending/cwi-1"
+	facts.Focus.CoverageEvidenceBindings = nil
+	facts.Coverage[0].FocusID = facts.Focus.ID
+	facts.Coverage[0].CWIConvergenceState = RuntimeCWIConvergenceStatePlanning
+	facts.Coverage[0].CurrentBindingRef = nil
+	facts.ReconciliationContract = RuntimeCWIReconciliationContract{}
+
+	if err := ValidateRuntimeCWILedger(facts); err == nil || !strings.Contains(err.Error(), "no retirement or reopen lineage") {
+		t.Fatalf("implicit cleared binding error = %v", err)
+	}
+
+	facts.Coverage[0].BindingRetirementLineage = []RuntimeCWIBindingRetirementLineage{{
+		RetiredBindingRef: previous,
+		CausationRef:      "binding-retirement/catalog-revision-2",
+		Reason:            "unexecuted binding depends on retired catalog revision",
+	}}
+	if err := ValidateRuntimeCWILedger(facts); err != nil {
+		t.Fatalf("explicit no-effect binding retirement rejected: %v", err)
+	}
+
+	conflict := facts
+	conflict.Coverage = append([]RuntimeCoverageItemFact(nil), facts.Coverage...)
+	conflict.Coverage[0].ReopenLineage = []RuntimeCWIReopenLineage{{
+		PreviousBindingRef: previous,
+		TriggerRef:         "receipt/changed-source",
+		Reason:             "declared dependency changed",
+	}}
+	if err := ValidateRuntimeCWILedger(conflict); err == nil || !strings.Contains(err.Error(), "both retired and reopened") {
+		t.Fatalf("retirement/reopen conflict error = %v", err)
+	}
+}
+
+func TestValidateRuntimeCWILedgerAllowsRetiredNoEffectSuccessor(t *testing.T) {
+	facts := runtimeCWILedgerFacts(t)
+	previous := facts.Coverage[0].CurrentBindingRef.Clone()
+	currentFocus := facts.Focus.Normalized()
+	currentBinding := currentFocus.CoverageEvidenceBindings[0].Clone()
+	currentBinding.ID = "binding-2"
+	currentBinding.FocusID = "focus-2"
+	currentBinding.Hash = StableCoverageEvidenceBindingHash(currentBinding)
+	currentFocus.ID = currentBinding.FocusID
+	currentFocus.CoverageEvidenceBindings = []CoverageEvidenceBinding{currentBinding}
+	current := RuntimeCWIBindingRefForCoverageBinding(currentBinding, "semantic-manifest-2")
+	facts.Focus = currentFocus
+	facts.Coverage[0].FocusID = currentFocus.ID
+	facts.Coverage[0].CurrentBindingRef = &current
+	facts.Coverage[0].BindingLineage = []RuntimeCWIBindingRef{previous, current}
+	facts.Coverage[0].BindingRetirementLineage = []RuntimeCWIBindingRetirementLineage{{
+		RetiredBindingRef: previous,
+		CausationRef:      "binding-retirement/catalog-revision-2",
+		Reason:            "unexecuted binding depends on retired catalog revision",
+	}}
+	contract, err := CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, []CoverageFocus{facts.Focus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.ReconciliationContract = contract
+	if err := ValidateRuntimeCWILedger(facts); err != nil {
+		t.Fatalf("retired no-effect successor rejected: %v", err)
+	}
+}
+
+func TestValidateRuntimeCWIBindingRetirementRejectsAcceptedDurableExecutionAndEvidence(t *testing.T) {
+	facts := runtimeCWILedgerFacts(t)
+	binding := facts.Coverage[0].CurrentBindingRef.Clone()
+	facts.Coverage[0].BindingRetirementLineage = []RuntimeCWIBindingRetirementLineage{{
+		RetiredBindingRef: binding,
+		CausationRef:      "binding-retirement/catalog-revision-2",
+		Reason:            "unexecuted binding depends on retired catalog revision",
+	}}
+	facts.Coverage[0].CurrentBindingRef = nil
+	facts.Coverage[0].CWIConvergenceState = RuntimeCWIConvergenceStatePlanning
+	facts.Focus.ID = "semantic-pending/cwi-1"
+	facts.Focus.CoverageEvidenceBindings = nil
+	facts.Coverage[0].FocusID = facts.Focus.ID
+	facts.ReconciliationContract = RuntimeCWIReconciliationContract{}
+
+	executionKey := StableRuntimeOperationExecutionKey(facts.WorkspaceID, facts.RunID, "dispatch-1", "op-1")
+	dispatch := RuntimeDispatchRecord{
+		ID: "dispatch-1",
+		Candidate: RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
+			ID: "op-1", Kind: StepKindFileWrite, BindingRefs: []string{binding.BindingID}, TargetRefs: []string{"main.go"},
+		}}}}},
+		OperationExecutions: []RuntimeOperationExecutionRecord{{
+			OperationID: "op-1", ExecutionKey: executionKey, ExpectedEffectScope: RuntimeEffectWorkspaceDurable,
+			State: OperationExecutionOwnerCommitted, Fence: 1, OwnerReceiptRef: "receipt-1", OwnerReceiptHash: "receipt-hash-1",
+		}},
+	}
+	receipt := RuntimeOperationReceipt{
+		ExecutionKey: executionKey, Fence: 1, OperationID: "op-1", Outcome: RuntimeOperationOutcomeAccepted,
+		ObservedEffectScope: RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: []string{"main.go"},
+	}
+	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts, &dispatch, nil, []RuntimeOperationReceipt{receipt}); err == nil || !strings.Contains(err.Error(), "accepted durable execution") {
+		t.Fatalf("durable execution retirement error = %v", err)
+	}
+
+	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts, nil, nil, nil); err != nil {
+		t.Fatalf("no-effect retirement rejected: %v", err)
+	}
+	facts.Evidence.Accepted = []EvidenceFact{{ID: "evidence-1", BindingRefs: []string{binding.BindingID}}}
+	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "accepted evidence") {
+		t.Fatalf("accepted evidence retirement error = %v", err)
+	}
+}
+
 func TestValidateRuntimeCWIReconciliationLedgerFencesCurrentAndHistoricalScope(t *testing.T) {
 	facts := runtimeCWILedgerFacts(t)
 	request := runtimeCWILedgerRequest(t, facts, "request-current", 2)

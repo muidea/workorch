@@ -126,6 +126,9 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if err := os.WriteFile(filepath.Join(deliverable, "implementation.go"), []byte("package fixture\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
+				if err := os.WriteFile(filepath.Join(deliverable, "validation-entry.go"), []byte("package fixture\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
 
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
@@ -188,6 +191,26 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				controller, err := runtime.NewRuntimeController(repository)
 				if err != nil {
 					t.Fatal(err)
+				}
+				grounded := controllerMustLoadRuntimeAggregate(t, controller)
+				if grounded.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
+					var prerequisite runtimecontract.RuntimePrerequisite
+					for _, pending := range grounded.Facts.Prerequisites.Pending {
+						if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.SubjectRef == "validation-entry.go" {
+							prerequisite = pending
+							break
+						}
+					}
+					if prerequisite.ID == "" {
+						t.Fatalf("MCP validation focus has no target snapshot prerequisite: %+v", grounded.Facts.Prerequisites.Pending)
+					}
+					snapshot := acquireFileBackedMCPTargetSnapshot(t, ctx, hub, grounded, prerequisite, deliverable)
+					grounded, err = runtimeTestControllerCommitPrerequisite(controller, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+						PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
+					})
+					if err != nil || grounded.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+						t.Fatalf("commit MCP validation target snapshot=%+v err=%v", grounded, err)
+					}
 				}
 				if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-grounding-prefix"); err != nil {
 					t.Fatal(err)
@@ -307,8 +330,12 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 						t.Fatalf("pre-receipt restart must preserve outcome-unknown safety: calls=%d err=%v", calls, restartErr)
 					}
 					reloaded, err := repository.Load(ctx, "ws-v2", "run-v2")
-					if err != nil || reloaded.Facts.Resources.FailureTarget != nil || len(reloaded.Facts.Resources.TargetSnapshots) != 0 {
-						t.Fatalf("outcome-unknown restart manufactured MCP target authority: aggregate=%+v err=%v", reloaded, err)
+					if err != nil || reloaded.Facts.Resources.FailureTarget != nil ||
+						runtimeFileBackedHasTargetSnapshot(reloaded.Facts.Resources.TargetSnapshots, "implementation.go") ||
+						!runtimeFileBackedHasTargetSnapshot(reloaded.Facts.Resources.TargetSnapshots, "validation-entry.go") ||
+						len(reloaded.OperationReceipts) != 0 || len(reloaded.Facts.Evidence.Rejected) != 0 {
+						t.Fatalf("outcome-unknown restart manufactured MCP repair authority: targetSnapshots=%+v receipts=%d rejected=%d failureTarget=%+v err=%v",
+							reloaded.Facts.Resources.TargetSnapshots, len(reloaded.OperationReceipts), len(reloaded.Facts.Evidence.Rejected), reloaded.Facts.Resources.FailureTarget, err)
 					}
 					return
 				}
@@ -363,8 +390,11 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				persisted, err = runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
 				})
-				if err != nil || len(persisted.Facts.Resources.TargetSnapshots) != 1 || persisted.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
-					t.Fatalf("File snapshot was not committed from MCP-grounded target: aggregate=%+v err=%v", persisted, err)
+				if err != nil || !runtimeFileBackedHasCompleteTargetSnapshot(persisted.Facts.Resources.TargetSnapshots, "implementation.go", snapshot.Snapshot.ContentHash) ||
+					!runtimeFileBackedHasCompleteTargetSnapshot(persisted.Facts.Resources.TargetSnapshots, "validation-entry.go", "") ||
+					!runtimeFileBackedHasPrerequisiteObservation(persisted.Facts.Resources.PrerequisiteObservations, snapshot.Observation) {
+					t.Fatalf("File snapshot was not committed from MCP-grounded target: targetSnapshots=%+v observations=%+v err=%v",
+						persisted.Facts.Resources.TargetSnapshots, persisted.Facts.Resources.PrerequisiteObservations, err)
 				}
 				if _, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
@@ -372,7 +402,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatalf("duplicate target snapshot commit = %v, want conflict", err)
 				}
 				if persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
-					t.Fatalf("MCP-grounded File snapshot did not reduce to target-bound state change: %+v", persisted.Decision)
+					t.Fatalf("MCP-grounded File snapshot did not reduce to target-bound state change: state=%s terminal=%+v failure=%+v", persisted.Decision.State, persisted.Decision.Terminal, persisted.Facts.Failure)
 				}
 
 				// P3's durable-owner half starts only after the MCP observation and
@@ -395,7 +425,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange &&
 						resources.FailureTarget != nil && resources.FailureTarget.TargetObservation != nil &&
 						len(resources.FailureTarget.TargetRefs) == 1 && resources.FailureTarget.TargetRefs[0] == target &&
-						len(resources.TargetSnapshots) == 1 && resources.TargetSnapshots[0].TargetRef == target &&
+						runtimeFileBackedHasCompleteTargetSnapshot(resources.TargetSnapshots, target, snapshot.Snapshot.ContentHash) &&
 						command.CandidateContext.Focus.TargetRole == "implementation" {
 						contextBound = true
 					}
@@ -452,7 +482,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatalf("grounded File receipt restart did not converge exactly once aggregate=%+v calls=%d err=%v", completedPatch, calls, err)
 				}
 				reloaded, err := repository.Load(ctx, "ws-v2", "run-v2")
-				if err != nil || len(reloaded.Facts.Resources.TargetSnapshots) != 0 || len(reloaded.OperationReceipts) != 2 ||
+				if err != nil || runtimeFileBackedHasTargetSnapshot(reloaded.Facts.Resources.TargetSnapshots, "implementation.go") ||
+					!runtimeFileBackedHasTargetSnapshot(reloaded.Facts.Resources.TargetSnapshots, "validation-entry.go") || len(reloaded.OperationReceipts) != 2 ||
 					reloaded.Facts.Resources.FailureTarget == nil || reloaded.Facts.Resources.FailureTarget.TargetObservation == nil ||
 					reloaded.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 					!runtimeFileBackedHasPendingPrerequisite(reloaded.Facts.Prerequisites.Pending, runtimecontract.PrerequisiteKindTargetSnapshot, "implementation.go") ||
@@ -470,7 +501,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatalf("stale pre-change File admissibility commit = %v, want conflict", err)
 				}
 				unchanged, err := repository.Load(ctx, "ws-v2", "run-v2")
-				if err != nil || unchanged.StateRevision != reloaded.StateRevision || len(unchanged.Facts.Resources.TargetSnapshots) != 0 ||
+				if err != nil || unchanged.StateRevision != reloaded.StateRevision || runtimeFileBackedHasTargetSnapshot(unchanged.Facts.Resources.TargetSnapshots, "implementation.go") ||
+					!runtimeFileBackedHasTargetSnapshot(unchanged.Facts.Resources.TargetSnapshots, "validation-entry.go") ||
 					unchanged.Facts.Resources.FailureTarget == nil || len(unchanged.OperationReceipts) != 2 {
 					t.Fatalf("stale target snapshot changed resource-invalidated authority: aggregate=%+v err=%v", unchanged, err)
 				}
@@ -490,7 +522,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				failingFreshSnapshot, err := runtime.NewRuntimeController(&failWhenRuntimeStateRepository{
 					RuntimeStateRepository: repository, err: errors.New("injected fresh File snapshot CAS failure"),
 					match: func(next runtime.RuntimeAggregate) bool {
-						return len(next.Facts.Resources.TargetSnapshots) == 1 && next.Facts.Resources.TargetSnapshots[0].ContentHash == freshSnapshot.Snapshot.ContentHash
+						return runtimeFileBackedHasCompleteTargetSnapshot(next.Facts.Resources.TargetSnapshots, "implementation.go", freshSnapshot.Snapshot.ContentHash)
 					},
 				})
 				if err != nil {
@@ -502,15 +534,15 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatal("fresh target snapshot CAS failure was not surfaced")
 				}
 				notCommitted, err := repository.Load(ctx, "ws-v2", "run-v2")
-				if err != nil || len(notCommitted.Facts.Resources.TargetSnapshots) != 0 || notCommitted.StateRevision != unchanged.StateRevision {
+				if err != nil || runtimeFileBackedHasTargetSnapshot(notCommitted.Facts.Resources.TargetSnapshots, "implementation.go") ||
+					!runtimeFileBackedHasTargetSnapshot(notCommitted.Facts.Resources.TargetSnapshots, "validation-entry.go") || notCommitted.StateRevision != unchanged.StateRevision {
 					t.Fatalf("fresh target snapshot leaked across failed CAS aggregate=%+v err=%v", notCommitted, err)
 				}
 				responseLostSnapshotRepository := &panicAfterRuntimeStateSaveRepository{
 					RuntimeStateRepository: repository,
 					marker:                 "fresh-file-snapshot-response-loss",
 					match: func(next runtime.RuntimeAggregate) bool {
-						return len(next.Facts.Resources.TargetSnapshots) == 1 &&
-							next.Facts.Resources.TargetSnapshots[0].ContentHash == freshSnapshot.Snapshot.ContentHash
+						return runtimeFileBackedHasCompleteTargetSnapshot(next.Facts.Resources.TargetSnapshots, "implementation.go", freshSnapshot.Snapshot.ContentHash)
 					},
 				}
 				responseLostSnapshot, err := runtime.NewRuntimeController(responseLostSnapshotRepository)
@@ -536,8 +568,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatal(err)
 				}
 				reacquired, err := recoveredPatch.Load(ctx, "ws-v2", "run-v2")
-				if err != nil || len(reacquired.Facts.Resources.TargetSnapshots) != 1 ||
-					reacquired.Facts.Resources.TargetSnapshots[0].ContentHash != freshSnapshot.Snapshot.ContentHash ||
+				if err != nil || !runtimeFileBackedHasCompleteTargetSnapshot(reacquired.Facts.Resources.TargetSnapshots, "implementation.go", freshSnapshot.Snapshot.ContentHash) ||
+					!runtimeFileBackedHasTargetSnapshot(reacquired.Facts.Resources.TargetSnapshots, "validation-entry.go") ||
 					!runtimeFileBackedHasPendingPrerequisite(reacquired.Facts.Prerequisites.Pending, runtimecontract.PrerequisiteKindOperationAdmissibility, "") {
 					t.Fatalf("fresh target snapshot response-loss restart did not retain committed authority: aggregate=%+v err=%v", reacquired, err)
 				}
@@ -548,8 +580,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				}
 				afterDuplicateSnapshot, err := repository.Load(ctx, "ws-v2", "run-v2")
 				if err != nil || afterDuplicateSnapshot.StateRevision != reacquired.StateRevision ||
-					len(afterDuplicateSnapshot.Facts.Resources.TargetSnapshots) != 1 ||
-					afterDuplicateSnapshot.Facts.Resources.TargetSnapshots[0].ContentHash != freshSnapshot.Snapshot.ContentHash {
+					!runtimeFileBackedHasCompleteTargetSnapshot(afterDuplicateSnapshot.Facts.Resources.TargetSnapshots, "implementation.go", freshSnapshot.Snapshot.ContentHash) ||
+					!runtimeFileBackedHasTargetSnapshot(afterDuplicateSnapshot.Facts.Resources.TargetSnapshots, "validation-entry.go") {
 					t.Fatalf("duplicate fresh target snapshot after response loss mutated authority: aggregate=%+v err=%v", afterDuplicateSnapshot, err)
 				}
 				freshFileInventory, freshFileObservation := acquireFileBackedFileAdmissibility(t, ctx, hub, deliverable)
@@ -682,6 +714,34 @@ func runtimeFileBackedHasOperationAdmissibility(values []runtimecontract.Runtime
 	return false
 }
 
+func runtimeFileBackedHasTargetSnapshot(values []runtimecontract.TargetSnapshot, targetRef string) bool {
+	for _, value := range values {
+		if value.TargetRef == targetRef {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeFileBackedHasCompleteTargetSnapshot(values []runtimecontract.TargetSnapshot, targetRef, contentHash string) bool {
+	for _, value := range values {
+		if value.TargetRef == targetRef && value.Complete() && (contentHash == "" || value.ContentHash == contentHash) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeFileBackedHasPrerequisiteObservation(values []runtimecontract.RuntimePrerequisiteObservation, expected runtimecontract.RuntimePrerequisiteObservation) bool {
+	for _, value := range values {
+		if value.PrerequisiteID == expected.PrerequisiteID && value.ObservationID == expected.ObservationID &&
+			value.OwnerModuleID == expected.OwnerModuleID && value.ContentHash == expected.ContentHash {
+			return true
+		}
+	}
+	return false
+}
+
 func (g runtimeFileBackedMCPServerGetter) GetServer(_ context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
 	if g.server == nil || g.server.ID != id {
 		return nil, common.ErrNotFound
@@ -792,11 +852,9 @@ func runtimeFileBackedMCPFailureAggregate(
 		ID: fileInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
 	}}
-	// This fixture changes the focus proof declaration from the baseline
-	// state-change CWI to an MCP validation CWI.  C12 requires a fresh immutable
-	// binding for that declaration; retaining the bootstrap's file-edit binding
-	// would model stale activation data rather than a recovery scenario.
-	facts = runtimeTestFactsWithReboundBindings(facts, runtimeDefinition())
+	// Keep the current-schema CWI unbound here. The shared semantic fixture below
+	// compiles and seals the MCP validation binding, updating binding lineage and
+	// CWI convergence state in the same canonical projection.
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{

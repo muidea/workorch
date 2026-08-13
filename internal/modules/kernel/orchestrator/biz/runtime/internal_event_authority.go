@@ -10,6 +10,8 @@ const (
 	// transition. It retires a manifest whose owner observation is no longer
 	// current; it never carries a destination state or provider repair choice.
 	RuntimeInternalEventSemanticCatalogInvalidated         RuntimeInternalEventKind = "semantic_catalog_invalidated"
+	RuntimeInternalEventSemanticCatalogScopeInvalidated    RuntimeInternalEventKind = "semantic_catalog_scope_invalidated"
+	RuntimeInternalEventCWIBindingRetired                  RuntimeInternalEventKind = "cwi_binding_retired"
 	RuntimeInternalEventSemanticFeasibilityRequired        RuntimeInternalEventKind = "semantic_feasibility_required"
 	RuntimeInternalEventSemanticFeasibilityObserved        RuntimeInternalEventKind = "semantic_feasibility_observed"
 	RuntimeInternalEventSemanticContractSealed             RuntimeInternalEventKind = "semantic_contract_sealed"

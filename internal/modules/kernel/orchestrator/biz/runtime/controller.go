@@ -1631,14 +1631,19 @@ func sameRuntimeDefinition(left runtimecontract.RuntimeFacts, right runtimecontr
 func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract.RuntimeDispatchRecord {
 	ret := make([]runtimecontract.RuntimeDispatchRecord, 0, len(values))
 	for _, value := range values {
-		ret = append(ret, runtimecontract.RuntimeDispatchRecord{
-			ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
-			Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
-			ValidationRecipes: runtimecontract.NormalizeRuntimeValidationRecipes(value.ValidationRecipes),
-			State:             runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
-		})
+		ret = append(ret, sealedDispatchToRuntimeRecord(value))
 	}
 	return ret
+}
+
+func sealedDispatchToRuntimeRecord(value SealedDispatch) runtimecontract.RuntimeDispatchRecord {
+	return runtimecontract.RuntimeDispatchRecord{
+		ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
+		Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
+		ValidationRecipes: runtimecontract.NormalizeRuntimeValidationRecipes(value.ValidationRecipes),
+		State:             runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
+		OperationExecutions: runtimecontract.NormalizeRuntimeOperationExecutionRecords(value.OperationExecutions),
+	}
 }
 
 func firstNonEmpty(values ...string) string {

@@ -93,6 +93,28 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 	})
 }
 
+func TestRuntimeCWIBindingFenceRejectsStaleBindingSetBeforeCandidateRequest(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := runtimeCWIManifestForBindingFenceTest(t, aggregate)
+	repository.aggregate.Facts.ReconciliationContract.BindingSetHash = strings.Repeat("0", 64)
+	before := *repository.aggregate
+	saves := repository.saves
+
+	_, err = controller.beginCandidateAttempt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "stale-binding-set", manifest, "stale-binding-set")
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "candidate request binding fence") {
+		t.Fatalf("candidate request stale binding-set error = %v", err)
+	}
+	if repository.saves != saves || !reflect.DeepEqual(*repository.aggregate, before) {
+		t.Fatalf("stale binding-set mutated aggregate: saves=%d want=%d aggregate=%+v", repository.saves, saves, repository.aggregate)
+	}
+}
+
 func TestRuntimeCWIBindingFenceRejectsReceiptAndBlocksOwnerExecution(t *testing.T) {
 	ctx := context.Background()
 

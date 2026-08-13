@@ -223,19 +223,6 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 	if err := newLedger.Validate(); err != nil {
 		return err
 	}
-	updatedFacts, _, err := retireRuntimeCWIBindingsForManifest(aggregate.Facts, ledger.Manifest.Hash)
-	if err != nil {
-		return err
-	}
-	reconciliation, err := canonicalRuntimeCWIReconciliationContract(updatedFacts)
-	if err != nil {
-		return err
-	}
-	aggregate.Facts = updatedFacts
-	aggregate.Facts.ReconciliationContract = reconciliation
-	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
-		return err
-	}
 	retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_catalog_invalidated")
 	aggregate.SemanticPlanning = newLedger
 	return nil
@@ -640,7 +627,7 @@ func (c *RuntimeController) compileSemanticPlanBatch(ctx context.Context, worksp
 		}
 		expected, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
 			*ledger.Manifest, *ledger.CoverageOrderDocument, batch.Sequence, batch.RequestLogicalID,
-			aggregate.Facts.Focus.CoverageWorkItemIDs, ledger.PendingCoverageIDs, maxItems,
+			SemanticPlanActiveCoverageIDsForDrive(aggregate.Facts, *ledger.CoverageOrderDocument, ledger.PendingCoverageIDs), ledger.PendingCoverageIDs, maxItems,
 		)
 		if err != nil {
 			return false, err
@@ -694,6 +681,83 @@ func (c *RuntimeController) compileSemanticPlanBatch(ctx context.Context, worksp
 		ledger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), requesting.PendingCoverageWorkItemIDs...)
 		return true, nil
 	})
+}
+
+// SemanticPlanActiveCoverageIDsForDrive selects the owner-local anchor for the
+// next bounded proof batch. Facts.Focus remains the execution focus until the
+// complete semantic contract is sealed, so after its CWI leaves the pending
+// set it must not be reused to expand a later planning batch. The provider
+// order supplies only the next pending identity; it does not grant authority.
+func SemanticPlanActiveCoverageIDsForDrive(facts runtimecontract.RuntimeFacts, order runtimecontract.RuntimeSemanticPlanDocument, pending []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	pendingSet := make(map[common.CoverageWorkItemID]struct{}, len(pending))
+	for _, id := range pending {
+		pendingSet[id] = struct{}{}
+	}
+	active := make([]common.CoverageWorkItemID, 0, len(facts.Focus.CoverageWorkItemIDs))
+	for _, id := range facts.Focus.Normalized().CoverageWorkItemIDs {
+		if _, found := pendingSet[id]; found {
+			active = append(active, id)
+		}
+	}
+	if len(active) != 0 {
+		return active
+	}
+	for _, id := range order.Normalized().CoverageOrder {
+		if _, found := pendingSet[id]; found {
+			return []common.CoverageWorkItemID{id}
+		}
+	}
+	return nil
+}
+
+// SemanticOperationAuthorityReady reports whether SM-3 may consume the
+// canonical current binding without creating a new semantic generation. A
+// catalog-invalidated generation can be required while an accepted durable
+// effect keeps the current CWI's older binding lineage-locked. That current
+// owner transaction must finish validation/assessment before a later eligible
+// CWI may start a new semantic generation.
+func SemanticOperationAuthorityReady(aggregate RuntimeAggregate) bool {
+	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
+		return true
+	}
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
+		return false
+	}
+	if validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts) != nil {
+		return false
+	}
+	if len(runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)) == 0 {
+		return true
+	}
+	return currentRuntimeCWIBindingExecutionLocked(aggregate)
+}
+
+func currentRuntimeCWIBindingExecutionLocked(aggregate RuntimeAggregate) bool {
+	focus := aggregate.Facts.Focus.Normalized()
+	if len(focus.CoverageWorkItemIDs) != 1 {
+		return false
+	}
+	coverageID := focus.CoverageWorkItemIDs[0]
+	probe := aggregate.Facts.Normalized()
+	for index := range probe.Coverage {
+		item := &probe.Coverage[index]
+		if item.ID != coverageID || item.CurrentBindingRef == nil {
+			continue
+		}
+		item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
+			RetiredBindingRef: item.CurrentBindingRef.Clone(), CausationRef: "read-only/execution-lock-probe", Reason: "read-only execution lock probe",
+		})
+		var active *runtimecontract.RuntimeDispatchRecord
+		if aggregate.ActiveDispatch != nil {
+			value := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
+			active = &value
+		}
+		return runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(
+			probe, active,
+			sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.OperationReceipts,
+		) != nil
+	}
+	return false
 }
 
 func (c *RuntimeController) advanceSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, identity runtimecontract.RuntimeSemanticPlanBatch, next runtimecontract.RuntimeSemanticPlanBatchState) (RuntimeAggregate, error) {

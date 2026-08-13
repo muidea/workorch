@@ -21,9 +21,6 @@ func TestRuntimeCWITransitionsFailClosedWithoutCurrentLedger(t *testing.T) {
 	if _, _, err := reopenRuntimeCWIs(facts, []runtimeCWIReopenTrigger{{CoverageWorkItemID: "cwi-v2", TriggerRef: "receipt-1", Reason: "test"}}); err == nil {
 		t.Fatal("legacy CWI facts were accepted by reopen")
 	}
-	if _, _, err := retireRuntimeCWIBindingsForManifest(facts, "manifest-1"); err == nil {
-		t.Fatal("legacy CWI facts were accepted by semantic retirement")
-	}
 }
 
 func TestRuntimeAggregateRejectsMissingCurrentCWILedger(t *testing.T) {
@@ -73,10 +70,21 @@ func TestSemanticCWIFocusProjectionRebindsRepairAuthorityAcrossRetirementAndRese
 		SupersedesEvidenceRevision: facts.EvidenceRevision,
 	}
 
-	oldManifestHash := facts.Coverage[0].CurrentBindingRef.SemanticManifestHash
-	retired, retiredIDs, err := retireRuntimeCWIBindingsForManifest(facts, oldManifestHash)
-	if err != nil || len(retiredIDs) != 1 || retiredIDs[0] != "cwi-1" {
-		t.Fatalf("retire current semantic binding = retired=%v err=%v", retiredIDs, err)
+	previous := facts.Coverage[0].CurrentBindingRef.Clone()
+	facts.Coverage[0].BindingRetirementLineage = append(facts.Coverage[0].BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
+		RetiredBindingRef: previous,
+		CausationRef:      "test/no-effect-binding-retirement",
+		Reason:            "test binding was never executed",
+	})
+	facts.Coverage[0].CurrentBindingRef = nil
+	facts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+	retired, err := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{"cwi-1"})
+	if err != nil {
+		t.Fatalf("retire current semantic binding projection: %v", err)
+	}
+	retired.ReconciliationContract = runtimecontract.RuntimeCWIReconciliationContract{}
+	if err := runtimecontract.ValidateRuntimeCWILedger(retired); err != nil {
+		t.Fatalf("validate explicit no-effect retirement: %v", err)
 	}
 	assertRuntimeRepairAuthorityRebound(t, retired, "semantic-pending/cwi-1")
 

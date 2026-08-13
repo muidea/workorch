@@ -400,6 +400,15 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		return decision, err
 	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.StateChangeKinds, facts.Focus)
+	// A semantic validation binding deliberately grants CWI credit only to its
+	// validation operation. When that owner returns a receipt-backed failure
+	// target, a durable repair is a non-credit continuation and therefore cannot
+	// be selected from the binding's proof kinds. Derive it from the already
+	// persisted activation capability plus the current capability-owner catalog;
+	// candidate feasibility, receipt and evidence fences still apply afterward.
+	if len(acceptedKinds) == 0 && needsStateChangeForOwnerGroundedFailure(facts) {
+		acceptedKinds = ownerGroundedFailureRepairKinds(facts)
+	}
 	if len(acceptedKinds) == 0 {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}
@@ -418,7 +427,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
 		AcceptedKinds:             acceptedKinds,
-		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, acceptedKinds),
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
@@ -428,6 +437,85 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 		RequiredOperationSequence: requiredCapabilityStateSequence(facts, acceptedKinds),
 	}
 	return base, nil
+}
+
+func ownerGroundedFailureRepairKinds(facts runtimecontract.RuntimeFacts) []string {
+	if !needsStateChangeForOwnerGroundedFailure(facts) || facts.Resources.FailureTarget == nil {
+		return nil
+	}
+	targetRefs := facts.Resources.FailureTarget.TargetRefs
+	ret := make([]string, 0, len(facts.Capabilities.StateChangeKinds))
+	for _, rawKind := range facts.Capabilities.StateChangeKinds {
+		kind := runtimecontract.CanonicalRuntimeBlockKind(rawKind)
+		if kind == "" || runtimeStringIncluded(facts.Focus.RejectedStepKinds, kind) {
+			continue
+		}
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+		if !found || descriptor.OwnerModuleID == "" || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+			continue
+		}
+		inventory, found := runtimeOperationAdmissibilityForKind(facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, kind)
+		if !found || !runtimePrerequisiteSatisfied(facts.Prerequisites.Satisfied, inventory.PrerequisiteID) {
+			continue
+		}
+		if _, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, inventory.PrerequisiteID); !found {
+			continue
+		}
+		if !runtimeTargetsIncluded(inventory.TargetRefs, targetRefs) || !runtimeInventoryAllowsExactTarget(inventory, kind) {
+			continue
+		}
+		ret = append(ret, kind)
+	}
+	return ret
+}
+
+func runtimeInventoryAllowsExactTarget(inventory runtimecontract.RuntimeOperationAdmissibility, kind string) bool {
+	inventory = inventory.Normalized()
+	if len(inventory.OperationVariants) == 0 {
+		allowed, _, _, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(
+			inventory, kind, "", runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+		)
+		return err == nil && allowed
+	}
+	for _, variant := range inventory.OperationVariants {
+		if variant.Kind != runtimecontract.CanonicalRuntimeBlockKind(kind) {
+			continue
+		}
+		allowed, _, _, found, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(
+			inventory, kind, variant.VariantID, runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+		)
+		if err == nil && found && allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimePrerequisiteSatisfied(values []runtimecontract.RuntimePrerequisite, prerequisiteID string) bool {
+	for _, value := range values {
+		if value.ID == prerequisiteID {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTargetsIncluded(available, required []string) bool {
+	for _, target := range required {
+		if !runtimeStringIncluded(available, target) {
+			return false
+		}
+	}
+	return len(required) > 0
+}
+
+func runtimeStringIncluded(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // creationScopeAdmissibleFileOperationKinds checks only the committed File
@@ -478,6 +566,22 @@ func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFact
 		kind = runtimecontract.CanonicalRuntimeBlockKind(kind)
 		if _, ok := admissible[kind]; ok {
 			ret = append(ret, kind)
+		}
+	}
+	return ret
+}
+
+func acceptedOperationVariantsForKinds(values []runtimecontract.RuntimeOperationVariantRef, kinds []string) []runtimecontract.RuntimeOperationVariantRef {
+	accepted := make(map[string]struct{}, len(kinds))
+	for _, kind := range kinds {
+		if canonical := runtimecontract.CanonicalRuntimeBlockKind(kind); canonical != "" {
+			accepted[canonical] = struct{}{}
+		}
+	}
+	ret := make([]runtimecontract.RuntimeOperationVariantRef, 0, len(values))
+	for _, value := range runtimecontract.NormalizeRuntimeOperationVariantRefs(values) {
+		if _, found := accepted[runtimecontract.CanonicalRuntimeBlockKind(value.Kind)]; found {
+			ret = append(ret, value)
 		}
 	}
 	return ret
@@ -588,7 +692,7 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	base.State = runtimecontract.ConvergenceStateNeedValidation
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
 		AcceptedKinds:             acceptedKinds,
-		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
+		AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, acceptedKinds),
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindValidation},

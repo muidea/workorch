@@ -468,12 +468,8 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}}
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
-	aggregate.Facts = runtimeTestFactsWithReboundBindings(aggregate.Facts, runtimeDefinition())
-	decision, err := runtime.ReduceRuntimeState(aggregate.Facts, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	aggregate.Decision = decision
+	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	decision := aggregate.Decision
 	recipeID := recipe.ID
 	bindingRef := aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -2127,7 +2123,6 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 	}}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{validationInventory}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{catalogObservation}
-	facts = runtimeTestFactsWithReboundBindings(facts, runtimeDefinition())
 
 	repository := runtimeStateRepository{hub: hub}
 	controller, err := runtime.NewRuntimeController(repository)
@@ -2576,13 +2571,16 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 		t.Fatal(err)
 	}
 	assessmentCandidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
-		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		FocusID: afterEvidence.Decision.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "current focus satisfied",
 		EvidenceRefs: []string{"assessment-state-change-evidence"},
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{
+			CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: []string{"assessment-state-change-evidence"},
+		}},
 	}}
 	assessmentDispatch, err := admitAndSealRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, assessmentCandidate)
 	if err != nil || !assessmentDispatch.Admission.Accepted() || assessmentDispatch.Aggregate.ActiveDispatch == nil {
-		t.Fatalf("assessment seal=%+v err=%v", assessmentDispatch, err)
+		t.Fatalf("assessment seal disposition=%s failure=%+v correction=%+v err=%v", assessmentDispatch.Admission.Disposition, assessmentDispatch.Admission.Failure, assessmentDispatch.Admission.Correction, err)
 	}
 
 	beforeCommit, err := runtime.NewRuntimeController(&failOnceRuntimeStateRepository{
@@ -2805,9 +2803,8 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	if err != nil {
 		t.Fatal(err)
 	}
-	if begun.Facts.RepairDirective == nil || begun.Facts.RepairDirective.Closure == nil ||
-		begun.Decision.RequiredOutput.RepairClosureID != begun.Facts.RepairDirective.Closure.ID {
-		t.Fatalf("same-gap candidate request lost repair closure: aggregate=%+v", begun)
+	if begun.Facts.RepairDirective != nil || begun.Decision.RequiredOutput.RepairClosureID != "" {
+		t.Fatalf("superseded same-gap repair closure leaked into canonical candidate authority: aggregate=%+v", begun)
 	}
 	stateCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "same-gap-write", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
@@ -2816,10 +2813,9 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
 		t.Fatalf("same-gap state candidate seal=%+v err=%v", sealed, err)
 	}
-	if sealed.Aggregate.Facts.RepairDirective == nil || sealed.Aggregate.Facts.RepairDirective.Closure == nil ||
-		sealed.Aggregate.ActiveDispatch.Transaction.RequiredOutputHash != sealed.Aggregate.Decision.AuthorityTransaction().RequiredOutputHash ||
-		sealed.Aggregate.Decision.RequiredOutput.RepairClosureID != sealed.Aggregate.Facts.RepairDirective.Closure.ID {
-		t.Fatalf("same-gap sealed dispatch lost repair closure: aggregate=%+v", sealed.Aggregate)
+	if sealed.Aggregate.Facts.RepairDirective != nil || sealed.Aggregate.Decision.RequiredOutput.RepairClosureID != "" ||
+		sealed.Aggregate.ActiveDispatch.Transaction.RequiredOutputHash != sealed.Aggregate.Decision.AuthorityTransaction().RequiredOutputHash {
+		t.Fatalf("same-gap sealed dispatch did not retain canonical authority: aggregate=%+v", sealed.Aggregate)
 	}
 	executor := runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
 		receipt := runtimecontract.RuntimeOperationReceipt{
@@ -2868,7 +2864,9 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 		t.Fatal(err)
 	}
 	pending, err := restartedBefore.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || pending.ActiveDispatch == nil || pending.ActiveDispatch.Candidate.Assessment == nil || len(pending.Facts.Assessments) != 0 || pending.Facts.Repair.LastProgressRevision != "" || pending.Facts.Repair.NoProgressCount != 1 {
+	if err != nil || pending.ActiveDispatch == nil || pending.ActiveDispatch.Candidate.Assessment == nil ||
+		pending.ActiveDispatch.ID != assessmentDispatch.Aggregate.ActiveDispatch.ID || len(pending.Facts.Assessments) != 0 ||
+		!reflect.DeepEqual(pending.Facts.Repair, assessmentDispatch.Aggregate.Facts.Repair) {
 		t.Fatalf("same-gap pre-commit restart leaked progress: aggregate=%+v err=%v", pending, err)
 	}
 
@@ -3137,6 +3135,9 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 			Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
 		}
+		aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+			TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+		}}
 		aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
 		if err := repository.Save(ctx, aggregate, 0); err != nil {
 			t.Fatal(err)

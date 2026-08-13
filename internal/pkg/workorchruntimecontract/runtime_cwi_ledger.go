@@ -17,8 +17,9 @@ const RuntimeCWILedgerSchemaCurrent = "workorch.runtime_cwi_ledger.v1"
 // per-CWI audit trail. They keep reopening/resealing recoverable without
 // turning the canonical coverage row into an unbounded history store.
 const (
-	RuntimeCWIBindingLineageLimit = 32
-	RuntimeCWIReopenLineageLimit  = 16
+	RuntimeCWIBindingLineageLimit           = 32
+	RuntimeCWIBindingRetirementLineageLimit = 16
+	RuntimeCWIReopenLineageLimit            = 16
 )
 
 // RuntimeCWIConvergenceState records the SM-2 authority state for one CWI.
@@ -109,6 +110,38 @@ func (l RuntimeCWIReopenLineage) Validate() error {
 	return nil
 }
 
+// RuntimeCWIBindingRetirementLineage records an explicit SM-2 retirement of
+// a binding before any owner receipt, effect, or evidence was accepted. It
+// carries only immutable identity and cause; eligibility is still derived by
+// the owner-local reducer and aggregate validator.
+type RuntimeCWIBindingRetirementLineage struct {
+	RetiredBindingRef RuntimeCWIBindingRef
+	CausationRef      string
+	Reason            string
+}
+
+func (l RuntimeCWIBindingRetirementLineage) Normalized() RuntimeCWIBindingRetirementLineage {
+	l.RetiredBindingRef = l.RetiredBindingRef.Clone()
+	l.CausationRef = strings.TrimSpace(l.CausationRef)
+	l.Reason = strings.TrimSpace(l.Reason)
+	return l
+}
+
+func (l RuntimeCWIBindingRetirementLineage) Clone() RuntimeCWIBindingRetirementLineage {
+	return l.Normalized()
+}
+
+func (l RuntimeCWIBindingRetirementLineage) Validate() error {
+	l = l.Normalized()
+	if err := l.RetiredBindingRef.Validate(); err != nil {
+		return fmt.Errorf("runtime CWI binding retirement lineage binding: %w", err)
+	}
+	if l.CausationRef == "" || l.Reason == "" {
+		return fmt.Errorf("runtime CWI binding retirement lineage requires causation and reason")
+	}
+	return nil
+}
+
 func normalizeRuntimeCWIBindingLineage(values []RuntimeCWIBindingRef) []RuntimeCWIBindingRef {
 	if len(values) == 0 {
 		return nil
@@ -131,6 +164,17 @@ func normalizeRuntimeCWIReopenLineage(values []RuntimeCWIReopenLineage) []Runtim
 	return ret
 }
 
+func normalizeRuntimeCWIBindingRetirementLineage(values []RuntimeCWIBindingRetirementLineage) []RuntimeCWIBindingRetirementLineage {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeCWIBindingRetirementLineage, len(values))
+	for index := range values {
+		ret[index] = values[index].Clone()
+	}
+	return ret
+}
+
 func normalizeRuntimeCoverageItemFact(value RuntimeCoverageItemFact) RuntimeCoverageItemFact {
 	value.CWIConvergenceState = RuntimeCWIConvergenceState(strings.TrimSpace(string(value.CWIConvergenceState)))
 	value.FocusID = strings.TrimSpace(value.FocusID)
@@ -139,6 +183,7 @@ func normalizeRuntimeCoverageItemFact(value RuntimeCoverageItemFact) RuntimeCove
 		value.CurrentBindingRef = &binding
 	}
 	value.BindingLineage = normalizeRuntimeCWIBindingLineage(value.BindingLineage)
+	value.BindingRetirementLineage = normalizeRuntimeCWIBindingRetirementLineage(value.BindingRetirementLineage)
 	value.ReopenLineage = normalizeRuntimeCWIReopenLineage(value.ReopenLineage)
 	return value
 }
@@ -194,6 +239,7 @@ func InitializeRuntimeCWILedgerForActivation(facts RuntimeFacts) (RuntimeFacts, 
 		item.FocusID = focusID
 		item.CurrentBindingRef = nil
 		item.BindingLineage = nil
+		item.BindingRetirementLineage = nil
 		item.ReopenLineage = nil
 	}
 	facts.CWILedgerSchemaVersion = RuntimeCWILedgerSchemaCurrent
@@ -223,6 +269,83 @@ func ValidateRuntimeStateCWILedger(facts RuntimeFacts, ledger RuntimeCWIReconcil
 		return NewRuntimeStateCWILedgerIncompatibilityError(err)
 	}
 	return nil
+}
+
+// ValidateRuntimeCWIBindingRetirementsAgainstExecution prevents a binding
+// retirement from rewriting already accepted execution history. It reads only
+// the persisted aggregate and does not select a transition or recovery path.
+func ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts RuntimeFacts, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt) error {
+	retired := make(map[string]common.CoverageWorkItemID)
+	for _, raw := range facts.Coverage {
+		item := normalizeRuntimeCoverageItemFact(raw)
+		for _, lineage := range item.BindingRetirementLineage {
+			retired[lineage.RetiredBindingRef.BindingID] = item.ID
+		}
+	}
+	if len(retired) == 0 {
+		return nil
+	}
+	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
+	if active != nil {
+		dispatches = append(dispatches, active.Clone())
+	}
+	for _, dispatch := range completed {
+		dispatches = append(dispatches, dispatch.Clone())
+	}
+	for _, dispatch := range dispatches {
+		operations := make([]RuntimeOperation, 0)
+		if dispatch.Candidate.StateChange != nil {
+			operations = append(operations, stateChangingRuntimeOperations(dispatch.Candidate.StateChange.Operations)...)
+		}
+		if dispatch.Candidate.Validation != nil {
+			operations = append(operations, validationRuntimeOperations(dispatch.Candidate.Validation.Operations)...)
+		}
+		for _, operation := range operations {
+			operation = operation.Normalized()
+			retiredCoverageID := common.CoverageWorkItemID("")
+			retiredBindingID := ""
+			for _, bindingID := range operation.BindingRefs {
+				if coverageID, found := retired[bindingID]; found {
+					retiredCoverageID = coverageID
+					retiredBindingID = bindingID
+					break
+				}
+			}
+			if retiredBindingID == "" {
+				continue
+			}
+			execution, found := runtimeOperationExecutionForID(dispatch.OperationExecutions, operation.ID)
+			if !found || execution.Fence == 0 {
+				continue
+			}
+			receipt, found := RuntimeOperationReceiptForExecutionKeyFence(receipts, execution.ExecutionKey, execution.Fence)
+			if !found || receipt.Outcome != RuntimeOperationOutcomeAccepted {
+				continue
+			}
+			if RuntimeEffectIsDurable(receipt.ObservedEffectScope) || receipt.Changed {
+				return fmt.Errorf("runtime CWI %q binding %q was retired after accepted durable execution %q", retiredCoverageID, retiredBindingID, execution.ExecutionKey)
+			}
+		}
+	}
+	for _, evidence := range facts.Evidence.Accepted {
+		for _, bindingID := range evidence.BindingRefs {
+			if coverageID, found := retired[bindingID]; found {
+				return fmt.Errorf("runtime CWI %q binding %q was retired after accepted evidence %q", coverageID, bindingID, evidence.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeOperationExecutionForID(values []RuntimeOperationExecutionRecord, operationID string) (RuntimeOperationExecutionRecord, bool) {
+	operationID = strings.TrimSpace(operationID)
+	for _, value := range values {
+		value = value.Normalized()
+		if value.OperationID == operationID {
+			return value, true
+		}
+	}
+	return RuntimeOperationExecutionRecord{}, false
 }
 
 // ValidateRuntimeCWILedger verifies the CWI authority projection contained in
@@ -360,6 +483,9 @@ func validateRuntimeCWIItem(item RuntimeCoverageItemFact, focus CoverageFocus, b
 	if len(item.ReopenLineage) > RuntimeCWIReopenLineageLimit {
 		return fmt.Errorf("reopen lineage exceeds bounded limit %d", RuntimeCWIReopenLineageLimit)
 	}
+	if len(item.BindingRetirementLineage) > RuntimeCWIBindingRetirementLineageLimit {
+		return fmt.Errorf("binding retirement lineage exceeds bounded limit %d", RuntimeCWIBindingRetirementLineageLimit)
+	}
 	lineage := make(map[string]RuntimeCWIBindingRef, len(item.BindingLineage))
 	for _, binding := range item.BindingLineage {
 		if err := binding.Validate(); err != nil {
@@ -383,6 +509,24 @@ func validateRuntimeCWIItem(item RuntimeCoverageItemFact, focus CoverageFocus, b
 		}
 		seenReopenedBindings[reopen.PreviousBindingRef.BindingID] = struct{}{}
 	}
+	seenRetiredBindings := make(map[string]struct{}, len(item.BindingRetirementLineage))
+	for _, retirement := range item.BindingRetirementLineage {
+		if err := retirement.Validate(); err != nil {
+			return fmt.Errorf("binding retirement lineage: %w", err)
+		}
+		bindingID := retirement.RetiredBindingRef.BindingID
+		historical, found := lineage[bindingID]
+		if !found || !SameRuntimeCWIBindingRef(historical, retirement.RetiredBindingRef) {
+			return fmt.Errorf("binding retirement lineage references a binding outside binding lineage")
+		}
+		if _, duplicate := seenRetiredBindings[bindingID]; duplicate {
+			return fmt.Errorf("duplicates binding retirement lineage for binding %q", bindingID)
+		}
+		if _, reopened := seenReopenedBindings[bindingID]; reopened {
+			return fmt.Errorf("binding %q cannot be both retired and reopened", bindingID)
+		}
+		seenRetiredBindings[bindingID] = struct{}{}
+	}
 
 	if item.CurrentBindingRef != nil {
 		current := item.CurrentBindingRef.Normalized()
@@ -402,6 +546,25 @@ func validateRuntimeCWIItem(item RuntimeCoverageItemFact, focus CoverageFocus, b
 		seenCurrentBindings[current.BindingID] = item.ID
 		if historical, found := lineage[current.BindingID]; !found || !SameRuntimeCWIBindingRef(historical, current) {
 			return fmt.Errorf("current binding is absent from binding lineage")
+		}
+		if _, retired := seenRetiredBindings[current.BindingID]; retired {
+			return fmt.Errorf("current binding is already retired")
+		}
+	} else if len(item.BindingLineage) != 0 {
+		latest := item.BindingLineage[len(item.BindingLineage)-1]
+		_, retired := seenRetiredBindings[latest.BindingID]
+		_, reopened := seenReopenedBindings[latest.BindingID]
+		if !retired && !reopened {
+			return fmt.Errorf("cleared binding %q has no retirement or reopen lineage", latest.BindingID)
+		}
+	}
+	if len(item.BindingLineage) > 1 {
+		for _, historical := range item.BindingLineage[:len(item.BindingLineage)-1] {
+			_, retired := seenRetiredBindings[historical.BindingID]
+			_, reopened := seenReopenedBindings[historical.BindingID]
+			if !retired && !reopened {
+				return fmt.Errorf("successor binding %q has no retirement or reopen lineage for predecessor %q", item.BindingLineage[len(item.BindingLineage)-1].BindingID, historical.BindingID)
+			}
 		}
 	}
 	_, focusHasBinding := bindingByIDForCoverage(focus, item.ID)

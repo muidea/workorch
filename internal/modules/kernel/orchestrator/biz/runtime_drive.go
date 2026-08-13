@@ -189,7 +189,7 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 		// Semantic planning is a persisted SM-2/SM-3 prerequisite for every
 		// operation authority. SM-4 may only re-drive its current phase; it must
 		// not let the provisional bootstrap focus enter the operations pipeline.
-		if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
+		if !runtime.SemanticOperationAuthorityReady(aggregate) && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
 			aggregate, err = m.driveRuntimeSemanticPlanning(ctx, aggregate)
 			if err != nil {
 				return orchestratorevents.DriveRuntimeResult{}, err

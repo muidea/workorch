@@ -26,6 +26,79 @@ func TestCompileRuntimeSemanticBindingsCombinesIndependentProofsForOneCWI(t *tes
 	}
 }
 
+func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValidation(t *testing.T) {
+	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	document.Proposals[0].Target = RuntimeOperationTargetAuthorization{
+		Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"file/workspace-relative-create"},
+		ProspectiveConstraintRefs: []string{"new-target-requires-owner-selector"}, ProspectiveTargetRef: "main.go",
+	}
+	document.Proposals[1].Target = RuntimeOperationTargetAuthorization{
+		Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"},
+	}
+	fileCatalog := &manifest.OwnerCatalogs[0]
+	fileCatalog.SelectorRefs = append(fileCatalog.SelectorRefs, "file/workspace-relative-create")
+	fileCatalog.ConstraintRefs = append(fileCatalog.ConstraintRefs, "new-target-requires-owner-selector")
+	fileCatalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{
+		Kind: document.Proposals[0].OperationKind, VariantID: document.Proposals[0].OperationVariantID,
+		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		SelectorRefs:          []string{"file/workspace-relative-create"}, ConstraintRefs: []string{"new-target-requires-owner-selector"},
+	}}
+	manifest = sealSemanticTestManifest(t, manifest)
+	document.ManifestHash = manifest.Hash
+	facts[0] = semanticFeasibilityForTest(t, manifest, document.Proposals[0], []string{"main.go"}, "", nil)
+	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"main.go"}, "recipe/validate", []string{"check/validate"})
+
+	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || focuses[0].ProspectiveTargetRef != "main.go" || focuses[0].TargetSelectorRef != "file/workspace-relative-create" || len(focuses[0].TargetRefs) != 0 {
+		t.Fatalf("prospective creation and exact validation target surface = %+v", focuses)
+	}
+
+	mismatched := document.Clone()
+	mismatched.Proposals[1].Target = RuntimeOperationTargetAuthorization{
+		Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"other.go"},
+	}
+	mismatchedFact := semanticFeasibilityForTest(t, manifest, mismatched.Proposals[1], []string{"other.go"}, "recipe/validate", []string{"check/validate"})
+	if _, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, mismatched, []RuntimeSemanticProofFeasibility{facts[0], mismatchedFact}, []CoverageFocus{source}); err == nil {
+		t.Fatalf("mismatched creation and validation targets were accepted: %v", err)
+	}
+}
+
+func TestCompileRuntimeSemanticBindingsUsesDeclaredSelectorOwnerAcrossProofOwners(t *testing.T) {
+	manifest, document, _, source := semanticIndependentProofSetFixture(t)
+	selector := "file/unique_workspace_entry"
+	for index := range document.Proposals {
+		document.Proposals[index].Target = RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{selector}}
+	}
+	for index := range manifest.OwnerCatalogs {
+		manifest.OwnerCatalogs[index].SelectorRefs = append(manifest.OwnerCatalogs[index].SelectorRefs, selector)
+		for variantIndex := range manifest.OwnerCatalogs[index].OperationVariants {
+			manifest.OwnerCatalogs[index].OperationVariants[variantIndex].SelectorRefs = append(manifest.OwnerCatalogs[index].OperationVariants[variantIndex].SelectorRefs, selector)
+		}
+	}
+	manifest = sealSemanticTestManifest(t, manifest)
+	document.ManifestHash = manifest.Hash
+	facts := make([]RuntimeSemanticProofFeasibility, 0, len(document.Proposals))
+	for _, proposal := range document.Proposals {
+		checks := proposal.RequiredCheckRefs
+		if proposal.ValidationRecipeID != "" && len(checks) == 0 {
+			checks = []string{"check/validate"}
+		}
+		facts = append(facts, semanticFeasibilityForTest(t, manifest, proposal, nil, proposal.ValidationRecipeID, checks))
+	}
+	source.TargetSelectorRef = selector
+	source.TargetSelectorOwnerRef = RuntimeModuleFile
+	bindings, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].TargetSelectorRef != selector || bindings[0].TargetSelectorOwnerRef != RuntimeModuleFile {
+		t.Fatalf("declared selector owner was not preserved: %+v", bindings)
+	}
+}
+
 func TestCompileRuntimeSemanticBindingsRejectsMissingSourceRequiredValidationProof(t *testing.T) {
 	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
 	document.Proposals = document.Proposals[:1]

@@ -114,8 +114,11 @@ type RuntimeCoverageItemFact struct {
 	CWIConvergenceState RuntimeCWIConvergenceState
 	CurrentBindingRef   *RuntimeCWIBindingRef
 	BindingLineage      []RuntimeCWIBindingRef
-	FocusID             string
-	ReopenLineage       []RuntimeCWIReopenLineage
+	// BindingRetirementLineage records the only legal pre-effect removal of a
+	// current binding. It is append-only SM-2 audit, not a second binding owner.
+	BindingRetirementLineage []RuntimeCWIBindingRetirementLineage
+	FocusID                  string
+	ReopenLineage            []RuntimeCWIReopenLineage
 }
 
 // InitialRuntimeCoverageFacts materializes the item closure ledger from the

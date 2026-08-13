@@ -688,6 +688,36 @@ func TestReduceRuntimeStateFiltersCapabilitiesByFocusContract(t *testing.T) {
 	}
 }
 
+func TestReduceRuntimeStateFiltersAcceptedVariantsByCurrentActionKinds(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write"}}
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+
+	stateChange, err := reduceRuntimeStateFixture(t, facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stateChange.RequiredOutput.AcceptedOperationVariants) != 1 || stateChange.RequiredOutput.AcceptedOperationVariants[0].Kind != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("state-change variants = %+v", stateChange.RequiredOutput.AcceptedOperationVariants)
+	}
+
+	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
+		ID: "state-change", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001",
+		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	})
+	facts.EvidenceRevision = "evidence-v1-00000000000000000001"
+	validation, err := reduceRuntimeStateFixture(t, facts, &stateChange.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validation.State != runtimecontract.ConvergenceStateNeedValidation || len(validation.RequiredOutput.AcceptedOperationVariants) != 0 {
+		t.Fatalf("validation required output leaked state-change variants: %+v", validation.RequiredOutput)
+	}
+}
+
 func TestReduceRuntimeStateDoesNotApplyGitSequenceToFileOnlyFocus(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
@@ -837,6 +867,66 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 	}
 	if got := decision.RequiredOutput.TargetRefs; len(got) != 1 || got[0] != "implementation.go" {
 		t.Fatalf("state-change repair targets = %v, want owner target", got)
+	}
+}
+
+func TestOwnerGroundedFailureRepairKindsRequiresCompleteOwnerAuthority(t *testing.T) {
+	const prerequisiteID = "operation-admissibility:file-repair"
+	base := func() runtimecontract.RuntimeFacts {
+		return runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{AcceptedStepKinds: []string{runtimecontract.StepKindMCPToolCall}},
+			Failure: &runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassExecutionFailure, Signature: "validation-failed", TargetRefs: []string{"implementation.go"},
+			},
+			Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}},
+			Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{{
+				ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+				OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			}}},
+			Resources: runtimecontract.RuntimeResourceFacts{
+				FailureTarget: &runtimecontract.FailureTarget{Signature: "validation-failed", TargetRefs: []string{"implementation.go"}},
+				OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
+					PrerequisiteID: prerequisiteID, SnapshotID: "file-repair-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"implementation.go"}, ObservedRevision: "file-revision-1",
+					OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+						Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
+						AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+					}},
+				}},
+				PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{{
+					PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+					OwnerModuleID: runtimecontract.RuntimeModuleFile, ObservationID: "file-repair-observation", ContentHash: "file-repair-catalog",
+				}},
+			},
+		}
+	}
+
+	if got := ownerGroundedFailureRepairKinds(base()); len(got) != 1 || got[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("complete owner repair authority kinds = %v", got)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeFacts)
+	}{
+		{name: "missing satisfied prerequisite", mutate: func(facts *runtimecontract.RuntimeFacts) { facts.Prerequisites.Satisfied = nil }},
+		{name: "missing observation", mutate: func(facts *runtimecontract.RuntimeFacts) { facts.Resources.PrerequisiteObservations = nil }},
+		{name: "target outside catalog", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			facts.Resources.OperationAdmissibilities[0].TargetRefs = []string{"validation-entry.go"}
+		}},
+		{name: "missing exact target policy", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			facts.Resources.OperationAdmissibilities[0].OperationVariants[0].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}
+		}},
+		{name: "focus rejects repair kind", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			facts.Focus.RejectedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			facts := base()
+			test.mutate(&facts)
+			if got := ownerGroundedFailureRepairKinds(facts); len(got) != 0 {
+				t.Fatalf("incomplete owner repair authority kinds = %v", got)
+			}
+		})
 	}
 }
 

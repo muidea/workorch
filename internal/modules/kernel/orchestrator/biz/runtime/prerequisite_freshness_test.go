@@ -23,6 +23,58 @@ func sameFreshnessStrings(got, want []string) bool {
 	return true
 }
 
+func TestRuntimeSemanticCatalogScopeGapRespectsTypedTargetPolicy(t *testing.T) {
+	base := RuntimeAggregate{
+		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+		Facts: runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{
+			ID: "semantic-pending/cwi", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"},
+			TargetRefs: []string{"main.go"}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}},
+		}},
+	}
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "operation_admissibility:git", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite},
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
+		OperationKinds: []string{runtimecontract.StepKindGitWrite}, OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindGitWrite, VariantID: "commit",
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+			SelectorRefs:          []string{"workspace-repository"},
+		}}, ObservedRevision: "repository-v1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: catalog.SnapshotID,
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	base.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	base.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	base.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+
+	if gap, found := NextRuntimeSemanticCatalogScopeGap(base); found {
+		t.Fatalf("closed Git owner scope was treated as an exact-target gap: %+v", gap)
+	}
+
+	exact := catalog
+	exact.OperationVariants[0].AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget}
+	exact.OperationVariants[0].SelectorRefs = nil
+	exact.TargetRefs = []string{"other.go"}
+	exact.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(exact)
+	exactObservation := observation
+	exactObservation.ContentHash = exact.SnapshotID
+	exactObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(exactObservation)
+	base.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{exact}
+	base.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{exactObservation}
+	gap, found := NextRuntimeSemanticCatalogScopeGap(base)
+	if !found || gap.PrerequisiteID != prerequisite.ID || gap.CatalogSnapshotID != exact.SnapshotID ||
+		!sameRuntimeTargetRefs(gap.RequiredTargetRefs, []string{"main.go"}) {
+		t.Fatalf("missing exact target did not produce a bounded scope gap: gap=%+v found=%v", gap, found)
+	}
+}
+
 func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}

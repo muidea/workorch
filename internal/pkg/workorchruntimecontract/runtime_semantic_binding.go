@@ -191,11 +191,27 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 		if err != nil {
 			return CoverageFocus{}, fmt.Errorf("runtime semantic proof %q target: %w", proposalHash, err)
 		}
+		currentSelectorOwner := proposal.OwnerModuleID
+		if source != nil && currentSelector != "" {
+			declaration := source.Normalized()
+			if declaration.TargetSelectorRef == currentSelector && declaration.TargetSelectorOwnerRef != "" {
+				currentSelectorOwner = declaration.TargetSelectorOwnerRef
+			}
+		}
 		if proofIndex == 0 {
 			targetRefs, selectorRef, prospectiveTargetRef = currentTargets, currentSelector, currentProspective
-			declarationRef, selectorOwner = proposal.DeclarationRef, proposal.OwnerModuleID
-		} else if !sameStrings(targetRefs, currentTargets) || selectorRef != currentSelector || prospectiveTargetRef != currentProspective || declarationRef != proposal.DeclarationRef {
-			return CoverageFocus{}, fmt.Errorf("runtime semantic proofs for coverage %q do not share one target and declaration surface", proofSet.CoverageWorkItemID)
+			declarationRef, selectorOwner = proposal.DeclarationRef, currentSelectorOwner
+		} else {
+			if declarationRef != proposal.DeclarationRef {
+				return CoverageFocus{}, fmt.Errorf("runtime semantic proofs for coverage %q do not share one target and declaration surface", proofSet.CoverageWorkItemID)
+			}
+			targetRefs, selectorRef, prospectiveTargetRef, selectorOwner, err = mergeRuntimeSemanticBindingTarget(
+				targetRefs, selectorRef, prospectiveTargetRef, selectorOwner,
+				currentTargets, currentSelector, currentProspective, currentSelectorOwner,
+			)
+			if err != nil {
+				return CoverageFocus{}, fmt.Errorf("runtime semantic proofs for coverage %q do not share one target and declaration surface", proofSet.CoverageWorkItemID)
+			}
 		}
 		acceptedKinds = append(acceptedKinds, proposal.OperationKind)
 		metricConstraints = append(metricConstraints, proposal.MetricConstraints...)
@@ -251,6 +267,39 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 		return CoverageFocus{}, err
 	}
 	return focus, nil
+}
+
+// mergeRuntimeSemanticBindingTarget preserves one logical target surface for
+// an independent proof set. A prospective state change and a later validation
+// necessarily use different owner policies: File authorizes creation while a
+// validation owner observes the resulting exact path. They may share one CWI
+// binding only when both facts name that exact same logical target.
+func mergeRuntimeSemanticBindingTarget(
+	targets []string, selector, prospective, selectorOwner string,
+	currentTargets []string, currentSelector, currentProspective, currentOwner string,
+) ([]string, string, string, string, error) {
+	if prospective != "" {
+		if currentProspective == "" && currentSelector == "" && sameStrings(currentTargets, []string{prospective}) {
+			return targets, selector, prospective, selectorOwner, nil
+		}
+		if currentProspective == prospective && currentSelector == selector && sameStrings(currentTargets, targets) && currentOwner == selectorOwner {
+			return targets, selector, prospective, selectorOwner, nil
+		}
+		return nil, "", "", "", fmt.Errorf("semantic prospective target surface mismatch")
+	}
+	if currentProspective != "" {
+		if selector == "" && sameStrings(targets, []string{currentProspective}) {
+			return currentTargets, currentSelector, currentProspective, currentOwner, nil
+		}
+		return nil, "", "", "", fmt.Errorf("semantic prospective target surface mismatch")
+	}
+	if !sameStrings(targets, currentTargets) || selector != currentSelector {
+		return nil, "", "", "", fmt.Errorf("semantic target surface mismatch")
+	}
+	if selector != "" && selectorOwner != currentOwner {
+		return nil, "", "", "", fmt.Errorf("semantic selector owner mismatch")
+	}
+	return targets, selector, prospective, selectorOwner, nil
 }
 
 func semanticProofEffectsForEvidenceKind(values []RuntimeEffectScope, evidenceKind string) []RuntimeEffectScope {

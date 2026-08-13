@@ -97,6 +97,12 @@ func (c *RuntimeController) executeActiveDispatch(ctx context.Context, workspace
 	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.State != DispatchStateSealed {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime has no active sealed dispatch", common.ErrConflict)
 	}
+	// Owner execution is downstream of the same canonical CWI fence used by
+	// candidate, dispatch, receipt, and evidence admission. Validate before any
+	// claim/recovery branch can call a capability owner.
+	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: operation execution binding fence: %v", common.ErrConflict, err)
+	}
 	dispatch := *aggregate.ActiveDispatch
 	operations, err := orderedCandidateOperations(dispatch.Candidate)
 	if err != nil {
@@ -546,6 +552,9 @@ func (c *RuntimeController) claimOperationExecution(ctx context.Context, workspa
 	}
 	if aggregate.ActiveDispatch == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: no active dispatch for claim", common.ErrConflict)
+	}
+	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: operation claim binding fence: %v", common.ErrConflict, err)
 	}
 	expectedRevision := aggregate.StateRevision
 	found := false

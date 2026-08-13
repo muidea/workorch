@@ -334,6 +334,9 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeStateCWILedger(r.Facts, r.Reconciliation); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(r.Facts, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts); err != nil {
+		return NewRuntimeStateCWILedgerIncompatibilityError(err)
+	}
 	if err := r.Facts.Validate(); err != nil {
 		return err
 	}

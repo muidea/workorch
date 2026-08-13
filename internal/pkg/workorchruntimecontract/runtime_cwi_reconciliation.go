@@ -145,6 +145,12 @@ func (c RuntimeCWIReconciliationContract) Normalized() RuntimeCWIReconciliationC
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	c.BindingSetHash = strings.TrimSpace(c.BindingSetHash)
 	c.Bindings = cloneRuntimeCWIReconciliationBindingRefs(c.Bindings)
+	sort.Slice(c.Bindings, func(i, j int) bool {
+		if c.Bindings[i].CoverageWorkItemID != c.Bindings[j].CoverageWorkItemID {
+			return c.Bindings[i].CoverageWorkItemID < c.Bindings[j].CoverageWorkItemID
+		}
+		return c.Bindings[i].BindingID < c.Bindings[j].BindingID
+	})
 	return c
 }
 
@@ -253,7 +259,7 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 			seenBinding[ref.BindingID] = struct{}{}
 		}
 	}
-	ret.Bindings = cloneRuntimeCWIReconciliationBindingRefs(ret.Bindings)
+	ret = ret.Normalized()
 	ret.BindingSetHash = StableRuntimeCWIReconciliationContractHash(ret)
 	if err := ret.Validate(); err != nil {
 		return RuntimeCWIReconciliationContract{}, err

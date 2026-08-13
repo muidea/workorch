@@ -946,93 +946,88 @@ func TestRuntimeSemanticCatalogReacquisitionRetiresOnlyCurrentGeneration(t *test
 	}
 }
 
-func TestRuntimeSemanticCatalogReacquisitionResealsCoverageProofLineageBeforeCredit(t *testing.T) {
-	for _, testCase := range []struct {
-		name                string
-		currentTarget       string
-		wantDisposition     runtimecontract.RuntimeCoverageProofLineageDisposition
-		wantCurrentCredit   bool
-		wantMissingEvidence bool
-	}{
-		{
-			name:              "equivalent proof",
-			currentTarget:     "target.txt",
-			wantDisposition:   runtimecontract.RuntimeCoverageProofLineageDispositionEquivalent,
-			wantCurrentCredit: true,
-		},
-		{
-			name:                "incompatible target",
-			currentTarget:       "other.txt",
-			wantDisposition:     runtimecontract.RuntimeCoverageProofLineageDispositionIncompatible,
-			wantCurrentCredit:   false,
-			wantMissingEvidence: true,
-		},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			ctx := context.Background()
-			controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
-			oldBinding := aggregate.Facts.Focus.CoverageEvidenceBindings[0]
-			accepted := seedAcceptedCoverageProofLineageForSemanticReseal(t, &aggregate, oldBinding)
+func TestRuntimeSemanticCatalogReacquisitionKeepsAcceptedEffectBindingLocked(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
+	oldBinding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
+	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, runtimecontract.EvidenceFact{
+		ID: "evidence-semantic-lineage-source", Kind: runtimecontract.EvidenceKindStateChange,
+		BindingRefs: []string{oldBinding.ID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{oldBinding.CoverageWorkItemID},
+		Quality: common.EvidenceQualityValid,
+	})
 
-			changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-lineage-reseal", "operation-lineage-reseal", runtimecontract.RuntimeOperationReceipt{
-				ExecutionKey: "execution/lineage-reseal", Fence: 1, OperationID: "operation-lineage-reseal",
-				ResourceChanges: []runtimecontract.RuntimeResourceChange{{
-					Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-					SubjectRef: "workspace_deliverable", BeforeRevision: catalog.ObservedRevision, AfterRevision: "file-revision-2",
-				}},
-			})
-			if err != nil || !changed || !semanticCatalogPrerequisitePending(aggregate, prerequisite.ID) {
-				t.Fatalf("receipt invalidation did not reopen semantic acquisition: changed=%t err=%v aggregate=%+v", changed, err, aggregate)
-			}
-			facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-			if err != nil {
-				t.Fatal(err)
-			}
-			aggregate.Facts, aggregate.Decision = facts, decision
-			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
-				t.Fatal(err)
-			}
-			repository.aggregate = &aggregate
+	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-lineage-lock", "operation-lineage-lock", runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "execution/lineage-lock", Fence: 1, OperationID: "operation-lineage-lock",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", BeforeRevision: catalog.ObservedRevision, AfterRevision: "file-revision-2",
+		}},
+	})
+	if err != nil || !changed || !semanticCatalogPrerequisitePending(aggregate, prerequisite.ID) {
+		t.Fatalf("receipt invalidation did not open catalog reacquisition: changed=%t err=%v", changed, err)
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	aggregate.StateRevision++
+	repository.aggregate = &aggregate
 
-			currentCatalog := catalog.Normalized()
-			currentCatalog.TargetRefs = []string{testCase.currentTarget}
-			currentCatalog.ObservedRevision = "file-revision-2"
-			currentCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(currentCatalog)
-			currentObservation := observation.Normalized()
-			currentObservation.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), currentObservation.Dependencies...)
-			currentObservation.ContentHash = currentCatalog.SnapshotID
-			currentObservation.Dependencies[0].Revision = currentCatalog.ObservedRevision
-			currentObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(currentObservation)
-			reacquired, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
-				PrerequisiteID: prerequisite.ID, OperationAdmissibility: &currentCatalog, Observation: &currentObservation,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if reacquired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(reacquired.CoverageProofLineage) != 1 {
-				t.Fatalf("reacquisition advanced before a re-seal: phase=%s lineage=%+v", reacquired.SemanticPlanning.Phase, reacquired.CoverageProofLineage)
-			}
-			if got := reacquired.Facts.Evidence.Accepted[0].BindingRefs; len(got) != 1 || got[0] != oldBinding.ID {
-				t.Fatalf("reacquisition rewrote immutable source evidence: %v", got)
-			}
+	currentCatalog := catalog.Normalized()
+	currentCatalog.TargetRefs = []string{"other.txt"}
+	currentCatalog.ObservedRevision = "file-revision-2"
+	currentCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(currentCatalog)
+	currentObservation := observation.Normalized()
+	currentObservation.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), currentObservation.Dependencies...)
+	currentObservation.ContentHash = currentCatalog.SnapshotID
+	currentObservation.Dependencies[0].Revision = currentCatalog.ObservedRevision
+	currentObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(currentObservation)
+	reacquired, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &currentCatalog, Observation: &currentObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := runtimeCoverageByID(reacquired.Facts.Coverage)[oldBinding.CoverageWorkItemID]
+	if item.CurrentBindingRef == nil || item.CurrentBindingRef.BindingID != oldBinding.ID || len(item.BindingRetirementLineage) != 0 {
+		t.Fatalf("accepted-effect binding was replaced during reacquisition: %+v", item)
+	}
+	if got := reacquired.Facts.Evidence.Accepted[0].BindingRefs; len(got) != 1 || got[0] != oldBinding.ID {
+		t.Fatalf("reacquisition rewrote source evidence: %v", got)
+	}
+	if eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(reacquired.Facts); len(eligible) != 0 {
+		t.Fatalf("accepted-effect CWI became eligible for implicit replan: %v", eligible)
+	}
+	if retirement, found := NextRuntimeCWIBindingRetirementFact(reacquired); found {
+		t.Fatalf("accepted-effect binding produced retirement fact: %+v", retirement)
+	}
+}
 
-			resealed := resealSemanticPlanningGenerationForLineageTest(t, controller, reacquired, currentCatalog, currentObservation, testCase.currentTarget)
-			if len(resealed.CoverageProofLineage) != 2 {
-				t.Fatalf("re-seal lineage rows = %+v", resealed.CoverageProofLineage)
-			}
-			resolution := resealed.CoverageProofLineage[1]
-			if resolution.Disposition != testCase.wantDisposition {
-				t.Fatalf("resolution disposition = %q, want %q; resolution=%+v", resolution.Disposition, testCase.wantDisposition, resolution)
-			}
-			if got := runtimeEvidenceAppliesToCurrentCoverageWithLineage(resealed.Facts, accepted, resealed.CoverageProofLineage); got != testCase.wantCurrentCredit {
-				t.Fatalf("current proof credit = %t, want %t; lineage=%+v", got, testCase.wantCurrentCredit, resealed.CoverageProofLineage)
-			}
-			missing := missingEvidenceKinds(resealed.Facts, resealed.CoverageProofLineage)
-			if (len(missing) != 0) != testCase.wantMissingEvidence {
-				t.Fatalf("missing evidence = %v, wantMissing=%t", missing, testCase.wantMissingEvidence)
-			}
-		})
+func TestSemanticOperationAuthorityKeepsLockedCurrentCWIAheadOfLaterPlanning(t *testing.T) {
+	_, _, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
+	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, runtimecontract.EvidenceFact{
+		ID: "evidence-current-binding-lock", Kind: runtimecontract.EvidenceKindStateChange,
+		BindingRefs: []string{binding.ID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID},
+		Quality: common.EvidenceQualityValid,
+	})
+	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
+		ID: "cwi-later", SliceID: "slice-later",
+		CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound,
+	})
+	aggregate.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningRequired
+
+	if eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts); len(eligible) != 1 || eligible[0] != "cwi-later" {
+		t.Fatalf("later planning eligibility = %v", eligible)
+	}
+	if !SemanticOperationAuthorityReady(aggregate) {
+		t.Fatal("later eligible CWI preempted the execution-locked current binding")
+	}
+
+	aggregate.Facts.Evidence.Accepted = nil
+	if SemanticOperationAuthorityReady(aggregate) {
+		t.Fatal("unlocked current binding bypassed required semantic planning")
 	}
 }
 
@@ -1138,6 +1133,174 @@ func TestRuntimeSemanticCatalogInvalidationEventRejectsUnknownRetiredManifest(t 
 	})
 	if err != nil || duplicate.Aggregate.StateRevision != revision {
 		t.Fatalf("matching semantic invalidation was not idempotent: err=%v duplicate=%+v", err, duplicate.Aggregate)
+	}
+}
+
+func TestRuntimeSemanticCatalogInvalidationRequiresSeparateNoEffectBindingRetirement(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	coverageID := aggregate.Facts.Coverage[0].ID
+	current := aggregate.Facts.Coverage[0].CurrentBindingRef.Clone()
+	manifestHash := aggregate.SemanticPlanning.Manifest.Hash
+	logicalRequestID := aggregate.SemanticPlanning.LogicalRequestID
+	aggregate.Facts.Resources.PrerequisiteObservations = nil
+	repository.aggregate = &aggregate
+
+	retired, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := runtimeCoverageByID(retired.Aggregate.Facts.Coverage)[coverageID]
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound || item.CurrentBindingRef == nil ||
+		!runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, current) || len(item.BindingRetirementLineage) != 0 {
+		t.Fatalf("catalog invalidation mutated canonical binding: %+v", item)
+	}
+	fact, found := NextRuntimeCWIBindingRetirementFact(retired.Aggregate)
+	if !found || fact.CoverageWorkItemID != coverageID || !runtimecontract.SameRuntimeCWIBindingRef(fact.CurrentBindingRef, current) {
+		t.Fatalf("no-effect binding retirement fact = %+v, found=%v", fact, found)
+	}
+	retirement, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventCWIBindingRetired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		CWIBindingRetirement: &fact,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item = runtimeCoverageByID(retirement.Aggregate.Facts.Coverage)[coverageID]
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning || item.CurrentBindingRef != nil ||
+		len(item.BindingRetirementLineage) != 1 || item.BindingRetirementLineage[0].CausationRef != fact.CausationRef {
+		t.Fatalf("explicit binding retirement did not update exact CWI: %+v", item)
+	}
+	if retirement.Aggregate.Facts.Focus.ID != "semantic-pending/"+string(coverageID) || len(retirement.Aggregate.Facts.Focus.CoverageEvidenceBindings) != 0 {
+		t.Fatalf("explicit binding retirement focus = %+v", retirement.Aggregate.Facts.Focus)
+	}
+	revision := retirement.Aggregate.StateRevision
+	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventCWIBindingRetired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		CWIBindingRetirement: &fact,
+	})
+	if err != nil || duplicate.Aggregate.StateRevision != revision {
+		t.Fatalf("duplicate binding retirement changed revision: err=%v aggregate=%+v", err, duplicate.Aggregate)
+	}
+}
+
+func TestRuntimeCWIBindingRetirementSupersedesReconciliationBeforeRestartScheduling(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	contract := aggregate.Facts.ReconciliationContract.Clone()
+	request := runtimecontract.RuntimeCWIReconciliationRequest{
+		RequestID:                 "reconcile-before-binding-retirement",
+		WorkspaceID:               aggregate.Facts.WorkspaceID,
+		RunID:                     aggregate.Facts.RunID,
+		Scope:                     runtimecontract.RuntimeCWIReconciliationScopeCurrentRun,
+		DefinitionRevision:        contract.DefinitionRevision,
+		BindingSetHash:            contract.BindingSetHash,
+		Bindings:                  contract.Bindings,
+		WorkspaceBaselineRevision: "tree-before-binding-retirement",
+		WorkspaceBaselineRef:      "workspace-tree/tree-before-binding-retirement",
+		Generation:                1,
+	}
+	sealed, changed, err := controller.ensureReconciliationRequest(ctx, request)
+	if err != nil || !changed {
+		t.Fatalf("seal reconciliation before binding retirement = changed=%v err=%v", changed, err)
+	}
+	manifestHash := sealed.SemanticPlanning.Manifest.Hash
+	logicalRequestID := sealed.SemanticPlanning.LogicalRequestID
+	sealed.Facts.Resources.PrerequisiteObservations = nil
+	repository.aggregate = &sealed
+
+	invalidated, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
+		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, found := NextRuntimeCWIBindingRetirementFact(invalidated.Aggregate)
+	if !found {
+		t.Fatal("catalog invalidation did not schedule the explicit no-effect binding retirement")
+	}
+	retired, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventCWIBindingRetired, WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
+		CWIBindingRetirement: &fact,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.Aggregate.Reconciliation.Request != nil || retired.Aggregate.Reconciliation.Batch != nil || retired.Aggregate.Reconciliation.Results != nil {
+		t.Fatalf("binding retirement retained active reconciliation transport: %+v", retired.Aggregate.Reconciliation)
+	}
+	if len(retired.Aggregate.Reconciliation.History) != 1 || !retired.Aggregate.Reconciliation.History[0].Superseded ||
+		retired.Aggregate.Reconciliation.History[0].Request.RequestID != request.RequestID {
+		t.Fatalf("binding retirement did not archive the old request in the same CAS: %+v", retired.Aggregate.Reconciliation.History)
+	}
+	retirementRevision := retired.Aggregate.StateRevision
+	retirementSaves := repository.saves
+
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := restarted.Load(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.StateRevision != retirementRevision || loaded.Reconciliation.Request != nil || repository.saves != retirementSaves {
+		t.Fatalf("restart changed or resurrected superseded reconciliation: aggregate=%+v saves=%d/%d", loaded.Reconciliation, repository.saves, retirementSaves)
+	}
+	if _, changed, err := restarted.ensureReconciliationRequest(ctx, request); !errors.Is(err, common.ErrConflict) || changed {
+		t.Fatalf("restart reactivated superseded request: changed=%v err=%v", changed, err)
+	}
+
+	if len(loaded.Facts.ReconciliationContract.Bindings) != 0 || loaded.Facts.Coverage[0].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning {
+		t.Fatalf("restart made an unsealed binding set eligible for reconciliation: facts=%+v", loaded.Facts)
+	}
+}
+
+func TestRuntimeSemanticCatalogInvalidationCannotRetireEffectBearingBinding(t *testing.T) {
+	ctx := context.Background()
+	controller, repository, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	coverageID := aggregate.Facts.Coverage[0].ID
+	binding := aggregate.Facts.Coverage[0].CurrentBindingRef.Clone()
+	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, runtimecontract.EvidenceFact{
+		ID: "evidence-effect-bearing", Kind: runtimecontract.EvidenceKindStateChange,
+		BindingRefs: []string{binding.BindingID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID},
+	})
+	manifestHash := aggregate.SemanticPlanning.Manifest.Hash
+	logicalRequestID := aggregate.SemanticPlanning.LogicalRequestID
+	aggregate.Facts.Resources.PrerequisiteObservations = nil
+	repository.aggregate = &aggregate
+
+	retired, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := runtimeCoverageByID(retired.Aggregate.Facts.Coverage)[coverageID]
+	if item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, binding) {
+		t.Fatalf("effect-bearing binding changed during catalog invalidation: %+v", item)
+	}
+	if fact, found := NextRuntimeCWIBindingRetirementFact(retired.Aggregate); found {
+		t.Fatalf("effect-bearing binding produced retirement fact: %+v", fact)
+	}
+	direct := RuntimeCWIBindingRetirementFact{
+		CoverageWorkItemID: coverageID, CurrentBindingRef: binding,
+		CausationRef: "forced-retirement", Reason: "must be rejected", ExpectedStateRevision: retired.Aggregate.StateRevision,
+	}
+	beforeRevision := repository.aggregate.StateRevision
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventCWIBindingRetired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		CWIBindingRetirement: &direct,
+	}); err == nil || !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("effect-bearing binding retirement error = %v", err)
+	}
+	if repository.aggregate.StateRevision != beforeRevision {
+		t.Fatalf("rejected effect-bearing retirement changed revision: before=%d after=%d", beforeRevision, repository.aggregate.StateRevision)
 	}
 }
 
@@ -1790,185 +1953,6 @@ func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *control
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
 	return controller, repository, aggregate, catalog, prerequisite, observation
-}
-
-// seedAcceptedCoverageProofLineageForSemanticReseal prepares a receipt that
-// was accepted under the source binding before a later catalog re-acquisition.
-// The test then drives the new binding through the normal semantic seal path;
-// it never rewrites the source evidence to make it appear current.
-func seedAcceptedCoverageProofLineageForSemanticReseal(t *testing.T, aggregate *RuntimeAggregate, binding runtimecontract.CoverageEvidenceBinding) runtimecontract.EvidenceFact {
-	t.Helper()
-	if aggregate == nil || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
-		t.Fatal("coverage proof lineage source requires a sealed semantic aggregate")
-	}
-	binding = binding.Normalized()
-	if _, found := runtimecontract.CoverageEvidenceBindingForRef(aggregate.Facts.Focus.CoverageEvidenceBindings, binding.ID); !found {
-		t.Fatalf("source binding %q is not current before re-acquisition", binding.ID)
-	}
-
-	receipt := runtimecontract.RuntimeOperationReceipt{
-		ExecutionKey:        "execution/semantic-lineage-source",
-		Fence:               1,
-		OperationID:         "operation-semantic-lineage-source",
-		Outcome:             runtimecontract.RuntimeOperationOutcomeAccepted,
-		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-		Changed:             true,
-		TargetRefs:          append([]string(nil), binding.TargetRefs...),
-		Evidence: runtimecontract.RuntimeOperationEvidence{
-			Quality: common.EvidenceQualityValid,
-		},
-	}.Normalized()
-	receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
-	fact := runtimecontract.EvidenceFact{
-		ID:                  "evidence-semantic-lineage-source",
-		Kind:                runtimecontract.EvidenceKindStateChange,
-		SubjectRef:          "semantic-lineage-source",
-		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
-		DispatchID:          "dispatch-semantic-lineage-source",
-		OperationID:         receipt.OperationID,
-		Revision:            nextEvidenceRevision(aggregate.EvidenceSequence + 1),
-		Summary:             "accepted source proof before semantic re-seal",
-		TargetRefs:          append([]string(nil), binding.TargetRefs...),
-		BindingRefs:         []string{binding.ID},
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID},
-		Quality:             common.EvidenceQualityValid,
-	}
-	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, SealedDispatch{
-		ID: fact.DispatchID,
-		OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
-			OperationID:      receipt.OperationID,
-			ExecutionKey:     receipt.ExecutionKey,
-			Fence:            receipt.Fence,
-			OwnerReceiptHash: receiptHash,
-			State:            runtimecontract.OperationExecutionEvidenceCommitted,
-		}},
-	})
-	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt)
-	aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
-	aggregate.EvidenceSequence++
-	aggregate.Facts.EvidenceRevision = nextEvidenceRevision(aggregate.EvidenceSequence)
-	// The source receipt is audit evidence only. It cannot directly mark the
-	// CWI satisfied: only the normal SM-2 evidence/assessment transition may
-	// settle the canonical ledger. Keeping it open lets this fixture prove that
-	// a new binding resolves old evidence before any credit is considered.
-	if err := appendAcceptedCoverageProofLineage(aggregate, fact, receipt); err != nil {
-		t.Fatalf("append source coverage proof lineage: %v", err)
-	}
-	return fact
-}
-
-// resealSemanticPlanningGenerationForLineageTest follows the same private
-// order, bounded-batch, owner-feasibility, merge and seal sequence as Runtime.
-// It keeps the source evidence untouched so the test observes only the SM-2
-// current-binding resolution written by semantic contract sealing.
-func resealSemanticPlanningGenerationForLineageTest(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, catalog runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation, target string) RuntimeAggregate {
-	t.Helper()
-	if controller == nil || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 {
-		t.Fatalf("semantic re-seal requires one pending current focus: %+v", aggregate)
-	}
-	catalog = catalog.Normalized()
-	observation = observation.Normalized()
-	coverageID := aggregate.Facts.Focus.CoverageWorkItemIDs[0]
-	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
-		aggregate.Facts.WorkspaceID,
-		aggregate.Facts.RunID,
-		aggregate.Definition,
-		aggregate.Facts.DefinitionSeed,
-		aggregate.Facts.Activation.ExecutionContract,
-		aggregate.Facts.Resources.OperationAdmissibilities,
-		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
-	)
-	if err != nil {
-		t.Fatalf("compile new semantic manifest: %v", err)
-	}
-	proposal := runtimecontract.RuntimeSemanticProofProposal{
-		CoverageWorkItemID:    coverageID,
-		OwnerModuleID:         runtimecontract.RuntimeModuleFile,
-		OperationKind:         runtimecontract.StepKindFileWrite,
-		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target}},
-		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "semantic/" + string(coverageID),
-	}
-	order := runtimecontract.RuntimeSemanticPlanDocument{
-		SchemaVersion:      runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
-		ManifestHash:       manifest.Hash,
-		DefinitionSeedHash: manifest.DefinitionSeedHash,
-		PlanStep:           runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
-		CoverageOrder:      []common.CoverageWorkItemID{coverageID},
-	}
-	if err := order.ValidateAgainstManifest(manifest); err != nil {
-		t.Fatalf("new semantic coverage order: %v", err)
-	}
-	apply := func(event RuntimeInternalEvent) {
-		t.Helper()
-		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
-		result, err := controller.ApplyInternalEvent(context.Background(), event)
-		if err != nil {
-			t.Fatalf("apply %s: %v", event.Kind, err)
-		}
-		aggregate = result.Aggregate
-	}
-	apply(RuntimeInternalEvent{
-		Kind:             RuntimeInternalEventSemanticPlanRequestStarted,
-		SemanticManifest: &manifest,
-		StablePrefixHash: "semantic-lineage-reseal-prefix",
-		LogicalRequestID: "semantic-lineage-reseal-order",
-	})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "semantic-lineage-reseal-order"})
-	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
-		manifest,
-		order,
-		0,
-		"semantic-lineage-reseal-batch",
-		aggregate.Facts.Focus.CoverageWorkItemIDs,
-		aggregate.SemanticPlanning.PendingCoverageIDs,
-		1,
-	)
-	if err != nil {
-		t.Fatalf("compile re-seal semantic batch: %v", err)
-	}
-	aggregate, err = controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
-	if err != nil {
-		t.Fatalf("persist re-seal semantic batch: %v", err)
-	}
-	proof := runtimecontract.RuntimeSemanticPlanDocument{
-		SchemaVersion:            runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
-		ManifestHash:             manifest.Hash,
-		DefinitionSeedHash:       manifest.DefinitionSeedHash,
-		PlanStep:                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
-		BatchID:                  batch.BatchID,
-		BatchSequence:            batch.Sequence,
-		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...),
-		Proposals:                []runtimecontract.RuntimeSemanticProofProposal{proposal},
-	}
-	if err := proof.ValidateAgainstManifest(manifest); err != nil {
-		t.Fatalf("new semantic proof batch: %v", err)
-	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
-	feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
-		SchemaVersion:        runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
-		ManifestHash:         manifest.Hash,
-		DefinitionSeedHash:   manifest.DefinitionSeedHash,
-		CoverageWorkItemID:   coverageID,
-		ProposalHash:         runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
-		OwnerModuleID:        proposal.OwnerModuleID,
-		CatalogSnapshotID:    catalog.SnapshotID,
-		CatalogObservationID: observation.ObservationID,
-		Status:               runtimecontract.RuntimeSemanticFeasibilityFeasible,
-		ObservedRevision:     catalog.ObservedRevision,
-		TargetRefs:           []string{target},
-	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility})
-	accepted := aggregate.SemanticPlanning.Batches[0]
-	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, proof)
-	if err != nil {
-		t.Fatalf("merge re-seal semantic proof batch: %v", err)
-	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
-	return aggregate
 }
 
 func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate) {

@@ -20,6 +20,22 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	ledger := aggregate.SemanticPlanning.Clone()
 	switch ledger.Phase {
 	case runtimecontract.RuntimeSemanticPlanningRequired:
+		if retirement, found := runtime.NextRuntimeCWIBindingRetirementFact(aggregate); found {
+			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:        runtime.RuntimeInternalEventCWIBindingRetired,
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				CWIBindingRetirement: &retirement,
+			})
+			return updated.Aggregate, err
+		}
+		if gap, found := runtime.NextRuntimeSemanticCatalogScopeGap(aggregate); found {
+			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:        runtime.RuntimeInternalEventSemanticCatalogScopeInvalidated,
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				SemanticCatalogScopeGap: &gap,
+			})
+			return updated.Aggregate, err
+		}
 		// Semantic Planning consumes committed owner facts. It must not create
 		// a second prerequisite path: capability-state acquisition (especially
 		// Git) is always committed before operation admissibility by the shared
@@ -400,7 +416,7 @@ func (m *Biz) compileRuntimeSemanticPlanBatch(ctx context.Context, aggregate run
 		*ledger.CoverageOrderDocument,
 		sequence,
 		logicalRequestID,
-		aggregate.Facts.Focus.CoverageWorkItemIDs,
+		runtime.SemanticPlanActiveCoverageIDsForDrive(aggregate.Facts, *ledger.CoverageOrderDocument, ledger.PendingCoverageIDs),
 		ledger.PendingCoverageIDs,
 		maxItems,
 	)

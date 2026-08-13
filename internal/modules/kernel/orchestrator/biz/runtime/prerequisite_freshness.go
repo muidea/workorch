@@ -23,6 +23,199 @@ type RuntimeSemanticCatalogFreshnessGap struct {
 	CurrentObservationID  string
 }
 
+// RuntimeSemanticCatalogScopeGap is an Orchestrator-local SM-2 fact. It says
+// that an already satisfied owner catalog cannot authorize the concrete
+// targets of the next semantic focus. It does not claim that the owner
+// resource revision is stale and does not select a provider repair action.
+type RuntimeSemanticCatalogScopeGap struct {
+	PrerequisiteID     string
+	ObservationID      string
+	OwnerModuleID      string
+	CatalogSnapshotID  string
+	FocusID            string
+	RequiredTargetRefs []string
+}
+
+// NextRuntimeSemanticCatalogScopeGap returns the first deterministic catalog
+// that must be reacquired before compiling a semantic manifest for the current
+// unbound focus. Only catalogs containing an operation kind declared by the
+// focus participate. A settled CWI's binding/effect/evidence is deliberately
+// outside this comparison and remains immutable lineage.
+func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSemanticCatalogScopeGap, bool) {
+	facts := aggregate.Facts.Normalized()
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
+		len(facts.Focus.CoverageEvidenceBindings) != 0 || len(facts.Focus.TargetRefs) == 0 {
+		return RuntimeSemanticCatalogScopeGap{}, false
+	}
+	requiredTargets := normalizeRuntimeTargetRefs(facts.Focus.TargetRefs)
+	acceptedKinds := make(map[string]struct{}, len(facts.Focus.AcceptedStepKinds))
+	for _, kind := range facts.Focus.AcceptedStepKinds {
+		if canonical := runtimecontract.CanonicalRuntimeBlockKind(kind); canonical != "" {
+			acceptedKinds[canonical] = struct{}{}
+		}
+	}
+	for _, catalog := range facts.Resources.OperationAdmissibilities {
+		catalog = catalog.Normalized()
+		relevant := false
+		for _, kind := range catalog.OperationKinds {
+			if _, found := acceptedKinds[kind]; found {
+				relevant = true
+				break
+			}
+		}
+		if !relevant || runtimeSemanticCatalogCoversFocusTargets(catalog, facts.Focus, requiredTargets) {
+			continue
+		}
+		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, catalog.PrerequisiteID)
+		if !found || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility ||
+			observation.OwnerModuleID != catalog.OwnerModuleID || observation.ContentHash != catalog.SnapshotID {
+			continue
+		}
+		return RuntimeSemanticCatalogScopeGap{
+			PrerequisiteID: catalog.PrerequisiteID, ObservationID: observation.ObservationID,
+			OwnerModuleID: catalog.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
+			FocusID: facts.Focus.ID, RequiredTargetRefs: requiredTargets,
+		}, true
+	}
+	return RuntimeSemanticCatalogScopeGap{}, false
+}
+
+// runtimeSemanticCatalogCoversFocusTargets distinguishes an exact target
+// catalog from a closed owner selector. Git, MCP and similar owners may
+// authorize an existing owner scope without enumerating workspace target
+// refs; repeatedly reacquiring that unchanged catalog cannot make its target
+// list grow. The selector is authority only when the exact accepted
+// kind/variant publishes the typed policy.
+func runtimeSemanticCatalogCoversFocusTargets(catalog runtimecontract.RuntimeOperationAdmissibility, focus runtimecontract.CoverageFocus, requiredTargets []string) bool {
+	if allRuntimeTargetRefsContained(requiredTargets, catalog.TargetRefs) {
+		return true
+	}
+	variantsByKind := make(map[string][]string)
+	for _, variant := range focus.AcceptedOperationVariants {
+		kind := runtimecontract.CanonicalRuntimeBlockKind(variant.Kind)
+		variantsByKind[kind] = append(variantsByKind[kind], variant.VariantID)
+	}
+	policy := runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+	if strings.TrimSpace(focus.ProspectiveTargetRef) != "" {
+		policy = runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget
+	}
+	for _, rawKind := range focus.AcceptedStepKinds {
+		kind := runtimecontract.CanonicalRuntimeBlockKind(rawKind)
+		if kind == "" || !runtimeStringIncluded(catalog.OperationKinds, kind) {
+			continue
+		}
+		variantIDs := variantsByKind[kind]
+		if len(variantIDs) == 0 {
+			for _, variant := range catalog.OperationVariants {
+				if variant.Kind == kind {
+					variantIDs = append(variantIDs, variant.VariantID)
+				}
+			}
+			if len(variantIDs) == 0 {
+				variantIDs = []string{""}
+			}
+		}
+		for _, variantID := range variantIDs {
+			allowed, selectors, _, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, kind, variantID, policy)
+			if err == nil && allowed && len(selectors) != 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func allRuntimeTargetRefsContained(required, available []string) bool {
+	set := make(map[string]struct{}, len(available))
+	for _, value := range normalizeRuntimeTargetRefs(available) {
+		set[value] = struct{}{}
+	}
+	for _, value := range normalizeRuntimeTargetRefs(required) {
+		if _, found := set[value]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeSemanticCatalogScopeGapSignature(gap RuntimeSemanticCatalogScopeGap) string {
+	return fmt.Sprintf("semantic-catalog-focus-scope/%s/%s/%s/%s", strings.TrimSpace(gap.FocusID), strings.TrimSpace(gap.OwnerModuleID), strings.TrimSpace(gap.PrerequisiteID), strings.TrimSpace(gap.CatalogSnapshotID))
+}
+
+// invalidateSemanticCatalogForFocusScope is the sole mutation for the scope
+// gap above. It atomically removes only the exact current catalog observation,
+// moves its prerequisite back to pending, and records an idempotency fence.
+// No recovery budget is consumed: focus advance is expected authority
+// progression, not an owner resource failure.
+func (c *RuntimeController) invalidateSemanticCatalogForFocusScope(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, gap RuntimeSemanticCatalogScopeGap) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	signature := runtimeSemanticCatalogScopeGapSignature(gap)
+	if prerequisiteInvalidationExists(aggregate, signature) {
+		return aggregate, nil
+	}
+	current, found := NextRuntimeSemanticCatalogScopeGap(aggregate)
+	if !found || current.PrerequisiteID != strings.TrimSpace(gap.PrerequisiteID) ||
+		current.ObservationID != strings.TrimSpace(gap.ObservationID) || current.OwnerModuleID != strings.TrimSpace(gap.OwnerModuleID) ||
+		current.CatalogSnapshotID != strings.TrimSpace(gap.CatalogSnapshotID) || current.FocusID != strings.TrimSpace(gap.FocusID) ||
+		!sameRuntimeTargetRefs(current.RequiredTargetRefs, gap.RequiredTargetRefs) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog focus-scope gap does not match current authority", common.ErrConflict)
+	}
+	if aggregate.ActiveDispatch != nil || runtimeAggregateHasCurrentCandidateWork(aggregate) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog focus-scope invalidation requires no current candidate or dispatch", common.ErrConflict)
+	}
+	var observation runtimecontract.RuntimePrerequisiteObservation
+	for _, value := range aggregate.Facts.Resources.PrerequisiteObservations {
+		if value.ObservationID == current.ObservationID {
+			observation = value
+			break
+		}
+	}
+	facts, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservations(aggregate.Facts, []runtimecontract.RuntimePrerequisiteObservation{observation})
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
+		OriginalClass: "semantic_catalog_focus_scope", OriginalCode: "semantic_catalog_focus_scope_mismatch",
+		OriginalMessage: "owner catalog target scope does not cover the current semantic focus",
+		Signature:       signature, TargetRefs: append([]string(nil), current.RequiredTargetRefs...),
+		ExpectedRevision: current.CatalogSnapshotID, ObservedRevision: current.FocusID,
+	}
+	if err := diagnostic.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
+		// The owner dependency remains current. Only the bounded catalog request
+		// scope changes for the new focus, so recording that dependency as stale
+		// would incorrectly reject the owner's fresh same-revision response.
+		RefreshDiagnostic: &diagnostic,
+	})
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	expectedRevision := aggregate.StateRevision
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
 // SemanticManifestCatalogFreshnessGaps compares every owner catalog in the
 // active semantic manifest with the current typed admissibility and
 // prerequisite-observation facts. A catalog is current only when both facts

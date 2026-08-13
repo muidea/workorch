@@ -1033,6 +1033,15 @@ func (a RuntimeAggregate) Validate() error {
 	if err := runtimecontract.ValidateRuntimeStateCWILedger(a.Facts, a.Reconciliation); err != nil {
 		return err
 	}
+	var active *runtimecontract.RuntimeDispatchRecord
+	if a.ActiveDispatch != nil {
+		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+		active = &value
+	}
+	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
+	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(a.Facts, active, completed, a.OperationReceipts); err != nil {
+		return runtimecontract.NewRuntimeStateCWILedgerIncompatibilityError(err)
+	}
 	if err := a.Facts.Validate(); err != nil {
 		return err
 	}

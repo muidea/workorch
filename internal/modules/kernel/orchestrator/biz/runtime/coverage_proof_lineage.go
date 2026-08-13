@@ -23,14 +23,13 @@ func appendAcceptedCoverageProofLineage(aggregate *RuntimeAggregate, fact runtim
 	if fact.Kind != runtimecontract.EvidenceKindStateChange && fact.Kind != runtimecontract.EvidenceKindValidation {
 		return nil
 	}
-	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed ||
-		aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Manifest.Hash == "" ||
-		strings.TrimSpace(aggregate.SemanticPlanning.LogicalRequestID) == "" {
-		return fmt.Errorf("accepted coverage receipt has no sealed semantic audit lineage")
-	}
 	binding, found := runtimecontract.CoverageEvidenceBindingForRef(aggregate.Facts.Focus.CoverageEvidenceBindings, fact.BindingRefs[0])
 	if !found || binding.CoverageWorkItemID != fact.CoverageWorkItemIDs[0] {
 		return fmt.Errorf("accepted coverage receipt has no exact current binding")
+	}
+	manifestHash, logicalRequestID, found := semanticAuditLineageForCurrentBinding(*aggregate, fact.CoverageWorkItemIDs[0])
+	if !found {
+		return fmt.Errorf("accepted coverage receipt has no sealed semantic audit lineage")
 	}
 	identity, err := runtimecontract.DeriveCoverageEvidenceProofIdentity(binding, fact.Kind)
 	if err != nil {
@@ -63,8 +62,8 @@ func appendAcceptedCoverageProofLineage(aggregate *RuntimeAggregate, fact runtim
 		SourceReceiptHash:      receiptHash,
 		SourceBindingRef:       binding.ID,
 		SourceBindingHash:      binding.Hash,
-		SourceManifestHash:     aggregate.SemanticPlanning.Manifest.Hash,
-		SourceLogicalRequestID: aggregate.SemanticPlanning.LogicalRequestID,
+		SourceManifestHash:     manifestHash,
+		SourceLogicalRequestID: logicalRequestID,
 		SourceProofIdentity:    identity,
 	}
 	row.ID = runtimecontract.StableRuntimeCoverageProofLineageSourceID(
@@ -87,6 +86,28 @@ func appendAcceptedCoverageProofLineage(aggregate *RuntimeAggregate, fact runtim
 	aggregate.CoverageProofLineage = append(aggregate.CoverageProofLineage, row)
 	aggregate.CoverageProofLineage = runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage)
 	return nil
+}
+
+func semanticAuditLineageForCurrentBinding(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) (string, string, bool) {
+	item, found := runtimeCoverageByID(aggregate.Facts.Coverage)[coverageID]
+	if !found || item.CurrentBindingRef == nil {
+		return "", "", false
+	}
+	manifestHash := item.CurrentBindingRef.SemanticManifestHash
+	active := aggregate.SemanticPlanning
+	if active.Phase == runtimecontract.RuntimeSemanticPlanningSealed && active.Manifest != nil &&
+		active.Manifest.Hash == manifestHash && strings.TrimSpace(active.LogicalRequestID) != "" {
+		return manifestHash, strings.TrimSpace(active.LogicalRequestID), true
+	}
+	for _, generation := range active.History {
+		snapshot := generation.Snapshot
+		if snapshot.Phase != runtimecontract.RuntimeSemanticPlanningSealed || snapshot.Manifest == nil ||
+			snapshot.Manifest.Hash != manifestHash || strings.TrimSpace(snapshot.LogicalRequestID) == "" {
+			continue
+		}
+		return manifestHash, strings.TrimSpace(snapshot.LogicalRequestID), true
+	}
+	return "", "", false
 }
 
 // resolveCoverageProofLineageForFocus records the current-binding side of

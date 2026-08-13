@@ -27,6 +27,29 @@ func TestCompileRuntimeCWIReconciliationContractBuildsScopedOwnerRefs(t *testing
 	}
 }
 
+func TestRuntimeCWIReconciliationBindingSetHashIgnoresFocusOrder(t *testing.T) {
+	first := runtimeCWIReconciliationFocus()
+	second := runtimeCWIReconciliationFocus()
+	second.ID = "focus-2"
+	second.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-2"}
+	second.CoverageEvidenceBindings[0].ID = "binding-2"
+	second.CoverageEvidenceBindings[0].CoverageWorkItemID = "cwi-2"
+	second.CoverageEvidenceBindings[0].FocusID = second.ID
+	second.CoverageEvidenceBindings[0].Hash = StableCoverageEvidenceBindingHash(second.CoverageEvidenceBindings[0])
+
+	forward, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{second, first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !SameRuntimeCWIReconciliationContract(forward, reversed) || forward.BindingSetHash != reversed.BindingSetHash {
+		t.Fatalf("focus order changed binding-set identity: forward=%+v reversed=%+v", forward, reversed)
+	}
+}
+
 func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T) {
 	focus := runtimeCWIReconciliationFocus()
 	focus.CoverageEvidenceBindings[0].TargetRefs = nil

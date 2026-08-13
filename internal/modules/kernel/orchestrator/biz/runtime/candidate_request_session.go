@@ -293,7 +293,7 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 			return fmt.Errorf("%w: current semantic phase does not accept a provider request", common.ErrConflict)
 		}
 	}
-	if documentKind != runtimecontract.RuntimeProviderDocumentOperations || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+	if documentKind != runtimecontract.RuntimeProviderDocumentOperations || !SemanticOperationAuthorityReady(aggregate) {
 		return fmt.Errorf("%w: operations request requires a sealed semantic contract", common.ErrConflict)
 	}
 	switch aggregate.Decision.State {

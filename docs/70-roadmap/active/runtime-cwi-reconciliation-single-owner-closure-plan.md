@@ -4,7 +4,7 @@ Status: active
 
 Type: implementation-closure-plan
 
-Last Updated: 2026-08-12
+Last Updated: 2026-08-13
 
 ## 1. Purpose And Authority
 
@@ -350,12 +350,12 @@ All items are sequential. A later item may not compensate for an earlier missing
 
 | ID | Status | Scope | Required outcome |
 | --- | --- | --- | --- |
-| CWI-SO-1 | pending | Contract and validation foundation | Extend the existing coverage row with canonical binding/focus lineage; validate queue uniqueness, current binding uniqueness, contract/request coherence, and stable pending IDs. |
-| CWI-SO-2 | pending | SM-2 generation retirement and semantic seal | Preserve settled CWI across catalog invalidation; constrain new order/batches to eligible CWI; atomically update canonical row, focus projection, binding set, and contract; reject duplicates before any operation request. |
-| CWI-SO-3 | pending | SM-4 request generation and SM-2 reconciliation commit | Supersede/archive old request generations on binding-set change; require exact current hash before query/commit; use the shared reopen transition. |
-| CWI-SO-4 | pending | SM-3 admission and evidence fences | Require every candidate, sealed dispatch, receipt, and evidence commit to match the canonical current binding; prove duplicate/stale input cannot replay a durable operation. |
+| CWI-SO-1 | code-closed | Contract and validation foundation | The existing coverage row is the canonical binding/focus ledger; queue uniqueness, current binding uniqueness, contract/request coherence and stable pending IDs are aggregate invariants. |
+| CWI-SO-2 | code-closed | SM-2 generation retirement and semantic seal | Generation retirement preserves effect-bearing bindings; planning batches use canonical CWI eligibility; binding seal and focus projection share one aggregate CAS. Typed owner-scope catalogs are distinguished from exact-target catalogs without retry loops. |
+| CWI-SO-3 | code-closed | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history; reconciliation and receipt-driven reopen use the canonical CWI transition. |
+| CWI-SO-4 | code-closed | SM-3 admission and evidence fences | Candidate, sealed dispatch, receipt and evidence admission require the exact canonical binding/execution/fence identity; stale or duplicate facts cannot replay a durable operation. |
 | CWI-SO-5 | code-closed | Current-schema boundary and component regressions | Legacy schema and current-schema ambiguous CWI ledgers fail closed through the typed Run-owned `fresh_activation_required` fact. No compatibility reconstruction, Runtime LLM topic, capability-owner I/O, retry lease, or replay occurs. |
-| CWI-SO-6 | pending | Full verification and deployed proof | Run focused/full/race/boundary/managed suites and a fresh restart/resume fault matrix with no duplicate CWI effect. |
+| CWI-SO-6 | automated-verified; live-pending | Full verification and deployed proof | Focused/full/race/boundary and managed mock-provider deployed suites pass. A fresh real-workspace catalog-invalidation/reopen/restart/resume fault matrix remains required for live closure. |
 
 ### 7.1 CWI-SO-1 detail
 
@@ -536,6 +536,24 @@ Evidence must include:
 - a fresh deployed catalog-invalidation plus explicit-reopen matrix proving zero duplicate execution/effect.
 
 Do not mark CWI-SO-6 complete from old green artifacts or a single positive run.
+
+### 7.7 2026-08-13 automated verification record
+
+The current code-closure packet passed:
+
+- `go test ./internal/pkg/workorchruntimecontract/... -count=1`;
+- `go test ./internal/modules/kernel/orchestrator/biz/runtime/... -count=1`;
+- `go test ./internal/modules/kernel/orchestrator/biz/... -count=1`;
+- `make verify-boundary-contract`;
+- `make test`;
+- `make test-race`; and
+- the CI-equivalent managed verifier with `verify-ci-mvp-file` against an isolated file-backed instance.
+
+The managed instance passed HTTP health/readiness, workspace template/Soul, mock LLM execution and MCP stdio execution;
+the MCP Run reached `completed`. Its bounded artifacts are under
+`.ci-artifacts/managed-workorch-local/`. This is CI-safe deployed evidence only. It does not replace CWI-SO-6's fresh
+real-workspace catalog-invalidation, explicit-reopen, process-restart, `/run resume`, `/run restart` and duplicate-effect
+matrix.
 
 ## 8. Owner-Local Event And CAS Catalogue
 
