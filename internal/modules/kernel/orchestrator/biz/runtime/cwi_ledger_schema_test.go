@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -125,5 +126,67 @@ func assertRuntimeRepairAuthorityRebound(t *testing.T, facts runtimecontract.Run
 		len(ledger.SignatureCounts) != 0 || ledger.LastCycleID != "" || ledger.ActiveGap != nil || ledger.Exhausted ||
 		facts.RepairDirective != nil {
 		t.Fatalf("focus projection retained predecessor repair authority: facts=%+v", facts)
+	}
+}
+
+func TestEligibleFocusProjectionSelectsLaterEligibleCWIAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	blocked := facts.Focus.Normalized()
+	blocked.ID = "focus-blocked"
+	blocked.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-v2"}
+	later := blocked
+	later.ID = "focus-later"
+	later.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-later"}
+	gate := blocked
+	gate.ID = "focus-gate"
+	gate.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-gate"}
+	facts.Focus = blocked
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{later, gate}
+	facts.Coverage[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-gate"}
+	facts.Coverage = append(facts.Coverage,
+		runtimecontract.RuntimeCoverageItemFact{ID: "cwi-later", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-later", TargetText: "later", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		runtimecontract.RuntimeCoverageItemFact{ID: "cwi-gate", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-gate", TargetText: "gate", State: runtimecontract.RuntimeCoverageItemStateOpen},
+	)
+	facts.DefinitionSeed.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-gate"}
+	facts.DefinitionSeed.CoverageItems = append(facts.DefinitionSeed.CoverageItems,
+		runtimecontract.RuntimeCoverageItem{ID: "cwi-later", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-later", TargetText: "later", Order: 2},
+		runtimecontract.RuntimeCoverageItem{ID: "cwi-gate", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-gate", TargetText: "gate", Order: 3})
+	facts.Slices[0].CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-v2", "cwi-later", "cwi-gate"}
+	facts.DefinitionSeed.Slices = facts.Slices
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	definition := runtimecontract.RuntimeDefinitionContext{
+		Revision: facts.DefinitionRevision, GoalID: "goal-neutral", GoalDefinition: "complete the neutral goal",
+		DoDID: "dod-neutral", DoDDefinition: "all neutral coverage is satisfied", CapabilityContract: []string{"neutral-capability"},
+	}
+	initialized, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventActivationObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
+		ActivationFacts: &facts, ActivationDefinition: &definition,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Aggregate.Facts.Focus.CoverageWorkItemIDs[0] != "cwi-later" {
+		t.Fatalf("projected focus = %+v", result.Aggregate.Facts.Focus)
+	}
+	if initialized.Aggregate.StateRevision >= result.Aggregate.StateRevision {
+		t.Fatalf("projection did not commit a new revision: before=%d after=%d", initialized.Aggregate.StateRevision, result.Aggregate.StateRevision)
+	}
+	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.Aggregate.StateRevision != result.Aggregate.StateRevision {
+		t.Fatalf("duplicate projection revision = %d, want %d", duplicate.Aggregate.StateRevision, result.Aggregate.StateRevision)
 	}
 }

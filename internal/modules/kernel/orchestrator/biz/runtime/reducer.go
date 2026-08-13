@@ -1027,15 +1027,19 @@ func evidenceRevisionAfter(left string, right string) bool {
 	return runtimecontract.EvidenceRevisionAfter(left, right)
 }
 
-func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) runtimecontract.RuntimeFacts {
+func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, error) {
 	facts = facts.Normalized()
 	if len(missingEvidenceKinds(facts, proofLineages...)) != 0 || !currentFocusCoverageSatisfied(facts, proofLineages...) || len(facts.RemainingFocuses) == 0 {
-		return facts
+		return facts, nil
+	}
+	// A settled current CWI may leave every remaining row dependency-blocked.
+	// Preserve that settled cursor for the typed dependency/terminal decision;
+	// do not duplicate it in CompletedFocuses or fabricate an unbound focus.
+	if len(runtimecontract.RuntimeCWIsEligibleForPlanning(facts)) == 0 {
+		return facts, nil
 	}
 	completedFocusID := facts.Focus.ID
-	facts.CompletedFocuses = append(facts.CompletedFocuses, facts.Focus)
-	facts.Focus = facts.RemainingFocuses[0]
-	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses[1:]...)
+	completedFocus := facts.Focus.Normalized()
 	retireFocusScopedPrerequisites(&facts, completedFocusID)
 	facts.Failure = nil
 	facts.Feasibility = nil
@@ -1048,9 +1052,8 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLine
 	facts.Resources.TargetSelection = nil
 	facts.Resources.TargetSnapshots = nil
 	facts.Resources.FailureTarget = nil
-	facts.Repair = resetRepairForFocus(facts.Focus.ID, facts.Focus.SliceID, facts.EvidenceRevision)
 	facts.RepairDirective = nil
-	return facts.Normalized()
+	return projectRuntimeCWIExecutionFocus(facts, nil, &completedFocus)
 }
 
 // retireFocusScopedPrerequisites moves the completed Focus's owner facts out

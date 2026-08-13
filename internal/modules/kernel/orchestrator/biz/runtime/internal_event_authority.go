@@ -12,6 +12,7 @@ const (
 	RuntimeInternalEventSemanticCatalogInvalidated         RuntimeInternalEventKind = "semantic_catalog_invalidated"
 	RuntimeInternalEventSemanticCatalogScopeInvalidated    RuntimeInternalEventKind = "semantic_catalog_scope_invalidated"
 	RuntimeInternalEventCWIBindingRetired                  RuntimeInternalEventKind = "cwi_binding_retired"
+	RuntimeInternalEventEligibleFocusProjected             RuntimeInternalEventKind = "eligible_focus_projected"
 	RuntimeInternalEventSemanticFeasibilityRequired        RuntimeInternalEventKind = "semantic_feasibility_required"
 	RuntimeInternalEventSemanticFeasibilityObserved        RuntimeInternalEventKind = "semantic_feasibility_observed"
 	RuntimeInternalEventSemanticContractSealed             RuntimeInternalEventKind = "semantic_contract_sealed"

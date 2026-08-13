@@ -73,6 +73,15 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningOrderAccepted:
+		projected, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind: runtime.RuntimeInternalEventEligibleFocusProjected, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			SemanticOrderManifestHash: ledger.Manifest.Hash, SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), ledger.CoverageOrderDocument.CoverageOrder...),
+		})
+		if err != nil {
+			return runtime.RuntimeAggregate{}, err
+		}
+		aggregate = projected.Aggregate
+		ledger = aggregate.SemanticPlanning.Clone()
 		batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
 		logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
 		return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)

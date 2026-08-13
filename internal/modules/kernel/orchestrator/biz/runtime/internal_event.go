@@ -50,6 +50,8 @@ type RuntimeInternalEvent struct {
 	SemanticRefreshGeneration int
 	CWIBindingRetirement      *RuntimeCWIBindingRetirementFact
 	SemanticCatalogScopeGap   *RuntimeSemanticCatalogScopeGap
+	SemanticCoverageOrder     []common.CoverageWorkItemID
+	SemanticOrderManifestHash string
 
 	PrerequisiteResult  *PrerequisiteResult
 	Stale               *runtimecontract.RuntimePrerequisiteStale
@@ -170,6 +172,10 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.retireRuntimeCWIBinding(ctx, event.WorkspaceID, event.RunID, *event.CWIBindingRetirement)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventEligibleFocusProjected:
+		aggregate, err := c.projectEligibleRuntimeFocus(ctx, event.WorkspaceID, event.RunID, event.SemanticOrderManifestHash, event.SemanticCoverageOrder)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticCatalogScopeInvalidated:

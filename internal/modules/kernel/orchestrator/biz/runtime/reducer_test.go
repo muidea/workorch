@@ -529,7 +529,10 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
 
-	advanced := advanceSatisfiedCoverageFocus(facts)
+	advanced, err := advanceSatisfiedCoverageFocus(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if advanced.Focus.ID != "bootstrap-source" || advanced.Resources.TargetSelection != nil || len(advanced.Resources.TargetSnapshots) != 0 || advanced.Resources.FailureTarget != nil {
 		t.Fatalf("advanced focus retained predecessor target facts: %+v", advanced)
 	}

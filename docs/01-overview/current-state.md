@@ -129,16 +129,17 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime CWI 单 owner 收口：CWI-SO-13～17 code/automated closed；CWI-SO-18 deployed live pending。**
+1. **必需 Runtime CWI 单 owner 收口：fresh `run-085` 已重新打开 CWI-SO-13/14/16，CWI-SO-18 live failed。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。
-   当前已完成 mutation/decision 盘点、纯 complete admission evaluator、Orchestrator 唯一 dispatcher、原子
-   candidate/dispatch seal、retirement/reopen/receipt/evidence 审计及跨 owner typed fact 收窄。owner feasibility 现在
-   必须持久化 exact candidate manifest hash，Runtime aggregate 唯一正式 schema 已提升为 v5，旧 v4 不兼容重建而
-   统一要求 fresh activation。focused/full/race/vet/fmt/boundary/managed file-backed 均通过；剩余 fresh deployed
-   `/run restart` 组合 live 矩阵。不得通过削弱 owner preflight、解析 message、让
-   capability owner 创建 CWI、新增全局索引或第五状态机规避。普通用户仍只提供 Goal/DoD/template/directory，
-   所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
+   fresh schema-v5 `run-085` 又证明：`cwi-043` settled 后，旧 focus advance 会直接选择 presentation queue 的
+   blocked `cwi-048`，而 semantic planning 按 prerequisite 正确选择 eligible `cwi-044/045/046`，最终在 strict seal
+   形成 closure mismatch。跨 owner typed fact、owner receipt/evidence、Run lifecycle 与 terminal delivery 仍符合
+   owner 边界；未关代码集中在 Orchestrator 内部的 exact eligible closure、唯一 focus projection、semantic order 与
+   seal identity。实施顺序为 active plan 的 `FOCUS-01`～`FOCUS-07`，完成 focused/full/race/vet/fmt/boundary/managed
+   file-backed 后再执行 fresh deployed `/run restart`。不得通过削弱 semantic seal/owner preflight、解析 message、让
+   Application/LLM/capability owner 创建或排序 current focus、新增全局索引或第五状态机规避。普通用户仍只提供
+   Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
    [CWI-SO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 2. **回归基线（不代表统一 admission 已收口）**：predecessor-owned restart、release-before-successor、sealed complete document、whole-document recovery、
    strict candidate、receipt match、owner-local terminal delivery、replay/CAS 与双 workspace regressions 必须持续通过。

@@ -132,6 +132,58 @@ func TestRuntimeCWIsEligibleForPlanningPreservesDefinitionOrder(t *testing.T) {
 	}
 }
 
+func TestProjectRuntimeCWIEligibilityKeepsBlockedQueueHeadBehindEligibleClosure(t *testing.T) {
+	settled := RuntimeCWIBindingRef{BindingID: "binding-source", BindingHash: "hash-source", FocusID: "focus-source", SemanticManifestHash: "manifest-source"}
+	facts := RuntimeFacts{
+		DefinitionSeed:   RuntimeDefinitionSeed{CoverageItems: []RuntimeCoverageItem{{ID: "cwi-blocked", Order: 1}, {ID: "cwi-source", Order: 2}, {ID: "cwi-later", Order: 3}, {ID: "cwi-gate", Order: 4}}},
+		Focus:            CoverageFocus{ID: "focus-blocked", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-blocked"}},
+		RemainingFocuses: []CoverageFocus{{ID: "focus-source", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}}, {ID: "focus-later", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-later"}}},
+		Coverage: []RuntimeCoverageItemFact{
+			{ID: "cwi-blocked", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound, PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-gate"}},
+			{ID: "cwi-source", State: RuntimeCoverageItemStateSatisfied, CWIConvergenceState: RuntimeCWIConvergenceStateSettled, CurrentBindingRef: &settled},
+			{ID: "cwi-later", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+			{ID: "cwi-gate", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+		},
+	}
+	projection, err := ProjectRuntimeCWIEligibility(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projection.OrderedEligibleCoverageIDs; len(got) != 2 || got[0] != "cwi-later" || got[1] != "cwi-gate" {
+		t.Fatalf("eligible closure = %+v", got)
+	}
+	if len(projection.BlockedCoverageWorkItemIDs) == 0 || projection.BlockedCoverageWorkItemIDs[0] != "cwi-blocked" {
+		t.Fatalf("blocked stable order = %+v", projection.BlockedCoverageWorkItemIDs)
+	}
+	if _, err := ProjectRuntimeCWIEligibility(facts, []common.CoverageWorkItemID{"cwi-blocked"}); err == nil {
+		t.Fatal("blocked semantic order was accepted")
+	}
+}
+
+func TestProjectRuntimeCWIEligibilityFencesBoundCurrentFocusAndDetachesOutput(t *testing.T) {
+	ref := RuntimeCWIBindingRef{BindingID: "binding-current", BindingHash: "hash-current", FocusID: "focus-current", SemanticManifestHash: "manifest-current"}
+	facts := RuntimeFacts{
+		DefinitionSeed:   RuntimeDefinitionSeed{CoverageItems: []RuntimeCoverageItem{{ID: "cwi-current", Order: 1}, {ID: "cwi-later", Order: 2}}},
+		Focus:            CoverageFocus{ID: "focus-current", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-current"}},
+		RemainingFocuses: []CoverageFocus{{ID: "focus-later", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-later"}}},
+		Coverage: []RuntimeCoverageItemFact{
+			{ID: "cwi-current", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateBound, CurrentBindingRef: &ref},
+			{ID: "cwi-later", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+		},
+	}
+	projection, err := ProjectRuntimeCWIEligibility(facts, []common.CoverageWorkItemID{"cwi-later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projection.FencedCurrentCoverageIDs) != 1 || projection.FencedCurrentCoverageIDs[0] != "cwi-current" {
+		t.Fatalf("bound current fence = %+v", projection.FencedCurrentCoverageIDs)
+	}
+	projection.OrderedEligibleCoverageIDs[0] = "mutated"
+	if facts.RemainingFocuses[0].CoverageWorkItemIDs[0] != "cwi-later" {
+		t.Fatal("projection aliases RuntimeFacts")
+	}
+}
+
 func TestValidateRuntimeCWILedgerAllowsOneReopenedSuccessorAndBoundsLineage(t *testing.T) {
 	facts := runtimeCWILedgerFacts(t)
 	previous := facts.Coverage[0].CurrentBindingRef.Clone()

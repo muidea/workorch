@@ -680,6 +680,92 @@ func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkIte
 	return ret
 }
 
+// RuntimeCWIEligibilityProjection is the detached SM-2 decision used to
+// reconcile the execution cursor with the canonical CWI ledger.  It contains
+// identities only; applying it to Focus/RemainingFocuses is an Orchestrator
+// private reducer operation.  Blocked IDs retain the current queue order.
+type RuntimeCWIEligibilityProjection struct {
+	EligibleCoverageWorkItemIDs []common.CoverageWorkItemID
+	OrderedEligibleCoverageIDs  []common.CoverageWorkItemID
+	BlockedCoverageWorkItemIDs  []common.CoverageWorkItemID
+	FencedCurrentCoverageIDs    []common.CoverageWorkItemID
+}
+
+func (p RuntimeCWIEligibilityProjection) Clone() RuntimeCWIEligibilityProjection {
+	p.EligibleCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), p.EligibleCoverageWorkItemIDs...)
+	p.OrderedEligibleCoverageIDs = append([]common.CoverageWorkItemID(nil), p.OrderedEligibleCoverageIDs...)
+	p.BlockedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), p.BlockedCoverageWorkItemIDs...)
+	p.FencedCurrentCoverageIDs = append([]common.CoverageWorkItemID(nil), p.FencedCurrentCoverageIDs...)
+	return p
+}
+
+// ProjectRuntimeCWIEligibility computes the exact executable closure from
+// persisted CWI rows. acceptedOrder is optional semantic coverage order; when
+// present it must be a complete permutation of the current eligible closure.
+// The function is pure and does not mutate or retain facts.
+func ProjectRuntimeCWIEligibility(facts RuntimeFacts, acceptedOrder []common.CoverageWorkItemID) (RuntimeCWIEligibilityProjection, error) {
+	eligible := RuntimeCWIsEligibleForPlanning(facts)
+	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(eligible))
+	for _, id := range eligible {
+		eligibleSet[id] = struct{}{}
+	}
+	ordered := append([]common.CoverageWorkItemID(nil), eligible...)
+	if len(acceptedOrder) != 0 {
+		seen := make(map[common.CoverageWorkItemID]struct{}, len(acceptedOrder))
+		ordered = make([]common.CoverageWorkItemID, 0, len(acceptedOrder))
+		for _, raw := range acceptedOrder {
+			id := common.CoverageWorkItemID(strings.TrimSpace(string(raw)))
+			if id == "" {
+				return RuntimeCWIEligibilityProjection{}, fmt.Errorf("runtime CWI semantic order contains empty coverage identity")
+			}
+			if _, ok := eligibleSet[id]; !ok {
+				return RuntimeCWIEligibilityProjection{}, fmt.Errorf("runtime CWI semantic order contains ineligible coverage %q", id)
+			}
+			if _, duplicate := seen[id]; duplicate {
+				return RuntimeCWIEligibilityProjection{}, fmt.Errorf("runtime CWI semantic order duplicates coverage %q", id)
+			}
+			seen[id] = struct{}{}
+			ordered = append(ordered, id)
+		}
+		if len(seen) != len(eligibleSet) {
+			return RuntimeCWIEligibilityProjection{}, fmt.Errorf("runtime CWI semantic order is not a complete eligible closure")
+		}
+	}
+	orderedSet := make(map[common.CoverageWorkItemID]struct{}, len(ordered))
+	for _, id := range ordered {
+		orderedSet[id] = struct{}{}
+	}
+	blocked := make([]common.CoverageWorkItemID, 0, len(facts.Coverage))
+	coverageByID := make(map[common.CoverageWorkItemID]RuntimeCoverageItemFact, len(facts.Coverage))
+	for _, item := range facts.Coverage {
+		coverageByID[item.ID] = normalizeRuntimeCoverageItemFact(item)
+	}
+	fenced := make([]common.CoverageWorkItemID, 0, len(facts.Focus.CoverageWorkItemIDs))
+	for _, id := range facts.Focus.Normalized().CoverageWorkItemIDs {
+		item, found := coverageByID[id]
+		if found && item.CWIConvergenceState == RuntimeCWIConvergenceStateBound && item.CurrentBindingRef != nil {
+			fenced = append(fenced, id)
+		}
+	}
+	for _, focus := range runtimeCWIFocusQueue(facts) {
+		for _, raw := range focus.Normalized().CoverageWorkItemIDs {
+			id := common.CoverageWorkItemID(strings.TrimSpace(string(raw)))
+			if id == "" {
+				continue
+			}
+			if _, ok := orderedSet[id]; !ok {
+				blocked = append(blocked, id)
+			}
+		}
+	}
+	return RuntimeCWIEligibilityProjection{
+		EligibleCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), eligible...),
+		OrderedEligibleCoverageIDs:  append([]common.CoverageWorkItemID(nil), ordered...),
+		BlockedCoverageWorkItemIDs:  blocked,
+		FencedCurrentCoverageIDs:    fenced,
+	}, nil
+}
+
 // ValidateRuntimeCWIReconciliationLedger binds the active SM-4 request to
 // the current SM-2 contract. Historical generations are intentionally not
 // compared with the current binding set: they are immutable audit evidence of

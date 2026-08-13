@@ -2185,4 +2185,23 @@ if [[ -n "$result_contract_violations" ]]; then
 	exit 1
 fi
 
+# Runtime execution focus has one Orchestrator-owned field-writing reducer.
+# Other helpers may compute detached projections, but production code must not
+# select RemainingFocuses[0] or assign the canonical queue independently.
+runtime_focus_writes="$(
+	grep -R -Hn -E 'facts\.(Focus|RemainingFocuses|CompletedFocuses)[[:space:]]*=' \
+		internal/modules/kernel/orchestrator/biz/runtime --include='*.go' --exclude='*_test.go' |
+		grep -v 'internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go:' || true
+)"
+runtime_queue_head_selection="$(
+	grep -R -Hn -E 'RemainingFocuses\[0\]' \
+		internal/modules/kernel/orchestrator/biz/runtime --include='*.go' --exclude='*_test.go' || true
+)"
+if [[ -n "$runtime_focus_writes" || -n "$runtime_queue_head_selection" ]]; then
+	echo "boundary contract violation: Runtime execution focus must be installed only by the Orchestrator eligible-focus reducer" >&2
+	echo "$runtime_focus_writes" >&2
+	echo "$runtime_queue_head_selection" >&2
+	exit 1
+fi
+
 echo "boundary contract verification passed"

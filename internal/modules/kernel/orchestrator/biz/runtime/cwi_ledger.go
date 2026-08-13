@@ -287,10 +287,7 @@ func replaceRuntimeCWIFocusProjection(facts runtimecontract.RuntimeFacts, replac
 	// Completed CWI become executable again before the already pending queue.
 	remaining = append(requeued, remaining...)
 
-	facts.Focus = currentQueue[0]
-	facts.RemainingFocuses = remaining
-	facts.CompletedFocuses = completed
-	return projectRuntimeCWIFocusIDs(facts)
+	return installRuntimeCWIFocusProjection(facts, currentQueue[0], remaining, completed)
 }
 
 func projectRuntimeCWIFocusIDs(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeFacts, error) {
@@ -405,9 +402,7 @@ func projectRuntimeCWISealedFocuses(
 			previousFocusByCoverage[coverageID] = focus.ID
 		}
 	}
-	facts.Focus = ordered[0]
-	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), ordered[1:]...)
-	projectedFacts, err := projectRuntimeCWIFocusIDs(facts)
+	projectedFacts, err := installRuntimeCWIFocusProjection(facts, ordered[0], ordered[1:], facts.CompletedFocuses)
 	if err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
@@ -633,11 +628,173 @@ func advanceRuntimeCWIFocus(facts runtimecontract.RuntimeFacts, proofLineages ..
 	if err := runtimecontract.ValidateRuntimeCWILedger(settled); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
-	advanced := advanceSatisfiedCoverageFocus(settled, proofLineages...)
+	advanced, advanceErr := advanceSatisfiedCoverageFocus(settled, proofLineages...)
+	if advanceErr != nil {
+		return runtimecontract.RuntimeFacts{}, advanceErr
+	}
 	if err := runtimecontract.ValidateRuntimeCWILedger(advanced); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
 	return advanced, nil
+}
+
+// projectRuntimeCWIExecutionFocus applies the detached eligibility decision to
+// the canonical active queue. It is intentionally private to the Orchestrator
+// SM-2 reducer; callers cannot submit a focus or queue as authority.
+func projectRuntimeCWIExecutionFocus(facts runtimecontract.RuntimeFacts, acceptedOrder []common.CoverageWorkItemID, completedCurrent *runtimecontract.CoverageFocus) (runtimecontract.RuntimeFacts, error) {
+	projection, err := runtimecontract.ProjectRuntimeCWIEligibility(facts, acceptedOrder)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	if len(projection.OrderedEligibleCoverageIDs) == 0 {
+		return facts.Normalized(), nil
+	}
+	if len(projection.FencedCurrentCoverageIDs) != 0 {
+		// A current binding is SM-2 authority and may carry an active/accepted
+		// effect lineage. Semantic order never replaces that transaction.
+		return facts.Normalized(), nil
+	}
+	active := append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...)
+	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(active))
+	coverageRows := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact, len(facts.Coverage))
+	for _, row := range facts.Coverage {
+		coverageRows[row.ID] = row
+	}
+	for _, source := range active {
+		for _, id := range source.Normalized().CoverageWorkItemIDs {
+			if id == "" {
+				continue
+			}
+			if row, found := coverageRows[id]; found && row.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled {
+				continue
+			}
+			if _, duplicate := byCoverage[id]; !duplicate {
+				byCoverage[id] = runtimeCWIWithCoverage(source, []common.CoverageWorkItemID{id})
+			}
+		}
+	}
+	ordered := make([]runtimecontract.CoverageFocus, 0, len(active))
+	used := make(map[common.CoverageWorkItemID]struct{}, len(active))
+	for _, id := range projection.OrderedEligibleCoverageIDs {
+		focus, found := byCoverage[id]
+		if !found {
+			continue
+		}
+		ordered = append(ordered, focus)
+		used[id] = struct{}{}
+	}
+	// Blocked rows remain in their existing owner-local order and are never
+	// promoted ahead of an eligible CWI.
+	for _, source := range active {
+		for _, id := range source.Normalized().CoverageWorkItemIDs {
+			if _, already := used[id]; already {
+				continue
+			}
+			if focus, found := byCoverage[id]; found {
+				ordered = append(ordered, focus)
+				used[id] = struct{}{}
+			}
+		}
+	}
+	if len(ordered) == 0 {
+		return facts.Normalized(), nil
+	}
+	completed := append([]runtimecontract.CoverageFocus(nil), facts.CompletedFocuses...)
+	if completedCurrent != nil {
+		completed = append(completed, completedCurrent.Normalized())
+	}
+	return installRuntimeCWIFocusProjection(facts, ordered[0], ordered[1:], completed)
+}
+
+// installRuntimeCWIFocusProjection is the sole field-writing focus reducer.
+// All callers provide an owner-derived detached projection; this function
+// installs the four canonical focus/repair values and rebinds CWI focus IDs.
+func installRuntimeCWIFocusProjection(facts runtimecontract.RuntimeFacts, current runtimecontract.CoverageFocus, remaining, completed []runtimecontract.CoverageFocus) (runtimecontract.RuntimeFacts, error) {
+	current = current.Normalized()
+	if current.ID == "" || len(current.CoverageWorkItemIDs) == 0 {
+		return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI focus projection requires a current focus")
+	}
+	facts.Focus = current
+	facts.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), remaining...)
+	facts.CompletedFocuses = append([]runtimecontract.CoverageFocus(nil), completed...)
+	projected, err := projectRuntimeCWIFocusIDs(facts)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	return projected.Normalized(), nil
+}
+
+// projectEligibleRuntimeFocus is the sole CAS-writing entry for applying an
+// accepted semantic execution order. The event carries only immutable order
+// identity; this reducer reloads and recomputes the eligible closure.
+func (c *RuntimeController) projectEligibleRuntimeFocus(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifestHash string, acceptedOrder []common.CoverageWorkItemID) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	manifestHash = strings.TrimSpace(manifestHash)
+	if manifestHash != "" {
+		ledger := aggregate.SemanticPlanning.Clone()
+		if ledger.Manifest == nil || ledger.Manifest.Hash != manifestHash || ledger.CoverageOrderDocument == nil ||
+			!sameCoverageIDs(ledger.CoverageOrderDocument.CoverageOrder, acceptedOrder) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: eligible focus projection semantic order is stale", common.ErrConflict)
+		}
+	}
+	projected, err := projectRuntimeCWIExecutionFocus(aggregate.Facts, acceptedOrder, nil)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if sameCoverageFocusProjection(aggregate.Facts, projected) {
+		return aggregate, nil
+	}
+	expectedRevision := aggregate.StateRevision
+	aggregate.Facts = projected
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+func sameCoverageIDs(left, right []common.CoverageWorkItemID) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameCoverageFocusProjection(left, right runtimecontract.RuntimeFacts) bool {
+	left, right = left.Normalized(), right.Normalized()
+	if left.Focus.ID != right.Focus.ID || len(left.RemainingFocuses) != len(right.RemainingFocuses) || len(left.CompletedFocuses) != len(right.CompletedFocuses) {
+		return false
+	}
+	for index := range left.RemainingFocuses {
+		if left.RemainingFocuses[index].ID != right.RemainingFocuses[index].ID {
+			return false
+		}
+	}
+	for index := range left.CompletedFocuses {
+		if left.CompletedFocuses[index].ID != right.CompletedFocuses[index].ID {
+			return false
+		}
+	}
+	return left.Repair.FocusID == right.Repair.FocusID && left.Repair.SliceID == right.Repair.SliceID
 }
 
 func reopenRuntimeCWIs(facts runtimecontract.RuntimeFacts, triggers []runtimeCWIReopenTrigger) (runtimecontract.RuntimeFacts, []common.CoverageWorkItemID, error) {
