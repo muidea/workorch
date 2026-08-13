@@ -90,6 +90,48 @@ func TestValidateRuntimeCWIFocusBindingsAllowsUnboundActivationAndRejectsMalform
 	}
 }
 
+func TestRuntimeCWIsEligibleForPlanningRequiresCurrentSettledPrerequisites(t *testing.T) {
+	settledRef := RuntimeCWIBindingRef{BindingID: "binding-source", BindingHash: "hash-source", FocusID: "focus-source", SemanticManifestHash: "manifest-source"}
+	facts := RuntimeFacts{
+		DefinitionSeed: RuntimeDefinitionSeed{CoverageItems: []RuntimeCoverageItem{
+			{ID: "cwi-dependent", Order: 1},
+			{ID: "cwi-source", Order: 2},
+			{ID: "cwi-independent", Order: 3},
+		}},
+		Coverage: []RuntimeCoverageItemFact{
+			{ID: "cwi-dependent", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound, PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}},
+			{ID: "cwi-source", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+			{ID: "cwi-independent", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStatePlanning},
+		},
+	}
+	if eligible := RuntimeCWIsEligibleForPlanning(facts); len(eligible) != 2 || eligible[0] != "cwi-source" || eligible[1] != "cwi-independent" {
+		t.Fatalf("eligible with unsettled prerequisite = %+v", eligible)
+	}
+	facts.Coverage[1].State = RuntimeCoverageItemStateSatisfied
+	facts.Coverage[1].CWIConvergenceState = RuntimeCWIConvergenceStateSettled
+	facts.Coverage[1].CurrentBindingRef = &settledRef
+	if eligible := RuntimeCWIsEligibleForPlanning(facts); len(eligible) != 2 || eligible[0] != "cwi-dependent" || eligible[1] != "cwi-independent" {
+		t.Fatalf("eligible with settled prerequisite = %+v", eligible)
+	}
+	facts.Coverage[1].CurrentBindingRef = nil
+	if eligible := RuntimeCWIsEligibleForPlanning(facts); len(eligible) != 1 || eligible[0] != "cwi-independent" {
+		t.Fatalf("settled prerequisite without current credit was admitted: %+v", eligible)
+	}
+}
+
+func TestRuntimeCWIsEligibleForPlanningPreservesDefinitionOrder(t *testing.T) {
+	facts := RuntimeFacts{
+		DefinitionSeed: RuntimeDefinitionSeed{CoverageItems: []RuntimeCoverageItem{{ID: "cwi-z", Order: 1}, {ID: "cwi-a", Order: 2}}},
+		Coverage: []RuntimeCoverageItemFact{
+			{ID: "cwi-a", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+			{ID: "cwi-z", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+		},
+	}
+	if eligible := RuntimeCWIsEligibleForPlanning(facts); len(eligible) != 2 || eligible[0] != "cwi-z" || eligible[1] != "cwi-a" {
+		t.Fatalf("eligible definition order = %+v", eligible)
+	}
+}
+
 func TestValidateRuntimeCWILedgerAllowsOneReopenedSuccessorAndBoundsLineage(t *testing.T) {
 	facts := runtimeCWILedgerFacts(t)
 	previous := facts.Coverage[0].CurrentBindingRef.Clone()

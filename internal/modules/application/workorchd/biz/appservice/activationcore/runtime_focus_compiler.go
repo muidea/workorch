@@ -523,21 +523,37 @@ func compileRuntimeCoverageDependencies(items []runtimecontract.RuntimeCoverageI
 					if source.ID == dependent.ID {
 						return nil, fmt.Errorf("runtime coverage dependency %q resolves source and dependent to coverage item %s", dependency.ID, source.ID)
 					}
-					for idx := range items {
-						if items[idx].ID != source.ID {
-							continue
+					if dependency.RequireSourceSettled {
+						for idx := range items {
+							if items[idx].ID != dependent.ID {
+								continue
+							}
+							items[idx].PrerequisiteCoverageWorkItemIDs = append(items[idx].PrerequisiteCoverageWorkItemIDs, source.ID)
+							items[idx] = items[idx].Normalized()
+							break
 						}
-						items[idx].ReopenDependencies = append(items[idx].ReopenDependencies, runtimecontract.RuntimeCoverageReopenDependency{
-							CoverageWorkItemID: dependent.ID, TriggerEvidenceKinds: dependency.TriggerEvidenceKinds,
-						})
-						items[idx] = items[idx].Normalized()
-						break
+					}
+					if len(dependency.TriggerEvidenceKinds) > 0 {
+						for idx := range items {
+							if items[idx].ID != source.ID {
+								continue
+							}
+							items[idx].ReopenDependencies = append(items[idx].ReopenDependencies, runtimecontract.RuntimeCoverageReopenDependency{
+								CoverageWorkItemID: dependent.ID, TriggerEvidenceKinds: dependency.TriggerEvidenceKinds,
+							})
+							items[idx] = items[idx].Normalized()
+							break
+						}
 					}
 				}
 			}
 		}
 	}
-	return runtimecontract.NormalizeRuntimeCoverageItems(items), nil
+	items = runtimecontract.NormalizeRuntimeCoverageItems(items)
+	if err := runtimecontract.ValidateRuntimeCoverageItemDependencies(items); err != nil {
+		return nil, fmt.Errorf("runtime coverage dependencies: %w", err)
+	}
+	return items, nil
 }
 
 func runtimeCoverageItemsFromWorkUnits(units []workUnit) []runtimecontract.RuntimeCoverageItem {

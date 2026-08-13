@@ -165,7 +165,14 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	slicesJSON, err := json.Marshal(runtimeSemanticSlicesForProvider(context.DefinitionSeed.Slices, context.PlanStep, context.BatchCoverageWorkItemIDs))
+	visibleCoverageIDs := context.BatchCoverageWorkItemIDs
+	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		visibleCoverageIDs = make([]common.CoverageWorkItemID, 0, len(manifest.CoverageItems))
+		for _, item := range manifest.CoverageItems {
+			visibleCoverageIDs = append(visibleCoverageIDs, item.ID)
+		}
+	}
+	slicesJSON, err := json.Marshal(runtimeSemanticSlicesForProvider(context.DefinitionSeed.Slices, visibleCoverageIDs))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -263,24 +270,21 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 	return projection
 }
 
-func runtimeSemanticSlicesForProvider(slices []runtimecontract.RuntimeAcceptanceSlice, step runtimecontract.RuntimeSemanticPlanStep, batchCoverageIDs []common.CoverageWorkItemID) []runtimeSemanticSliceProjection {
-	selected := make(map[common.CoverageWorkItemID]struct{}, len(batchCoverageIDs))
-	for _, id := range batchCoverageIDs {
+func runtimeSemanticSlicesForProvider(slices []runtimecontract.RuntimeAcceptanceSlice, visibleCoverageIDs []common.CoverageWorkItemID) []runtimeSemanticSliceProjection {
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(visibleCoverageIDs))
+	for _, id := range visibleCoverageIDs {
 		selected[id] = struct{}{}
 	}
 	ret := make([]runtimeSemanticSliceProjection, 0, len(slices))
 	for _, value := range runtimecontract.NormalizeRuntimeAcceptanceSlices(slices) {
-		coverageIDs := append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...)
-		if step == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			coverageIDs = coverageIDs[:0]
-			for _, id := range value.CoverageWorkItemIDs {
-				if _, found := selected[id]; found {
-					coverageIDs = append(coverageIDs, id)
-				}
+		coverageIDs := make([]common.CoverageWorkItemID, 0, len(value.CoverageWorkItemIDs))
+		for _, id := range value.CoverageWorkItemIDs {
+			if _, found := selected[id]; found {
+				coverageIDs = append(coverageIDs, id)
 			}
-			if len(coverageIDs) == 0 {
-				continue
-			}
+		}
+		if len(coverageIDs) == 0 {
+			continue
 		}
 		ret = append(ret, runtimeSemanticSliceProjection{
 			ID: value.ID, Title: value.Title, Scope: value.Scope, Priority: value.Priority,

@@ -17,7 +17,7 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | --- | --- |
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **active: CWI-SO-1 through CWI-SO-6 code-closed; CWI-SO-7 automated-verified and live-pending.** The `run-078` prospective/existing contradiction is now rejected through the existing bounded SM-3 correction before owner probing. |
+| CWI reconciliation | **active only for CWI-SO-12 deployed proof.** CWI-SO-8 through CWI-SO-11 dependency contract, Activation compilation, SM-2 admission and bounded dynamic request code are closed and pass the full automated matrix; a fresh deployed `/run restart` proof remains. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -25,13 +25,14 @@ claims are archived and cannot override a current persisted aggregate counterexa
 
 | ID | Work | Required result | Plan |
 | --- | --- | --- | --- |
-| CWI-SO | Canonical CWI ledger and single-owner generation/reconciliation closure | A settled CWI cannot be re-planned or re-executed without an explicit typed reopen lineage; current reconciliation request matches current sealed binding set. | [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| CWI-SO | Canonical CWI ledger, dependency admission, and single-owner reconciliation closure | A settled CWI cannot be re-planned without typed reopen; a dependent CWI cannot be planned before prerequisites settle; validation preparation and final snapshot order are profile-compiled rather than inferred by Runtime. | [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-`CWI-SO` is sequential: the completed canonical-ledger and SM-3 target-policy slices remain closed; automated gates
-have been re-run and fresh deployed verification remains. A provider, capability owner, UI, or
-projection change cannot substitute for either step.
+`CWI-SO` is sequential: the completed canonical-ledger and SM-3 target-policy slices remain closed. CWI-SO-8 through
+CWI-SO-11 now close the explicit dependency contract, activation compilation, SM-2 admission and bounded dynamic
+request. CWI-SO-12 retains only deployed proof exposed by `run-081`. A provider, capability owner, UI, or projection change cannot substitute for
+these steps.
 
 ## Active Documentation Rules
 

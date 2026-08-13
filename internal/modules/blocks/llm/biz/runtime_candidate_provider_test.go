@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -149,6 +150,40 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	}
 	if strings.Contains(providerRequest.Schema, `"coverageOrder"`) || !strings.Contains(authority, "Do not return coverageOrder") {
 		t.Fatalf("proof batch repeated SM-3 coverage order: schema=%s authority=%s", providerRequest.Schema, authority)
+	}
+}
+
+func TestRuntimeSemanticCoverageOrderProjectionOmitsUnrelatedDefinitionSlices(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	request.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	request.SemanticContext.BatchID = ""
+	request.SemanticContext.BatchCoverageWorkItemIDs = nil
+	for index := 2; index <= 24; index++ {
+		id := common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", index))
+		request.SemanticContext.DefinitionSeed.CoverageItems = append(request.SemanticContext.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{
+			ID: id, SliceID: fmt.Sprintf("slice-%d", index), SourceScope: "dodItem", SourceID: fmt.Sprintf("dod-%03d", index), TargetText: strings.Repeat("unrelated ", 64), Order: index,
+		})
+		request.SemanticContext.DefinitionSeed.Slices = append(request.SemanticContext.DefinitionSeed.Slices, runtimecontract.RuntimeAcceptanceSlice{
+			ID: fmt.Sprintf("slice-%d", index), Title: strings.Repeat("unrelated ", 16), CoverageWorkItemIDs: []common.CoverageWorkItemID{id},
+		})
+	}
+	request.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(request.SemanticContext.DefinitionSeed)
+	request.SemanticManifest.DefinitionSeedHash = request.SemanticContext.DefinitionSeed.Hash
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	providerRequest, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := providerRequest.PromptContext.Sections[3].Content
+	slices := providerRequest.PromptContext.Sections[5].Content
+	if strings.Contains(authority, "cwi-024") || strings.Contains(slices, "cwi-024") || strings.Contains(slices, "unrelated") {
+		t.Fatalf("coverage-order dynamic context leaked unrelated Definition rows: authority=%s slices=%s", authority, slices)
+	}
+	if !strings.Contains(authority, `"coverageItems":[{"ID":"cwi-001"`) || !strings.Contains(slices, `"coverageWorkItemIds":["cwi-001"]`) {
+		t.Fatalf("coverage-order projection lost eligible CWI: authority=%s slices=%s", authority, slices)
+	}
+	if providerRequest.ContextBudget == nil || providerRequest.ContextBudget.CachePlan == nil || providerRequest.ContextBudget.CachePlan.StablePrefixHash != request.StablePrefixHash {
+		t.Fatalf("coverage-order projection changed stable prefix: %+v", providerRequest.ContextBudget)
 	}
 }
 

@@ -111,7 +111,14 @@ type RuntimeCoverageDependency struct {
 	SourceRequirementID    string
 	DependentScope         string
 	DependentRequirementID string
-	TriggerEvidenceKinds   []string
+	// RequireSourceSettled gates semantic-plan admission for the dependent
+	// coverage row until every compiled source row has current settled credit.
+	// It is independent from post-effect invalidation below.
+	RequireSourceSettled bool
+	// TriggerEvidenceKinds reopens an already credited dependent after matching
+	// source evidence is accepted. An empty list means this declaration has no
+	// post-effect invalidation behavior.
+	TriggerEvidenceKinds []string
 }
 
 func NormalizeRuntimeProfileContracts(values []RuntimeProfileContract) []RuntimeProfileContract {
@@ -186,8 +193,8 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if dependency.SourceScope == dependency.DependentScope && dependency.SourceRequirementID == dependency.DependentRequirementID {
 				return fmt.Errorf("runtime coverage dependency %q cannot target itself", dependency.ID)
 			}
-			if len(dependency.TriggerEvidenceKinds) == 0 {
-				return fmt.Errorf("runtime coverage dependency %q requires trigger evidence kinds", dependency.ID)
+			if !dependency.RequireSourceSettled && len(dependency.TriggerEvidenceKinds) == 0 {
+				return fmt.Errorf("runtime coverage dependency %q requires admission or invalidation semantics", dependency.ID)
 			}
 		}
 		for _, recipe := range profile.BootstrapRecipes {
@@ -514,6 +521,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 		l, r := left.CoverageDependencies[idx], right.CoverageDependencies[idx]
 		if l.ID != r.ID || l.SourceScope != r.SourceScope || l.SourceRequirementID != r.SourceRequirementID ||
 			l.DependentScope != r.DependentScope || l.DependentRequirementID != r.DependentRequirementID ||
+			l.RequireSourceSettled != r.RequireSourceSettled ||
 			!sameStrings(l.TriggerEvidenceKinds, r.TriggerEvidenceKinds) {
 			return false
 		}

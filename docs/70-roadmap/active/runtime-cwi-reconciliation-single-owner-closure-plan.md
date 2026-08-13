@@ -1,4 +1,4 @@
-# Runtime CWI Canonical Ledger Single-Owner Closure Plan
+# Runtime CWI Canonical Ledger And Dependency Admission Single-Owner Closure Plan
 
 Status: active
 
@@ -9,8 +9,9 @@ Last Updated: 2026-08-13
 ## 1. Purpose And Authority
 
 This is the sole active implementation queue for Runtime CWI identity, semantic-generation retirement, focus
-projection, reconciliation generation, and semantic target-policy closure. It is derived from the current Runtime
-contract and the persisted `run-073`, `run-077`, `run-078`, and `run-080` counterexamples. The prior plan was moved to
+projection, reconciliation generation, semantic target-policy, dependency admission, and bounded current-focus
+request closure. It is derived from the current Runtime contract and the persisted `run-073`, `run-077`, `run-078`,
+`run-080`, and `run-081` counterexamples. The prior plan was moved to
 [`90-archive/superseded`](../../90-archive/superseded/runtime-cwi-reconciliation-single-owner-closure-plan-pre-cwi-ledger-2026-08-11.md);
 its historical RSO status claims are not implementation authority.
 
@@ -111,7 +112,7 @@ When all exact owner observations remain satisfied, current-Run credit is retain
 `workspace_full`. A fresh restart receives no predecessor credit when its new aggregate is created; reconciliation must
 not attempt to repair illegal predecessor state by reopening every satisfied row.
 
-### 2.3 Pre-binding target-policy contradiction exposed by `run-078`
+### 2.4 Pre-binding target-policy contradiction exposed by `run-078`
 
 The fresh workspace-full restart `ws-a8bada88e7b1b5f8/run-078` did not reach binding seal or operation dispatch. Its
 semantic proof batch selected `cwi-043` and proposed:
@@ -142,6 +143,54 @@ contract gap before binding seal:
 The closure is owner-neutral. It must express only the invariant that one target cannot be both an existing catalog
 member and a prospective target in the same sealed generation. It must not mention File paths, software-development
 templates, `main.go`, or infer which alternative policy the provider should choose.
+
+### 2.5 Dependency-admission and validation-preparation gap exposed by `run-081`
+
+Fresh workspace-full restart `ws-a8bada88e7b1b5f8/run-081` live-verified the `run-080` closure:
+
+- File state change for `cwi-043` was accepted exactly once;
+- Git `add` remained an auxiliary operation with no binding, while Git `commit` alone carried the `cwi-047` binding;
+- `cwi-043` and `cwi-047` remained `satisfied/settled` through workspace-full reconciliation;
+- no catalog change implicitly reopened either CWI; and
+- terminal delivery remained `Result -> Workspace -> Run`, with no post-terminal drive.
+
+The Run then failed on `cwi-001` with the Shell-owned typed fact
+`validation_recipe_unavailable`: the selected `go test` recipe had no executable `*_test.go` target. Shell correctly
+rejected the recipe without side effects, Orchestrator correctly classified the known typed code as
+`candidate_infeasible`, and Run correctly committed the failed SM-1 terminal. The defect occurred earlier:
+
+```text
+Goal/DoD + software-development profile
+  -> activation compiles 42 acceptance rows primarily as validation-only CWI
+  -> every validation CWI has no prerequisite coverage edge
+  -> primary state change settles
+  -> final Git snapshot settles before validation
+  -> SM-2 admits cwi-001 directly to semantic planning
+  -> provider selects a syntactically allowed but non-executable validation recipe
+  -> Shell reports typed validation_recipe_unavailable
+  -> Orchestrator fails closed
+```
+
+The persisted Definition seed confirms the contradiction:
+
+- `slice-primary-state-change-001` has priority `10`;
+- `slice-version-control-snapshot-001` has priority `15`;
+- eleven `slice-direct-validation-*` slices have priority `20`;
+- `cwi-001` through the validation set have no `PrerequisiteCoverageWorkItemIDs`; and
+- the profile's `coverageDependencies` are compiled only into post-effect `ReopenDependencies`, not pre-admission
+  prerequisites.
+
+This is not a reason to weaken Shell preflight, retry owner infeasibility, parse its message, or let Shell create a
+CWI. The closure belongs to the template/profile declaration, activation compiler, pure dependency contract, and
+Orchestrator SM-2 admission. A domain profile may declare a validation-preparation deliverable and its allowed
+capability/target policy; Runtime core only sees opaque CWI identities, prerequisite edges, evidence kinds, owner
+facts, and settled/reopened state.
+
+`run-081` also recorded single-CWI semantic-plan requests of approximately `65-94 KB`. Their provider calls completed
+without timeout, so request size was not the terminal cause. It nevertheless proves that bounded output membership
+does not yet bound the dynamic input: C3 still expands authority unrelated to the current dependency closure. C0-C2
+must remain cache-stable and complete; C3-C5 must be rendered from only the current eligible CWI, its unresolved
+prerequisite closure, current failure, and directly relevant evidence/refs.
 
 ## 3. Final Ownership Model
 
@@ -363,8 +412,11 @@ cannot create a new binding or focus and must never cause the capability owner t
 | `kernel/orchestrator/biz/runtime/internal_event.go` | Add only private typed events needed for generation supersession, no-effect binding retirement and atomic CWI transitions | expose these events as EventHub commands or accept target states |
 | `kernel/orchestrator/biz/runtime/transition_coordinator.go` | Validate the complete post-reducer aggregate and perform exactly one semantic CAS per private event | persist partial CWI/focus/request updates or retry an owner effect |
 | `kernel/orchestrator/biz/runtime_reconciliation.go` | Schedule current request generation only; archive/supersede stale request generations | mutate CWI/coverage/focus or reuse stale request blindly |
+| `application/workorchd/biz/appservice/activationcore` | Compile profile-declared admission prerequisites and invalidation/reopen edges into stable CWI IDs; keep slice priority presentation-only | inspect live owner resources, mutate Runtime state, infer a test framework/file path, or encode an Orchestrator transition |
+| `internal/pkg/workorchdefaults/defaults/templates.json` and selected profiles | Declare bounded validation-preparation deliverables, dependency direction, proof alternatives, and final-snapshot ordering in profile data | put software-development semantics in Runtime core or require users to submit raw CWI/evidence JSON |
+| `blocks/llm` request assembly | Preserve complete cache-stable C0-C2 and render C3-C5 from the current eligible dependency closure and relevant evidence only | choose eligible CWI, alter dependency state, omit protected current facts, or rebuild authority from prompt text |
 | `blocks/run` | Persist opaque current-schema Runtime aggregate and preserve semantic CAS behavior; add schema-boundary tests | interpret SM-2/3/4 or choose successor state |
-| File/Git/Shell/MCP capability Blocks | Keep returning scoped feasibility observations and exact receipts; File retains the real-resource prospective/existing fence for post-catalog drift and concurrency; add duplicate/stale response tests where needed | mutate focus, coverage, binding, correction, request generation, or lifecycle; choose exact versus prospective policy for Orchestrator |
+| File/Git/Shell/MCP capability Blocks | Keep returning scoped feasibility/readiness observations and exact receipts; File retains the real-resource prospective/existing fence and Shell retains executable validation preflight | mutate focus, coverage, dependency, binding, correction, request generation, or lifecycle; create a CWI; choose the next action |
 | Workspace/Result | Preserve terminal delivery/acknowledgement tests | write Runtime CWI state |
 | LLM, application, TUI, Web, projection, eventstream | LLM renders variant/ref binding rules from the sealed manifest; all others transport typed facts or display canonical CWI state after it is authoritative | infer/rebuild authority or drive a transition |
 
@@ -407,11 +459,16 @@ All items are sequential. A later item may not compensate for an earlier missing
 | --- | --- | --- | --- |
 | CWI-SO-1 | code-closed | Contract and validation foundation | The existing coverage row is the canonical binding/focus ledger; queue uniqueness, current binding uniqueness, contract/request coherence and stable pending IDs are aggregate invariants. |
 | CWI-SO-2 | code-closed | SM-2 generation retirement and semantic seal | Generation retirement preserves effect-bearing bindings; planning batches use canonical CWI eligibility; binding seal and focus projection share one aggregate CAS. Typed owner-scope catalogs are distinguished from exact-target catalogs without retry loops. |
-| CWI-SO-3 | code-closed; live-reverification-required | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history. Reconciliation scope selects observation coverage and cannot reopen satisfied current-Run proof; exact stale/unverifiable/unsatisfied observations use the canonical reopen transition. |
-| CWI-SO-4 | code-closed; live-reverification-required | SM-3 admission and evidence fences | Source profile variants constrain semantic proposals before feasibility. Binding authorization is exact to kind/variant/required-operation-ref: auxiliary sequence operations omit binding, the proof-bearing operation requires one canonical binding, and dispatch/receipt/evidence preserve its execution/fence identity. |
+| CWI-SO-3 | code-closed; live-verified-by-run-081 | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history. Reconciliation scope selects observation coverage and cannot reopen satisfied current-Run proof; exact stale/unverifiable/unsatisfied observations use the canonical reopen transition. |
+| CWI-SO-4 | code-closed; live-verified-by-run-081 | SM-3 admission and evidence fences | Source profile variants constrain semantic proposals before feasibility. Binding authorization is exact to kind/variant/required-operation-ref: auxiliary sequence operations omit binding, the proof-bearing operation requires one canonical binding, and dispatch/receipt/evidence preserve its execution/fence identity. |
 | CWI-SO-5 | code-closed | Current-schema boundary and component regressions | Legacy schema and current-schema ambiguous CWI ledgers fail closed through the typed Run-owned `fresh_activation_required` fact. No compatibility reconstruction, Runtime LLM topic, capability-owner I/O, retry lease, or replay occurs. |
 | CWI-SO-6 | code-closed | SM-3 target-policy consistency and bounded correction | A prospective target already present in the same sealed owner catalog is rejected before owner probing; the existing attempt-0/1 correction preserves immutable generation identity; the owner feasibility fence remains unchanged. |
-| CWI-SO-7 | automated-verified; live-pending | Full verification and deployed proof | Focused/full/race/boundary and isolated managed mock-provider suites pass. Complete a fresh positive run and catalog-invalidation/reopen/restart/resume fault matrix. |
+| CWI-SO-7 | automated-verified; live-superseded-by-run-081 | Prior ledger/variant deployed proof | `run-081` verified the `run-080` binding/variant and workspace-full retention closure, then exposed the separate dependency-admission gap below. |
+| CWI-SO-8 | code-closed; automated-verified | Dependency contract foundation | Profile dependency direction is explicit; prerequisite and invalidation/reopen are distinct, hash-stable, acyclic, and cannot be inferred from priority or evidence text. |
+| CWI-SO-9 | code-closed; automated-verified | Activation/profile compilation | Selected template/profile compiles validation preparation, validation, assessment/report, and final snapshot into stable CWI edges without domain logic entering Runtime core. |
+| CWI-SO-10 | code-closed; automated-verified | SM-2 dependency admission | Only state-eligible CWI whose declared prerequisites are settled may enter ordering, semantic batch, feasibility, binding, or dispatch; blocked CWI cause zero provider/capability work. |
+| CWI-SO-11 | code-closed; automated-verified | Dynamic request closure | Semantic-plan C3-C5 contain only current eligible CWI and directly relevant slices/refs while C0-C2 remain stable. |
+| CWI-SO-12 | automated-verified; deployed-live-pending | Full automated and deployed proof | Dependency, invalidation, restart/resume, request-bound, terminal-delivery, race, managed file-backed, and 22-owner boundary matrices pass; a fresh deployed workspace proof remains required. |
 
 ### 7.1 CWI-SO-1 detail
 
@@ -663,10 +720,10 @@ Exit gate: a fixture matching `run-078` cannot reach File feasibility with the c
 corrected exact/existing or truly prospective proposal reaches feasibility and binding seal, while all rejected paths
 have zero operation side effects.
 
-### 7.7 CWI-SO-7 detail
+### 7.7 CWI-SO-7 historical verification detail
 
-Verification is a required implementation slice, not a documentation-only sign-off. Run it only after CWI-SO-1 through
-CWI-SO-6 are code-closed.
+This section records the verification packet that preceded `run-081`. It is retained as audit evidence for
+CWI-SO-1 through CWI-SO-6, but its former live-pending status is superseded by CWI-SO-8 through CWI-SO-12.
 
 Evidence must include:
 
@@ -678,7 +735,7 @@ Evidence must include:
 - boundary verification proving all 22 registered units retain their owner role; and
 - a fresh deployed catalog-invalidation plus explicit-reopen matrix proving zero duplicate execution/effect.
 
-Do not mark CWI-SO-7 complete from old green artifacts or a single positive run.
+Do not use this historical packet to close the new dependency-admission queue.
 
 ### 7.8 2026-08-13 post-CWI-SO-6 automated verification record
 
@@ -697,9 +754,203 @@ The current code-closure packet passed:
 
 The managed instance passed HTTP health/readiness, workspace template/Soul, mock LLM execution and MCP stdio execution;
 the MCP Run reached `completed` with two completed dispatches and evidence sequence two. Its bounded step log is under
-`.ci-artifacts/managed-workorch-cwi-so-7/`. This automated record does not replace CWI-SO-7's fresh real-workspace
-positive convergence, catalog-invalidation, explicit-reopen, process-restart, `/run resume`, `/run restart` and
-duplicate-effect matrix.
+`.ci-artifacts/managed-workorch-cwi-so-7/`. `run-081` subsequently verified the prior Git binding and current-run
+retention behavior, then superseded this packet as the active counterexample for dependency admission.
+
+### 7.9 CWI-SO-8 dependency contract foundation
+
+Affected machines: SM-2 contract validation only. This item adds no transition and performs no I/O.
+
+Implementation order:
+
+1. Extend `RuntimeCoverageDependency` so dependency direction is explicit. The final names may follow Go conventions,
+   but the contract must independently represent:
+   - admission prerequisite: source CWI must be settled before dependent CWI can become planning-eligible; and
+   - invalidation/reopen trigger: accepted source evidence of a declared kind reopens an already credited dependent.
+2. Preserve `RuntimeCoverageItem.PrerequisiteCoverageWorkItemIDs` and `ReopenDependencies` as the compiled canonical
+   forms. Do not add a second persisted graph or global lookup.
+3. Normalize, clone, compare, stable-hash, and Definition-revision calculation must include both relations.
+4. Validation must reject empty endpoints, self edges, duplicate conflicting declarations, missing compiled endpoints,
+   prerequisite cycles, reopen cycles, and a dependency mode with neither semantic effect.
+5. Priority remains presentation/order metadata. Contract validation must never infer a prerequisite from priority.
+
+Required tests:
+
+- prerequisite-only, reopen-only, and combined declarations normalize deterministically;
+- changing either relation changes Definition and stable-prefix identity;
+- prerequisite and reopen edges cannot silently alias each other;
+- cycles and self edges fail before Run activation;
+- clone/detach tests prove caller mutation cannot change sealed dependency data; and
+- no contract helper imports EventHub, repositories, filesystem, template IDs, language, or test-framework semantics.
+
+Exit gate: the pure contract can represent `prepare -> validate`, `state change -> reopen validation`, and
+`all durable producers -> final snapshot` without inspecting workspace state or adding a Runtime state.
+
+### 7.10 CWI-SO-9 activation and profile compilation
+
+Affected machines: none directly. Application compiles immutable Definition input and cannot mutate SM-1/2/3/4.
+
+Template/profile work:
+
+1. Add a profile-owned validation-preparation declaration for the software-development template. It describes an
+   opaque deliverable/readiness requirement and allowed proof alternatives; concrete software semantics remain in the
+   profile, not Runtime core.
+2. Declare the intended graph explicitly:
+
+   ```text
+   primary implementation/state-change CWI
+     -> validation preparation/readiness CWI
+     -> direct validation CWI
+     -> validation assessment/report CWI
+     -> final version-control snapshot CWI
+   ```
+
+3. A profile may allow readiness to be established by an existing owner-grounded artifact/recipe or by a bounded
+   state-changing preparation operation. These are alternative profile proofs, not separate Runtime actions.
+4. Every CWI capable of a later durable workspace effect must declare invalidation edges to affected validation,
+   validation-report, and final-snapshot CWI. Unrelated CWI must not be reopened.
+5. Git snapshot must be dependency-terminal, not merely priority `15`. It must not settle before a declared producer
+   that may still change workspace output.
+
+Activation compiler work:
+
+1. Resolve source/dependent profile references against the complete stable CWI inventory before continuation filtering.
+2. Compile admission edges onto each dependent's `PrerequisiteCoverageWorkItemIDs`.
+3. Compile invalidation edges onto each source's `ReopenDependencies`.
+4. Preserve original stable CWI identity and definition order; do not manufacture identities during resume/restart.
+5. Reject unresolved or ambiguous dependency endpoints at activation. Do not defer malformed profile data to Runtime.
+6. Do not inspect `*_test.go`, execute discovery, query Shell/File, or derive paths from Goal/DoD prose.
+
+Required tests:
+
+- the software-development template produces a non-empty validation-preparation CWI and explicit dependency chain;
+- validation CWI cannot be compiled without its declared preparation prerequisite;
+- final Git snapshot depends on every declared durable producer;
+- one state change reopens only declared downstream proof/snapshot rows;
+- continuation filtering preserves stable IDs and removes only edges whose closed endpoint cannot affect the new Run;
+- large Goal/DoD lists retain bounded slice sizes while preserving the complete graph; and
+- generic/weather/review/document/data templates remain domain-correct and do not inherit software-development data.
+
+Exit gate: a fresh activation for the `run-081` Definition shape cannot place `cwi-001` or final Git snapshot ahead of
+their declared unsettled prerequisites.
+
+### 7.11 CWI-SO-10 SM-2 dependency admission
+
+Affected machine: SM-2 only. SM-3 receives only the admitted set; capability owners receive no blocked work.
+
+One pure eligibility projection must be used by initial focus selection, coverage-order admission, semantic-plan
+batch compilation, reseal after invalidation, and post-receipt focus advance. A CWI is eligible only when:
+
+```text
+convergence state is unbound | planning | reopened
+AND every PrerequisiteCoverageWorkItemID is settled with current credit
+AND it is not execution-locked by another current binding/dispatch
+AND its binding/reconciliation generation is current
+```
+
+Implementation rules:
+
+1. Replace state-only `RuntimeCWIsEligibleForPlanning` behavior with dependency-aware projection, retaining a separate
+   explicitly named state-only helper only if a pure validator needs it internally.
+2. Return stable Definition/provider order after filtering; lexical CWI ID order must not override accepted semantic
+   order where order is already persisted.
+3. A blocked CWI remains in the canonical ledger and pending lineage, but is absent from semantic request membership,
+   feasibility batches, binding seal, candidate manifest, and dispatch.
+4. When the last prerequisite settles, one Orchestrator private internal event atomically advances the canonical focus
+   projection; no cross-owner wake-up state is introduced.
+5. Reopen uses the existing canonical SM-2 helper. If a prerequisite is reopened, dependents that require current
+   settled proof become blocked; already credited dependents are reopened only through an explicitly declared
+   invalidation edge.
+6. No owner diagnostic, priority, candidate output, projection, or UI state may change dependency eligibility.
+
+Required tests:
+
+- unsettled prerequisite means zero semantic request, LLM call, owner feasibility, binding, dispatch, and receipt;
+- settling the prerequisite makes the dependent eligible exactly once;
+- a provider order placing a dependent first cannot bypass admission;
+- duplicate settle/reopen facts cause no extra CAS or request;
+- unrelated settled/reopened CWI do not change eligibility;
+- dependency closure larger than the configured batch budget fails before provider submission with a typed contract
+  diagnostic, not partial authority;
+- restart after each dependency/focus CAS restores identical eligibility; and
+- `/run resume` retains current-run dependency/credit lineage while `/run restart` starts a fresh uncredited graph.
+
+Exit gate: Shell can never receive the `run-081` validation proposal until its profile-declared preparation CWI is
+settled, and Shell still owns the final executable-recipe feasibility decision.
+
+### 7.12 CWI-SO-11 bounded dynamic request closure
+
+Affected machines: SM-2/SM-3 request projection only. This item cannot alter eligibility or action selection.
+
+Rendering rules:
+
+- C0 remains the full neutral semantic/candidate contract;
+- C1 remains the complete Goal/DoD definition;
+- C2 remains the complete selected capability/profile declaration needed to preserve the stable prefix;
+- C3 expands only the current eligible CWI, its unresolved prerequisite closure, current authority, and matching owner
+  catalog vocabulary;
+- C4 contains only the current provider-safe failure/correction and latest directly relevant evidence identity; and
+- C5 contains bounded refs for the current batch. Other CWI remain hash/count/pending-lineage summaries.
+
+The renderer must derive C3-C5 from persisted typed values after SM-2 eligibility. It must not parse Goal/DoD text,
+owner diagnostic messages, prior raw responses, projection rows, or workspace files. Protected P0-P4 fields remain
+mandatory; an integrity warning or omitted protected current fact rejects the request before provider submission.
+
+Required tests:
+
+- adding unrelated pending CWI does not expand current C3/C4 content beyond bounded summaries;
+- prerequisite closure changes C3 and request identity but not C0-C2 stable-prefix hashes;
+- same sealed transaction retries preserve C0-C3 and change only allowed C4 correction fields;
+- settled unrelated CWI and historical evidence are ref-only;
+- current target, failure, recipe/check, binding, and evidence cannot be omitted by byte/token compaction;
+- request audit reports per-section bytes, refs, included/omitted fields, and stable-prefix identity; and
+- the `run-081` fixture demonstrates bounded dynamic growth as total Goal/DoD CWI count increases.
+
+Exit gate: a single-CWI semantic request remains complete and auditable while C3-C5 size is a function of the active
+dependency closure, not the total workspace CWI count.
+
+### 7.13 CWI-SO-12 verification and live closure
+
+Affected machines: all four are verified, none receives a new owner.
+
+Automated gates must run in order:
+
+```bash
+go test ./internal/pkg/workorchruntimecontract/... -count=1
+go test ./internal/modules/application/workorchd/biz/appservice/activationcore/... -count=1
+go test ./internal/modules/kernel/orchestrator/biz/runtime/... -count=1
+go test ./internal/modules/kernel/orchestrator/biz/... -count=1
+go test ./internal/modules/blocks/shell/biz/... -count=1
+make fmt-check
+make vet
+make verify-boundary-contract
+make test
+make test-race
+WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file ./scripts/verify-workorch-managed-full.sh
+```
+
+Deployed proof must use a fresh `/run restart` and record bounded persisted facts demonstrating:
+
+1. fresh Definition contains the expected prerequisite and invalidation graph;
+2. no validation or Git snapshot request occurs before its prerequisite settles;
+3. existing validation readiness takes the no-state-change proof alternative;
+4. missing readiness uses only a profile-declared bounded preparation operation, then validates;
+5. a post-validation state change reopens exactly the declared validation/report/snapshot rows;
+6. final Git commit occurs after all declared durable producers and alone earns snapshot credit;
+7. process restart after preparation, validation, and final snapshot CAS repeats no owner side effect;
+8. `/run resume` retains current-run credit and `/run restart` inherits none;
+9. dynamic request section sizes and stable-prefix hashes meet CWI-SO-11 assertions;
+10. projection catches up and terminal delivery remains `Result -> Workspace -> Run`; and
+11. all 22 registered units retain the component boundary matrix in section 6.1.
+
+Exit gate: the workspace progresses beyond the `run-081` failure point without manual CWI/evidence JSON, reaches a
+truthful terminal, and fault injection shows zero cross-owner state mutation or duplicate durable effect.
+
+Automated verification record (2026-08-13): all commands in this section passed, including full `make test`,
+`make test-race`, boundary verification, and the managed file-backed harness. The latter completed HTTP readiness,
+template/Soul, mock LLM, and MCP stdio execution; its MCP Run completed with two dispatches and evidence sequence two.
+Artifacts are under `.ci-artifacts/managed-workorch/`. This closes automated verification only. The eleven deployed
+proof points above remain required against a fresh user-deployed `/run restart` before CWI-SO-12 is live-closed.
 
 ## 8. Owner-Local Event And CAS Catalogue
 
@@ -714,6 +965,8 @@ authority and write sets may not be merged with cross-owner commands.
 | semantic plan correction required | SM-3 | exact attempt-0 complete-document typed violation | preserve immutable generation identity and open attempt 1 exactly once |
 | semantic feasibility observed | SM-2 | exact owner proposal observation | persist factual observation only |
 | semantic contract sealed | SM-2 | complete eligible proposal/observation set | seal bindings, focus projection and current reconciliation authority |
+| prerequisite coverage settled | SM-2 | exact accepted evidence/credit fact for the current prerequisite CWI | recompute dependency-aware eligibility and advance one canonical focus projection |
+| prerequisite coverage reopened | SM-2 | existing canonical reopen event plus declared dependency graph | block dependent admission; reopen credited dependents only through declared invalidation edges |
 | reconciliation batch observed | SM-4 -> SM-2 | exact typed owner batch fact | validate current generation, then retain/reopen/fail in SM-2 |
 | CWI reopened | SM-2 | declared trigger plus prior binding/receipt/evidence refs | atomically reopen one CWI and synchronize all projections |
 | dispatch candidate admitted/sealed | SM-3 | current canonical binding/candidate fact | seal one dispatch after all fences pass |
@@ -746,6 +999,14 @@ is exported as a topic or accepted from Web, TUI, application, projection, LLM, 
 | workspace-full reconciliation after current-Run proof | matching satisfied owner observations retain the exact CWI credit; no reopen, new binding, provider request or operation |
 | required Git `add -> commit` sequence | add is sealed auxiliary without binding; commit carries exactly one commit-authorized binding and alone earns credit |
 | profile declares commit but semantic proposal selects add | proposal is rejected before Git feasibility and before binding/dispatch/receipt/effect; existing bounded semantic correction applies |
+| validation CWI with unsettled preparation prerequisite | CWI remains pending; zero semantic request, owner feasibility, binding, dispatch, receipt, or terminal |
+| preparation prerequisite settles | dependent validation CWI becomes eligible exactly once through an Orchestrator-private transition |
+| provider order places dependent before prerequisite | order cannot bypass SM-2 admission; no blocked CWI appears in a proof batch |
+| existing validation readiness | owner-grounded readiness alternative settles preparation without a fabricated durable effect |
+| missing validation readiness | only a profile-declared prospective preparation operation may run; Runtime core does not infer a path or test framework |
+| state change after accepted validation | only declared validation/report/final-snapshot dependents reopen in one canonical SM-2 transition |
+| final Git snapshot ordering | no Git snapshot dispatch until every declared durable producer is settled; commit alone earns credit |
+| large Goal/DoD with one active dependency closure | C0-C2 stay stable and complete; C3-C5 remain bounded to current closure and protected facts |
 | duplicate semantic document, feasibility, receipt, or batch | no extra CAS, request, binding, dispatch, or operation |
 | restart after each durable CAS | reload yields the same CWI ledger and never repeats owner execution |
 | `/run resume` | retains matching current-run binding/receipt lineage and does not re-plan settled CWI |
@@ -761,6 +1022,7 @@ Run the following only after each implementation slice is complete:
 
 ```bash
 go test ./internal/pkg/workorchruntimecontract/... -count=1
+go test ./internal/modules/application/workorchd/biz/appservice/activationcore/... -count=1
 go test ./internal/modules/kernel/orchestrator/biz/runtime/... -count=1
 go test ./internal/modules/kernel/orchestrator/biz/... -count=1
 make verify-boundary-contract
@@ -771,16 +1033,20 @@ make verify-ci-mvp-file
 
 Deployed verification must use a fresh Run and record only bounded audit facts:
 
-1. restart the `run-078` workspace shape and prove the first state-change CWI passes target-policy evaluation,
-   feasibility and binding seal without `prospective_target_exists` looping;
-2. prove the Run reaches at least one sealed dispatch, accepted receipt, evidence commit and CWI advance;
-3. restart a workspace with at least one completed CWI;
-4. induce a declared catalog/resource invalidation without changing the CWI's reopen condition;
-5. prove no duplicate binding, LLM operation request, dispatch, receipt, or workspace effect;
-6. exercise one explicit reopen and prove exactly one successor lineage and effect path;
-7. resume after process restart and prove no re-drive of an accepted execution key;
-8. verify `healthz` and `readyz`, including projection catch-up; and
-9. validate terminal delivery order if a typed contract failure is intentionally injected.
+1. restart the `run-081` workspace shape and prove the Definition seed contains the declared prerequisite and
+   invalidation graph;
+2. prove no validation or final Git snapshot operation is requested before its prerequisite settles;
+3. prove missing validation readiness selects only a profile-declared bounded preparation proof and then advances to
+   executable validation;
+4. prove a later durable state change reopens exactly the declared validation/report/snapshot CWI;
+5. prove final Git commit occurs after all durable producers and alone earns snapshot credit;
+6. prove current semantic C3-C5 section sizes are bounded by the active dependency closure;
+7. induce catalog/resource invalidation without changing a settled CWI's reopen condition and prove zero duplicate
+   binding, request, dispatch, receipt, or workspace effect;
+8. resume after process restart and prove no re-drive of an accepted execution key;
+9. restart and prove no predecessor credit or dependency-generation lineage is inherited;
+10. verify `healthz` and `readyz`, including projection catch-up; and
+11. validate terminal delivery order if a typed contract failure is intentionally injected.
 
 Raw provider prompts, credentials, full workspace contents, and unredacted responses are not evidence artifacts.
 
@@ -800,6 +1066,15 @@ This plan is code-closed only when all of the following hold:
 - evaluator-detected target-policy contradiction can consume only the existing attempt-0/1 correction budget and
   cannot refresh the catalog, add a state machine, or create operation side effects; owner `infeasible` cannot consume
   that correction budget;
+- profile dependency declarations compile admission prerequisites and invalidation/reopen edges into the one canonical
+  CWI ledger, with no priority-derived or diagnostic-derived relation;
+- a CWI with an unsettled prerequisite cannot enter provider ordering, semantic batch, owner feasibility, binding,
+  dispatch, or evidence, and becomes eligible exactly once after the prerequisite settles;
+- validation preparation is profile-owned and owner-grounded; Runtime core contains no software-development, language,
+  test-file, command, or framework inference;
+- final version-control snapshot is dependency-terminal and is reopened by every declared later durable producer;
+- C3-C5 request growth is bounded by the active dependency closure while complete C0-C2 and protected P0-P4 facts are
+  preserved;
 - no runtime component outside Orchestrator owns or mutates SM-2/SM-3/SM-4 state;
 - legacy/ambiguous aggregates fail closed without fallback or replay; and
 - the regression matrix and deployed fault matrix pass.
@@ -823,6 +1098,13 @@ The following do not close this issue and must not be introduced:
   semantics in Orchestrator;
 - retrying every owner `infeasible` status, using diagnostic message text to select correction, or refreshing an
   unchanged catalog to repair a provider target-policy contradiction;
+- weakening Shell validation preflight, treating missing tests as passed/skipped evidence, or letting Shell/File create,
+  reorder, settle, or reopen a CWI;
+- hard-coding Go, `*_test.go`, test harness paths, software-development template IDs, or Git ordering in Orchestrator or
+  `workorchruntimecontract`;
+- using slice priority, CWI numeric ID, LLM order, or free-text guidance as a substitute for an explicit prerequisite;
+- allowing final Git snapshot to settle while a declared durable producer remains eligible or unsettled;
+- truncating C0-C2, Goal/DoD, current binding/target/failure, or protected P0-P4 facts merely to meet a byte target;
 - adding a second correction counter, retry loop, target policy, or state machine for semantic feasibility;
 - migrating an ambiguous live aggregate by guessing lineage; or
 - retrying/replaying a durable capability operation solely to repair bookkeeping.

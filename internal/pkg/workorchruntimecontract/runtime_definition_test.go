@@ -134,7 +134,7 @@ func TestRuntimeCandidatePrefixChangesWithCoverageDependency(t *testing.T) {
 	changed := base
 	changed.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
 	changed.ProfileContracts[0].CoverageDependencies = append([]RuntimeCoverageDependency(nil), base.ProfileContracts[0].CoverageDependencies...)
-	changed.ProfileContracts[0].CoverageDependencies[0].TriggerEvidenceKinds = []string{EvidenceKindValidation}
+	changed.ProfileContracts[0].CoverageDependencies[0].RequireSourceSettled = true
 	if StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base) == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changed) {
 		t.Fatal("candidate prefix did not change with coverage dependency")
 	}

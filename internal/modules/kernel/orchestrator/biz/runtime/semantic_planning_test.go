@@ -1014,7 +1014,11 @@ func TestSemanticOperationAuthorityKeepsLockedCurrentCWIAheadOfLaterPlanning(t *
 	})
 	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
 		ID: "cwi-later", SliceID: "slice-later",
+		State:               runtimecontract.RuntimeCoverageItemStateOpen,
 		CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound,
+	})
+	aggregate.Facts.DefinitionSeed.CoverageItems = append(aggregate.Facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{
+		ID: "cwi-later", SliceID: "slice-later", Order: len(aggregate.Facts.DefinitionSeed.CoverageItems) + 1,
 	})
 	aggregate.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningRequired
 

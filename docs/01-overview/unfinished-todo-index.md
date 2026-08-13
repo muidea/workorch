@@ -22,14 +22,14 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | Runtime CWI target-policy and deployed convergence (CWI-SO) | CWI-SO-1～CWI-SO-6 are code-closed and CWI-SO-7 is automated-verified. Execute fresh positive convergence and deployed invalidation/reopen/restart/resume proof. | [CWI-SO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A1 | Runtime CWI deployed convergence proof (CWI-SO-12) | CWI-SO-8～CWI-SO-11 code and automated matrices are closed; execute a fresh deployed `/run restart` and retain the dependency, reopen, terminal-order, request-bound and restart/resume persisted evidence required by CWI-SO-12. | [CWI-SO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 | A2 | Workspace reasoning effort deployed proof | 代码与正式合同已收口；剩余重新部署后的 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection 和双 workspace 隔离验证 | [WRE plan](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md) |
 
 Predecessor-owned restart、release-before-successor、complete-document recovery、strict decoder、receipt matcher、
 owner-local terminal delivery、replay/CAS、CPU guard 与 dual-workspace matrix 继续作为 A1 的代码回归基线。A1 还必须
-证明 `run-078` 形状可到达 binding/dispatch/evidence/CWI advance，settled CWI 不会因 catalog invalidation 重入
-planning，且 stale reconciliation generation 和 duplicate owner facts 不会产生额外 durable effect；本地绿灯不能
-据此标记为 live closed。
+证明 `run-081` 形状在 prerequisite settled 前不会提交 validation 或 final Git snapshot，后续 state change 只会
+reopen 声明关联的 proof/snapshot CWI，且 stale generation 和 duplicate owner facts 不会产生额外 durable effect；
+本地绿灯不能据此标记为 live closed。
 
 ## C. 可选验证
 

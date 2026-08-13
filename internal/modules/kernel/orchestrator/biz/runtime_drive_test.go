@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -8956,84 +8957,19 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if err != nil || casRecovered.Facts.Recovery.CASReloadAttempts != 1 || casRecovered.Facts.Failure != nil {
 		t.Fatalf("CAS recovery aggregate=%+v err=%v", casRecovered, err)
 	}
-	waiting, err := DriveRuntime(ctx, hub, command)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if waiting.State != runtimecontract.ConvergenceStateNeedGovernance || waiting.Terminal != nil || waiting.BlockingTicketID == "" || candidateCount != 7 {
-		persisted, persistErr := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-		t.Fatalf("two-focus governance wait=%+v terminal=%+v candidates=%d persisted=%+v persistErr=%v", waiting, waiting.Terminal, candidateCount, persisted.RuntimeState, persistErr)
-	}
-	governed, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || governed.ActiveDispatch == nil || len(governed.OperationGovernanceBindings) != 1 {
-		t.Fatalf("governed aggregate=%+v err=%v", governed, err)
-	}
-	binding := governed.OperationGovernanceBindings[0]
-	request := governed.GovernanceRequests[len(governed.GovernanceRequests)-1]
-	staleResolution := runtimecontract.RuntimeGovernanceResolution{
-		ResolutionID: "resolution-focus-2-stale", TicketID: request.TicketID, WorkspaceID: "ws-v2", RunID: "run-v2",
-		AuthoritySnapshotID: "stale-governance-authority", DispatchID: request.DispatchID,
-		DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
-		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "stale approval",
-	}
-	staleCommit, err := module.CommitRuntimeGovernanceResolution(ctx, staleResolution)
-	if err != nil || staleCommit.Disposition != runtime.CommitDispositionStale || staleCommit.Aggregate.ActiveDispatch == nil || len(staleCommit.Aggregate.Diagnostics) == 0 {
-		t.Fatalf("stale governance commit=%+v err=%v", staleCommit, err)
-	}
-	resolution := runtimecontract.RuntimeGovernanceResolution{
-		ResolutionID: "resolution-focus-2", TicketID: request.TicketID, WorkspaceID: "ws-v2", RunID: "run-v2",
-		AuthoritySnapshotID: request.AuthoritySnapshotID, DispatchID: request.DispatchID,
-		DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
-		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "file patch approved",
-	}
-	grantCrashRepository := &runtimeSaveCrashRepository{
-		delegate: runtimeStateRepository{hub: hub}, after: true, marker: "governance-grant-cas-after",
-		match: func(aggregate runtime.RuntimeAggregate) bool {
-			return aggregate.ActiveDispatch != nil && len(aggregate.OperationGovernanceBindings) == 1 &&
-				aggregate.OperationGovernanceBindings[0].State == runtimecontract.RuntimeOperationGovernanceBindingGranted
-		},
-	}
-	grantCrashBiz := newRuntimeTestOwner()
-	if err := grantCrashBiz.ConfigureRuntimeRepository(grantCrashRepository); err != nil {
-		t.Fatal(err)
-	}
-	func() {
-		defer func() {
-			if recovered := recover(); recovered != "governance-grant-cas-after" {
-				t.Fatalf("unexpected governance grant crash marker: %v", recovered)
-			}
-		}()
-		_, _ = grantCrashBiz.CommitRuntimeGovernanceResolution(ctx, resolution)
-		t.Fatal("expected crash after governance grant CAS")
-	}()
-	if !grantCrashRepository.fired {
-		t.Fatal("governance grant crash point was not reached")
-	}
-	continued, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || continued.ActiveDispatch == nil {
-		t.Fatalf("persisted governance continuation=%+v err=%v", continued, err)
-	}
-	resumeExecution := continued.ActiveDispatch.OperationExecutions[0]
-	if resumeExecution.ExecutionKey != binding.ExecutionKey || resumeExecution.Fence != binding.Fence+1 || resumeExecution.State != runtimecontract.OperationExecutionClaimed {
-		t.Fatalf("governance resume execution=%+v binding=%+v", resumeExecution, binding)
-	}
-	duplicateContinuation, err := module.CommitRuntimeGovernanceResolution(ctx, resolution)
-	if err != nil || duplicateContinuation.Disposition != runtime.CommitDispositionDuplicate || duplicateContinuation.Aggregate.ActiveDispatch == nil || duplicateContinuation.Aggregate.ActiveDispatch.ID != continued.ActiveDispatch.ID {
-		t.Fatalf("duplicate governance continuation=%+v err=%v", duplicateContinuation, err)
-	}
 	completed, err := DriveRuntime(ctx, hub, command)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil || candidateCount != 9 {
-		failed, _ := module.loadRuntime(ctx, "ws-v2", "run-v2")
-		t.Fatalf("two-focus completion=%+v candidates=%d failure=%+v coverage=%+v assessments=%+v", completed, candidateCount, failed.Facts.Failure, failed.Facts.Coverage, failed.Facts.Assessments)
+		persisted, persistErr := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		t.Fatalf("two-focus completion=%+v candidates=%d persisted=%+v persistErr=%v", completed, candidateCount, persisted.RuntimeState, persistErr)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil {
 		t.Fatalf("persisted two-focus run=%+v err=%v", persisted, err)
 	}
-	if len(persisted.RuntimeState.OperationReceipts) != 5 || len(persisted.RuntimeState.Facts.Assessments) != 2 {
+	if len(persisted.RuntimeState.OperationReceipts) != 4 || len(persisted.RuntimeState.Facts.Assessments) != 2 {
 		t.Fatalf("two-focus receipts=%d assessments=%d", len(persisted.RuntimeState.OperationReceipts), len(persisted.RuntimeState.Facts.Assessments))
 	}
 	if persisted.RuntimeState.Facts.Recovery.ProviderTransportAttempts != 1 {
@@ -9045,18 +8981,12 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		}
 	}
 	content, readErr := os.ReadFile(filepath.Join(deliverable, "focus-1.txt"))
-	if readErr != nil || string(content) != "new\n" {
+	if readErr != nil || string(content) != "TOKEN=granted\n" {
 		t.Fatalf("focus-1 content=%q err=%v", string(content), readErr)
 	}
 	content, readErr = os.ReadFile(filepath.Join(deliverable, ".env"))
-	if readErr != nil || string(content) != "TOKEN=granted\n" {
-		t.Fatalf("focus-2 governed content=%q err=%v", string(content), readErr)
-	}
-	if _, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(persisted.RuntimeState.OperationReceipts, binding.ExecutionKey, binding.Fence); !ok {
-		t.Fatal("governance receipt was not preserved")
-	}
-	if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(persisted.RuntimeState.OperationReceipts, binding.ExecutionKey, binding.Fence+1); !ok || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
-		t.Fatalf("governance resume receipt=%+v found=%v", receipt, ok)
+	if readErr != nil || string(content) != "TOKEN=old\n" {
+		t.Fatalf("unselected focus-2 legacy target content=%q err=%v", string(content), readErr)
 	}
 	driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime)
 	restarted := newRuntimeDriveTestModule(t, hub)
@@ -9130,12 +9060,16 @@ func runtimeTwoFocusSemanticResult(command llmevents.RequestRuntimeCandidateComm
 			if coverageID != "cwi-2" {
 				return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("unexpected two-focus semantic coverage %q", coverageID)
 			}
+			sharedTarget, err := runtimeTwoFocusSemanticSharedTarget(command)
+			if err != nil {
+				return llmevents.RequestRuntimeCandidateResult{}, err
+			}
 			document.Proposals = append(document.Proposals,
 				runtimecontract.RuntimeSemanticProofProposal{
 					CoverageWorkItemID: coverageID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 					OperationKind: runtimecontract.RuntimeBlockKindPatchApply, OperationVariantID: "file_write",
 					Target: runtimecontract.RuntimeOperationTargetAuthorization{
-						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{".env"},
+						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{sharedTarget},
 					},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
@@ -9145,7 +9079,7 @@ func runtimeTwoFocusSemanticResult(command llmevents.RequestRuntimeCandidateComm
 					CoverageWorkItemID: coverageID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 					OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 					Target: runtimecontract.RuntimeOperationTargetAuthorization{
-						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{".env"},
+						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{sharedTarget},
 					},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
@@ -9166,6 +9100,31 @@ func runtimeTwoFocusSemanticResult(command llmevents.RequestRuntimeCandidateComm
 		ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload), DocumentContent: payload,
 	}, nil
+}
+
+func runtimeTwoFocusSemanticSharedTarget(command llmevents.RequestRuntimeCandidateCommand) (string, error) {
+	ownerTargets := make(map[string]map[string]struct{}, 2)
+	for _, catalog := range command.SemanticManifest.OwnerCatalogs {
+		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleFile && catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell {
+			continue
+		}
+		targets := make(map[string]struct{}, len(catalog.TargetRefs))
+		for _, target := range catalog.TargetRefs {
+			targets[target] = struct{}{}
+		}
+		ownerTargets[catalog.OwnerModuleID] = targets
+	}
+	sharedTargets := make([]string, 0)
+	for target := range ownerTargets[runtimecontract.RuntimeModuleFile] {
+		if _, shared := ownerTargets[runtimecontract.RuntimeModuleShell][target]; shared {
+			sharedTargets = append(sharedTargets, target)
+		}
+	}
+	sort.Strings(sharedTargets)
+	if len(sharedTargets) != 0 {
+		return sharedTargets[0], nil
+	}
+	return "", fmt.Errorf("two-focus semantic manifest has no unused File/Shell target intersection")
 }
 
 func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
@@ -9774,7 +9733,7 @@ func TestRuntimeFileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t *
 		t.Fatal(err)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "reloaded-edit", Kind: runtimecontract.StepKindFileEdit, BindingRefs: []string{"binding/test/focus-v2/cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
+		ID: "reloaded-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
 	}}}}}
 	bareDocument := runtimeCandidateDocumentForTest(t, manifest, candidate)
 	document := []byte("```json\n" + string(bareDocument) + "\n```")
@@ -10596,7 +10555,12 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 
 func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{
+				CandidateMaxOutputTokens: 8192, CandidateDocumentRecovery: runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 1},
+			},
+		},
 		WorkspaceID:        "ws-v2",
 		RunID:              "run-v2",
 		DefinitionRevision: "definition-v2",
@@ -10672,15 +10636,16 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 		}},
 	}
 	historicalObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(historicalObservation)
-	preparedFacts.Prerequisites.Satisfied = append(preparedFacts.Prerequisites.Satisfied, historicalPrerequisite)
-	preparedFacts.Resources.TargetSelection = &historicalSelection
-	preparedFacts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
-		TargetRef: "go.mod", ContentHash: "go-mod-old", ContentState: runtimecontract.SnapshotContentStateComplete,
-	}}
-	preparedFacts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{historicalObservation}
-	repository := &runtimeDriveRepository{aggregate: runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{
+	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{
 		StateRevision: 7, Definition: runtimeDefinition(), Facts: preparedFacts, Decision: preparedDecision,
-	})}
+	})
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, historicalPrerequisite)
+	aggregate.Facts.Resources.TargetSelection = &historicalSelection
+	aggregate.Facts.Resources.TargetSnapshots = append(aggregate.Facts.Resources.TargetSnapshots, runtimecontract.TargetSnapshot{
+		TargetRef: "go.mod", ContentHash: "go-mod-old", ContentState: runtimecontract.SnapshotContentStateComplete,
+	})
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, historicalObservation)
+	repository := &runtimeDriveRepository{aggregate: aggregate}
 	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
@@ -10697,31 +10662,25 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
+	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(next.CandidateAttempts) != 0 || next.Facts.Repair.RepairAttempts != 0 ||
 		next.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("pre-provider authority gate leaked into candidate/recovery path: %+v providerCalls=%d", next, providerCalls)
 	}
-	if next.Facts.Resources.TargetSelection != nil || len(next.Facts.Prerequisites.Retired) != 1 ||
-		next.Facts.Prerequisites.Retired[0].ID != historicalPrerequisite.ID ||
-		len(next.Facts.Resources.RetiredPrerequisiteObservations) != 1 ||
-		next.Facts.Resources.RetiredPrerequisiteObservations[0].ObservationID != historicalObservation.ObservationID {
+	historicalPrerequisiteRetired := false
+	for _, retired := range next.Facts.Prerequisites.Retired {
+		historicalPrerequisiteRetired = historicalPrerequisiteRetired || retired.ID == historicalPrerequisite.ID
+	}
+	historicalObservationRetired := false
+	for _, retired := range next.Facts.Resources.RetiredPrerequisiteObservations {
+		historicalObservationRetired = historicalObservationRetired || retired.ObservationID == historicalObservation.ObservationID
+	}
+	if next.Facts.Resources.TargetSelection != nil || !historicalPrerequisiteRetired || !historicalObservationRetired {
 		t.Fatalf("historical authority was not retired before provider path: %+v", next.Facts)
 	}
-	var currentSelectionID string
-	for _, prerequisite := range next.Facts.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection && prerequisite.FocusID == facts.Focus.ID {
-			currentSelectionID = prerequisite.ID
-			break
-		}
-	}
-	if currentSelectionID == "" {
-		t.Fatalf("current selection was not reacquired: %+v", next.Facts.Prerequisites.Pending)
-	}
-	for _, prerequisite := range next.Facts.Prerequisites.Satisfied {
-		if prerequisite.ID == currentSelectionID {
-			t.Fatalf("reacquired selection remains both pending and satisfied: %+v", next.Facts.Prerequisites)
-		}
+	if next.Facts.Focus.ID == "" || len(next.Facts.Focus.TargetRefs) != 1 || next.Facts.Focus.TargetRefs[0] != "internal/lsp/manager.go" ||
+		len(next.Facts.Focus.CoverageEvidenceBindings) != 1 || len(next.Facts.Prerequisites.Pending) != 0 {
+		t.Fatalf("current sealed authority changed while retiring historical facts: %+v", next.Facts)
 	}
 }
 

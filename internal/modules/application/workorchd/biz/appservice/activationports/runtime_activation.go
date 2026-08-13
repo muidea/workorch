@@ -154,6 +154,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 				SourceRequirementID:    runtimeString(item["sourceRequirementId"]),
 				DependentScope:         runtimeString(item["dependentScope"]),
 				DependentRequirementID: runtimeString(item["dependentRequirementId"]),
+				RequireSourceSettled:   runtimeBool(item["requireSourceSettled"]),
 				TriggerEvidenceKinds:   runtimeStrings(item["triggerEvidenceKinds"]),
 			})
 		}

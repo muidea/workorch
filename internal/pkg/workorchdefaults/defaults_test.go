@@ -178,6 +178,33 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	}
 }
 
+func TestValidationPreparationContractIsSoftwareDevelopmentScoped(t *testing.T) {
+	templates, err := loadEmbeddedTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range templates {
+		contracts, _ := template.ContextHints["profileContracts"].(map[string]any)
+		for profileID, raw := range contracts {
+			profile, _ := raw.(map[string]any)
+			encoded, err := json.Marshal(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasPreparation := strings.Contains(string(encoded), "validation_preparation")
+			if template.ID == "software-dev" && profileID == "software-dev" {
+				if !hasPreparation {
+					t.Fatal("software-development profile is missing validation preparation")
+				}
+				continue
+			}
+			if hasPreparation {
+				t.Fatalf("template/profile %s/%s inherited software-development validation preparation", template.ID, profileID)
+			}
+		}
+	}
+}
+
 func TestEmbeddedTemplatesDeclareDefaultSoulIDs(t *testing.T) {
 	templates, err := loadEmbeddedTemplates()
 	if err != nil {
@@ -786,6 +813,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	requiredDeliverables := map[string]bool{
 		"source_change":            false,
+		"validation_preparation":   false,
 		"validation_report":        false,
 		"coverage_map":             false,
 		"version_control_snapshot": false,
@@ -821,23 +849,41 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	if !ok || len(dependencies) == 0 {
 		t.Fatalf("software-dev coverageDependencies = %+v, want declared source-to-validation dependency", softwareDev["coverageDependencies"])
 	}
-	dependencyFound := false
+	wantDependencies := map[string]bool{
+		"source-change-precedes-and-refreshes-validation-preparation":  false,
+		"validation-preparation-precedes-and-refreshes-dod-validation": false,
+		"dod-validation-precedes-and-refreshes-validation-report":      false,
+		"source-change-precedes-and-refreshes-final-snapshot":          false,
+		"validation-preparation-precedes-and-refreshes-final-snapshot": false,
+		"dod-validation-precedes-and-refreshes-final-snapshot":         false,
+		"validation-report-precedes-final-snapshot":                    false,
+		"coverage-map-precedes-and-refreshes-final-snapshot":           false,
+		"user-deliverable-precedes-and-refreshes-final-snapshot":       false,
+	}
 	for _, raw := range dependencies {
 		item, ok := raw.(map[string]any)
-		if !ok || item["id"] != "source-change-refreshes-validation-report" {
+		if !ok {
+			t.Fatalf("coverage dependency = %+v, want map", raw)
+		}
+		id, _ := item["id"].(string)
+		if _, wanted := wantDependencies[id]; !wanted {
 			continue
 		}
-		if item["sourceScope"] != "deliverable" || item["sourceRequirementId"] != "source_change" || item["dependentScope"] != "deliverable" || item["dependentRequirementId"] != "validation_report" {
-			t.Fatalf("source-to-validation dependency = %+v", item)
+		if item["requireSourceSettled"] != true {
+			t.Fatalf("coverage dependency %q does not declare admission semantics: %+v", id, item)
 		}
-		triggers, ok := item["triggerEvidenceKinds"].([]any)
-		if !ok || len(triggers) != 1 || triggers[0] != "state_change" {
-			t.Fatalf("source-to-validation dependency triggers = %+v", item["triggerEvidenceKinds"])
+		if id != "validation-report-precedes-final-snapshot" {
+			triggers, ok := item["triggerEvidenceKinds"].([]any)
+			if !ok || len(triggers) != 1 || triggers[0] != "state_change" {
+				t.Fatalf("coverage dependency %q triggers = %+v", id, item["triggerEvidenceKinds"])
+			}
 		}
-		dependencyFound = true
+		wantDependencies[id] = true
 	}
-	if !dependencyFound {
-		t.Fatalf("software-dev coverageDependencies missing source-change-refreshes-validation-report in %+v", dependencies)
+	for id, found := range wantDependencies {
+		if !found {
+			t.Fatalf("software-dev coverageDependencies missing %s in %+v", id, dependencies)
+		}
 	}
 	validationPolicy, ok := softwareDev["validationEnvironmentPolicy"].(map[string]any)
 	if !ok {

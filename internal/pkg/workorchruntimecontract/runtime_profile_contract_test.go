@@ -4,25 +4,60 @@ import "testing"
 
 func TestRuntimeCoverageDependenciesNormalizeAndRejectIncompleteBindings(t *testing.T) {
 	valid := RuntimeProfileContract{ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{
-		{ID: "source-refreshes-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", TriggerEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindStateChange}},
+		{ID: "source-precedes-and-refreshes-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", RequireSourceSettled: true, TriggerEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindStateChange}},
 	}}
 	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
 		t.Fatalf("valid coverage dependency rejected: %v", err)
 	}
 	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
 	dependency := normalized[0].CoverageDependencies[0]
-	if len(dependency.TriggerEvidenceKinds) != 1 || dependency.TriggerEvidenceKinds[0] != EvidenceKindStateChange {
+	if !dependency.RequireSourceSettled || len(dependency.TriggerEvidenceKinds) != 1 || dependency.TriggerEvidenceKinds[0] != EvidenceKindStateChange {
 		t.Fatalf("coverage dependency normalization = %+v", dependency)
 	}
 	for name, dependency := range map[string]RuntimeCoverageDependency{
-		"missing trigger": {ID: "dep", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation"},
-		"self reference":  {ID: "dep", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "source", TriggerEvidenceKinds: []string{EvidenceKindStateChange}},
+		"missing semantics": {ID: "dep", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation"},
+		"self reference":    {ID: "dep", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "source", TriggerEvidenceKinds: []string{EvidenceKindStateChange}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{{ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{dependency}}}); err == nil {
 				t.Fatalf("invalid coverage dependency %+v was accepted", dependency)
 			}
 		})
+	}
+}
+
+func TestRuntimeCoverageDependencyAdmissionAndInvalidationAreIndependent(t *testing.T) {
+	base := RuntimeCoverageDependency{ID: "source-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation"}
+	for name, dependency := range map[string]RuntimeCoverageDependency{
+		"admission only": func() RuntimeCoverageDependency { value := base; value.RequireSourceSettled = true; return value }(),
+		"invalidation only": func() RuntimeCoverageDependency {
+			value := base
+			value.TriggerEvidenceKinds = []string{EvidenceKindStateChange}
+			return value
+		}(),
+		"combined": func() RuntimeCoverageDependency {
+			value := base
+			value.RequireSourceSettled = true
+			value.TriggerEvidenceKinds = []string{EvidenceKindStateChange}
+			return value
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{{ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{dependency}}}); err != nil {
+				t.Fatalf("valid dependency rejected: %v", err)
+			}
+		})
+	}
+
+	admission := base
+	admission.RequireSourceSettled = true
+	invalidation := base
+	invalidation.TriggerEvidenceKinds = []string{EvidenceKindStateChange}
+	if SameRuntimeProfileContracts(
+		[]RuntimeProfileContract{{ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{admission}}},
+		[]RuntimeProfileContract{{ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{invalidation}}},
+	) {
+		t.Fatal("admission and invalidation dependencies were treated as aliases")
 	}
 }
 

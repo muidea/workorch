@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -792,7 +793,7 @@ func TestCompileRuntimeCoverageCompilesProfileCoverageDependencies(t *testing.T)
 					{ID: "source", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{"file/write"}},
 					{ID: "validation", Scope: "deliverable", EvidenceRole: "supplemental_evidence", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{"validation/managed_session"}},
 				},
-				CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "source-invalidates-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
+				CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{{ID: "source-precedes-and-invalidates-validation", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", RequireSourceSettled: true, TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}},
 			}},
 		},
 	}
@@ -804,9 +805,135 @@ func TestCompileRuntimeCoverageCompilesProfileCoverageDependencies(t *testing.T)
 		t.Fatalf("compiled dependency coverage = %+v", compiled)
 	}
 	source := compiled.CoverageItems[0]
+	dependent := compiled.CoverageItems[1]
 	if source.SourceID != "source" || len(source.ReopenDependencies) != 1 || source.ReopenDependencies[0].CoverageWorkItemID != compiled.CoverageItems[1].ID || len(source.ReopenDependencies[0].TriggerEvidenceKinds) != 1 || source.ReopenDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
 		t.Fatalf("source dependency = %+v; coverage=%+v", source, compiled.CoverageItems)
 	}
+	if len(dependent.PrerequisiteCoverageWorkItemIDs) != 1 || dependent.PrerequisiteCoverageWorkItemIDs[0] != source.ID {
+		t.Fatalf("dependent prerequisite = %+v; coverage=%+v", dependent, compiled.CoverageItems)
+	}
+}
+
+func TestCompileRuntimeCoverageKeepsAdmissionAndInvalidationIndependent(t *testing.T) {
+	base := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "source", Required: true}, {ID: "dependent", Required: true}},
+		}}},
+	}
+	for name, dependency := range map[string]runtimecontract.RuntimeCoverageDependency{
+		"admission":    {ID: "source-precedes-dependent", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "dependent", RequireSourceSettled: true},
+		"invalidation": {ID: "source-invalidates-dependent", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "dependent", TriggerEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			activation := base
+			activation.ExecutionContract.ProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(base.ExecutionContract.ProfileContracts)
+			activation.ExecutionContract.ProfileContracts[0].CoverageDependencies = []runtimecontract.RuntimeCoverageDependency{dependency}
+			compiled, err := compileRuntimeCoverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var source, dependent runtimecontract.RuntimeCoverageItem
+			for _, item := range compiled.CoverageItems {
+				switch item.SourceID {
+				case "source":
+					source = item
+				case "dependent":
+					dependent = item
+				}
+			}
+			if name == "admission" && (len(dependent.PrerequisiteCoverageWorkItemIDs) != 1 || len(source.ReopenDependencies) != 0) {
+				t.Fatalf("admission-only dependency = source %+v dependent %+v", source, dependent)
+			}
+			if name == "invalidation" && (len(dependent.PrerequisiteCoverageWorkItemIDs) != 0 || len(source.ReopenDependencies) != 1) {
+				t.Fatalf("invalidation-only dependency = source %+v dependent %+v", source, dependent)
+			}
+		})
+	}
+}
+
+func TestCompileRuntimeCoverageBuildsDeclaredPreparationValidationAndSnapshotGraph(t *testing.T) {
+	dependency := func(id, sourceScope, sourceID, dependentScope, dependentID string, reopen bool) runtimecontract.RuntimeCoverageDependency {
+		value := runtimecontract.RuntimeCoverageDependency{
+			ID: id, SourceScope: sourceScope, SourceRequirementID: sourceID,
+			DependentScope: dependentScope, DependentRequirementID: dependentID, RequireSourceSettled: true,
+		}
+		if reopen {
+			value.TriggerEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+		}
+		return value
+	}
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "software-dev",
+			DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{
+				{ID: "source_change", Required: true, EvidenceRole: "primary_state_change"},
+				{ID: "validation_preparation", Required: true, EvidenceRole: "supplemental_evidence"},
+				{ID: "validation_report", Required: true, EvidenceRole: "supplemental_evidence"},
+				{ID: "coverage_map", Required: true, EvidenceRole: "supplemental_evidence"},
+				{ID: "user_deliverable", Required: true, EvidenceRole: "supplemental_evidence"},
+				{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"},
+			},
+			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
+				dependency("source-preparation", "deliverable", "source_change", "deliverable", "validation_preparation", true),
+				dependency("preparation-dod", "deliverable", "validation_preparation", "dodItem", "*", true),
+				dependency("dod-report", "dodItem", "*", "deliverable", "validation_report", true),
+				dependency("source-snapshot", "deliverable", "source_change", "deliverable", "version_control_snapshot", true),
+				dependency("preparation-snapshot", "deliverable", "validation_preparation", "deliverable", "version_control_snapshot", true),
+				dependency("dod-snapshot", "dodItem", "*", "deliverable", "version_control_snapshot", true),
+				dependency("report-snapshot", "deliverable", "validation_report", "deliverable", "version_control_snapshot", false),
+				dependency("coverage-snapshot", "deliverable", "coverage_map", "deliverable", "version_control_snapshot", true),
+				dependency("deliverable-snapshot", "deliverable", "user_deliverable", "deliverable", "version_control_snapshot", true),
+			},
+		}}},
+	}
+	compiled, err := compileRuntimeCoverage(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}}, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySource := make(map[string]runtimecontract.RuntimeCoverageItem, len(compiled.CoverageItems))
+	for _, item := range compiled.CoverageItems {
+		bySource[item.SourceScope+"/"+item.SourceID] = item
+	}
+	source := bySource["deliverable/source_change"]
+	preparation := bySource["deliverable/validation_preparation"]
+	report := bySource["deliverable/validation_report"]
+	snapshot := bySource["deliverable/version_control_snapshot"]
+	if source.ID == "" || preparation.ID == "" || report.ID == "" || snapshot.ID == "" {
+		t.Fatalf("compiled graph misses required nodes: %+v", bySource)
+	}
+	if !containsCoverageID(preparation.PrerequisiteCoverageWorkItemIDs, source.ID) {
+		t.Fatalf("preparation prerequisites = %v, want %s", preparation.PrerequisiteCoverageWorkItemIDs, source.ID)
+	}
+	wantSnapshotPrerequisites := []common.CoverageWorkItemID{
+		source.ID, preparation.ID, report.ID,
+		bySource["deliverable/coverage_map"].ID, bySource["deliverable/user_deliverable"].ID,
+		bySource["dodItem/dod-001"].ID, bySource["dodItem/dod-002"].ID,
+	}
+	for _, id := range wantSnapshotPrerequisites {
+		if !containsCoverageID(snapshot.PrerequisiteCoverageWorkItemIDs, id) {
+			t.Fatalf("snapshot prerequisites = %v, missing %s", snapshot.PrerequisiteCoverageWorkItemIDs, id)
+		}
+	}
+	for _, dodID := range []string{"dod-001", "dod-002"} {
+		dodItem := bySource["dodItem/"+dodID]
+		if !containsCoverageID(dodItem.PrerequisiteCoverageWorkItemIDs, preparation.ID) || !containsCoverageID(report.PrerequisiteCoverageWorkItemIDs, dodItem.ID) {
+			t.Fatalf("validation chain for %s = preparation %v report %v", dodID, dodItem.PrerequisiteCoverageWorkItemIDs, report.PrerequisiteCoverageWorkItemIDs)
+		}
+	}
+}
+
+func containsCoverageID(values []common.CoverageWorkItemID, target common.CoverageWorkItemID) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompileRuntimeCoverageRejectsUnresolvedCoverageDependency(t *testing.T) {
@@ -837,6 +964,23 @@ func TestCompileRuntimeCoverageRejectsCyclicCoverageDependencies(t *testing.T) {
 	_, err := compileRuntimeCoverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
 	if err == nil || !strings.Contains(err.Error(), "contain a cycle") {
 		t.Fatalf("cyclic dependency error = %v", err)
+	}
+}
+
+func TestCompileRuntimeCoverageRejectsCyclicAdmissionDependencies(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+			ID: "profile", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "first", Required: true}, {ID: "second", Required: true}},
+			CoverageDependencies: []runtimecontract.RuntimeCoverageDependency{
+				{ID: "first-precedes-second", SourceScope: "deliverable", SourceRequirementID: "first", DependentScope: "deliverable", DependentRequirementID: "second", RequireSourceSettled: true},
+				{ID: "second-precedes-first", SourceScope: "deliverable", SourceRequirementID: "second", DependentScope: "deliverable", DependentRequirementID: "first", RequireSourceSettled: true},
+			},
+		}}},
+	}
+	_, err := compileRuntimeCoverage(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"}, activation)
+	if err == nil || !strings.Contains(err.Error(), "prerequisite dependencies contain a cycle") {
+		t.Fatalf("cyclic admission dependency error = %v", err)
 	}
 }
 

@@ -123,6 +123,45 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 	}
 }
 
+func TestCompileRuntimeSemanticPlanManifestOmitsSettledPrerequisiteFromProviderOrder(t *testing.T) {
+	definition := RuntimeDefinitionContext{
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver", DoDID: "dod-1", DoDDefinition: "works",
+		CapabilityContract: []string{StepKindFileWrite},
+	}
+	execution := RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision()}
+	activation := RuntimeActivationContext{ExecutionContract: execution}
+	items := []RuntimeCoverageItem{
+		{ID: "cwi-source", SliceID: "slice-1", SourceScope: "deliverable", SourceID: "source", Order: 1},
+		{ID: "cwi-dependent", SliceID: "slice-2", SourceScope: "deliverable", SourceID: "dependent", Order: 2, PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}},
+	}
+	slices := []RuntimeAcceptanceSlice{
+		{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}},
+		{ID: "slice-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-dependent"}},
+	}
+	seed, err := CompileRuntimeDefinitionSeed(definition, activation, items, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := semanticTestOwnerCatalog("file-catalog", RuntimeModuleFile, []string{StepKindFileWrite})
+	manifest, err := CompileRuntimeSemanticPlanManifestForCoverage("ws-1", "run-1", definition, seed, execution, []RuntimeOperationAdmissibility{catalog}, []common.CoverageWorkItemID{"cwi-dependent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.CoverageItems) != 1 || manifest.CoverageItems[0].ID != "cwi-dependent" || len(manifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs) != 0 {
+		t.Fatalf("eligible manifest retained settled predecessor: %+v", manifest.CoverageItems)
+	}
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-dependent"},
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("dependent-only coverage order: %v", err)
+	}
+	if len(seed.CoverageItems[1].PrerequisiteCoverageWorkItemIDs) != 1 {
+		t.Fatal("manifest projection mutated complete Definition seed graph")
+	}
+}
+
 func semanticTestOwnerCatalog(id, owner string, kinds []string) RuntimeOperationAdmissibility {
 	catalog := RuntimeOperationAdmissibility{PrerequisiteID: id, OwnerModuleID: owner, OperationKinds: kinds, ObservedRevision: id + "-revision"}
 	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)

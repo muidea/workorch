@@ -19,14 +19,21 @@ Status: active
 Orchestrator still violates CWI canonicality internally. The Run produced two accepted File effects for `cwi-043`, then
 failed when the reconciliation compiler finally observed duplicate coverage. Its current reconciliation request also
 referenced an older binding set than the current sealed contract. CWI-SO-1 through CWI-SO-5 closed that ledger defect.
-The later `run-078` exposed the remaining pre-binding gap: a semantic proposal may label an existing sealed-catalog
-target as prospective and escape the only legal complete-document correction point.
+The later `run-078` exposed a pre-binding gap: a semantic proposal could label an existing sealed-catalog target as
+prospective and escape the only legal complete-document correction point. `run-081` verified that closure and the
+`run-080` Git variant/current-run retention closure, then exposed a separate dependency-admission defect: validation
+CWI have no preparation prerequisites and the final Git snapshot is ordered before validation.
 
 | Item | Status | Owner | Required closure |
 | --- | --- | --- | --- |
 | CWI-SO-1 through CWI-SO-5 | code-closed | Orchestrator + pure runtime contract + Run opaque persistence | Canonical CWI ledger, generation/reconciliation fencing, dispatch/evidence fences, and current-schema fail-closed boundary are implemented. |
 | CWI-SO-6 | code-closed | Orchestrator SM-3 + pure runtime contract | A prospective target already present in the same sealed owner catalog is rejected before owner probing and uses only the existing attempt-0/1 complete-document correction. |
-| CWI-SO-7 | automated-verified; live-pending | Runtime verification | Focused/full/race/boundary and isolated managed mock-provider verification pass. Complete fresh positive convergence and deployed invalidation/reopen/restart/resume matrix. |
+| CWI-SO-7 | automated-verified; live-superseded-by-run-081 | Runtime verification | `run-081` verified prior CWI binding/variant behavior and provided the next persisted counterexample. |
+| CWI-SO-8 | code-closed; automated-verified | Pure runtime contract | Prerequisite admission and evidence-triggered invalidation/reopen are separate, validated, hash-stable relations with no second graph owner. |
+| CWI-SO-9 | code-closed; automated-verified | Template/profile + Activation compiler | The software-development profile compiles validation preparation, validation, report, and final snapshot into stable prerequisite/reopen edges; neutral templates do not inherit them. |
+| CWI-SO-10 | code-closed; automated-verified | Orchestrator SM-2 | Planning eligibility requires every prerequisite to be settled, satisfied, and currently bound before provider request, feasibility, binding, or dispatch. |
+| CWI-SO-11 | code-closed; automated-verified | Runtime request projection + LLM transport | C0-C2 remain complete/stable; coverage-order and proof-batch C3-C5 project only current eligible CWI slices and protected refs. |
+| CWI-SO-12 | automated-verified; deployed-live-pending | Automated/live verification | Focused/full/race/boundary and managed file-backed verification pass; fresh deployed `/run restart` persisted proof remains open. |
 
 The detailed owner map, transition rules, migration boundary, and regression matrix are in the
 [Runtime CWI plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md).
@@ -58,9 +65,9 @@ isolation. It is independent of CWI/focus/dispatch authority. See the
 
 ## Judgment
 
-The Runtime path is not fully closed until CWI-SO is complete. Passing `verify-boundary-contract`, focused tests, or
-healthy projection confirms useful layers, but does not prove cross-generation CWI uniqueness or absence of duplicate
-durable effects.
+The Runtime code path and automated matrix are closed through CWI-SO-11. CWI-SO remains active only because the
+deployed fresh-workspace evidence in CWI-SO-12 has not yet been recorded; managed mock verification cannot substitute
+for that persisted live proof.
 
 ## Navigation
 

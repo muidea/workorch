@@ -109,6 +109,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, dependency.SourceRequirementID)
 			writeHashString(h, dependency.DependentScope)
 			writeHashString(h, dependency.DependentRequirementID)
+			writeHashString(h, fmt.Sprintf("%t", dependency.RequireSourceSettled))
 			writeHashStrings(h, dependency.TriggerEvidenceKinds)
 		}
 		writeHashString(h, fmt.Sprintf("%d", len(profile.BootstrapRecipes)))

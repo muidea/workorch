@@ -623,17 +623,60 @@ func runtimeCWIFocusQueue(facts RuntimeFacts) []CoverageFocus {
 
 // RuntimeCWIsEligibleForPlanning returns the exact rows SM-2 may present to a
 // new semantic generation. It is a pure projection and deliberately excludes
-// settled CWI unless an explicit owner-local reopen changed their state.
+// settled CWI unless an explicit owner-local reopen changed their state. A
+// dependent is admitted only after every declared prerequisite has current
+// settled credit. Definition order remains authoritative; slice priority and
+// lexical CWI identity cannot bypass admission.
 func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkItemID {
+	byID := make(map[common.CoverageWorkItemID]RuntimeCoverageItemFact, len(facts.Coverage))
+	for _, item := range facts.Coverage {
+		item.ID = common.CoverageWorkItemID(strings.TrimSpace(string(item.ID)))
+		item.State = RuntimeCoverageItemState(strings.TrimSpace(string(item.State)))
+		item = normalizeRuntimeCoverageItemFact(item)
+		byID[item.ID] = item
+	}
 	ret := make([]common.CoverageWorkItemID, 0, len(facts.Coverage))
 	for _, item := range facts.Coverage {
+		item.ID = common.CoverageWorkItemID(strings.TrimSpace(string(item.ID)))
+		item.State = RuntimeCoverageItemState(strings.TrimSpace(string(item.State)))
 		item = normalizeRuntimeCoverageItemFact(item)
 		switch item.CWIConvergenceState {
 		case RuntimeCWIConvergenceStateUnbound, RuntimeCWIConvergenceStatePlanning, RuntimeCWIConvergenceStateReopened:
+		default:
+			continue
+		}
+		prerequisitesSettled := true
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			prerequisite, found := byID[prerequisiteID]
+			if !found || prerequisite.CWIConvergenceState != RuntimeCWIConvergenceStateSettled ||
+				prerequisite.State != RuntimeCoverageItemStateSatisfied || prerequisite.CurrentBindingRef == nil {
+				prerequisitesSettled = false
+				break
+			}
+		}
+		if prerequisitesSettled {
 			ret = append(ret, item.ID)
 		}
 	}
-	sort.SliceStable(ret, func(i, j int) bool { return string(ret[i]) < string(ret[j]) })
+	order := make(map[common.CoverageWorkItemID]int, len(facts.DefinitionSeed.CoverageItems))
+	for index, item := range facts.DefinitionSeed.CoverageItems {
+		value := item.Order
+		if value <= 0 {
+			value = index + 1
+		}
+		order[item.ID] = value
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		left, leftFound := order[ret[i]]
+		right, rightFound := order[ret[j]]
+		if leftFound != rightFound {
+			return leftFound
+		}
+		if leftFound && left != right {
+			return left < right
+		}
+		return string(ret[i]) < string(ret[j])
+	})
 	return ret
 }
 

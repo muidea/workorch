@@ -763,8 +763,20 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
-	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-catalog-prefix"); err != nil {
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
+	initialized.Facts.Failure = facts.Failure
+	initialized.Facts.Resources.FailureTarget = facts.Resources.FailureTarget
+	initialized.Facts.Resources.OperationAdmissibilities = facts.Resources.OperationAdmissibilities
+	initialized.Facts.Resources.PrerequisiteObservations = facts.Resources.PrerequisiteObservations
+	initialized.Facts.Prerequisites.Satisfied = facts.Prerequisites.Satisfied
+	initialized.StateRevision++
+	if err := initialized.Validate(); err != nil {
+		t.Fatalf("seal owner-observed MCP failure fixture: %v", err)
+	}
+	if err := repository.Save(ctx, initialized, initialized.StateRevision-1); err != nil {
+		t.Fatalf("persist owner-observed MCP failure fixture: %v", err)
+	}
+	if initialized, err = beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-catalog-prefix"); err != nil {
 		t.Fatal(err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{

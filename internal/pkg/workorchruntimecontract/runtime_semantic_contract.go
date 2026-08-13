@@ -220,10 +220,24 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest has no eligible coverage items")
 	}
 	coverageItems := make([]RuntimeCoverageItem, 0, len(wantedCoverage))
+	eligibleCoverage := make(map[common.CoverageWorkItemID]struct{}, len(wantedCoverage))
+	for coverageID := range wantedCoverage {
+		eligibleCoverage[coverageID] = struct{}{}
+	}
 	for _, item := range seed.CoverageItems {
 		if _, found := wantedCoverage[item.ID]; !found {
 			continue
 		}
+		// Admission prerequisites outside this manifest are already settled
+		// canonical CWI facts. Keep the complete graph in DefinitionSeed and the
+		// CWI ledger, but do not ask the provider to order or re-plan settled rows.
+		prerequisites := make([]common.CoverageWorkItemID, 0, len(item.PrerequisiteCoverageWorkItemIDs))
+		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+			if _, stillEligible := eligibleCoverage[prerequisiteID]; stillEligible {
+				prerequisites = append(prerequisites, prerequisiteID)
+			}
+		}
+		item.PrerequisiteCoverageWorkItemIDs = prerequisites
 		coverageItems = append(coverageItems, item)
 		delete(wantedCoverage, item.ID)
 	}
