@@ -993,6 +993,59 @@ EOF
   exit 1
 fi
 
+# CWI-SO-14/15: final executable admission is one invocation-local pure
+# contract and one Orchestrator-owned dispatcher. The admission input must not
+# become an EventHub DTO or persisted aggregate, and production dispatch
+# construction must not bypass admitRuntimeDispatch.
+if [[ ! -f internal/pkg/workorchruntimecontract/runtime_complete_admission.go ]] ||
+   ! grep -q -F -- 'func EvaluateRuntimeCompleteAdmission(' internal/pkg/workorchruntimecontract/runtime_complete_admission.go; then
+  echo "boundary contract violation: pure Runtime complete-admission evaluator is missing" >&2
+  exit 1
+fi
+runtime_complete_admission_consumers="$(
+  grep -R -Hn -F --include='*.go' --exclude='*_test.go' -- 'RuntimeCompleteAdmissionInput' internal |
+    grep -v -E -- 'internal/pkg/workorchruntimecontract/runtime_complete_admission\.go:|internal/modules/kernel/orchestrator/biz/runtime/controller\.go:' || true
+)"
+if [[ -n "$runtime_complete_admission_consumers" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Runtime complete-admission input escaped its pure
+contract and sole Orchestrator assembler.
+
+$runtime_complete_admission_consumers
+
+Do not persist or publish this invocation-local detached view. Assemble it
+only in the owner-local admission dispatcher from canonical aggregate facts.
+EOF
+  exit 1
+fi
+if ! grep -q -F -- 'func admitRuntimeDispatch(' internal/modules/kernel/orchestrator/biz/runtime/controller.go ||
+   ! grep -q -F -- 'EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{' internal/modules/kernel/orchestrator/biz/runtime/controller.go; then
+  echo "boundary contract violation: Orchestrator complete-admission dispatcher is missing" >&2
+  exit 1
+fi
+runtime_dispatch_builder_bypasses="$(
+  grep -R -Hn -F --include='*.go' --exclude='*_test.go' -- 'SealDispatchWithManifestAndFeasibilities(' internal/modules/kernel/orchestrator/biz/runtime |
+    grep -v -E -- 'dispatch_commit\.go:.*func SealDispatchWithManifestAndFeasibilities|controller\.go:' || true
+)"
+if [[ -n "$runtime_dispatch_builder_bypasses" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: production Runtime dispatch construction bypasses
+the sole owner-local admission dispatcher.
+
+$runtime_dispatch_builder_bypasses
+EOF
+  exit 1
+fi
+
+# Semantic providers select only sealed vocabulary. Artifact and metric proof
+# authority remain declaration-owned and therefore must never be restored to
+# the provider-authored proposal DTO.
+semantic_proposal_shape="$(sed -n '/^type RuntimeSemanticProofProposal struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_semantic_contract.go)"
+if grep -q -E -- 'ArtifactRefs|MetricConstraints' <<<"$semantic_proposal_shape"; then
+  echo "boundary contract violation: semantic provider proposal restored artifact or metric authority" >&2
+  exit 1
+fi
+
 runtime_transition_root="internal/modules/kernel/orchestrator/biz/runtime"
 runtime_internal_fact_sources=(
   internal_event_activation.go

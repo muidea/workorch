@@ -866,7 +866,8 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 		}
 		record := runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
-			Observation: &ownerObservation, ReplayProof: response.ReplayProof,
+			CandidateManifestHash: response.CandidateManifestHash,
+			Observation:           &ownerObservation, ReplayProof: response.ReplayProof,
 		}
 		recorded, recordErr := m.runtimeRecordCandidateFeasibility(ctx, aggregate, candidateAttempt, record)
 		if recordErr != nil {

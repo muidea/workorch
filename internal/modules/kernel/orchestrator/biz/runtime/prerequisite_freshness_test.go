@@ -370,7 +370,8 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 		t.Fatal(err)
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "replace-target", AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &ownerObservation,
+		OperationID: "replace-target", AdmissibilitySnapshotID: inventory.SnapshotID,
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +473,8 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &ownerObservation,
+		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, facts.WorkspaceID, facts.RunID, 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +561,8 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-target", AdmissibilitySnapshotID: "inventory-file", Observation: &ownerObservation,
+		OperationID: "write-target", AdmissibilitySnapshotID: "inventory-file",
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0), Observation: &ownerObservation,
 	}); err != nil {
 		t.Fatal(err)
 	}

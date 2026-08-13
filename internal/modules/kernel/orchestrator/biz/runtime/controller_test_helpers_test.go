@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -63,6 +64,11 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 	if err != nil {
 		return err
 	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	_, attemptRecord, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !found {
+		return fmt.Errorf("fixture candidate attempt %d is not pending", attempt)
+	}
 	for _, operation := range candidateRuntimeOperations(candidate) {
 		operation = operation.Normalized()
 		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
@@ -74,10 +80,25 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 			return fmt.Errorf("fixture operation %q has no matching owner admissibility inventory", operation.ID)
 		}
 		if _, err := c.recordCandidateFeasibility(ctx, workspaceID, runID, attempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
-			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
+			CandidateManifestHash: attemptRecord.ManifestHash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func runtimeTestPendingCandidateManifestHash(t *testing.T, c *RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) string {
+	t.Helper()
+	aggregate, err := c.Load(context.Background(), workspaceID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	_, record, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !found || record.ManifestHash == "" {
+		t.Fatalf("fixture candidate attempt %d has no manifest identity", attempt)
+	}
+	return record.ManifestHash
 }

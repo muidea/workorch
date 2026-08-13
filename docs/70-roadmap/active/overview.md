@@ -17,7 +17,7 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | --- | --- |
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **active only for CWI-SO-12 deployed proof.** CWI-SO-8 through CWI-SO-11 dependency contract, Activation compilation, SM-2 admission and bounded dynamic request code are closed and pass the full automated matrix; a fresh deployed `/run restart` proof remains. |
+| CWI reconciliation | **code/automated-closed through CWI-SO-17; CWI-SO-18 deployed live pending.** One pure evaluator and Orchestrator dispatcher now close the complete admission matrix; schema v5 binds owner feasibility to the exact candidate manifest. Fresh deployed `/run restart` combined proof remains. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -29,10 +29,9 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-`CWI-SO` is sequential: the completed canonical-ledger and SM-3 target-policy slices remain closed. CWI-SO-8 through
-CWI-SO-11 now close the explicit dependency contract, activation compilation, SM-2 admission and bounded dynamic
-request. CWI-SO-12 retains only deployed proof exposed by `run-081`. A provider, capability owner, UI, or projection change cannot substitute for
-these steps.
+`CWI-SO` is sequential. CWI-SO-13 through CWI-SO-17 and the automated CWI-SO-18 gates now pass. The only active step is
+the fresh deployed schema-v5 combined matrix; a provider, capability owner, UI, projection or managed mock result cannot
+substitute for that persisted live proof.
 
 ## Active Documentation Rules
 

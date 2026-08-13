@@ -704,6 +704,9 @@ func (c *RuntimeController) recordCandidateFeasibility(ctx context.Context, work
 	if !candidateProposalContainsOperation(*attemptRecord.Proposal, record.OperationID) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
 	}
+	if record.CandidateManifestHash != attemptRecord.ManifestHash {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q does not match the pending manifest", common.ErrConflict, record.OperationID)
+	}
 	for _, persisted := range attemptRecord.Feasibilities {
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
 			continue
@@ -813,10 +816,10 @@ func (c *RuntimeController) admitAndSealCandidateAttempt(ctx context.Context, wo
 		}
 		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
-	if err := validateCandidateAdmissionFeasibility(aggregate.Facts, candidate, record); err != nil {
-		return CandidateAdmissionCommitResult{}, err
+	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, &record, &admission)
+	if !completeAdmission.Admitted() {
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: complete candidate admission %s: %s", common.ErrConflict, completeAdmission.Code, completeAdmission.Message)
 	}
-	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, record.Feasibilities)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -856,9 +859,6 @@ func (c *RuntimeController) sealGovernanceDispatch(ctx context.Context, workspac
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime authority cannot seal governance", common.ErrConflict)
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil))); err != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: governance manifest does not match sealed authority: %v", common.ErrConflict, err)
-	}
 	if candidate.Governance == nil || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance candidate does not match sealed authority", common.ErrConflict)
 	}
@@ -870,10 +870,10 @@ func (c *RuntimeController) sealGovernanceDispatch(ctx context.Context, workspac
 	if dependency != expectedDependency {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance candidate dependency does not match the sealed source", common.ErrConflict)
 	}
-	if admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate); !admission.Accepted() {
-		return RuntimeAggregate{}, fmt.Errorf("%w: governance candidate rejected by manifest", common.ErrConflict)
+	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, nil, nil)
+	if !completeAdmission.Admitted() {
+		return RuntimeAggregate{}, fmt.Errorf("%w: governance dispatch admission %s: %s", common.ErrConflict, completeAdmission.Code, completeAdmission.Message)
 	}
-	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -887,6 +887,60 @@ func (c *RuntimeController) sealGovernanceDispatch(ctx context.Context, workspac
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// admitRuntimeDispatch is the only production dispatcher constructor. Provider
+// candidates and reducer-authored governance facts have different source
+// ledgers, but both cross the same manifest, active-dispatch and sealed-builder
+// fence. It is pure and owner-local; callers commit the returned value only
+// through the corresponding private internal event and one aggregate CAS.
+func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, attempt *runtimecontract.RuntimeCandidateAttemptRecord, evaluated *CandidateAdmissionResult) (SealedDispatch, runtimecontract.RuntimeCompleteAdmissionDecision, error) {
+	if aggregate.ActiveDispatch != nil {
+		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+			Disposition: runtimecontract.RuntimeCompleteAdmissionStaleConflict,
+			Code:        "active_dispatch_conflict",
+			Message:     "runtime authority already has an active dispatch",
+		}, nil
+	}
+	admission := evaluated
+	if admission == nil {
+		value := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
+		admission = &value
+	}
+	if !admission.Accepted() {
+		message := "runtime candidate rejected by manifest-bound admission"
+		if admission.Failure != nil {
+			message = admission.Failure.Reason
+		}
+		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+			Disposition: runtimecontract.RuntimeCompleteAdmissionCorrectableOnce,
+			Code:        "candidate_document_rejected",
+			Message:     message,
+		}, nil
+	}
+	var feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord
+	if attempt != nil {
+		complete := runtimecontract.EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{
+			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning,
+			Reconciliation: aggregate.Reconciliation, Manifest: manifest, Candidate: candidate, Attempt: *attempt,
+			ActiveDispatch:      sealedDispatchRecord(aggregate.ActiveDispatch),
+			CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+			OperationReceipts:   aggregate.OperationReceipts,
+		})
+		if !complete.Admitted() {
+			return SealedDispatch{}, complete, nil
+		}
+		feasibilities = attempt.Feasibilities
+	}
+	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, feasibilities)
+	if err != nil {
+		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+			Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
+			Code:        "dispatch_seal_invalid",
+			Message:     err.Error(),
+		}, err
+	}
+	return dispatch, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionAdmitted, Code: "admitted"}, nil
 }
 
 // GovernanceDependencyForAggregate returns the only dependency a governed
@@ -945,68 +999,19 @@ func GovernanceDependencyForAggregate(aggregate RuntimeAggregate) (runtimecontra
 	}, true
 }
 
-// validateCandidateAdmissionFeasibility is the final write-side fence for
-// SM-3. Mainline records probes, but this controller-level validation prevents
-// any alternate caller from sealing an executable candidate without every
-// required persisted owner feasibility result.
-func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, candidate runtimecontract.RuntimeCandidate, attempt runtimecontract.RuntimeCandidateAttemptRecord) error {
-	operations := candidateRuntimeOperations(candidate)
-	if len(operations) == 0 {
+func sealedDispatchRecord(value *SealedDispatch) *runtimecontract.RuntimeDispatchRecord {
+	if value == nil {
 		return nil
 	}
-	for _, operation := range operations {
-		operation = operation.Normalized()
-		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-		if !known || descriptor.OwnerModuleID == "" {
-			return fmt.Errorf("candidate operation %q has no canonical owner", operation.Kind)
-		}
-		if !runtimeOperationAdmissibilityRequiredForOperation(facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
-			continue
-		}
-		inventory, found := runtimeOperationAdmissibilityForKind(facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
-		if !found {
-			return fmt.Errorf("candidate operation %q has no persisted owner admissibility inventory", operation.Kind)
-		}
-		feasibility, found := candidateAttemptFeasibilityForOperation(attempt.Feasibilities, operation.ID)
-		if !found || feasibility.AdmissibilitySnapshotID != inventory.SnapshotID {
-			return fmt.Errorf("candidate operation %q has no current persisted feasibility result", operation.ID)
-		}
-		if feasibility.Observation == nil || feasibility.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible {
-			return fmt.Errorf("candidate operation %q has persisted infeasible result", operation.ID)
-		}
-		if feasibility.ReplayProof != nil {
-			proof := feasibility.ReplayProof.Normalized()
-			if err := proof.Validate(); err != nil || proof.OwnerModuleID != descriptor.OwnerModuleID || proof.OperationID != operation.ID || proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding || !sameStringSet(proof.TargetRefs, operation.TargetRefs) {
-				return fmt.Errorf("candidate operation %q has invalid persisted replay proof", operation.ID)
-			}
-		}
-	}
-	return nil
+	record := sealedDispatchToRuntimeRecord(*value)
+	return &record
 }
 
-// runtimeOperationAdmissibilityRequiredForOperation scopes the final
-// feasibility fence to the owner and executable capability that actually
-// requested the admissibility fact.  A Shell recipe preflight must not impose a
-// synthetic File/MCP/Git feasibility requirement, and vice versa.
+// runtimeOperationAdmissibilityRequiredForOperation remains a package-local
+// fixture seam. Production complete admission owns the rule in the pure
+// runtime contract; do not add an Orchestrator-local variant here.
 func runtimeOperationAdmissibilityRequiredForOperation(prerequisites runtimecontract.PrerequisiteState, ownerModuleID, operationKind string) bool {
-	ownerModuleID = strings.TrimSpace(ownerModuleID)
-	operationKind = runtimecontract.CanonicalRuntimeBlockKind(operationKind)
-	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), prerequisites.Pending...), prerequisites.Satisfied...) {
-		if prerequisite.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || strings.TrimSpace(prerequisite.OwnerModuleID) != ownerModuleID {
-			continue
-		}
-		// Empty required capabilities is an owner-wide admissibility contract;
-		// otherwise the prerequisite is deliberately capability-scoped.
-		if len(prerequisite.RequiredCapabilities) == 0 {
-			return true
-		}
-		for _, capability := range prerequisite.RequiredCapabilities {
-			if runtimecontract.CanonicalRuntimeBlockKind(capability) == operationKind {
-				return true
-			}
-		}
-	}
-	return false
+	return runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(prerequisites, ownerModuleID, operationKind)
 }
 
 func runtimeOperationAdmissibilityForKind(values []runtimecontract.RuntimeOperationAdmissibility, owner, kind string) (runtimecontract.RuntimeOperationAdmissibility, bool) {

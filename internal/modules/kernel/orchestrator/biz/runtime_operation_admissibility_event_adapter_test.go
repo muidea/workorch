@@ -79,6 +79,16 @@ func TestProbeRuntimeOperationFeasibilityRejectsMalformedResult(t *testing.T) {
 	if _, err := ProbeRuntimeOperationFeasibility(ctx, hub, command); err == nil {
 		t.Fatal("probe accepted a mismatched operation/snapshot result")
 	}
+	observer.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
+	observer.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(fileevents.ProbeRuntimeOperationFeasibilityResult{
+			OperationID: command.Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
+			CandidateManifestHash: "", Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible,
+		}, nil)
+	})
+	if _, err := ProbeRuntimeOperationFeasibility(ctx, hub, command); err == nil {
+		t.Fatal("probe accepted an owner result without the exact candidate manifest identity")
+	}
 
 	if err := runtimecontract.ValidateRuntimeOperationAdmissibilityRequest(runtimecontract.RuntimeOperationAdmissibilityRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "snapshot-v2", PrerequisiteID: "admissibility-file",

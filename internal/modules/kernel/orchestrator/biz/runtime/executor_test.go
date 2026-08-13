@@ -560,7 +560,8 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: "admissibility-1",
 	}
 	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "patch-1", AdmissibilitySnapshotID: "admissibility-1", Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: &proof,
+		OperationID: "patch-1", AdmissibilitySnapshotID: "admissibility-1",
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: &proof,
 	}); err != nil {
 		t.Fatal(err)
 	}

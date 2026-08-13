@@ -319,10 +319,10 @@ func TestRuntimeTerminationRecordAndCurrentSchema(t *testing.T) {
 		Focus:      CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
 		Activation: RuntimeActivationContext{}, // may fail validate if activation incomplete - use minimal valid path via existing tests pattern
 	}
-	if RuntimeStateSchemaVersionCurrent != 4 {
-		t.Fatalf("production writer current schema must be 4, got %d", RuntimeStateSchemaVersionCurrent)
+	if RuntimeStateSchemaVersionCurrent != 5 {
+		t.Fatalf("production writer current schema must be 5, got %d", RuntimeStateSchemaVersionCurrent)
 	}
-	for _, version := range []uint32{0, 1, 2, 3, 5, 6, 7, 9} {
+	for _, version := range []uint32{0, 1, 2, 3, 4, 6, 7, 9} {
 		if err := (RuntimeStateRecord{SchemaVersion: version}).Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
 			t.Fatalf("schema %d must fail fast, got %v", version, err)
 		}
@@ -340,7 +340,7 @@ func TestRuntimeTerminationRecordAndCurrentSchema(t *testing.T) {
 }
 
 func TestBootstrapSchemaRejectsEveryNonCurrentVersion(t *testing.T) {
-	for _, version := range []uint32{0, 1, 2, 3, 5, 6, 7, 9} {
+	for _, version := range []uint32{0, 1, 2, 3, 4, 6, 7, 9} {
 		b := RuntimeBootstrap{SchemaVersion: version}
 		if err := b.Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
 			t.Fatalf("bootstrap schema %d must fail, got %v", version, err)

@@ -66,6 +66,11 @@ type RuntimeCandidateFeasibilityRecord struct {
 	OperationID             string
 	AdmissibilitySnapshotID string
 	AcquisitionBinding      string
+	// CandidateManifestHash binds the owner observation to the exact sealed
+	// proposal vocabulary presented during the side-effect-free probe. It is
+	// copied from the owner response and cannot be reconstructed from current
+	// catalog state during restart.
+	CandidateManifestHash string
 	// Observation is the sole owner-authored factual result. It is separate from the
 	// CandidateAttempt Failure field so an owner infeasibility cannot enter the
 	// SM-3 correction matrix.
@@ -157,10 +162,11 @@ type RuntimeStateRecord struct {
 }
 
 // RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
-// Version 4 introduces the persisted canonical CWI ledger. Earlier aggregates
-// cannot safely reconstruct binding, focus, receipt, or reconciliation lineage
+// Version 5 adds the exact candidate-manifest identity to every persisted
+// capability-owner feasibility observation. Earlier aggregates cannot safely
+// reconstruct that authority (or the canonical CWI lineage introduced in v4)
 // and therefore require a fresh activation instead of an in-place migration.
-const RuntimeStateSchemaVersionCurrent uint32 = 4
+const RuntimeStateSchemaVersionCurrent uint32 = 5
 
 // ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")
@@ -661,8 +667,8 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		operationID := strings.TrimSpace(value.OperationID)
-		if operationID == "" || strings.TrimSpace(value.AdmissibilitySnapshotID) == "" {
-			return fmt.Errorf("runtime candidate feasibility record requires operation and snapshot identity")
+		if operationID == "" || strings.TrimSpace(value.AdmissibilitySnapshotID) == "" || strings.TrimSpace(value.CandidateManifestHash) == "" {
+			return fmt.Errorf("runtime candidate feasibility record requires operation, snapshot and candidate manifest identity")
 		}
 		if _, exists := seen[operationID]; exists {
 			return fmt.Errorf("runtime candidate feasibility operation %q is duplicated", operationID)

@@ -15,6 +15,16 @@ func runtimeTestEnsureCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggre
 	runtimeTestSealCurrentFocusBindings(t, aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, aggregate)
 	runtimeTestSealCanonicalCWILedger(t, aggregate)
+	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
+		aggregate.SemanticPlanning.SealedBindingSetHash = aggregate.Facts.ReconciliationContract.BindingSetHash
+		if len(aggregate.SemanticPlanning.SealedLineageRefs) == 0 {
+			t.Fatal("test semantic planning ledger has no sealed lineage")
+		}
+		aggregate.SemanticPlanning.SealedLineageRefs[len(aggregate.SemanticPlanning.SealedLineageRefs)-1] = aggregate.SemanticPlanning.SealedBindingSetHash
+		if err := aggregate.SemanticPlanning.Validate(); err != nil {
+			t.Fatalf("align test semantic planning binding set: %v", err)
+		}
+	}
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatalf("reduce test fixture with sealed coverage binding: %v", err)
@@ -110,6 +120,13 @@ func runtimeTestSealCanonicalCWILedger(t *testing.T, aggregate *RuntimeAggregate
 func runtimeTestSynchronizeCanonicalCWILedger(t *testing.T, aggregate *RuntimeAggregate) {
 	t.Helper()
 	runtimeTestSealCanonicalCWILedger(t, aggregate)
+	if aggregate != nil && aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed && len(aggregate.SemanticPlanning.SealedLineageRefs) != 0 {
+		aggregate.SemanticPlanning.SealedBindingSetHash = aggregate.Facts.ReconciliationContract.BindingSetHash
+		aggregate.SemanticPlanning.SealedLineageRefs[len(aggregate.SemanticPlanning.SealedLineageRefs)-1] = aggregate.SemanticPlanning.SealedBindingSetHash
+		if err := aggregate.SemanticPlanning.Validate(); err != nil {
+			t.Fatalf("align synchronized test semantic planning binding set: %v", err)
+		}
+	}
 }
 
 func runtimeTestFactsWithCanonicalCWIProjection(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {

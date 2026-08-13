@@ -914,7 +914,8 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 		t.Fatal(err)
 	}
 	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-1", AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+		OperationID: "write-1", AdmissibilitySnapshotID: inventory.SnapshotID,
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -380,7 +380,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, Transaction: persisted.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: decodedCandidate.StateChange.Operations[0].Operation,
 			Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
-			CandidateManifestHash: "manifest-mcp-file-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, decodedCandidate.StateChange.Operations[0].Operation.Kind),
+			CandidateManifestHash: manifest.Hash, OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, decodedCandidate.StateChange.Operations[0].Operation.Kind),
 		},
 	))
 	if probeResult == nil {
@@ -396,7 +396,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	persisted, err = controller.recordCandidateFeasibility(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: decodedCandidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
-		AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResponse.ReplayProof,
+		AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probeResponse.CandidateManifestHash,
+		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResponse.ReplayProof,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -922,14 +923,14 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		if !found {
 			t.Fatalf("candidate owner observation missing: %+v", inventory)
 		}
-		probeResult, probeErr := sendRuntimeOperationFeasibilityProbeForTest(ctx, hub, runtimecontract.RuntimeOperationFeasibilityRequest{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(), WorkspaceDeliverableDirectory: directory, Operation: operation, Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation, CandidateManifestHash: "manifest-mcp-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, operation.Kind)})
+		probeResult, probeErr := sendRuntimeOperationFeasibilityProbeForTest(ctx, hub, runtimecontract.RuntimeOperationFeasibilityRequest{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(), WorkspaceDeliverableDirectory: directory, Operation: operation, Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation, CandidateManifestHash: manifest.Hash, OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, operation.Kind)})
 		if probeErr != nil {
 			t.Fatal(probeErr)
 		}
 		if probeResult.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probeResult.Feedback != nil || probeResult.Stale != nil {
 			t.Fatalf("candidate feasibility = %#v", probeResult)
 		}
-		aggregate, err = controller.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResult.ReplayProof})
+		aggregate, err = controller.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probeResult.CandidateManifestHash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResult.ReplayProof})
 		if err != nil {
 			t.Fatal(err)
 		}

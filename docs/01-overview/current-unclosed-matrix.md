@@ -15,25 +15,22 @@ evidence; they do not close a later persisted aggregate counterexample.
 
 Status: active
 
-`run-073` showed that the production owner boundaries and terminal delivery can be structurally correct while the
-Orchestrator still violates CWI canonicality internally. The Run produced two accepted File effects for `cwi-043`, then
-failed when the reconciliation compiler finally observed duplicate coverage. Its current reconciliation request also
-referenced an older binding set than the current sealed contract. CWI-SO-1 through CWI-SO-5 closed that ledger defect.
-The later `run-078` exposed a pre-binding gap: a semantic proposal could label an existing sealed-catalog target as
-prospective and escape the only legal complete-document correction point. `run-081` verified that closure and the
-`run-080` Git variant/current-run retention closure, then exposed a separate dependency-admission defect: validation
-CWI have no preparation prerequisites and the final Git snapshot is ordered before validation.
+`run-073` through `run-082` showed that structural owner boundaries can remain correct while Orchestrator admission is
+still incomplete. Canonical CWI identity, retirement, target policy, variant authorization, dependency admission and
+proof-requirement authority were closed one counterexample at a time. The recent commit audit also confirmed one real
+authority reversal: provider-declared artifact/metric requirements were introduced and later removed. The remaining
+work therefore consolidates all dimensions into one Orchestrator-owned admission transaction rather than adding
+another field-specific repair.
 
 | Item | Status | Owner | Required closure |
 | --- | --- | --- | --- |
-| CWI-SO-1 through CWI-SO-5 | code-closed | Orchestrator + pure runtime contract + Run opaque persistence | Canonical CWI ledger, generation/reconciliation fencing, dispatch/evidence fences, and current-schema fail-closed boundary are implemented. |
-| CWI-SO-6 | code-closed | Orchestrator SM-3 + pure runtime contract | A prospective target already present in the same sealed owner catalog is rejected before owner probing and uses only the existing attempt-0/1 complete-document correction. |
-| CWI-SO-7 | automated-verified; live-superseded-by-run-081 | Runtime verification | `run-081` verified prior CWI binding/variant behavior and provided the next persisted counterexample. |
-| CWI-SO-8 | code-closed; automated-verified | Pure runtime contract | Prerequisite admission and evidence-triggered invalidation/reopen are separate, validated, hash-stable relations with no second graph owner. |
-| CWI-SO-9 | code-closed; automated-verified | Template/profile + Activation compiler | The software-development profile compiles validation preparation, validation, report, and final snapshot into stable prerequisite/reopen edges; neutral templates do not inherit them. |
-| CWI-SO-10 | code-closed; automated-verified | Orchestrator SM-2 | Planning eligibility requires every prerequisite to be settled, satisfied, and currently bound before provider request, feasibility, binding, or dispatch. |
-| CWI-SO-11 | code-closed; automated-verified | Runtime request projection + LLM transport | C0-C2 remain complete/stable; coverage-order and proof-batch C3-C5 project only current eligible CWI slices and protected refs. |
-| CWI-SO-12 | automated-verified; deployed-live-pending | Automated/live verification | Focused/full/race/boundary and managed file-backed verification pass; fresh deployed `/run restart` persisted proof remains open. |
+| Prior CWI-SO slices | regression baseline only | Orchestrator + typed owner contracts | Canonical ledger, target, variant, dependency, request-bound and proof-authority work remains required regression coverage, but no prior field-level `code-closed` claim establishes complete admission closure. |
+| CWI-SO-13 | code/automated-closed | Runtime mutation/admission inventory | One private-event/CAS mutation chain and mechanical admission/dispatch/provider-authority scans are in place. |
+| CWI-SO-14 | code/automated-closed | Pure runtime contract | One detached complete admission input/outcome validates the full identity/dependency/target/variant/proof/binding/fence/lineage matrix. |
+| CWI-SO-15 | code/automated-closed | Orchestrator SM-3 | Every production dispatch passes one owner-local dispatcher; candidate attempt acceptance and dispatch creation share one CAS. |
+| CWI-SO-16 | code/automated-closed | Orchestrator SM-2/SM-3/SM-4 | Canonical retirement, reopen, receipt and evidence transitions pass restart/idempotency/effect fences. |
+| CWI-SO-17 | code/automated-closed | Run/LLM/capability/governance/delivery owners | Cross-owner contracts remain detached typed facts; exact candidate-manifest identity is now mandatory on persisted owner feasibility. |
+| CWI-SO-18 | automated-closed; deployed-live-pending | Automated/live verification | Full/race/boundary and managed file-backed gates pass. Deploy schema v5 and record fresh `/run restart` combined proof. |
 
 The detailed owner map, transition rules, migration boundary, and regression matrix are in the
 [Runtime CWI plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md).
@@ -50,7 +47,7 @@ The detailed owner map, transition rules, migration boundary, and regression mat
 
 ## B. Workspace Reasoning Effort
 
-Status: code-closed, deployed verification pending.
+Status: independent code baseline; deployed verification pending.
 
 The remaining proof covers Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and two-workspace
 isolation. It is independent of CWI/focus/dispatch authority. See the
@@ -65,9 +62,9 @@ isolation. It is independent of CWI/focus/dispatch authority. See the
 
 ## Judgment
 
-The Runtime code path and automated matrix are closed through CWI-SO-11. CWI-SO remains active only because the
-deployed fresh-workspace evidence in CWI-SO-12 has not yet been recorded; managed mock verification cannot substitute
-for that persisted live proof.
+The unified code and automated admission matrix are closed through CWI-SO-17. CWI-SO-18 remains active only for a
+fresh deployed schema-v5 `/run restart` combined proof; managed mock verification cannot substitute for persisted live
+evidence.
 
 ## Navigation
 

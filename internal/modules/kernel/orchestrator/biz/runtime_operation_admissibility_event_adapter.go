@@ -252,7 +252,7 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	if !ok || response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID || response.CapabilityStateBinding != inventory.AcquisitionBinding {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
 	}
-	if response.CandidateManifestHash != "" && response.CandidateManifestHash != command.CandidateManifestHash {
+	if response.CandidateManifestHash != command.CandidateManifestHash {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned mismatched candidate manifest hash")
 	}
 	if normalized, err := runtimecontract.NormalizeRuntimeOperationFeasibilityObservation(response); err != nil {
