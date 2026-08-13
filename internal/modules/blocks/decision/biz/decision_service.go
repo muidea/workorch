@@ -146,10 +146,6 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		return nil, common.ErrConflict
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	ticket.UpdatedAt = now
-	ticket.ResolvedAt = now
-	ticket.ResolvedBy = nonEmptyString(stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor"))
 	resolution := &decisionModel.Resolution{
 		ID:                 cmd.ResolutionID,
 		TicketID:           cmd.TicketID,
@@ -163,10 +159,14 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 		return nil, err
 	}
 
-	ticket.State = common.DecisionTicketStateResolved
-	if err := s.tickets.Update(ctx, ticket); err != nil {
+	next, err := s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
+		ResolvedBy: nonEmptyString(stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor")),
+	})
+	if err != nil {
 		return nil, err
 	}
+	*ticket = *next
 	return resolution, nil
 }
 
@@ -233,11 +233,11 @@ func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Contex
 		}
 		transitioned := ticket.State != common.DecisionTicketStateResolved
 		if ticket.State != common.DecisionTicketStateResolved {
-			ticket.State = common.DecisionTicketStateResolved
-			ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			if err := s.tickets.Update(ctx, ticket); err != nil {
+			next, err := s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionRecovered, TicketID: ticket.ID})
+			if err != nil {
 				return nil, nil, false, err
 			}
+			ticket = next
 		}
 		return ticket, existingResolution, transitioned, nil
 	}
@@ -420,14 +420,11 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 			return nil, nil, common.ErrConflict
 		}
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	proposal.CreatedAt = now
-	proposal.UpdatedAt = now
-	ticket.RuntimeGovernanceProposal = &proposal
-	if err := s.tickets.Update(ctx, ticket); err != nil {
+	ticket, err = s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{Kind: lifecycleInternalEventProposalPrepared, TicketID: ticket.ID, Proposal: &proposal})
+	if err != nil {
 		return nil, nil, err
 	}
-	ret := proposal.Clone()
+	ret := ticket.RuntimeGovernanceProposal.Clone()
 	return ticket, &ret, nil
 }
 
@@ -484,15 +481,11 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 		return nil, nil, false, common.ErrConflict
 	}
 	transitioned := ticket.State == common.DecisionTicketStateOpen
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	ticket.State = common.DecisionTicketStateResolved
-	ticket.ResolvedAt = nonEmptyString(ticket.ResolvedAt, now)
-	ticket.ResolvedBy = nonEmptyString(ticket.ResolvedBy, stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor"))
-	ticket.RuntimeGovernanceProposal.State = decisionModel.RuntimeGovernanceResolutionProposalCommitted
-	ticket.RuntimeGovernanceProposal.FailureClass = ""
-	ticket.RuntimeGovernanceProposal.FailureReason = ""
-	ticket.RuntimeGovernanceProposal.UpdatedAt = now
-	if err := s.tickets.Update(ctx, ticket); err != nil {
+	ticket, err = s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventProposalCommitted, TicketID: ticket.ID,
+		ResolvedBy: nonEmptyString(stringPayloadValue(cmd.Payload, "resolvedBy"), stringPayloadValue(cmd.Payload, "actor")),
+	})
+	if err != nil {
 		return nil, nil, false, err
 	}
 	return ticket, resolution, transitioned, nil
@@ -517,11 +510,11 @@ func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if ticket.DecisionKind != "runtime_governance" || ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil || !sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) {
 		return common.ErrConflict
 	}
-	ticket.RuntimeGovernanceProposal.State = decisionModel.RuntimeGovernanceResolutionProposalRejected
-	ticket.RuntimeGovernanceProposal.FailureClass = strings.TrimSpace(failureClass)
-	ticket.RuntimeGovernanceProposal.FailureReason = strings.TrimSpace(failureReason)
-	ticket.RuntimeGovernanceProposal.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	return s.tickets.Update(ctx, ticket)
+	_, err = s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventProposalRejected, TicketID: ticket.ID,
+		FailureClass: failureClass, FailureReason: failureReason,
+	})
+	return err
 }
 
 func runtimeGovernanceProposalFromCommand(cmd decisioncontracts.ResolveTicketCommand) (decisionModel.RuntimeGovernanceResolutionProposal, error) {

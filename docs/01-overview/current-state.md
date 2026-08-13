@@ -132,10 +132,13 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
 1. **必需 Runtime CWI 单 owner 收口：CWI-SO-13/14/16/18 已完成代码与自动化矩阵，deployed live 待验证。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。
-   fresh schema-v5 `run-085` 证明 blocked queue-head 与 eligible closure 曾分裂；旧二进制 `run-087` 又证明 settled
-   `cwi-045` 仍被旧 semantic order 当成可执行成员。当前实现已将两者归一到 Orchestrator owner-private closure：
+   fresh schema-v5 `run-085` 证明 blocked queue-head 与 eligible closure 曾分裂；旧二进制 `run-086` 证明 prospective
+   binding target 与 candidate target 漂移后，File `file/write` 曾在 receipt adjudication 前覆盖已有文件；`run-087` 又证明 settled
+   `cwi-045` 仍被旧 semantic order 当成可执行成员。当前实现已将这些路径归一到 owner-private closure：
    settled predecessor 只保留审计 lineage，非 settled ineligible row fail-closed，依赖 settlement 新解锁旧 manifest 外
-   CWI 时在同一 CAS 以 `eligible_closure_changed` 退休 generation。跨 owner typed fact、owner receipt/evidence、Run
+   CWI 时在同一 CAS 以 `eligible_closure_changed` 退休 generation；SM-3 complete admission 在 dispatch 前拒绝 target 漂移，
+   File owner 将 `file/write` 限定为 create-only，已有文件替换必须使用带 owner-observed `baseHash` 的 `patch/apply`；
+   Decision/Approval 生命周期也只经各自 private event/reducer 更新。跨 owner typed fact、owner receipt/evidence、Run
    lifecycle 与 terminal delivery 仍符合 owner 边界；full/race/vet/fmt/boundary 与 managed file-backed 已通过，剩余仅为
    部署该二进制后的 fresh `/run restart` persisted proof。不得通过削弱 semantic seal/owner preflight、解析 message、让
    Application/LLM/capability owner 创建或排序 current focus、新增全局索引或第五状态机规避。普通用户仍只提供

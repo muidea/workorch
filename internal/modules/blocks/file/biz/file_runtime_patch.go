@@ -46,6 +46,7 @@ type patchExecutionRequest struct {
 	BaseHash        string
 	Occurrence      int
 	CoverageTargets []string
+	CreateOnly      bool
 }
 
 type patchExecutionResult struct {
@@ -138,6 +139,14 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 	if exists && looksBinary(before) {
 		err := fmt.Errorf("%w: patch target is binary", common.ErrInvalidArgument)
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_binary_target"), err
+	}
+	if exists && req.CreateOnly {
+		err := fmt.Errorf("%w: file/write target already exists; use revision-bound patch/apply to replace it", common.ErrConflict)
+		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_target_exists"), err
+	}
+	if exists && strings.TrimSpace(req.BaseHash) == "" {
+		err := fmt.Errorf("%w: patch/apply file_write requires baseHash to replace an existing target", common.ErrConflict)
+		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_basehash_required"), err
 	}
 	if err := verifyPatchBaseHash(target, before, exists, req.BaseHash); err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_basehash_mismatch"), err

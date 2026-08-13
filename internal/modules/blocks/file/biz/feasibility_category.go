@@ -37,6 +37,8 @@ var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibil
 	"operation_replay_proof_invalid":      runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
 	"operation_replay_proof_unavailable":  runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
 	"operation_base_hash_mismatch":        runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
+	"operation_base_hash_required":        runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
+	"operation_target_exists":             runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
 	"patch_basehash_mismatch":             runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
 	"patch_text_replace_conflict":         runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
 	"patch_unified_diff_conflict":         runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,

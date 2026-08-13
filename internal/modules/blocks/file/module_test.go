@@ -137,6 +137,47 @@ func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
 	}
 }
 
+func TestFileModuleFileWriteRejectsExistingTargetWithoutChangingContent(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	registerFileModuleReceiptOwner(t, hub)
+	module := New()
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "main.go")
+	original := []byte("package main\n")
+	if err := os.WriteFile(target, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-existing", RequiredOutputHash: "required-output-existing"}
+	result := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicExecuteFileWriteOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecuteFileWriteOperationCommand{
+			RuntimeOperationExecutionContext: fileExecutionContext("exec/ws-1/run-1/dispatch-existing/write-main", "dispatch-existing", "write-main", transaction, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.EvidenceKindStateChange, workspace, "main.go"),
+			Data:                             fileevents.FileWriteOperationData{TargetRef: "main.go", Content: "# markdown\n", ContentPresent: true},
+		},
+	))
+	data, magicErr := result.Get()
+	if magicErr != nil {
+		t.Fatal(magicErr)
+	}
+	response := data.(fileevents.ExecuteOperationResult)
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Feedback == nil || response.Receipt.Feedback.OriginalDiagnostic == nil || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != "patch_target_exists" {
+		t.Fatalf("file/write existing-target receipt = %+v", response.Receipt)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != string(original) {
+		t.Fatalf("existing target changed to %q err=%v", string(content), err)
+	}
+}
+
 func TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

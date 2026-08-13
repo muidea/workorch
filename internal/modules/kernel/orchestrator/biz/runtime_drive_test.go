@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -7041,7 +7042,8 @@ func TestRuntimeFileBackedPatchVariantMatrix(t *testing.T) {
 			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", want: "written\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, content, target := "file_write", "written\n", "written.txt"
-				return runtimePatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				baseHash := fmt.Sprintf("%x", sha256.Sum256([]byte("old\n")))
+				return runtimePatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}, {Name: "baseHash", String: &baseHash}})
 			},
 		},
 		{
@@ -7165,7 +7167,8 @@ func TestRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", operationID: "patch-file-write", want: "written\n",
 			candidate: func(target string) runtimecontract.RuntimeCandidate {
 				patchType, content := "file_write", "written\n"
-				return runtimePatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				baseHash := fmt.Sprintf("%x", sha256.Sum256([]byte("old\n")))
+				return runtimePatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}, {Name: "baseHash", String: &baseHash}})
 			},
 		},
 		{
@@ -7602,7 +7605,8 @@ func TestRuntimeFileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			name: "file_write", target: "written.txt", initial: "old\n", variant: "file_write", want: "written\n",
 			candidate: func() runtimecontract.RuntimeCandidate {
 				patchType, content, target := "file_write", "written\n", "written.txt"
-				return runtimePatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}})
+				baseHash := fmt.Sprintf("%x", sha256.Sum256([]byte("old\n")))
+				return runtimePatchCandidate("patch-file-write", target, []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}, {Name: "baseHash", String: &baseHash}})
 			},
 		},
 		{
@@ -8896,10 +8900,15 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		case runtimecontract.ConvergenceStateNeedStateChange:
 			if coverageID == "cwi-2" {
 				patchType, content := "file_write", "TOKEN=granted\n"
+				baseContent := "TOKEN=old\n"
+				if target == "focus-1.txt" {
+					baseContent = "new\n"
+				}
+				baseHash := fmt.Sprintf("%x", sha256.Sum256([]byte(baseContent)))
 				candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 					ID: "patch-" + focus.ID, Kind: runtimecontract.RuntimeBlockKindPatchApply,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-					Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}},
+					Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}, {Name: "baseHash", String: &baseHash}},
 				}}}}}
 			} else {
 				oldText, newText := "old\n", "new\n"

@@ -487,6 +487,9 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 		if requiresRegular && !info.Mode().IsRegular() {
 			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)}), nil
 		}
+		if operation.Kind == runtimemodel.StepKindFileWrite {
+			return fileOperationInfeasible(operation, "operation_target_exists", "file/write is create-only; use revision-bound patch/apply to replace an existing file", []string{filepath.ToSlash(rel)}), nil
+		}
 		if failure := verifyFileWriteReplayPrecondition(target, operation, filepath.ToSlash(rel)); failure != nil {
 			return failure, nil
 		}
@@ -523,7 +526,7 @@ func verifyFileWriteReplayPrecondition(target string, operation runtimemodel.Run
 	}
 	baseHash := runtimeOperationParameterString(operation, "baseHash")
 	if baseHash == "" {
-		return nil
+		return fileOperationInfeasible(operation, "operation_base_hash_required", "patch/apply file_write requires the owner-observed baseHash when replacing an existing file", []string{targetRef})
 	}
 	content, err := os.ReadFile(target)
 	if err != nil {

@@ -413,6 +413,10 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				// resource delta.
 				target := "implementation.go"
 				fileCandidate := variant.candidate(target)
+				if variant.name == "file_write" {
+					baseHash := snapshot.Snapshot.ContentHash
+					fileCandidate.StateChange.Operations[0].Operation.Parameters = append(fileCandidate.StateChange.Operations[0].Operation.Parameters, runtimecontract.OperationParameter{Name: "baseHash", String: &baseHash})
+				}
 				fileCandidate.StateChange.Operations[0].Operation.CoverageWorkItemIDs = nil
 				filePrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(persisted.Definition, persisted.Facts.Activation.ExecutionContract)
 				currentFileInventory, currentFileObservation := runtimeFileBackedOperationAdmissibility(t, persisted, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply)

@@ -45,6 +45,10 @@ func TestEvaluateRuntimeCompleteAdmissionMatrix(t *testing.T) {
 		{name: "proposal missing", mutate: func(input *RuntimeCompleteAdmissionInput) {
 			input.Attempt.Proposal = nil
 		}, disposition: RuntimeCompleteAdmissionStaleConflict, code: "candidate_proposal_mismatch"},
+		{name: "run-086 prospective binding target cannot dispatch to main go", mutate: func(input *RuntimeCompleteAdmissionInput) {
+			input.Candidate.StateChange.Operations[0].Operation.TargetRefs[0] = "cmd/lsp-bridge/main.go"
+			input.Attempt.Proposal.StateChange.Operations[0].Operation.TargetRefs[0] = "cmd/lsp-bridge/main.go"
+		}, disposition: RuntimeCompleteAdmissionCorrectableOnce, code: "candidate_manifest_violation"},
 		{name: "attempt already closed", mutate: func(input *RuntimeCompleteAdmissionInput) {
 			input.Attempt.State = RuntimeCandidateAttemptStateAccepted
 		}, disposition: RuntimeCompleteAdmissionDuplicateNoop, code: "candidate_attempt_not_pending"},

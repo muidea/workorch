@@ -221,6 +221,10 @@ owner_private_reducer_matches="$({
   source_matches 'applyTerminalDelivery\(' internal/modules/blocks/result/biz |
     grep -v -F -- 'internal/modules/blocks/result/biz/lifecycle_internal_event.go' |
     grep -v -E -- 'func \(m \*Biz\) applyTerminalDelivery\(' || true
+	 source_matches '(\.State[[:space:]]*=[[:space:]]*[^=]|\.RuntimeGovernanceProposal\.State[[:space:]]*=[[:space:]]*[^=]|\.Update\()' internal/modules/blocks/decision/biz |
+	   grep -v -F -- 'internal/modules/blocks/decision/biz/lifecycle_internal_event.go' || true
+	 source_matches '(\.State[[:space:]]*=[[:space:]]*[^=]|\.Update\()' internal/modules/blocks/approval/biz |
+	   grep -v -F -- 'internal/modules/blocks/approval/biz/lifecycle_internal_event.go' || true
 } | sed '/^[[:space:]]*$/d')"
 if [[ -n "$owner_private_reducer_matches" ]]; then
   cat >&2 <<EOF
@@ -229,6 +233,12 @@ internal-event dispatcher.
 
 $owner_private_reducer_matches
 EOF
+  exit 1
+fi
+
+if ! grep -q -F -- 'submitEffectInternalEvent' internal/modules/blocks/file/biz/owner.go ||
+   source_matches 'runtimeAdapter\.ApplyPatch\(' internal/modules/blocks/file/biz/owner.go | grep -q .; then
+  echo "boundary contract violation: File EventHub handler bypasses the owner-private effect dispatcher" >&2
   exit 1
 fi
 

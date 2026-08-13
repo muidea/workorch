@@ -226,12 +226,14 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		return
 	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
-	operationResult, executeErr := m.runtimeAdapter.ApplyPatch(PatchApplyRequest{
+	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
 		TargetRef:          command.Data.TargetRef, PatchType: "file_write",
 		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
+		CreateOnly:      true,
 		ApprovalGranted: command.Execution.GovernanceGrant != nil,
-	})
+	}
+	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
 	var failure *runtimecontract.FailureFact
@@ -269,7 +271,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		return
 	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
-	operationResult, executeErr := m.runtimeAdapter.ApplyPatch(PatchApplyRequest{
+	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
 		TargetRef:          command.Data.TargetRef, PatchType: command.Data.PatchType,
 		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
@@ -278,7 +280,8 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
 		ApprovalGranted: command.Execution.GovernanceGrant != nil,
 		ReplayProof:     command.Execution.ReplayProof,
-	})
+	}
+	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
 	var failure *runtimecontract.FailureFact

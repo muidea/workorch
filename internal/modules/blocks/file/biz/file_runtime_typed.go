@@ -121,6 +121,10 @@ type PatchApplyRequest struct {
 	Occurrence         int64
 	CoverageTargets    []string
 	Summary            string
+	// CreateOnly is selected only by the File owner's file/write command
+	// adapter. It makes file/write a creation operation and prevents it from
+	// replacing an owner-observed resource without a revision-bound patch.
+	CreateOnly bool
 	// ApprovalGranted is set only after the File owner has validated the persisted
 	// Runtime governance grant for this exact ExecutionKey + resume Fence.
 	ApprovalGranted bool
@@ -330,6 +334,7 @@ func (a *RuntimeAdapter) PreviewPatch(request PatchApplyRequest) (PatchPreviewRe
 		Operation: "preview", PatchType: request.PatchType, TargetRef: request.TargetRef, Summary: request.Summary,
 		Content: request.Content, Diff: request.Diff, OldText: request.OldText, NewText: request.NewText,
 		BaseHash: request.BaseHash, Occurrence: int(request.Occurrence), CoverageTargets: append([]string(nil), request.CoverageTargets...),
+		CreateOnly: request.CreateOnly,
 	}
 	if request.PatchType == patchTypeFileWrite && !request.ContentPresent {
 		return PatchPreviewResult{FailureCode: "patch_invalid_input", FailureMessage: common.ErrInvalidArgument.Error(), TargetRef: request.TargetRef}, common.ErrInvalidArgument
@@ -441,6 +446,7 @@ func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOpera
 		Operation: "apply", PatchType: request.PatchType, TargetRef: request.TargetRef, Summary: request.Summary,
 		Content: request.Content, Diff: request.Diff, OldText: request.OldText, NewText: request.NewText,
 		BaseHash: request.BaseHash, Occurrence: int(request.Occurrence), CoverageTargets: append([]string(nil), request.CoverageTargets...),
+		CreateOnly: request.CreateOnly,
 	}
 	if request.PatchType == patchTypeFileWrite && !request.ContentPresent {
 		return runtimeFileFailure("patch_invalid_input", common.ErrInvalidArgument, request.TargetRef), common.ErrInvalidArgument

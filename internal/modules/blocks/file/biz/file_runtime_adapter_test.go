@@ -60,6 +60,7 @@ func TestRuntimeAdapterFileWriteSameContentPreservesWorkspaceManifestRevision(t 
 		PatchType:          patchTypeFileWrite,
 		Content:            content,
 		ContentPresent:     true,
+		BaseHash:           sha256Hex([]byte(content)),
 	})
 	if err != nil || result.BeforeHash != result.AfterHash || result.BeforeHash == "" {
 		t.Fatalf("same-content file write = %+v err=%v", result, err)
@@ -864,6 +865,27 @@ func TestRuntimeAdapterPatchApplyFileWriteWritesOnce(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPatchApplyFileWriteRejectsExistingTargetWithoutBaseHash(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "main.go")
+	original := []byte("package main\n")
+	if err := os.WriteFile(target, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewRuntimeAdapter().ApplyPatch(PatchApplyRequest{
+		WorkspaceDirectory: workspace, PatchType: "file_write", TargetRef: "main.go",
+		Content: "# markdown\n", ContentPresent: true,
+	})
+	if !errors.Is(err, common.ErrConflict) || result.FailureCode != "patch_basehash_required" {
+		t.Fatalf("unversioned replacement result=%+v err=%v", result, err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil || string(content) != string(original) {
+		t.Fatalf("unversioned replacement changed target to %q err=%v", string(content), readErr)
+	}
+}
+
 func TestRuntimeAdapterPatchApplyFileWriteConfirmsSealedReplayAfterReceiptLoss(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "README.md")
@@ -938,6 +960,10 @@ func TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants(t *testing.
 				t.Fatal(err)
 			}
 			operation := runtimecontract.RuntimeOperation{ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"README.md"}, Parameters: test.parameters()}
+			if test.name == "file_write" {
+				baseHash := sha256Hex([]byte("before\n"))
+				operation.Parameters = append(operation.Parameters, runtimecontract.OperationParameter{Name: "baseHash", String: &baseHash})
+			}
 			failure, stale, proof := adapter.ProbeRuntimeOperationFeasibilityWithReplayProof(workspace, inventory, operation, nil)
 			if failure != nil || stale != nil || proof == nil || proof.OwnerModuleID != ModuleID || proof.OperationID != operation.ID || proof.BeforeHash == proof.AfterHash || proof.AdmissibilitySnapshotID != inventory.SnapshotID {
 				t.Fatalf("owner replay proof = %+v failure=%+v stale=%+v", proof, failure, stale)
@@ -1280,7 +1306,7 @@ func TestRuntimeAdapterPatchApplyAllowsLargeWorkspaceLocalSourceChange(t *testin
 
 	request := PatchApplyRequest{
 		WorkspaceDirectory: workspace, PatchType: patchTypeFileWrite, TargetRef: "internal/lsp/manager.go",
-		Content: after, ContentPresent: true,
+		Content: after, ContentPresent: true, BaseHash: sha256Hex([]byte(before)),
 	}
 	preview, err := NewRuntimeAdapter().PreviewPatch(request)
 	if err != nil {

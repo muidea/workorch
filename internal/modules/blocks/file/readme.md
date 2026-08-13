@@ -6,9 +6,8 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递文件操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 禁止的 执行通知。
-- Runtime target snapshot prerequisite 使用 Orchestrator 定义的 `AcquireTargetSnapshotCommand` / `AcquireTargetSnapshotResult`；本 block 直接订阅 EventHub 并返回具体 `TargetSnapshot`，不使用跨组件 map 或 JSON bridge。
-- Runtime workspace manifest 与 File capability preflight 同样使用 Orchestrator 定义的 typed EventHub command/result；manifest revision 对文件路径和内容变化敏感。
+- `kernel/orchestrator` 通过 File owner 在 `blocks/file/pkg/events` 定义的具体 command/result 同步投递文件操作；本组件直接订阅 EventHub，不启动通用 runtime executor，也不发布第二套执行通知。
+- Runtime target snapshot、workspace manifest 与 capability preflight 均使用 File owner 定义的 typed EventHub command/result；结果只表达 owner 观测，manifest revision 对文件路径和内容变化敏感。
 - 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权 LLM 提出一个具体 workspace-relative File target，并由同一 owner feasibility/admissibility gate 验证。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的空工作区仍返回 `absent`。
 - Runtime state-change/validation operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner
   stable factual category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威或 map。
@@ -16,6 +15,9 @@
   result 返回唯一 receipt outcome、target refs、side-effect metadata、bounded evidence/ref 与 original diagnostic。
 - Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 canonical decision。
 - 对跨越信任边界的敏感 file/write、patch/apply（密钥、`.env`、`.git`、CI workflow），File owner 先返回 `governance_required` 且不执行副作用；普通 workspace-local 文件的变更规模不构成 approval。resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证后消费该 grant 并执行，普通布尔参数或调用方声明不能绕过 approval。
+
+- EventHub handler 只校验并复制外部 command；文件副作用只能由 File-private effect event 选择并调用 adapter。
+- `file/write` 是 create-only 操作，目标已存在时必须拒绝且保持原内容不变；替换已有文件只能使用 `patch/apply file_write`，并携带 File owner 预检得到且在执行时再次核对的 `baseHash`。
 
 ## 相关约束
 

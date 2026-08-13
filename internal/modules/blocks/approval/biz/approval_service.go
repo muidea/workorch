@@ -90,7 +90,8 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontr
 	if item.State == common.ApprovalStateRejected {
 		return nil, common.ErrConflict
 	}
-	if err := s.resolveItem(ctx, item, common.ApprovalStateApproved, cmd.Context); err != nil {
+	item, err = s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, Target: common.ApprovalStateApproved, Context: cmd.Context.Clone()})
+	if err != nil {
 		return nil, err
 	}
 	return item, nil
@@ -120,7 +121,8 @@ func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontr
 	if item.State == common.ApprovalStateApproved {
 		return nil, common.ErrConflict
 	}
-	if err := s.resolveItem(ctx, item, common.ApprovalStateRejected, cmd.Context); err != nil {
+	item, err = s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, Target: common.ApprovalStateRejected, Context: cmd.Context.Clone()})
+	if err != nil {
 		return nil, err
 	}
 	return item, nil
@@ -131,31 +133,8 @@ func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, tar
 		return common.ErrInvalidArgument
 	}
 
-	item, err := s.approvals.Get(ctx, approvalID)
-	if err != nil {
-		return err
-	}
-	if item.State != common.ApprovalStatePending {
-		return common.ErrConflict
-	}
-
-	return s.resolveItem(ctx, item, target, context)
-}
-
-func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval, target common.ApprovalState, resolutionContext workorcheventpayload.Payload) error {
-	if item == nil || item.ID == "" {
-		return common.ErrInvalidArgument
-	}
-	if item.State != common.ApprovalStatePending {
-		return common.ErrConflict
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	item.UpdatedAt = now
-	item.ResolvedAt = now
-	item.ResolvedBy = firstNonEmptyApprovalString(approvalStringValue(resolutionContext, "resolvedBy"), approvalStringValue(resolutionContext, "actor"))
-	item.Context = mergeApprovalContext(item.Context, resolutionContext)
-	item.State = target
-	return s.approvals.Update(ctx, item)
+	_, err := s.submitLifecycleInternalEvent(ctx, lifecycleInternalEvent{ApprovalID: approvalID, Target: target, Context: context.Clone()})
+	return err
 }
 
 func cloneApprovalContext(input workorcheventpayload.Payload) workorcheventpayload.Payload {

@@ -413,8 +413,8 @@ Items are sequential. A later item cannot compensate for a missing earlier invar
 | CWI-SO-14 | implementation/focused-closed | Current focus, eligible closure, semantic order, proof batch and seal use one persisted closure lineage. If settlement unlocks a CWI outside the immutable manifest, the same SM-2 CAS retires that generation with typed `eligible_closure_changed` lineage before any new provider request. |
 | CWI-SO-15 | closed | `admitRuntimeDispatch` is the sole production dispatch constructor. Provider candidates pass complete admission; reducer-authored governance dispatches pass the same active/manifest/seal fence without fabricating a provider attempt. `candidate_sealed` closes the attempt and creates dispatch in one aggregate CAS. |
 | CWI-SO-16 | implementation/focused-closed | Evidence settlement, eligible projection, retained-order reuse and dependency-unlock retirement remain Orchestrator-private SM-2/SM-3 transitions. No Application, LLM, Run or capability owner can mutate the CWI cursor or semantic generation. |
-| CWI-SO-17 | closed | Run/LLM/capability/governance/delivery clone and scope tests plus the 22-unit boundary scan pass. Feasibility records now preserve the exact candidate-manifest identity returned by the owner, and empty/mismatched identities fail before persistence. |
-| CWI-SO-18 | code/automated-closed; deployed-live pending | `run-085` exposed blocked queue-head selection; `run-087` then exposed reuse of a settled predecessor in the accepted semantic order. Both shapes have focused regression coverage, the full Go/race/fmt/vet/boundary matrix passes, and the file-backed managed matrix completes through semantic seal, candidate admission, typed owner receipt/evidence and terminal delivery. A fresh post-fix deployment proof is still required. |
+| CWI-SO-17 | closed | Run/LLM/capability/governance/delivery clone and scope tests plus the 22-unit boundary scan pass. Decision/Approval lifecycle transitions and File effects now have owner-private dispatchers; `file/write` cannot replace an existing target and revision-bound `patch/apply` is required for replacement. |
+| CWI-SO-18 | code/automated-closed; deployed-live pending | `run-085` exposed blocked queue-head selection, `run-086` exposed post-effect target mismatch and unversioned `file/write` replacement, and `run-087` exposed reuse of a settled predecessor. Focused tests now reject the `run-086` candidate before dispatch and independently prove the File owner leaves an existing target unchanged. A fresh post-fix deployment proof is still required. |
 
 There is no compatibility reconstruction from schema v4. The v5 change is deliberate: candidate feasibility now persists
 `CandidateManifestHash`, so a v4 aggregate cannot prove that an owner observation belongs to the current sealed proposal.
@@ -811,8 +811,10 @@ After deploying the verified binary, issue a fresh `/run restart`. The live reco
 4. persisted SM-3 order, following SM-2 focus projection, and later SM-3 proof batch/feasibility/seal use one closure
    identity without a cross-machine event;
 5. exact owner receipt and evidence credit remain one-to-one;
-6. restart/recovery creates no duplicate provider session, dispatch or durable effect; and
-7. terminal delivery remains `Result -> Workspace -> Run`.
+6. a prospective binding target cannot dispatch an operation for another path;
+7. `file/write` cannot replace an existing target, while replacement `patch/apply` is bound to the owner-observed `baseHash`;
+8. restart/recovery creates no duplicate provider session, dispatch or durable effect; and
+9. terminal delivery remains `Result -> Workspace -> Run`.
 
 Exit gate: the fresh deployed run no longer produces `semantic seal omits active coverage`, and either continues
 truthful convergence or stops at a different deliberately typed owner/contract fact. It must also not produce

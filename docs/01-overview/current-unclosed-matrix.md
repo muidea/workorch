@@ -34,8 +34,8 @@ private transitions and pure Runtime contract validation.
 | CWI-SO-14 | implementation/focused-closed | Pure runtime contract | Current focus, exact eligible closure, semantic order/batch and seal identity share one closure; dependency unlock retires stale generation authority. |
 | CWI-SO-15 | code/automated-closed | Orchestrator SM-3 | Every production dispatch passes one owner-local dispatcher; candidate attempt acceptance and dispatch creation share one CAS. |
 | CWI-SO-16 | implementation/focused-closed | Orchestrator SM-2/SM-3/SM-4 | Settle, prerequisite, reopen, retirement, reconciliation and semantic-order projection remain owner-private and CAS-bound. |
-| CWI-SO-17 | code/automated-closed | Run/LLM/capability/governance/delivery owners | Cross-owner contracts remain detached typed facts; exact candidate-manifest identity is now mandatory on persisted owner feasibility. |
-| CWI-SO-18 | code/automated-closed; deployed-live pending | Automated/live verification | Full/race/fmt/vet/boundary and file-backed managed checks pass. Execute a fresh post-fix `/run restart` covering both `run-085` and `run-087` shapes and inspect its persisted aggregate. |
+| CWI-SO-17 | code/automated-closed | Run/LLM/capability/governance/delivery owners | Cross-owner contracts remain detached typed facts; Decision/Approval transitions and File effects now enter only owner-private dispatchers. `file/write` is create-only and replacement requires revision-bound `patch/apply`. |
+| CWI-SO-18 | code/automated-closed; deployed-live pending | Automated/live verification | `run-086` target drift is frozen as a pre-dispatch manifest rejection and File owner independently refuses overwrite. Execute a fresh post-fix `/run restart` covering the `run-085`/`run-086`/`run-087` shapes and inspect its persisted aggregate. |
 
 The detailed owner map, transition rules, migration boundary, and regression matrix are in the
 [Runtime CWI plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md).
@@ -67,8 +67,8 @@ isolation. It is independent of CWI/focus/dispatch authority. See the
 
 ## Judgment
 
-The prior broad code-closed claim was superseded by persisted `run-085` and `run-087`. Their implementation closures
-are now present under CWI-SO-13/14/16, and CWI-SO-18 automated/managed gates pass. CWI-SO remains open only on a new
+The prior broad code-closed claim was superseded by persisted `run-085`, `run-086` and `run-087`. Their implementation closures
+are now present under CWI-SO-13/14/16/17, and CWI-SO-18 automated/managed gates pass. CWI-SO remains open only on a new
 deployed schema-v5 `/run restart` proof; managed mock verification cannot substitute for persisted live evidence.
 
 ## Navigation

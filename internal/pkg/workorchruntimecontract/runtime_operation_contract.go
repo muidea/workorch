@@ -259,7 +259,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			},
 			RequireTargetRefs:   true,
 			ForbiddenParameters: []string{"input", "output", "payload", "path", "targetRef", "targetRefs"},
-			Rules:               []string{"targetRefs must contain exactly one workspace-relative target"},
+			Rules:               []string{"targetRefs must contain exactly one workspace-relative target", "target must not already exist; replacing content requires patch/apply with an owner-observed baseHash"},
 		}, true
 	case StepKindFileEdit:
 		return RuntimeOperationContract{
@@ -286,7 +286,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "diff", Type: RuntimeOperationParameterTypeString, Description: "unified_diff content"},
 				{Name: "oldText", Type: RuntimeOperationParameterTypeString, Description: "exact text_replace source text"},
 				{Name: "newText", Type: RuntimeOperationParameterTypeString, Description: "text_replace replacement; an empty string is allowed"},
-				{Name: "baseHash", Type: RuntimeOperationParameterTypeString, Description: "optional current content hash; file_write replay verification requires an owner-observed preflight match when supplied"},
+				{Name: "baseHash", Type: RuntimeOperationParameterTypeString, Description: "owner-observed current content hash; required when file_write replaces an existing target"},
 				{Name: "occurrence", Type: RuntimeOperationParameterTypeInteger, Description: "1-based match index when oldText is not unique"},
 				{Name: "coverageTargets", Type: RuntimeOperationParameterTypeStringList, Description: "coverage targets addressed by this state change"},
 				{Name: "summary", Type: RuntimeOperationParameterTypeString, Description: "bounded change summary"},
@@ -300,6 +300,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			},
 			Rules: []string{
 				"file_write must provide content",
+				"file_write replacing an existing target must provide the owner-observed baseHash",
 				"text_replace must provide non-empty oldText and a distinct newText",
 				"unified_diff must provide non-empty diff",
 				"targetRefs must contain exactly one workspace-relative target",
