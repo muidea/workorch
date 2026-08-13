@@ -876,3 +876,33 @@ func TestRuntimeSemanticPlanningHistoryRejectsSeedAndReasonDrift(t *testing.T) {
 		t.Fatal("semantic history with a mismatched definition seed was accepted")
 	}
 }
+
+func TestRuntimeSemanticPlanningEligibleClosureHistoryIsTypedAndDetached(t *testing.T) {
+	ledger := semanticSealedLedgerFixture(t)
+	coverageID := ledger.DefinitionSeed.CoverageItems[0].ID
+	history := RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: 2,
+		Reason:                 RuntimeSemanticPlanningRetirementEligibleClosureChanged,
+		ChangedCoverageIDs:     []common.CoverageWorkItemID{coverageID}, ClosureChangeTriggerRefs: []string{"binding-prerequisite"},
+		Snapshot: ledger,
+	}
+	if err := history.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	clone := history.Clone()
+	clone.ChangedCoverageIDs[0] = "mutated"
+	clone.ClosureChangeTriggerRefs[0] = "mutated"
+	if history.ChangedCoverageIDs[0] != coverageID || history.ClosureChangeTriggerRefs[0] != "binding-prerequisite" {
+		t.Fatal("eligible closure history clone aliases typed lineage")
+	}
+	invalid := history
+	invalid.ChangedCoverageIDs = []common.CoverageWorkItemID{coverageID, coverageID}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("duplicate eligible closure lineage was accepted")
+	}
+	invalid = history
+	invalid.ClosureChangeTriggerRefs = nil
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("eligible closure history without prerequisite binding refs was accepted")
+	}
+}

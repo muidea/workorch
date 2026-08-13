@@ -736,14 +736,39 @@ func (c *RuntimeController) projectEligibleRuntimeFocus(ctx context.Context, wor
 		return RuntimeAggregate{}, err
 	}
 	manifestHash = strings.TrimSpace(manifestHash)
+	projectionOrder := append([]common.CoverageWorkItemID(nil), acceptedOrder...)
 	if manifestHash != "" {
 		ledger := aggregate.SemanticPlanning.Clone()
 		if ledger.Manifest == nil || ledger.Manifest.Hash != manifestHash || ledger.CoverageOrderDocument == nil ||
 			!sameCoverageIDs(ledger.CoverageOrderDocument.CoverageOrder, acceptedOrder) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: eligible focus projection semantic order is stale", common.ErrConflict)
 		}
+		var closureChanged []common.CoverageWorkItemID
+		projectionOrder, closureChanged, err = currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, acceptedOrder)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+		if len(closureChanged) != 0 {
+			expectedRevision := aggregate.StateRevision
+			if err := retireSemanticPlanningGenerationForEligibilityChange(&aggregate, closureChanged); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+			if err != nil {
+				return RuntimeAggregate{}, err
+			}
+			aggregate.Facts, aggregate.Decision = facts, decision
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			return aggregate, nil
+		}
 	}
-	projected, err := projectRuntimeCWIExecutionFocus(aggregate.Facts, acceptedOrder, nil)
+	projected, err := projectRuntimeCWIExecutionFocus(aggregate.Facts, projectionOrder, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -765,6 +790,48 @@ func (c *RuntimeController) projectEligibleRuntimeFocus(ctx context.Context, wor
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// currentRuntimeCWIOrderFromSemanticLineage narrows an immutable accepted
+// semantic order after an earlier proof batch settled its CWI. Settled rows
+// remain audit lineage but are no longer members of the executable closure.
+// Every other eligibility change is stale authority and must start a fresh
+// semantic generation instead of being silently filtered.
+func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFacts, acceptedOrder []common.CoverageWorkItemID) ([]common.CoverageWorkItemID, []common.CoverageWorkItemID, error) {
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
+	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(eligible))
+	for _, id := range eligible {
+		eligibleSet[id] = struct{}{}
+	}
+	coverage := runtimeCoverageByID(facts.Coverage)
+	seen := make(map[common.CoverageWorkItemID]struct{}, len(acceptedOrder))
+	ret := make([]common.CoverageWorkItemID, 0, len(eligible))
+	for _, raw := range acceptedOrder {
+		id := common.CoverageWorkItemID(strings.TrimSpace(string(raw)))
+		if id == "" {
+			return nil, nil, fmt.Errorf("%w: semantic order lineage contains an empty coverage identity", common.ErrConflict)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, nil, fmt.Errorf("%w: semantic order lineage duplicates coverage %q", common.ErrConflict, id)
+		}
+		seen[id] = struct{}{}
+		if _, current := eligibleSet[id]; current {
+			ret = append(ret, id)
+			continue
+		}
+		item, found := coverage[id]
+		if !found || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled ||
+			item.State != runtimecontract.RuntimeCoverageItemStateSatisfied || item.CurrentBindingRef == nil {
+			return nil, nil, fmt.Errorf("%w: semantic order lineage contains non-settled ineligible coverage %q", common.ErrConflict, id)
+		}
+	}
+	changed := make([]common.CoverageWorkItemID, 0)
+	for _, id := range eligible {
+		if _, found := seen[id]; !found {
+			changed = append(changed, id)
+		}
+	}
+	return ret, changed, nil
 }
 
 func sameCoverageIDs(left, right []common.CoverageWorkItemID) bool {

@@ -192,9 +192,17 @@ def _operation_contract(authority: dict[str, Any], kind: str) -> dict[str, Any]:
 def _mcp_recipe_from_sealed_binding(
     contract: dict[str, Any], bindings: list[dict[str, Any]], expected_server_id: str
 ) -> tuple[list[str], str, str]:
-    binding_refs = _unique(_strings(_object(contract, "allowedBindingRefs", "AllowedBindingRefs")))
-    if not binding_refs:
-        raise MockContractError("sealed MCP operation has no binding refs")
+    binding_refs: list[str] = []
+    authorizations = _object(contract, "bindingAuthorizations", "BindingAuthorizations")
+    if not isinstance(authorizations, list):
+        raise MockContractError("sealed MCP operation has no binding authorizations")
+    for authorization in authorizations:
+        if not isinstance(authorization, dict):
+            continue
+        binding_refs.extend(_strings(_object(authorization, "allowedBindingRefs", "AllowedBindingRefs")))
+    binding_refs = _unique(binding_refs)
+    if len(binding_refs) != 1:
+        raise MockContractError("sealed MCP operation must resolve to exactly one binding ref")
     by_id = {
         _object(binding, "id", "ID"): binding
         for binding in bindings
@@ -305,7 +313,9 @@ def _authority(state: str, binding_refs: list[str] | None = None) -> dict[str, A
     recipe = "mcp/tool_call/mcp-test/repo.summary"
     return {
         "outputContract": {"operationContracts": [{
-            "kind": "mcp/tool_call", "allowedBindingRefs": binding_refs or ["binding/cwi-test"],
+            "kind": "mcp/tool_call", "bindingAuthorizations": [{
+                "allowedBindingRefs": binding_refs or ["binding/cwi-test"],
+            }],
             "target": {"ownerSelectorRefs": ["mcp-test"]},
         }]},
         "context": {

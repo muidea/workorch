@@ -372,7 +372,7 @@ semantic batch order, or independently repair a blocked current focus.
 
 These still require boundary scanning, but should not receive Runtime state logic:
 
-- `initiators/workorchruntime`: repository factory/provider only;
+- `internal/initiators/workorchruntime`: repository factory/provider only;
 - `kernel/system`: startup/configuration ownership only;
 - `kernel/governance`: governance policy composition only;
 - `blocks/memory`, `skill`, `soul`: their own resources and typed facts only.
@@ -392,6 +392,15 @@ The final boundary scan covers 1 Initiator, 4 Modules and 17 Blocks. For every u
 6. projection and notifications are never consumed as authoritative state; and
 7. no Runtime behavior is hard-coded to a template, language, test framework or MCP recipe.
 
+Registered-unit inventory (canonical repository paths):
+
+| Classification | Registered units |
+| --- | --- |
+| Initiator | `internal/initiators/workorchruntime` |
+| Modules | `internal/modules/application/workorchd`, `internal/modules/kernel/governance`, `internal/modules/kernel/orchestrator`, `internal/modules/kernel/system` |
+| Resource Blocks | `internal/modules/blocks/approval`, `internal/modules/blocks/decision`, `internal/modules/blocks/eventstream`, `internal/modules/blocks/mcpregistry`, `internal/modules/blocks/memory`, `internal/modules/blocks/result`, `internal/modules/blocks/run`, `internal/modules/blocks/skill`, `internal/modules/blocks/soul`, `internal/modules/blocks/workspace` |
+| Capability Blocks | `internal/modules/blocks/file`, `internal/modules/blocks/git`, `internal/modules/blocks/llm`, `internal/modules/blocks/mcp`, `internal/modules/blocks/shell`, `internal/modules/blocks/ssh`, `internal/modules/blocks/web` |
+
 ## 8. Ordered Code Closure Queue
 
 Items are sequential. A later item cannot compensate for a missing earlier invariant.
@@ -400,12 +409,12 @@ Items are sequential. A later item cannot compensate for a missing earlier invar
 
 | Item | Code/automated status | Closure evidence |
 | --- | --- | --- |
-| CWI-SO-13 | reopened by `run-085` | The mutation chain is owner-private, but the audit missed a second decision rule: `advanceSatisfiedCoverageFocus` selects the queue head while semantic planning selects only eligible CWI. Inventory and scanners must cover every focus-selection decision, not only repository writes. |
-| CWI-SO-14 | reopened by `run-085` | `EvaluateRuntimeCompleteAdmission` validates dependency rows, but current focus, exact eligible closure, semantic manifest/order/batch and seal are not yet bound by one pure projection/identity. |
+| CWI-SO-13 | implementation/focused-closed | Every unbound execution-focus decision now uses the Orchestrator-owned eligible projection. Settled semantic-order predecessors remain audit lineage and are removed only from the executable closure; non-settled ineligible rows fail closed. |
+| CWI-SO-14 | implementation/focused-closed | Current focus, eligible closure, semantic order, proof batch and seal use one persisted closure lineage. If settlement unlocks a CWI outside the immutable manifest, the same SM-2 CAS retires that generation with typed `eligible_closure_changed` lineage before any new provider request. |
 | CWI-SO-15 | closed | `admitRuntimeDispatch` is the sole production dispatch constructor. Provider candidates pass complete admission; reducer-authored governance dispatches pass the same active/manifest/seal fence without fabricating a provider attempt. `candidate_sealed` closes the attempt and creates dispatch in one aggregate CAS. |
-| CWI-SO-16 | reopened by `run-085` | Receipt/evidence lineage is correct, but evidence settlement can advance to a prerequisite-blocked queue head. Focus advance, semantic-order acceptance and reopen/retirement re-projection must share one SM-2 internal transition. |
+| CWI-SO-16 | implementation/focused-closed | Evidence settlement, eligible projection, retained-order reuse and dependency-unlock retirement remain Orchestrator-private SM-2/SM-3 transitions. No Application, LLM, Run or capability owner can mutate the CWI cursor or semantic generation. |
 | CWI-SO-17 | closed | Run/LLM/capability/governance/delivery clone and scope tests plus the 22-unit boundary scan pass. Feasibility records now preserve the exact candidate-manifest identity returned by the owner, and empty/mismatched identities fail before persistence. |
-| CWI-SO-18 | reopened; live failed | Fresh `run-085` proved new lineage/schema-v5 admission and correct owner receipts, but failed on focus/eligibility divergence. Automated and deployed combined verification must be rerun after CWI-SO-13/14/16 close. |
+| CWI-SO-18 | code/automated-closed; deployed-live pending | `run-085` exposed blocked queue-head selection; `run-087` then exposed reuse of a settled predecessor in the accepted semantic order. Both shapes have focused regression coverage, the full Go/race/fmt/vet/boundary matrix passes, and the file-backed managed matrix completes through semantic seal, candidate admission, typed owner receipt/evidence and terminal delivery. A fresh post-fix deployment proof is still required. |
 
 There is no compatibility reconstruction from schema v4. The v5 change is deliberate: candidate feasibility now persists
 `CandidateManifestHash`, so a v4 aggregate cannot prove that an owner observation belongs to the current sealed proposal.
@@ -777,12 +786,24 @@ Exit gate: `make verify-boundary-contract` proves the single owner/mutation path
 
 #### FOCUS-07 — Combined automated and live closure
 
-Status: pending. The new focused tests and boundary gate pass. The full runtime
-suite still contains the pre-existing `candidate_proposal_mismatch` baseline
-failures (reproduced from HEAD), and a fresh deployed `/run restart` has not
-yet supplied post-fix persisted evidence.
+Status: code/automated-closed; deployed verification pending.
 
-Run the full CWI-SO-18 automated matrix, then deploy and issue a fresh `/run restart`. The live record must show:
+The 2026-08-13 old-binary `run-087` advanced from settled `cwi-045` to `cwi-046`, but replayed the immutable
+`[cwi-045,cwi-046]` order as if both rows were still executable and failed with
+`runtime CWI semantic order contains ineligible coverage "cwi-045"`. The closure now distinguishes:
+
+- a settled predecessor, which remains immutable audit lineage but is removed from the current executable order;
+- a non-settled ineligible row, which remains a contract conflict; and
+- a newly eligible dependent row outside the old manifest, which retires the generation in the same Orchestrator CAS
+  with `eligible_closure_changed`, exact changed CWI IDs and settled prerequisite binding refs.
+
+Focused semantic/CWI and runtime-contract tests, full `go test ./...`, race, fmt, targeted vet/build and the boundary
+gate pass. The file-backed managed matrix also completes after its deterministic provider fixtures were aligned with
+the current per-variant `bindingAuthorizations` wire contract; the fixtures remain strict consumers of sealed C3
+authority and add no compatibility path. A fresh deployed `/run restart` has not yet supplied post-fix persisted
+evidence.
+
+After deploying the verified binary, issue a fresh `/run restart`. The live record must show:
 
 1. new Run/activation/request lineage and schema v5;
 2. settled current CWI advances only to an eligible CWI;
@@ -794,8 +815,9 @@ Run the full CWI-SO-18 automated matrix, then deploy and issue a fresh `/run res
 7. terminal delivery remains `Result -> Workspace -> Run`.
 
 Exit gate: the fresh deployed run no longer produces `semantic seal omits active coverage`, and either continues
-truthful convergence or stops at a different deliberately typed owner/contract fact. A new failure must be evaluated
-against the entire admission matrix before any code change.
+truthful convergence or stops at a different deliberately typed owner/contract fact. It must also not produce
+`semantic order contains ineligible coverage` merely because an earlier member of that immutable order is settled.
+A new failure must be evaluated against the entire admission matrix before any code change.
 
 ## 9. Regression Matrix
 

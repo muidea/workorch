@@ -317,11 +317,18 @@ def operation_target_ref(contract):
 
 def operation_binding_refs(contract):
     # Binding refs are the only candidate-side proof authorization.  They are
-    # sealed in C3 by SM-2 and must be reproduced exactly by the mock; a CWI
-    # list is an assessment observation, never an operation authorization.
-    refs = unique_strings(string_list(object_value(contract, "allowedBindingRefs", "AllowedBindingRefs")))
-    if not refs:
-        raise ValueError("sealed operation contract has no binding refs")
+    # sealed per variant/required-operation authorization in C3 by SM-2 and
+    # must be reproduced exactly by the mock; a CWI list is an assessment
+    # observation, never an operation authorization.  This verifier emits one
+    # operation per focus, so its selected contract must resolve to exactly one
+    # proof binding rather than guessing between authorization alternatives.
+    refs = []
+    authorizations = object_value(contract, "bindingAuthorizations", "BindingAuthorizations") or []
+    for authorization in authorizations:
+        refs.extend(string_list(object_value(authorization, "allowedBindingRefs", "AllowedBindingRefs")))
+    refs = unique_strings(refs)
+    if len(refs) != 1:
+        raise ValueError("sealed operation contract must resolve to exactly one binding ref")
     return refs
 
 def operation_validation_recipe_id(contract):
@@ -573,7 +580,7 @@ def semantic_plan_payload(request):
 
 def provider_request_parser_self_test():
     payload = {"input": """### C3.runtime-authority
-{"transaction":{"authoritySnapshotId":"authority-current"},"outputContract":{"operationContracts":[{"kind":"file/edit","allowedBindingRefs":["binding/cwi-current"],"target":{"allowedTargetRefs":["runtime-validation-source.txt"]}}]},"context":{"workspaceId":"ws-current","runId":"run-current","requiredState":"need_assessment","focus":{"id":"focus-current","coverageWorkItemIds":["cwi-current"]}}}
+{"transaction":{"authoritySnapshotId":"authority-current"},"outputContract":{"operationContracts":[{"kind":"file/edit","bindingAuthorizations":[{"allowedBindingRefs":["binding/cwi-current"]}],"target":{"allowedTargetRefs":["runtime-validation-source.txt"]}}]},"context":{"workspaceId":"ws-current","runId":"run-current","requiredState":"need_assessment","focus":{"id":"focus-current","coverageWorkItemIds":["cwi-current"]}}}
 
 ### C4.execution-tail
 {"latestAcceptedEvidence":[{"coverageWorkItemIds":["cwi-old"],"evidenceRefs":["workorch://old"]},{"coverageWorkItemIds":["cwi-current"],"evidenceRefs":["workorch://current"]}]}

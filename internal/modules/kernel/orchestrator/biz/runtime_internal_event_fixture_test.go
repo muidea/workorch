@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -81,6 +82,18 @@ func (o *Biz) AdmitRuntimeCandidateProposal(ctx context.Context, workspaceID com
 }
 
 func (o *Biz) RecordRuntimeCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (runtime.RuntimeAggregate, error) {
+	if record.CandidateManifestHash == "" {
+		aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
+		if err != nil {
+			return runtime.RuntimeAggregate{}, err
+		}
+		contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+		_, pending, found := pendingRuntimeCandidateAttemptForTest(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+		if !found || pending.ManifestHash == "" {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending manifest identity", common.ErrConflict, attempt)
+		}
+		record.CandidateManifestHash = pending.ManifestHash
+	}
 	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateFeasibilityObserved, WorkspaceID: workspaceID, RunID: runID, Attempt: attempt, CandidateFeasibility: &record})
 	return result.Aggregate, err
 }

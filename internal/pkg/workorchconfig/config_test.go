@@ -604,6 +604,35 @@ func writeApplicationConfig(t *testing.T, content string) string {
 	return configDir
 }
 
+func TestSaveReplacesApplicationConfigAtomically(t *testing.T) {
+	configDir := writeApplicationConfig(t, validLLMApplicationTOML())
+	t.Setenv(EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = Close() })
+
+	cfg, err := Persisted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.LLM.DefaultChat.ModelID = "gpt-atomic"
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := Persisted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.LLM.AIProxy.BaseURL != "http://127.0.0.1:8080" || persisted.LLM.DefaultChat.ModelID != "gpt-atomic" {
+		t.Fatalf("persisted config = %+v, want complete atomically replaced LLM section", persisted.LLM)
+	}
+	temporaryFiles, err := filepath.Glob(filepath.Join(configDir, ".application.toml-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporaryFiles) != 0 {
+		t.Fatalf("temporary config files remain after save: %v", temporaryFiles)
+	}
+}
+
 func TestNormalizeLLMConfigCanonicalizesMapKeys(t *testing.T) {
 	cfg := DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"

@@ -1640,6 +1640,17 @@ func TestRuntimeSemanticMultiBatchFeasibilityMergeRecoversAfterResponseLoss(t *t
 		aggregate.Facts.Focus.ID != "semantic-pending/cwi-v2-second" {
 		t.Fatalf("next focus did not reopen retained order lineage: phase=%s focus=%+v", aggregate.SemanticPlanning.Phase, aggregate.Facts.Focus)
 	}
+	// The immutable order still contains the settled predecessor. Replaying the
+	// owner-private projection event must narrow it to the current executable
+	// closure instead of rejecting the settled audit lineage as in run-087.
+	projectedRevision := aggregate.StateRevision
+	apply(RuntimeInternalEvent{
+		Kind: RuntimeInternalEventEligibleFocusProjected, SemanticOrderManifestHash: manifest.Hash,
+		SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), order.CoverageOrder...),
+	})
+	if aggregate.StateRevision != projectedRevision || aggregate.Facts.Focus.CoverageWorkItemIDs[0] != "cwi-v2-second" {
+		t.Fatalf("settled predecessor projection changed current closure: revision=%d want=%d focus=%+v", aggregate.StateRevision, projectedRevision, aggregate.Facts.Focus)
+	}
 	secondBatch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(
 		manifest, order, aggregate.SemanticPlanning.NextBatchSequence, "batch-request-1", aggregate.Facts.Focus.CoverageWorkItemIDs,
 		aggregate.SemanticPlanning.PendingCoverageIDs, 1,
@@ -1773,6 +1784,99 @@ func TestRuntimeSemanticCatalogInvalidationDoesNotReplanSettledCWI(t *testing.T)
 	}
 	if len(freshManifest.CoverageItems) != 1 || freshManifest.CoverageItems[0].ID != pendingID {
 		t.Fatalf("fresh semantic manifest reintroduced settled CWI: %+v", freshManifest.CoverageItems)
+	}
+}
+
+func TestRuntimeSemanticSettlementRetiresGenerationWhenDependencyBecomesEligible(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	dependent := runtimecontract.RuntimeCoverageItemFact{
+		ID: "cwi-dependent", SliceID: facts.Slices[0].ID, SourceScope: "dodItem", SourceID: "dod-dependent",
+		TargetText: "deliver dependent coverage", State: runtimecontract.RuntimeCoverageItemStateOpen,
+		PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+	}
+	facts.Coverage = append(facts.Coverage, dependent)
+	facts.Slices[0].CoverageWorkItemIDs = append(facts.Slices[0].CoverageWorkItemIDs, dependent.ID)
+	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
+		ID: "focus-dependent", SliceID: dependent.SliceID, CoverageWorkItemIDs: []common.CoverageWorkItemID{dependent.ID},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"target.txt"},
+	}}
+	facts.DefinitionSeed.CoverageItems = append(facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{
+		ID: dependent.ID, SliceID: dependent.SliceID, SourceScope: dependent.SourceScope, SourceID: dependent.SourceID,
+		TargetText: dependent.TargetText, Order: 2, PrerequisiteCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), dependent.PrerequisiteCoverageWorkItemIDs...),
+	})
+	facts.DefinitionSeed.Slices = facts.Slices
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
+	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
+	if len(manifest.CoverageItems) != 1 || manifest.CoverageItems[0].ID != "cwi-v2" {
+		t.Fatalf("initial eligible manifest = %+v, want only prerequisite CWI", manifest.CoverageItems)
+	}
+	order := document.Clone()
+	order.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.BatchID = ""
+	order.BatchSequence = 0
+	order.BatchCoverageWorkItemIDs = nil
+	order.CoverageOrder = []common.CoverageWorkItemID{"cwi-v2"}
+	order.Proposals = nil
+
+	apply := func(event RuntimeInternalEvent) {
+		t.Helper()
+		event.WorkspaceID, event.RunID = aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+		result, applyErr := controller.ApplyInternalEvent(ctx, event)
+		if applyErr != nil {
+			t.Fatalf("apply %s: %v", event.Kind, applyErr)
+		}
+		aggregate = result.Aggregate
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "dependency-prefix", LogicalRequestID: "dependency-order-request"})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &order, LogicalRequestID: "dependency-order-request"})
+	batch, err := runtimecontract.CompileRuntimeSemanticPlanFocusBatch(manifest, order, 0, "dependency-batch-request", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err = controller.compileSemanticPlanBatch(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document.BatchID = batch.BatchID
+	document.BatchSequence = batch.Sequence
+	document.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), batch.CoverageWorkItemIDs...)
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, SemanticDocument: &document, LogicalRequestID: batch.RequestLogicalID})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility})
+	accepted := aggregate.SemanticPlanning.Batches[0]
+	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, SemanticPlanMergedDocument: &merged})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed})
+	if err := runtimeTestAdvanceSemanticFocus(t, repository, &aggregate); err != nil {
+		t.Fatal(err)
+	}
+
+	if aggregate.Facts.Focus.CoverageWorkItemIDs[0] != dependent.ID || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(aggregate.SemanticPlanning.History) != 1 {
+		t.Fatalf("dependency unlock did not retire semantic generation: focus=%+v ledger=%+v", aggregate.Facts.Focus, aggregate.SemanticPlanning)
+	}
+	history := aggregate.SemanticPlanning.History[0]
+	if history.Reason != runtimecontract.RuntimeSemanticPlanningRetirementEligibleClosureChanged || len(history.ChangedCoverageIDs) != 1 || history.ChangedCoverageIDs[0] != dependent.ID || len(history.ClosureChangeTriggerRefs) != 1 {
+		t.Fatalf("dependency unlock history = %+v", history)
+	}
+	if len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 0 || aggregate.ActiveDispatch != nil {
+		t.Fatalf("dependency unlock fabricated execution authority: focus=%+v dispatch=%+v", aggregate.Facts.Focus, aggregate.ActiveDispatch)
 	}
 }
 

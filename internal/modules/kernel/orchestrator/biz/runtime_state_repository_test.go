@@ -233,7 +233,9 @@ func recordRuntimeFileBackedManagedValidationFeasibility(t *testing.T, ctx conte
 	}
 	if _, err := runtimeTestControllerRecordCandidateFeasibility(controller, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
-		AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+		AcquisitionBinding:    inventory.AcquisitionBinding,
+		CandidateManifestHash: runtimePendingCandidateManifestHashForBizTest(t, ctx, controller, "ws-v2", "run-v2", 0),
+		Observation:           &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}); err != nil {
 		t.Fatal(err)
 	}

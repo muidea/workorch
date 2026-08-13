@@ -225,7 +225,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 						WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: controllerMustLoadRuntimeAggregate(t, controller).Decision.AuthorityTransaction(),
 						WorkspaceDeliverableDirectory: deliverable, Operation: candidate.Validation.Operations[0].Operation, Admissibility: inventory,
 						CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
-						CandidateManifestHash: "manifest-mcp-restart", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, candidate.Validation.Operations[0].Operation.Kind),
+						CandidateManifestHash: runtimePendingCandidateManifestHashForBizTest(t, ctx, controller, "ws-v2", "run-v2", 0), OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, candidate.Validation.Operations[0].Operation.Kind),
 					},
 				))
 				if probeResult == nil {
@@ -241,7 +241,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				}
 				if _, err := runtimeTestControllerRecordCandidateFeasibility(controller, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 					OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
-					AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probe.ReplayProof,
+					AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probe.CandidateManifestHash,
+					Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probe.ReplayProof,
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -656,6 +657,20 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 			})
 		}
 	}
+}
+
+func runtimePendingCandidateManifestHashForBizTest(t *testing.T, ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) string {
+	t.Helper()
+	aggregate, err := controller.Load(ctx, workspaceID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	_, record, found := pendingRuntimeCandidateAttemptForTest(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if !found || record.ManifestHash == "" {
+		t.Fatalf("candidate attempt %d has no pending manifest identity", attempt)
+	}
+	return record.ManifestHash
 }
 
 type runtimeFileBackedMCPServerGetter struct{ server *mcpmodel.Server }

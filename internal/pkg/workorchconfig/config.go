@@ -351,7 +351,42 @@ func Save(next Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath, payload, 0o600)
+	return writeConfigAtomically(configPath, payload)
+}
+
+func writeConfigAtomically(configPath string, payload []byte) error {
+	directory := filepath.Dir(configPath)
+	temporary, err := os.CreateTemp(directory, ".application.toml-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	removeTemporary := true
+	defer func() {
+		if removeTemporary {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(payload); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, configPath); err != nil {
+		return err
+	}
+	removeTemporary = false
+	return nil
 }
 
 func DefaultLLMOutputRuntimeConfig() LLMOutputRuntimeConfig {

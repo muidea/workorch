@@ -17,7 +17,7 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | --- | --- |
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **CWI-SO-13/14/16 reopened by fresh schema-v5 `run-085`; CWI-SO-18 live failed.** Owner boundaries and receipt/evidence lineage remain valid, but SM-2 queue-head advancement can select a prerequisite-blocked focus while semantic planning uses a different eligible closure. One eligible-focus projection and exact closure identity must be closed before another deployed proof. |
+| CWI reconciliation | **CWI-SO-13/14/16/18 code and automated matrices are closed; deployed verification remains open.** `run-085` blocked-focus selection and `run-087` settled-order reuse now converge through one Orchestrator-owned eligible closure and typed semantic-generation retirement. Full/race/boundary and file-backed managed gates pass; a fresh deployed proof remains. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -29,11 +29,10 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-`CWI-SO` is sequential. The active order is `FOCUS-01` through `FOCUS-07` in the Runtime CWI plan: freeze the neutral
-`run-085` counterexample, add the pure eligible-focus projection, introduce one SM-2 private transition, route every
-focus decision through it, bind semantic generations to the same closure, remove obsolete decisions, then repeat the
-combined automated and fresh deployed matrix. A provider, capability owner, UI, projection or managed mock result
-cannot substitute for Orchestrator-owned closure.
+`CWI-SO` is now at `FOCUS-07`: the eligible-focus projection, owner-private transition routing, settled-order narrowing
+and dependency-unlock generation retirement are implemented and covered by the combined automated matrix. The remaining
+work is a fresh deployed `/run restart` proof. A provider, capability owner, UI, projection or managed mock result cannot
+substitute for Orchestrator-owned closure.
 
 ## Active Documentation Rules
 

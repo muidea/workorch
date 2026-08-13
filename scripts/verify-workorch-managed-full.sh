@@ -174,7 +174,9 @@ baseURL = "$AI_PROXY_BASE_URL"
 
 [llm.defaultChat]
 providerID = "ai-proxy"
-modelID = "managed-verify-placeholder"
+# The managed mock catalog exposes verify-model. LLM configuration writes in
+# child verifiers are restart-staged and must not be used as a hot-switch.
+modelID = "verify-model"
 EOF
 }
 

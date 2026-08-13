@@ -129,15 +129,15 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime CWI 单 owner 收口：fresh `run-085` 已重新打开 CWI-SO-13/14/16，CWI-SO-18 live failed。**
+1. **必需 Runtime CWI 单 owner 收口：CWI-SO-13/14/16/18 已完成代码与自动化矩阵，deployed live 待验证。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。
-   fresh schema-v5 `run-085` 又证明：`cwi-043` settled 后，旧 focus advance 会直接选择 presentation queue 的
-   blocked `cwi-048`，而 semantic planning 按 prerequisite 正确选择 eligible `cwi-044/045/046`，最终在 strict seal
-   形成 closure mismatch。跨 owner typed fact、owner receipt/evidence、Run lifecycle 与 terminal delivery 仍符合
-   owner 边界；未关代码集中在 Orchestrator 内部的 exact eligible closure、唯一 focus projection、semantic order 与
-   seal identity。实施顺序为 active plan 的 `FOCUS-01`～`FOCUS-07`，完成 focused/full/race/vet/fmt/boundary/managed
-   file-backed 后再执行 fresh deployed `/run restart`。不得通过削弱 semantic seal/owner preflight、解析 message、让
+   fresh schema-v5 `run-085` 证明 blocked queue-head 与 eligible closure 曾分裂；旧二进制 `run-087` 又证明 settled
+   `cwi-045` 仍被旧 semantic order 当成可执行成员。当前实现已将两者归一到 Orchestrator owner-private closure：
+   settled predecessor 只保留审计 lineage，非 settled ineligible row fail-closed，依赖 settlement 新解锁旧 manifest 外
+   CWI 时在同一 CAS 以 `eligible_closure_changed` 退休 generation。跨 owner typed fact、owner receipt/evidence、Run
+   lifecycle 与 terminal delivery 仍符合 owner 边界；full/race/vet/fmt/boundary 与 managed file-backed 已通过，剩余仅为
+   部署该二进制后的 fresh `/run restart` persisted proof。不得通过削弱 semantic seal/owner preflight、解析 message、让
    Application/LLM/capability owner 创建或排序 current focus、新增全局索引或第五状态机规避。普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
    [CWI-SO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。

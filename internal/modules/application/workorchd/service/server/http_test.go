@@ -5553,10 +5553,11 @@ func TestWorkorchDActivationHTTPProjectsBackgroundSchedulerFailure(t *testing.T)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
 	}
-	waitForCondition(t, time.Second, func() bool {
-		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
-		return err == nil && snapshot.RunCommand != nil && snapshot.RunCommand.State == "rejected"
-	})
+	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := state.waitBackground(waitCtx); err != nil {
+		t.Fatalf("wait for scheduler failure projection: %v", err)
+	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatal(err)

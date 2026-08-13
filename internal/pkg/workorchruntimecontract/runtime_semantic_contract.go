@@ -1149,6 +1149,11 @@ const (
 	// facts can remain current while exactly one settled CWI needs a successor
 	// proof binding.
 	RuntimeSemanticPlanningRetirementCWIReopened RuntimeSemanticPlanningRetirementReason = "cwi_reopened"
+	// RuntimeSemanticPlanningRetirementEligibleClosureChanged records that a
+	// settled prerequisite made a CWI eligible after the immutable manifest and
+	// coverage order were accepted. The next generation must recompile the
+	// complete closure; the old provider order is audit lineage only.
+	RuntimeSemanticPlanningRetirementEligibleClosureChanged RuntimeSemanticPlanningRetirementReason = "eligible_closure_changed"
 )
 
 // RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
@@ -1257,7 +1262,12 @@ type RuntimeSemanticPlanningGeneration struct {
 	// audit lineage only and never select an operation or a recovery action.
 	ReopenedCoverageIDs []common.CoverageWorkItemID
 	ReopenTriggerRefs   []string
-	Snapshot            RuntimeSemanticPlanningLedger
+	// ChangedCoverageIDs and ClosureChangeTriggerRefs bind an eligibility
+	// change to the exact settled prerequisite binding facts that unlocked it.
+	// They do not select the next focus or grant proof authority.
+	ChangedCoverageIDs       []common.CoverageWorkItemID
+	ClosureChangeTriggerRefs []string
+	Snapshot                 RuntimeSemanticPlanningLedger
 }
 
 func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningGeneration {
@@ -1266,6 +1276,8 @@ func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningG
 	g.PrerequisiteIDs = normalizeStrings(g.PrerequisiteIDs)
 	g.ReopenedCoverageIDs = normalizeOrderedCoverageWorkItemIDs(g.ReopenedCoverageIDs)
 	g.ReopenTriggerRefs = normalizeStrings(g.ReopenTriggerRefs)
+	g.ChangedCoverageIDs = normalizeOrderedCoverageWorkItemIDs(g.ChangedCoverageIDs)
+	g.ClosureChangeTriggerRefs = normalizeStrings(g.ClosureChangeTriggerRefs)
 	// Detach the generation snapshot without recursively walking a malformed
 	// nested History tree.  Validation below rejects any non-nil nested history;
 	// normalization must remain bounded so a corrupt persisted record cannot
@@ -1287,7 +1299,8 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 	raw := g
 	g = g.Normalized()
 	if len(raw.InvalidationSignatures) != len(g.InvalidationSignatures) || len(raw.PrerequisiteIDs) != len(g.PrerequisiteIDs) ||
-		len(raw.ReopenedCoverageIDs) != len(g.ReopenedCoverageIDs) || len(raw.ReopenTriggerRefs) != len(g.ReopenTriggerRefs) {
+		len(raw.ReopenedCoverageIDs) != len(g.ReopenedCoverageIDs) || len(raw.ReopenTriggerRefs) != len(g.ReopenTriggerRefs) ||
+		len(raw.ChangedCoverageIDs) != len(g.ChangedCoverageIDs) || len(raw.ClosureChangeTriggerRefs) != len(g.ClosureChangeTriggerRefs) {
 		return fmt.Errorf("runtime semantic planning generation contains duplicate or empty lineage values")
 	}
 	if g.RetiredAtStateRevision == 0 || g.Reason == "" {
@@ -1295,12 +1308,16 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 	}
 	switch g.Reason {
 	case RuntimeSemanticPlanningRetirementResourceInvalidated, RuntimeSemanticPlanningRetirementCatalogRefresh:
-		if len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 {
+		if len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic catalog retirement requires only catalog lineage")
 		}
 	case RuntimeSemanticPlanningRetirementCWIReopened:
-		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) == 0 || len(g.ReopenTriggerRefs) == 0 {
+		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) == 0 || len(g.ReopenTriggerRefs) == 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic CWI reopen retirement requires only CWI lineage")
+		}
+	case RuntimeSemanticPlanningRetirementEligibleClosureChanged:
+		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) == 0 || len(g.ClosureChangeTriggerRefs) == 0 {
+			return fmt.Errorf("runtime semantic eligible-closure retirement requires only closure-change lineage")
 		}
 	default:
 		return fmt.Errorf("runtime semantic planning generation has unsupported retirement reason %q", g.Reason)
@@ -1331,7 +1348,7 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 			return fmt.Errorf("runtime semantic planning generation prerequisite %q is outside snapshot manifest", prerequisiteID)
 		}
 	}
-	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened {
+	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged {
 		seedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(g.Snapshot.DefinitionSeed.CoverageItems))
 		for _, item := range g.Snapshot.DefinitionSeed.CoverageItems {
 			seedCoverage[item.ID] = struct{}{}
@@ -1339,6 +1356,11 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 		for _, coverageID := range g.ReopenedCoverageIDs {
 			if _, found := seedCoverage[coverageID]; !found {
 				return fmt.Errorf("runtime semantic CWI reopen %q is outside snapshot definition seed", coverageID)
+			}
+		}
+		for _, coverageID := range g.ChangedCoverageIDs {
+			if _, found := seedCoverage[coverageID]; !found {
+				return fmt.Errorf("runtime semantic closure change %q is outside snapshot definition seed", coverageID)
 			}
 		}
 	}
@@ -1570,7 +1592,9 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 	seenInvalidationSignatures := make(map[string]struct{})
 	lastRetiredRevision := uint64(0)
 	for idx := range l.History {
-		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(l.History[idx].InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(l.History[idx].PrerequisiteIDs) {
+		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(l.History[idx].InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(l.History[idx].PrerequisiteIDs) ||
+			len(rawHistory[idx].ReopenedCoverageIDs) != len(l.History[idx].ReopenedCoverageIDs) || len(rawHistory[idx].ReopenTriggerRefs) != len(l.History[idx].ReopenTriggerRefs) ||
+			len(rawHistory[idx].ChangedCoverageIDs) != len(l.History[idx].ChangedCoverageIDs) || len(rawHistory[idx].ClosureChangeTriggerRefs) != len(l.History[idx].ClosureChangeTriggerRefs) {
 			return fmt.Errorf("runtime semantic planning history %d contains duplicate or empty lineage values", idx)
 		}
 		history := l.History[idx]

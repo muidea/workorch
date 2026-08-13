@@ -190,3 +190,35 @@ func TestEligibleFocusProjectionSelectsLaterEligibleCWIAndIsIdempotent(t *testin
 		t.Fatalf("duplicate projection revision = %d, want %d", duplicate.Aggregate.StateRevision, result.Aggregate.StateRevision)
 	}
 }
+
+func TestCurrentRuntimeCWIOrderFromSemanticLineageDropsOnlySettledPredecessor(t *testing.T) {
+	settledRef := runtimecontract.RuntimeCWIBindingRef{
+		BindingID: "binding-settled", BindingHash: "hash-settled", FocusID: "focus-settled", SemanticManifestHash: "manifest-order",
+	}
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionSeed: runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{
+			{ID: "cwi-settled", Order: 1}, {ID: "cwi-next", Order: 2}, {ID: "cwi-blocked", Order: 3},
+		}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{
+			{ID: "cwi-settled", State: runtimecontract.RuntimeCoverageItemStateSatisfied, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateSettled, CurrentBindingRef: &settledRef},
+			{ID: "cwi-next", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning},
+			{ID: "cwi-blocked", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStatePlanning, PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-next"}},
+		},
+	}
+
+	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, []common.CoverageWorkItemID{"cwi-settled", "cwi-next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(order) != 1 || order[0] != "cwi-next" || len(changed) != 0 {
+		t.Fatalf("current semantic order = %+v, want only cwi-next", order)
+	}
+
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, []common.CoverageWorkItemID{"cwi-settled", "cwi-blocked", "cwi-next"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+		t.Fatalf("blocked historical order error = %v", err)
+	}
+	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, []common.CoverageWorkItemID{"cwi-settled"})
+	if err != nil || len(changed) != 1 || changed[0] != "cwi-next" {
+		t.Fatalf("new eligible closure change = %+v, error = %v", changed, err)
+	}
+}

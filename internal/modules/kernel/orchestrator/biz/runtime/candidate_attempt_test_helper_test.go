@@ -283,6 +283,19 @@ func (c *RuntimeController) AdmitAndSealCandidateAttemptForTest(ctx context.Cont
 		return CandidateAdmissionCommitResult{}, err
 	}
 	candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	_, record, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	if pending && record.Proposal == nil {
+		proposal, proposalErr := c.admitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+		if proposalErr != nil || !proposal.Admission.Accepted() {
+			return proposal, proposalErr
+		}
+		aggregate, manifest, logicalRequestID, err = candidateAttemptTestBinding(ctx, c, workspaceID, runID, attempt)
+		if err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
+	}
 	return c.admitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
