@@ -24,9 +24,9 @@ func TestRuntimeSemanticProofFeasibilityCommandRequiresExactOwnerAndCatalog(t *t
 
 func TestRuntimeSemanticProofFeasibilityResultPreservesOriginalDiagnostic(t *testing.T) {
 	command := semanticFeasibilityCommandFixture(t)
-	diagnostic := runtimecontract.RuntimeSemanticFeasibilityDiagnostic(runtimecontract.RuntimeModuleFile, "target_exists", "the exact owner message", "workspace-1", "workspace-2", []string{"main.go"})
+	diagnostic := runtimecontract.RuntimeSemanticFeasibilityDiagnostic(runtimecontract.RuntimeModuleFile, "target_exists", "the exact owner message", "workspace-1", "workspace-2", []string{"new-file.go"})
 	diagnostic.OriginalMessage = "  the exact owner message  "
-	response, err := runtimecontract.NewRuntimeSemanticProofFeasibilityObservation(command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, "workspace-2", []string{"main.go"}, diagnostic)
+	response, err := runtimecontract.NewRuntimeSemanticProofFeasibilityObservation(command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, "workspace-2", []string{"new-file.go"}, diagnostic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRuntimeSemanticProofFeasibilityResultPreservesOriginalDiagnostic(t *tes
 func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing.T) {
 	command := semanticFeasibilityCommandFixture(t)
 	valid, err := runtimecontract.NewRuntimeSemanticProofFeasibilityObservation(
-		command, runtimecontract.RuntimeSemanticFeasibilityFeasible, "workspace-2", []string{"main.go"}, nil,
+		command, runtimecontract.RuntimeSemanticFeasibilityFeasible, "workspace-2", []string{"new-file.go"}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func semanticFeasibilityCommandFixture(t *testing.T) runtimecontract.RuntimeSema
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
 		Target: runtimecontract.RuntimeOperationTargetAuthorization{
 			Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"workspace-relative-new-file-target"},
-			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "main.go",
+			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "new-file.go",
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "semantic/dod-1",
 	}

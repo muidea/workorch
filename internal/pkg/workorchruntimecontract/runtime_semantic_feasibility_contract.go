@@ -129,6 +129,9 @@ func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofPr
 		if !allStringsContained(target.ProspectiveConstraintRefs, constraintRefs) {
 			return runtimeSemanticProposalConstraint("target.prospectiveConstraintRefs", RuntimeSemanticConstraintAllowedValue, strings.Join(target.ProspectiveConstraintRefs, ","), nil, constraintRefs)
 		}
+		if semanticContainsString(catalog.TargetRefs, target.ProspectiveTargetRef) {
+			return runtimeSemanticProposalConstraint("target.prospectiveTargetRef", RuntimeSemanticConstraintRelational, target.ProspectiveTargetRef, []string{"target absent from sealed existing target set"}, nil)
+		}
 	}
 	if proposal.ValidationRecipeID != "" {
 		if !allStringsContained([]string{proposal.ValidationRecipeID}, catalog.ValidationRecipeRefs) {

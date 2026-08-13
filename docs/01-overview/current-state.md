@@ -129,13 +129,14 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime CWI 单 owner 收口：CWI-SO-1～CWI-SO-4 与 CWI-SO-6；CWI-SO-5 已代码收口。** 旧 schema 或当前
-   schema 但 CWI ledger 歧义的 aggregate 已经由 Run owner 持久化 `fresh_activation_required`，不迁移、不重建、不触发
-   LLM/capability/retry/replay。`run-073` 已证实：catalog generation 切换可让
-   已处理 CWI 重新进入 pending，形成第二条 binding 和 durable effect；当前 reconciliation request 也可滞后于最新
-   sealed contract。后续收口以 Orchestrator 内部、基于既有 coverage row 的 canonical CWI ledger 为唯一权威，统一
-   binding、focus、coverage、reopen 与 reconciliation generation，不新增全局索引或第五状态机。普通用户仍只提供
-   Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
+1. **必需 Runtime CWI 单 owner 收口：CWI-SO-1～CWI-SO-6 已代码收口；CWI-SO-7 automated-verified、live-pending。**
+   canonical CWI ledger、generation/reconciliation fencing、dispatch/evidence fences 与 current-schema fail-closed
+   boundary 已完成。`run-078` 新暴露：SM-3 complete-document evaluator 可接受一个已存在于同一 sealed owner catalog
+   的 `prospective_owner_target`，导致矛盾绕过合法 attempt-0/1 correction 并在 owner feasibility 阶段终态化。当前先
+   已以 owner-neutral 纯合同补齐 target-policy 一致性，并复用既有 attempt-0/1 complete-document correction；没有修改
+   capability owner 的真实性 fence、把 owner `infeasible` 变成 retry、新增全局索引或第五状态机。CWI-SO-7 的
+   focused/full/race/boundary/managed 自动化复验已通过；fresh deployed fault matrix 仍待重新部署后验证。普通用户仍
+   只提供 Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
    [CWI-SO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 2. **回归基线**：predecessor-owned restart、release-before-successor、sealed complete document、whole-document recovery、
    strict candidate、receipt match、owner-local terminal delivery、replay/CAS 与双 workspace regressions 必须持续通过。

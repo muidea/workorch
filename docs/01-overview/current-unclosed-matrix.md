@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-11
+Last Updated: 2026-08-13
 
 ## Purpose
 
@@ -18,16 +18,15 @@ Status: active
 `run-073` showed that the production owner boundaries and terminal delivery can be structurally correct while the
 Orchestrator still violates CWI canonicality internally. The Run produced two accepted File effects for `cwi-043`, then
 failed when the reconciliation compiler finally observed duplicate coverage. Its current reconciliation request also
-referenced an older binding set than the current sealed contract.
+referenced an older binding set than the current sealed contract. CWI-SO-1 through CWI-SO-5 closed that ledger defect.
+The later `run-078` exposed the remaining pre-binding gap: a semantic proposal may label an existing sealed-catalog
+target as prospective and escape the only legal complete-document correction point.
 
 | Item | Status | Owner | Required closure |
 | --- | --- | --- | --- |
-| CWI-SO-1 | pending | Orchestrator SM-2 + pure runtime contract | Make the existing coverage rows the canonical CWI ledger and validate queue/binding/request uniqueness. |
-| CWI-SO-2 | pending | Orchestrator SM-2 | Retire catalog generations without reintroducing settled CWI; reject duplicate binding before operation request. |
-| CWI-SO-3 | pending | Orchestrator SM-2/SM-4 | Supersede old reconciliation generations and atomically synchronize reopen coverage with focus projection. |
-| CWI-SO-4 | pending | Orchestrator SM-3 | Fence candidate, dispatch, receipt, and evidence by the canonical current binding. |
-| CWI-SO-5 | code-closed | Orchestrator + Run opaque persistence | Legacy or ambiguous persisted aggregate is routed as a typed `fresh_activation_required` fact; no inferred migration, LLM/capability call, retry lease, or durable replay. Full and deployed matrix remains CWI-SO-6. |
-| CWI-SO-6 | pending | Runtime verification | Pass focused/full/race/boundary/managed and fresh deployed invalidation/reopen/restart matrix. |
+| CWI-SO-1 through CWI-SO-5 | code-closed | Orchestrator + pure runtime contract + Run opaque persistence | Canonical CWI ledger, generation/reconciliation fencing, dispatch/evidence fences, and current-schema fail-closed boundary are implemented. |
+| CWI-SO-6 | code-closed | Orchestrator SM-3 + pure runtime contract | A prospective target already present in the same sealed owner catalog is rejected before owner probing and uses only the existing attempt-0/1 complete-document correction. |
+| CWI-SO-7 | automated-verified; live-pending | Runtime verification | Focused/full/race/boundary and isolated managed mock-provider verification pass. Complete fresh positive convergence and deployed invalidation/reopen/restart/resume matrix. |
 
 The detailed owner map, transition rules, migration boundary, and regression matrix are in the
 [Runtime CWI plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md).

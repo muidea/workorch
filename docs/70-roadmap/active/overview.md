@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-08-11
+Last Updated: 2026-08-13
 
 ## Purpose
 
@@ -17,7 +17,7 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | --- | --- |
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **active: CWI-SO-1 through CWI-SO-4 and CWI-SO-6; CWI-SO-5 code-closed.** `run-073` proved duplicate CWI binding/effect across semantic generations, stale reconciliation request binding, and focus queue inconsistency. |
+| CWI reconciliation | **active: CWI-SO-1 through CWI-SO-6 code-closed; CWI-SO-7 automated-verified and live-pending.** The `run-078` prospective/existing contradiction is now rejected through the existing bounded SM-3 correction before owner probing. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -29,9 +29,9 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-`CWI-SO` is sequential: contract/validator, SM-2 generation seal, reconciliation generation, SM-3 fences,
-current-schema boundary, then full/deployed verification. A provider, capability owner, UI, or projection change cannot
-substitute for any of those steps.
+`CWI-SO` is sequential: the completed canonical-ledger and SM-3 target-policy slices remain closed; automated gates
+have been re-run and fresh deployed verification remains. A provider, capability owner, UI, or
+projection change cannot substitute for either step.
 
 ## Active Documentation Rules
 

@@ -9,8 +9,8 @@ Last Updated: 2026-08-13
 ## 1. Purpose And Authority
 
 This is the sole active implementation queue for Runtime CWI identity, semantic-generation retirement, focus
-projection, and reconciliation generation closure. It is derived from the current Runtime contract and the persisted
-`run-073` and `run-077` counterexamples. The prior plan was moved to
+projection, reconciliation generation, and semantic target-policy closure. It is derived from the current Runtime
+contract and the persisted `run-073`, `run-077`, and `run-078` counterexamples. The prior plan was moved to
 [`90-archive/superseded`](../../90-archive/superseded/runtime-cwi-reconciliation-single-owner-closure-plan-pre-cwi-ledger-2026-08-11.md);
 its historical RSO status claims are not implementation authority.
 
@@ -88,6 +88,38 @@ The following concepts are distinct and must have distinct private transitions:
 
 There is no implicit `bound -> planning` transition. In particular, catalog revision drift, provider rejection, process
 restart, reconciliation retry, projection lag, or a changed LLM proposal is not a reopen or binding-retirement cause.
+
+### 2.3 Pre-binding target-policy contradiction exposed by `run-078`
+
+The fresh workspace-full restart `ws-a8bada88e7b1b5f8/run-078` did not reach binding seal or operation dispatch. Its
+semantic proof batch selected `cwi-043` and proposed:
+
+```text
+owner=blocks/file
+operation=patch/apply
+variant=unified_diff
+policy=prospective_owner_target
+prospectiveTargetRef=cmd/lsp-bridge/main.go
+```
+
+The same sealed File admissibility catalog already contained `cmd/lsp-bridge/main.go` in its existing `TargetRefs`.
+The complete semantic document evaluator accepted the proposal because it checked the prospective selector and
+constraint vocabulary but did not reject the contradiction between `ProspectiveTargetRef` and the same catalog's
+existing target set. File then correctly returned the typed feasibility fact `prospective_target_exists`; SM-2
+persisted that observation and immediately sealed `semantic_contract_failed`. The terminal delivery order remained
+`Result -> Workspace -> Run`, no owner operation ran, and no durable effect occurred.
+
+This is not a File owner defect and must not be fixed by weakening File feasibility. It is a two-part Orchestrator
+contract gap before binding seal:
+
+1. the pure SM-3 semantic evaluator does not consume all target-policy facts already present in the immutable owner
+   catalog; and
+2. the contradiction therefore escapes the only legal correction point and reaches SM-2 as an owner `infeasible`
+   fact, where fail-closed terminalization is correct but too late.
+
+The closure is owner-neutral. It must express only the invariant that one target cannot be both an existing catalog
+member and a prospective target in the same sealed generation. It must not mention File paths, software-development
+templates, `main.go`, or infer which alternative policy the provider should choose.
 
 ## 3. Final Ownership Model
 
@@ -300,16 +332,17 @@ cannot create a new binding or focus and must never cause the capability owner t
 
 | Component | Required change | Must not do |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | Extend existing coverage/binding lineage values; provide pure normalize, clone, hash, and aggregate-level validation helpers | persist state, use EventHub, select retry/action/terminal, create a global index |
+| `internal/pkg/workorchruntimecontract` | Preserve canonical coverage/binding validation and add a pure owner-neutral target-policy consistency rule: a prospective target must not be a member of the same sealed catalog's existing target set; return a typed proposal violation suitable for bounded correction | persist state, use EventHub, select retry/action/terminal, inspect the workspace, create a global index, hard-code File/domain semantics |
 | `kernel/orchestrator/biz/runtime/cwi_ledger.go` | Provide the sole canonical CWI eligibility, binding retirement, reopen and focus-projection reducers; lock an accepted-effect binding until explicit reopen | expose a second owner, persist a global lookup, infer lineage from history |
-| `kernel/orchestrator/biz/runtime/semantic_planning.go` | Retire only semantic-generation authority; make order/batch generation consume canonical eligible CWI rows; enforce pre-seal uniqueness; generate stable pending IDs | clear bindings as a catalog-retirement side effect, reset all CWI to pending, rebuild credit from text/history |
+| `kernel/orchestrator/biz/runtime/semantic_planning.go` | Retire only semantic-generation authority; make order/batch generation consume canonical eligible CWI rows; enforce pre-seal uniqueness; generate stable pending IDs; persist exactly one typed correction transition for an attempt-0 target-policy contradiction | clear bindings as a catalog-retirement side effect, reset all CWI to pending, rebuild credit from text/history, add a second retry state machine |
+| `kernel/orchestrator/biz/runtime_semantic_drive.go` | Route the new pure semantic evaluator rejection through the existing attempt-0/1 correction session and preserve the current terminal handling for owner `infeasible` facts | retry owner infeasibility, refresh a current catalog, let diagnostic text choose action, submit an unbounded provider request |
 | `kernel/orchestrator/biz/runtime/reconciliation.go` | Make reconciliation commit validate the current contract and call the shared reopen/focus transition | directly reopen only coverage without focus, infer new credit |
 | `kernel/orchestrator/biz/runtime/dispatch_commit.go` | Reuse one canonical reopen helper; record accepted effect lineage and gate evidence on current binding/execution/fence refs | create a parallel CWI owner or bypass SM-2 |
 | `kernel/orchestrator/biz/runtime/internal_event.go` | Add only private typed events needed for generation supersession, no-effect binding retirement and atomic CWI transitions | expose these events as EventHub commands or accept target states |
 | `kernel/orchestrator/biz/runtime/transition_coordinator.go` | Validate the complete post-reducer aggregate and perform exactly one semantic CAS per private event | persist partial CWI/focus/request updates or retry an owner effect |
 | `kernel/orchestrator/biz/runtime_reconciliation.go` | Schedule current request generation only; archive/supersede stale request generations | mutate CWI/coverage/focus or reuse stale request blindly |
 | `blocks/run` | Persist opaque current-schema Runtime aggregate and preserve semantic CAS behavior; add schema-boundary tests | interpret SM-2/3/4 or choose successor state |
-| File/Git/Shell/MCP capability Blocks | Keep returning scoped binding/owner observations and exact receipts; add duplicate/stale response tests where needed | mutate focus, coverage, binding, request generation, or lifecycle |
+| File/Git/Shell/MCP capability Blocks | Keep returning scoped feasibility observations and exact receipts; File retains the real-resource prospective/existing fence for post-catalog drift and concurrency; add duplicate/stale response tests where needed | mutate focus, coverage, binding, correction, request generation, or lifecycle; choose exact versus prospective policy for Orchestrator |
 | Workspace/Result | Preserve terminal delivery/acknowledgement tests | write Runtime CWI state |
 | LLM, application, TUI, Web, projection, eventstream | Render/transport typed facts only; optionally display canonical CWI state after it is authoritative | infer/rebuild authority or drive a transition |
 
@@ -355,7 +388,8 @@ All items are sequential. A later item may not compensate for an earlier missing
 | CWI-SO-3 | code-closed | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history; reconciliation and receipt-driven reopen use the canonical CWI transition. |
 | CWI-SO-4 | code-closed | SM-3 admission and evidence fences | Candidate, sealed dispatch, receipt and evidence admission require the exact canonical binding/execution/fence identity; stale or duplicate facts cannot replay a durable operation. |
 | CWI-SO-5 | code-closed | Current-schema boundary and component regressions | Legacy schema and current-schema ambiguous CWI ledgers fail closed through the typed Run-owned `fresh_activation_required` fact. No compatibility reconstruction, Runtime LLM topic, capability-owner I/O, retry lease, or replay occurs. |
-| CWI-SO-6 | automated-verified; live-pending | Full verification and deployed proof | Focused/full/race/boundary and managed mock-provider deployed suites pass. A fresh real-workspace catalog-invalidation/reopen/restart/resume fault matrix remains required for live closure. |
+| CWI-SO-6 | code-closed | SM-3 target-policy consistency and bounded correction | A prospective target already present in the same sealed owner catalog is rejected before owner probing; the existing attempt-0/1 correction preserves immutable generation identity; the owner feasibility fence remains unchanged. |
+| CWI-SO-7 | automated-verified; live-pending | Full verification and deployed proof | Focused/full/race/boundary and isolated managed mock-provider suites pass. Complete a fresh positive run and catalog-invalidation/reopen/restart/resume fault matrix. |
 
 ### 7.1 CWI-SO-1 detail
 
@@ -517,13 +551,88 @@ Code closure evidence:
   interpreting SM-2/SM-3/SM-4 state. The TUI directs the user to `/run restart` without falsely reporting a schema
   version mismatch for a same-schema ledger defect.
 
-This is code closure only. The full/race/managed and fresh deployed invalidation/reopen/restart matrix remains
-explicitly open as CWI-SO-6.
+This slice closed only the current-schema boundary. CWI-SO-6 subsequently closed target-policy consistency; CWI-SO-7
+has passed the full/race/managed automated gates, while its fresh deployed invalidation/reopen/restart matrix remains
+open.
 
 ### 7.6 CWI-SO-6 detail
 
+This slice closes the pre-binding contradiction from `run-078` without adding a state machine or weakening owner
+feasibility. Implement it in this order:
+
+1. In `workorchruntimecontract`, extend `validateSemanticProposalAgainstOwnerCatalog` with one pure relational rule for
+   `prospective_owner_target`: the normalized `ProspectiveTargetRef` must not occur in the normalized sealed
+   `catalog.TargetRefs`. Return `RuntimeSemanticProposalConstraintError` with the exact proposal field, relational rule,
+   actual target, and a bounded required statement. Do not return the complete target inventory as an error payload.
+2. Ensure complete semantic document validation converts that constraint into the existing
+   `RuntimeSemanticProposalViolationError` and `RuntimeOriginalDiagnostic` path. Attempt 0 must therefore enter the
+   existing `semantic_plan_correction_required` private transition; attempt 1 must fail deterministically with the
+   original typed violation preserved.
+3. Keep correction identity inside the existing semantic request session: same workspace/run, Definition seed,
+   manifest hash, catalog snapshot/revision, coverage order, batch identity and stable prefix; only logical request and
+   `CorrectionAttempt=1` may advance. Correction must not refresh or reacquire the catalog.
+4. Keep SM-2 owner-feasibility handling unchanged: a revision mismatch remains the owner's typed `stale` fact and may
+   use the existing bounded catalog refresh; a current-revision `infeasible` fact remains terminal. It must never be
+   converted into semantic correction based on diagnostic code or message.
+5. On correction, retire only the rejected semantic document/request authority. Preserve CWI rows, focus, catalog
+   observation, reconciliation authority, receipts and evidence byte-for-byte. There is still no binding to retire in
+   this phase.
+6. File owner continues to stat the target and return `prospective_target_exists` or
+   `prospective_target_unobservable`. This remains the final resource-truth fence and must not choose the replacement
+   policy or trigger an Orchestrator transition directly.
+
+Allowed transition sequence:
+
+```text
+attempt-0 complete semantic document
+  -> pure catalog-consistency rejection
+  -> SM-3 semantic_plan_correction_required (one CAS)
+  -> attempt-1 complete semantic document
+  -> evaluate against the same sealed catalog
+  -> owner feasibility
+  -> SM-2 semantic_contract_sealed
+```
+
+Resource-race sequence:
+
+```text
+attempt-0 document accepted against catalog revision R
+  -> owner observes resource revision R+1
+  -> SM-2 semantic_feasibility_observed(stale) (fact-only CAS)
+  -> existing bounded catalog refresh
+  -> new manifest/request identity for revision R+1
+```
+
+This is distinct from semantic correction. A same-revision owner infeasibility, missing diagnostic identity,
+batch/snapshot drift, a second semantic contradiction, or exhausted correction/refresh budget must terminate with the
+original diagnostic.
+
+Required tests:
+
+- prospective target equals one sealed existing target: rejected before EventHub owner feasibility;
+- exact-target proposal for that target: accepted when otherwise admissible;
+- existing-owner-scope proposal for that target: accepted when otherwise admissible;
+- truly new prospective target: accepted by pure evaluation and still probed by the owner;
+- attempt-0 contradiction: exactly one correction session and one private CAS;
+- attempt-1 contradiction: typed terminal, no third provider request;
+- owner reports same-revision `prospective_target_exists` after document acceptance: terminal without correction,
+  binding, dispatch, receipt, effect, Decision or Approval;
+- owner reports a matching revision change: existing bounded stale catalog refresh, not semantic correction;
+- unrelated owner infeasibility: terminal without correction;
+- duplicate/stale document, feasibility fact and correction event: no additional revision or request;
+- restart after rejection CAS and after correction-required CAS: reload preserves attempt identity and does not replay
+  attempt 0; and
+- stable prefix, manifest, Definition seed, catalog snapshot and coverage-order hashes remain unchanged across
+  correction.
+
+Exit gate: a fixture matching `run-078` cannot reach File feasibility with the contradictory attempt-0 proposal; a
+corrected exact/existing or truly prospective proposal reaches feasibility and binding seal, while all rejected paths
+have zero operation side effects.
+
+### 7.7 CWI-SO-7 detail
+
 Verification is a required implementation slice, not a documentation-only sign-off. Run it only after CWI-SO-1 through
-CWI-SO-4 are code-closed.
+CWI-SO-6 are code-closed.
 
 Evidence must include:
 
@@ -535,25 +644,28 @@ Evidence must include:
 - boundary verification proving all 22 registered units retain their owner role; and
 - a fresh deployed catalog-invalidation plus explicit-reopen matrix proving zero duplicate execution/effect.
 
-Do not mark CWI-SO-6 complete from old green artifacts or a single positive run.
+Do not mark CWI-SO-7 complete from old green artifacts or a single positive run.
 
-### 7.7 2026-08-13 automated verification record
+### 7.8 2026-08-13 post-CWI-SO-6 automated verification record
 
 The current code-closure packet passed:
 
 - `go test ./internal/pkg/workorchruntimecontract/... -count=1`;
 - `go test ./internal/modules/kernel/orchestrator/biz/runtime/... -count=1`;
 - `go test ./internal/modules/kernel/orchestrator/biz/... -count=1`;
+- `make fmt-check`;
+- `make vet`;
 - `make verify-boundary-contract`;
 - `make test`;
 - `make test-race`; and
-- the CI-equivalent managed verifier with `verify-ci-mvp-file` against an isolated file-backed instance.
+- `WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file ./scripts/verify-workorch-managed-full.sh` against an isolated
+  file-backed instance. Direct `make verify-ci-mvp-file` is a deployed-instance target, not the managed harness entry.
 
 The managed instance passed HTTP health/readiness, workspace template/Soul, mock LLM execution and MCP stdio execution;
-the MCP Run reached `completed`. Its bounded artifacts are under
-`.ci-artifacts/managed-workorch-local/`. This is CI-safe deployed evidence only. It does not replace CWI-SO-6's fresh
-real-workspace catalog-invalidation, explicit-reopen, process-restart, `/run resume`, `/run restart` and duplicate-effect
-matrix.
+the MCP Run reached `completed` with two completed dispatches and evidence sequence two. Its bounded step log is under
+`.ci-artifacts/managed-workorch-cwi-so-7/`. This automated record does not replace CWI-SO-7's fresh real-workspace
+positive convergence, catalog-invalidation, explicit-reopen, process-restart, `/run resume`, `/run restart` and
+duplicate-effect matrix.
 
 ## 8. Owner-Local Event And CAS Catalogue
 
@@ -564,7 +676,8 @@ authority and write sets may not be merged with cross-owner commands.
 | --- | --- | --- | --- |
 | semantic catalog invalidated | SM-2/SM-3 | exact catalog revision/dependency gap | retire planning authority only |
 | no-effect binding retired | SM-2 | exact current binding and typed cause | retire one eligible binding and synchronize focus/contract/request |
-| semantic plan evaluated | SM-3 | detached complete provider document/evaluation | persist accepted document or bounded correction/failure |
+| semantic plan evaluated | SM-3 | detached complete provider document evaluated against the complete sealed catalog | persist accepted document or one bounded correction/failure |
+| semantic plan correction required | SM-3 | exact attempt-0 complete-document typed violation | preserve immutable generation identity and open attempt 1 exactly once |
 | semantic feasibility observed | SM-2 | exact owner proposal observation | persist factual observation only |
 | semantic contract sealed | SM-2 | complete eligible proposal/observation set | seal bindings, focus projection and current reconciliation authority |
 | reconciliation batch observed | SM-4 -> SM-2 | exact typed owner batch fact | validate current generation, then retain/reopen/fail in SM-2 |
@@ -580,6 +693,13 @@ is exported as a topic or accepted from Web, TUI, application, projection, LLM, 
 
 | Scenario | Required assertion |
 | --- | --- |
+| prospective target already belongs to sealed catalog | attempt 0 is rejected by the pure evaluator; zero owner probe, binding, dispatch, receipt or effect |
+| corrected existing target policy | one attempt-1 document can select exact/existing policy within the unchanged catalog and proceed to owner feasibility |
+| truly new prospective target | pure evaluator accepts it; capability owner remains the final real-resource feasibility fence |
+| target appears after catalog snapshot with revision change | owner returns typed stale; existing bounded catalog refresh creates a new manifest identity; no semantic correction or operation side effect |
+| same-revision owner infeasibility | typed terminal is preserved; no semantic correction is inferred from owner code/message |
+| repeated prospective/existing contradiction | attempt 1 terminates with the original typed diagnostic; no attempt 2 |
+| unrelated owner infeasibility | no semantic correction is inferred from message text; typed terminal remains fail-closed |
 | completed CWI + catalog invalidation | no new pending focus, semantic proposal, binding, LLM operation request, dispatch, receipt, or effect for that CWI |
 | bound CWI + accepted durable effect + catalog invalidation | current binding and effect lineage remain locked; no successor binding or operation without explicit reopen |
 | bound CWI + no effect + explicit binding retirement | one typed retirement lineage, one planning projection, synchronized contract/request, no owner operation |
@@ -614,13 +734,16 @@ make verify-ci-mvp-file
 
 Deployed verification must use a fresh Run and record only bounded audit facts:
 
-1. restart a workspace with at least one completed CWI;
-2. induce a declared catalog/resource invalidation without changing the CWI's reopen condition;
-3. prove no duplicate binding, LLM operation request, dispatch, receipt, or workspace effect;
-4. exercise one explicit reopen and prove exactly one successor lineage and effect path;
-5. resume after process restart and prove no re-drive of an accepted execution key;
-6. verify `healthz` and `readyz`, including projection catch-up; and
-7. validate terminal delivery order if a typed contract failure is intentionally injected.
+1. restart the `run-078` workspace shape and prove the first state-change CWI passes target-policy evaluation,
+   feasibility and binding seal without `prospective_target_exists` looping;
+2. prove the Run reaches at least one sealed dispatch, accepted receipt, evidence commit and CWI advance;
+3. restart a workspace with at least one completed CWI;
+4. induce a declared catalog/resource invalidation without changing the CWI's reopen condition;
+5. prove no duplicate binding, LLM operation request, dispatch, receipt, or workspace effect;
+6. exercise one explicit reopen and prove exactly one successor lineage and effect path;
+7. resume after process restart and prove no re-drive of an accepted execution key;
+8. verify `healthz` and `readyz`, including projection catch-up; and
+9. validate terminal delivery order if a typed contract failure is intentionally injected.
 
 Raw provider prompts, credentials, full workspace contents, and unredacted responses are not evidence artifacts.
 
@@ -635,6 +758,11 @@ This plan is code-closed only when all of the following hold:
 - duplicate CWI binding is rejected before provider operation request and before any side effect;
 - active reconciliation request/batch exactly match the current sealed contract, while superseded history remains auditable;
 - receipt- and reconciliation-driven reopen share one SM-2 queue/coverage transition;
+- semantic proposal evaluation rejects a prospective target already present in the same sealed catalog before owner
+  probing, while a real post-catalog resource change still reaches the capability-owner feasibility fence;
+- evaluator-detected target-policy contradiction can consume only the existing attempt-0/1 correction budget and
+  cannot refresh the catalog, add a state machine, or create operation side effects; owner `infeasible` cannot consume
+  that correction budget;
 - no runtime component outside Orchestrator owns or mutates SM-2/SM-3/SM-4 state;
 - legacy/ambiguous aggregates fail closed without fallback or replay; and
 - the regression matrix and deployed fault matrix pass.
@@ -654,5 +782,10 @@ The following do not close this issue and must not be introduced:
 - treating catalog invalidation as an implicit reopen;
 - treating catalog invalidation as implicit binding retirement, including for a not-yet-settled CWI;
 - adding only a late receipt/evidence fence while preserving implicit `bound -> planning -> bound` replacement;
+- fixing `prospective_target_exists` only inside File, removing File's real-resource fence, or hard-coding path/file
+  semantics in Orchestrator;
+- retrying every owner `infeasible` status, using diagnostic message text to select correction, or refreshing an
+  unchanged catalog to repair a provider target-policy contradiction;
+- adding a second correction counter, retry loop, target policy, or state machine for semantic feasibility;
 - migrating an ambiguous live aggregate by guessing lineage; or
 - retrying/replaying a durable capability operation solely to repair bookkeeping.

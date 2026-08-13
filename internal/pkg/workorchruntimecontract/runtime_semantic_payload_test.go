@@ -241,7 +241,6 @@ func TestRuntimeSemanticPlanRequestSchemaRejectsUnscopedProofBatch(t *testing.T)
 func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	proposal := semanticContractTestProposal("cwi-001")
-	proposal.Target.ProspectiveTargetRef = "new-file.go"
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
@@ -260,6 +259,63 @@ func TestRuntimeSemanticPlanPayloadStrictRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(payload), `"batchSequence":0`) || strings.Contains(string(payload), `"coverageOrder"`) {
 		t.Fatalf("proof-batch wire identity was not minimal and complete: %s", payload)
+	}
+}
+
+func TestRuntimeSemanticPlanRejectsExistingCatalogTargetLabeledProspective(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	proposal := semanticContractTestProposal("cwi-001")
+	document := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal},
+	}
+	payload, err := EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRef":"new-file.go"`, `"prospectiveTargetRef":"main.go"`, 1))
+	_, err = DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, payload)
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].target.prospectiveTargetRef" || len(diagnostic.SemanticViolations) != 1 {
+		t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
+	}
+	violation := diagnostic.SemanticViolations[0]
+	if violation.Rule != RuntimeSemanticConstraintRelational || violation.Actual != "main.go" || len(violation.Required) != 1 || len(violation.Allowed) != 0 {
+		t.Fatalf("prospective/existing violation = %+v", violation)
+	}
+}
+
+func TestRuntimeSemanticPlanTargetPolicyConsistencyKeepsLegalPolicies(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{
+		RuntimeOperationTargetPolicyExactTarget,
+		RuntimeOperationTargetPolicyExistingOwnerScope,
+		RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+	}
+	manifest = sealSemanticTestManifest(t, manifest)
+	base := semanticContractTestProposal("cwi-001")
+	tests := []struct {
+		name   string
+		target RuntimeOperationTargetAuthorization
+	}{
+		{name: "exact existing", target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"}}},
+		{name: "existing scope", target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"main.go"}}},
+		{name: "new prospective", target: base.Target},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			proposal := base
+			proposal.Target = test.target
+			document := RuntimeSemanticPlanDocument{
+				SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+				DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch,
+				BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{proposal},
+			}
+			if err := document.ValidateAgainstManifest(manifest); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

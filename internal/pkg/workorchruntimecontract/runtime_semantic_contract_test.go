@@ -534,7 +534,7 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID,
 		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID,
-		Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{"main.go"},
+		Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: []string{proposal.Target.ProspectiveTargetRef},
 	}
 	seed := RuntimeDefinitionSeed{
 		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: manifest.DefinitionRevision,
@@ -630,7 +630,7 @@ func semanticContractTestProposal(id common.CoverageWorkItemID) RuntimeSemanticP
 		Target: RuntimeOperationTargetAuthorization{
 			Policy:                    RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 			OwnerSelectorRefs:         []string{"file/workspace-relative-create"},
-			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "main.go",
+			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: "new-file.go",
 		},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		DeclarationRef: "semantic-plan/dod-001",

@@ -137,11 +137,28 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
 		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
 	}
-	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-revision-1"}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"},
+		SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+		}},
+		ObservedRevision: "file-revision-1",
+	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	const retiredHistorySentinel = "retired-semantic-history-must-not-reach-provider"
-	retired := runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	// The retired generation is test-only history. Detach its facts before the
+	// semantic projection mutates CWI rows so active authority remains intact.
+	retiredAggregate := aggregate
+	retiredAggregate.Facts = aggregate.Facts.Normalized()
+	retired := runtimeTestAggregateWithSemanticPlanning(t, retiredAggregate)
 	if retired.SemanticPlanning.Manifest == nil || len(retired.SemanticPlanning.Manifest.OwnerCatalogs) == 0 {
 		t.Fatalf("retired semantic fixture has no owner catalog: %+v", retired.SemanticPlanning)
 	}
@@ -162,6 +179,9 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	requestCount := 0
+	proofManifestHash := ""
+	proofStablePrefixHash := ""
+	proofBatchID := ""
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" {
@@ -192,28 +212,47 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 			document.CoverageOrder = []common.CoverageWorkItemID{item.ID}
 		} else if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			if len(repository.aggregate.CandidateRequestSessions) != 2 {
+			if len(repository.aggregate.CandidateRequestSessions) < 2 {
 				t.Errorf("proof-batch provider call preceded persisted expected-document session: %+v", repository.aggregate.CandidateRequestSessions)
+				return
+			}
+			if command.CandidateAttempt == 0 {
+				proofManifestHash = command.SemanticManifest.Hash
+				proofStablePrefixHash = command.StablePrefixHash
+				proofBatchID = command.SemanticContext.BatchID
+			} else if command.CandidateAttempt != 1 || command.SemanticManifest.Hash != proofManifestHash || command.StablePrefixHash != proofStablePrefixHash || command.SemanticContext.BatchID != proofBatchID || command.SemanticCorrectionDirective == nil || command.PreviousSemanticRejection == nil {
+				t.Errorf("semantic correction changed immutable request identity or lost typed rejection: %+v", command)
 				return
 			}
 			document.BatchID = command.SemanticContext.BatchID
 			document.BatchSequence = command.SemanticContext.BatchSequence
 			document.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), command.SemanticContext.BatchCoverageWorkItemIDs...)
-			document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{{
+			proposal := runtimecontract.RuntimeSemanticProofProposal{
 				CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 				OperationKind: runtimecontract.StepKindFileEdit,
 				Target: runtimecontract.RuntimeOperationTargetAuthorization{
-					Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
+					Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+					OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveConstraintRefs: []string{"workspace-relative-path"},
+					ProspectiveTargetRef: "new-target.txt",
 				},
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 				DeclarationRef:        "semantic/session-test",
-			}}
+			}
+			if command.CandidateAttempt == 1 {
+				proposal.Target = runtimecontract.RuntimeOperationTargetAuthorization{
+					Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
+				}
+			}
+			document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{proposal}
 		}
 		payload, encodeErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 		if encodeErr != nil {
 			t.Errorf("encode semantic document: %v", encodeErr)
 			return
+		}
+		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && command.CandidateAttempt == 0 {
+			payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRef":"new-target.txt"`, `"prospectiveTargetRef":"target.txt"`, 1))
 		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
@@ -247,8 +286,15 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || len(proofObserved.CandidateRequestSessions) != 2 || requestCount != 2 {
-		t.Fatalf("semantic proof batch did not use a distinct persisted expected-document session: ledger=%+v sessions=%+v requests=%d", proofObserved.SemanticPlanning, proofObserved.CandidateRequestSessions, requestCount)
+	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || proofObserved.SemanticPlanning.Attempt != 1 || len(proofObserved.SemanticPlanning.Rejections) != 1 || len(proofObserved.CandidateRequestSessions) != 3 || requestCount != 2 {
+		t.Fatalf("contradictory proof did not open one bounded correction: ledger=%+v sessions=%+v requests=%d", proofObserved.SemanticPlanning, proofObserved.CandidateRequestSessions, requestCount)
+	}
+	corrected, err := module.driveRuntimeSemanticPlanning(ctx, proofObserved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || corrected.SemanticPlanning.Attempt != 1 || len(corrected.SemanticPlanning.Rejections) != 1 || requestCount != 3 || len(corrected.CandidateAttempts) != 0 || corrected.ActiveDispatch != nil {
+		t.Fatalf("corrected proof lost bounded lineage or crossed into operation authority: ledger=%+v requests=%d", corrected.SemanticPlanning, requestCount)
 	}
 }
 
