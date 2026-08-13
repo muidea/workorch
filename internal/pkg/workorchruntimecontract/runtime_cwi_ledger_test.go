@@ -239,6 +239,11 @@ func TestValidateRuntimeCWIBindingRetirementRejectsAcceptedDurableExecutionAndEv
 	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts, &dispatch, nil, []RuntimeOperationReceipt{receipt}); err == nil || !strings.Contains(err.Error(), "accepted durable execution") {
 		t.Fatalf("durable execution retirement error = %v", err)
 	}
+	dispatch.Candidate.StateChange.Operations[0].Operation.BindingRefs = nil
+	dispatch.Transaction.FocusID = binding.FocusID
+	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts, nil, []RuntimeDispatchRecord{dispatch}, []RuntimeOperationReceipt{receipt}); err == nil || !strings.Contains(err.Error(), "omitted its sealed binding identity") {
+		t.Fatalf("ambiguous durable execution retirement error = %v", err)
+	}
 
 	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts, nil, nil, nil); err != nil {
 		t.Fatalf("no-effect retirement rejected: %v", err)

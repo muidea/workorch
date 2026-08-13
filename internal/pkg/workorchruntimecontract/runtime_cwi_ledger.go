@@ -276,10 +276,12 @@ func ValidateRuntimeStateCWILedger(facts RuntimeFacts, ledger RuntimeCWIReconcil
 // the persisted aggregate and does not select a transition or recovery path.
 func ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts RuntimeFacts, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt) error {
 	retired := make(map[string]common.CoverageWorkItemID)
+	retiredByFocus := make(map[string]string)
 	for _, raw := range facts.Coverage {
 		item := normalizeRuntimeCoverageItemFact(raw)
 		for _, lineage := range item.BindingRetirementLineage {
 			retired[lineage.RetiredBindingRef.BindingID] = item.ID
+			retiredByFocus[lineage.RetiredBindingRef.FocusID] = lineage.RetiredBindingRef.BindingID
 		}
 	}
 	if len(retired) == 0 {
@@ -311,15 +313,21 @@ func ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts RuntimeFacts, ac
 					break
 				}
 			}
-			if retiredBindingID == "" {
-				continue
-			}
 			execution, found := runtimeOperationExecutionForID(dispatch.OperationExecutions, operation.ID)
 			if !found || execution.Fence == 0 {
 				continue
 			}
 			receipt, found := RuntimeOperationReceiptForExecutionKeyFence(receipts, execution.ExecutionKey, execution.Fence)
 			if !found || receipt.Outcome != RuntimeOperationOutcomeAccepted {
+				continue
+			}
+			if retiredBindingID == "" && len(operation.BindingRefs) == 0 && (RuntimeEffectIsDurable(receipt.ObservedEffectScope) || receipt.Changed) {
+				if bindingID, matchesRetiredFocus := retiredByFocus[dispatch.Transaction.FocusID]; matchesRetiredFocus {
+					return fmt.Errorf("runtime binding %q retirement is ambiguous after accepted durable execution %q omitted its sealed binding identity", bindingID, execution.ExecutionKey)
+				}
+				continue
+			}
+			if retiredBindingID == "" {
 				continue
 			}
 			if RuntimeEffectIsDurable(receipt.ObservedEffectScope) || receipt.Changed {

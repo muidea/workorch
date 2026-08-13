@@ -416,8 +416,9 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 		// are immutable for this dispatch.  Record the full mismatch on the
 		// evidence lineage and reduce a stable SM-2 terminal instead of allowing
 		// SM-3 bookkeeping/evidence revisions to create an unbounded validation
-		// loop.  Operations without BindingRefs remain permitted non-credit
-		// diagnostics and deliberately do not take this branch.
+		// loop. Kinds without a proof binding authorization remain non-credit
+		// diagnostics and deliberately do not take this branch; current SM-3
+		// admission rejects omission when the manifest authorizes a binding.
 		if len(fact.BindingRefs) != 0 && len(fact.CoverageWorkItemIDs) == 0 && bindingDiagnostic != "" {
 			failure := coverageBindingMismatchFailure(aggregate.Facts, fact, bindingDiagnostic)
 			aggregate.Facts.Failure = &failure

@@ -112,6 +112,31 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 	}
 }
 
+func TestValidateRuntimeCandidateAgainstManifestRequiresSealedBindingForProofBearingOperation(t *testing.T) {
+	decision := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:         []string{RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+			TargetRefs:            []string{"main.go"},
+		},
+	})
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{
+		Operation: RuntimeOperation{ID: "patch", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}},
+	}}}}
+	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
+	if err == nil || !strings.Contains(err.Error(), "proof-bearing operation must select exactly one sealed coverage evidence binding") {
+		t.Fatalf("missing binding error = %v", err)
+	}
+}
+
 func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVariants(t *testing.T) {
 	decision := RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,

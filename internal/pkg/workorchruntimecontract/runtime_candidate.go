@@ -618,10 +618,10 @@ func runtimeOperationBoundToRequiredCoverage(decision RuntimeDecision, operation
 	if len(CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, operation.Kind, evidenceKind)) == 0 {
 		return true
 	}
-	// A selected operation without BindingRefs is explicitly non-crediting. It
-	// may still be a necessary prerequisite or auxiliary operation in the same
-	// sealed dispatch. Only a supplied sealed ref asks SM-2 to evaluate CWI
-	// credit from the subsequent owner receipt.
+	// Manifest admission requires a proof-bearing operation to preserve one
+	// sealed binding ref. This decision-only helper does not own that manifest,
+	// so it leaves a missing ref to the single manifest evaluator instead of
+	// inferring coverage here.
 	if len(operation.Normalized().BindingRefs) == 0 {
 		return true
 	}

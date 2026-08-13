@@ -764,8 +764,8 @@ func (c *RuntimeController) retireRuntimeCWIBinding(ctx context.Context, workspa
 	if aggregate.StateRevision != fact.ExpectedStateRevision {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement state revision is stale", common.ErrConflict)
 	}
-	if aggregate.ActiveDispatch != nil || aggregate.Reconciliation.Batch != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement has an active dispatch or reconciliation batch", common.ErrConflict)
+	if aggregate.ActiveDispatch != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement has an active dispatch", common.ErrConflict)
 	}
 	index := -1
 	for idx := range aggregate.Facts.Coverage {

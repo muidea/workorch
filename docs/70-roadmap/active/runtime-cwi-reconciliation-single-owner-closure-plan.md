@@ -386,7 +386,7 @@ All items are sequential. A later item may not compensate for an earlier missing
 | CWI-SO-1 | code-closed | Contract and validation foundation | The existing coverage row is the canonical binding/focus ledger; queue uniqueness, current binding uniqueness, contract/request coherence and stable pending IDs are aggregate invariants. |
 | CWI-SO-2 | code-closed | SM-2 generation retirement and semantic seal | Generation retirement preserves effect-bearing bindings; planning batches use canonical CWI eligibility; binding seal and focus projection share one aggregate CAS. Typed owner-scope catalogs are distinguished from exact-target catalogs without retry loops. |
 | CWI-SO-3 | code-closed | SM-4 request generation and SM-2 reconciliation commit | Request generations are fenced by the current binding set; stale generations are retained only as history; reconciliation and receipt-driven reopen use the canonical CWI transition. |
-| CWI-SO-4 | code-closed | SM-3 admission and evidence fences | Candidate, sealed dispatch, receipt and evidence admission require the exact canonical binding/execution/fence identity; stale or duplicate facts cannot replay a durable operation. |
+| CWI-SO-4 | code-closed; live-reverification-required | SM-3 admission and evidence fences | A proof-bearing manifest authorization requires exactly one canonical binding ref; candidate, sealed dispatch, receipt and evidence admission preserve the exact binding/execution/fence identity. A current-schema durable receipt that omitted this identity fails closed and cannot authorize destructive binding retirement. |
 | CWI-SO-5 | code-closed | Current-schema boundary and component regressions | Legacy schema and current-schema ambiguous CWI ledgers fail closed through the typed Run-owned `fresh_activation_required` fact. No compatibility reconstruction, Runtime LLM topic, capability-owner I/O, retry lease, or replay occurs. |
 | CWI-SO-6 | code-closed | SM-3 target-policy consistency and bounded correction | A prospective target already present in the same sealed owner catalog is rejected before owner probing; the existing attempt-0/1 correction preserves immutable generation identity; the owner feasibility fence remains unchanged. |
 | CWI-SO-7 | automated-verified; live-pending | Full verification and deployed proof | Focused/full/race/boundary and isolated managed mock-provider suites pass. Complete a fresh positive run and catalog-invalidation/reopen/restart/resume fault matrix. |
@@ -524,6 +524,18 @@ Accepted durable receipts must be recorded before any dependent invalidation is 
 cannot pass through a timing window and erase the binding. Duplicate delivery of the same accepted receipt is an
 idempotent fact commit; it cannot invoke the capability owner again. A different receipt for the same execution key or
 fence is a typed conflict.
+
+The operation manifest owns a deterministic binding policy. If an operation authorization has non-empty
+`AllowedBindingRefs`, the candidate must select exactly one of them and SM-3 must preserve it in the sealed operation.
+An auxiliary/non-credit operation is legal only when its operation authorization has no binding refs. The candidate
+cannot turn a proof-bearing operation into auxiliary work by omitting `BindingRefs`; `CoverageWorkItemIDs` remain
+forbidden on the provider wire and SM-2 derives CWI identity only from the sealed binding. A loaded current-schema
+dispatch whose matching-focus accepted durable receipt omitted binding identity is not reconstructed from target or
+text: the execution fence rejects binding retirement as an ambiguous contract defect.
+
+A legitimate no-effect retirement still treats an active dispatch as a hard conflict. An existing reconciliation
+`Request + Batch + Results` is not a second state owner: SM-2 archives the complete generation as superseded in the same
+CAS that retires the binding, replaces the focus projection and recompiles the reconciliation contract.
 
 Exit gate: fault injection at every durable CAS boundary, including process restart, proves exactly one owner execution
 and at most one durable effect for an execution key.

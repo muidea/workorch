@@ -956,6 +956,36 @@ func TestRuntimeCandidateSchemaDerivesPatchTargetRequirementsFromOperationContra
 	}
 }
 
+func TestRuntimeCandidateSchemaRequiresExactlyOneSealedBindingForProofBearingKind(t *testing.T) {
+	policy, ok := runtimecontract.RuntimeConvergenceEffectPolicyFor(runtimecontract.ConvergenceStateNeedStateChange)
+	if !ok {
+		t.Fatal("missing state-change effect policy")
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		State: runtimecontract.ConvergenceStateNeedStateChange, EffectPolicy: policy,
+		RequiredTopLevelFields: []string{"operations"}, AllowedTopLevelFields: []string{"operations"},
+		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+			Kind: runtimecontract.RuntimeBlockKindPatchApply, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			AllowedOperationFields: []string{"id", "kind", "bindingRefs", "parameters", "targetRefs"},
+			AllowedBindingRefs:     []string{"binding/cwi-1"},
+			Parameters: []runtimecontract.RuntimeOperationParameterContract{{
+				Name: "patchType", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
+			}},
+			RequireTargetRefs: true,
+		}},
+	}
+	schema := runtimeCandidateSchemaForManifest(manifest)
+	for _, want := range []string{`"bindingRefs"`, `"minItems":1`, `"maxItems":1`, `"required":["bindingRefs","parameters","targetRefs"]`} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("proof-bearing schema lost %q: %s", want, schema)
+		}
+	}
+	instruction := runtimeCandidateStructuredOutputInstruction(manifest)
+	if !strings.Contains(instruction, "bindingRefs is required with exactly one value") || strings.Contains(instruction, "Optional bindingRefs") || strings.Contains(instruction, "may omit bindingRefs") {
+		t.Fatalf("proof-bearing instruction = %s", instruction)
+	}
+}
+
 func TestRuntimeCandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperations(t *testing.T) {
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,

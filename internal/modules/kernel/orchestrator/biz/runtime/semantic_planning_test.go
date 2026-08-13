@@ -1207,6 +1207,26 @@ func TestRuntimeCWIBindingRetirementSupersedesReconciliationBeforeRestartSchedul
 	if err != nil || !changed {
 		t.Fatalf("seal reconciliation before binding retirement = changed=%v err=%v", changed, err)
 	}
+	batch := reconciliationBatchForRequest(t, request, runtimecontract.RuntimeCWIReconciliationObservationSatisfied)
+	sealed.Reconciliation.Batch = &batch
+	for _, binding := range request.Bindings {
+		observations := make([]runtimecontract.RuntimeCWIReconciliationObservation, 0, len(binding.OwnerModuleIDs))
+		for _, observation := range batch.Observations {
+			if observation.CoverageWorkItemID == binding.CoverageWorkItemID && observation.BindingID == binding.BindingID {
+				observations = append(observations, observation)
+			}
+		}
+		sealed.Reconciliation.Results = append(sealed.Reconciliation.Results, runtimecontract.RuntimeCWIReconciliationResult{
+			RequestID: request.RequestID, WorkspaceID: request.WorkspaceID, RunID: request.RunID,
+			Generation: request.Generation, BatchHash: batch.Hash, CoverageItemID: binding.CoverageWorkItemID,
+			BindingID: binding.BindingID, Disposition: runtimecontract.RuntimeCWIReconciliationDispositionPrerequisite,
+			ObservationRef: runtimecontract.StableRuntimeCWIReconciliationObservationSetRef(observations),
+		})
+	}
+	sealed.Reconciliation = sealed.Reconciliation.Normalized()
+	if err := sealed.Reconciliation.Validate(); err != nil {
+		t.Fatalf("complete reconciliation fixture: %v", err)
+	}
 	manifestHash := sealed.SemanticPlanning.Manifest.Hash
 	logicalRequestID := sealed.SemanticPlanning.LogicalRequestID
 	sealed.Facts.Resources.PrerequisiteObservations = nil
@@ -1234,7 +1254,10 @@ func TestRuntimeCWIBindingRetirementSupersedesReconciliationBeforeRestartSchedul
 		t.Fatalf("binding retirement retained active reconciliation transport: %+v", retired.Aggregate.Reconciliation)
 	}
 	if len(retired.Aggregate.Reconciliation.History) != 1 || !retired.Aggregate.Reconciliation.History[0].Superseded ||
-		retired.Aggregate.Reconciliation.History[0].Request.RequestID != request.RequestID {
+		retired.Aggregate.Reconciliation.History[0].Request.RequestID != request.RequestID ||
+		retired.Aggregate.Reconciliation.History[0].Batch == nil ||
+		retired.Aggregate.Reconciliation.History[0].Batch.Hash != batch.Hash ||
+		len(retired.Aggregate.Reconciliation.History[0].Results) != len(request.Bindings) {
 		t.Fatalf("binding retirement did not archive the old request in the same CAS: %+v", retired.Aggregate.Reconciliation.History)
 	}
 	retirementRevision := retired.Aggregate.StateRevision

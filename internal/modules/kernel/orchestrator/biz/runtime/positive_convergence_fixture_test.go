@@ -130,7 +130,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 				Operation: runtimecontract.RuntimeOperation{
 					ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-					TargetRefs: []string{"target.txt"},
+					BindingRefs: []string{"binding/cwi-v2-positive"}, TargetRefs: []string{"target.txt"},
 					Parameters: runtimeManagedValidationParameters(),
 				},
 			}}},
@@ -194,9 +194,15 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	// repairable_gap must reopen state-change (same-focus repair), not terminal.
-	if afterGap.Decision.State == runtimecontract.ConvergenceStateFailed || afterGap.Decision.State == runtimecontract.ConvergenceStateComplete {
-		t.Fatalf("repairable assessment must not terminal: %+v", afterGap.Decision)
+	// The assessment claim cannot reopen a CWI after both sealed owner proofs
+	// have been accepted. Before proof-bearing validation required BindingRefs,
+	// this fixture accidentally created a real validation gap by dropping the
+	// binding identity. The current contract must prefer owner facts.
+	if afterGap.Decision.State == runtimecontract.ConvergenceStateComplete {
+		return
+	}
+	if afterGap.Decision.State == runtimecontract.ConvergenceStateFailed {
+		t.Fatalf("repairable assessment unexpectedly failed: %+v", afterGap.Decision)
 	}
 	if afterGap.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		// Some paths may go to validation first; allow either repair path but not terminal.
@@ -417,7 +423,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 				Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 					Operation: runtimecontract.RuntimeOperation{
 						ID: "v1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-						TargetRefs: []string{"target.txt"}, Parameters: runtimeManagedValidationParameters(),
+						BindingRefs: []string{"binding/test/runtime/focus-v2/cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeManagedValidationParameters(),
 					},
 				}}},
 			})

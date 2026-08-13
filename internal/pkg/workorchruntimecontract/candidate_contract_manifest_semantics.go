@@ -140,6 +140,9 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if len(operation.BindingRefs) > 1 {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("an operation may select only one coverage evidence binding"))
 	}
+	if len(operationManifest.AllowedBindingRefs) != 0 && len(operation.BindingRefs) != 1 {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("a proof-bearing operation must select exactly one sealed coverage evidence binding"))
+	}
 	if len(operation.BindingRefs) != 0 && !runtimeCandidateManifestBindingRefsAllowed(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, nil, []string{"bindingRefs"}, nil)
 	}

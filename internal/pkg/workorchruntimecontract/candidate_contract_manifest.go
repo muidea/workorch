@@ -620,10 +620,12 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		evidenceKind = EvidenceKindValidation
 	}
 	allowedBindingRefs := CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, contract.Kind, evidenceKind)
-	// Coverage is opt-in at the selected candidate operation. A kind that can
-	// prove a CWI may also appear as prerequisite or auxiliary non-crediting
-	// work in the same dispatch. If BindingRefs is supplied it remains strictly
-	// limited to allowedBindingRefs; omitting it cannot create credit.
+	// A manifest operation authorization is either proof-bearing or auxiliary.
+	// When the current sealed focus authorizes this kind for a binding, SM-3
+	// requires the candidate to preserve exactly one such binding through the
+	// sealed dispatch. Auxiliary work must use a kind without binding
+	// authorization; omission must not become a second candidate-controlled
+	// credit policy.
 	if len(allowedBindingRefs) != 0 {
 		fields = append(fields, "bindingRefs")
 	}

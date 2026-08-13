@@ -1219,20 +1219,21 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
+		requiredFields := make([]string, 0, 3)
 		if len(operation.AllowedBindingRefs) != 0 {
 			thenProperties["bindingRefs"] = map[string]any{
-				"type": "array", "minItems": 1,
+				"type": "array", "minItems": 1, "maxItems": 1,
 				"items": map[string]any{"type": "string", "enum": append([]string(nil), operation.AllowedBindingRefs...)},
 			}
+			requiredFields = append(requiredFields, "bindingRefs")
 		}
 		if len(parameterRequirements) > 0 || len(operation.Variants) > 0 {
-			then["required"] = []string{"parameters"}
+			requiredFields = append(requiredFields, "parameters")
 		}
 		allowedTargets := operation.Target.Normalized().AllowedTargetRefs()
 		if operation.RequireTargetRefs || len(allowedTargets) > 0 {
 			if operation.RequireTargetRefs {
-				required, _ := then["required"].([]string)
-				then["required"] = append(required, "targetRefs")
+				requiredFields = append(requiredFields, "targetRefs")
 			}
 			targetItems := map[string]any{"type": "string"}
 			if len(allowedTargets) > 0 {
@@ -1249,6 +1250,9 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 				}
 			}
 			thenProperties["targetRefs"] = targetSchema
+		}
+		if len(requiredFields) != 0 {
+			then["required"] = requiredFields
 		}
 		ret = append(ret, map[string]any{
 			"if":   map[string]any{"properties": map[string]any{"kind": map[string]any{"const": operation.Kind}}, "required": []string{"kind"}},
@@ -1576,7 +1580,7 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 		lines = append(lines, "Forbidden top-level fields: "+runtimeCandidateContractFieldList(manifest.ForbiddenTopLevelFields)+".")
 	}
 	if runtimeManifestHasAllowedBindingRefs(manifest) {
-		lines = append(lines, "An operation may omit bindingRefs only for explicit non-crediting work. If it claims coverage, select non-empty bindingRefs only from that operation's sealed authorization; never emit coverageWorkItemIds.")
+		lines = append(lines, "Every operation kind with a sealed binding authorization must select exactly one bindingRefs value from that authorization; never emit coverageWorkItemIds. Operation kinds without binding authorization are non-crediting and must omit bindingRefs.")
 	}
 	if len(manifest.RequiredOperationSequence) > 0 {
 		refs := make([]string, 0, len(manifest.RequiredOperationSequence))
@@ -1628,7 +1632,7 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 			line += " requiredOperationRef must be one of: " + runtimeCandidateContractFieldList(operation.RequiredOperationReferences) + "."
 		}
 		if len(operation.AllowedBindingRefs) > 0 {
-			line += " Optional bindingRefs may be selected only to claim coverage: " + runtimeCandidateContractFieldList(operation.AllowedBindingRefs) + ". Omit bindingRefs for non-crediting work."
+			line += " bindingRefs is required with exactly one value from: " + runtimeCandidateContractFieldList(operation.AllowedBindingRefs) + "."
 		}
 		if len(operation.ForbiddenParameters) > 0 {
 			line += " Forbidden parameters: " + runtimeCandidateContractFieldList(operation.ForbiddenParameters) + "."
