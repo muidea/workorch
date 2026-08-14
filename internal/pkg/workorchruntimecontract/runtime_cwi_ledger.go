@@ -11,7 +11,7 @@ import (
 // RuntimeCWILedgerSchemaCurrent identifies the canonical CWI identity fields
 // persisted on RuntimeCoverageItemFact. The coverage row remains the one CWI
 // ledger; this schema does not introduce a parallel registry or owner.
-const RuntimeCWILedgerSchemaCurrent = "workorch.runtime_cwi_ledger.v1"
+const RuntimeCWILedgerSchemaCurrent = "workorch.runtime_cwi_ledger"
 
 // RuntimeCWIBindingLineageLimit and RuntimeCWIReopenLineageLimit bound the
 // per-CWI audit trail. They keep reopening/resealing recoverable without

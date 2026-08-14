@@ -84,7 +84,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	registerRuntimeOperationReceiptOwner(t, hub, controller)
 
-	record := `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
+	record := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
 	command := "printf '%s\\n' '" + record + "'; exit 7"
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-with-observed-target", Kind: runtimecontract.StepKindShellCommand,

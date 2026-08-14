@@ -170,4 +170,34 @@ func TestWorkspaceExecutionResumeRejectsFreshActivationRequirementWithoutContinu
 		stored.RuntimeState.StateRevision != stateRevision {
 		t.Fatalf("fresh-activation resume rewrote Run: %+v", stored)
 	}
+
+	restart := command
+	restart.Kind = runtimecontract.RuntimeExecutionIntentRestart
+	restart.RunID = ""
+	restart.RequestID = "restart-schema-incompatible"
+	restart.Bootstrap = &bootstrap
+	result = hub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandWorkspaceExecutionIntent,
+		workspaceExecutionIntentRunSource,
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		restart,
+	))
+	data, resultErr = result.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	admission, ok = data.(runevents.WorkspaceExecutionIntentResult)
+	if !ok || admission.Outcome != runtimecontract.RuntimeExecutionIntentDataResetRequired ||
+		admission.Reason != runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible || admission.RunID != run.ID {
+		t.Fatalf("schema-incompatible restart admission = %+v", data)
+	}
+	stored, err = runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReplacementIntent != nil || stored.State != common.RunStateActive || stored.Revision != 1 {
+		t.Fatalf("schema-incompatible restart mutated Run: %+v", stored)
+	}
 }

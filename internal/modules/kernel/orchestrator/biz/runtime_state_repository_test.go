@@ -4015,10 +4015,10 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	seeded.CompletedDispatches = []runtime.SealedDispatch{previousDispatch}
 	seeded.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-edit", Kind: runtimecontract.EvidenceKindStateChange, DispatchID: previousDispatch.ID, OperationID: replayedOperation.ID,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Revision: "evidence-v1-00000000000000000001",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Revision: "runtime-evidence-00000000000000000001",
 		FailureClass: runtimecontract.FailureClassCandidateContractFailure, FailureCode: "base_mismatch", FailureSignature: "rejected-edit",
 	}}
-	seeded.Facts.EvidenceRevision = "evidence-v1-00000000000000000001"
+	seeded.Facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
 	// The current authority must be sealed against the updated evidence lineage;
 	// the rejected dispatch itself remains history, never an active candidate.
 	seeded.Facts, seeded.Decision, err = runtime.ReduceRuntimeStateWithDirective(seeded.Facts, &initialized.Decision.AuthoritySnapshot)
@@ -4352,7 +4352,7 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	bootstrap := runtimeBootstrap()
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  bootstrap.Activation,
-		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", DefinitionSeed: bootstrap.DefinitionSeed, EvidenceRevision: "evidence-v1-00000000000000000000",
+		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", DefinitionSeed: bootstrap.DefinitionSeed, EvidenceRevision: "runtime-evidence-00000000000000000000",
 		DefinitionFocuses: runtimecontract.CompileRuntimeDefinitionFocuses(bootstrap.Focuses),
 		Focus:             bootstrap.Focuses[0],
 		Coverage:          []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},

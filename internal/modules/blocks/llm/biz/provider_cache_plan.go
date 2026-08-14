@@ -8,7 +8,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
 
-const providerCachePlanSchemaVersion = "workorch.providerCachePlan.v1"
+const providerCachePlanSchemaVersion = "workorch.providerCachePlan"
 
 func attachProviderCachePlan(request *llmmodels.ProviderRequest) {
 	if request == nil || request.PromptContext == nil || len(request.PromptContext.Sections) == 0 {

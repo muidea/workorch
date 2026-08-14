@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeExpectedDocumentSchemaCurrent = "workorch.runtime_expected_document.v1"
+const RuntimeExpectedDocumentSchemaCurrent = "workorch.runtime_expected_document"
 
 // RuntimeExpectedDocumentContract is the sealed identity of one complete
 // authority document expected from every physical provider call. Recovery may

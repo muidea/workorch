@@ -14,8 +14,9 @@ Last Updated: 2026-08-14
 - workspace 下一次运行选择：`blocks/workspace` CAS 持久化可选 `DefaultLLMSelection`；选择包含完整 ai-proxy model target 与可选 reasoning effort
 - activation：fresh Start/Restart 读取 Workspace owner canonical selection；为空时使用当前系统 `defaultChat` 且省略 reasoning；caller 不得提交仅对本次 Run 生效的 selection patch
 - Run 封存：`blocks/run` 在 activation 中持久化 `ProviderInferenceSelection`；Resume 与进程恢复只使用该 sealed fact，不重读 mutable Workspace 偏好
-- TUI 运行控制通过 scoped Run intent 提交；可继续的 current-schema Run 才可 `/run resume`，terminal 或
-  `fresh_activation_required` Run 必须由用户显式 restart 创建新的 Runtime activation，TUI 不再以本地状态猜测续跑路径
+- TUI 运行控制通过 scoped Run intent 提交；可继续的 current-baseline Run 才可 `/run resume`。非当前 schema Run
+  只显示开发数据清理要求，`/run restart` 不得伪造兼容 replacement；其他 current-baseline fresh activation blocker
+  仍可由显式 restart 创建新的 Runtime activation
 - TUI：`/model` 自动列出 ready Responses target；`/model reasoning <effort|default>` 更新当前 workspace 的下一次运行偏好；`/model show` 区分 next-run 与 current-run sealed selection
 - Runtime：`ProviderCeiling` 封存完整 selection + token/byte ceiling + capability/configuration revision；reasoning effort 不改变 CWI、预算或稳定 prompt prefix
 - LLM wire：`blocks/llm` 只依据 ai-proxy catalog 校验显式 effort，并在 `/v1/responses` 中编码 nested `reasoning.effort`；空 effort 完全省略 `reasoning`
@@ -47,6 +48,8 @@ Last Updated: 2026-08-14
   Runtime drive。缺少 typed bootstrap 必须按 owner-local `fresh_activation_required` 事实收敛。
 - 唯一同步推进合同：`DriveRuntimeCommand/Result`（Orchestrator）。
 - 正式运行时状态：`RuntimeStateRecord` / Runtime aggregate（Run owner CAS 持久化）。
+- Runtime aggregate、Result closeout、semantic document、candidate prompt、step summary 与 contract audit 均以当前
+  实现重置为 current development baseline；开发期不维护多版本 reducer 或 migration。
 - 生产主链不包含 `StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、progress/terminal checkpoint replay 或通用 RuntimeAdapter registry。
 - 完整生产规约由四个协调状态机组成：SM-1 Run lifecycle、SM-2 authority/focus convergence、SM-3 candidate/sealed dispatch transaction、SM-4 drive/recovery/projection delivery；任何 runtime 变更必须通过四状态机变更门禁。
 - complete candidate 只经过一个 evaluator；evaluator 只返回完整 typed rejection，SM-3 internal event 再决定
@@ -130,27 +133,17 @@ evidence，不再定义当前实施顺序，也不能代替最新 deployed live�
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
 1. **必需 Runtime single-owner 与 model-capability output 收口：SO-MC 为唯一 active 实施队列。**
-   最新部署 Run 已证明 schema-v5 semantic seal、eligible focus、stable authority、whole-document recovery 和
-   fail-closed 零副作用边界正常，但 operations document 连续三次达到 WorkOrch 封存的 8192-token 上限，未形成
-   CandidateAttempt、Dispatch、Receipt 或 Evidence。这使原 schema-v5 deployed-only 验收失效：配置/activation 中的
-   stage token authority 必须删除；该部分已在 schema v6 完成，由 LLM owner 对当前 model 返回唯一 typed
-   `ProviderCeiling`，Orchestrator 将 `EffectiveMaxOutputTokens` 封存为 `ExpectedDocument` 的具体请求值；同时 prompt、
-   schema、strict decoder 与 evaluator 必须从同一 manifest 约束完整紧凑 JSON。所有正式状态继续只由唯一 owner 的
-   private internal event/reducer 迁移，Approval 的 target-state 私有输入也必须改为 granted/rejected observed fact。
-   详见 [SO-MC active plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)。
-   当前 SO-MC-01～09 已完成代码与自动化回归，token 唯一权威、ExpectedDocument 等值、紧凑有界 JSON、
-   whole-document recovery 与 Approval fact-event 均已落地；SO-MC-09 的 fmt/vet/full/race/boundary/isolated managed
-   file-backed/build 门禁已通过。2026-08-14 fresh schema-v6 `run-002` 已证明 29000 ceiling、attempt recovery、sealed
-   dispatch、File create receipt 与 evidence advance，但资源变化后的下一 semantic generation 错把旧 `file/write` binding
-   当作 immutable declaration，拒绝 owner-feasible `patch/apply`。SO-MC-11 因此以 schema v7 分离 activation-only
-   `DefinitionFocuses` 与 SM-2 generation focus queue；schema v6 Resume 只返回 `fresh_activation_required` 且零 owner work。
-   fresh schema-v7 deployed execution 随后暴露新的当前反例：SM-2 对既有 exact target 的 `file/write` 返回 feasible
-   并 seal binding，File operation probe 又以 create-only `operation_target_exists` 拒绝；相同 binding、catalog、target
-   和 failure signature 被反复包装为新 authority attempt，aggregate revision 与 provider token 持续增长但始终零
-   dispatch/receipt/evidence。SO-MC-12～17 已按 schema v8 完成代码与自动化收口：File 两阶段共享 owner policy，
-   contradiction 精确退役 binding，等价 authority 在 provider submission 前围栏，Run 仅持久化 opaque Runtime 与
-   lifecycle fence，repository-wide owner boundary 组合门禁通过。SO-MC-10 仍需执行 fresh schema-v8 real-provider
-   terminal persisted proof；managed mock 不构成 live closure。
+   历史部署 Run 暴露过三类缺陷：配置与 activation 持有第二份 stage token authority；immutable Definition declaration
+   与 generation binding 混用；File 两阶段 feasibility 矛盾后，等价 authority 被重复创建。旧运行记录中的 schema
+   v5-v8 仅标识这些历史反例，不定义当前兼容链或迁移支持。
+   当前实现已把全部内部持久化格式重置为开发基线 v1：LLM owner 返回唯一 typed `ProviderCeiling`，Orchestrator 将
+   `EffectiveMaxOutputTokens` 封存为 `ExpectedDocument`；Definition declaration 与 SM-2 generation focus queue 分离；
+   File 两阶段共享 owner policy，contradiction 精确退役 binding，等价 authority 在 provider submission 前围栏；Run
+   只持久化 opaque Runtime 与 lifecycle fence。所有正式状态仍只由唯一 owner 的 private internal event/reducer 迁移。
+   非当前基线 Resume 返回 `fresh_activation_required` 且零 owner work；Restart 由 Run owner 在 SM-1 admission 内返回
+   `data_reset_required`，不创建 ReplacementIntent，也不要求 Orchestrator 加载不兼容 aggregate。SO-MC-10 仍需在清理
+   开发数据后执行 fresh current-baseline real-provider terminal persisted proof；managed mock 不构成 live closure。详见
+   [SO-MC active plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)。
 2. **Runtime CWI 单 owner 矩阵继续作为必需回归基线，不再独立定义实施顺序。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。
@@ -161,8 +154,8 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
    CWI 时在同一 CAS 以 `eligible_closure_changed` 退休 generation；SM-3 complete admission 在 dispatch 前拒绝 target 漂移，
    File owner 将 `file/write` 限定为 create-only，已有文件替换必须使用带 owner-observed `baseHash` 的 `patch/apply`；
    Decision/Approval 生命周期也只经各自 private event/reducer 更新。跨 owner typed fact、owner receipt/evidence、Run
-   lifecycle 与 terminal delivery 仍符合 owner 边界；这些自动化结果必须纳入 SO-MC schema-v7 回归，不再以部署
-   schema-v5 二进制作为独立 exit。不得通过削弱 semantic seal/owner preflight、解析 message、让
+   lifecycle 与 terminal delivery 仍符合 owner 边界；这些自动化结果必须纳入 SO-MC current-baseline 回归，不再以旧
+   schema 二进制作为独立 exit。不得通过削弱 semantic seal/owner preflight、解析 message、让
    Application/LLM/capability owner 创建或排序 current focus、新增全局索引或第五状态机规避。普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
    [CWI-SO regression plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。

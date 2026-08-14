@@ -2,7 +2,7 @@ package workorchruntimecontract
 
 import "testing"
 
-func TestRuntimeResultCloseoutV2ValidatesOperationReceiptProjection(t *testing.T) {
+func TestRuntimeResultCloseoutBaselineValidatesOperationReceiptProjection(t *testing.T) {
 	closeout := RuntimeResultCloseout{
 		SchemaVersion: RuntimeResultCloseoutSchemaVersionCurrent,
 		OperationOutcomes: []RuntimeOperationCloseout{{
@@ -23,7 +23,7 @@ func TestRuntimeResultCloseoutV2ValidatesOperationReceiptProjection(t *testing.T
 		t.Fatal("owner outcome without receipt hash must fail")
 	}
 	nonCurrent := closeout
-	nonCurrent.SchemaVersion = 1
+	nonCurrent.SchemaVersion = 2
 	if err := nonCurrent.Validate(); err == nil {
 		t.Fatal("non-current closeout schema must not be accepted by Runtime")
 	}

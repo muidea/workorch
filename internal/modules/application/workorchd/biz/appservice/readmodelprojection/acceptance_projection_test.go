@@ -47,7 +47,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", ObservedRevision: "repo-absent", ContentHash: "hash-git",
 		Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired, RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 	}}
-	state.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "evidence-1", Kind: runtimecontract.EvidenceKindStateChange, AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1", OperationID: "write-1", Revision: "evidence-v1-00000000000000000001", TargetRefs: []string{"main.txt"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+	state.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "evidence-1", Kind: runtimecontract.EvidenceKindStateChange, AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1", OperationID: "write-1", Revision: "runtime-evidence-00000000000000000001", TargetRefs: []string{"main.txt"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
 	state.Facts.Resources.TargetSelection = &runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection:file", SnapshotID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/profile_declared_candidates", SelectorOwnerRef: "profile-1", SelectorSubjectRef: "subject-1",

@@ -1815,7 +1815,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 		}
 		return []projectioncontract.EventRecord{{
 			ID:          "evt-persisted-step",
-			Version:     "workorch.event.v1",
+			Version:     "workorch.event",
 			Topic:       "/step/state/changed",
 			WorkspaceID: "ws-persist",
 			RunID:       "run-persist",

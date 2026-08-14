@@ -148,7 +148,7 @@ type RuntimeStateRecord struct {
 	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
 	// OperationReceipts are owner-authored terminal receipts persisted before
-	// capability owners return execution results (introduced in schema v3 / INV-03/INV-04).
+	// capability owners return execution results (INV-03/INV-04).
 	OperationReceipts []RuntimeOperationReceipt
 	// DeliveryAcknowledgements are SM-4-only durable receipts for the terminal
 	// Result -> Workspace -> Run saga. They never alter the sealed SM-2 decision.
@@ -165,14 +165,11 @@ type RuntimeStateRecord struct {
 }
 
 // RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
-// Version 8 seals owner-policy, equivalent-authority input, binding
-// contradiction and opaque lifecycle-fence identities. Version 7 separated
-// immutable activation declarations from generation-specific semantic focus
-// bindings. ProviderCeiling remains the sole persisted
-// model capability fact and ExpectedDocument the sole resolved request budget.
-// Earlier aggregates require a fresh activation instead of an in-place
-// reinterpretation.
-const RuntimeStateSchemaVersionCurrent uint32 = 8
+// During development only the current implementation baseline is maintained;
+// incompatible development data is discarded instead of accumulating migration
+// branches. ProviderCeiling remains the sole persisted model capability fact
+// and ExpectedDocument the sole resolved request budget.
+const RuntimeStateSchemaVersionCurrent uint32 = 1
 
 // ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")

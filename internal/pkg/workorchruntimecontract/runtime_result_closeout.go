@@ -47,7 +47,7 @@ type RuntimeOperationCloseout struct {
 	ReceiptHash         string
 }
 
-const RuntimeResultCloseoutSchemaVersionCurrent uint32 = 2
+const RuntimeResultCloseoutSchemaVersionCurrent uint32 = 1
 
 func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)

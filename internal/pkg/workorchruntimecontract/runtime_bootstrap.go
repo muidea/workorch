@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const InitialRuntimeEvidenceRevision = "evidence-v1-00000000000000000000"
+const InitialRuntimeEvidenceRevision = "runtime-evidence-00000000000000000000"
 
 type RuntimeBootstrap struct {
 	SchemaVersion uint32

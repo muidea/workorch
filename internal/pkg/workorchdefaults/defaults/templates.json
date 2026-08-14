@@ -802,7 +802,7 @@
             "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists."
           ],
           "validationEnvironmentPolicy": {
-            "schemaVersion": "workorch.software_dev.validation_environment.v1",
+            "schemaVersion": "workorch.software_dev.validation_environment",
             "scratchIsolationRequired": true,
             "preferManagedSessionFor": [
               "service",

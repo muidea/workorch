@@ -54,7 +54,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if committed.Disposition != CommitDispositionCommitted || committed.Aggregate.EvidenceSequence != 1 || committed.Aggregate.Facts.EvidenceRevision != "evidence-v1-00000000000000000001" {
+	if committed.Disposition != CommitDispositionCommitted || committed.Aggregate.EvidenceSequence != 1 || committed.Aggregate.Facts.EvidenceRevision != "runtime-evidence-00000000000000000001" {
 		t.Fatalf("commit result = %+v", committed)
 	}
 	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 {
@@ -1064,7 +1064,7 @@ func dispatchDefinition() runtimecontract.RuntimeDefinitionContext {
 func baseDispatchFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
-		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-v1-00000000000000000000",
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "runtime-evidence-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, TargetRefs: []string{"main.go"},

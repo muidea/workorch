@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	shellFailureTargetObservationPrefix  = "WORKORCH_FAILURE_TARGET_V1="
-	shellFailureTargetObservationSchema  = "workorch.shell.failure_target.v1"
+	shellFailureTargetObservationPrefix  = "WORKORCH_FAILURE_TARGET="
+	shellFailureTargetObservationSchema  = "workorch.shell.failure_target"
 	shellFailureTargetObservationSubject = "shell_runtime_policy"
 	shellFailureTargetObservationMaxRefs = 8
 )

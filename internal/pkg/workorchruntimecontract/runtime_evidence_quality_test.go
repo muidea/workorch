@@ -66,7 +66,7 @@ func TestInitialRuntimeCoverageFactsPreserveClaimIdentity(t *testing.T) {
 
 func TestRuntimeCandidateContextPreservesValidationQualityObservation(t *testing.T) {
 	facts := RuntimeFacts{
-		WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition", EvidenceRevision: "evidence-v1-00000000000000000001",
+		WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition", EvidenceRevision: "runtime-evidence-00000000000000000001",
 		Focus:    CoverageFocus{ID: "focus", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"}},
 		Coverage: []RuntimeCoverageItemFact{{ID: "cwi", State: RuntimeCoverageItemStateOpen}},
 		Evidence: EvidenceLedger{Accepted: []EvidenceFact{{

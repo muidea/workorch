@@ -226,7 +226,7 @@ func TestCoverageProofLineageEquivalentResolutionUnlocksOnlyCurrentTargetAndRepa
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
 	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	fact.TargetRefs = []string{"main.go"}
-	fact.Revision = "evidence-v1-00000000000000000001"
+	fact.Revision = "runtime-evidence-00000000000000000001"
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{fact}
 	if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
 		t.Fatalf("append source lineage: %v", err)
@@ -282,7 +282,7 @@ func TestCoverageProofLineageIncompatibleResolutionCannotUnlockTargetOrRepairGat
 	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
 	coverageProofLineageSynchronizeLedger(t, &aggregate)
 	fact.TargetRefs = []string{"main.go"}
-	fact.Revision = "evidence-v1-00000000000000000001"
+	fact.Revision = "runtime-evidence-00000000000000000001"
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{fact}
 	if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
 		t.Fatalf("append source lineage: %v", err)
@@ -331,7 +331,7 @@ func TestCoverageProofLineageCandidateAdmissionRequiresEquivalentCurrentCredit(t
 		coverageProofLineageSynchronizeLedger(t, &aggregate)
 		aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 			ID: "rejected-state", Kind: runtimecontract.EvidenceKindStateChange,
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-lineage"}, Revision: "evidence-v1-00000000000000000002",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-lineage"}, Revision: "runtime-evidence-00000000000000000002",
 		}}
 		if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
 			t.Fatalf("resolve lineage: %v", err)

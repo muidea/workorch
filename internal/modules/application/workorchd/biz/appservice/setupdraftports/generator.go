@@ -15,7 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-const WorkspaceSetupDraftSchemaName = "workorch.workspaceSetupDraft.v1"
+const WorkspaceSetupDraftSchemaName = "workorch.workspaceSetupDraft"
 
 type EventHubGenerator struct {
 	CommandHub magicevent.Hub
@@ -44,7 +44,7 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 			Kind:           "workspace/setup_draft",
 			Schema:         WorkspaceSetupDraftSchemaName,
 			DialogLanguage: request.DialogLanguage,
-			PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.workspace_setup_prompt.v1", Sections: []llmmodels.PromptSection{
+			PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.workspace_setup_prompt", Sections: []llmmodels.PromptSection{
 				{ID: "C0.workspace-setup-contract", Name: "Workspace setup contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: string(contractPayload)},
 				{ID: "C3.workspace-setup-request", Name: "Workspace setup request", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(requestPayload)},
 			}},

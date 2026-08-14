@@ -1297,7 +1297,7 @@ func (e ExecutionEvidence) Validate() error {
 }
 
 func nextEvidenceRevision(sequence uint64) string {
-	return fmt.Sprintf("evidence-v1-%020d", sequence)
+	return fmt.Sprintf("runtime-evidence-%020d", sequence)
 }
 
 func appendNormalizedString(values []string, value string) []string {

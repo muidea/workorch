@@ -3160,7 +3160,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	if bundle.TaskProgress.RunID != string(runID) || bundle.Recovery.Mode != "resume" {
 		t.Fatalf("bundle progress/recovery = %+v/%+v, want resume run progress", bundle.TaskProgress, bundle.Recovery)
 	}
-	if bundle.CompressedContext.Version != "workorch.compressedContext.v1" ||
+	if bundle.CompressedContext.Version != "workorch.compressedContext" ||
 		bundle.CompressedContext.Mode != "deterministic_recovery_summary" ||
 		bundle.CompressedContext.RunID != string(runID) {
 		t.Fatalf("compressedContext = %+v, want deterministic compressed context for run", bundle.CompressedContext)

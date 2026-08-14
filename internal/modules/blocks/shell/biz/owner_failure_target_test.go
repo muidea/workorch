@@ -169,7 +169,7 @@ func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 			OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
 		},
 		TargetRole: "implementation",
-		Data:       shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf '%s\\n' 'WORKORCH_FAILURE_TARGET_V1={\"schemaVersion\":\"workorch.shell.failure_target.v1\",\"targetRole\":\"implementation\",\"targetRefs\":[\"implementation.go\"],\"diagnosticClass\":\"validation_build_failed\"}'; exit 7"}, ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed}},
+		Data:       shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf '%s\\n' 'WORKORCH_FAILURE_TARGET={\"schemaVersion\":\"workorch.shell.failure_target\",\"targetRole\":\"implementation\",\"targetRefs\":[\"implementation.go\"],\"diagnosticClass\":\"validation_build_failed\"}'; exit 7"}, ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed}},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()
@@ -196,7 +196,7 @@ func TestShellFailureTargetObservationRejectsUnstructuredOrMismatchedRecords(t *
 	base := RuntimeCommandResult{
 		ValidationFailureDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
 	}
-	valid := `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
+	valid := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
 	for name, test := range map[string]struct {
 		stdout string
 		role   string
@@ -205,9 +205,9 @@ func TestShellFailureTargetObservationRejectsUnstructuredOrMismatchedRecords(t *
 		"valid":               {stdout: valid, role: "implementation", want: true},
 		"missing":             {stdout: "implementation.go failed", role: "implementation"},
 		"multiple":            {stdout: valid + "\n" + valid, role: "implementation"},
-		"unknown_field":       {stdout: `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed","extra":true}`, role: "implementation"},
+		"unknown_field":       {stdout: `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed","extra":true}`, role: "implementation"},
 		"role_mismatch":       {stdout: valid, role: "validation"},
-		"diagnostic_mismatch": {stdout: `WORKORCH_FAILURE_TARGET_V1={"schemaVersion":"workorch.shell.failure_target.v1","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_test_failed"}`, role: "implementation"},
+		"diagnostic_mismatch": {stdout: `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_test_failed"}`, role: "implementation"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			result := base

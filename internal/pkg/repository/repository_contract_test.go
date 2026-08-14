@@ -863,7 +863,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 
 	first := &eventstreammodel.EventRecord{
 		ID:             common.EventRecordID("event-record-1"),
-		Version:        "workorch.event.v1",
+		Version:        "workorch.event",
 		Topic:          "/run/state/changed",
 		OccurredAt:     "2026-04-28T00:00:00Z",
 		SourceModule:   "blocks/run",
@@ -877,7 +877,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	}
 	second := &eventstreammodel.EventRecord{
 		ID:           common.EventRecordID("event-record-2"),
-		Version:      "workorch.event.v1",
+		Version:      "workorch.event",
 		Topic:        "/step/state/changed",
 		OccurredAt:   "2026-04-28T00:01:00Z",
 		SourceModule: "kernel/orchestrator",
@@ -890,7 +890,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	}
 	third := &eventstreammodel.EventRecord{
 		ID:           common.EventRecordID("event-record-3"),
-		Version:      "workorch.event.v1",
+		Version:      "workorch.event",
 		Topic:        "/step/state/changed",
 		OccurredAt:   "2026-04-28T00:02:00Z",
 		SourceModule: "kernel/orchestrator",
@@ -1097,7 +1097,7 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 		EmbeddingModel:         "embedding-model",
 		VectorDimension:        3,
 		RefreshSource:          "repair",
-		SelectionPolicyVersion: "workorch.memory.step_input.v1",
+		SelectionPolicyVersion: "workorch.memory.step_input",
 		CandidateMemoryIDs:     []common.MemoryID{common.MemoryID("memory-contract"), common.MemoryID("memory-other")},
 		SelectedMemoryIDs:      []common.MemoryID{common.MemoryID("memory-contract")},
 		ExcludedMemoryIDs:      []common.MemoryID{common.MemoryID("memory-other")},
@@ -3337,7 +3337,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 
 	eventRecord := &eventstreammodel.EventRecord{
 		ID:           eventRecordID,
-		Version:      "workorch.event.v1",
+		Version:      "workorch.event",
 		Topic:        "/run/state/changed",
 		OccurredAt:   "2026-04-28T00:00:00Z",
 		SourceModule: "blocks/run",

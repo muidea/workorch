@@ -35,12 +35,12 @@ private transitions and pure Runtime contract validation.
 | CWI-SO-15 | code/automated-closed | Orchestrator SM-3 | Every production dispatch passes one owner-local dispatcher; candidate attempt acceptance and dispatch creation share one CAS. |
 | CWI-SO-16 | implementation/focused-closed | Orchestrator SM-2/SM-3/SM-4 | Settle, prerequisite, reopen, retirement, reconciliation and semantic-order projection remain owner-private and CAS-bound. |
 | CWI-SO-17 | code/automated-closed | Run/LLM/capability/governance/delivery owners | Cross-owner contracts remain detached typed facts; Decision/Approval transitions and File effects now enter only owner-private dispatchers. `file/write` is create-only and replacement requires revision-bound `patch/apply`. |
-| CWI-SO-18 | code/automated-closed; live exit superseded by SO-MC | Automated/live verification | `run-086` target drift remains frozen as a pre-dispatch manifest rejection and File owner independently refuses overwrite. Re-run these shapes inside the fresh schema-v8 SO-MC live proof. |
+| CWI-SO-18 | code/automated-closed; live exit superseded by SO-MC | Automated/live verification | `run-086` target drift remains frozen as a pre-dispatch manifest rejection and File owner independently refuses overwrite. Re-run these shapes inside a fresh development-baseline SO-MC live proof. |
 
 The detailed owner map, transition rules, migration boundary, and regression matrix are in the
 [Runtime CWI plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md).
 
-The former schema-v5 deployed-only exit is superseded by the active
+The former versioned deployed-only exit is superseded by the active
 [Runtime single-owner and model-capability output closure plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md).
 The CWI matrix remains mandatory regression coverage for that queue.
 
@@ -51,8 +51,9 @@ The CWI matrix remains mandatory regression coverage for that queue.
   CAS boundary.
 - Capability Blocks return only scoped typed observations and receipts. They do not alter CWI, focus, binding,
   reconciliation, retry, or terminal state.
-- `/run resume` retains only current-Run lineage; `/run restart` creates a new Run with no predecessor CWI credit.
-- Non-current or ambiguous Runtime aggregate schema returns `fresh_activation_required`, with no compatibility fallback.
+- `/run resume` retains only current-Run lineage; current-baseline `/run restart` creates a new Run with no predecessor CWI credit.
+- Non-current Runtime aggregate schema returns `fresh_activation_required`; Restart returns `data_reset_required` and creates no
+  replacement. Ambiguous current-baseline CWI state remains a typed fresh-activation blocker.
 
 ## B. Workspace Reasoning Effort
 
@@ -64,11 +65,11 @@ isolation. It is independent of CWI/focus/dispatch authority. See the
 
 ## C. Runtime Single-Owner And Model-Capability Output
 
-Status: code/automated-closed; deployed schema-v8 verification pending.
+Status: code/automated-closed; deployed development-baseline verification pending.
 
 The latest deployed Run correctly preserved one Orchestrator request session, stable authority and zero side effect,
 but three operations calls reached the WorkOrch-sealed 8192-token limit and ended before CandidateAttempt/Dispatch.
-The required closure removes configuration/activation token authority, upgrades fresh Runtime to schema v8, obtains
+The required closure removes configuration/activation token authority, resets fresh Runtime to current development baseline, obtains
 the effective output limit only from the selected model's typed ProviderCeiling, seals it into ExpectedDocument, adds
 compact complete-JSON prompt/schema limits, and completes target-state removal for all owner-private lifecycle inputs.
 
@@ -78,9 +79,9 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 | SO-MC-04..07 | code/focused-closed | LLM owner + Orchestrator SM-3/SM-4 | Typed model ceiling, exact ExpectedDocument equality, compact bounded schema/prompt and whole-document recovery are covered. |
 | SO-MC-08 | code/focused-closed | Approval + all state owners | Approval uses observed fact kinds; owner-private dispatcher and zero-side-effect regressions pass. |
 | SO-MC-09 | automated-closed | repository-wide | Core docs and narrow boundary gates are updated; fmt/vet/full/race/boundary/isolated managed file-backed/build gates pass. |
-| SO-MC-10 | open; deployed-only | deployed Runtime | Requires a real-provider fresh schema-v8 candidate/dispatch/receipt/evidence/delivery terminal proof. |
-| SO-MC-11 | code/automated-closed | Runtime contract + Orchestrator SM-2/3/4 | Schema v7 persists immutable DefinitionFocus declarations; prior generation operation kinds cannot constrain resource-change reseal; v6 Resume is side-effect free. |
-| SO-MC-12 | code/automated-closed | Runtime contract + event contract | Schema v8 owner-policy, authority-input and opaque lifecycle-fence identities; v7 Resume is side-effect free. |
+| SO-MC-10 | open; deployed-only | deployed Runtime | Requires a real-provider fresh current-baseline candidate/dispatch/receipt/evidence/delivery terminal proof after development data cleanup. |
+| SO-MC-11 | code/automated-closed | Runtime contract + Orchestrator SM-2/3/4 | Current baseline persists immutable DefinitionFocus declarations; prior generation operation kinds cannot constrain resource-change reseal. |
+| SO-MC-12 | code/automated-closed | Runtime contract + event contract | Current baseline owns owner-policy, authority-input and opaque lifecycle-fence identities; non-current Resume/Restart is side-effect free. |
 | SO-MC-13 | code/automated-closed | File owner | Semantic and operation feasibility share one kind/variant/target/resource policy. |
 | SO-MC-14 | code/automated-closed | Orchestrator SM-2 | Contradictory owner fact retires the exact binding and triggers bounded semantic replan or typed terminal. |
 | SO-MC-15 | code/automated-closed | Orchestrator SM-2/3/4 | Unchanged binding/revision/signature/targets cannot mint another AuthoritySnapshot or provider request. |
@@ -96,9 +97,9 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 
 ## Judgment
 
-The fresh schema-v7 persisted counterexample remains a regression baseline. SO-MC-12..17 now close its code and
-automated owner/convergence defects; live closure still requires one fresh schema-v8
-candidate/dispatch/receipt/evidence/terminal chain. Managed mock verification, aggregate revision growth and correct
+The prior persisted counterexample remains a regression baseline, not a supported schema lineage. SO-MC-12..17 now
+close its code and automated owner/convergence defects; live closure still requires one fresh current development baseline
+candidate/dispatch/receipt/evidence/terminal chain after data cleanup. Managed mock verification, aggregate revision growth and correct
 per-attempt fail-closed behavior cannot substitute for bounded forward convergence.
 
 ## Navigation

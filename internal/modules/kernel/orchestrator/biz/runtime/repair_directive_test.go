@@ -76,15 +76,15 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds:      []string{runtimecontract.RuntimeBlockKindPatchApply},
 		CoverageWorkItemIDs:        facts.Focus.CoverageWorkItemIDs,
-		SupersedesEvidenceRevision: "evidence-v1-00000000000000000002",
+		SupersedesEvidenceRevision: "runtime-evidence-00000000000000000002",
 	}
 	// A rejected state-change does not complete or flip the repair continuation.
 	facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-patch", Kind: runtimecontract.EvidenceKindStateChange,
-		Revision: "evidence-v1-00000000000000000003", FailureClass: runtimecontract.FailureClassEffectMismatch,
+		Revision: "runtime-evidence-00000000000000000003", FailureClass: runtimecontract.FailureClassEffectMismatch,
 		FailureMessage: "hunk context mismatch", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
-	facts.EvidenceRevision = "evidence-v1-00000000000000000003"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -96,9 +96,9 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
 		ID: "accepted-repair", Kind: runtimecontract.EvidenceKindStateChange,
-		Revision: "evidence-v1-00000000000000000004", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		Revision: "runtime-evidence-00000000000000000004", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
-	facts.EvidenceRevision = "evidence-v1-00000000000000000004"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
 	if err != nil {
@@ -143,13 +143,13 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
-		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: "evidence-v1-00000000000000000002",
+		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: "runtime-evidence-00000000000000000002",
 	}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-validation-entry-edit", Kind: runtimecontract.EvidenceKindStateChange,
-		Revision: "evidence-v1-00000000000000000003", TargetRefs: []string{"entry_test.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		Revision: "runtime-evidence-00000000000000000003", TargetRefs: []string{"entry_test.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
-	facts.EvidenceRevision = "evidence-v1-00000000000000000003"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
@@ -161,9 +161,9 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
 		ID: "accepted-implementation-edit", Kind: runtimecontract.EvidenceKindStateChange,
-		Revision: "evidence-v1-00000000000000000004", TargetRefs: []string{"implementation.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		Revision: "runtime-evidence-00000000000000000004", TargetRefs: []string{"implementation.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
-	facts.EvidenceRevision = "evidence-v1-00000000000000000004"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
 	if err != nil {
@@ -275,13 +275,13 @@ func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t 
 		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: facts.EvidenceRevision,
 	}
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
-		ID: "changed-target", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001", TargetRefs: []string{"implementation.go"},
+		ID: "changed-target", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
 	facts = repairDirectiveFactsWithCanonicalCWI(t, facts)
 	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus})
 	if updated.RepairDirective == nil || updated.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
-		updated.RepairDirective.SupersedesEvidenceRevision != "evidence-v1-00000000000000000001" {
+		updated.RepairDirective.SupersedesEvidenceRevision != "runtime-evidence-00000000000000000001" {
 		t.Fatalf("accepted repair state-change must retain directive and require fresh validation: %+v", updated.RepairDirective)
 	}
 	if !acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
@@ -346,7 +346,7 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 	facts.RepairDirective = &directive
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "changed", Kind: runtimecontract.EvidenceKindStateChange,
-		Revision: "evidence-v1-00000000000000000002", TargetRefs: []string{"implementation.go"},
+		Revision: "runtime-evidence-00000000000000000002", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	facts = repairDirectiveFactsWithCanonicalCWI(t, facts)
@@ -371,15 +371,15 @@ func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-state-change", Kind: runtimecontract.EvidenceKindStateChange,
-		Revision: "evidence-v1-00000000000000000002", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		Revision: "runtime-evidence-00000000000000000002", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation,
-		Revision: "evidence-v1-00000000000000000004", FailureClass: runtimecontract.FailureClassExecutionFailure,
+		Revision: "runtime-evidence-00000000000000000004", FailureClass: runtimecontract.FailureClassExecutionFailure,
 		FailureCode: "shell_exit_nonzero", FailureMessage: "validation exited non-zero",
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
-	facts.EvidenceRevision = "evidence-v1-00000000000000000004"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
 	facts.Feasibility = &runtimecontract.RuntimeFeasibilityFact{
 		FocusID: facts.Focus.ID, State: runtimecontract.ConvergenceStateNeedValidation,
 		RequiredOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
@@ -393,7 +393,7 @@ func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {
 		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindValidation},
 		AllowedOperationKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		CoverageWorkItemIDs:        facts.Focus.CoverageWorkItemIDs,
-		SupersedesEvidenceRevision: "evidence-v1-00000000000000000002",
+		SupersedesEvidenceRevision: "runtime-evidence-00000000000000000002",
 	}
 
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)

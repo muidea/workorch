@@ -2913,7 +2913,7 @@ func cloneMap(input map[string]any) map[string]any {
 	return out
 }
 
-const stepSummarySchemaVersion = "workorch.step_summary.v2"
+const stepSummarySchemaVersion = "workorch.step_summary"
 
 func compactStepSummaryInput(input map[string]any) map[string]any {
 	ret := map[string]any{

@@ -25,7 +25,7 @@ func TestMapObservedPreservesEnvelopeShape(t *testing.T) {
 	items := []observed.SnapshotItem{
 		{
 			ID:           "/run/snapshot:run-1",
-			Version:      "workorch.v1",
+			Version:      "workorch",
 			Topic:        "/run/snapshot",
 			OccurredAt:   "2026-04-22T00:00:00Z",
 			SourceModule: workorchdcommon.EventSourceModuleID,
@@ -57,7 +57,7 @@ func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 	items := []observed.SnapshotItem{
 		{
 			ID:      "/decision/ticket/snapshot:ticket-1",
-			Version: "workorch.v1",
+			Version: "workorch",
 			Topic:   "/decision/ticket/snapshot",
 			Payload: observed.DecisionTicketPayload{
 				State: "resolved",

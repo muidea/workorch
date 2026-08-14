@@ -856,7 +856,7 @@ func TestModelHelpExplainsRunResumeAndFreshRestart(t *testing.T) {
 	}
 }
 
-func TestModelFreshActivationStatusExplainsRestartInsteadOfRunning(t *testing.T) {
+func TestModelSchemaMismatchExplainsDevelopmentDataResetInsteadOfRestart(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.applyRunControlState(&projectioncontract.Run{
 		ID: "run-schema-v2", WorkspaceID: "ws-1", State: string(common.RunStateActive),
@@ -864,7 +864,7 @@ func TestModelFreshActivationStatusExplainsRestartInsteadOfRunning(t *testing.T)
 			Disposition: "fresh_activation_required", Reason: "schema_unsupported", ActualSchemaVersion: 2, SupportedSchemaVersion: 4,
 		},
 	}, "")
-	if m.running || m.progress != progressIdle || !strings.Contains(m.result, "/run restart") || !strings.Contains(m.result, "v2") {
+	if m.running || m.progress != progressIdle || strings.Contains(m.result, "/run restart") || !strings.Contains(m.result, "clear") || !strings.Contains(m.result, "v2") {
 		t.Fatalf("fresh activation display running=%v progress=%s result=%q", m.running, m.progress, m.result)
 	}
 }

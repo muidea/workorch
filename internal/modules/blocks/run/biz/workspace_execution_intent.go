@@ -169,6 +169,11 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		}
 		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated), nil
 	}
+	if predecessor.RuntimeActivationStatus != nil &&
+		predecessor.RuntimeActivationStatus.Disposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired &&
+		predecessor.RuntimeActivationStatus.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported {
+		return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentDataResetRequired, runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible), nil
+	}
 	if err := m.persistReplacementIntent(ctx, predecessor, replacementIntentFromCommand(cmd)); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}

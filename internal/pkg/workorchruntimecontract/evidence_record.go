@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-const EvidenceRecordSchema = "workorch.evidence_record.v1"
+const EvidenceRecordSchema = "workorch.evidence_record"
 
 const (
 	EvidenceKindStateChange    = "state_change"

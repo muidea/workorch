@@ -6,7 +6,7 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		if len(source) == 0 {
 			continue
 		}
-		if readModelStringValue(source["schemaVersion"]) == "workorch.step_contract_audit.v2" ||
+		if readModelStringValue(source["schemaVersion"]) == "workorch.step_contract_audit" ||
 			len(readModelMapValue(source["requiredOutput"])) > 0 ||
 			readModelStringValue(source["currentActionKind"]) != "" ||
 			readModelStringValue(source["currentFocusId"]) != "" {
@@ -25,7 +25,7 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil
 	}
-	if readModelStringValue(input["schemaVersion"]) == "workorch.step_contract_audit.v2" {
+	if readModelStringValue(input["schemaVersion"]) == "workorch.step_contract_audit" {
 		return cloneReadModelMap(input)
 	}
 
@@ -48,7 +48,7 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 	)
 
 	ret := map[string]any{
-		"schemaVersion": "workorch.step_contract_audit.v2",
+		"schemaVersion": "workorch.step_contract_audit",
 	}
 	if stage := firstNonEmptyString(
 		readModelStringValue(input["runtimeStage"]),

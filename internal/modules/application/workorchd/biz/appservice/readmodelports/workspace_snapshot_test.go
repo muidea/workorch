@@ -417,7 +417,7 @@ func (r *recordingWorkspaceArtifactContinuationReader) ListByRun(_ context.Conte
 func llmUsageEventRecord(t *testing.T, id string, workspaceID common.WorkspaceID, runID common.RunID, providerID string, model string, estimated bool) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID(id),
-		Version:     "workorch.event.v1",
+		Version:     "workorch.event",
 		Topic:       "/run/llm_usage/recorded",
 		WorkspaceID: workspaceID,
 		RunID:       runID,

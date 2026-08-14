@@ -34,7 +34,7 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-repair", Kind: runtimecontract.EvidenceKindStateChange,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000002",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000002",
 		BindingRefs: []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID},
 	}}
 	if shapes := ActiveRejectedOperationShapes(aggregate); len(shapes) != 0 {
@@ -123,10 +123,10 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 	// shape, and evidence outside current focus cannot clear it either.
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "older-accepted", Kind: runtimecontract.EvidenceKindStateChange,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000000",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000000",
 	}, {
 		ID: "other-focus-accepted", Kind: runtimecontract.EvidenceKindStateChange,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-other"}, Revision: "evidence-v1-00000000000000000002",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-other"}, Revision: "runtime-evidence-00000000000000000002",
 	}}
 	if shapes := ActiveRejectedOperationShapes(aggregate); len(shapes) != 1 {
 		t.Fatalf("older or unbound accepted evidence cleared current rejected shape: %+v", shapes)
@@ -200,11 +200,11 @@ func TestEvaluateCandidateAdmissionRespectsRepairDirectiveForValidationGap(t *te
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000001",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000001",
 	}}
 	aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-state", Kind: runtimecontract.EvidenceKindStateChange,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000002",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000002",
 	}}
 	runtimeTestSealCurrentFocusBindings(t, &aggregate)
 	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
@@ -834,7 +834,7 @@ func aggregateWithActiveRejectedCandidate(t *testing.T) (RuntimeAggregate, runti
 	aggregate.Facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
 		ID: "rejected-patch", Kind: runtimecontract.EvidenceKindStateChange,
 		DispatchID: dispatch.ID, OperationID: "patch-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: "evidence-v1-00000000000000000001", FailureSignature: "rejected-patch",
+		Revision: "runtime-evidence-00000000000000000001", FailureSignature: "rejected-patch",
 	}}
 	return aggregate, candidate
 }

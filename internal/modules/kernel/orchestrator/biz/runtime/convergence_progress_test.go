@@ -37,7 +37,7 @@ func TestRuntimeConvergenceProgressSignatureTracksEvidenceAndDispatch(t *testing
 	}
 	base := RuntimeAggregate{StateRevision: 1, Definition: controllerDefinition(), Facts: facts, Decision: decision}
 	withEvidence := base
-	withEvidence.Facts.EvidenceRevision = "evidence-v1-00000000000000000001"
+	withEvidence.Facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withEvidence) {
 		t.Fatal("evidence progress did not change convergence signature")
 	}

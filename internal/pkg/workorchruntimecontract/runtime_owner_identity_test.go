@@ -2,7 +2,7 @@ package workorchruntimecontract
 
 import "testing"
 
-func TestRuntimeV8OwnerIdentitiesNormalizeValidateAndHash(t *testing.T) {
+func TestRuntimeOwnerIdentitiesNormalizeValidateAndHash(t *testing.T) {
 	policy := RuntimeOwnerPolicyIdentity{OwnerModuleID: " blocks/file ", PolicyRevision: " file-policy-v1 ", CatalogSnapshotID: " catalog-1 "}.Normalized()
 	if err := policy.Validate(); err != nil {
 		t.Fatal(err)
@@ -30,13 +30,13 @@ func TestRuntimeV8OwnerIdentitiesNormalizeValidateAndHash(t *testing.T) {
 	}
 }
 
-func TestRuntimeSchemaV7RequiresFreshActivation(t *testing.T) {
-	err := ValidateRuntimeStateSchemaVersion(7)
+func TestNonCurrentRuntimeSchemaRequiresDataReset(t *testing.T) {
+	err := ValidateRuntimeStateSchemaVersion(8)
 	if err == nil {
-		t.Fatal("schema v7 was accepted by the schema v8 writer")
+		t.Fatal("non-current schema was accepted by the baseline writer")
 	}
 	incompatibility, ok := RuntimeStateIncompatibilityFromError(err)
-	if !ok || incompatibility.ActualSchemaVersion != 7 || incompatibility.SupportedSchemaVersion != 8 || incompatibility.Reason != RuntimeStateIncompatibilityReasonSchemaUnsupported {
-		t.Fatalf("schema v7 incompatibility = %+v ok=%v", incompatibility, ok)
+	if !ok || incompatibility.ActualSchemaVersion != 8 || incompatibility.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent || incompatibility.Reason != RuntimeStateIncompatibilityReasonSchemaUnsupported {
+		t.Fatalf("schema incompatibility = %+v ok=%v", incompatibility, ok)
 	}
 }

@@ -7,11 +7,11 @@ Type: implementation-closure-plan
 Last Updated: 2026-08-14
 
 Implementation status (2026-08-14): SO-MC-01 through SO-MC-09 and SO-MC-11 remain regression baselines. SO-MC-12
-through SO-MC-17 are code/automated-closed: schema v8 rejects v7 Resume, File semantic/operation feasibility shares one
+through SO-MC-17 are code/automated-closed: current development baseline rejects non-current Resume/Restart, File semantic/operation feasibility shares one
 owner policy, exact binding contradictions retire through one Orchestrator-private event, equivalent authority is
 fenced before provider submission, and Run persists SM-2/3/4 as opaque state behind an Orchestrator-authored lifecycle
 fence. Focused/full/race/vet/fmt/boundary/isolated managed/build gates pass. SO-MC-10 remains open and requires a fresh
-deployed schema-v8 real-provider terminal proof; managed/mock success is not that exit.
+deployed current-baseline real-provider terminal proof after development-data cleanup; managed/mock success is not that exit.
 
 ## 1. Purpose And Authority
 
@@ -248,9 +248,11 @@ Mandatory invariants:
 
 ## 10. Runtime Schema Boundary
 
-The token closure upgraded Runtime aggregate schema from v5 to v6 because schema-v5 activation and stable-prefix identity persisted stage token limits. The generation closure now upgrades v6 to v7 because v6 does not persist immutable source declarations separately from semantic focus bindings. Reinterpreting a v6 focus in place would change existing authority across restart.
+WorkOrch is in active development. The completed token, generation and owner-convergence closures are consolidated into
+one current development baseline instead of being maintained as a v5-v8 migration chain. Old version labels in triggering
+evidence are historical defect identifiers only; no production reader, reducer or Restart path supports them.
 
-Schema v7 retains the v6 token rules and additionally:
+Current baseline:
 
 - removes semantic/candidate stage token authority from activation/execution contract;
 - keeps ProviderCeiling as the sole persisted model capability fact;
@@ -261,15 +263,7 @@ Schema v7 retains the v6 token rules and additionally:
 - validates semantic documents and seal output only against immutable declarations;
 - lets receipt/resource-change retirement and reseal replace generation bindings without widening declarations.
 
-Under the v7 baseline, schema v6 and earlier were not implicitly migrated or reinterpreted; Resume returned
-`fresh_activation_required`, and explicit Restart created new v7 lineage without predecessor candidate, request or CWI
-credit. Schema v8 now supersedes that current-schema boundary.
-
-The deployed contradiction requires schema v8 because v7 persists neither the new owner-convergence fence nor an
-opaque Run lifecycle fence. Reinterpreting an already-sealed v7 binding as if it had passed the unified File policy
-would change authority across restart.
-
-Schema v8 must additionally:
+Current baseline additionally:
 
 - bind every sealed semantic feasibility fact to a canonical owner policy revision covering kind, variant, target
   policy and current resource shape;
@@ -277,10 +271,12 @@ Schema v8 must additionally:
 - forbid a new AuthoritySnapshot when binding hash, owner revision, failure signature and targets are unchanged;
 - persist an opaque lifecycle fence/hash that Run can compare without decoding SM-2/3/4 fields;
 - retain binding retirement lineage for a contradiction discovered after seal;
-- reject schema-v7 and earlier Resume as `fresh_activation_required` before provider/capability work.
+- reject every non-current Resume as `fresh_activation_required` before provider/capability work.
 
-Explicit Restart creates a fresh schema-v8 Run. No production migration may patch v7 JSON, synthesize `patch/apply`,
-copy prior candidate/receipt/evidence credit, or reconstruct authority through a map/JSON compatibility bridge.
+Explicit Restart against a non-current predecessor is rejected by the Run owner as `data_reset_required` before a
+ReplacementIntent is persisted or Orchestrator is invoked. No production migration may patch old JSON, synthesize
+`patch/apply`, copy prior candidate/receipt/evidence credit, or reconstruct authority through a map/JSON compatibility
+bridge. Development data must be cleared before a fresh current-baseline activation.
 
 ## 11. Approval Owner Closure
 
@@ -297,7 +293,7 @@ Remove `Target common.ApprovalState` from the private event. External commands c
 
 | Component | Required change | Forbidden result |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | schema v8; remove stage token authority; separate immutable declaration from binding generation; retain pure ProviderCeiling/ExpectedDocument and owner/fence identity validation | I/O, retry choice, state mutation, model-specific branching |
+| `internal/pkg/workorchruntimecontract` | current baseline schema; remove stage token authority; separate immutable declaration from binding generation; retain pure ProviderCeiling/ExpectedDocument and owner/fence identity validation | I/O, retry choice, state mutation, model-specific branching |
 | `internal/pkg/workorchconfig` | remove stage token and mode fields/defaults/values | second token authority |
 | `internal/pkg/workorchruntimepolicy` | remove stage token policy projection | runtime override of model ceiling |
 | `application/workorchd/.../activationports` | stop copying token limits; seal provider selection only | runtime ceiling calculation or retry |
@@ -388,7 +384,7 @@ Exit: all automated gates pass and active docs contain one implementation queue.
 ### SO-MC-10 — Fresh deployed live closure
 
 - Build and deploy the verified binary.
-- Explicitly restart into a fresh schema-v8 Run.
+- After clearing incompatible development data, start a fresh current-baseline Run.
 - Inspect persisted ceiling, ExpectedDocument, request audit, candidate, dispatch, receipt, evidence and delivery.
 - Assert provider calls remain bounded by actual document recovery/correction and do not grow by recreating an
   equivalent authority.
@@ -399,11 +395,11 @@ Exit: at least one legal CandidateAttempt, SealedDispatch, exact owner receipt a
 
 - Persist fresh activation declarations independently from mutable SM-2 focus queues.
 - Route receipt-driven retirement, CWI reopen and reseal through existing Orchestrator private events and aggregate CAS.
-- Reject schema-v6 Resume before provider/capability work.
+- Reject non-current Resume before provider/capability work.
 - Prove a prior `file/write` generation cannot constrain a new owner-feasible `patch/apply` generation.
 
-Exit: code/automated closure passes without File-specific Runtime branching or a fifth state machine; its v7 result
-remains a regression baseline and the fresh schema-v8 live proof remains SO-MC-10.
+Exit: code/automated closure passes without File-specific Runtime branching or a fifth state machine; historical
+results remain regression baselines and the fresh current-baseline live proof remains SO-MC-10.
 
 ### Reopened execution order
 
@@ -414,9 +410,10 @@ SO-MC-12 -> SO-MC-13 -> SO-MC-14 -> SO-MC-15 -> SO-MC-16 -> SO-MC-17 -> SO-MC-10
 ```
 
 SO-MC-01 through SO-MC-09 and SO-MC-11 remain regression baselines. They are not rerun as design phases, but every
-affected regression remains mandatory. SO-MC-10 must not start against schema v7 or before SO-MC-17 passes.
+affected regression remains mandatory. SO-MC-10 must start only after incompatible development data is cleared and
+SO-MC-17 passes.
 
-### SO-MC-12 — Schema-v8 owner and transition envelope
+### SO-MC-12 — Current-baseline owner and transition envelope
 
 Status: code/automated-closed (2026-08-14).
 
@@ -429,8 +426,9 @@ Code scope:
 
 Work:
 
-- increment the Runtime schema to v8 and make v7 Resume return `fresh_activation_required` with zero provider,
-  capability, dispatch or projection-driven recovery work;
+- reset the Runtime schema to current development baseline; make non-current Resume return `fresh_activation_required` and
+  non-current Restart return `data_reset_required`, both with zero provider, capability, dispatch or projection-driven
+  recovery work;
 - define pure typed values for owner policy revision, equivalent-authority input identity, binding contradiction
   identity and opaque lifecycle fence;
 - keep all retry/replan/terminal selection out of the contract package;
@@ -439,12 +437,12 @@ Work:
 
 Required tests:
 
-- v7 Resume/recovery performs zero owner work;
-- v8 clone/normalize/hash/validate preserves all new identities across restart;
+- non-current Resume/Restart performs zero owner work and persists no ReplacementIntent;
+- current-baseline clone/normalize/hash/validate preserves all new identities across restart;
 - an EventHub fact cannot be classified as an owner-private transition;
 - every Orchestrator mutation kind is exhaustively classified and handled only by `ApplyInternalEvent`.
 
-Exit: schema-v8 identity can express the later fixes without target state, mutable handles, map authority or policy
+Exit: current-baseline identity can express the later fixes without target state, mutable handles, map authority or policy
 selection outside the owner.
 
 ### SO-MC-13 — File owner feasibility unification
@@ -720,20 +718,20 @@ The following do not close this plan:
 - concatenate partial provider output;
 - ask Application/UI to Resume after truncation;
 - weaken strict schema, semantic seal, target policy or File overwrite protection;
-- migrate schema-v7 or earlier aggregate in place;
+- migrate any non-current aggregate in place;
 - mark live closure after a fail-closed run that never reaches dispatch;
 - let File choose `patch/apply`, correction, retry or binding retirement for Orchestrator;
 - parse `operation_target_exists` message text to select a Runtime action;
 - add a larger retry/authority budget instead of preventing equivalent-authority recreation;
 - split SM-2, SM-3 and SM-4 into different framework owners;
-- keep schema v7 current and reinterpret its sealed binding/fence semantics in place.
+- retain an internal version-upgrade chain during development or reinterpret old sealed authority in place.
 
 ## 18. Completion Criteria
 
 Code closure requires SO-MC-01 through SO-MC-09, SO-MC-11 through SO-MC-17 and all automated gates. Live closure
-additionally requires SO-MC-10 with a fresh schema-v8 persisted proof that:
+additionally requires SO-MC-10 with a fresh current-baseline persisted proof after development-data cleanup that:
 
-1. schema-v8 activation contains no stage token authority, persists immutable DefinitionFocus declarations and seals
+1. current-baseline activation contains no stage token authority, persists immutable DefinitionFocus declarations and seals
    owner-policy/authority-input/lifecycle-fence identities;
 2. ProviderCeiling comes from the selected model's current capability revision;
 3. ExpectedDocument and actual provider request use the exact effective ceiling;

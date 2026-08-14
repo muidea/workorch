@@ -21,9 +21,10 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - reasoning effort参与 activation/ceiling identity，但不改变 stable prefix、CWI、focus、预算、retry或 action
 - Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy、模型品牌或 effort语义
 
-### Schema v6 与 provider output contract
+### Current development baseline 与 provider output contract
 
-current Runtime schema 为 v7。activation/execution contract、config、runtime policy 与 stable-prefix hash 不再携带
+当前 Runtime schema 只维护一个无版本号的开发基线。开发调试阶段不维护历史 schema migration 或多版本 reducer；不兼容变化直接更新
+当前代码/fixture baseline，并要求清理既有运行数据。activation/execution contract、config、runtime policy 与 stable-prefix hash 不携带
 semantic-plan/candidate stage token limit。LLM owner 是 model capability 的唯一解释者；Orchestrator 只消费针对当前
 workspace/run/authority、sealed selection 及 capability/configuration revision 的 detached persisted
 `ProviderCeiling`，不得按 model name 分支或应用 token override。
@@ -39,15 +40,16 @@ sealed manifest 同时约束 prompt、closed JSON Schema、strict decoder 与 ev
 target、binding 与 content/effect shape 均有界。LLM owner只返回 provider factual outcome，不能选择 retry、terminal、
 CandidateAttempt 或 Runtime transition。
 
-v7 将 activation-only `DefinitionFocuses` 与 SM-2 generation-specific focus/binding queue 分开持久化。semantic document
+activation-only `DefinitionFocuses` 与 SM-2 generation-specific focus/binding queue 分开持久化。semantic document
 admission、feasibility merge 与 seal 只读前者的 immutable declaration；receipt/resource-change 触发的 binding retirement、CWI
 reopen 与 reseal 只修改后者，并继续经过 Orchestrator private internal event、controller 与 transition coordinator 的单次 CAS。
 capability owner 只报告资源事实和当前 admissibility，不能请求 CWI/focus 状态。
 
-schema v7 及更早 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；显式
-restart 由 Run owner 创建新的 schema-v8 lineage，不继承 predecessor request、candidate、CWI credit 或 recovery budget。
+非当前 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；显式
+Restart 由 Run owner 返回 `data_reset_required`，不创建 replacement intent，也不要求 Orchestrator 加载旧 aggregate。
+清理开发数据后才能从当前 baseline 创建新 Run。
 
-schema v8 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
+当前 baseline 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
 evidence、capability/catalog、freshness 与 owner observation lineage 不能创建第二个 AuthoritySnapshot；精确 owner binding
 contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件退休，无法唯一绑定则 typed fail closed。
 

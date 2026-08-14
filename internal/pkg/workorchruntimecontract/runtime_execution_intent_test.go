@@ -60,6 +60,7 @@ func TestRuntimeExecutionIntentAdmissionIsExhaustiveAndPreservesReason(t *testin
 		{RuntimeExecutionIntentFreshActivationRequired, RuntimeExecutionIntentReasonRuntimeBootstrapMissing},
 		{RuntimeExecutionIntentDefinitionChanged, RuntimeExecutionIntentReasonDefinitionChanged},
 		{RuntimeExecutionIntentGovernanceRequired, RuntimeExecutionIntentReasonGovernancePending},
+		{RuntimeExecutionIntentDataResetRequired, RuntimeExecutionIntentReasonDevelopmentDataIncompatible},
 	}
 	for _, testCase := range cases {
 		if err := ValidateRuntimeExecutionIntentAdmission(testCase.outcome, testCase.reason); err != nil {

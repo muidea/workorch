@@ -21,7 +21,7 @@ func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 		t.Fatalf("CreateArtifact err = %v, want invalid argument", err)
 	}
 	invalidCloseout := validTestResult()
-	invalidCloseout.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{SchemaVersion: 1}
+	invalidCloseout.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{SchemaVersion: 2}
 	if err := service.CreateResult(ctx, invalidCloseout); err == nil {
 		t.Fatal("Result owner accepted unsupported Runtime closeout schema")
 	}

@@ -37,10 +37,13 @@ projection。它不推断“应创建哪个文件”“何种实现正确”或�
 `internal/pkg/workorchruntimecontract` 仅保存 DTO、合同定义以及无状态的 normalize、validate、
 clone、hash helper。它不得拥有状态迁移、CAS、EventHub、filesystem/network I/O 或 retry 决策。
 
-### Schema v8、owner identity 与 model capability token 权威
+### Current development baseline、owner identity 与 model capability token 权威
 
-current Runtime aggregate schema 为 v8。v6 已从 activation、`RuntimeExecutionContract`、配置、policy projection
-和 stable-prefix identity 中删除 semantic-plan/candidate stage token limit。唯一 output-token 权威是 LLM owner 针对
+当前 Runtime aggregate 只维护一个无版本号的开发基线。开发调试阶段不维护历史 aggregate migration/reducer：合同结构发生
+不兼容变化时，代码、fixture 与测试直接更新为当前基线，现有运行数据必须清理后重新创建。版本号不得作为
+补字段、重解释旧 authority 或绕过 owner transition 的工具。
+
+唯一 output-token 权威是 LLM owner 针对
 已封存 provider/model selection 与 capability/configuration revision 返回并持久化的 typed `ProviderCeiling`；
 Application、Web、TUI 与 Orchestrator 均不得维护固定值、override 或 model-name 分支。
 
@@ -51,21 +54,22 @@ Application、Web、TUI 与 Orchestrator 均不得维护固定值、override 或
 context-integrity/contract failure。recovery 复用同一 ExpectedDocument，不重读配置、不提高 token 值，也不拼接 partial
 output。
 
-v7 把 fresh activation 的不可变 `DefinitionFocuses` 与 SM-2 封存的 generation-specific
+fresh activation 把不可变 `DefinitionFocuses` 与 SM-2 封存的 generation-specific
 `Focus/RemainingFocuses/CompletedFocuses` 分离。前者只包含 CWI、slice、required evidence/assessment 及声明式
 metric/artifact obligation 及可选 profile-declared selector identity，不得携带 resolved target、operation kind/variant、recipe/check 或 binding；后者可随 owner
 resource revision 退休、重开和重新封存。任何 semantic document admission、owner feasibility batch 与 final seal 都只能用
 `DefinitionFocuses` 检查 source declaration，禁止把上一 generation 的 accepted operation kind 当成下一 generation 的声明。
 
-v8 在此基础上封存 capability-owner policy revision、equivalent-authority input、binding contradiction 与 opaque
+当前基线同时封存 capability-owner policy revision、equivalent-authority input、binding contradiction 与 opaque
 lifecycle fence identity。File semantic/operation feasibility 必须消费同一 owner policy；Orchestrator 只有在 Definition、
 focus/binding、evidence、capability/catalog、prerequisite freshness 或 owner observation lineage 改变时才能创建新
 AuthoritySnapshot；Run 只能比较随 opaque Runtime record 持久化的 lifecycle fence，不得解码 SM-2/3/4 内容选择 SM-1
 迁移。
 
-schema v7 及更早 aggregate 不得原地迁移、忽略旧字段或重解释 authority。Resume/drive 只能返回
-`fresh_activation_required`，且不得产生 provider/capability work；用户显式 restart 后由 Run owner 创建新的 schema-v8
-lineage，新 Run 不继承旧 request、candidate、CWI credit 或 recovery budget。
+任何非当前 aggregate 不得原地迁移、忽略旧字段、重解释 authority 或通过 Restart 包装为当前数据。Resume/drive
+只能返回 `fresh_activation_required`，且不得产生 provider/capability work；Restart 由 Run owner 返回
+`data_reset_required`，不得创建悬挂的 replacement intent。清理开发数据后，新 Run 从当前 bootstrap 开始，
+不继承旧 request、candidate、CWI credit 或 recovery budget。
 
 跨 owner I/O 只能通过 EventHub 的具体 typed command/result。禁止跨 owner service/repository、
 `map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 envelope。

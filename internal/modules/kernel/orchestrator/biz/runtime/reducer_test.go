@@ -107,12 +107,12 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassExecutionFailure, Signature: "stable-patch-failure", Message: "patch input remains invalid", TargetRefs: []string{"main.go"},
 	}
-	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "accepted-unrelated", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v1-00000000000000000001"}}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "accepted-unrelated", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000001"}}
 	for idx := 0; idx < 2; idx++ {
 		facts.Evidence.Rejected = append(facts.Evidence.Rejected, runtimecontract.EvidenceFact{
 			ID: common.EvidenceRecordID("rejected-" + string(rune('a'+idx))), Kind: runtimecontract.EvidenceKindStateChange,
 			FailureClass: runtimecontract.FailureClassExecutionFailure, FailureSignature: "stable-patch-failure",
-			Revision:            fmt.Sprintf("evidence-v1-%020d", idx+2),
+			Revision:            fmt.Sprintf("runtime-evidence-%020d", idx+2),
 			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 		})
 	}
@@ -126,7 +126,7 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	facts.Evidence.Rejected = append(facts.Evidence.Rejected, runtimecontract.EvidenceFact{
 		ID: "rejected-c", Kind: runtimecontract.EvidenceKindStateChange,
 		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureSignature: "stable-patch-failure",
-		Revision:            "evidence-v1-00000000000000000004",
+		Revision:            "runtime-evidence-00000000000000000004",
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
 	// Rejected evidence count is diagnostic only; the sealed repair ledger is
@@ -313,7 +313,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 
 		facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
 			ID: "created", Kind: runtimecontract.EvidenceKindStateChange, TargetRefs: []string{"initial-deliverable.txt"},
-			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, Revision: "evidence-v1-00000000000000000001",
+			CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, Revision: "runtime-evidence-00000000000000000001",
 		}}
 		facts.Resources.TargetSelection = &runtimecontract.RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, TargetRole: facts.Focus.TargetRole,
@@ -708,10 +708,10 @@ func TestReduceRuntimeStateFiltersAcceptedVariantsByCurrentActionKinds(t *testin
 	}
 
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
-		ID: "state-change", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001",
+		ID: "state-change", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001",
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
-	facts.EvidenceRevision = "evidence-v1-00000000000000000001"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
 	validation, err := reduceRuntimeStateFixture(t, facts, &stateChange.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -765,17 +765,17 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 		},
 		Evidence: runtimecontract.EvidenceLedger{
 			Accepted: []runtimecontract.EvidenceFact{{
-				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001",
+				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 			}},
 			Rejected: []runtimecontract.EvidenceFact{
 				{
-					ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v1-00000000000000000002",
+					ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000002",
 					FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "exit status 2",
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 				},
 				{
-					ID: "rej-patch", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000003",
+					ID: "rej-patch", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000003",
 					FailureClass: runtimecontract.FailureClassExecutionFailure, FailureCode: "conflict",
 					FailureSignature: "sig-repair", FailureMessage: "conflict",
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -812,10 +812,10 @@ func TestReduceRuntimeStateKeepsValidationGapAsValidationWithoutOwnerTarget(t *t
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
-		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	facts.Evidence.Rejected = []runtimecontract.EvidenceFact{{
-		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v1-00000000000000000002",
+		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000002",
 		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", TargetRefs: []string{"validation-entry"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Signature: "validation-failed", Message: "validation failed", TargetRefs: []string{"validation-entry"}}
@@ -837,10 +837,10 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 	base.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	base.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	base.Evidence.Accepted = []runtimecontract.EvidenceFact{{
-		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001", CoverageWorkItemIDs: base.Focus.CoverageWorkItemIDs,
+		ID: "accepted-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001", CoverageWorkItemIDs: base.Focus.CoverageWorkItemIDs,
 	}}
 	base.Evidence.Rejected = []runtimecontract.EvidenceFact{{
-		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v1-00000000000000000002",
+		ID: "rejected-validation", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000002",
 		FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "validation failed", CoverageWorkItemIDs: base.Focus.CoverageWorkItemIDs,
 	}}
 
@@ -945,16 +945,16 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 		Evidence: runtimecontract.EvidenceLedger{
 			Accepted: []runtimecontract.EvidenceFact{
 				{
-					ID: "acc-old", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001",
+					ID: "acc-old", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001",
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 				},
 				{
-					ID: "acc-repair", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000003",
+					ID: "acc-repair", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000003",
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 				},
 			},
 			Rejected: []runtimecontract.EvidenceFact{{
-				ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v1-00000000000000000002",
+				ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000002",
 				FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "exit status 2",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 			}},
@@ -984,11 +984,11 @@ func TestReduceRuntimeStateRejectedValidationWithoutOwnerTargetRemainsValidation
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-001", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Evidence: runtimecontract.EvidenceLedger{
 			Accepted: []runtimecontract.EvidenceFact{{
-				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v1-00000000000000000001",
+				ID: "acc-state", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 			}},
 			Rejected: []runtimecontract.EvidenceFact{{
-				ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "evidence-v1-00000000000000000002",
+				ID: "rej-val", Kind: runtimecontract.EvidenceKindValidation, Revision: "runtime-evidence-00000000000000000002",
 				FailureClass: runtimecontract.FailureClassExecutionFailure, FailureMessage: "exit status 2",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 			}},
@@ -1108,7 +1108,7 @@ func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.
 	// satisfy ledger then complete
 	facts.StateChange = applyAcceptedStateChangeEvidence(facts.StateChange, runtimecontract.EvidenceFact{
 		ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: "evidence-v1-00000000000000000002",
+		Revision: "runtime-evidence-00000000000000000002",
 	}, []common.CoverageWorkItemID{"cwi-1"})
 	decision, err = reduceRuntimeStateFixture(t, facts, nil)
 	if err != nil {
@@ -1188,8 +1188,8 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 	facts.Capabilities.StateChangeKinds = []string{"patch/apply"}
 	facts.Capabilities.ValidationKinds = []string{"validation/managed_session"}
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{
-		{ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000001"},
-		{ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000002"},
+		{ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000001"},
+		{ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000002"},
 	}
 	// No assessment present (invalidated after repair evidence) => produce_assessment.
 	facts = facts.Normalized()

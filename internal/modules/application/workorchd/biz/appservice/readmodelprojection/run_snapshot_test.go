@@ -306,7 +306,7 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 		t.Fatalf("projected Input = %+v, want omitted full input", projected.Input)
 	}
 	audit := projected.ContractAudit
-	if audit["schemaVersion"] != "workorch.step_contract_audit.v2" ||
+	if audit["schemaVersion"] != "workorch.step_contract_audit" ||
 		audit["runtimeStage"] != "repair" ||
 		audit["currentActionKind"] != "state_change" ||
 		audit["currentFocusId"] != "cwi-101" ||

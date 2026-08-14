@@ -3,7 +3,7 @@ package workorchruntimecontract
 import "strings"
 
 const (
-	ValidationFailureDiagnosticSchemaVersion = "workorch.validationFailureDiagnostic.v1"
+	ValidationFailureDiagnosticSchemaVersion = "workorch.validationFailureDiagnostic"
 
 	ValidationDiagnosticCommandInvalid            = "validation_command_invalid"
 	ValidationDiagnosticEnvironmentMissing        = "validation_environment_missing"

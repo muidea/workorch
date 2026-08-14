@@ -595,7 +595,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	feedback.OriginalDiagnostic.ObservedRevision = "tree-v1"
 	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
 		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
-		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-v1", CatalogSnapshotID: inventory.SnapshotID},
+		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,

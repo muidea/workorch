@@ -37,7 +37,7 @@ func LLMConfigurationRevision(input LLMConfig) (string, error) {
 		return "", err
 	}
 	h := sha256.New()
-	writeLLMRevisionString(h, "workorch/llm-configuration-revision/v1")
+	writeLLMRevisionString(h, "workorch/llm-configuration-revision")
 	writeLLMRevisionString(h, strings.TrimSpace(cfg.AIProxy.BaseURL))
 	writeLLMRevisionString(h, llmRevisionSecretFingerprint(cfg.AIProxy.APIKey))
 	writeLLMRevisionString(h, strings.TrimSpace(cfg.AIProxy.Timeout))

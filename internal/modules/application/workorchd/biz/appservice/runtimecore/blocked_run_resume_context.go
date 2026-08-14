@@ -48,7 +48,7 @@ func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker projectioncon
 		return nil
 	}
 	return CompressedContextMap(projectioncontract.CompressedContext{
-		Version:          "workorch.compressedContext.v1",
+		Version:          "workorch.compressedContext",
 		Mode:             "deterministic_recovery_summary",
 		WorkspaceID:      string(item.WorkspaceID),
 		RunID:            string(item.ID),

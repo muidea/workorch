@@ -7,7 +7,7 @@ import (
 
 func CompressedContextFromBundle(bundle projectioncontract.ContextBundle, retentionPolicy string) projectioncontract.CompressedContext {
 	return projectioncontract.CompressedContext{
-		Version:            "workorch.compressedContext.v1",
+		Version:            "workorch.compressedContext",
 		Mode:               "deterministic_recovery_summary",
 		WorkspaceID:        bundle.WorkspaceID,
 		RunID:              bundle.RunID,
@@ -26,7 +26,7 @@ func CompressedContextFromBundle(bundle projectioncontract.ContextBundle, retent
 
 func CompressedContextFromRunSnapshot(snapshot readmodelcore.RunSnapshotState, progress projectioncontract.TaskProgress, recentEvidence []projectioncontract.ContextEvidence, summary string, retentionPolicy string) projectioncontract.CompressedContext {
 	return projectioncontract.CompressedContext{
-		Version:            "workorch.compressedContext.v1",
+		Version:            "workorch.compressedContext",
 		Mode:               "deterministic_recovery_summary",
 		WorkspaceID:        snapshot.Run.WorkspaceID,
 		RunID:              snapshot.Run.ID,

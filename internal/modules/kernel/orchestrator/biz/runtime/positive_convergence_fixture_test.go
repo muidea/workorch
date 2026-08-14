@@ -586,9 +586,9 @@ func TestPositiveConvergenceFixture_RepairableAssessmentPersistsAcrossController
 	}
 	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}}
 	facts.Evidence = runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
-		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v1-00000000000000000001",
+		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "runtime-evidence-00000000000000000001",
 	}}}
-	facts.EvidenceRevision = "evidence-v1-00000000000000000001"
+	facts.EvidenceRevision = "runtime-evidence-00000000000000000001"
 	// This fixture intentionally leaves one validation-only repair after the
 	// assessment. The sealed budget must permit that recipe; zero means
 	// no validation retry is authorized and is correctly terminal elsewhere.

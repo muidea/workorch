@@ -13,10 +13,10 @@ import (
 
 const (
 	RuntimeDefinitionSeedSchemaCurrent         = "workorch.runtime_definition_seed"
-	RuntimeSemanticPlanManifestSchemaCurrent   = "workorch.runtime_semantic_plan_manifest.v2"
-	RuntimeSemanticPlanDocumentSchemaCurrent   = "workorch.runtime_semantic_plan_document.v2"
-	RuntimeSemanticFeasibilitySchemaCurrent    = "workorch.runtime_semantic_feasibility.v2"
-	RuntimeSemanticPlanningLedgerSchemaCurrent = "workorch.runtime_semantic_planning_ledger.v2"
+	RuntimeSemanticPlanManifestSchemaCurrent   = "workorch.runtime_semantic_plan_manifest"
+	RuntimeSemanticPlanDocumentSchemaCurrent   = "workorch.runtime_semantic_plan_document"
+	RuntimeSemanticFeasibilitySchemaCurrent    = "workorch.runtime_semantic_feasibility"
+	RuntimeSemanticPlanningLedgerSchemaCurrent = "workorch.runtime_semantic_planning_ledger"
 )
 
 // RuntimeProviderDocumentKind selects one of the two mutually exclusive

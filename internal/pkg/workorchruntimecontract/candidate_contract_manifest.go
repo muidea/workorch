@@ -13,7 +13,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v2"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest"
 
 // RuntimeOperationTargetPolicy is the only owner-neutral target authorization
 // vocabulary sealed into a candidate manifest. Concrete File/Git/Shell/MCP

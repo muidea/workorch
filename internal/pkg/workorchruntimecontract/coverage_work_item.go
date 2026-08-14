@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-const CoverageWorkItemSchema = "workorch.coverage_work_item.v1"
+const CoverageWorkItemSchema = "workorch.coverage_work_item"
 
 type CoverageWorkItem struct {
 	ID                    common.CoverageWorkItemID    `json:"id"`

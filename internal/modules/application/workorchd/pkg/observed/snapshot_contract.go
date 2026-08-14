@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-const SnapshotVersion = "workorch.v1"
+const SnapshotVersion = "workorch"
 
 type SnapshotPayload interface {
 	PayloadMap() map[string]any

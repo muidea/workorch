@@ -180,8 +180,8 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		WorkspaceID: string(context.WorkspaceID), RunID: string(context.RunID), Kind: "runtime_semantic_plan",
 		ReasoningEffort: ceiling.Selection.ReasoningEffort,
 		Schema:          schema,
-		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_semantic_plan_prompt.v1", Sections: []llmmodels.PromptSection{
-			{ID: "C0.runtime-semantic-contract", Name: "Runtime semantic plan contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://semantic-plan-contract/v1"}, Content: runtimeSemanticPlanContractCatalog()},
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_semantic_plan_prompt", Sections: []llmmodels.PromptSection{
+			{ID: "C0.runtime-semantic-contract", Name: "Runtime semantic plan contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://semantic-plan-contract"}, Content: runtimeSemanticPlanContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: context.Definition.Revision, SourceRefs: []string{"runtime://definition/" + context.Definition.Revision}, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, SourceRefs: []string{"runtime://execution-contract/" + context.Definition.Revision}, Content: string(capabilityJSON)},
 			{ID: "C3.semantic-authority", Name: "Current semantic plan authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, SourceRefs: []string{"runtime://semantic-manifest/" + manifest.Hash}, Content: string(authorityJSON)},
@@ -197,7 +197,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 			EstimatedOutputTokens: ceiling.EffectiveMaxOutputTokens,
 			CapabilitySource:      "sealed_ceiling", ProfileMode: "runtime_typed_ceiling",
 			CachePlan: &llmmodels.ProviderCachePlan{
-				SchemaVersion: "workorch.provider_cache_plan.v1", Strategy: "stable_prefix_dynamic_tail",
+				SchemaVersion: "workorch.provider_cache_plan", Strategy: "stable_prefix_dynamic_tail",
 				StablePrefixHash: wantPrefix, RenderedStablePrefixHash: wantPrefix,
 			},
 		},

@@ -28,6 +28,7 @@ const (
 	RuntimeExecutionIntentFreshActivationRequired RuntimeExecutionIntentOutcome = "fresh_activation_required"
 	RuntimeExecutionIntentDefinitionChanged       RuntimeExecutionIntentOutcome = "definition_changed_requires_restart"
 	RuntimeExecutionIntentGovernanceRequired      RuntimeExecutionIntentOutcome = "governance_required"
+	RuntimeExecutionIntentDataResetRequired       RuntimeExecutionIntentOutcome = "data_reset_required"
 )
 
 // RuntimeExecutionIntentReason preserves the exact owner-authored factual
@@ -48,6 +49,7 @@ const (
 	RuntimeExecutionIntentReasonDuplicateRestart               RuntimeExecutionIntentReason = "duplicate_restart"
 	RuntimeExecutionIntentReasonNewRunActivated                RuntimeExecutionIntentReason = "new_run_activated"
 	RuntimeExecutionIntentReasonPredecessorSupersedeRequested  RuntimeExecutionIntentReason = "predecessor_supersede_requested"
+	RuntimeExecutionIntentReasonDevelopmentDataIncompatible    RuntimeExecutionIntentReason = "development_data_incompatible"
 )
 
 // RuntimeExecutionIntentAdmission is the immutable, owner-neutral admission
@@ -110,6 +112,8 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 		valid = reason == RuntimeExecutionIntentReasonDefinitionChanged
 	case RuntimeExecutionIntentGovernanceRequired:
 		valid = reason == RuntimeExecutionIntentReasonGovernancePending
+	case RuntimeExecutionIntentDataResetRequired:
+		valid = reason == RuntimeExecutionIntentReasonDevelopmentDataIncompatible
 	}
 	if !valid {
 		return fmt.Errorf("invalid runtime execution intent admission outcome %q reason %q", outcome, reason)
@@ -147,6 +151,8 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "new Workspace Run activated"
 	case RuntimeExecutionIntentReasonPredecessorSupersedeRequested:
 		return "predecessor supersede requested"
+	case RuntimeExecutionIntentReasonDevelopmentDataIncompatible:
+		return "persisted development data is incompatible with the current Runtime baseline"
 	default:
 		return ""
 	}
