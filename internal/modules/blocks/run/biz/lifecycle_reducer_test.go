@@ -62,6 +62,7 @@ func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state comm
 
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
 		RuntimeState: &runtimecontract.RuntimeStateRecord{
+			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 			StateRevision: 3,
 			Facts: runtimecontract.RuntimeFacts{
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1",
@@ -72,6 +73,10 @@ func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state comm
 				AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: authID},
 			},
 		},
+	}
+	run.RuntimeLifecycleFence = &runtimecontract.RuntimeOpaqueLifecycleFence{
+		WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3,
+		RuntimeStateRef: runevents.RuntimeStateRef("ws-1", "run-1", 3), RuntimeStateHash: "opaque-state", BootstrapHash: "opaque-bootstrap", TerminalFenceID: "td-1",
 	}
 	if err := runs.Create(context.Background(), run); err != nil {
 		t.Fatalf("seed v2: %v", err)
@@ -260,8 +265,9 @@ func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
 		BlockingTicketID: "ticket-1",
 
-		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
-		RuntimeState:     &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceResolutions: []runtimecontract.RuntimeGovernanceResolutionRecord{{ResolutionID: "res-1", TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
+		RuntimeBootstrap:      &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:          &runtimecontract.RuntimeStateRecord{StateRevision: 3},
+		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3, GovernanceFenceID: "runtime-governance/auth-1/dispatch-1"},
 	}
 	_, err := reduceContinuationEligible(current, runevents.RuntimeContinuationEligibleFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
@@ -284,8 +290,9 @@ func TestReduceGovernanceWaitDuplicateIsNoop(t *testing.T) {
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
 		BlockingTicketID: "ticket-1",
 
-		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
-		RuntimeState:     &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceRequests: []runtimecontract.RuntimeGovernanceRequestRecord{{TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
+		RuntimeBootstrap:      &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:          &runtimecontract.RuntimeStateRecord{StateRevision: 3},
+		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3, GovernanceFenceID: "runtime-governance/auth-1/dispatch-1"},
 	}
 	tr, err := reduceGovernanceWait(current, runevents.RuntimeGovernanceWaitFact{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
@@ -471,6 +478,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 7, Definition: definition,
 		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: definition.Revision, Activation: activation},
 	}
@@ -512,6 +520,7 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 7, Definition: definition,
 		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: definition.Revision, Activation: activation},
 	}

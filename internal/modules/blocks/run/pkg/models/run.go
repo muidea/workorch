@@ -92,6 +92,9 @@ type Run struct {
 	// predecessor coverage credit.
 	ReconciliationScope runtimecontract.RuntimeCWIReconciliationScope
 	RuntimeState        *runtimecontract.RuntimeStateRecord
+	// RuntimeLifecycleFence is Orchestrator-authored opaque identity persisted
+	// beside RuntimeState. Run compares it without decoding aggregate content.
+	RuntimeLifecycleFence *runtimecontract.RuntimeOpaqueLifecycleFence
 	// RuntimeActivationStatus is the Run owner's administrative resume status.
 	// It never contains decoded aggregate authority or a requested target state.
 	RuntimeActivationStatus *RuntimeActivationStatus
@@ -126,6 +129,10 @@ func CloneRun(item *Run) *Run {
 	if item.RuntimeState != nil {
 		state := item.RuntimeState.Clone()
 		cloned.RuntimeState = &state
+	}
+	if item.RuntimeLifecycleFence != nil {
+		fence := item.RuntimeLifecycleFence.Normalized()
+		cloned.RuntimeLifecycleFence = &fence
 	}
 	if item.ReplacementIntent != nil {
 		intent := *item.ReplacementIntent

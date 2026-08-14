@@ -37,9 +37,12 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	if attempt == 1 {
 		correctionHash = fmt.Sprintf("test-correction-%d", attempt)
 	}
-	_, session, err := c.ensureCandidateRequestSession(ctx, workspaceID, runID, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
+	ensured, session, err := c.ensureCandidateRequestSession(ctx, workspaceID, runID, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
 	if err != nil {
 		return RuntimeAggregate{}, err
+	}
+	if ensured.Decision.State == runtimecontract.ConvergenceStateFailed || ensured.Decision.State == runtimecontract.ConvergenceStateComplete {
+		return ensured, nil
 	}
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)

@@ -37,6 +37,50 @@ func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndReject
 	}
 }
 
+func TestRuntimeCandidateAttemptBindingContradictionValidatesAndClones(t *testing.T) {
+	facts := testRuntimeFacts()
+	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()
+	failure := FailureFact{
+		Class: FailureClassCandidateContractFailure, Code: "operation_target_exists", Signature: "file/target-exists",
+		Message: "file/write is create-only", TargetRefs: []string{"target.txt"},
+	}
+	feedback, err := RuntimeFeedbackFromFailureFact(RuntimeFeedbackScope{
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: transaction.AuthoritySnapshotID,
+	}, RuntimeFeedbackDomainFeasibility, RuntimeFeedbackCategory(RuntimeOwnerFeasibilityCategoryPolicyDisallowed), RuntimeModuleFile, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback.OriginalDiagnostic.OperationID = "write-target"
+	policy := RuntimeOwnerPolicyIdentity{OwnerModuleID: RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-v1", CatalogSnapshotID: "catalog-1"}
+	observation := RuntimeOwnerFeasibilityObservation{Outcome: RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback, OwnerPolicy: policy}
+	contradiction := RuntimeBindingContradictionIdentity{
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthorityInputID: transaction.AuthorityInputID,
+		BindingID: "binding-1", BindingSetHash: "binding-set-1", ProposalHash: "proposal-1", ObservationHash: "observation-1",
+		OwnerPolicy: policy, ObservedRevision: "workspace-2",
+	}
+	record := RuntimeCandidateAttemptRecord{
+		AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction), Transaction: transaction,
+		Attempt: 0, StablePrefixHash: "stable-prefix", ManifestHash: "manifest-1", LogicalRequestID: "request-0",
+		State: RuntimeCandidateAttemptStateInvalidated, OwnerFeasibility: &observation, BindingContradiction: &contradiction,
+	}
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{record}); err != nil {
+		t.Fatal(err)
+	}
+	state := RuntimeStateRecord{CandidateAttempts: []RuntimeCandidateAttemptRecord{record}}
+	clone := state.Clone()
+	record.BindingContradiction.BindingID = "mutated"
+	record.OwnerFeasibility.Feedback.OriginalDiagnostic.OriginalMessage = "mutated"
+	if clone.CandidateAttempts[0].BindingContradiction == nil || clone.CandidateAttempts[0].BindingContradiction.BindingID != "binding-1" ||
+		clone.CandidateAttempts[0].OwnerFeasibility == nil || clone.CandidateAttempts[0].OwnerFeasibility.Feedback.OriginalDiagnostic.OriginalMessage != "file/write is create-only" {
+		t.Fatalf("binding contradiction clone shared mutable identity: %+v", clone.CandidateAttempts[0])
+	}
+	tampered := clone.CandidateAttempts[0]
+	tampered.BindingContradiction.AuthorityInputID = "other-authority-input"
+	if err := ValidateRuntimeCandidateAttemptRecordsForScope(facts.WorkspaceID, facts.RunID, []RuntimeCandidateAttemptRecord{tampered}); err == nil {
+		t.Fatal("candidate attempt accepted a contradiction from another authority input")
+	}
+}
+
 func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing.T) {
 	facts := testRuntimeFacts()
 	transaction := validDecisionForState(ConvergenceStateNeedStateChange).AuthorityTransaction()

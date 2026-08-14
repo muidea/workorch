@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-08-13
+Last Updated: 2026-08-14
 
 ## Purpose
 
@@ -22,7 +22,7 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | Runtime single-owner and model-capability output closure (SO-MC) | Retain model-ceiling closure, introduce schema v7 immutable declaration / binding-generation separation, then complete candidate/dispatch/receipt/evidence/terminal live proof. | [SO-MC plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md) |
+| A1 | Runtime single-owner and model-capability output closure (SO-MC) | SO-MC-12..17 code/automated closure is complete; execute only SO-MC-10 fresh deployed schema-v8 real-provider terminal proof. | [SO-MC plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md) |
 | A2 | Workspace reasoning effort deployed proof | 代码与正式合同已收口；剩余重新部署后的 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection 和双 workspace 隔离验证 | [WRE plan](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md) |
 
 The CWI-SO plan is now regression reference for A1 rather than an independent schema-v5 deployed queue.

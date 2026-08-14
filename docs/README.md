@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-08-13
+Last Updated: 2026-08-14
 
 ## Purpose
 
@@ -29,7 +29,7 @@ Last Updated: 2026-08-13
 
 - Runtime 核心规则：
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-- 当前 Runtime single-owner、model capability output、schema-v7 declaration/generation 与完整文档恢复收口：
+- 当前 Runtime single-owner、model capability output、schema-v8 owner/convergence fence、declaration/generation 与完整文档恢复收口：
   [runtime-single-owner-model-capability-output-closure-plan.md](70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)
 - Runtime CWI reconciliation、`/run resume`/`/run restart` scope 回归矩阵：
   [runtime-cwi-reconciliation-single-owner-closure-plan.md](70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)

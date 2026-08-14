@@ -3,7 +3,6 @@ package file
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -419,7 +418,9 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setPrerequisiteError(result, err)
 		return
 	}
-	result.Set(observation, nil)
+	value := runtimecontract.RuntimeOperationFeasibilityObservation(observation)
+	value.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: ModuleID, PolicyRevision: fileOwnerFeasibilityPolicyRevision, CatalogSnapshotID: command.Admissibility.SnapshotID}
+	result.Set(fileevents.ProbeRuntimeOperationFeasibilityResult(value), nil)
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
@@ -451,27 +452,13 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_invalid", pathErr.Error(), "", manifest.Revision, []string{targetRef}))
 			return
 		}
-		info, statErr := os.Stat(absolute)
-		if command.Proposal.Target.Policy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
-			if statErr == nil {
-				m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
-					runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "prospective_target_exists", "runtime prospective File target already exists", "", manifest.Revision, []string{relative}))
-				return
-			}
-			if !os.IsNotExist(statErr) {
-				m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
-					runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "prospective_target_unobservable", statErr.Error(), "", manifest.Revision, []string{relative}))
-				return
-			}
-			continue
-		}
-		if statErr != nil || !info.Mode().IsRegular() {
-			message := "runtime File semantic target does not exist as a regular file"
-			if statErr != nil && !os.IsNotExist(statErr) {
-				message = statErr.Error()
-			}
+		policy := evaluateFileOwnerFeasibilityPolicy(fileOwnerFeasibilityPolicyInput{
+			OperationKind: command.Proposal.OperationKind, VariantID: command.Proposal.OperationVariantID,
+			TargetPolicy: command.Proposal.Target.Policy, TargetRef: relative, TargetPath: absolute,
+		})
+		if !policy.Feasible() {
 			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
-				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_not_regular", message, "", manifest.Revision, []string{relative}))
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, policy.Code, policy.Message, "", manifest.Revision, policy.TargetRefs))
 			return
 		}
 	}
@@ -489,7 +476,9 @@ func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, comma
 		setPrerequisiteError(result, err)
 		return
 	}
-	result.Set(response, nil)
+	value := runtimecontract.RuntimeSemanticProofFeasibilityObservation(response)
+	value.Observation.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: ModuleID, PolicyRevision: fileOwnerFeasibilityPolicyRevision, CatalogSnapshotID: command.OwnerCatalog.SnapshotID}
+	result.Set(fileevents.ProbeRuntimeSemanticProofFeasibilityResult(value), nil)
 }
 
 func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magicevent.Result) {

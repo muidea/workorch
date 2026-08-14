@@ -96,7 +96,7 @@ func reduceGovernanceWait(current *runmodel.Run, cmd runevents.RuntimeGovernance
 	if err := validateRuntimeFactIdentity(current, cmd.AuthoritySnapshotID, cmd.DefinitionRevision, cmd.EvidenceRevision, cmd.DispatchID); err != nil {
 		return lifecycleTransition{}, err
 	}
-	if cmd.BlockingTicketID == "" || !hasPersistedGovernanceRequest(current.RuntimeState, cmd.BlockingTicketID, cmd.AuthoritySnapshotID, cmd.DispatchID) {
+	if cmd.BlockingTicketID == "" || current.RuntimeLifecycleFence == nil || current.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceFenceID(cmd.AuthoritySnapshotID, cmd.DispatchID) {
 		return lifecycleTransition{}, fmt.Errorf("%w: governance wait does not match persisted governance binding", common.ErrConflict)
 	}
 	target := common.RunStateBlockedOnDecision
@@ -142,7 +142,7 @@ func reduceContinuationEligible(current *runmodel.Run, cmd runevents.RuntimeCont
 	if err := validateRuntimeFactIdentity(current, cmd.AuthoritySnapshotID, cmd.DefinitionRevision, cmd.EvidenceRevision, cmd.DispatchID); err != nil {
 		return lifecycleTransition{}, err
 	}
-	if cmd.TicketID == "" || !hasPersistedGovernanceResolution(current.RuntimeState, cmd.ResolutionID, cmd.TicketID, cmd.AuthoritySnapshotID, cmd.DispatchID) {
+	if cmd.TicketID == "" || current.RuntimeLifecycleFence == nil || current.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceFenceID(cmd.AuthoritySnapshotID, cmd.DispatchID) {
 		return lifecycleTransition{}, fmt.Errorf("%w: continuation eligible does not match persisted governance resolution", common.ErrConflict)
 	}
 	if current.State == common.RunStateActive {
@@ -282,49 +282,16 @@ func terminalTargetFromCommand(cmd runevents.RuntimeTerminalDeliveryFact) (commo
 
 func validateSealedTerminalIdentity(current *runmodel.Run, cmd runevents.RuntimeTerminalDeliveryFact) error {
 	cmd = cmd.Normalized()
-	if current.RuntimeBootstrap == nil || current.RuntimeState == nil {
-		return fmt.Errorf("%w: sealed terminal delivery requires a typed runtime aggregate", common.ErrConflict)
-	}
-	state := current.RuntimeState
-	expected := runtimecontract.TerminalOutcome{}
-	if state.Termination != nil {
-		switch state.Termination.Kind {
-		case runtimecontract.RuntimeTerminationCancelled:
-			expected.Kind = runtimecontract.TerminalOutcomeKindCancelled
-		case runtimecontract.RuntimeTerminationSuperseded:
-			expected.Kind = runtimecontract.TerminalOutcomeKindSuperseded
-		default:
-			return fmt.Errorf("%w: terminal delivery has invalid persisted administrative termination", common.ErrConflict)
-		}
-		expected.Code = "administrative_" + string(state.Termination.Kind)
-		expected.Summary = state.Termination.Reason
-	} else {
-		if state.Decision.Terminal == nil {
-			return fmt.Errorf("%w: sealed terminal delivery requires persisted terminal decision", common.ErrConflict)
-		}
-		switch state.Decision.State {
-		case runtimecontract.ConvergenceStateComplete:
-			expected.Kind = runtimecontract.TerminalOutcomeKindCompleted
-		case runtimecontract.ConvergenceStateFailed:
-			expected.Kind = runtimecontract.TerminalOutcomeKindFailed
-		default:
-			return fmt.Errorf("%w: terminal delivery has non-terminal convergence state", common.ErrConflict)
-		}
-		expected.Code = state.Decision.Terminal.Code
-		expected.Summary = state.Decision.Terminal.Summary
-	}
-	if expected.Normalized() != cmd.Outcome.Normalized() {
-		return fmt.Errorf("%w: terminal delivery outcome mismatch", common.ErrConflict)
+	if current.RuntimeBootstrap == nil || current.RuntimeState == nil || current.RuntimeLifecycleFence == nil {
+		return fmt.Errorf("%w: sealed terminal delivery requires an opaque lifecycle fence", common.ErrConflict)
 	}
 	if cmd.AuthoritySnapshotID == "" || cmd.DefinitionRevision == "" || cmd.EvidenceRevision == "" {
 		return fmt.Errorf("%w: terminal delivery requires complete sealed identity", common.ErrConflict)
 	}
-	if cmd.AuthoritySnapshotID != strings.TrimSpace(state.Decision.AuthoritySnapshot.ID) {
-		return fmt.Errorf("%w: terminal delivery authority snapshot mismatch", common.ErrConflict)
-	}
-	if cmd.DefinitionRevision != strings.TrimSpace(state.Facts.DefinitionRevision) ||
-		cmd.EvidenceRevision != strings.TrimSpace(state.Facts.EvidenceRevision) {
-		return fmt.Errorf("%w: terminal delivery definition revision mismatch", common.ErrConflict)
+	fence := current.RuntimeLifecycleFence.Normalized()
+	if fence.TerminalFenceID != cmd.TerminalDeliveryID || fence.WorkspaceID != cmd.WorkspaceID || fence.RunID != cmd.RunID ||
+		fence.RuntimeStateRevision != current.RuntimeState.StateRevision || fence.RuntimeStateRef != runevents.RuntimeStateRef(current.WorkspaceID, current.ID, current.RuntimeState.StateRevision) {
+		return fmt.Errorf("%w: terminal delivery lifecycle fence mismatch", common.ErrConflict)
 	}
 	return nil
 }
@@ -337,41 +304,20 @@ func validateRuntimeFactIdentity(current *runmodel.Run, authoritySnapshotID, def
 	if current == nil || current.RuntimeBootstrap == nil || current.RuntimeState == nil {
 		return fmt.Errorf("%w: runtime lifecycle fact requires persisted typed runtime state", common.ErrConflict)
 	}
-	state := current.RuntimeState
 	if strings.TrimSpace(authoritySnapshotID) == "" || strings.TrimSpace(definitionRevision) == "" ||
 		strings.TrimSpace(evidenceRevision) == "" || strings.TrimSpace(dispatchID) == "" {
 		return fmt.Errorf("%w: runtime lifecycle fact has incomplete sealed identity", common.ErrConflict)
 	}
-	if definitionRevision != strings.TrimSpace(state.Facts.DefinitionRevision) ||
-		evidenceRevision != strings.TrimSpace(state.Facts.EvidenceRevision) {
+	fence := current.RuntimeLifecycleFence
+	if fence == nil || fence.WorkspaceID != current.WorkspaceID || fence.RunID != current.ID ||
+		fence.RuntimeStateRevision != current.RuntimeState.StateRevision || fence.GovernanceFenceID != runtimeGovernanceFenceID(authoritySnapshotID, dispatchID) {
 		return fmt.Errorf("%w: runtime lifecycle fact identity mismatch", common.ErrConflict)
 	}
 	return nil
 }
 
-func hasPersistedGovernanceRequest(state *runtimecontract.RuntimeStateRecord, ticketID common.TicketID, authoritySnapshotID, dispatchID string) bool {
-	if state == nil {
-		return false
-	}
-	for _, request := range state.GovernanceRequests {
-		if request.TicketID == ticketID && strings.TrimSpace(request.AuthoritySnapshotID) == authoritySnapshotID && strings.TrimSpace(request.DispatchID) == dispatchID {
-			return true
-		}
-	}
-	return false
-}
-
-func hasPersistedGovernanceResolution(state *runtimecontract.RuntimeStateRecord, resolutionID common.ResolutionID, ticketID common.TicketID, authoritySnapshotID, dispatchID string) bool {
-	if state == nil {
-		return false
-	}
-	for _, resolution := range state.GovernanceResolutions {
-		if resolution.ResolutionID == resolutionID && resolution.TicketID == ticketID &&
-			strings.TrimSpace(resolution.AuthoritySnapshotID) == authoritySnapshotID && strings.TrimSpace(resolution.DispatchID) == dispatchID {
-			return true
-		}
-	}
-	return false
+func runtimeGovernanceFenceID(authoritySnapshotID, dispatchID string) string {
+	return "runtime-governance/" + strings.TrimSpace(authoritySnapshotID) + "/" + strings.TrimSpace(dispatchID)
 }
 
 func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransition) *runmodel.Run {

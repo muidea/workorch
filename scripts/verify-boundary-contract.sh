@@ -257,13 +257,13 @@ EOF
   exit 1
 fi
 
-# Schema v7 retains one output-token authority: the LLM-owner ProviderCeiling.
+# Schema v8 retains one output-token authority: the LLM-owner ProviderCeiling.
 # Configuration, activation, policy and execution contracts must not regain
 # stage-specific token fields or a selector mode.
 legacy_stage_token_authority_matches="$(source_matches 'OutputTokenBudgetMode|semanticPlanMaxOutputTokens|candidateMaxOutputTokens|SemanticPlanMaxOutputTokens|CandidateMaxOutputTokens' internal application config web || true)"
 if [[ -n "$legacy_stage_token_authority_matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: schema-v7 production code/config reintroduced
+Boundary contract violation: schema-v8 production code/config reintroduced
 stage-specific output-token authority. Use persisted ProviderCeiling and the
 sealed ExpectedDocument value.
 
@@ -842,6 +842,45 @@ candidate_feasibility_shape="$(sed -n '/^type RuntimeCandidateFeasibilityRecord 
 if ! grep -q -E -- 'Observation[[:space:]]+\*RuntimeOwnerFeasibilityObservation' <<<"$candidate_feasibility_shape" ||
    grep -q -E -- 'Feasible[[:space:]]+bool|Failure[[:space:]]+\*' <<<"$candidate_feasibility_shape"; then
   echo "boundary contract violation: candidate feasibility ledger must persist only the canonical owner observation" >&2
+  exit 1
+fi
+
+# File semantic and operation probes must execute the same owner-private target
+# policy. Separate existence/create-only branches recreate the deployed v7
+# contradiction where SM-2 accepted an operation that SM-3 always rejected.
+file_policy="internal/modules/blocks/file/biz/file_owner_feasibility_policy.go"
+if [[ ! -f "$file_policy" ]] ||
+   ! grep -q -F -- 'evaluateFileOwnerFeasibilityPolicy' internal/modules/blocks/file/biz/owner.go ||
+   ! grep -q -F -- 'evaluateFileOwnerFeasibilityPolicy' internal/modules/blocks/file/biz/file_runtime_adapter.go; then
+  echo "boundary contract violation: File semantic and operation feasibility do not share one owner policy" >&2
+  exit 1
+fi
+
+# Equivalent-authority identity excludes request/lease/CAS bookkeeping and is
+# persisted in both snapshot and candidate transaction. Attempt 0 must consult
+# historical owner infeasibility before opening another provider session.
+authority_snapshot_shape="$(sed -n '/^type AuthoritySnapshot struct {/,/^}/p' internal/pkg/workorchruntimecontract/canonical_runtime.go)"
+authority_transaction_shape="$(sed -n '/^type AuthorityTransaction struct {/,/^}/p' internal/pkg/workorchruntimecontract/canonical_runtime.go)"
+if ! grep -q -E -- 'AuthorityInputID[[:space:]]+string' <<<"$authority_snapshot_shape" ||
+   ! grep -q -E -- 'AuthorityInput[[:space:]]+RuntimeEquivalentAuthorityInputIdentity' <<<"$authority_snapshot_shape" ||
+   ! grep -q -E -- 'AuthorityInputID[[:space:]]+string' <<<"$authority_transaction_shape" ||
+   ! grep -q -F -- 'equivalentOwnerInfeasibilityExists' internal/modules/kernel/orchestrator/biz/runtime/controller.go; then
+  echo "boundary contract violation: equivalent Runtime authority can bypass the no-progress fence" >&2
+  exit 1
+fi
+
+# Run is the physical Runtime record owner, not the semantic owner. Lifecycle
+# reduction may compare only its opaque lifecycle fence and envelope revision;
+# decoding these aggregate fields would let SM-1 select transitions from
+# SM-2/SM-3/SM-4 state.
+run_runtime_decode_matches="$(source_matches 'RuntimeState\.(Facts|Decision|SemanticPlanning|Reconciliation|CandidateAttempts|ActiveDispatch|CompletedDispatches|GovernanceRequests|GovernanceResolutions|OperationReceipts|DeliveryAcknowledgements|DriveLease|Termination)' internal/modules/blocks/run/biz/lifecycle_reducer.go)"
+if [[ -n "$run_runtime_decode_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Run lifecycle reducer decodes Orchestrator-owned
+Runtime semantic state instead of comparing the opaque lifecycle fence.
+
+$run_runtime_decode_matches
+EOF
   exit 1
 fi
 run_state_update_shape="$(sed -n '/^type RuntimeStateUpdateResult struct {/,/^}/p' internal/modules/blocks/run/pkg/events/messages.go)"

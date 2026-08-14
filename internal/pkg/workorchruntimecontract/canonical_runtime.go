@@ -1289,6 +1289,8 @@ type AuthoritySnapshot struct {
 	CapabilityStateHash       string
 	PrerequisiteFreshnessHash string
 	OperationContractRevision string
+	AuthorityInputID          string
+	AuthorityInput            RuntimeEquivalentAuthorityInputIdentity
 	Attempt                   int
 }
 
@@ -1340,6 +1342,7 @@ type AuthorityTransaction struct {
 	CapabilityStateHash       string
 	PrerequisiteFreshnessHash string
 	OperationContractRevision string
+	AuthorityInputID          string
 	Attempt                   int
 }
 
@@ -1967,6 +1970,8 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 		OperationContractRevision: facts.Activation.ExecutionContract.OperationContractRevision,
 		Attempt:                   attempt,
 	}
+	decision.AuthoritySnapshot.AuthorityInput = runtimeEquivalentAuthorityInput(facts)
+	decision.AuthoritySnapshot.AuthorityInputID = StableRuntimeEquivalentAuthorityInputID(decision.AuthoritySnapshot.AuthorityInput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
 	if err := decision.Validate(); err != nil {
 		return RuntimeDecision{}, err
@@ -2014,6 +2019,7 @@ func (d RuntimeDecision) AuthorityTransaction() AuthorityTransaction {
 		CapabilityStateHash:       snapshot.CapabilityStateHash,
 		PrerequisiteFreshnessHash: snapshot.PrerequisiteFreshnessHash,
 		OperationContractRevision: snapshot.OperationContractRevision,
+		AuthorityInputID:          snapshot.AuthorityInputID,
 		Attempt:                   snapshot.Attempt,
 	}
 }
@@ -2034,7 +2040,7 @@ func convergenceStateContract(state ConvergenceState) (terminal bool, known bool
 
 func validateAuthoritySnapshot(d RuntimeDecision) error {
 	s := d.AuthoritySnapshot
-	if s.ID == "" || s.WorkspaceID == "" || s.RunID == "" || s.DefinitionRevision == "" || s.EvidenceRevision == "" {
+	if s.ID == "" || s.WorkspaceID == "" || s.RunID == "" || s.DefinitionRevision == "" || s.EvidenceRevision == "" || s.AuthorityInputID == "" {
 		return fmt.Errorf("runtime decision requires a sealed authority snapshot")
 	}
 	if s.Attempt < 0 {
@@ -2045,6 +2051,9 @@ func validateAuthoritySnapshot(d RuntimeDecision) error {
 	}
 	if s.RequiredOutputHash != StableRequiredOutputHash(d.RequiredOutput) {
 		return fmt.Errorf("authority snapshot required output hash mismatch")
+	}
+	if err := s.AuthorityInput.Validate(); err != nil || s.AuthorityInputID != StableRuntimeEquivalentAuthorityInputID(s.AuthorityInput) {
+		return fmt.Errorf("authority snapshot input identity mismatch")
 	}
 	if s.ID != stableAuthoritySnapshotID(s) {
 		return fmt.Errorf("authority snapshot id mismatch")
@@ -2066,8 +2075,44 @@ func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
 		writeHashString(h, snapshot.PrerequisiteFreshnessHash)
 	}
 	writeHashString(h, snapshot.OperationContractRevision)
+	writeHashString(h, snapshot.AuthorityInputID)
 	writeHashString(h, fmt.Sprintf("%d", snapshot.Attempt))
 	return "authority-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthorityInputIdentity {
+	facts = facts.Normalized()
+	focusHash := sha256.New()
+	writeHashString(focusHash, facts.Focus.ID)
+	writeHashString(focusHash, facts.Focus.SliceID)
+	for _, id := range facts.Focus.CoverageWorkItemIDs {
+		writeHashString(focusHash, string(id))
+	}
+	for _, binding := range facts.Focus.CoverageEvidenceBindings {
+		writeHashString(focusHash, binding.ID)
+		writeHashString(focusHash, binding.Hash)
+	}
+	catalogHash := sha256.New()
+	for _, inventory := range facts.Resources.OperationAdmissibilities {
+		writeHashString(catalogHash, inventory.OwnerModuleID)
+		writeHashString(catalogHash, inventory.SnapshotID)
+		writeHashString(catalogHash, inventory.ObservedRevision)
+	}
+	observationHash := sha256.New()
+	for _, observation := range facts.Resources.PrerequisiteObservations {
+		writeHashString(observationHash, observation.ObservationID)
+		writeHashString(observationHash, observation.ContentHash)
+	}
+	return RuntimeEquivalentAuthorityInputIdentity{
+		DefinitionRevision:        facts.DefinitionRevision,
+		FocusHash:                 "focus-" + hex.EncodeToString(focusHash.Sum(nil))[:20],
+		BindingSetHash:            facts.ReconciliationContract.BindingSetHash,
+		EvidenceRevision:          facts.EvidenceRevision,
+		CapabilityStateHash:       StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
+		CatalogRevisionHash:       "catalog-" + hex.EncodeToString(catalogHash.Sum(nil))[:20],
+		PrerequisiteFreshnessHash: StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
+		OwnerObservationHash:      "owner-observation-" + hex.EncodeToString(observationHash.Sum(nil))[:20],
+	}.Normalized()
 }
 
 type hashStringWriter interface {

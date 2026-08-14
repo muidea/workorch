@@ -44,8 +44,12 @@ admission、feasibility merge 与 seal 只读前者的 immutable declaration；r
 reopen 与 reseal 只修改后者，并继续经过 Orchestrator private internal event、controller 与 transition coordinator 的单次 CAS。
 capability owner 只报告资源事实和当前 admissibility，不能请求 CWI/focus 状态。
 
-schema v6 及更早 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；显式
-restart 由 Run owner 创建新的 schema-v7 lineage，不继承 predecessor request、candidate、CWI credit 或 recovery budget。
+schema v7 及更早 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；显式
+restart 由 Run owner 创建新的 schema-v8 lineage，不继承 predecessor request、candidate、CWI credit 或 recovery budget。
+
+schema v8 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
+evidence、capability/catalog、freshness 与 owner observation lineage 不能创建第二个 AuthoritySnapshot；精确 owner binding
+contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件退休，无法唯一绑定则 typed fail closed。
 
 ## Runtime 四状态机实现约束（2026-07-16）
 

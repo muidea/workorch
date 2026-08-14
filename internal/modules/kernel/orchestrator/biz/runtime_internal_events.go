@@ -62,8 +62,12 @@ func (m *Biz) runtimeCandidatePrerequisite(ctx context.Context, aggregate runtim
 }
 
 func (m *Biz) runtimeOwnerFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtime.RuntimeAggregate, error) {
+	kind := runtime.RuntimeInternalEventOwnerFeasibilityObserved
+	if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.OwnerPolicy.PolicyRevision != "" {
+		kind = runtime.RuntimeInternalEventSemanticBindingContradictionObserved
+	}
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Attempt: attempt, OwnerFeasibility: &observation,
+		Kind: kind, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Attempt: attempt, OwnerFeasibility: &observation,
 	})
 	return result.Aggregate, err
 }

@@ -51,11 +51,12 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandGetRuntimeCheckpoint, TopicRunCommandListCheckpointsByRun,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
-		TopicRunCommandCreate, TopicRunCommandStoreRuntimeStateRecord,
+		TopicRunCommandCreate,
 		TopicRunCommandDelete, TopicRunCommandWorkspaceExecutionIntent,
 		TopicRunFactGovernanceWait, TopicRunFactContinuationEligible,
 		TopicRunFactTerminalDelivery, TopicRunFactRuntimeStateIncompatible,
 	)
+	ret = eventcontract.Annotate(ret, eventcontract.OpaquePersistenceMetadata(eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority), TopicRunCommandStoreRuntimeStateRecord)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandPurgeRuntimeResources)
 	return ret
 }

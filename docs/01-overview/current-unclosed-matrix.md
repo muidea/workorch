@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-13
+Last Updated: 2026-08-14
 
 ## Purpose
 
@@ -35,7 +35,7 @@ private transitions and pure Runtime contract validation.
 | CWI-SO-15 | code/automated-closed | Orchestrator SM-3 | Every production dispatch passes one owner-local dispatcher; candidate attempt acceptance and dispatch creation share one CAS. |
 | CWI-SO-16 | implementation/focused-closed | Orchestrator SM-2/SM-3/SM-4 | Settle, prerequisite, reopen, retirement, reconciliation and semantic-order projection remain owner-private and CAS-bound. |
 | CWI-SO-17 | code/automated-closed | Run/LLM/capability/governance/delivery owners | Cross-owner contracts remain detached typed facts; Decision/Approval transitions and File effects now enter only owner-private dispatchers. `file/write` is create-only and replacement requires revision-bound `patch/apply`. |
-| CWI-SO-18 | code/automated-closed; live exit superseded by SO-MC | Automated/live verification | `run-086` target drift remains frozen as a pre-dispatch manifest rejection and File owner independently refuses overwrite. Re-run these shapes inside the fresh schema-v7 SO-MC live proof. |
+| CWI-SO-18 | code/automated-closed; live exit superseded by SO-MC | Automated/live verification | `run-086` target drift remains frozen as a pre-dispatch manifest rejection and File owner independently refuses overwrite. Re-run these shapes inside the fresh schema-v8 SO-MC live proof. |
 
 The detailed owner map, transition rules, migration boundary, and regression matrix are in the
 [Runtime CWI plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md).
@@ -64,11 +64,11 @@ isolation. It is independent of CWI/focus/dispatch authority. See the
 
 ## C. Runtime Single-Owner And Model-Capability Output
 
-Status: active implementation.
+Status: code/automated-closed; deployed schema-v8 verification pending.
 
 The latest deployed Run correctly preserved one Orchestrator request session, stable authority and zero side effect,
 but three operations calls reached the WorkOrch-sealed 8192-token limit and ended before CandidateAttempt/Dispatch.
-The required closure removes configuration/activation token authority, upgrades fresh Runtime to schema v7, obtains
+The required closure removes configuration/activation token authority, upgrades fresh Runtime to schema v8, obtains
 the effective output limit only from the selected model's typed ProviderCeiling, seals it into ExpectedDocument, adds
 compact complete-JSON prompt/schema limits, and completes target-state removal for all owner-private lifecycle inputs.
 
@@ -78,8 +78,14 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 | SO-MC-04..07 | code/focused-closed | LLM owner + Orchestrator SM-3/SM-4 | Typed model ceiling, exact ExpectedDocument equality, compact bounded schema/prompt and whole-document recovery are covered. |
 | SO-MC-08 | code/focused-closed | Approval + all state owners | Approval uses observed fact kinds; owner-private dispatcher and zero-side-effect regressions pass. |
 | SO-MC-09 | automated-closed | repository-wide | Core docs and narrow boundary gates are updated; fmt/vet/full/race/boundary/isolated managed file-backed/build gates pass. |
-| SO-MC-10 | live pending | deployed Runtime | Requires a real-provider fresh schema-v7 candidate/dispatch/receipt/evidence/delivery terminal proof; schema-v6 `run-002` reached receipt/evidence but failed on generation/declaration conflation. |
+| SO-MC-10 | open; deployed-only | deployed Runtime | Requires a real-provider fresh schema-v8 candidate/dispatch/receipt/evidence/delivery terminal proof. |
 | SO-MC-11 | code/automated-closed | Runtime contract + Orchestrator SM-2/3/4 | Schema v7 persists immutable DefinitionFocus declarations; prior generation operation kinds cannot constrain resource-change reseal; v6 Resume is side-effect free. |
+| SO-MC-12 | code/automated-closed | Runtime contract + event contract | Schema v8 owner-policy, authority-input and opaque lifecycle-fence identities; v7 Resume is side-effect free. |
+| SO-MC-13 | code/automated-closed | File owner | Semantic and operation feasibility share one kind/variant/target/resource policy. |
+| SO-MC-14 | code/automated-closed | Orchestrator SM-2 | Contradictory owner fact retires the exact binding and triggers bounded semantic replan or typed terminal. |
+| SO-MC-15 | code/automated-closed | Orchestrator SM-2/3/4 | Unchanged binding/revision/signature/targets cannot mint another AuthoritySnapshot or provider request. |
+| SO-MC-16 | code/automated-closed | Run owner + Orchestrator persistence adapter | Run owns SM-1 and opaque CAS but does not decode SM-2/3/4 to select lifecycle transitions. |
+| SO-MC-17 | code/automated-closed | repository-wide | Boundary scanner plus transition/restart/stale/duplicate/budget gates prove one owner-private mutation entry per machine. |
 
 ## D. Optional And Deferred Work
 
@@ -90,10 +96,10 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 
 ## Judgment
 
-The prior broad code-closed claim was superseded by persisted CWI counterexamples and the latest 8192-token truncation
-run. The CWI implementation matrix remains closed as a regression baseline, but live closure now requires the SO-MC
-schema-v7 model-capability path and one persisted candidate/dispatch/receipt/evidence/terminal chain. Managed mock verification
-and correct fail-closed behavior cannot substitute for that proof.
+The fresh schema-v7 persisted counterexample remains a regression baseline. SO-MC-12..17 now close its code and
+automated owner/convergence defects; live closure still requires one fresh schema-v8
+candidate/dispatch/receipt/evidence/terminal chain. Managed mock verification, aggregate revision growth and correct
+per-attempt fail-closed behavior cannot substitute for bounded forward convergence.
 
 ## Navigation
 

@@ -221,6 +221,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 	record := runtimeStateRecordFromAggregate(aggregate)
 	runFixture := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
 	runFixture.RuntimeState = &record
+	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
@@ -1035,10 +1036,12 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 	workspaces := memory.NewWorkspaceRepository()
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
-	if err := runs.Create(ctx, &runmodel.Run{
+	runFixture := &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &record,
-	}); err != nil {
+	}
+	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
@@ -1090,7 +1093,9 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	workspaces := filerepository.NewWorkspaceRepository(root + "/workspaces.json")
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}); err != nil {
+	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}
+	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
@@ -1285,7 +1290,9 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	aggregate.Decision = decision
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
-	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}); err != nil {
+	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}
+	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {

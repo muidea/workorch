@@ -509,8 +509,30 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	if !reflect.DeepEqual(reloadedDiagnostic, expectedDiagnostic) {
 		t.Fatalf("owner diagnostic changed across persisted reload:\n got=%+v\nwant=%+v", reloadedDiagnostic, expectedDiagnostic)
 	}
-	if _, err := restarted.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "owner-infeasible-new-authority"); err != nil {
-		t.Fatalf("new authority did not permit fresh attempt 0: %v", err)
+	requestSessionsBeforeFence := len(reloaded.CandidateRequestSessions)
+	fenced, err := restarted.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "owner-infeasible-new-authority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fenced.Decision.State != runtimecontract.ConvergenceStateFailed || fenced.Decision.Terminal == nil || fenced.Decision.Terminal.Code != "equivalent_authority_no_progress" ||
+		fenced.Facts.Failure == nil || fenced.Facts.Failure.Code != "equivalent_authority_no_progress" || len(fenced.CandidateAttempts) != 1 ||
+		len(fenced.CandidateRequestSessions) != requestSessionsBeforeFence || fenced.ActiveDispatch != nil || len(fenced.OperationReceipts) != 0 ||
+		len(fenced.Facts.Evidence.Accepted) != 0 || len(fenced.Facts.Evidence.Rejected) != 0 {
+		t.Fatalf("equivalent authority fence did not stop before provider work: %+v", fenced)
+	}
+	restartSaves := repository.saves
+	restartedAfterFence, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedAfterFence, err := restartedAfterFence.Load(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedAfterFence.StateRevision != fenced.StateRevision || reloadedAfterFence.Decision.Terminal == nil ||
+		reloadedAfterFence.Decision.Terminal.Code != "equivalent_authority_no_progress" || repository.saves != restartSaves ||
+		len(reloadedAfterFence.CandidateRequestSessions) != requestSessionsBeforeFence {
+		t.Fatalf("equivalent authority fence changed across restart: %+v saves=%d", reloadedAfterFence, repository.saves)
 	}
 	saves := repository.saves
 	duplicateEvent, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
@@ -518,6 +540,109 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	})
 	if err != nil || duplicateEvent.Aggregate.StateRevision != repository.aggregate.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate owner observation rewrote aggregate: duplicate=%+v saves=%d err=%v", duplicateEvent.Aggregate, repository.saves, err)
+	}
+}
+
+func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"target.txt"}, ObservedRevision: "tree-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	prerequisite := runtimecontract.RuntimePrerequisite{ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: inventory.OperationKinds}
+	catalogObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: inventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"}},
+	}
+	catalogObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(catalogObservation)
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{catalogObservation}
+	_, err = controller.initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	begun, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "binding-contradiction-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(begun.Facts.Coverage) != 1 || begun.Facts.Coverage[0].CurrentBindingRef == nil {
+		t.Fatalf("semantic binding fixture was not sealed: %+v", begun.Facts.Coverage)
+	}
+	binding := begun.Facts.Coverage[0].CurrentBindingRef.Clone()
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "write-target", Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{binding.BindingID}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("state"),
+	}}}}}
+	if _, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_exists", Signature: "file/target-exists", Message: "file/write is create-only", TargetRefs: []string{"target.txt"}}
+	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: begun.Decision.AuthoritySnapshot.ID,
+	}, runtimecontract.RuntimeFeedbackDomainFeasibility, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed), runtimecontract.RuntimeModuleFile, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback.OriginalDiagnostic.OperationID = "write-target"
+	feedback.OriginalDiagnostic.ObservedRevision = "tree-v1"
+	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
+		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
+		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-v1", CatalogSnapshotID: inventory.SnapshotID},
+	}
+	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, facts.WorkspaceID, facts.RunID, 0), Observation: &ownerObservation,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := committed.Aggregate
+	item := retired.Facts.Coverage[0]
+	if len(retired.CandidateAttempts) != 1 || retired.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
+		retired.CandidateAttempts[0].BindingContradiction == nil || item.State != runtimecontract.RuntimeCoverageItemStateOpen ||
+		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning || item.CurrentBindingRef != nil || len(item.BindingRetirementLineage) != 1 ||
+		!runtimecontract.SameRuntimeCWIBindingRef(item.BindingRetirementLineage[0].RetiredBindingRef, binding) ||
+		retired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(retired.SemanticPlanning.History) != 1 ||
+		retired.SemanticPlanning.History[0].Reason != runtimecontract.RuntimeSemanticPlanningRetirementBindingContradiction ||
+		retired.ActiveDispatch != nil || len(retired.OperationReceipts) != 0 || len(retired.Facts.Evidence.Accepted) != 0 || len(retired.Facts.Evidence.Rejected) != 0 ||
+		len(retired.GovernanceRequests) != 0 || retired.Facts.RepairDirective != nil {
+		t.Fatalf("binding contradiction did not perform one no-effect retirement: %+v", retired)
+	}
+	saves := repository.saves
+	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+	})
+	if err != nil || duplicate.Aggregate.StateRevision != retired.StateRevision || repository.saves != saves {
+		t.Fatalf("duplicate binding contradiction was not a no-op: %+v err=%v saves=%d", duplicate.Aggregate, err, repository.saves)
+	}
+	staleObservation := ownerObservation.Clone()
+	staleObservation.Feedback.OriginalDiagnostic.Signature = "file/stale-target-exists"
+	stale, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &staleObservation,
+	})
+	if err != nil || stale.Aggregate.StateRevision != retired.StateRevision || repository.saves != saves {
+		t.Fatalf("stale binding contradiction was not a no-op: %+v err=%v saves=%d", stale.Aggregate, err, repository.saves)
+	}
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := restarted.Load(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil || reloaded.StateRevision != retired.StateRevision || len(reloaded.Facts.Coverage[0].BindingRetirementLineage) != 1 || repository.saves != saves {
+		t.Fatalf("binding retirement changed across restart: %+v err=%v saves=%d", reloaded, err, repository.saves)
 	}
 }
 

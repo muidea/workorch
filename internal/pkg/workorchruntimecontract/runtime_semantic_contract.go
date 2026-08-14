@@ -1006,6 +1006,7 @@ type RuntimeSemanticProofFeasibility struct {
 	OwnerModuleID        string
 	CatalogSnapshotID    string
 	CatalogObservationID string
+	OwnerPolicy          RuntimeOwnerPolicyIdentity
 	Status               RuntimeSemanticFeasibilityStatus
 	ObservedRevision     string
 	TargetRefs           []string
@@ -1023,6 +1024,7 @@ func (f RuntimeSemanticProofFeasibility) Normalized() RuntimeSemanticProofFeasib
 	f.OwnerModuleID = strings.TrimSpace(f.OwnerModuleID)
 	f.CatalogSnapshotID = strings.TrimSpace(f.CatalogSnapshotID)
 	f.CatalogObservationID = strings.TrimSpace(f.CatalogObservationID)
+	f.OwnerPolicy = f.OwnerPolicy.Normalized()
 	f.Status = RuntimeSemanticFeasibilityStatus(strings.TrimSpace(string(f.Status)))
 	f.ObservedRevision = strings.TrimSpace(f.ObservedRevision)
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
@@ -1061,6 +1063,14 @@ func (f RuntimeSemanticProofFeasibility) ValidateForProposal(manifest RuntimeSem
 	}
 	if catalog.OwnerModuleID == "" || f.CatalogSnapshotID != catalog.SnapshotID {
 		return fmt.Errorf("runtime semantic feasibility catalog identity does not match sealed owner catalog")
+	}
+	if f.OwnerPolicy.OwnerModuleID != "" || f.OwnerPolicy.PolicyRevision != "" || f.OwnerPolicy.CatalogSnapshotID != "" {
+		if err := f.OwnerPolicy.Validate(); err != nil {
+			return err
+		}
+		if f.OwnerPolicy.OwnerModuleID != f.OwnerModuleID || f.OwnerPolicy.CatalogSnapshotID != f.CatalogSnapshotID {
+			return fmt.Errorf("runtime semantic feasibility owner policy identity mismatch")
+		}
 	}
 	if err := validateSemanticProposalAgainstOwnerCatalog(proposal, catalog); err != nil {
 		return err
@@ -1149,6 +1159,9 @@ const (
 	// facts can remain current while exactly one settled CWI needs a successor
 	// proof binding.
 	RuntimeSemanticPlanningRetirementCWIReopened RuntimeSemanticPlanningRetirementReason = "cwi_reopened"
+	// RuntimeSemanticPlanningRetirementBindingContradiction records an exact
+	// owner-policy contradiction before any dispatch or effect.
+	RuntimeSemanticPlanningRetirementBindingContradiction RuntimeSemanticPlanningRetirementReason = "binding_contradiction"
 	// RuntimeSemanticPlanningRetirementEligibleClosureChanged records that a
 	// settled prerequisite made a CWI eligible after the immutable manifest and
 	// coverage order were accepted. The next generation must recompile the
@@ -1311,7 +1324,7 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 		if len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic catalog retirement requires only catalog lineage")
 		}
-	case RuntimeSemanticPlanningRetirementCWIReopened:
+	case RuntimeSemanticPlanningRetirementCWIReopened, RuntimeSemanticPlanningRetirementBindingContradiction:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) == 0 || len(g.ReopenTriggerRefs) == 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic CWI reopen retirement requires only CWI lineage")
 		}
@@ -1348,7 +1361,7 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 			return fmt.Errorf("runtime semantic planning generation prerequisite %q is outside snapshot manifest", prerequisiteID)
 		}
 	}
-	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged {
+	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementBindingContradiction || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged {
 		seedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(g.Snapshot.DefinitionSeed.CoverageItems))
 		for _, item := range g.Snapshot.DefinitionSeed.CoverageItems {
 			seedCoverage[item.ID] = struct{}{}
@@ -2322,6 +2335,9 @@ func StableRuntimeSemanticFeasibilitySetHash(values []RuntimeSemanticProofFeasib
 		writeHashString(h, value.OwnerModuleID)
 		writeHashString(h, value.CatalogSnapshotID)
 		writeHashString(h, value.CatalogObservationID)
+		writeHashString(h, value.OwnerPolicy.OwnerModuleID)
+		writeHashString(h, value.OwnerPolicy.PolicyRevision)
+		writeHashString(h, value.OwnerPolicy.CatalogSnapshotID)
 		writeHashString(h, string(value.Status))
 		writeHashString(h, value.ObservedRevision)
 		writeHashStrings(h, value.TargetRefs)

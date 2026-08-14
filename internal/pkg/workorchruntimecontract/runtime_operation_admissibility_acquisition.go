@@ -78,6 +78,7 @@ type RuntimeOperationFeasibilityObservation struct {
 	AdmissibilitySnapshotID string
 	CapabilityStateBinding  string
 	CandidateManifestHash   string
+	OwnerPolicy             RuntimeOwnerPolicyIdentity
 	Outcome                 RuntimeOwnerFeasibilityOutcome
 	Feedback                *RuntimeFeedback
 	ReplayProof             *RuntimeOperationReplayProof
@@ -154,6 +155,7 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 	result.AdmissibilitySnapshotID = strings.TrimSpace(result.AdmissibilitySnapshotID)
 	result.CapabilityStateBinding = strings.TrimSpace(result.CapabilityStateBinding)
 	result.CandidateManifestHash = strings.TrimSpace(result.CandidateManifestHash)
+	result.OwnerPolicy = result.OwnerPolicy.Normalized()
 	result.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(result.Outcome)))
 	if result.OperationID == "" || result.AdmissibilitySnapshotID == "" {
 		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility result requires operation and admissibility identity")

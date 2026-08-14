@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-11
+Last Updated: 2026-08-14
 
 
 ## LLM Provider（2026-07-15）
@@ -144,7 +144,13 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
    dispatch、File create receipt 与 evidence advance，但资源变化后的下一 semantic generation 错把旧 `file/write` binding
    当作 immutable declaration，拒绝 owner-feasible `patch/apply`。SO-MC-11 因此以 schema v7 分离 activation-only
    `DefinitionFocuses` 与 SM-2 generation focus queue；schema v6 Resume 只返回 `fresh_activation_required` 且零 owner work。
-   SO-MC-10 仍需 fresh schema-v7 terminal persisted proof，managed mock 不构成 live closure。
+   fresh schema-v7 deployed execution 随后暴露新的当前反例：SM-2 对既有 exact target 的 `file/write` 返回 feasible
+   并 seal binding，File operation probe 又以 create-only `operation_target_exists` 拒绝；相同 binding、catalog、target
+   和 failure signature 被反复包装为新 authority attempt，aggregate revision 与 provider token 持续增长但始终零
+   dispatch/receipt/evidence。SO-MC-12～17 已按 schema v8 完成代码与自动化收口：File 两阶段共享 owner policy，
+   contradiction 精确退役 binding，等价 authority 在 provider submission 前围栏，Run 仅持久化 opaque Runtime 与
+   lifecycle fence，repository-wide owner boundary 组合门禁通过。SO-MC-10 仍需执行 fresh schema-v8 real-provider
+   terminal persisted proof；managed mock 不构成 live closure。
 2. **Runtime CWI 单 owner 矩阵继续作为必需回归基线，不再独立定义实施顺序。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。

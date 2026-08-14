@@ -104,6 +104,9 @@ type RuntimeCandidateAttemptRecord struct {
 	// proposal. It is never a candidate failure and therefore cannot authorize
 	// attempt 1.
 	OwnerFeasibility *RuntimeOwnerFeasibilityObservation
+	// BindingContradiction is the exact SM-2 retirement fact derived from an
+	// owner infeasibility. It carries no retry or next-action choice.
+	BindingContradiction *RuntimeBindingContradictionIdentity
 	// PrerequisiteRequest records why this unsealed attempt was invalidated for
 	// owner fact acquisition, making duplicate delivery/restart deterministic.
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
@@ -162,12 +165,14 @@ type RuntimeStateRecord struct {
 }
 
 // RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
-// Version 7 separates immutable activation declarations from generation-
-// specific semantic focus bindings. ProviderCeiling remains the sole persisted
+// Version 8 seals owner-policy, equivalent-authority input, binding
+// contradiction and opaque lifecycle-fence identities. Version 7 separated
+// immutable activation declarations from generation-specific semantic focus
+// bindings. ProviderCeiling remains the sole persisted
 // model capability fact and ExpectedDocument the sole resolved request budget.
 // Earlier aggregates require a fresh activation instead of an in-place
 // reinterpretation.
-const RuntimeStateSchemaVersionCurrent uint32 = 7
+const RuntimeStateSchemaVersionCurrent uint32 = 8
 
 // ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")
@@ -719,6 +724,12 @@ func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.Workspace
 		if value.AuthorityContractID != contractID || value.AuthorityContractID != StableAuthorityContractID(workspaceID, runID, value.Transaction) {
 			return fmt.Errorf("runtime candidate authority contract id mismatch")
 		}
+		if value.BindingContradiction != nil {
+			identity := value.BindingContradiction.Normalized()
+			if err := identity.Validate(); err != nil || identity.WorkspaceID != workspaceID || identity.RunID != runID || identity.AuthorityInputID != value.Transaction.AuthorityInputID || value.State != RuntimeCandidateAttemptStateInvalidated || value.OwnerFeasibility == nil {
+				return fmt.Errorf("runtime candidate binding contradiction identity mismatch")
+			}
+		}
 	}
 	for contractID, attempts := range byContract {
 		attemptCounts := [2]int{}
@@ -758,6 +769,7 @@ func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunI
 		writeHashString(h, transaction.PrerequisiteFreshnessHash)
 	}
 	writeHashString(h, transaction.OperationContractRevision)
+	writeHashString(h, transaction.AuthorityInputID)
 	return "authority-contract-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -770,7 +782,8 @@ func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction
 		left.EvidenceRevision == right.EvidenceRevision &&
 		left.CapabilityStateHash == right.CapabilityStateHash &&
 		left.PrerequisiteFreshnessHash == right.PrerequisiteFreshnessHash &&
-		left.OperationContractRevision == right.OperationContractRevision
+		left.OperationContractRevision == right.OperationContractRevision &&
+		left.AuthorityInputID == right.AuthorityInputID
 }
 
 func CandidateAttemptAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunID, record RuntimeCandidateAttemptRecord) string {
@@ -842,6 +855,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 		if attempt.OwnerFeasibility != nil {
 			observation := attempt.OwnerFeasibility.Clone()
 			ret.CandidateAttempts[idx].OwnerFeasibility = &observation
+		}
+		if attempt.BindingContradiction != nil {
+			identity := attempt.BindingContradiction.Normalized()
+			ret.CandidateAttempts[idx].BindingContradiction = &identity
 		}
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)

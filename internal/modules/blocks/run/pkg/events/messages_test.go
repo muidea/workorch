@@ -5,8 +5,22 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeStateStoreIsOpaquePersistenceNotSM1Transition(t *testing.T) {
+	for _, contract := range Contracts() {
+		if contract.Topic != TopicRunCommandStoreRuntimeStateRecord {
+			continue
+		}
+		if contract.Metadata.StateMachine != eventcontract.StateMachineNone || contract.Metadata.EffectClass != eventcontract.EffectClassOpaquePersistence || contract.Metadata.TransitionTarget != eventcontract.TransitionTargetOpaquePersistence {
+			t.Fatalf("runtime store metadata = %+v", contract.Metadata)
+		}
+		return
+	}
+	t.Fatal("runtime state store contract missing")
+}
 
 func TestRunStateChangedDataFromModelIncludesOnlyOpaqueRuntimeReference(t *testing.T) {
 	run := &runmodel.Run{

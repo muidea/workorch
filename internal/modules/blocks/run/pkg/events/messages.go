@@ -30,6 +30,7 @@ type StoreRuntimeStateRecordCommand struct {
 	RunID                        common.RunID
 	WorkspaceID                  common.WorkspaceID
 	RuntimeState                 *runtimecontract.RuntimeStateRecord
+	LifecycleFence               *runtimecontract.RuntimeOpaqueLifecycleFence
 	ExpectedRuntimeStateRevision *uint64
 }
 

@@ -61,6 +61,102 @@ func TestFileModuleStartRequiresEventHub(t *testing.T) {
 	}
 }
 
+func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	workspace := t.TempDir()
+	const targetRef = "existing.txt"
+	if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte("existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adapter := filebiz.NewRuntimeAdapter()
+	workspaceManifest, err := adapter.AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility(
+		"file-catalog", runtimecontract.RuntimeModuleFile, []string{runtimecontract.StepKindFileWrite}, nil,
+		[]string{"workspace-relative-new-file-target"}, []string{"workspace-relative-path"}, workspaceManifest.Revision,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+		Kind: runtimecontract.StepKindFileWrite,
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+	}}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"workspace-relative-new-file-target"},
+			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRef: targetRef,
+		},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "test/cwi-1",
+	}
+	semanticManifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:   "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", DefinitionSeedHash: "seed-1",
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "deliver", Order: 1}},
+		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget}, OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	semanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(semanticManifest)
+	semanticResult := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicProbeRuntimeSemanticProofFeasibility, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ProbeRuntimeSemanticProofFeasibilityCommand(runtimecontract.RuntimeSemanticProofFeasibilityRequest{
+			WorkspaceID: "ws-1", RunID: "run-1", FeasibilityBatchID: "batch-1", WorkspaceDeliverableDirectory: workspace,
+			Manifest: semanticManifest, Proposal: proposal, OwnerCatalog: catalog,
+		}),
+	))
+	semanticData, semanticErr := semanticResult.Get()
+	if semanticErr != nil {
+		t.Fatal(semanticErr)
+	}
+	semantic := runtimecontract.RuntimeSemanticProofFeasibilityObservation(semanticData.(fileevents.ProbeRuntimeSemanticProofFeasibilityResult))
+
+	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(runtimecontract.StepKindFileWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "new\n"
+	operationResult := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicProbeRuntimeOperationFeasibility, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ProbeRuntimeOperationFeasibilityCommand(runtimecontract.RuntimeOperationFeasibilityRequest{
+			WorkspaceID: "ws-1", RunID: "run-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			WorkspaceDeliverableDirectory: workspace, Admissibility: catalog, CandidateManifestHash: "candidate-manifest-1", OperationAuthorization: authorization,
+			Operation: runtimecontract.RuntimeOperation{ID: "write-1", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{targetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}},
+		}),
+	))
+	operationData, operationErr := operationResult.Get()
+	if operationErr != nil {
+		t.Fatal(operationErr)
+	}
+	operation := runtimecontract.RuntimeOperationFeasibilityObservation(operationData.(fileevents.ProbeRuntimeOperationFeasibilityResult))
+	if semantic.Observation.Status != runtimecontract.RuntimeSemanticFeasibilityInfeasible || semantic.Observation.OriginalDiagnostic == nil ||
+		operation.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible || operation.Feedback == nil || operation.Feedback.OriginalDiagnostic == nil ||
+		semantic.Observation.OriginalDiagnostic.OriginalCode != "operation_target_exists" || operation.Feedback.OriginalDiagnostic.OriginalCode != "operation_target_exists" ||
+		semantic.Observation.OwnerPolicy.PolicyRevision == "" || semantic.Observation.OwnerPolicy != operation.OwnerPolicy ||
+		semantic.Observation.OwnerPolicy.CatalogSnapshotID != catalog.SnapshotID {
+		t.Fatalf("semantic/operation File policy drifted: semantic=%+v operation=%+v", semantic, operation)
+	}
+}
+
 func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

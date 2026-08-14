@@ -39,6 +39,7 @@ const (
 	EffectClassExternalSideEffect EffectClass = "external_side_effect"
 	EffectClassPublishedFact      EffectClass = "published_fact"
 	EffectClassReceiverDefined    EffectClass = "receiver_defined"
+	EffectClassOpaquePersistence  EffectClass = "opaque_persistence"
 )
 
 type SourcePolicy string
@@ -71,6 +72,7 @@ type TransitionTarget string
 const (
 	TransitionTargetNone                 TransitionTarget = "none"
 	TransitionTargetReceiverOwnerPrivate TransitionTarget = "receiver_owner_private_logic"
+	TransitionTargetOpaquePersistence    TransitionTarget = "opaque_persistence_only"
 )
 
 type Metadata struct {
@@ -303,6 +305,15 @@ func RuntimeMetadata(class CommandClass, stateMachine StateMachine, scope ScopeP
 	metadata.ScopePolicy = scope
 	metadata.IdentityPolicy = identity
 	metadata.CanonicalFeedback = canonicalFeedback
+	return metadata
+}
+
+// OpaquePersistenceMetadata classifies physical storage/CAS of a payload whose
+// state-machine semantics remain owned by another component.
+func OpaquePersistenceMetadata(scope ScopePolicy, identity IdentityPolicy) Metadata {
+	metadata := RuntimeMetadata(CommandClassWrite, StateMachineNone, scope, identity, true)
+	metadata.EffectClass = EffectClassOpaquePersistence
+	metadata.TransitionTarget = TransitionTargetOpaquePersistence
 	return metadata
 }
 

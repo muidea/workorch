@@ -471,6 +471,9 @@ func (c *RuntimeController) beginCandidateAttempt(ctx context.Context, workspace
 	transaction := aggregate.Decision.AuthorityTransaction()
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
 	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
+	if attempt == 0 && len(current) == 0 && equivalentOwnerInfeasibilityExists(aggregate.CandidateAttempts, transaction.AuthorityInputID) {
+		return c.terminalizeEquivalentAuthorityNoProgress(ctx, aggregate)
+	}
 	for _, record := range current {
 		if record.Attempt != attempt {
 			continue
@@ -538,6 +541,45 @@ func (c *RuntimeController) beginCandidateAttempt(ctx context.Context, workspace
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func (c *RuntimeController) terminalizeEquivalentAuthorityNoProgress(ctx context.Context, aggregate RuntimeAggregate) (RuntimeAggregate, error) {
+	expectedRevision := aggregate.StateRevision
+	transaction := aggregate.Decision.AuthorityTransaction()
+	facts := aggregate.Facts
+	facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassNoProgressExhausted, Code: "equivalent_authority_no_progress",
+		Signature: "equivalent-authority/" + transaction.AuthorityInputID,
+		Message:   "unchanged authority inputs already produced the same owner infeasibility",
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+func equivalentOwnerInfeasibilityExists(attempts []runtimecontract.RuntimeCandidateAttemptRecord, authorityInputID string) bool {
+	authorityInputID = strings.TrimSpace(authorityInputID)
+	if authorityInputID == "" {
+		return false
+	}
+	for _, attempt := range attempts {
+		if attempt.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && attempt.OwnerFeasibility != nil &&
+			attempt.Transaction.AuthorityInputID == authorityInputID {
+			return true
+		}
+	}
+	return false
 }
 
 // rejectCompletedCandidateDocument is the single SM-3 transition for a

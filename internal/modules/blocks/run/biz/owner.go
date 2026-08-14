@@ -717,6 +717,12 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runevents.StoreRuntimeState
 	}
 	item := *current
 	item.RuntimeState = cloneRuntimeStateRecord(cmd.RuntimeState)
+	if cmd.LifecycleFence != nil {
+		fence := cmd.LifecycleFence.Normalized()
+		item.RuntimeLifecycleFence = &fence
+	} else {
+		item.RuntimeLifecycleFence = nil
+	}
 	item.RuntimeActivationStatus = current.RuntimeActivationStatus.Clone()
 	return &item
 }
@@ -728,20 +734,20 @@ func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRec
 	if !runUsesRuntime(current) {
 		return nil
 	}
-	if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil ||
-		cmd.RuntimeState.Facts.WorkspaceID != cmd.WorkspaceID || cmd.RuntimeState.Facts.RunID != cmd.RunID {
+	if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.RuntimeState.SchemaVersion != runtimemodel.RuntimeStateSchemaVersionCurrent {
 		return common.ErrConflict
+	}
+	if cmd.LifecycleFence != nil {
+		fence := cmd.LifecycleFence.Normalized()
+		if err := fence.Validate(); err != nil || fence.WorkspaceID != cmd.WorkspaceID || fence.RunID != cmd.RunID ||
+			fence.RuntimeStateRevision != cmd.RuntimeState.StateRevision || fence.RuntimeStateRef != runevents.RuntimeStateRef(cmd.WorkspaceID, cmd.RunID, cmd.RuntimeState.StateRevision) ||
+			fence.RuntimeStateHash != runtimemodel.StableRuntimeStateRecordHash(*cmd.RuntimeState) || fence.BootstrapHash != runtimemodel.StableRuntimeBootstrapHash(*current.RuntimeBootstrap) {
+			return common.ErrConflict
+		}
 	}
 	if current.RuntimeBootstrap == nil {
 		// The sealed bootstrap is required to validate an aggregate write. Reject a
 		// malformed record instead of letting a generic owner command panic.
-		return common.ErrConflict
-	}
-	state := cmd.RuntimeState.Clone()
-	bootstrap := current.RuntimeBootstrap.Normalized()
-	if state.Definition.GoalID != current.GoalID || state.Definition.DoDID != current.DoDID || state.Definition.Revision != current.DefinitionRevision ||
-		!runtimemodel.SameRuntimeDefinitionContext(bootstrap.Definition, state.Definition) ||
-		!runtimemodel.SameRuntimeActivationContext(bootstrap.Activation, state.Facts.Activation) {
 		return common.ErrConflict
 	}
 	return nil

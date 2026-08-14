@@ -61,7 +61,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 			t.Fatalf("topic %s message/delivery metadata mismatch: message=%+v delivery=%+v", topic, message, contract)
 		}
 		if strings.Contains(strings.ToLower(topic), "runtime") {
-			if contract.Metadata.StateMachine == eventcontract.StateMachineNone || contract.Metadata.ScopePolicy == eventcontract.ScopePolicyDeclared || contract.Metadata.IdentityPolicy == eventcontract.IdentityPolicyTopicOwnerReceiver {
+			opaquePersistence := contract.Metadata.StateMachine == eventcontract.StateMachineNone && contract.Metadata.EffectClass == eventcontract.EffectClassOpaquePersistence && contract.Metadata.TransitionTarget == eventcontract.TransitionTargetOpaquePersistence
+			if (!opaquePersistence && contract.Metadata.StateMachine == eventcontract.StateMachineNone) || contract.Metadata.ScopePolicy == eventcontract.ScopePolicyDeclared || contract.Metadata.IdentityPolicy == eventcontract.IdentityPolicyTopicOwnerReceiver {
 				t.Fatalf("Runtime-sensitive topic %s lacks explicit SM/scope/identity metadata: %+v", topic, contract.Metadata)
 			}
 		}

@@ -573,8 +573,9 @@ func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-v2", DoDID: "dod-v2", Revision: "definition-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}}
-	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
+	bootstrap := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, Definition: definition, Activation: activation}
 	state := runtimecontract.RuntimeStateRecord{
+		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		StateRevision: 1,
 		Definition:    definition,
 		Facts: runtimecontract.RuntimeFacts{
@@ -601,11 +602,6 @@ func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 		mutate func(*runevents.StoreRuntimeStateRecordCommand)
 	}{
 		{name: "runtime state removal", mutate: func(cmd *runevents.StoreRuntimeStateRecordCommand) { cmd.RuntimeState = nil }},
-		{name: "state definition drift", mutate: func(cmd *runevents.StoreRuntimeStateRecordCommand) {
-			cloned := cmd.RuntimeState.Clone()
-			cloned.Definition.Revision = "definition-other"
-			cmd.RuntimeState = &cloned
-		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -615,6 +611,13 @@ func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 				t.Fatalf("err = %v, want conflict", err)
 			}
 		})
+	}
+	opaque := valid
+	cloned := opaque.RuntimeState.Clone()
+	cloned.Definition.Revision = "definition-other"
+	opaque.RuntimeState = &cloned
+	if err := runbiz.ValidateRunUpdate(current, opaque); err != nil {
+		t.Fatalf("Run decoded opaque Runtime definition: %v", err)
 	}
 }
 

@@ -338,6 +338,55 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	return nil
 }
 
+// retireSemanticPlanningGenerationForBindingContradiction clears only the
+// generation that sealed the contradicted binding. The binding row must
+// already contain the matching no-effect retirement lineage.
+func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeAggregate, coverageID common.CoverageWorkItemID, causationRef string) error {
+	if aggregate == nil || coverageID == "" || strings.TrimSpace(causationRef) == "" {
+		return common.ErrInvalidArgument
+	}
+	ledger := aggregate.SemanticPlanning.Clone()
+	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
+		return nil
+	}
+	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed || ledger.Manifest == nil || aggregate.ActiveDispatch != nil {
+		return fmt.Errorf("%w: semantic binding contradiction cannot retire the current generation", common.ErrConflict)
+	}
+	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
+		return fmt.Errorf("%w: semantic planning generation history exhausted", common.ErrConflict)
+	}
+	item, found := runtimeCoverageByID(aggregate.Facts.Coverage)[coverageID]
+	if !found || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning || item.CurrentBindingRef != nil || len(item.BindingRetirementLineage) == 0 ||
+		item.BindingRetirementLineage[len(item.BindingRetirementLineage)-1].CausationRef != strings.TrimSpace(causationRef) {
+		return fmt.Errorf("%w: semantic binding contradiction has no canonical retirement lineage", common.ErrConflict)
+	}
+	snapshot := ledger.Clone()
+	snapshot.History = nil
+	history := runtimecontract.RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: aggregate.StateRevision + 1,
+		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementBindingContradiction,
+		ReopenedCoverageIDs:    []common.CoverageWorkItemID{coverageID},
+		ReopenTriggerRefs:      []string{strings.TrimSpace(causationRef)},
+		Snapshot:               snapshot,
+	}
+	if err := history.Validate(); err != nil {
+		return err
+	}
+	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
+		SchemaVersion:          ledger.SchemaVersion,
+		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
+		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
+		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
+		History:                append(append([]runtimecontract.RuntimeSemanticPlanningGeneration(nil), ledger.History...), history),
+	}
+	if err := newLedger.Validate(); err != nil {
+		return err
+	}
+	retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_binding_contradiction")
+	aggregate.SemanticPlanning = newLedger
+	return nil
+}
+
 // retireSemanticPlanningGenerationForEligibilityChange retires an immutable
 // order when settled prerequisite bindings unlock CWI outside its manifest.
 // The exact changed rows and their prerequisite binding refs are audit

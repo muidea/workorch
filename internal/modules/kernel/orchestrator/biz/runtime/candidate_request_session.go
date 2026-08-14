@@ -24,6 +24,16 @@ func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx contex
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
+	if documentKind == runtimecontract.RuntimeProviderDocumentOperations &&
+		len(candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction))) == 0 &&
+		!operationRequestSessionExistsForAuthority(aggregate.CandidateRequestSessions, transaction) &&
+		equivalentOwnerInfeasibilityExists(aggregate.CandidateAttempts, transaction.AuthorityInputID) {
+		if strings.TrimSpace(correctionHash) != "" {
+			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: owner infeasibility cannot authorize correction attempt 1", common.ErrConflict)
+		}
+		terminal, terminalErr := c.terminalizeEquivalentAuthorityNoProgress(ctx, aggregate)
+		return terminal, runtimecontract.RuntimeCandidateRequestSession{}, terminalErr
+	}
 	session := runtimecontract.RuntimeCandidateRequestSession{
 		DocumentKind: documentKind,
 		Transaction:  transaction, StablePrefixHash: strings.TrimSpace(stablePrefixHash), ManifestHash: strings.TrimSpace(manifestHash),
@@ -60,6 +70,15 @@ func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx contex
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
 	return aggregate, session.Clone(), nil
+}
+
+func operationRequestSessionExistsForAuthority(sessions []runtimecontract.RuntimeCandidateRequestSession, transaction runtimecontract.AuthorityTransaction) bool {
+	for _, session := range sessions {
+		if session.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations && runtimecontract.SameAuthorityContract(session.Transaction, transaction) {
+			return true
+		}
+	}
+	return false
 }
 
 func sameRuntimeExpectedDocument(left, right *runtimecontract.RuntimeExpectedDocumentContract) bool {

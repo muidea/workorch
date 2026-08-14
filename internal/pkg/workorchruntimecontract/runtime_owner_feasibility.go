@@ -59,6 +59,7 @@ const (
 // Runtime action, retry, terminal, governance or aggregate mutation fields.
 type RuntimeOwnerFeasibilityObservation struct {
 	Outcome             RuntimeOwnerFeasibilityOutcome
+	OwnerPolicy         RuntimeOwnerPolicyIdentity
 	Feedback            *RuntimeFeedback
 	Stale               *RuntimePrerequisiteStale
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
@@ -66,6 +67,7 @@ type RuntimeOwnerFeasibilityObservation struct {
 
 func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibilityObservation {
 	o.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(o.Outcome)))
+	o.OwnerPolicy = o.OwnerPolicy.Normalized()
 	if o.Feedback != nil {
 		feedback := o.Feedback.CloneOriginal()
 		o.Feedback = &feedback
@@ -83,6 +85,11 @@ func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibility
 
 func (o RuntimeOwnerFeasibilityObservation) Validate() error {
 	o = o.Normalized()
+	if o.OwnerPolicy.OwnerModuleID != "" || o.OwnerPolicy.PolicyRevision != "" || o.OwnerPolicy.CatalogSnapshotID != "" {
+		if err := o.OwnerPolicy.Validate(); err != nil {
+			return err
+		}
+	}
 	switch o.Outcome {
 	case RuntimeOwnerFeasibilityFeasible:
 		if o.Feedback != nil || o.Stale != nil || o.PrerequisiteRequest != nil {

@@ -6,11 +6,12 @@ Type: implementation-closure-plan
 
 Last Updated: 2026-08-14
 
-Implementation status (2026-08-14): SO-MC-01 through SO-MC-09 remain code/automated-closed. The first real-provider
-schema-v6 run proved model-ceiling, complete-document recovery, sealed dispatch, File receipt and evidence advance, then
-exposed a generation/declaration authority defect. SO-MC-11 closes that defect with schema v7 and immutable
-`DefinitionFocuses`; focused/full/vet/fmt/boundary/release gates pass. SO-MC-10 remains live-pending until a fresh
-schema-v7 run reaches terminal delivery.
+Implementation status (2026-08-14): SO-MC-01 through SO-MC-09 and SO-MC-11 remain regression baselines. SO-MC-12
+through SO-MC-17 are code/automated-closed: schema v8 rejects v7 Resume, File semantic/operation feasibility shares one
+owner policy, exact binding contradictions retire through one Orchestrator-private event, equivalent authority is
+fenced before provider submission, and Run persists SM-2/3/4 as opaque state behind an Orchestrator-authored lifecycle
+fence. Focused/full/race/vet/fmt/boundary/isolated managed/build gates pass. SO-MC-10 remains open and requires a fresh
+deployed schema-v8 real-provider terminal proof; managed/mock success is not that exit.
 
 ## 1. Purpose And Authority
 
@@ -28,7 +29,7 @@ schema-v7 run reaches terminal delivery.
 
 ## 2. Triggering Evidence
 
-最新部署运行已经证明：
+Earlier deployed schema-v5 execution proved:
 
 - schema-v5 semantic contract 正确封存，SM-2 正确选择 eligible `cwi-026`；
 - operations 请求连续三次精确达到 `8192` output token 后被截断；
@@ -50,6 +51,24 @@ sealed dispatch；File owner create receipt 的 target/hash 与工作区一致�
 `patch/apply`，但 semantic admission 错把上一 generation 的 `file/write` focus 当作 immutable source declaration，最终以
 `runtime_contract_defect` 终止。该反例要求 schema v7 显式分离 immutable Definition declaration 与 generation binding；
 不得通过扩宽 File 权限或跨 owner 指定 CWI 状态修补。
+
+Fresh schema-v7 deployed execution then proved that declaration/generation separation alone is insufficient:
+
+- SM-2 semantic proof feasibility marked `file/write + exact existing target` as feasible and sealed that operation
+  kind into the current `CoverageEvidenceBinding`;
+- the File owner's ordinary operation feasibility correctly rejected the same target because `file/write` is
+  create-only and replacement requires revision-bound `patch/apply`;
+- the sealed manifest therefore could not legally emit `patch/apply`, so prompt correction could not repair the
+  authority contradiction;
+- repeated `operation_target_exists` observations retained the same binding, catalog revision, target and failure
+  signature but created fresh authority attempt-0 transactions;
+- the persisted aggregate advanced beyond revision 100 and consumed more than 400k provider tokens while producing
+  zero dispatch, receipt, evidence or workspace effect.
+
+This is not an LLM-quality-only failure. It is an owner-contract and convergence defect: File emitted contradictory
+facts across SM-2/SM-3, and Orchestrator treated unchanged infeasibility as new authority. The closure must prevent the
+invalid seal, bound already-sealed contradictions, and make physical persistence unable to interpret another owner's
+state machine.
 
 ## 3. Non-Negotiable Production Path
 
@@ -95,7 +114,28 @@ typed external intent/fact
 | capability resource state and receipt | matching capability Block | capability-owner execution/reducer |
 | projection/read model | `workorchd` / `eventstream` | derived projection only; never formal authority |
 
-Run owner may physically store the opaque Runtime aggregate, but it does not own SM-2/3/4 semantics. Cross-owner messages may carry only immutable intent, persisted fact, typed observation/receipt or delivery acknowledgement. They must not carry a target receiver state, reducer name, retry/next-action/focus/terminal decision, mutable entity, repository/service/callback, generic envelope or `map[string]any` authority.
+Run owner may physically store the opaque Runtime aggregate, but it does not own SM-2/3/4 semantics. Storage ownership
+is not state-machine ownership: Run may compare scope, schema envelope, state revision, record hash and CAS revision,
+but it must not inspect `Decision`, `SemanticPlanning`, candidate, dispatch, governance, evidence or delivery content to
+decide SM-1. Cross-owner messages may carry only immutable intent, persisted fact, typed observation/receipt or delivery
+acknowledgement. They must not carry a target receiver state, reducer name, retry/next-action/focus/terminal decision,
+mutable entity, repository/service/callback, generic envelope or `map[string]any` authority.
+
+For every state machine, the only legal trigger is an owner-private internal event. EventHub commands/results are never
+state transitions themselves:
+
+```text
+cross-owner typed fact
+  -> receiver owner validates scope, identity, causation and freshness
+  -> receiver owner creates a private internal event
+  -> receiver owner reducer selects the transition
+  -> receiver owner commits one CAS
+  -> receiver owner emits an immutable fact/ack
+```
+
+SM-2, SM-3 and SM-4 remain subdomains of one Orchestrator aggregate and must not be split into separate framework
+Modules. They share one owner, one private dispatcher and one transition coordinator; file/package separation inside
+the Orchestrator is implementation organization only.
 
 ## 5. Model Capability Is The Sole Token Authority
 
@@ -221,7 +261,26 @@ Schema v7 retains the v6 token rules and additionally:
 - validates semantic documents and seal output only against immutable declarations;
 - lets receipt/resource-change retirement and reseal replace generation bindings without widening declarations.
 
-Schema v6 and earlier are not implicitly migrated or reinterpreted. Resume returns `fresh_activation_required` with zero provider/capability work. Explicit restart creates a new schema-v7 Run with new activation/request lineage and no predecessor candidate, request or CWI credit.
+Under the v7 baseline, schema v6 and earlier were not implicitly migrated or reinterpreted; Resume returned
+`fresh_activation_required`, and explicit Restart created new v7 lineage without predecessor candidate, request or CWI
+credit. Schema v8 now supersedes that current-schema boundary.
+
+The deployed contradiction requires schema v8 because v7 persists neither the new owner-convergence fence nor an
+opaque Run lifecycle fence. Reinterpreting an already-sealed v7 binding as if it had passed the unified File policy
+would change authority across restart.
+
+Schema v8 must additionally:
+
+- bind every sealed semantic feasibility fact to a canonical owner policy revision covering kind, variant, target
+  policy and current resource shape;
+- persist enough owner-convergence lineage to prove whether a later infeasibility contains a new authority input;
+- forbid a new AuthoritySnapshot when binding hash, owner revision, failure signature and targets are unchanged;
+- persist an opaque lifecycle fence/hash that Run can compare without decoding SM-2/3/4 fields;
+- retain binding retirement lineage for a contradiction discovered after seal;
+- reject schema-v7 and earlier Resume as `fresh_activation_required` before provider/capability work.
+
+Explicit Restart creates a fresh schema-v8 Run. No production migration may patch v7 JSON, synthesize `patch/apply`,
+copy prior candidate/receipt/evidence credit, or reconstruct authority through a map/JSON compatibility bridge.
 
 ## 11. Approval Owner Closure
 
@@ -238,16 +297,19 @@ Remove `Target common.ApprovalState` from the private event. External commands c
 
 | Component | Required change | Forbidden result |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | schema v7; remove stage token authority; separate immutable declaration from binding generation; retain pure ProviderCeiling/ExpectedDocument validation | I/O, retry choice, state mutation, model-specific branching |
+| `internal/pkg/workorchruntimecontract` | schema v8; remove stage token authority; separate immutable declaration from binding generation; retain pure ProviderCeiling/ExpectedDocument and owner/fence identity validation | I/O, retry choice, state mutation, model-specific branching |
 | `internal/pkg/workorchconfig` | remove stage token and mode fields/defaults/values | second token authority |
 | `internal/pkg/workorchruntimepolicy` | remove stage token policy projection | runtime override of model ceiling |
 | `application/workorchd/.../activationports` | stop copying token limits; seal provider selection only | runtime ceiling calculation or retry |
 | `kernel/orchestrator/biz/runtime` | build ExpectedDocument only from persisted ceiling; preserve SM-3/SM-4 recovery | model table, config override, in-recovery raise |
-| `kernel/orchestrator/biz` | map typed owner outcomes to private events; one dispatcher/CAS | lifecycle facade or parallel queue |
+| `kernel/orchestrator/biz/runtime` | own equivalent-authority fence, binding contradiction retirement, semantic replan and bounded terminal through private events | unchanged owner infeasibility opening another authority attempt |
+| `kernel/orchestrator/biz` | map typed owner outcomes to private events; one dispatcher/CAS | lifecycle facade, direct reducer call or parallel queue |
 | `blocks/llm` | own model capability interpretation; enforce sealed request equality; improve prompt/schema | Runtime action/retry/terminal choice |
 | `blocks/approval` | fact-kind private events and owner reducer | target-state input |
-| `blocks/run/workspace/result/decision` | regression-proof owner-private lifecycle | cross-owner state write |
-| capability Blocks | exact sealed execution and factual receipt | CWI/focus/dispatch/evidence mutation |
+| `blocks/run` | SM-1 private reducer; opaque Runtime record CAS and lifecycle-fence comparison only | decoding SM-2/3/4 to select SM-1 |
+| `blocks/workspace/result/decision` | regression-proof owner-private lifecycle | cross-owner state write or Runtime interpretation |
+| `blocks/file` | one owner-local policy for semantic and operation feasibility | contradictory feasibility or Runtime next-action choice |
+| capability Blocks | exact sealed execution and factual receipt | CWI/focus/dispatch/evidence/retry mutation |
 | Eventstream/Web/TUI/CLI | intent and projection only | Resume/Drive from projection or UI state |
 | boundary verifier | scan state and token authority bypasses | global event/state registry |
 
@@ -326,8 +388,10 @@ Exit: all automated gates pass and active docs contain one implementation queue.
 ### SO-MC-10 — Fresh deployed live closure
 
 - Build and deploy the verified binary.
-- Explicitly restart into a fresh schema-v7 Run.
+- Explicitly restart into a fresh schema-v8 Run.
 - Inspect persisted ceiling, ExpectedDocument, request audit, candidate, dispatch, receipt, evidence and delivery.
+- Assert provider calls remain bounded by actual document recovery/correction and do not grow by recreating an
+  equivalent authority.
 
 Exit: at least one legal CandidateAttempt, SealedDispatch, exact owner receipt and binding-matched evidence exist. Correct fail-closed alone is insufficient for live closure.
 
@@ -338,7 +402,219 @@ Exit: at least one legal CandidateAttempt, SealedDispatch, exact owner receipt a
 - Reject schema-v6 Resume before provider/capability work.
 - Prove a prior `file/write` generation cannot constrain a new owner-feasible `patch/apply` generation.
 
-Exit: code/automated closure passes without File-specific Runtime branching or a fifth state machine; fresh schema-v7 live proof remains SO-MC-10.
+Exit: code/automated closure passes without File-specific Runtime branching or a fifth state machine; its v7 result
+remains a regression baseline and the fresh schema-v8 live proof remains SO-MC-10.
+
+### Reopened execution order
+
+The current implementation order is strictly:
+
+```text
+SO-MC-12 -> SO-MC-13 -> SO-MC-14 -> SO-MC-15 -> SO-MC-16 -> SO-MC-17 -> SO-MC-10
+```
+
+SO-MC-01 through SO-MC-09 and SO-MC-11 remain regression baselines. They are not rerun as design phases, but every
+affected regression remains mandatory. SO-MC-10 must not start against schema v7 or before SO-MC-17 passes.
+
+### SO-MC-12 — Schema-v8 owner and transition envelope
+
+Status: code/automated-closed (2026-08-14).
+
+Code scope:
+
+- `internal/pkg/workorchruntimecontract`;
+- `internal/pkg/eventcontract`;
+- `internal/modules/kernel/orchestrator/biz/runtime/internal_event*`;
+- Run Runtime-state EventHub contracts.
+
+Work:
+
+- increment the Runtime schema to v8 and make v7 Resume return `fresh_activation_required` with zero provider,
+  capability, dispatch or projection-driven recovery work;
+- define pure typed values for owner policy revision, equivalent-authority input identity, binding contradiction
+  identity and opaque lifecycle fence;
+- keep all retry/replan/terminal selection out of the contract package;
+- classify `StoreRuntimeStateRecord` as opaque persistence/CAS, not an SM-1 transition;
+- document an exhaustive owner matrix for SM-1..SM-4 and resource state machines without adding a runtime registry.
+
+Required tests:
+
+- v7 Resume/recovery performs zero owner work;
+- v8 clone/normalize/hash/validate preserves all new identities across restart;
+- an EventHub fact cannot be classified as an owner-private transition;
+- every Orchestrator mutation kind is exhaustively classified and handled only by `ApplyInternalEvent`.
+
+Exit: schema-v8 identity can express the later fixes without target state, mutable handles, map authority or policy
+selection outside the owner.
+
+### SO-MC-13 — File owner feasibility unification
+
+Status: code/automated-closed (2026-08-14).
+
+Code scope:
+
+- `internal/modules/blocks/file/biz/owner.go`;
+- `internal/modules/blocks/file/biz/file_runtime_adapter.go`;
+- `internal/modules/blocks/file/biz/feasibility_category.go`;
+- `internal/modules/blocks/file/pkg/events`.
+
+Work:
+
+- extract one File-owner pure policy that evaluates operation kind, variant, target policy, target existence/type,
+  catalog revision and required base revision;
+- make semantic proof feasibility and ordinary operation feasibility consume that same policy;
+- return `infeasible` for `file/write + existing target` during SM-2 semantic feasibility;
+- keep `patch/apply` replacement feasible only with an owner-observed base hash and supported variant;
+- return only canonical typed observations. Diagnostics may state the violated owner rule but must not select Runtime
+  retry, correction, binding retirement or next action.
+
+Required tests:
+
+- missing exact target, existing regular target, directory/symlink, prospective target, target drift and stale catalog;
+- `file/write` create succeeds only for an admissible missing target;
+- `file/write` existing target is identically infeasible in semantic and operation probes;
+- `patch/apply` text replacement/file-write/unified-diff variants enforce matching base hash and target inventory;
+- duplicate probes are side-effect free and return stable policy revision/diagnostic identity.
+
+Exit: the File owner cannot emit `feasible` in SM-2 for an operation it deterministically rejects in SM-3 under the
+same resource revision.
+
+### SO-MC-14 — Orchestrator binding contradiction retirement
+
+Status: code/automated-closed (2026-08-14).
+
+Code scope:
+
+- `internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go`;
+- `internal/modules/kernel/orchestrator/biz/runtime/cwi_ledger.go`;
+- `internal/modules/kernel/orchestrator/biz/runtime/prerequisite_freshness.go`;
+- Orchestrator private internal-event vocabulary and reducer tests.
+
+Work:
+
+- introduce or specialize an Orchestrator-private `semantic_binding_contradiction_observed` fact;
+- map a capability owner's typed contradiction to that private event only after scope, binding, catalog, target and
+  observation identity validation;
+- atomically invalidate the pending candidate, retire the exact binding with no-effect lineage, clear only the
+  dependent semantic generation, and return SM-2 to bounded semantic planning;
+- allow the next plan to select any kind/variant already authorized by the immutable Definition declaration and fresh
+  owner catalog, including revision-bound `patch/apply`;
+- if the contradiction cannot be tied to one current binding, fail closed as `runtime_contract_defect` without another
+  provider request.
+
+Required tests:
+
+- restart at each CAS boundary between observation, retirement and replan;
+- duplicate/stale contradiction is a no-op;
+- exactly one binding is retired and CWI remains open;
+- no dispatch, receipt, evidence, governance request or repair debt is created by retirement;
+- semantic correction/replan exhaustion reaches a typed terminal;
+- old generation `file/write` cannot constrain the newly sealed `patch/apply` generation.
+
+Exit: an already-sealed owner contradiction has one owner-private recovery path and cannot be repaired by changing
+state in File, Run, Application or projection.
+
+### SO-MC-15 — Equivalent-authority and no-progress fence
+
+Status: code/automated-closed (2026-08-14).
+
+Code scope:
+
+- Orchestrator authority compiler/reducer;
+- candidate attempt/request session ledger;
+- convergence progress signature and recovery tests.
+
+Work:
+
+- compute the next-authority input identity from Definition/focus/binding hashes, evidence revision, capability/catalog
+  revisions, prerequisite freshness and exact owner observation lineage;
+- prohibit a fresh AuthoritySnapshot when that identity is unchanged;
+- treat revision-only bookkeeping, lease generation, request ID, physical call ID and repeated failure persistence as
+  non-progress;
+- route a repeated same-input infeasibility to binding contradiction retirement or a typed bounded terminal;
+- retain CandidateAttemptBudget as attempt 0/1 within one authority; do not add a new budget that merely permits more
+  equivalent authorities.
+
+Required tests:
+
+- same binding/revision/signature/targets cannot open a second equivalent authority;
+- a genuinely changed catalog, target revision, evidence revision or binding lineage can open one new authority;
+- duplicate and restart preserve the same judgment;
+- provider calls remain zero after the no-progress fence chooses terminal;
+- progress signature does not count CAS retry, lease or audit-only revision as forward progress.
+
+Exit: every new authority has a provably new owner/authority input; otherwise the aggregate retires the invalid binding
+or terminates.
+
+### SO-MC-16 — Run opaque persistence and SM-1 lifecycle fence
+
+Status: code/automated-closed (2026-08-14).
+
+Code scope:
+
+- `internal/modules/blocks/run/biz`;
+- `internal/modules/blocks/run/pkg/events`;
+- Orchestrator Run-state repository/event adapter;
+- terminal/governance delivery contracts.
+
+Work:
+
+- keep Run as physical CAS owner for the Runtime record but restrict validation to workspace/run scope, schema envelope,
+  Runtime state revision/ref/hash, bootstrap identity and physical CAS revision;
+- persist Orchestrator-authored terminal/governance lifecycle fence identities beside the opaque record;
+- make Run compare typed fence identities without inspecting Runtime `Decision`, `SemanticPlanning`, candidate,
+  dispatch, governance or evidence collections;
+- continue converting accepted cross-owner facts into Run-private lifecycle events before the SM-1 reducer;
+- ensure terminal outcome mapping remains Run-owned and external inputs never carry a target `RunState`.
+
+Required tests:
+
+- Run cannot derive terminal/governance state by decoding Runtime fields;
+- forged, stale and duplicate lifecycle fences are rejected/no-op as appropriate;
+- physical Run-record CAS rebase does not alter Runtime semantic revision;
+- Runtime aggregate CAS mismatch returns a typed persistence fact to Orchestrator SM-4;
+- terminal delivery remains idempotent across Result -> Workspace -> Run ordering and restart.
+
+Exit: Run owns SM-1 and physical storage, while Orchestrator alone owns every SM-2/3/4 semantic transition.
+
+### SO-MC-17 — Repository-wide owner boundary and combined gates
+
+Status: code/automated-closed (2026-08-14).
+
+Code scope:
+
+- boundary verifier;
+- `blocks/workspace`, `result`, `decision`, `approval`, `llm`, capability Blocks and `eventstream` regressions;
+- `application/workorchd`, TUI/CLI and `internal/services/workorch` production scans;
+- core/current docs.
+
+Work:
+
+- reject production direct reducer/repository calls across owner boundaries;
+- reject EventHub DTOs carrying receiver target state, reducer/action/retry choice or mutable handles;
+- reject non-Orchestrator writes of CWI, binding, authority, candidate, dispatch, evidence, terminal or drive lease;
+- reject Run decoding of SM-2/3/4 content for lifecycle selection;
+- prove application/scheduler issue only typed Start/Resume/Drive intent and projection remains read-only;
+- update the four-state-machine transition, stale/duplicate, idempotency/restart and budget/guard matrices together.
+
+Exit commands:
+
+```bash
+go test ./internal/pkg/workorchruntimecontract/... -count=1
+go test ./internal/modules/blocks/file/... -count=1
+go test ./internal/modules/blocks/run/... -count=1
+go test ./internal/modules/kernel/orchestrator/... -count=1
+make fmt-check
+make vet
+make test
+make test-race
+make verify-boundary-contract
+make verify-ci-mvp-file
+make build
+```
+
+Exit: all gates pass, production scans show one owner-private transition entry per machine, and no managed/mock result is
+used as the deployed live exit.
 
 ## 14. Verification Matrix
 
@@ -379,6 +655,9 @@ Exit: code/automated closure passes without File-specific Runtime branching or a
 - projection cannot trigger formal transition;
 - stale/duplicate input returns through the same owner reducer;
 - File write cannot overwrite existing target; patch requires matching owner-observed base hash.
+- File semantic and operation feasibility agree for the same policy/resource revision;
+- unchanged owner infeasibility cannot mint another authority;
+- Run compares an opaque lifecycle fence and does not decode Orchestrator state.
 
 ### Runtime/CWI and schema
 
@@ -390,6 +669,9 @@ Exit: code/automated closure passes without File-specific Runtime branching or a
 - v5 Resume returns `fresh_activation_required` with zero provider/capability work;
 - v6 restart creates new lineage and inherits no old request/CWI credit;
 - terminal delivery remains `Result -> Workspace -> Run`.
+- v7 Resume returns `fresh_activation_required` with zero provider/capability work;
+- a v8 sealed-binding contradiction retires exactly one binding or reaches a typed terminal;
+- each fresh authority proves a changed authority-input identity.
 
 ## 15. Verification Commands
 
@@ -419,6 +701,9 @@ make build
 - LLM-owner retry, terminal or token-raise decision;
 - configuration/activation stage max-output token authority;
 - non-Orchestrator CWI/binding/dispatch mutation;
+- capability semantic/operation feasibility divergence for the same owner policy revision;
+- equivalent AuthoritySnapshot creation without changed authority inputs;
+- Run lifecycle code decoding Orchestrator `Decision`, semantic, candidate, dispatch, governance or evidence state;
 - `RemainingFocuses[0]` as execution cursor;
 - map/JSON/reflect authority bridge or forbidden Runtime surface.
 
@@ -435,17 +720,27 @@ The following do not close this plan:
 - concatenate partial provider output;
 - ask Application/UI to Resume after truncation;
 - weaken strict schema, semantic seal, target policy or File overwrite protection;
-- migrate schema-v6 or earlier aggregate in place;
-- mark live closure after a fail-closed run that never reaches dispatch.
+- migrate schema-v7 or earlier aggregate in place;
+- mark live closure after a fail-closed run that never reaches dispatch;
+- let File choose `patch/apply`, correction, retry or binding retirement for Orchestrator;
+- parse `operation_target_exists` message text to select a Runtime action;
+- add a larger retry/authority budget instead of preventing equivalent-authority recreation;
+- split SM-2, SM-3 and SM-4 into different framework owners;
+- keep schema v7 current and reinterpret its sealed binding/fence semantics in place.
 
 ## 18. Completion Criteria
 
-Code closure requires SO-MC-01 through SO-MC-09 plus SO-MC-11 and all automated gates. Live closure additionally requires SO-MC-10 with persisted proof that:
+Code closure requires SO-MC-01 through SO-MC-09, SO-MC-11 through SO-MC-17 and all automated gates. Live closure
+additionally requires SO-MC-10 with a fresh schema-v8 persisted proof that:
 
-1. schema-v7 activation contains no stage token authority and persists immutable DefinitionFocus declarations;
+1. schema-v8 activation contains no stage token authority, persists immutable DefinitionFocus declarations and seals
+   owner-policy/authority-input/lifecycle-fence identities;
 2. ProviderCeiling comes from the selected model's current capability revision;
 3. ExpectedDocument and actual provider request use the exact effective ceiling;
 4. prompt/schema enforce complete compact bounded JSON;
 5. at least one candidate, sealed dispatch, owner receipt and exact evidence advances Runtime;
 6. no duplicate request, dispatch or side effect occurs across restart/recovery;
-7. owner boundaries and terminal delivery order remain intact.
+7. owner boundaries and terminal delivery order remain intact;
+8. semantic and operation feasibility agree for the same File owner revision;
+9. every new authority proves a changed input identity and no equivalent-authority loop occurs;
+10. Run reaches SM-1 transitions only through Run-private internal events without decoding SM-2/3/4 authority.

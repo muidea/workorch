@@ -386,8 +386,63 @@ func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) runevents.Store
 	if item.RuntimeState != nil {
 		revision := item.RuntimeState.StateRevision
 		ret.ExpectedRuntimeStateRevision = &revision
+		ret.LifecycleFence = runtimeLifecycleFenceFromModel(item)
 	}
 	return ret
+}
+
+func runtimeLifecycleFenceFromModel(item *runmodel.Run) *runtimecontract.RuntimeOpaqueLifecycleFence {
+	if item == nil || item.RuntimeState == nil || item.RuntimeBootstrap == nil {
+		return nil
+	}
+	state := item.RuntimeState
+	fence := runtimecontract.RuntimeOpaqueLifecycleFence{
+		WorkspaceID: item.WorkspaceID, RunID: item.ID, RuntimeStateRevision: state.StateRevision,
+		RuntimeStateRef:  runevents.RuntimeStateRef(item.WorkspaceID, item.ID, state.StateRevision),
+		RuntimeStateHash: runtimecontract.StableRuntimeStateRecordHash(*state),
+		BootstrapHash:    runtimecontract.StableRuntimeBootstrapHash(*item.RuntimeBootstrap),
+	}
+	if count := len(state.GovernanceResolutions); count != 0 {
+		value := state.GovernanceResolutions[count-1]
+		fence.GovernanceFenceID = runtimeGovernanceLifecycleFenceID(value.AuthoritySnapshotID, value.DispatchID)
+	} else if count := len(state.GovernanceRequests); count != 0 {
+		value := state.GovernanceRequests[count-1]
+		fence.GovernanceFenceID = runtimeGovernanceLifecycleFenceID(value.AuthoritySnapshotID, value.DispatchID)
+	}
+	if outcome, ok := runtimeTerminalOutcomeFromState(state); ok {
+		fence.TerminalFenceID = runtimecontract.StableTerminalDeliveryID(item.WorkspaceID, item.ID, state.Decision.AuthoritySnapshot.ID, outcome)
+	}
+	if fence.GovernanceFenceID == "" && fence.TerminalFenceID == "" {
+		return nil
+	}
+	return &fence
+}
+
+func runtimeGovernanceLifecycleFenceID(authoritySnapshotID, dispatchID string) string {
+	return "runtime-governance/" + authoritySnapshotID + "/" + dispatchID
+}
+
+func runtimeTerminalOutcomeFromState(state *runtimecontract.RuntimeStateRecord) (runtimecontract.TerminalOutcome, bool) {
+	if state == nil {
+		return runtimecontract.TerminalOutcome{}, false
+	}
+	if state.Termination != nil {
+		kind := runtimecontract.TerminalOutcomeKindCancelled
+		if state.Termination.Kind == runtimecontract.RuntimeTerminationSuperseded {
+			kind = runtimecontract.TerminalOutcomeKindSuperseded
+		}
+		return runtimecontract.TerminalOutcome{Kind: kind, Code: "administrative_" + string(state.Termination.Kind), Summary: state.Termination.Reason}.Normalized(), true
+	}
+	if state.Decision.Terminal == nil {
+		return runtimecontract.TerminalOutcome{}, false
+	}
+	kind := runtimecontract.TerminalOutcomeKindFailed
+	if state.Decision.State == runtimecontract.ConvergenceStateComplete {
+		kind = runtimecontract.TerminalOutcomeKindCompleted
+	} else if state.Decision.State != runtimecontract.ConvergenceStateFailed {
+		return runtimecontract.TerminalOutcome{}, false
+	}
+	return runtimecontract.TerminalOutcome{Kind: kind, Code: state.Decision.Terminal.Code, Summary: state.Decision.Terminal.Summary}.Normalized(), true
 }
 
 func cloneRuntimeStateRecord(value *runtimecontract.RuntimeStateRecord) *runtimecontract.RuntimeStateRecord {

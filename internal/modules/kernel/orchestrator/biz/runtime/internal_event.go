@@ -391,6 +391,13 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, err := c.invalidateCandidateAttemptForOwnerInfeasibility(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.OwnerFeasibility)
 		result.Aggregate = aggregate
 		return result, err
+	case RuntimeInternalEventSemanticBindingContradictionObserved:
+		if event.OwnerFeasibility == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.invalidateCandidateAttemptForOwnerInfeasibility(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.OwnerFeasibility)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventCandidateSealed:
 		if event.Manifest == nil || event.Candidate == nil {
 			return result, common.ErrInvalidArgument

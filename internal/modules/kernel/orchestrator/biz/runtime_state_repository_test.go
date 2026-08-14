@@ -663,7 +663,7 @@ func TestRuntimeStateRepositoryRejectsStaleRevision(t *testing.T) {
 	}
 }
 
-func TestRuntimeStateRepositoryReturnsSemanticRejectionWithoutCASRetry(t *testing.T) {
+func TestRuntimeStateRepositoryTreatsRuntimeDefinitionAsOpaque(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -671,9 +671,8 @@ func TestRuntimeStateRepositoryReturnsSemanticRejectionWithoutCASRetry(t *testin
 	current := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
 	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 0))
 	current.RuntimeState = &record
-	// The aggregate to be saved remains internally valid; only the Run-owned
-	// immutable definition fence differs, which is a semantic rejection rather
-	// than a physical aggregate revision mismatch.
+	// Definition is SM-2 content. Run persists the current-schema payload
+	// opaquely and must not decode it to select an SM-1 outcome.
 	current.DefinitionRevision = "definition-drift"
 	if err := runs.Create(ctx, current); err != nil {
 		t.Fatal(err)
@@ -687,15 +686,8 @@ func TestRuntimeStateRepositoryReturnsSemanticRejectionWithoutCASRetry(t *testin
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	err := (runtimeStateRepository{hub: hub}).Save(ctx, runtimeAggregate(t, 1), 0)
-	var semantic *runtime.RuntimeSemanticRejectionError
-	if !errors.As(err, &semantic) || semantic.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainPersistence ||
-		semantic.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategorySemanticRejection || semantic.Feedback.OriginalDiagnostic == nil {
-		t.Fatalf("semantic update result=%+v err=%v", semantic, err)
-	}
-	var cas *runtime.RuntimeCASConflictError
-	if errors.As(err, &cas) {
-		t.Fatalf("semantic rejection entered CAS retry path: %+v", cas)
+	if err := (runtimeStateRepository{hub: hub}).Save(ctx, runtimeAggregate(t, 1), 0); err != nil {
+		t.Fatalf("opaque Runtime update rejected: %v", err)
 	}
 }
 

@@ -521,6 +521,9 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	aggregate = ensured
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || aggregate.Decision.State == runtimecontract.ConvergenceStateComplete {
+		return aggregate, runtimecontract.RuntimeCandidate{}, false, nil
+	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		return m.admitRuntimeCompletedCandidateDocument(ctx, aggregate, manifest, session.LogicalRequestID, candidateAttempt)
 	}
@@ -864,6 +867,7 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 		if observationErr != nil {
 			return nil, nil, nil, observationErr
 		}
+		ownerObservation.OwnerPolicy = response.OwnerPolicy.Normalized()
 		record := runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 			CandidateManifestHash: response.CandidateManifestHash,

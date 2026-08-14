@@ -478,17 +478,21 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 	if err != nil {
 		return fileOperationInfeasible(operation, "operation_target_invalid", err.Error(), []string{targetRef}), nil
 	}
-	info, statErr := os.Stat(target)
+	info, statErr := os.Lstat(target)
 	requiresRegular := fileOperationRequiresRegularTarget(operation)
 	if statErr == nil {
+		policy := evaluateFileOwnerFeasibilityPolicy(fileOwnerFeasibilityPolicyInput{
+			OperationKind: operation.Kind, VariantID: runtimeOperationParameterString(operation, "patchType"),
+			TargetPolicy: runtimemodel.RuntimeOperationTargetPolicyExactTarget, TargetRef: filepath.ToSlash(rel), TargetPath: target,
+		})
+		if !policy.Feasible() {
+			return fileOperationInfeasible(operation, policy.Code, policy.Message, policy.TargetRefs), nil
+		}
 		if !fileInventoryContainsTarget(inventory, targetRef) {
 			return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef}), nil
 		}
 		if requiresRegular && !info.Mode().IsRegular() {
 			return fileOperationInfeasible(operation, "operation_target_not_regular", "runtime file operation target is not a regular file", []string{filepath.ToSlash(rel)}), nil
-		}
-		if operation.Kind == runtimemodel.StepKindFileWrite {
-			return fileOperationInfeasible(operation, "operation_target_exists", "file/write is create-only; use revision-bound patch/apply to replace an existing file", []string{filepath.ToSlash(rel)}), nil
 		}
 		if failure := verifyFileWriteReplayPrecondition(target, operation, filepath.ToSlash(rel)); failure != nil {
 			return failure, nil
@@ -503,6 +507,13 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspa
 	}
 	if fileOperationRequiresExistingTarget(operation) {
 		return fileOperationInfeasible(operation, "operation_target_missing", "runtime file operation requires an existing regular file", []string{filepath.ToSlash(rel)}), nil
+	}
+	policy := evaluateFileOwnerFeasibilityPolicy(fileOwnerFeasibilityPolicyInput{
+		OperationKind: operation.Kind, VariantID: runtimeOperationParameterString(operation, "patchType"),
+		TargetPolicy: runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget, TargetRef: filepath.ToSlash(rel), TargetPath: target,
+	})
+	if !policy.Feasible() {
+		return fileOperationInfeasible(operation, policy.Code, policy.Message, policy.TargetRefs), nil
 	}
 	if !fileInventoryContainsTarget(inventory, targetRef) && !fileInventoryAllowsNewTargetForOperation(inventory, operation) {
 		return fileOperationInfeasible(operation, "operation_target_not_admissible", "runtime file operation target is absent from the owner admissibility inventory", []string{targetRef}), nil
