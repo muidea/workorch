@@ -88,6 +88,34 @@ func TestRuntimeAdapterAcquireRuntimeTargetSelectionIsCardinalityBounded(t *test
 			t.Fatalf("creation selection lost owner selector binding: %+v", selection)
 		}
 	})
+	t.Run("workspace-relative new target grounds an absent prospective path", func(t *testing.T) {
+		workspace := t.TempDir()
+		binding := runtimeTargetSelectionBinding{ownerRef: "blocks/file", subjectRef: "workspace_deliverable"}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-prospective", "semantic_proof_target", runtimeFileSelectorWorkspaceRelativeNewTarget, "coverage-map.json", 4, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || selection.ProspectiveTargetRef != "coverage-map.json" || selection.CandidateCount != 0 || len(selection.TargetRefs) != 0 || len(selection.CandidateTargetRefs) != 0 || selection.SnapshotID == "" {
+			t.Fatalf("prospective creation selection = %+v", selection)
+		}
+		if selection.SelectorOwnerRef != binding.ownerRef || selection.SelectorSubjectRef != binding.subjectRef {
+			t.Fatalf("prospective selection lost owner binding: %+v", selection)
+		}
+	})
+	t.Run("workspace-relative new target rejects an existing prospective path", func(t *testing.T) {
+		workspace := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workspace, "coverage-map.json"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		selection, err := adapter.AcquireRuntimeTargetSelection(workspace, "target-selection-existing-prospective", "semantic_proof_target", runtimeFileSelectorWorkspaceRelativeNewTarget, "coverage-map.json", 4,
+			runtimeTargetSelectionBinding{ownerRef: "blocks/file", subjectRef: "workspace_deliverable"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || selection.ProspectiveTargetRef != "coverage-map.json" || selection.CandidateCount != 0 || len(selection.TargetRefs) != 0 || len(selection.CandidateTargetRefs) != 0 || selection.SnapshotID == "" {
+			t.Fatalf("existing prospective selection = %+v", selection)
+		}
+	})
 	t.Run("empty workspace without profile artifact is typed absent", func(t *testing.T) {
 		selection, err := adapter.AcquireRuntimeTargetSelection(t.TempDir(), "target-selection-absent", "deliverable", runtimeFileTargetSelectorWorkspaceDeliverable, "", 4)
 		if err != nil {

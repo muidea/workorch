@@ -18,6 +18,10 @@ after development-data cleanup; managed/mock success is not that exit.
 
 本文是 Workspace Runtime 单 owner 状态迁移与 LLM 完整文档输出收口的**唯一 active 实施队列**。后续代码修改、测试、部署和 live 验收必须逐项依据本文执行，不得再按单个 live 错误增加字段级修补。
 
+逐组件代码实施、`cwi-027` 目标准入和部署验收按配套的
+[Runtime 单 Owner 执行链路代码收口 Runbook](runtime-single-owner-code-closure-runbook.md) 执行；Runbook 是本文的
+实施附录，不构成第二套状态机或路线。
+
 权威顺序：
 
 1. [`docs/00-core/runtime-stage-contract.md`](../../00-core/runtime-stage-contract.md)

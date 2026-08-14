@@ -124,6 +124,24 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 	if len(groundedTargets) == 0 {
 		selection := currentFocusTargetSelection(facts)
 		if selection == nil {
+			// A File-owned prospective selector is itself a sealed target
+			// acquisition requirement.  Semantic planning may provide the
+			// selector/prospective declaration without a discovery-source hint;
+			// that must not let SM-2 skip the File observation and reach the
+			// operations provider with an ungrounded target.  File remains the
+			// sole owner of existence/path-boundary facts; this branch only
+			// schedules its typed prerequisite.
+			if focus.TargetSelectorOwnerRef == runtimecontract.RuntimeModuleFile &&
+				focus.TargetSelectorRef != "" && focus.ProspectiveTargetRef != "" {
+				requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
+					Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef,
+					TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
+					TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRef,
+					Reason: "prospective File target requires owner target selection",
+				}))
+				goto selectionRequirementDone
+			}
 			for _, source := range focus.TargetDiscoverySources {
 				switch source {
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:

@@ -233,6 +233,37 @@ func TestReduceRuntimeStateWithDirectiveAcquiresDiscoveryManifestBeforeCandidate
 	}
 }
 
+func TestReduceRuntimeStateWithDirectiveAcquiresProspectiveFileTargetWithoutDiscoverySource(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus = runtimecontract.CoverageFocus{
+		ID:                       "focus-prospective",
+		CoverageWorkItemIDs:      []common.CoverageWorkItemID{"cwi-prospective"},
+		RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindStateChange},
+		TargetRole:               "semantic_proof_target",
+		TargetSelectorRef:        "workspace-relative-new-file-target",
+		TargetSelectorOwnerRef:   runtimecontract.RuntimeModuleFile,
+		TargetSelectorSubjectRef: "workspace_deliverable",
+		ProspectiveTargetRef:     "coverage-map.json",
+		RequireTargetGrounding:   true,
+	}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-prospective", State: runtimecontract.RuntimeCoverageItemStateOpen}}
+	facts.Prerequisites = runtimecontract.PrerequisiteState{}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) != 1 {
+		t.Fatalf("prospective target grounding = decision=%+v prerequisites=%+v, want one File selection", decision, updated.Prerequisites)
+	}
+	prerequisite := updated.Prerequisites.Pending[0]
+	if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSelection || prerequisite.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+		prerequisite.TargetSelectorRef != "workspace-relative-new-file-target" || prerequisite.TargetSelectorOwnerRef != runtimecontract.RuntimeModuleFile ||
+		prerequisite.TargetSelectorSubjectRef != "workspace_deliverable" || prerequisite.ProspectiveTargetRef != "coverage-map.json" {
+		t.Fatalf("prospective target prerequisite = %+v", prerequisite)
+	}
+}
+
 func TestReduceRuntimeStateWithDirectiveDoesNotRequestStateChangeWithoutOwnerGroundedTarget(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireTargetGrounding = true

@@ -31,6 +31,8 @@ Last Updated: 2026-08-14
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - 当前 Runtime single-owner、model capability output、schema-v8 owner/convergence fence、declaration/generation 与完整文档恢复收口：
   [runtime-single-owner-model-capability-output-closure-plan.md](70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)
+- 逐组件 Runtime 单 Owner 代码收口、`cwi-027` target grounding、测试与部署验收 Runbook：
+  [runtime-single-owner-code-closure-runbook.md](70-roadmap/active/runtime-single-owner-code-closure-runbook.md)
 - Runtime CWI reconciliation、`/run resume`/`/run restart` scope 回归矩阵：
   [runtime-cwi-reconciliation-single-owner-closure-plan.md](70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 - Workspace reasoning effort、ai-proxy capability、Run seal、Web Start/Restart 与 TUI `/model` 收口：

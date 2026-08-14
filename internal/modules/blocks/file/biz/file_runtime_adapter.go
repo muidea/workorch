@@ -123,7 +123,7 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 		binding.subjectRef = strings.TrimSpace(bindings[0].subjectRef)
 		binding.candidateRefs = normalizeRuntimeFileTargetRefs(bindings[0].candidateRefs)
 	}
-	if selectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry && selectorRef != runtimeFileTargetSelectorWorkspaceDeliverable && selectorRef != runtimeFileTargetSelectorProfileCandidates {
+	if selectorRef != runtimeFileSelectorWorkspaceRelativeNewTarget && selectorRef != runtimeFileTargetSelectorUniqueWorkspaceEntry && selectorRef != runtimeFileTargetSelectorWorkspaceDeliverable && selectorRef != runtimeFileTargetSelectorProfileCandidates {
 		selection := runtimemodel.RuntimeTargetSelection{
 			PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
 			SelectorOwnerRef: binding.ownerRef, SelectorSubjectRef: binding.subjectRef, SelectorCandidateRefs: binding.candidateRefs,
@@ -136,6 +136,42 @@ func (a *RuntimeAdapter) AcquireRuntimeTargetSelection(workspaceDirectory, prere
 	manifest, err := a.AcquireWorkspaceManifest(workspaceDirectory)
 	if err != nil {
 		return runtimemodel.RuntimeTargetSelection{}, err
+	}
+	if selectorRef == runtimeFileSelectorWorkspaceRelativeNewTarget {
+		// This selector is a deterministic prospective-target declaration.  It
+		// never derives a filename from the workspace inventory: the caller must
+		// supply the sealed prospective path, and File only verifies its
+		// workspace-relative canonical form and absence.  Existing targets are
+		// returned as an owner observation that cannot authorize create-only
+		// file/write; the Orchestrator then performs its typed contradiction
+		// handling before requesting an operation candidate.
+		selection := runtimemodel.RuntimeTargetSelection{
+			PrerequisiteID: prerequisiteID, OwnerModuleID: runtimemodel.RuntimeModuleFile, TargetRole: targetRole, SelectorRef: selectorRef,
+			SelectorOwnerRef: binding.ownerRef, SelectorSubjectRef: binding.subjectRef, SelectorCandidateRefs: binding.candidateRefs,
+			ProspectiveTargetRef: prospectiveTargetRef, CandidateCount: 0, ObservedRevision: manifest.Revision,
+		}
+		if prospectiveTargetRef == "" || strings.Contains(prospectiveTargetRef, "\\") {
+			selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+			selection.ObservedRevision = manifest.Revision
+		} else {
+			_, target, relative, pathErr := guardedWorkspacePath(workspaceDirectory, prospectiveTargetRef, false)
+			if pathErr != nil || filepath.ToSlash(relative) != prospectiveTargetRef {
+				selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+				selection.ObservedRevision = manifest.Revision
+			} else if _, statErr := os.Lstat(target); statErr == nil {
+				selection.Disposition = runtimemodel.RuntimeTargetSelectionUnsupported
+				selection.ObservedRevision = manifest.Revision
+			} else if !os.IsNotExist(statErr) {
+				return runtimemodel.RuntimeTargetSelection{}, statErr
+			} else {
+				selection.Disposition = runtimemodel.RuntimeTargetSelectionCreate
+			}
+		}
+		selection.SnapshotID = runtimemodel.StableRuntimeTargetSelectionSnapshotID(selection)
+		if err := selection.Validate(); err != nil {
+			return runtimemodel.RuntimeTargetSelection{}, err
+		}
+		return selection, nil
 	}
 	if selectorRef == runtimeFileTargetSelectorProfileCandidates {
 		return acquireProfileDeclaredTargetSelection(workspaceDirectory, prerequisiteID, targetRole, selectorRef, prospectiveTargetRef, maxItems, manifest, binding)
