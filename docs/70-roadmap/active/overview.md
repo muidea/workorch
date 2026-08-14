@@ -58,5 +58,6 @@ capability owner, UI, projection or managed mock result cannot substitute for pe
 - [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)
 - [Runtime single-owner and model-capability output plan](runtime-single-owner-model-capability-output-closure-plan.md)
 - [Runtime single-owner code-closure runbook](runtime-single-owner-code-closure-runbook.md)
+- [Runtime 22-component function and complexity inventory](runtime-22-component-function-complexity-inventory.md)
 - [Completed archive](../../90-archive/completed/overview.md)
 - [Superseded archive](../../90-archive/superseded/overview.md)
