@@ -17,7 +17,8 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | --- | --- |
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **CWI-SO-13/14/16/18 code and automated matrices are closed; deployed verification remains open.** `run-085` blocked-focus selection and `run-087` settled-order reuse now converge through one Orchestrator-owned eligible closure and typed semantic-generation retirement. Full/race/boundary and file-backed managed gates pass; a fresh deployed proof remains. |
+| CWI reconciliation | **Mandatory regression reference.** CWI-SO-13/14/16/18 automated matrices remain required, but their former schema-v5 deployed-only exit is superseded by SO-MC schema-v6 live closure. |
+| Model-capability output and state ownership | **Live closure pending.** SO-MC-01..09 are code/automated-closed: schema v6 removes stage token authority, ExpectedDocument uses the selected model's typed ProviderCeiling, prompt/schema enforce compact complete JSON, Approval uses owner-private observed facts, and all repository gates pass. SO-MC-10 real-provider fresh deployed proof remains. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -25,14 +26,15 @@ claims are archived and cannot override a current persisted aggregate counterexa
 
 | ID | Work | Required result | Plan |
 | --- | --- | --- | --- |
-| CWI-SO | Canonical CWI ledger, eligible-focus projection, dependency admission, and single-owner reconciliation closure | Definition, presentation and execution order remain distinct; only an eligible CWI can become the unbound current focus; semantic order and seal use the same exact closure; settled CWI still require typed reopen. | [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| CWI-SO | Mandatory Runtime admission regression matrix | Definition, presentation and execution order remain distinct; only an eligible CWI can become the unbound current focus; semantic order and seal use the same exact closure; settled CWI still require typed reopen. | [Runtime CWI regression plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| SO-MC | Runtime single-owner and model-capability output closure | Remove configuration token authority, introduce the schema-v6 boundary, seal model-declared effective ceiling into ExpectedDocument, enforce compact complete JSON, and verify one owner-private mutation path per state. | [SO-MC plan](runtime-single-owner-model-capability-output-closure-plan.md) |
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-`CWI-SO` is now at `FOCUS-07`: the eligible-focus projection, owner-private transition routing, settled-order narrowing
-and dependency-unlock generation retirement are implemented and covered by the combined automated matrix. The remaining
-work is a fresh deployed `/run restart` proof. A provider, capability owner, UI, projection or managed mock result cannot
-substitute for Orchestrator-owned closure.
+The prior CWI automated matrix remains mandatory regression coverage, but its schema-v5 deployed-only queue is
+superseded by `SO-MC`. The next live proof must use the fresh schema-v6 path after model-capability output and owner
+boundary closure; a provider, capability owner, UI, projection or managed mock result cannot substitute for persisted
+Orchestrator-owned closure.
 
 ## Active Documentation Rules
 
@@ -54,5 +56,6 @@ substitute for Orchestrator-owned closure.
 - [Current unclosed matrix](../../01-overview/current-unclosed-matrix.md)
 - [Unfinished todo index](../../01-overview/unfinished-todo-index.md)
 - [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)
+- [Runtime single-owner and model-capability output plan](runtime-single-owner-model-capability-output-closure-plan.md)
 - [Completed archive](../../90-archive/completed/overview.md)
 - [Superseded archive](../../90-archive/superseded/overview.md)

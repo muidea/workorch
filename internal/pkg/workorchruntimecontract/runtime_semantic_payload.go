@@ -342,7 +342,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			"planStep":                 map[string]any{"enum": []string{string(RuntimeSemanticPlanStepCoverageOrder), string(RuntimeSemanticPlanStepProofBatch)}},
 			"batchId":                  map[string]any{"type": "string"},
 			"batchSequence":            map[string]any{"type": "integer", "minimum": 0},
-			"batchCoverageWorkItemIds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": coverageIDs}},
+			"batchCoverageWorkItemIds": map[string]any{"type": "array", "maxItems": len(coverageIDs), "items": map[string]any{"type": "string", "enum": coverageIDs}},
 			"coverageOrder":            map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "items": map[string]any{"type": "string", "enum": coverageIDs}},
 			"proposals": map[string]any{"type": "array", "minItems": 0, "maxItems": len(coverageIDs) * 2, "items": map[string]any{
 				"type": "object", "additionalProperties": false,
@@ -351,15 +351,15 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 					"coverageWorkItemId": map[string]any{"type": "string", "enum": coverageIDs},
 					"ownerModuleId":      map[string]any{"type": "string", "enum": manifest.AllowedOwnerModuleIDs},
 					"operationKind":      map[string]any{"type": "string", "enum": manifest.AllowedOperationKinds},
-					"operationVariantId": map[string]any{"type": "string"},
+					"operationVariantId": map[string]any{"type": "string", "maxLength": 65536},
 					"target": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"policy"}, "properties": map[string]any{
 						"policy": map[string]any{"type": "string", "enum": policies}, "exactTargetRefs": stringEnumArraySchema(targetRefs),
 						"ownerScopeTargetRefs": stringEnumArraySchema(targetRefs), "ownerSelectorRefs": stringEnumArraySchema(selectorRefs),
-						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1},
+						"prospectiveConstraintRefs": stringEnumArraySchema(constraintRefs), "prospectiveTargetRef": map[string]any{"type": "string", "minLength": 1, "maxLength": 65536},
 					}},
 					"requiredEvidenceKinds": stringEnumArraySchemaWithMinimum([]string{EvidenceKindStateChange, EvidenceKindValidation}, 1),
 					"validationRecipeId":    stringEnumSchema(recipeIDs),
-					"declarationRef":        map[string]any{"type": "string", "minLength": 1},
+					"declarationRef":        map[string]any{"type": "string", "minLength": 1, "maxLength": 65536},
 				},
 			}},
 		},
@@ -614,7 +614,7 @@ func stringEnumSchema(values []string) map[string]any {
 	if values == nil {
 		values = []string{}
 	}
-	return map[string]any{"type": "string", "enum": values}
+	return map[string]any{"type": "string", "maxLength": 65536, "enum": values}
 }
 
 func stringEnumSchemaWithMinimum(values []string, minimum int) map[string]any {
@@ -628,7 +628,7 @@ func stringEnumArraySchema(values []string) map[string]any {
 	if values == nil {
 		values = []string{}
 	}
-	return map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": values}}
+	return map[string]any{"type": "array", "maxItems": len(values), "uniqueItems": true, "items": map[string]any{"type": "string", "maxLength": 65536, "enum": values}}
 }
 
 func stringEnumArraySchemaWithMinimum(values []string, minimum int) map[string]any {

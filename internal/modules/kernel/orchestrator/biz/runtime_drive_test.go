@@ -295,6 +295,7 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	}
 	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
 	candidateCount := 0
+	startRuntimeProviderCeilingTestOwner(t, hub)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCount++
@@ -2415,7 +2416,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate = runtimeTestPersistSealedSemanticAuthority(t, ctx, crashRepository, aggregate)
+			aggregate = runtimeTestPersistSealedSemanticAuthorityWithoutProviderCeiling(t, ctx, crashRepository, aggregate)
 			func() {
 				defer func() {
 					if recovered := recover(); recovered != marker {
@@ -10569,9 +10570,7 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	facts := runtimecontract.RuntimeFacts{
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
-			ExecutionContract: runtimecontract.RuntimeExecutionContract{
-				CandidateMaxOutputTokens: 8192, CandidateDocumentRecovery: runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 1},
-			},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{CandidateDocumentRecovery: runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{MaxAttempts: 1}},
 		},
 		WorkspaceID:        "ws-v2",
 		RunID:              "run-v2",

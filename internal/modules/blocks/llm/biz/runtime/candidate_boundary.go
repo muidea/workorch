@@ -286,6 +286,13 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 		if expected.DocumentKind != request.DocumentKind || expected.LogicalRequestID != request.RequestIdentity.LogicalRequestID || expected.ManifestHash != manifestHash || expected.StablePrefixHash != request.StablePrefixHash {
 			return fmt.Errorf("candidate expected document identity does not match request")
 		}
+		ceiling := request.CandidateContext.Resources.ProviderCeiling
+		if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			ceiling = request.SemanticContext.ProviderCeiling
+		}
+		if ceiling == nil || expected.MaxOutputTokens != ceiling.EffectiveMaxOutputTokens {
+			return fmt.Errorf("candidate expected document max output tokens do not match sealed provider ceiling")
+		}
 	}
 	switch request.DocumentKind {
 	case runtimecontract.RuntimeProviderDocumentOperations:

@@ -2,7 +2,6 @@ package approval
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -15,9 +14,16 @@ import (
 // selected, reduced, and persisted by the owner.
 type lifecycleInternalEvent struct {
 	ApprovalID common.ApprovalID
-	Target     common.ApprovalState
+	Kind       lifecycleInternalEventKind
 	Context    workorcheventpayload.Payload
 }
+
+type lifecycleInternalEventKind string
+
+const (
+	lifecycleInternalEventGrantedObserved  lifecycleInternalEventKind = "granted_observed"
+	lifecycleInternalEventRejectedObserved lifecycleInternalEventKind = "rejected_observed"
+)
 
 func (s *Service) submitLifecycleInternalEvent(ctx context.Context, event lifecycleInternalEvent) (*approvalModel.Approval, error) {
 	if s == nil || event.ApprovalID == "" {
@@ -51,15 +57,19 @@ func reduceApprovalLifecycle(current *approvalModel.Approval, event lifecycleInt
 	if current.State != common.ApprovalStatePending {
 		return nil, common.ErrConflict
 	}
-	if event.Target != common.ApprovalStateApproved && event.Target != common.ApprovalStateRejected {
-		return nil, fmt.Errorf("%w: unsupported approval lifecycle target %q", common.ErrInvalidArgument, event.Target)
-	}
 	next := approvalModel.CloneApproval(current)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	next.UpdatedAt = now
 	next.ResolvedAt = now
 	next.ResolvedBy = firstNonEmptyApprovalString(approvalStringValue(event.Context, "resolvedBy"), approvalStringValue(event.Context, "actor"))
 	next.Context = mergeApprovalContext(next.Context, event.Context)
-	next.State = event.Target
+	switch event.Kind {
+	case lifecycleInternalEventGrantedObserved:
+		next.State = common.ApprovalStateApproved
+	case lifecycleInternalEventRejectedObserved:
+		next.State = common.ApprovalStateRejected
+	default:
+		return nil, common.ErrInvalidArgument
+	}
 	return next, nil
 }

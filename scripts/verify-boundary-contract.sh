@@ -257,6 +257,38 @@ EOF
   exit 1
 fi
 
+# Schema v6 has one output-token authority: the LLM-owner ProviderCeiling.
+# Configuration, activation, policy and execution contracts must not regain
+# stage-specific token fields or a selector mode.
+legacy_stage_token_authority_matches="$(source_matches 'OutputTokenBudgetMode|semanticPlanMaxOutputTokens|candidateMaxOutputTokens|SemanticPlanMaxOutputTokens|CandidateMaxOutputTokens' internal application config web || true)"
+if [[ -n "$legacy_stage_token_authority_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: schema-v6 production code/config reintroduced
+stage-specific output-token authority. Use persisted ProviderCeiling and the
+sealed ExpectedDocument value.
+
+$legacy_stage_token_authority_matches
+EOF
+  exit 1
+fi
+
+# Approval lifecycle input is an observed fact kind. A caller-selected target
+# state or direct target assignment would bypass the owner-private reducer.
+approval_target_state_matches="$({
+  source_matches 'Target[[:space:]]+common\.ApprovalState' internal/modules/blocks/approval
+  source_matches 'next\.State[[:space:]]*=[[:space:]]*(event|command|data)\.Target' internal/modules/blocks/approval
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$approval_target_state_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Approval lifecycle input carries a receiver-owner
+target state. Translate granted/rejected observations into an owner-private
+fact kind and let the reducer select the state.
+
+$approval_target_state_matches
+EOF
+  exit 1
+fi
+
 matches="$(
   find internal/initiators -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- 'basebiz\.Base|NewSimpleObserver|\.Subscribe\(|\.Unsubscribe\(|\.Send\(|\.Post\(' || true

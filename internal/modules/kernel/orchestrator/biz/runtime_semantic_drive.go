@@ -206,8 +206,8 @@ func runtimeSemanticLogicalRequestID(aggregate runtime.RuntimeAggregate, stableP
 
 func runtimeSemanticExpectedDocument(aggregate runtime.RuntimeAggregate, step runtimecontract.RuntimeSemanticPlanStep, batch *runtimecontract.RuntimeSemanticPlanBatch, correctionAttempt int) runtimecontract.RuntimeExpectedDocumentContract {
 	execution := aggregate.Facts.Activation.ExecutionContract.Normalized()
-	maxOutputTokens := execution.SemanticPlanMaxOutputTokens
-	if maxOutputTokens <= 0 && aggregate.Facts.Resources.ProviderCeiling != nil {
+	maxOutputTokens := 0
+	if aggregate.Facts.Resources.ProviderCeiling != nil {
 		maxOutputTokens = aggregate.Facts.Resources.ProviderCeiling.EffectiveMaxOutputTokens
 	}
 	maxRecoveryAttempts := execution.CandidateDocumentRecovery.MaxAttempts

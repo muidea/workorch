@@ -67,7 +67,7 @@ func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.Crea
 }
 
 func (s *Service) Approve(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
-	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateApproved, cmd.Context)
+	return s.resolve(ctx, cmd.ApprovalID, lifecycleInternalEventGrantedObserved, cmd.Context)
 }
 
 func (s *Service) EnsureApproved(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
@@ -90,7 +90,7 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontr
 	if item.State == common.ApprovalStateRejected {
 		return nil, common.ErrConflict
 	}
-	item, err = s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, Target: common.ApprovalStateApproved, Context: cmd.Context.Clone()})
+	item, err = s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, Kind: lifecycleInternalEventGrantedObserved, Context: cmd.Context.Clone()})
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontr
 }
 
 func (s *Service) Reject(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
-	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateRejected, cmd.Context)
+	return s.resolve(ctx, cmd.ApprovalID, lifecycleInternalEventRejectedObserved, cmd.Context)
 }
 
 func (s *Service) EnsureRejected(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
@@ -121,19 +121,19 @@ func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontr
 	if item.State == common.ApprovalStateApproved {
 		return nil, common.ErrConflict
 	}
-	item, err = s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, Target: common.ApprovalStateRejected, Context: cmd.Context.Clone()})
+	item, err = s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, Kind: lifecycleInternalEventRejectedObserved, Context: cmd.Context.Clone()})
 	if err != nil {
 		return nil, err
 	}
 	return item, nil
 }
 
-func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, target common.ApprovalState, context workorcheventpayload.Payload) error {
+func (s *Service) resolve(ctx context.Context, approvalID common.ApprovalID, kind lifecycleInternalEventKind, context workorcheventpayload.Payload) error {
 	if approvalID == "" {
 		return common.ErrInvalidArgument
 	}
 
-	_, err := s.submitLifecycleInternalEvent(ctx, lifecycleInternalEvent{ApprovalID: approvalID, Target: target, Context: context.Clone()})
+	_, err := s.submitLifecycleInternalEvent(ctx, lifecycleInternalEvent{ApprovalID: approvalID, Kind: kind, Context: context.Clone()})
 	return err
 }
 

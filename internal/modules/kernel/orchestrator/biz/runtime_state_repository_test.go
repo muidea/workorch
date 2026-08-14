@@ -3506,6 +3506,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
+	facts.Resources.ProviderCeiling = nil
 	requirement := runtimecontract.RuntimeRequirement{
 		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
 		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
@@ -4366,6 +4367,16 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 		ConvergencePolicy: runtimeTestConvergencePolicy(),
 		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 	}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:                bootstrap.Activation.ProviderSelection,
+		ContextWindowTokens:      128000,
+		ProviderMaxOutputTokens:  16384,
+		EffectiveMaxOutputTokens: 8192,
+		MaxInputTokens:           119808,
+		MaxBytes:                 128 * 1024,
+		CapabilityRevision:       "capability-1",
+		ConfigurationRevision:    "config-1",
+	}
 	initialized, err := runtimecontract.InitializeRuntimeCWILedgerForActivation(facts)
 	if err != nil {
 		t.Fatal(err)
@@ -4508,10 +4519,8 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{
-				OperationContractRevision:   runtimecontract.RuntimeOperationContractRevision(),
-				AcceptanceSlicePolicy:       &policy,
-				SemanticPlanMaxOutputTokens: 8192,
-				CandidateMaxOutputTokens:    8192,
+				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+				AcceptanceSlicePolicy:     &policy,
 			},
 		},
 		Focuses: []runtimecontract.CoverageFocus{{

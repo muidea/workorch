@@ -1,6 +1,6 @@
 # Runtime CWI Reconciliation Single-Owner Closure Plan
 
-Status: active
+Status: regression-reference
 
 Type: implementation-closure-plan
 
@@ -8,9 +8,11 @@ Last Updated: 2026-08-13
 
 ## 1. Purpose And Authority
 
-This is the sole active implementation queue for closing Runtime CWI reconciliation and dispatch admission without
-cross-component state management. It supersedes the former field-by-field closure queue in this file. Historical
-implementation narratives and superseded status claims are audit evidence only and do not authorize new code.
+This document preserves the complete Runtime CWI reconciliation and dispatch-admission regression matrix. The sole
+active implementation queue is now the
+[Runtime single-owner and model-capability output closure plan](runtime-single-owner-model-capability-output-closure-plan.md),
+which incorporates these invariants and the latest deployed output-truncation counterexample. This file must not be
+used to continue the former schema-v5 deployed-only queue independently.
 
 Authority order:
 

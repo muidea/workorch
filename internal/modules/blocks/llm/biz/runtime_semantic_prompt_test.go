@@ -15,3 +15,12 @@ func TestCompactSemanticPlanPromptSchemaRemovesProseMetadata(t *testing.T) {
 		t.Fatalf("compact schema lost structural metadata: %s", compact)
 	}
 }
+
+func TestRuntimeSemanticContractRequiresCompleteCompactOutput(t *testing.T) {
+	contract := runtimeSemanticPlanContractCatalog()
+	for _, required := range []string{"exactly one complete compact JSON object", "finish", "unknown fields", "unrequested proposals", "preface", "suffix", "markdown fences", "repeated Goal"} {
+		if !strings.Contains(contract, required) {
+			t.Fatalf("runtime semantic contract lost %q: %s", required, contract)
+		}
+	}
+}

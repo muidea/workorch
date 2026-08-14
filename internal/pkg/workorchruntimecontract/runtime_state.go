@@ -162,11 +162,11 @@ type RuntimeStateRecord struct {
 }
 
 // RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
-// Version 5 adds the exact candidate-manifest identity to every persisted
-// capability-owner feasibility observation. Earlier aggregates cannot safely
-// reconstruct that authority (or the canonical CWI lineage introduced in v4)
-// and therefore require a fresh activation instead of an in-place migration.
-const RuntimeStateSchemaVersionCurrent uint32 = 5
+// Version 6 removes activation-sealed stage token limits. ProviderCeiling is
+// the sole persisted model capability fact and ExpectedDocument is the sole
+// resolved request budget. Earlier aggregates require a fresh activation
+// instead of an in-place reinterpretation.
+const RuntimeStateSchemaVersionCurrent uint32 = 6
 
 // ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")

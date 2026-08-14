@@ -22,9 +22,10 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | Runtime unified admission deployed proof (CWI-SO-18) | CWI-SO-13～17 code/automated closure and the automated portion of CWI-SO-18 pass. Deploy the schema-v5 binary, execute fresh `/run restart`, and retain the combined admission/receipt/evidence/restart/terminal persisted proof. | [CWI-SO plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A1 | Runtime single-owner and model-capability output closure (SO-MC) | Remove configured stage token authority, introduce schema v6, use the selected model's typed ProviderCeiling for ExpectedDocument, enforce compact complete JSON, close target-state owner inputs, then retain candidate/dispatch/receipt/evidence live proof. | [SO-MC plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md) |
 | A2 | Workspace reasoning effort deployed proof | 代码与正式合同已收口；剩余重新部署后的 Web Start/Restart、TUI `/model reasoning`、Resume sealed selection 和双 workspace 隔离验证 | [WRE plan](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md) |
 
+The CWI-SO plan is now regression reference for A1 rather than an independent schema-v5 deployed queue.
 Predecessor-owned restart、release-before-successor、complete-document recovery、strict decoder、receipt matcher、
 owner-local terminal delivery、replay/CAS、CPU guard 与 dual-workspace matrix 继续作为 A1 的代码回归基线，但不能
 代替统一 admission matrix。A1 必须组合验证 identity、dependency、target/catalog、kind/variant、proof authority、

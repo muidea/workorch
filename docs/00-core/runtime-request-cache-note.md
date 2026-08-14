@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-08-11
+Last Updated: 2026-08-13
 
 ## Purpose
 
@@ -21,6 +21,28 @@ Runtime 的唯一 provider transaction 管道使用显式 `DocumentKind`：opera
 - `stablePrefixHash` 意外漂移视为 request rendering bug，不是 provider 偶然行为。
 - LLM block 不得从 禁止的 map 或临时上下文重建 authority；只消费 typed candidate command。
 - `DocumentKind` 必须显式为 `semantic_plan | operations`；空值不解释为 operations，result 必须回显同一 kind。
+
+## Model Ceiling 与完整文档合同
+
+provider-facing token value 只来自当前 selection/revision 已持久化的 typed `ProviderCeiling`。Orchestrator 在 provider
+call 前封存 `RuntimeExpectedDocumentContract`，并要求以下值精确相等：
+
+```text
+ProviderCeiling.EffectiveMaxOutputTokens
+= ExpectedDocument.MaxOutputTokens
+= RequestRuntimeCandidateCommand.ExpectedDocument.MaxOutputTokens
+= ProviderRequest.MaxOutputTokens
+= provider-facing max_output_tokens
+```
+
+任何不等值都必须在 provider submission 前拒绝并保持零 physical call。whole-document recovery 复用同一
+ExpectedDocument identity 和 token 值；不得重读配置、提高预算或拼接 partial output。provider ceiling 只限制模型可输出
+多少 token，sealed manifest/schema 的数组、字符串、target、binding、content/effect 限制独立决定 Runtime 接受什么文档。
+
+semantic-plan 与 operations prompt 都必须要求恰好一个完整、紧凑的 JSON object：不得包含 Markdown fence、解释、前后缀，
+不得重复 Goal/DoD/manifest/input context，只能输出 schema 字段和 manifest-authorized operation，并必须在单次 response
+内闭合。wire schema 对 object 使用 `additionalProperties: false`，对数组、字符串和内容应用 sealed manifest 派生的上限；
+renderer、schema、strict decoder 与 evaluator 必须共享同一 vocabulary 和 shape contract。
 
 ## Stable Rules
 

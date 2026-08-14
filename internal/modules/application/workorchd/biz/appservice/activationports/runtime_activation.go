@@ -94,11 +94,9 @@ func runtimeDefinitionChangeSet(input map[string]any, effectiveKey, latestKey, p
 
 func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecutionContract {
 	ret := runtimecontract.RuntimeExecutionContract{
-		OperationContractRevision:   runtimecontract.RuntimeOperationContractRevision(),
-		StateChangePolicy:           runtimecontract.RuntimeStateChangePolicy(runtimeString(input["stateChangePolicy"])),
-		MaxRepairAttemptsPerFocus:   runtimeInt(input["maxRepairAttemptsPerFocus"]),
-		SemanticPlanMaxOutputTokens: runtimeInt(input["semanticPlanMaxOutputTokens"]),
-		CandidateMaxOutputTokens:    runtimeInt(input["candidateMaxOutputTokens"]),
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		StateChangePolicy:         runtimecontract.RuntimeStateChangePolicy(runtimeString(input["stateChangePolicy"])),
+		MaxRepairAttemptsPerFocus: runtimeInt(input["maxRepairAttemptsPerFocus"]),
 	}
 	if recovery := runtimeMap(input["candidateDocumentRecovery"]); len(recovery) > 0 {
 		ret.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{

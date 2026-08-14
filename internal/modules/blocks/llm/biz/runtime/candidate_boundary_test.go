@@ -59,6 +59,22 @@ func TestRequestCandidatePreservesSemanticDocumentKindThroughSingleBoundary(t *t
 	}
 }
 
+func TestRequestCandidateRejectsExpectedDocumentTokenMismatchBeforeProvider(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	mismatched := request.ExpectedDocument.Normalized()
+	mismatched.MaxOutputTokens--
+	mismatched.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(mismatched)
+	request.ExpectedDocument = &mismatched
+	providerCalls := 0
+	_, err := RequestCandidate(context.Background(), candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		providerCalls++
+		return generationResult([]byte(`{"operations":[]}`), nil)
+	}), request)
+	if err == nil || !strings.Contains(err.Error(), "max output tokens do not match") || providerCalls != 0 {
+		t.Fatalf("token mismatch reached provider: calls=%d err=%v", providerCalls, err)
+	}
+}
+
 func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	definition := runtimecontract.RuntimeDefinitionContext{
@@ -503,6 +519,16 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 			}},
 		},
 	}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:                facts.Activation.ProviderSelection,
+		ContextWindowTokens:      128000,
+		ProviderMaxOutputTokens:  16384,
+		EffectiveMaxOutputTokens: 8192,
+		MaxInputTokens:           119808,
+		MaxBytes:                 128 * 1024,
+		CapabilityRevision:       "capability-1",
+		ConfigurationRevision:    "config-1",
+	}
 	decision := runtimecontract.RuntimeDecision{State: state, Focus: facts.Focus}
 	switch state {
 	case runtimecontract.ConvergenceStateNeedStateChange:
@@ -551,7 +577,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  request.DocumentKind, ManifestHash: manifest.Hash,
 		LogicalRequestID: request.RequestIdentity.LogicalRequestID, StablePrefixHash: request.StablePrefixHash,
-		MaxOutputTokens: 8192, MaxRecoveryAttempts: 2,
+		MaxOutputTokens: context.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 2,
 	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	request.ExpectedDocument = &expected

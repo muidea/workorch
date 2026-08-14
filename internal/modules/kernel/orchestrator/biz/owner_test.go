@@ -365,7 +365,7 @@ func TestGMMR2DirectDrivePreCWILedgerSchemaMarksRunFreshActivationWithoutRetry(t
 	runs := memoryrepo.NewRunRepository()
 	bootstrap := runtimeBootstrap()
 	legacy := runtimeStateRecordFromAggregate(runtimeAggregate(t, 11))
-	legacy.SchemaVersion = 3
+	legacy.SchemaVersion = 5
 	run := runtimeRunForTestBootstrap(common.RunStateActive, bootstrap)
 	run.RuntimeState = &legacy
 	if err := runs.Create(ctx, run); err != nil {

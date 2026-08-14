@@ -139,11 +139,11 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		return llmmodels.ProviderRequest{}, err
 	}
 	promptSchema := compactSemanticPlanPromptSchema([]byte(schema))
-	outputInstruction := "Return exactly one compact semantic_plan JSON document. For every manifest coverage item, return one bounded proof declaration for each required evidence kind. Each proposal has exactly one requiredEvidenceKinds value; a CWI requiring state_change and validation therefore has two proposals with the same coverageWorkItemId. Omit optional arrays and fields when empty; do not repeat prose, descriptions, or markdown. A validation evidence proof must use only operationKind=mcp/tool_call or operationKind=validation/managed_session and a non-durable effect (none or ephemeral_session); file/read, file/write, shell/command, git/write, and patch/apply cannot claim validation evidence. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results."
+	outputInstruction := "Return exactly one complete compact semantic_plan JSON object and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, or unrequested proposals, and do not repeat the Goal, DoD, manifest, authority, or input context. For every manifest coverage item, return one bounded proof declaration for each required evidence kind. Each proposal has exactly one requiredEvidenceKinds value; a CWI requiring state_change and validation therefore has two proposals with the same coverageWorkItemId. Omit optional arrays and fields when empty. A validation evidence proof must use only operationKind=mcp/tool_call or operationKind=validation/managed_session and a non-durable effect (none or ephemeral_session); file/read, file/write, shell/command, git/write, and patch/apply cannot claim validation evidence. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results."
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
-		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=coverage_order and a complete coverageOrder. Do not return proposals or any operation, target, recipe, feasibility, action, credit, terminal, retry, governance, receipt, or markdown field."
+		outputInstruction = "Return exactly one complete compact semantic_plan JSON object with planStep=coverage_order and a complete coverageOrder, and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, or repeated Goal, DoD, manifest, authority, or input context. Do not return proposals or any operation, target, recipe, feasibility, action, credit, terminal, retry, governance, or receipt field."
 	} else if context.BatchID != "" {
-		outputInstruction = "Return exactly one compact semantic_plan JSON document with planStep=proof_batch and proposals only for the supplied batch coverage IDs. Every batch CWI must have one proof for each required evidence kind; each proposal has exactly one requiredEvidenceKinds value, so a CWI requiring state_change and validation has two proposals. Echo the sealed batch identity exactly. For validation evidence use only mcp/tool_call or validation/managed_session with a non-durable effect; never use file/read, file/write, shell/command, git/write, or patch/apply for validation. Do not return coverageOrder, add or omit batch coverage, claim coverage outside the batch, or return markdown."
+		outputInstruction = "Return exactly one complete compact semantic_plan JSON object with planStep=proof_batch and proposals only for the supplied batch coverage IDs, and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, unrequested proposals, or repeated Goal, DoD, manifest, authority, or input context. Every batch CWI must have one proof for each required evidence kind; each proposal has exactly one requiredEvidenceKinds value, so a CWI requiring state_change and validation has two proposals. Echo the sealed batch identity exactly. For validation evidence use only mcp/tool_call or validation/managed_session with a non-durable effect; never use file/read, file/write, shell/command, git/write, or patch/apply for validation. Do not return coverageOrder, add or omit batch coverage, or claim coverage outside the batch."
 	}
 	var batchSequence *int
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && context.BatchID != "" {
@@ -202,11 +202,12 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 			},
 		},
 	}
-	if budget := context.Activation.ExecutionContract.SemanticPlanMaxOutputTokens; budget > 0 && budget < ceiling.EffectiveMaxOutputTokens {
-		providerRequest.MaxOutputTokens = budget
-		providerRequest.ContextBudget.EffectiveMaxOutputTokens = budget
-		providerRequest.ContextBudget.EstimatedOutputTokens = budget
+	providerRequest.MaxOutputTokens = ceiling.EffectiveMaxOutputTokens
+	if request.ExpectedDocument != nil {
+		providerRequest.MaxOutputTokens = request.ExpectedDocument.Normalized().MaxOutputTokens
 	}
+	providerRequest.ContextBudget.EffectiveMaxOutputTokens = providerRequest.MaxOutputTokens
+	providerRequest.ContextBudget.EstimatedOutputTokens = providerRequest.MaxOutputTokens
 	attachProviderCachePlan(&providerRequest)
 	if providerRequest.ContextBudget.CachePlan != nil {
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
@@ -337,7 +338,7 @@ func compactSemanticPlanPromptSchema(raw []byte) []byte {
 }
 
 func runtimeSemanticPlanContractCatalog() string {
-	return "You propose a bounded semantic proof plan for a sealed WorkOrch definition. The proposal is not authority and has no side effects. Use only the owner modules, operation kinds, target policies, evidence kinds, effect scopes, declarations, and identities supplied in C3. Each proposal is one independently feasible proof and has exactly one evidence kind. Group proofs by coverageWorkItemId: return one proof for every required evidence kind of each coverage item, with no extra CWI or duplicate evidence kind. Validation evidence is receipt-backed and may use only mcp/tool_call or validation/managed_session with effect none or ephemeral_session; file/read, file/write, shell/command, git/write, and patch/apply are never validation proof operations. Never emit operation execution, runtime action, coverage state or credit, terminal/retry/governance decisions, receipts, owner observations, or markdown."
+	return "Return exactly one complete compact JSON object and finish it in this response. Emit only schema fields; never add prose, a preface or suffix, markdown fences, unknown fields, unrequested proposals, or repeated Goal, DoD, manifest, authority, or input context. You propose a bounded semantic proof plan for a sealed WorkOrch definition. The proposal is not authority and has no side effects. Use only the owner modules, operation kinds, target policies, evidence kinds, effect scopes, declarations, and identities supplied in C3. Each proposal is one independently feasible proof and has exactly one evidence kind. Group proofs by coverageWorkItemId: return one proof for every required evidence kind of each coverage item, with no extra CWI or duplicate evidence kind. Validation evidence is receipt-backed and may use only mcp/tool_call or validation/managed_session with effect none or ephemeral_session; file/read, file/write, shell/command, git/write, and patch/apply are never validation proof operations. Never emit operation execution, runtime action, coverage state or credit, terminal/retry/governance decisions, receipts, or owner observations."
 }
 
 func runtimeProviderSafeSemanticDiagnostic(value *runtimecontract.RuntimeOriginalDiagnostic) *runtimeSemanticDiagnosticProjection {

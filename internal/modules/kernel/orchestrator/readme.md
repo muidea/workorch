@@ -21,6 +21,27 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - reasoning effort参与 activation/ceiling identity，但不改变 stable prefix、CWI、focus、预算、retry或 action
 - Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy、模型品牌或 effort语义
 
+### Schema v6 与 provider output contract
+
+current Runtime schema 为 v6。activation/execution contract、config、runtime policy 与 stable-prefix hash 不再携带
+semantic-plan/candidate stage token limit。LLM owner 是 model capability 的唯一解释者；Orchestrator 只消费针对当前
+workspace/run/authority、sealed selection 及 capability/configuration revision 的 detached persisted
+`ProviderCeiling`，不得按 model name 分支或应用 token override。
+
+semantic-plan 与 operations 的 `RuntimeExpectedDocumentContract.MaxOutputTokens` 只能从
+`ProviderCeiling.EffectiveMaxOutputTokens` 创建，并在 provider call 前随 request session 持久化。ExpectedDocument、
+LLM EventHub command、provider request、provider-facing `max_output_tokens` 与 audit 必须精确等值；LLM boundary 在任何
+不等值时拒绝提交，physical call count 保持为零。SM-4 whole-document recovery 复用 sealed ExpectedDocument，不提高预算、
+不重读配置、不拼接 partial output。
+
+两个 request renderer 都要求恰好一个完整 compact JSON object，无 prose、fence、prefix/suffix 或 authority 重复。
+sealed manifest 同时约束 prompt、closed JSON Schema、strict decoder 与 evaluator；object 禁止 unknown field，数组、字符串、
+target、binding 与 content/effect shape 均有界。LLM owner只返回 provider factual outcome，不能选择 retry、terminal、
+CandidateAttempt 或 Runtime transition。
+
+schema v5 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；显式
+restart 由 Run owner 创建新的 schema-v6 lineage，不继承 predecessor request、candidate、CWI credit 或 recovery budget。
+
 ## Runtime 四状态机实现约束（2026-07-16）
 
 完整规范以 `docs/00-core/runtime-stage-contract.md` 的“Runtime 四状态机固化规约”为唯一权威。本模块按以下四个状态机落实现有职责，不定义第二份状态语义：

@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-08-11
+Last Updated: 2026-08-13
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -36,6 +36,24 @@ projection。它不推断“应创建哪个文件”“何种实现正确”或�
 
 `internal/pkg/workorchruntimecontract` 仅保存 DTO、合同定义以及无状态的 normalize、validate、
 clone、hash helper。它不得拥有状态迁移、CAS、EventHub、filesystem/network I/O 或 retry 决策。
+
+### Schema v6 与 model capability token 权威
+
+current Runtime aggregate schema 为 v6。v6 从 activation、`RuntimeExecutionContract`、配置、policy projection
+和 stable-prefix identity 中删除 semantic-plan/candidate stage token limit。唯一 output-token 权威是 LLM owner 针对
+已封存 provider/model selection 与 capability/configuration revision 返回并持久化的 typed `ProviderCeiling`；
+Application、Web、TUI 与 Orchestrator 均不得维护固定值、override 或 model-name 分支。
+
+每个 semantic-plan 或 operations request 的唯一已解析预算是先于 provider call 持久化的
+`RuntimeExpectedDocumentContract.MaxOutputTokens`，其值必须精确等于当前
+`ProviderCeiling.EffectiveMaxOutputTokens`。EventHub command、LLM provider request、provider-facing
+`max_output_tokens` 与 request audit 必须复制同一个 sealed 值；任何不等值都在 provider submission 前形成 typed
+context-integrity/contract failure。recovery 复用同一 ExpectedDocument，不重读配置、不提高 token 值，也不拼接 partial
+output。
+
+schema v5 aggregate 不得原地迁移、忽略旧字段或重解释 stable prefix。Resume/drive 只能返回
+`fresh_activation_required`，且不得产生 provider/capability work；用户显式 restart 后由 Run owner 创建新的 schema-v6
+lineage，新 Run 不继承旧 request、candidate、CWI credit 或 recovery budget。
 
 跨 owner I/O 只能通过 EventHub 的具体 typed command/result。禁止跨 owner service/repository、
 `map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 envelope。

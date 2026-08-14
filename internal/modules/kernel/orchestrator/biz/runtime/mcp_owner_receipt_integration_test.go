@@ -141,6 +141,16 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	t.Cleanup(func() { owner.Teardown(ctx) })
 
 	aggregate := validationAggregate(t)
+	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:                aggregate.Facts.Activation.ProviderSelection,
+		ContextWindowTokens:      128000,
+		ProviderMaxOutputTokens:  16384,
+		EffectiveMaxOutputTokens: 8192,
+		MaxInputTokens:           119808,
+		MaxBytes:                 128 * 1024,
+		CapabilityRevision:       "capability-1",
+		ConfigurationRevision:    "config-1",
+	}
 	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindMCPToolCall}
 	aggregate.Facts.Activation.MCPCapabilities = []runtimecontract.RuntimeMCPCapabilityContext{{
 		ID: "mcp-observed-target:tool:lookup.references", ServerID: "mcp-observed-target", Kind: "tool", Name: "lookup.references", Enabled: true,
@@ -329,7 +339,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,
 		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: stablePrefix,
-		MaxOutputTokens: 8192, MaxRecoveryAttempts: 1,
+		MaxOutputTokens: candidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 1,
 	}
 	expectedDocument.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expectedDocument)
 	requestResult := hub.Send(magicevent.NewEventWithContext(
@@ -889,7 +899,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,
 		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: prefix,
-		MaxOutputTokens: 8192, MaxRecoveryAttempts: 1,
+		MaxOutputTokens: candidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 1,
 	}
 	expectedDocument.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expectedDocument)
 	result := hub.Send(magicevent.NewEventWithContext(llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RequestIdentity: requestIdentity, ExpectedDocument: &expectedDocument, Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))

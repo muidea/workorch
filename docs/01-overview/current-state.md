@@ -129,7 +129,20 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime CWI 单 owner 收口：CWI-SO-13/14/16/18 已完成代码与自动化矩阵，deployed live 待验证。**
+1. **必需 Runtime single-owner 与 model-capability output 收口：SO-MC 为唯一 active 实施队列。**
+   最新部署 Run 已证明 schema-v5 semantic seal、eligible focus、stable authority、whole-document recovery 和
+   fail-closed 零副作用边界正常，但 operations document 连续三次达到 WorkOrch 封存的 8192-token 上限，未形成
+   CandidateAttempt、Dispatch、Receipt 或 Evidence。这使原 schema-v5 deployed-only 验收失效：配置/activation 中的
+   stage token authority 必须删除，fresh Runtime 升级为 schema v6，由 LLM owner 对当前 model 返回唯一 typed
+   `ProviderCeiling`，Orchestrator 将 `EffectiveMaxOutputTokens` 封存为 `ExpectedDocument` 的具体请求值；同时 prompt、
+   schema、strict decoder 与 evaluator 必须从同一 manifest 约束完整紧凑 JSON。所有正式状态继续只由唯一 owner 的
+   private internal event/reducer 迁移，Approval 的 target-state 私有输入也必须改为 granted/rejected observed fact。
+   详见 [SO-MC active plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)。
+   当前 SO-MC-01～08 已完成代码与定向回归，schema v6、token 唯一权威、ExpectedDocument 等值、紧凑有界 JSON、
+   whole-document recovery 与 Approval fact-event 均已落地；SO-MC-09 的 fmt/vet/full/race/boundary/isolated managed
+   file-backed/build 门禁已通过。SO-MC-10 仍需真实 provider 的 fresh deployed persisted proof，managed mock 不构成
+   live closure。
+2. **Runtime CWI 单 owner 矩阵继续作为必需回归基线，不再独立定义实施顺序。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。
    fresh schema-v5 `run-085` 证明 blocked queue-head 与 eligible closure 曾分裂；旧二进制 `run-086` 证明 prospective
@@ -139,18 +152,18 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
    CWI 时在同一 CAS 以 `eligible_closure_changed` 退休 generation；SM-3 complete admission 在 dispatch 前拒绝 target 漂移，
    File owner 将 `file/write` 限定为 create-only，已有文件替换必须使用带 owner-observed `baseHash` 的 `patch/apply`；
    Decision/Approval 生命周期也只经各自 private event/reducer 更新。跨 owner typed fact、owner receipt/evidence、Run
-   lifecycle 与 terminal delivery 仍符合 owner 边界；full/race/vet/fmt/boundary 与 managed file-backed 已通过，剩余仅为
-   部署该二进制后的 fresh `/run restart` persisted proof。不得通过削弱 semantic seal/owner preflight、解析 message、让
+   lifecycle 与 terminal delivery 仍符合 owner 边界；这些自动化结果必须纳入 SO-MC schema-v6 回归，不再以部署
+   schema-v5 二进制作为独立 exit。不得通过削弱 semantic seal/owner preflight、解析 message、让
    Application/LLM/capability owner 创建或排序 current focus、新增全局索引或第五状态机规避。普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
-   [CWI-SO active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
-2. **回归基线（不代表统一 admission 已收口）**：predecessor-owned restart、release-before-successor、sealed complete document、whole-document recovery、
+   [CWI-SO regression plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
+3. **回归基线（不代表统一 admission 已收口）**：predecessor-owned restart、release-before-successor、sealed complete document、whole-document recovery、
    strict candidate、receipt match、owner-local terminal delivery、replay/CAS 与双 workspace regressions 必须持续通过。
    自动化矩阵现已覆盖 unsettled prerequisite 零 provider/owner work、settle 后单次 admission、validation 后精确
    reopen、final snapshot ordering、跨 generation settled-CWI、request supersession、legacy schema 和 duplicate
    durable-effect；managed mock 绿灯仍不能代替最新 deployed persisted aggregate/provider/projection 证明。
-3. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
-4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+4. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+5. **延期候选**：provider failover、tokenizer/native usage 精度等高级项见 `70-roadmap/candidates/`，**不占 active**；model capability 作为 token 唯一权威及完整文档输出引导属于 SO-MC 必需工作，不能延期。
 
 此前的 OPS-1 预设了一个不存在的 Runtime maintenance command；经实现、合同与 CLI 复核后已从 active
 移除。历史数据只能按现有 owner 的只读审计边界保留，不能据此重建第二条 production maintenance 主链。

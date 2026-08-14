@@ -166,11 +166,23 @@ func candidateManifestForEventRequest(t *testing.T, decision runtimecontract.Run
 
 func withOperationsExpectedDocument(t *testing.T, command llmevents.RequestRuntimeCandidateCommand) llmevents.RequestRuntimeCandidateCommand {
 	t.Helper()
+	if command.CandidateContext.Resources.ProviderCeiling == nil {
+		command.CandidateContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+			Selection:                command.CandidateContext.Activation.ProviderSelection,
+			ContextWindowTokens:      128000,
+			ProviderMaxOutputTokens:  16384,
+			EffectiveMaxOutputTokens: 8192,
+			MaxInputTokens:           119808,
+			MaxBytes:                 128 * 1024,
+			CapabilityRevision:       "capability-1",
+			ConfigurationRevision:    "config-1",
+		}
+	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  command.DocumentKind, ManifestHash: command.CandidateManifest.Hash,
 		LogicalRequestID: command.RequestIdentity.LogicalRequestID, CorrectionAttempt: command.CandidateAttempt,
-		StablePrefixHash: command.StablePrefixHash, MaxOutputTokens: 8192, MaxRecoveryAttempts: 2,
+		StablePrefixHash: command.StablePrefixHash, MaxOutputTokens: command.CandidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 2,
 	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	command.ExpectedDocument = &expected

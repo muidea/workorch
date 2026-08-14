@@ -29,8 +29,6 @@ shellCommandTimeout = '60s'
 defaultTimeout = '30s'
 
 [runtime.llmOutput]
-semanticPlanMaxOutputTokens = 8192
-candidateMaxOutputTokens = 8192
 maxPatchContentBytes = 12288
 maxGraphBytes = 32768
 maxGraphFileWrites = 3

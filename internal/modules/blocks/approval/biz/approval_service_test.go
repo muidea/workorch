@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -149,6 +150,41 @@ func TestService_CreateApproval_ValidateArguments(t *testing.T) {
 		if err := service.CreateApproval(ctx, tt); !errors.Is(err, common.ErrInvalidArgument) {
 			t.Fatalf("cmd %#v err = %v, want invalid argument", tt, err)
 		}
+	}
+}
+
+func TestApprovalLifecycleRejectsUnknownFactKind(t *testing.T) {
+	current := &approvalModel.Approval{ID: "approval-1", State: common.ApprovalStatePending}
+	if next, err := reduceApprovalLifecycle(current, lifecycleInternalEvent{ApprovalID: current.ID, Kind: "approved"}); !errors.Is(err, common.ErrInvalidArgument) || next != nil {
+		t.Fatalf("unknown approval fact kind produced state: next=%+v err=%v", next, err)
+	}
+}
+
+func TestApprovalLifecycleDuplicateObservedFactDoesNotMutateOwnerState(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	service := NewService(repo)
+	cmd := approvalservice.CreateApprovalCommand{ApprovalID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", Reason: "review"}
+	if err := service.CreateApproval(ctx, cmd); err != nil {
+		t.Fatal(err)
+	}
+	resolve := approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}
+	if err := service.Approve(ctx, resolve); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.Get(ctx, cmd.ApprovalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Approve(ctx, resolve); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate granted observation err=%v, want conflict", err)
+	}
+	after, err := repo.Get(ctx, cmd.ApprovalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("duplicate granted observation mutated approval: before=%+v after=%+v", before, after)
 	}
 }
 

@@ -72,6 +72,18 @@ func runtimePreflightFeedbackForTest(t *testing.T, command llmevents.PreflightRu
 
 func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
 	t.Helper()
+	if aggregate.Facts.Resources.ProviderCeiling == nil {
+		aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+			Selection:                aggregate.Facts.Activation.ProviderSelection,
+			ContextWindowTokens:      128000,
+			ProviderMaxOutputTokens:  16384,
+			EffectiveMaxOutputTokens: 8192,
+			MaxInputTokens:           119808,
+			MaxBytes:                 128 * 1024,
+			CapabilityRevision:       "capability-1",
+			ConfigurationRevision:    "config-1",
+		}
+	}
 	if aggregate.Facts.DefinitionSeed.SchemaVersion == "" {
 		items := make([]runtimecontract.RuntimeCoverageItem, 0, len(aggregate.Facts.Coverage))
 		slicesByID := map[string][]common.CoverageWorkItemID{}
@@ -402,11 +414,33 @@ func runtimeTestPersistSealedSemanticAuthority(
 	repository runtime.RuntimeStateRepository,
 	aggregate runtime.RuntimeAggregate,
 ) runtime.RuntimeAggregate {
+	return runtimeTestPersistSealedSemanticAuthorityWithProviderCeiling(t, ctx, repository, aggregate, true)
+}
+
+func runtimeTestPersistSealedSemanticAuthorityWithoutProviderCeiling(
+	t *testing.T,
+	ctx context.Context,
+	repository runtime.RuntimeStateRepository,
+	aggregate runtime.RuntimeAggregate,
+) runtime.RuntimeAggregate {
+	return runtimeTestPersistSealedSemanticAuthorityWithProviderCeiling(t, ctx, repository, aggregate, false)
+}
+
+func runtimeTestPersistSealedSemanticAuthorityWithProviderCeiling(
+	t *testing.T,
+	ctx context.Context,
+	repository runtime.RuntimeStateRepository,
+	aggregate runtime.RuntimeAggregate,
+	retainProviderCeiling bool,
+) runtime.RuntimeAggregate {
 	t.Helper()
 	if repository == nil {
 		t.Fatal("runtime test semantic authority repository is nil")
 	}
 	next := runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	if !retainProviderCeiling {
+		next.Facts.Resources.ProviderCeiling = nil
+	}
 	if next.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		t.Fatalf("runtime test semantic authority phase = %q", next.SemanticPlanning.Phase)
 	}

@@ -16,6 +16,12 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+const (
+	runtimeProviderStringMaxLength    = 65536
+	runtimeProviderStringListMaxItems = 256
+	runtimeProviderAssessmentMaxItems = 256
+)
+
 type runtimeCandidateDefinitionProjection struct {
 	Revision       string                                         `json:"revision"`
 	GoalID         common.GoalID                                  `json:"goalId"`
@@ -313,8 +319,9 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		}, err
 	}
 	providerRequest.Model = ceiling.Selection.Target.ModelID
-	if budget := request.CandidateContext.Activation.ExecutionContract.CandidateMaxOutputTokens; budget > 0 && budget < ceiling.EffectiveMaxOutputTokens {
-		providerRequest.MaxOutputTokens = budget
+	providerRequest.MaxOutputTokens = ceiling.EffectiveMaxOutputTokens
+	if request.ExpectedDocument != nil {
+		providerRequest.MaxOutputTokens = request.ExpectedDocument.Normalized().MaxOutputTokens
 	}
 	if providerRequest.ContextBudget == nil {
 		providerRequest.ContextBudget = &llmmodels.ProviderContextBudget{}
@@ -330,10 +337,8 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	providerRequest.ContextBudget.MaxRequestBytes = ceiling.MaxBytes
 	providerRequest.ContextBudget.MaxTokens = ceiling.MaxInputTokens
 	providerRequest.ContextBudget.EstimatedOutputTokens = ceiling.EffectiveMaxOutputTokens
-	if providerRequest.MaxOutputTokens > 0 {
-		providerRequest.ContextBudget.EffectiveMaxOutputTokens = providerRequest.MaxOutputTokens
-		providerRequest.ContextBudget.EstimatedOutputTokens = providerRequest.MaxOutputTokens
-	}
+	providerRequest.ContextBudget.EffectiveMaxOutputTokens = providerRequest.MaxOutputTokens
+	providerRequest.ContextBudget.EstimatedOutputTokens = providerRequest.MaxOutputTokens
 	providerRequest.ContextBudget.CapabilitySource = "sealed_ceiling"
 	providerRequest.ContextBudget.ProfileMode = "runtime_sealed_ceiling"
 
@@ -1089,6 +1094,55 @@ func runtimeCandidateSoul(activation runtimecontract.RuntimeActivationContext, s
 	return &value
 }
 
+func runtimeAssessmentCandidateSchema() string {
+	stringSchema := func() map[string]any {
+		return map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}
+	}
+	stringArray := func(minimum int) map[string]any {
+		value := map[string]any{"type": "array", "maxItems": runtimeProviderAssessmentMaxItems, "items": stringSchema()}
+		if minimum > 0 {
+			value["minItems"] = minimum
+		}
+		return value
+	}
+	value := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"focusId", "coverageWorkItemIds", "disposition", "summary"},
+		"properties": map[string]any{
+			"focusId": stringSchema(), "sliceId": stringSchema(), "coverageWorkItemIds": stringArray(1),
+			"disposition": map[string]any{"type": "string", "enum": []string{"satisfied", "repairable_gap", "governance_required", "terminal_rejection"}},
+			"items": map[string]any{"type": "array", "maxItems": runtimeProviderAssessmentMaxItems, "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"coverageWorkItemId", "satisfied"},
+				"properties": map[string]any{"coverageWorkItemId": stringSchema(), "satisfied": map[string]any{"type": "boolean"}, "reason": stringSchema(), "evidenceRefs": stringArray(0)},
+			}},
+			"gap": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+				"coverageWorkItemIds": stringArray(0), "missingEvidenceKinds": stringArray(0), "targetRefs": stringArray(0), "evidenceRefs": stringArray(0),
+				"reason": stringSchema(), "failureClass": stringSchema(), "failureCode": stringSchema(), "failureSignature": stringSchema(),
+			}},
+			"summary": stringSchema(), "evidenceRefs": stringArray(0), "artifactRefs": stringArray(0),
+		},
+		"allOf": []any{map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"disposition": map[string]any{"const": "satisfied"}}, "required": []string{"disposition"}},
+			"then": map[string]any{"required": []string{"evidenceRefs"}, "properties": map[string]any{"evidenceRefs": stringArray(1)}},
+		}},
+	}
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
+}
+
+func runtimeGovernanceCandidateSchema() string {
+	stringSchema := map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}
+	value := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []string{"externalDependency"},
+		"properties": map[string]any{"externalDependency": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"kind", "reason"},
+			"properties": map[string]any{"kind": stringSchema, "subjectRef": stringSchema, "reason": stringSchema},
+		}},
+	}
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
+}
+
 func runtimeCandidateSchema(state runtimecontract.ConvergenceState) string {
 	switch state {
 	case runtimecontract.ConvergenceStateNeedStateChange:
@@ -1096,9 +1150,9 @@ func runtimeCandidateSchema(state runtimecontract.ConvergenceState) string {
 	case runtimecontract.ConvergenceStateNeedValidation:
 		return runtimeOperationCandidateSchema("workorch.runtime_candidate.validation", "Runtime non-durable validation candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
 	case runtimecontract.ConvergenceStateNeedAssessment:
-		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
+		return runtimeAssessmentCandidateSchema()
 	case runtimecontract.ConvergenceStateNeedGovernance:
-		return `{"type":"object","additionalProperties":false,"required":["externalDependency"],"properties":{"externalDependency":{"type":"object","additionalProperties":false,"required":["kind","reason"],"properties":{"kind":{"type":"string"},"subjectRef":{"type":"string"},"reason":{"type":"string"}}}}}`
+		return runtimeGovernanceCandidateSchema()
 	default:
 		return ""
 	}
@@ -1133,6 +1187,14 @@ func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidate
 		return base
 	}
 	allowedKinds := make([]string, 0, len(manifest.Operations))
+	maxOperations := len(manifest.Operations)
+	if len(manifest.RequiredOperationSequence) > maxOperations {
+		maxOperations = len(manifest.RequiredOperationSequence)
+	}
+	if maxOperations < 1 {
+		maxOperations = 1
+	}
+	operations["maxItems"] = maxOperations
 	allowsRequiredOperationRef := false
 	for _, operation := range manifest.Operations {
 		allowedKinds = append(allowedKinds, operation.Kind)
@@ -1220,7 +1282,7 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 			parameterRequirements = append(parameterRequirements, map[string]any{"anyOf": oneOf})
 		}
 		parameterSchema := map[string]any{
-			"type":  "array",
+			"type": "array", "maxItems": len(operation.Parameters) + runtimeProviderStringListMaxItems,
 			"items": runtimeOperationParameterItemSchemaForManifest(operation),
 		}
 		if len(parameterRequirements) > 0 {
@@ -1282,6 +1344,9 @@ func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.Ru
 				targetItems["enum"] = append([]string(nil), allowedTargets...)
 			}
 			targetSchema := map[string]any{"type": "array", "items": targetItems}
+			if len(allowedTargets) > 0 {
+				targetSchema["maxItems"] = len(allowedTargets)
+			}
 			switch operation.TargetCardinality {
 			case runtimecontract.RuntimeOperationTargetCardinalityOne:
 				targetSchema["minItems"] = 1
@@ -1357,9 +1422,9 @@ func runtimeOperationParameterValueSchema(parameterType runtimecontract.RuntimeO
 	case runtimecontract.RuntimeOperationParameterTypeBoolean:
 		return "boolean", map[string]any{"type": "boolean"}
 	case runtimecontract.RuntimeOperationParameterTypeStringList:
-		return "stringList", map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
+		return "stringList", map[string]any{"type": "array", "minItems": 1, "maxItems": runtimeProviderStringListMaxItems, "items": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}}
 	default:
-		return "string", map[string]any{"type": "string"}
+		return "string", map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}
 	}
 }
 
@@ -1382,7 +1447,7 @@ func runtimeMCPDynamicParameterSchemas(kind string) []any {
 		field  string
 		schema map[string]any
 	}{
-		{field: "string", schema: map[string]any{"type": "string"}},
+		{field: "string", schema: map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}},
 		{field: "integer", schema: map[string]any{"type": "integer"}},
 		{field: "boolean", schema: map[string]any{"type": "boolean"}},
 	} {
@@ -1477,22 +1542,22 @@ func runtimeOperationCandidateSchema(id, title, description string) string {
 		"type": "object", "additionalProperties": false, "required": []string{"operations"},
 		"properties": map[string]any{
 			"operations": map[string]any{
-				"type": "array", "minItems": 1,
+				"type": "array", "minItems": 1, "maxItems": runtimecontract.RuntimeCandidateContextItemsMaxCount,
 				"items": map[string]any{
 					"type": "object", "additionalProperties": false,
 					"required": []string{"id", "kind", "bindingRefs"},
 					"properties": map[string]any{
-						"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"},
-						"requiredOperationRef": map[string]any{"type": "string"},
-						"dependsOn":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"id": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}, "kind": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength},
+						"requiredOperationRef": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength},
+						"dependsOn":            map[string]any{"type": "array", "maxItems": runtimecontract.RuntimeCandidateContextItemsMaxCount, "items": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}},
 						"bindingRefs":          map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
-						"targetRefs":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"targetRefs":           map[string]any{"type": "array", "maxItems": runtimecontract.RuntimeCandidateContextItemsMaxCount, "items": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}},
 						"parameters": map[string]any{"type": "array", "items": map[string]any{
 							"type": "object", "additionalProperties": false, "required": []string{"name"},
 							"properties": map[string]any{
-								"name": map[string]any{"type": "string"}, "string": map[string]any{"type": "string"},
+								"name": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}, "string": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength},
 								"integer": map[string]any{"type": "integer"}, "boolean": map[string]any{"type": "boolean"},
-								"stringList": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"stringList": map[string]any{"type": "array", "maxItems": runtimeProviderStringListMaxItems, "items": map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}},
 							},
 						}},
 					},
@@ -1509,9 +1574,9 @@ func runtimeOperationCandidateSchema(id, title, description string) string {
 
 func runtimeCandidateContractCatalog() string {
 	return strings.Join([]string{
-		"Return exactly one JSON object for the requested Runtime convergence state. The JSON object itself is the candidate; never wrap it in another object.",
+		"Return exactly one JSON object for the requested Runtime convergence state; it must be complete, compact, and finished in this response. The JSON object itself is the candidate; never wrap it in another object.",
 		"The current runtime authority's context.outputContract is the sole structured-output contract. Its manifestHash, schema, structuredOutputInstruction, and operationContracts define the complete allowed fields, kinds, variants, parameters, targets, coverage and dependencies for this request.",
-		"Do not infer a field, operation kind, parameter, target, coverage item, dependency, or operation variant from this stable instruction. If it is not in context.outputContract, omit it. Do not use markdown fences or explanatory text.",
+		"Emit only schema fields and manifest-authorized operations. Do not infer or add unknown fields, unrequested operations, prose, preface, suffix, or markdown fences. Do not repeat the Goal, DoD, manifest, authority, or input context.",
 		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
 		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in context.outputContract and current runtime authority.",
 		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredState or context.repairDirective.",

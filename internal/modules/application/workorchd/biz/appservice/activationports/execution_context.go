@@ -134,9 +134,6 @@ func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract ma
 		executionContract["maxRepairAttemptsPerFocus"] = configuration.Runtime.MaxRuntimeRepairAttempts
 	}
 	if executionContract != nil {
-		llmOutput := configuration.Runtime.LLMOutput
-		executionContract["semanticPlanMaxOutputTokens"] = llmOutput.SemanticPlanMaxOutputTokens
-		executionContract["candidateMaxOutputTokens"] = llmOutput.CandidateMaxOutputTokens
 		executionContract["candidateDocumentRecovery"] = map[string]any{
 			"maxAttempts": configuration.Runtime.LLMOutput.MaxDocumentRecoveryAttempts,
 		}

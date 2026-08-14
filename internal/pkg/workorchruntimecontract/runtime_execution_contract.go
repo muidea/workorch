@@ -17,10 +17,6 @@ type RuntimeExecutionContract struct {
 	OperationContractRevision string
 	StateChangePolicy         RuntimeStateChangePolicy
 	MaxRepairAttemptsPerFocus int
-	// Stage output budgets are activation-sealed business limits. They are
-	// deliberately independent from the provider capability ceiling.
-	SemanticPlanMaxOutputTokens int
-	CandidateMaxOutputTokens    int
 	// CandidateDocumentRecovery bounds complete-document provider retries for
 	// this Run. Resume cannot change the activation-sealed budget.
 	CandidateDocumentRecovery RuntimeCandidateDocumentRecoveryPolicy
@@ -81,9 +77,6 @@ func (c RuntimeExecutionContract) Validate() error {
 	if c.MaxRepairAttemptsPerFocus < 0 || c.MaxRepairAttemptsPerFocus > MaxRepairAttemptsPerFocusLimit {
 		return fmt.Errorf("runtime execution contract max repair attempts must be in 0..%d", MaxRepairAttemptsPerFocusLimit)
 	}
-	if c.SemanticPlanMaxOutputTokens < 0 || c.SemanticPlanMaxOutputTokens > 131072 || c.CandidateMaxOutputTokens < 0 || c.CandidateMaxOutputTokens > 131072 {
-		return fmt.Errorf("runtime stage output token budgets must be in 0..131072")
-	}
 	if err := c.CandidateDocumentRecovery.Validate(); err != nil {
 		return err
 	}
@@ -109,7 +102,7 @@ func (c RuntimeExecutionContract) Validate() error {
 func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeExecutionContract) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.OperationContractRevision != right.OperationContractRevision || left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus || left.SemanticPlanMaxOutputTokens != right.SemanticPlanMaxOutputTokens || left.CandidateMaxOutputTokens != right.CandidateMaxOutputTokens ||
+	if left.OperationContractRevision != right.OperationContractRevision || left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus ||
 		left.CandidateDocumentRecovery != right.CandidateDocumentRecovery ||
 		len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
 		!sameRuntimeValidationPolicies(left.ValidationPolicies, right.ValidationPolicies) ||

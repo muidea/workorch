@@ -667,6 +667,21 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 }
 
+func TestRuntimeProviderContractRequiresCompleteCompactBoundedOutput(t *testing.T) {
+	contract := runtimeCandidateContractCatalog()
+	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat"} {
+		if !strings.Contains(contract, required) {
+			t.Fatalf("runtime candidate contract lost %q: %s", required, contract)
+		}
+	}
+	schema := runtimeCandidateSchema(runtimecontract.ConvergenceStateNeedStateChange)
+	for _, required := range []string{`"maxItems"`, `"maxLength"`, `"additionalProperties":false`} {
+		if !strings.Contains(schema, required) {
+			t.Fatalf("runtime candidate schema lost bound %s: %s", required, schema)
+		}
+	}
+}
+
 func TestValidateRuntimeCandidateContextIntegrityRejectsProtectedContextLoss(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", DoDID: "dod-1"}
 	context := runtimecontract.RuntimeCandidateContext{

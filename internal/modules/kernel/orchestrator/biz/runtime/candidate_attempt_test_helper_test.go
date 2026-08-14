@@ -72,8 +72,8 @@ func (c *RuntimeController) ensureCandidateRequestSession(ctx context.Context, w
 
 func runtimeTestOperationsExpectedDocument(aggregate RuntimeAggregate, manifestHash string, correctionAttempt int) runtimecontract.RuntimeExpectedDocumentContract {
 	execution := aggregate.Facts.Activation.ExecutionContract.Normalized()
-	maxOutputTokens := execution.CandidateMaxOutputTokens
-	if maxOutputTokens <= 0 && aggregate.Facts.Resources.ProviderCeiling != nil {
+	maxOutputTokens := 0
+	if aggregate.Facts.Resources.ProviderCeiling != nil {
 		maxOutputTokens = aggregate.Facts.Resources.ProviderCeiling.EffectiveMaxOutputTokens
 	}
 	if maxOutputTokens <= 0 {
