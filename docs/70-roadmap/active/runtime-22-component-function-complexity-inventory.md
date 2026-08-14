@@ -109,7 +109,7 @@ Owner 合约。后续简化应以本文的证据和优先级为入口，遵守�
 | `workorchruntime` | 创建并按配置暴露 memory/file repository provider，负责基础设施生命周期清理 | `1/1/2/2/2 = 8 L` | repository group 多、配置 fail-fast 与 backend 分支 | 保持一个 Initiator；将 backend builder 和 repository group mapping 仅作为 focused helper，禁止引入综合 runtime container |
 | `application/workorchd` | HTTP/Web、CLI facade、scheduler、activation、context registry、read model、projection、SSE 生命周期接线 | `5/3/5/4/5 = 22 VH` | 入口适配与用例编排过宽；888 文件；projection 431 文件；多 owner 读写合同 | 保持一个 Application Module；先把 server lifecycle、activation use-case、read-model query、projection mapping 分成 4 个稳定内聚层，再将 431 个 projection 文件按事件族合并为少量纯 mapper 包 |
 | `kernel/governance` | 自动治理评估、Decision/Approval resolve、升级/阻塞、AutoGovernanceTrace | `3/3/5/3/3 = 17 H` | 跨 6 个 owner 的策略组合；trace 与治理决策易混 | 保持一个 Module/Owner；将 policy evaluation、trace persistence、EventHub adapter 拆为 focused package，禁止 Governance 写 Run/Orchestrator 状态 |
-| `kernel/orchestrator` | Runtime SM-2 authority、SM-3 candidate/dispatch、SM-4 drive/recovery/delivery；不拥有 Run lifecycle | `5/5/5/5/5 = 25 VH` | 四状态机共享一个 aggregate/CAS；semantic、prerequisite、dispatch、receipt、evidence、governance、delivery 全链路 | 不拆成多个 Module/Owner；在同一 `biz/runtime` 内按 SM-2/SM-3/SM-4 和纯合同适配分包，统一 private event dispatcher、transition coordinator、operation matrix，削减重复 adapter |
+| `kernel/orchestrator` | Runtime SM-2 authority、SM-3 candidate/dispatch、SM-4 drive/recovery/delivery；不拥有 Run lifecycle | `5/5/5/5/5 = 25 VH` | 四状态机共享一个 aggregate/CAS；semantic、prerequisite、dispatch、receipt、evidence、governance、delivery 全链路 | 不拆成多个 Module/Owner；先在同一 `biz/runtime` package 内按 SM-2/SM-3/SM-4 重组文件，只有不共享可变 aggregate 的纯算法才进入 focused subpackage；统一 private event dispatcher、transition coordinator、operation matrix |
 | `kernel/system` | 启动阶段幂等初始化 Soul、WorkspaceTemplate、MCP defaults | `2/1/4/2/1 = 10 M` | 跨 owner 初始化顺序和 fail-fast | 保持单一启动 Module；把 defaults 清单作为 typed data，避免再增加 service/facade；若生命周期不再独立再评估并回 application bootstrap |
 | `blocks/approval` | Approval 请求、查询、更新、批准/拒绝、supersede 与通知 | `2/3/3/2/2 = 12 M` | 生命周期状态与授权 fence；测试/合同重复 | 保持 Block；合并过薄 contracts/helper，集中 lifecycle reducer 和 evidence mapping，不接收外部 target state |
 | `blocks/decision` | DecisionTicket/Resolution 生命周期、治理提案与 resolution | `3/4/4/2/3 = 16 H` | ticket 与 resolution 双对象；Orchestrator governance proposal reconciliation | 保持 Block；将 ticket lifecycle 与 runtime proposal reconciliation 分成两个 focused package，仍由 Decision owner 单一 CAS 推进 |
@@ -159,7 +159,8 @@ Owner 合约。后续简化应以本文的证据和优先级为入口，遵守�
 
 ### P0：先降低状态和入口风险
 
-1. **Orchestrator**：建立内部 `SM-2 / SM-3 / SM-4 / contracts / adapters` 包边界；所有 mutation 仍经同一
+1. **Orchestrator**：建立内部 `SM-2 / SM-3 / SM-4 / contracts / adapters` 文件职责；共享 aggregate、controller
+   和 reducer 的逻辑先保留同一 package，只有纯算法才建立 subpackage。所有 mutation 仍经同一
    `RuntimeInternalEvent` dispatcher 和 `RuntimeTransitionCoordinator.Commit`。优先处理 6 个超大文件和重复
    prerequisite/operation adapter。
 2. **Application/workorchd**：将 `service/server` 限定为 HTTP/SSE 生命周期壳；将 appservice 归并为 activation、
@@ -216,3 +217,67 @@ Orchestrator / Run
 ```
 
 该顺序是复杂度降低顺序，不是新的运行时执行顺序。
+
+## 8. P0 细粒度核对
+
+### 8.1 Orchestrator：边界正确，内部 union 和 mutation 分发过宽
+
+当前生产面已满足关键 Owner 约束：`RuntimeController` 只对外暴露 `ApplyInternalEvent`、`Load` 和
+`QueryOperationReceipt` 三个方法；Biz mutation 通过 `submitRuntimeInternalEvent` 进入 controller，最终统一由
+`RuntimeTransitionCoordinator.Commit` 完成 Run owner opaque CAS。
+
+但同一边界内部存在明显维护压力：
+
+- 57 个 `RuntimeInternalEventKind`；
+- `RuntimeInternalEvent` 有 61 个字段，大部分字段只服务一个或少数 kind；
+- dispatcher 是 525 行、57 个 case 的 exhaustive switch；
+- `RuntimeController` 有 72 个生产方法；
+- `biz/runtime` 有 60 个 `transitions.Commit` 调用点；
+- 外层 Biz 有 55 个 `submitRuntimeInternalEvent` 调用点。
+
+这说明当前不是“多个 Owner”问题，而是一个 Owner 内部使用了过宽的 tagged union，并把 load/mutate/validate/commit
+模板分散到多个状态机文件。第一轮简化应遵守：
+
+1. 保留唯一 dispatcher，不把 57 个 kind 变成 EventHub topic 或公共 registry。
+2. 将 event payload 按 activation、SM-2 authority、SM-3 transaction、SM-4 delivery 分成四个具体 payload
+   结构；顶层只保存 `Kind + Scope + 对应机器 payload`，减少无关字段组合。
+3. 不引入接收任意 callback 的通用 transaction helper。只有 load/expected revision/invariant/commit 语义完全
+   一致的 handler 才可复用 typed transition skeleton。
+4. 先按职责拆大文件，不立即建立 `sm2`/`sm3`/`sm4` 子包；这些机器共享 aggregate 和私有 reducer，强行分包会
+   扩大 export surface 或形成循环依赖。
+5. `semantic_planning.go` 优先按 manifest、request session、owner feasibility、seal/retirement 四组分文件；
+   `controller.go` 优先按 activation、authority、transaction、delivery controller 分文件，package 与 Owner 不变。
+
+### 8.2 Application：Owner 边界干净，包图和公开面过度膨胀
+
+排除 `biz/testkit` 和测试文件后，`application/workorchd` 没有生产代码导入其他 Owner 的 `biz` 包；跨 Owner
+访问保持在 `pkg/events`、owner model/read port 和 EventHub 上。问题主要位于 application 自己的内部组织：
+
+- `biz/appservice` 有 28 个一级子包和 9 组 `*core + *ports` 配对；
+- appservice 根目录仍有 55 个生产文件和 23 个测试文件；
+- `readmodelprojection` 有 404 个生产文件、27 个测试文件、230 个 exported declaration；
+- `readmodelports` 有 51 个文件和 111 个 exported declaration；
+- `service/server` 有 29 个生产文件、8,629 LOC，`http_types.go` 单文件约 94 KB；
+- application 生产面引用 26 个 owner event/model package，属于天然高 fan-out adapter。
+
+因此不能通过继续增加 `core/ports` 包来降低复杂度。建议按下面顺序处理：
+
+1. 先冻结六类 application 职责：`server transport`、`activation use-case`、`owner command ports`、`owner read
+   ports`、`projection/read model`、`runtime session`；新代码必须归入其中之一。
+2. 对 `readmodelprojection` 先做 API 收口：按 workspace/run/decision/approval/LLM/evidence 六个投影族建立少量
+   package-private facade，逐步降低 230 个 exported declaration；随后再按同一事件族合并零散文件。
+3. `http_types.go` 只按 endpoint DTO 家族拆文件，不建立新的 service package，也不让 HTTP DTO 进入 EventHub。
+4. 先评估 `contentcore+contentports`、`setupdraftcore+setupdraftports` 等无反向依赖的薄配对；
+   `definition`、`readmodel`、`governance`、`activation` 当前存在经 projection/ports 回流的依赖，不能机械合并。
+5. appservice 根目录的 forwarding service 应逐一归并到对应 use-case/port；保留 facade 只限稳定的应用入口，
+   不得保留一层只有转调、无边界校验的 wrapper。
+
+### 8.3 P0 第一批安全动作
+
+| 顺序 | 单元 | 动作 | 为什么先做 | 明确不做 |
+|---|---|---|---|---|
+| P0-A | Orchestrator | 把 `RuntimeInternalEvent` 的 61 字段按四类具体 payload 分组，并保持一个 exhaustive dispatcher | 直接降低非法字段组合和 switch 认知成本，不改变状态迁移 | 不改 EventHub 合同、不拆 Owner、不改 reducer 语义 |
+| P0-B | Orchestrator | 将 `semantic_planning.go` 和 `controller.go` 按职责拆文件，补 dispatcher/metadata 完整性测试 | 纯组织变化可先降低冲突面，为后续消重提供边界 | 不抽通用回调事务、不增加第二 CAS 入口 |
+| P0-C | workorchd | 为 readmodel projection 建立六个 package-private 入口并减少 exported declaration | 先收窄调用图，再合并 404 个文件，风险可控 | 不修改 projection 内容、不让 projection 发 owner command |
+| P0-D | workorchd | 归并无环的薄 `core/ports` 配对和 appservice forwarding wrapper | 删除包间转调与重复 DTO | 不机械合并存在循环依赖的配对 |
+| P0-E | Run/LLM/File/Shell | 分别完成 owner 内部职责文件重组后再做行为消重 | 避免同时改变核心状态与 capability 行为 | 不建立通用执行 Block、不共享可变 adapter |
