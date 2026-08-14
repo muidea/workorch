@@ -142,6 +142,115 @@ func TestRuntimeSemanticPlanStaticVariantSchemaUsesOnlyOwnerCatalogFacts(t *test
 	}
 }
 
+func TestRuntimeSemanticExistingTargetPayloadAndCorrectionUseOwnerReplacementKind(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	catalog := RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-file-existing-catalog", OwnerModuleID: RuntimeModuleFile,
+		OperationKinds: []string{StepKindFileWrite, RuntimeBlockKindPatchApply},
+		OperationVariants: []RuntimeOperationAdmissibilityVariant{
+			{
+				Kind: StepKindFileWrite,
+				AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+					RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				},
+				SelectorRefs: []string{"file/workspace-relative-create"}, ConstraintRefs: []string{"workspace-relative-path"},
+			},
+			{
+				Kind: RuntimeBlockKindPatchApply, VariantID: "text_replace",
+				AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+					RuntimeOperationTargetPolicyExactTarget,
+					RuntimeOperationTargetPolicyExistingOwnerScope,
+				},
+			},
+		},
+		TargetRefs: []string{"existing.go"}, SelectorRefs: []string{"file/workspace-relative-create"},
+		ConstraintRefs: []string{"workspace-relative-path"}, ObservedRevision: "tree-existing",
+	}
+	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest.AllowedOperationKinds = []string{StepKindFileWrite, RuntimeBlockKindPatchApply}
+	manifest.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{
+		RuntimeOperationTargetPolicyExactTarget,
+		RuntimeOperationTargetPolicyExistingOwnerScope,
+		RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+	}
+	manifest.OwnerCatalogs = []RuntimeOperationAdmissibility{catalog}
+	manifest = sealSemanticTestManifest(t, manifest)
+
+	// The provider-facing schema must reject the bad combination before the
+	// document is decoded: file/write is prospective-only in this exact owner
+	// snapshot even though exact_target remains available through patch/apply.
+	schema, err := RuntimeSemanticPlanJSONSchema(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schemaDocument map[string]any
+	if err := json.Unmarshal([]byte(schema), &schemaDocument); err != nil {
+		t.Fatal(err)
+	}
+	proposalItems := schemaDocument["properties"].(map[string]any)["proposals"].(map[string]any)["items"].(map[string]any)
+	var writePolicies []any
+	for _, raw := range proposalItems["allOf"].([]any) {
+		rule := raw.(map[string]any)
+		condition, ok := rule["if"].(map[string]any)
+		if !ok {
+			continue
+		}
+		properties, ok := condition["properties"].(map[string]any)
+		if !ok || properties["ownerModuleId"] == nil || properties["operationKind"] == nil {
+			continue
+		}
+		owner := properties["ownerModuleId"].(map[string]any)["const"]
+		kind := properties["operationKind"].(map[string]any)["const"]
+		if owner != RuntimeModuleFile || kind != StepKindFileWrite {
+			continue
+		}
+		thenProperties := rule["then"].(map[string]any)["properties"].(map[string]any)
+		targetProperties := thenProperties["target"].(map[string]any)["properties"].(map[string]any)
+		writePolicies = targetProperties["policy"].(map[string]any)["enum"].([]any)
+		break
+	}
+	if len(writePolicies) != 1 || writePolicies[0] != string(RuntimeOperationTargetPolicyProspectiveOwnerTarget) {
+		t.Fatalf("file/write schema policies = %v", writePolicies)
+	}
+
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"` + RuntimeSemanticPlanDocumentSchemaCurrent + `","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"proof_batch","batchId":"batch-existing","batchSequence":0,"batchCoverageWorkItemIds":["cwi-001"],"proposals":[{"coverageWorkItemId":"cwi-001","ownerModuleId":"blocks/file","operationKind":"file/write","target":{"policy":"exact_target","exactTargetRefs":["existing.go"]},"requiredEvidenceKinds":["state_change"],"declarationRef":"semantic/cwi-001"}]}`
+	_, err = DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.proposals[0].operationKind" || len(diagnostic.SemanticViolations) != 1 ||
+		len(diagnostic.Allowed) != 1 || diagnostic.Allowed[0] != RuntimeBlockKindPatchApply {
+		t.Fatalf("existing-target payload diagnostic = %+v err=%v", diagnostic, err)
+	}
+
+	// Attempt 1 carries the same typed owner-catalog alternative. It neither
+	// parses the File owner's prose nor creates a new authority generation.
+	rejection := RuntimeOriginalDiagnostic{
+		SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: RuntimeModuleLLM,
+		OriginalClass: "semantic_plan", OriginalCode: "proposal_constraint", OriginalMessage: "proposal is outside the sealed owner catalog",
+		Signature: "semantic-plan/existing-target-create-only",
+		FieldViolations: []RuntimeFieldViolation{{
+			Path: diagnostic.Path, Actual: diagnostic.Actual, Allowed: append([]string(nil), diagnostic.Allowed...), Required: append([]string(nil), diagnostic.Required...),
+		}},
+		SemanticViolations: append([]RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
+	}
+	expected := RuntimeExpectedDocumentContract{
+		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:  RuntimeProviderDocumentSemanticPlan, PlanStep: RuntimeSemanticPlanStepProofBatch,
+		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		LogicalRequestID: "semantic-existing-correction", CorrectionAttempt: 1, StablePrefixHash: "stable-prefix-existing",
+		BatchID: "batch-existing", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, CoverageOrderHash: "coverage-order-existing",
+		MaxOutputTokens: 1024, MaxRecoveryAttempts: 1,
+	}
+	expected.Hash = StableRuntimeExpectedDocumentHash(expected)
+	directive, err := DeriveRuntimeSemanticCorrectionDirective(manifest, expected, expected.StablePrefixHash, rejection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(directive.Violations) != 1 || directive.Violations[0].Path != "$.proposals[0].operationKind" ||
+		len(directive.Violations[0].Allowed) != 1 || directive.Violations[0].Allowed[0] != RuntimeBlockKindPatchApply {
+		t.Fatalf("attempt-1 replacement directive = %+v", directive)
+	}
+}
+
 func TestRuntimeSemanticPlanKeepsOwnerCatalogFactsScoped(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	mcpCatalog := semanticTestOwnerCatalog("semantic-mcp-catalog", RuntimeModuleMCP, []string{StepKindMCPToolCall})

@@ -100,6 +100,18 @@ func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofPr
 		return policyErr
 	}
 	if !allowed {
+		// Prefer an owner-catalog operation/variant delta when the selected
+		// target policy is valid for another replacement surface. Returning only
+		// "change target.policy" would let a create-only kind escape an exact
+		// existing target by inventing a prospective target on correction. The
+		// owner still supplies every allowed value; this pure evaluator only
+		// projects the sealed intersection and does not choose a Runtime action.
+		if variants := runtimeSemanticCatalogVariantIDsForPolicy(catalog, proposal.OperationKind, proposal.Target.Policy); len(variants) != 0 {
+			return runtimeSemanticProposalConstraint("operationVariantId", RuntimeSemanticConstraintAllowedValue, proposal.OperationVariantID, nil, variants)
+		}
+		if kinds := runtimeSemanticCatalogOperationKindsForProposalPolicy(catalog, proposal); len(kinds) != 0 && !containsCanonicalOperationKind(kinds, proposal.OperationKind) {
+			return runtimeSemanticProposalConstraint("operationKind", RuntimeSemanticConstraintAllowedValue, proposal.OperationKind, nil, kinds)
+		}
 		allowedPolicies := runtimeSemanticOwnerTargetPolicies(catalog, proposal.OperationKind, proposal.OperationVariantID)
 		return runtimeSemanticProposalConstraint("target.policy", RuntimeSemanticConstraintAllowedValue, string(proposal.Target.Policy), nil, runtimeSemanticTargetPoliciesAsStrings(allowedPolicies))
 	}
@@ -151,6 +163,61 @@ func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofPr
 		}
 	}
 	return nil
+}
+
+// runtimeSemanticCatalogVariantIDsForPolicy returns only variants published by
+// one owner catalog that can use the requested target policy. It is a pure
+// projection over the persisted owner fact, not a process-global operation
+// registry and not a selection decision.
+func runtimeSemanticCatalogVariantIDsForPolicy(catalog RuntimeOperationAdmissibility, kind string, policy RuntimeOperationTargetPolicy) []string {
+	catalog = catalog.Normalized()
+	kind = CanonicalRuntimeBlockKind(kind)
+	contract, found := RuntimeOperationContractForKind(kind)
+	if !found || len(contract.Variants) == 0 {
+		return nil
+	}
+	ret := make([]string, 0)
+	for _, variant := range catalog.OperationVariants {
+		variant = variant.Normalized()
+		if variant.Kind != kind || variant.VariantID == "" || !runtimeOperationAdmissibilityVariantAllowsTargetPolicy(variant, policy) {
+			continue
+		}
+		ret = append(ret, variant.VariantID)
+	}
+	return normalizeStrings(ret)
+}
+
+// runtimeSemanticCatalogOperationKindsForProposalPolicy returns the bounded
+// operation-kind alternatives that the same owner catalog authorizes for the
+// proposal's evidence kind and target policy. This lets a correction replace a
+// create-only kind with an owner-admissible replacement kind without parsing
+// File-specific diagnostics or widening the sealed manifest.
+func runtimeSemanticCatalogOperationKindsForProposalPolicy(catalog RuntimeOperationAdmissibility, proposal RuntimeSemanticProofProposal) []string {
+	catalog = catalog.Normalized()
+	proposal = proposal.Normalized()
+	evidenceKind := ""
+	if len(proposal.RequiredEvidenceKinds) == 1 {
+		evidenceKind = proposal.RequiredEvidenceKinds[0]
+	}
+	ret := make([]string, 0, len(catalog.OperationKinds))
+	for _, kind := range catalog.OperationKinds {
+		kind = CanonicalRuntimeBlockKind(kind)
+		if kind == "" || !RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind) {
+			continue
+		}
+		contract, found := RuntimeOperationContractForKind(kind)
+		if found && len(contract.Variants) != 0 {
+			if len(runtimeSemanticCatalogVariantIDsForPolicy(catalog, kind, proposal.Target.Policy)) != 0 {
+				ret = append(ret, kind)
+			}
+			continue
+		}
+		allowed, _, _, _, err := RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, kind, "", proposal.Target.Policy)
+		if err == nil && allowed {
+			ret = append(ret, kind)
+		}
+	}
+	return canonicalizeOperationKinds(ret)
 }
 
 func runtimeSemanticOwnerTargetPolicies(catalog RuntimeOperationAdmissibility, kind, variantID string) []RuntimeOperationTargetPolicy {

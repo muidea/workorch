@@ -7,7 +7,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const fileOwnerFeasibilityPolicyRevision = "file-owner-feasibility"
+const fileOwnerFeasibilityPolicyRevision = "file-owner-feasibility/create-only-write"
 
 type fileOwnerFeasibilityPolicyInput struct {
 	OperationKind string

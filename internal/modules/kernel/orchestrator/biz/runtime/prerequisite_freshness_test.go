@@ -566,7 +566,9 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{catalogObservation}
-	_, err = controller.initialize(ctx, facts, controllerDefinition(), nil)
+	definition := controllerDefinition()
+	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply}
+	_, err = controller.initialize(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,6 +622,71 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 		retired.ActiveDispatch != nil || len(retired.OperationReceipts) != 0 || len(retired.Facts.Evidence.Accepted) != 0 || len(retired.Facts.Evidence.Rejected) != 0 ||
 		len(retired.GovernanceRequests) != 0 || retired.Facts.RepairDirective != nil {
 		t.Fatalf("binding contradiction did not perform one no-effect retirement: %+v", retired)
+	}
+
+	// The retired generation remains immutable audit history. A subsequently
+	// acquired File-owner catalog is compiled into a fresh manifest, and that
+	// manifest must reject the exact existing target for create-only file/write
+	// while retaining the revision-bound patch/apply replacement surface.
+	replacementInventory := inventory
+	replacementInventory.SelectorRefs = []string{"file/workspace-relative-create"}
+	replacementInventory.ConstraintRefs = []string{"workspace-relative-path"}
+	replacementInventory.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{
+		{
+			Kind: runtimecontract.StepKindFileWrite,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs: []string{"file/workspace-relative-create"}, ConstraintRefs: []string{"workspace-relative-path"},
+		},
+		{
+			Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace",
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		},
+	}
+	replacementInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(replacementInventory)
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(retired.Facts)
+	freshManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		retired.Facts.WorkspaceID,
+		retired.Facts.RunID,
+		retired.Definition,
+		retired.Facts.DefinitionSeed,
+		retired.Facts.Activation.ExecutionContract,
+		[]runtimecontract.RuntimeOperationAdmissibility{replacementInventory},
+		eligible,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldManifest := retired.SemanticPlanning.History[0].Snapshot.Manifest
+	if oldManifest == nil || freshManifest.Hash == oldManifest.Hash || len(eligible) != 1 || eligible[0] != item.ID {
+		t.Fatalf("binding retirement did not produce a distinct eligible semantic generation: old=%+v fresh=%+v eligible=%v", oldManifest, freshManifest, eligible)
+	}
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
+		},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		DeclarationRef: "semantic/reopened-existing-target",
+	}
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: freshManifest.Hash, DefinitionSeedHash: freshManifest.DefinitionSeedHash,
+		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: "batch-reopened-existing-target", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID},
+		Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal},
+	}
+	var violation *runtimecontract.RuntimeSemanticProposalViolationError
+	if err := document.ValidateAgainstManifest(freshManifest); !errors.As(err, &violation) || violation.Violation().Path != "$.proposals[0].operationKind" ||
+		len(violation.Violation().Allowed) != 1 || violation.Violation().Allowed[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("fresh manifest retained create-only existing-target authority: violation=%+v err=%v", violation, err)
+	}
+	document.Proposals[0].OperationKind = runtimecontract.RuntimeBlockKindPatchApply
+	document.Proposals[0].OperationVariantID = "text_replace"
+	if err := document.ValidateAgainstManifest(freshManifest); err != nil {
+		t.Fatalf("fresh manifest rejected revision-bound replacement: %v", err)
 	}
 	saves := repository.saves
 	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{

@@ -18,7 +18,7 @@ func TestCompactSemanticPlanPromptSchemaRemovesProseMetadata(t *testing.T) {
 
 func TestRuntimeSemanticContractRequiresCompleteCompactOutput(t *testing.T) {
 	contract := runtimeSemanticPlanContractCatalog()
-	for _, required := range []string{"exactly one complete compact JSON object", "finish", "unknown fields", "unrequested proposals", "preface", "suffix", "markdown fences", "repeated Goal"} {
+	for _, required := range []string{"exactly one complete compact JSON object", "finish", "unknown fields", "unrequested proposals", "preface", "suffix", "markdown fences", "repeated Goal", "same ownerCatalog fact", "prospective/create-only authority cannot be used for an existing owner target"} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("runtime semantic contract lost %q: %s", required, contract)
 		}

@@ -349,6 +349,46 @@ func TestRuntimeAdapterAdmissibilityInventoryPrioritizesFocusTargetsWithinBound(
 	}
 }
 
+func TestRuntimeAdapterAdmissibilityPublishesCreateOnlyWriteAndRevisionBoundReplacement(t *testing.T) {
+	workspace := t.TempDir()
+	const targetRef = "existing.go"
+	if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte("package existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewRuntimeAdapter().AcquireRuntimeOperationAdmissibility(
+		workspace,
+		"admissibility-file",
+		[]string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply},
+		[]string{targetRef},
+		4,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write, found, err := runtimecontract.RuntimeOperationAdmissibilityVariantForProposal(inventory, runtimecontract.StepKindFileWrite, "")
+	if err != nil || !found {
+		t.Fatalf("file/write owner fact = %+v found=%t err=%v", write, found, err)
+	}
+	if len(write.AllowedTargetPolicies) != 1 || write.AllowedTargetPolicies[0] != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+		t.Fatalf("file/write owner fact is not create-only: %+v", write)
+	}
+	for _, policy := range []runtimecontract.RuntimeOperationTargetPolicy{
+		runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+		runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+	} {
+		allowed, _, _, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory, runtimecontract.StepKindFileWrite, "", policy)
+		if err != nil || allowed {
+			t.Fatalf("file/write policy %q allowed=%t err=%v", policy, allowed, err)
+		}
+	}
+	allowed, _, _, found, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(
+		inventory, runtimecontract.RuntimeBlockKindPatchApply, patchTypeTextReplace, runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+	)
+	if err != nil || !found || !allowed {
+		t.Fatalf("patch/apply text_replace replacement fact allowed=%t found=%t err=%v inventory=%+v", allowed, found, err, inventory)
+	}
+}
+
 func TestRuntimeAdapterProbeAllowsSelectedNewFileWriteTargetWithoutMutation(t *testing.T) {
 	workspace := t.TempDir()
 	adapter := NewRuntimeAdapter()

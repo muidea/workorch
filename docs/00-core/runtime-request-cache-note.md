@@ -79,6 +79,10 @@ request 应按 cacheability 从高到低组织：
   generation 的 operation/target/binding 只能进入 volatile lineage，不能回写 C2 declaration。manifest 必须包含 provider request 前已获取的 owner
   admissibility snapshot/revision 与 bounded target/selector/constraint/recipe vocabulary，C4 attempt 0/1 与 provider-safe rejection，C5
   acceptance slice refs。C4 不得渲染 `OriginalMessage`、raw provider body 或 details content。
+- C0 只保存“operation kind、variant、target policy 必须来自同一 owner fact；existing target 不得使用
+  create-only/prospective fact”这一 owner-neutral 规则；具体 owner、kind、variant、target set 与 allowed policy 仍只在
+  C3 sealed manifest/schema。attempt-1 的 C4 只能回显 evaluator 从该 manifest 得到的 typed alternative，不能从
+  owner message 猜测 replacement，也不能改变 C0～C3 或 `stablePrefixHash`。
 - semantic owner 报告 catalog `stale | prerequisite_required` 时，原 request/session 都只保留 audit，不把 owner
   diagnostic 放入 C4 或 correction。只有带精确 revision fence 的 `stale` 可由 SM-2 有界重获 catalog；catalog
   snapshot/revision 改变后必须以新 manifest hash 创建新 logical request identity，不能 continuation/replay 旧 complete

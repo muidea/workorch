@@ -140,9 +140,15 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
    `EffectiveMaxOutputTokens` 封存为 `ExpectedDocument`；Definition declaration 与 SM-2 generation focus queue 分离；
    File 两阶段共享 owner policy，contradiction 精确退役 binding，等价 authority 在 provider submission 前围栏；Run
    只持久化 opaque Runtime 与 lifecycle fence。所有正式状态仍只由唯一 owner 的 private internal event/reducer 迁移。
+   clean-data `36fc96a7` live 进一步证明这些 owner/fail-closed 边界成立，但也暴露 File 发布的 semantic catalog 曾让
+   create-only `file/write` 与 exact existing target 组合进入 schema；同-manifest correction 因而重复原 kind，并在
+   revision 93 终止。当前 SO-MC-18 已将 `file/write` catalog 收窄为 prospective-only，strict schema/evaluator 从同一
+   owner fact 返回 `patch/apply` replacement alternative；LLM 仅渲染该 sealed value，Orchestrator 仍只通过自身 SM-2/SM-3
+   private event 退役 binding、创建 correction 或 seal 新 generation，File/LLM 均不管理 Runtime 状态。
    非当前基线 Resume 返回 `fresh_activation_required` 且零 owner work；Restart 由 Run owner 在 SM-1 admission 内返回
-   `data_reset_required`，不创建 ReplacementIntent，也不要求 Orchestrator 加载不兼容 aggregate。SO-MC-10 仍需在清理
-   开发数据后执行 fresh current-baseline real-provider terminal persisted proof；managed mock 不构成 live closure。详见
+   `data_reset_required`，不创建 ReplacementIntent，也不要求 Orchestrator 加载不兼容 aggregate。`36fc96a7` 的 clean-data
+   运行是有效正向制品证据但不是 live closure；SO-MC-10 仍需在部署 SO-MC-18 后执行新的 fresh current-baseline
+   real-provider terminal persisted proof；managed mock 不构成 live closure。详见
    [SO-MC active plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)。
 2. **Runtime CWI 单 owner 矩阵继续作为必需回归基线，不再独立定义实施顺序。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority

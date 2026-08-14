@@ -1,11 +1,81 @@
 package workorchruntimecontract_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeSemanticExistingTargetCorrectionSelectsOwnerReplacementKind(t *testing.T) {
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{
+			{
+				Kind: runtimecontract.StepKindFileWrite,
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+					runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				},
+				SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"},
+			},
+			{
+				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace",
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+					runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+					runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				},
+			},
+		},
+		TargetRefs: []string{"existing.go"}, SelectorRefs: []string{"workspace-relative-new-file-target"},
+		ConstraintRefs: []string{"workspace-relative-path"}, ObservedRevision: "tree-existing",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:   "ws-existing", RunID: "run-existing", DefinitionRevision: "definition-existing", DefinitionSeedHash: "seed-existing",
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{
+			ID: "cwi-existing", SliceID: "slice-existing", SourceScope: "dodItem", SourceID: "dod-existing", TargetText: "revise existing deliverable", Order: 1,
+		}},
+		AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile},
+		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-existing", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKind: runtimecontract.StepKindFileWrite,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"existing.go"},
+		},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+		DeclarationRef:        "semantic/cwi-existing",
+	}
+	request := runtimecontract.RuntimeSemanticProofFeasibilityRequest{
+		WorkspaceID: "ws-existing", RunID: "run-existing", FeasibilityBatchID: "batch-existing",
+		WorkspaceDeliverableDirectory: t.TempDir(), Manifest: manifest, Proposal: proposal, OwnerCatalog: catalog,
+	}
+	var constraint *runtimecontract.RuntimeSemanticProposalConstraintError
+	err := runtimecontract.ValidateRuntimeSemanticProofFeasibilityRequest(request, runtimecontract.RuntimeModuleFile)
+	if !errors.As(err, &constraint) || constraint.Field != "operationKind" ||
+		len(constraint.Allowed) != 1 || constraint.Allowed[0] != runtimecontract.RuntimeBlockKindPatchApply {
+		t.Fatalf("create-only existing-target correction = %+v err=%v", constraint, err)
+	}
+
+	request.Proposal.OperationKind = runtimecontract.RuntimeBlockKindPatchApply
+	request.Proposal.OperationVariantID = "text_replace"
+	if err := runtimecontract.ValidateRuntimeSemanticProofFeasibilityRequest(request, runtimecontract.RuntimeModuleFile); err != nil {
+		t.Fatalf("revision-bound replacement proposal rejected: %v", err)
+	}
+}
 
 func TestRuntimeSemanticProofFeasibilityCommandRequiresExactOwnerAndCatalog(t *testing.T) {
 	command := semanticFeasibilityCommandFixture(t)

@@ -18,7 +18,7 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
 | CWI reconciliation | **Mandatory regression reference.** CWI-SO-13/14/16/18 matrices remain required; the development baseline separates immutable declaration from generation binding. |
-| Model-capability output and state ownership | **Code/automated-closed; deployed verification pending.** SO-MC-12..17 close the current-baseline owner envelopes, unified File feasibility, exact binding retirement, pre-provider equivalent-authority fencing, opaque Run persistence and repository-wide gates. SO-MC-10 remains the fresh real-provider live proof. |
+| Model-capability output and state ownership | **Code/automated-closed; deployed verification pending.** SO-MC-12..18 close the current-baseline owner envelopes, unified File feasibility/catalog, target-bound semantic replacement, exact binding retirement, pre-provider equivalent-authority fencing, opaque Run persistence and repository-wide gates. SO-MC-10 remains the fresh real-provider live proof. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -27,12 +27,12 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | ID | Work | Required result | Plan |
 | --- | --- | --- | --- |
 | CWI-SO | Mandatory Runtime admission regression matrix | Definition, presentation and execution order remain distinct; only an eligible CWI can become the unbound current focus; semantic order and seal use the same exact closure; settled CWI still require typed reopen. | [Runtime CWI regression plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| SO-MC | Runtime single-owner and model-capability output closure | SO-MC-12..17 code/automated closure is complete; after development-data cleanup, verify a fresh current-baseline real-provider candidate/dispatch/receipt/evidence terminal chain under SO-MC-10. | [SO-MC plan](runtime-single-owner-model-capability-output-closure-plan.md) |
+| SO-MC | Runtime single-owner and model-capability output closure | SO-MC-12..18 code/automated closure is complete; after deploying the target-bound catalog fix, verify a fresh current-baseline real-provider candidate/dispatch/receipt/evidence terminal chain under SO-MC-10. | [SO-MC plan](runtime-single-owner-model-capability-output-closure-plan.md) |
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
 The prior CWI automated matrix remains mandatory regression coverage, but its historical deployed-only queue is
-superseded by `SO-MC`. The next live proof must use a fresh current development baseline path after SO-MC-12..17 and data
+superseded by `SO-MC`. The next live proof must use a fresh current development baseline path after SO-MC-12..18 and data
 cleanup; a provider,
 capability owner, UI, projection or managed mock result cannot substitute for persisted Orchestrator-owned closure.
 

@@ -7,11 +7,12 @@ Type: implementation-closure-plan
 Last Updated: 2026-08-14
 
 Implementation status (2026-08-14): SO-MC-01 through SO-MC-09 and SO-MC-11 remain regression baselines. SO-MC-12
-through SO-MC-17 are code/automated-closed: current development baseline rejects non-current Resume/Restart, File semantic/operation feasibility shares one
+through SO-MC-18 are code/automated-closed: current development baseline rejects non-current Resume/Restart, File semantic/operation feasibility and its published target-policy catalog share one
 owner policy, exact binding contradictions retire through one Orchestrator-private event, equivalent authority is
 fenced before provider submission, and Run persists SM-2/3/4 as opaque state behind an Orchestrator-authored lifecycle
-fence. Focused/full/race/vet/fmt/boundary/isolated managed/build gates pass. SO-MC-10 remains open and requires a fresh
-deployed current-baseline real-provider terminal proof after development-data cleanup; managed/mock success is not that exit.
+fence. Focused/full/race/vet/fmt/boundary/build gates pass; managed/mock verification remains a regression aid and is not
+the deployed exit. SO-MC-10 remains open and requires a fresh deployed current-baseline real-provider terminal proof
+after development-data cleanup; managed/mock success is not that exit.
 
 ## 1. Purpose And Authority
 
@@ -69,6 +70,15 @@ This is not an LLM-quality-only failure. It is an owner-contract and convergence
 facts across SM-2/SM-3, and Orchestrator treated unchanged infeasibility as new authority. The closure must prevent the
 invalid seal, bound already-sealed contradictions, and make physical persistence unable to interpret another owner's
 state machine.
+
+The clean-data real-provider run on commit `36fc96a7` then supplied a narrower counterexample. `cwi-026` produced and
+accepted a valid `mcp-lsp-bridge/server.go` artifact, advanced from `need_state_change` to `need_assessment`, and preserved
+single-owner transition/delivery ordering. After the CWI reopened, the refreshed File facts correctly reported that the
+target existed, `file/write` was create-only, and revision-bound `patch/apply/text_replace` was the legal replacement.
+Semantic replan and its one bounded correction nevertheless selected `file/write` again; File rejected before a second
+effect and Orchestrator failed closed at revision 93. This proves that owner feasibility and loop fencing were correct,
+but the provider-facing owner catalog still exposed an inconsistent `file/write + exact existing target` combination.
+SO-MC-18 closes that catalog/schema/evaluator intersection without moving any state machine or parsing File diagnostics.
 
 ## 3. Non-Negotiable Production Path
 
@@ -388,6 +398,9 @@ Exit: all automated gates pass and active docs contain one implementation queue.
 - Inspect persisted ceiling, ExpectedDocument, request audit, candidate, dispatch, receipt, evidence and delivery.
 - Assert provider calls remain bounded by actual document recovery/correction and do not grow by recreating an
   equivalent authority.
+- If accepted evidence reopens an existing target, assert the next semantic generation selects an owner-published
+  revision-bound replacement kind/variant, reaches another legal dispatch/evidence transition, and does not repeat
+  create-only `file/write`; subsequent eligible CWI work must not remain permanently starved behind that focus.
 
 Exit: at least one legal CandidateAttempt, SealedDispatch, exact owner receipt and binding-matched evidence exist. Correct fail-closed alone is insufficient for live closure.
 
@@ -406,12 +419,12 @@ results remain regression baselines and the fresh current-baseline live proof re
 The current implementation order is strictly:
 
 ```text
-SO-MC-12 -> SO-MC-13 -> SO-MC-14 -> SO-MC-15 -> SO-MC-16 -> SO-MC-17 -> SO-MC-10
+SO-MC-12 -> SO-MC-13 -> SO-MC-14 -> SO-MC-15 -> SO-MC-16 -> SO-MC-17 -> SO-MC-18 -> SO-MC-10
 ```
 
 SO-MC-01 through SO-MC-09 and SO-MC-11 remain regression baselines. They are not rerun as design phases, but every
 affected regression remains mandatory. SO-MC-10 must start only after incompatible development data is cleared and
-SO-MC-17 passes.
+SO-MC-18 passes.
 
 ### SO-MC-12 — Current-baseline owner and transition envelope
 
@@ -614,6 +627,47 @@ make build
 Exit: all gates pass, production scans show one owner-private transition entry per machine, and no managed/mock result is
 used as the deployed live exit.
 
+### SO-MC-18 — Target-bound semantic replacement convergence
+
+Status: code/automated-closed (2026-08-14).
+
+Affected machines and owners:
+
+- SM-2: Orchestrator remains the sole authority/binding owner; File only publishes immutable admissibility facts;
+- SM-3: Orchestrator remains the sole semantic request/correction/candidate owner; LLM only renders and decodes the
+  sealed manifest;
+- SM-1 and SM-4: no transition or owner change.
+
+Code scope:
+
+- File owner operation-admissibility variants and policy revision;
+- owner-neutral semantic manifest/schema/evaluator/correction value contracts;
+- LLM semantic-plan prompt rendering;
+- Orchestrator retirement/fresh-generation regression only; no new mutation entry.
+
+Work:
+
+- publish `file/write` as `prospective_owner_target` only, while owner-published replacement variants retain exact and
+  existing target policies;
+- compile provider JSON schema from the same operation-kind/variant/target-policy fact used by owner feasibility;
+- when an exact/existing policy is illegal for the selected create-only kind, return only same-owner catalog
+  kind/variant alternatives supporting the same evidence kind, rather than suggesting a prospective target;
+- preserve the typed violation through the one same-manifest correction; never parse owner message text or let LLM,
+  File, Run, Application, projection, or a cross-owner callback mutate SM-2/SM-3;
+- keep actual replacement revision authority in File target snapshot/operation preflight and the candidate manifest.
+
+Required tests:
+
+- File catalog exposes prospective-only `file/write` and exact/existing `patch/apply/text_replace`;
+- provider schema rejects `file/write + exact existing target` before submission;
+- strict decoder returns `operationKind -> patch/apply` and attempt 1 preserves that exact typed alternative;
+- binding contradiction retires one old generation with no effect, and a fresh catalog manifest accepts the
+  revision-bound replacement while duplicate/stale/restart remain idempotent;
+- full File/LLM/runtime-contract/Orchestrator suites and repository gates pass.
+
+Exit: a reopened existing target has a legal replacement inside the sealed semantic candidate space before provider
+submission; failure closure remains a guard, not the only way the Run can stop growing.
+
 ## 14. Verification Matrix
 
 ### Model capability and request identity
@@ -652,8 +706,11 @@ used as the deployed live exit.
 - Decision resolution cannot directly Resume;
 - projection cannot trigger formal transition;
 - stale/duplicate input returns through the same owner reducer;
-- File write cannot overwrite existing target; patch requires matching owner-observed base hash.
+- File write cannot overwrite an existing target; replacement requires the owner-published existing-target variant and
+  matching owner-observed revision/replay facts.
 - File semantic and operation feasibility agree for the same policy/resource revision;
+- schema, strict evaluator and attempt-1 correction reject create-only + existing-target and retain the sealed
+  replacement kind/variant;
 - unchanged owner infeasibility cannot mint another authority;
 - Run compares an opaque lifecycle fence and does not decode Orchestrator state.
 
@@ -728,7 +785,7 @@ The following do not close this plan:
 
 ## 18. Completion Criteria
 
-Code closure requires SO-MC-01 through SO-MC-09, SO-MC-11 through SO-MC-17 and all automated gates. Live closure
+Code closure requires SO-MC-01 through SO-MC-09, SO-MC-11 through SO-MC-18 and all automated gates. Live closure
 additionally requires SO-MC-10 with a fresh current-baseline persisted proof after development-data cleanup that:
 
 1. current-baseline activation contains no stage token authority, persists immutable DefinitionFocus declarations and seals
@@ -741,4 +798,6 @@ additionally requires SO-MC-10 with a fresh current-baseline persisted proof aft
 7. owner boundaries and terminal delivery order remain intact;
 8. semantic and operation feasibility agree for the same File owner revision;
 9. every new authority proves a changed input identity and no equivalent-authority loop occurs;
-10. Run reaches SM-1 transitions only through Run-private internal events without decoding SM-2/3/4 authority.
+10. Run reaches SM-1 transitions only through Run-private internal events without decoding SM-2/3/4 authority;
+11. an existing target is replanned through an owner-published revision-bound replacement and the Run continues beyond
+    the reopened focus instead of closing only by fail-closed.

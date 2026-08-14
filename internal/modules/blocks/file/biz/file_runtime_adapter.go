@@ -342,7 +342,18 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 		kind := runtimemodel.CanonicalRuntimeBlockKind(raw)
 		switch kind {
 		case runtimemodel.StepKindFileWrite:
-			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesCreate, SelectorRefs: selector, ConstraintRefs: constraints})
+			// file/write is the File owner's create-only operation. Existing
+			// targets are intentionally absent from this fact so the semantic
+			// manifest, JSON schema and operation feasibility probe all consume
+			// the same owner policy. Revision-bound replacement remains available
+			// through file/edit or an admissible patch/apply variant.
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{
+				Kind: kind,
+				AllowedTargetPolicies: []runtimemodel.RuntimeOperationTargetPolicy{
+					runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+				},
+				SelectorRefs: selector, ConstraintRefs: constraints,
+			})
 		case runtimemodel.StepKindFileEdit:
 			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesExisting})
 		case runtimemodel.RuntimeBlockKindPatchApply:

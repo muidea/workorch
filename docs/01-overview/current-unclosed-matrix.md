@@ -79,7 +79,7 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 | SO-MC-04..07 | code/focused-closed | LLM owner + Orchestrator SM-3/SM-4 | Typed model ceiling, exact ExpectedDocument equality, compact bounded schema/prompt and whole-document recovery are covered. |
 | SO-MC-08 | code/focused-closed | Approval + all state owners | Approval uses observed fact kinds; owner-private dispatcher and zero-side-effect regressions pass. |
 | SO-MC-09 | automated-closed | repository-wide | Core docs and narrow boundary gates are updated; fmt/vet/full/race/boundary/isolated managed file-backed/build gates pass. |
-| SO-MC-10 | open; deployed-only | deployed Runtime | Requires a real-provider fresh current-baseline candidate/dispatch/receipt/evidence/delivery terminal proof after development data cleanup. |
+| SO-MC-10 | open; deployed-only | deployed Runtime | Requires a real-provider fresh current-baseline candidate/dispatch/receipt/evidence/delivery terminal proof after deploying SO-MC-18; an existing-target reopen must use a revision-bound replacement and continue to later eligible work rather than terminate only by fail-closed. |
 | SO-MC-11 | code/automated-closed | Runtime contract + Orchestrator SM-2/3/4 | Current baseline persists immutable DefinitionFocus declarations; prior generation operation kinds cannot constrain resource-change reseal. |
 | SO-MC-12 | code/automated-closed | Runtime contract + event contract | Current baseline owns owner-policy, authority-input and opaque lifecycle-fence identities; non-current Resume/Restart is side-effect free. |
 | SO-MC-13 | code/automated-closed | File owner | Semantic and operation feasibility share one kind/variant/target/resource policy. |
@@ -87,6 +87,7 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 | SO-MC-15 | code/automated-closed | Orchestrator SM-2/3/4 | Unchanged binding/revision/signature/targets cannot mint another AuthoritySnapshot or provider request. |
 | SO-MC-16 | code/automated-closed | Run owner + Orchestrator persistence adapter | Run owns SM-1 and opaque CAS but does not decode SM-2/3/4 to select lifecycle transitions. |
 | SO-MC-17 | code/automated-closed | repository-wide | Boundary scanner plus transition/restart/stale/duplicate/budget gates prove one owner-private mutation entry per machine. |
+| SO-MC-18 | code/automated-closed | File owner facts + Runtime pure contract + LLM renderer + Orchestrator SM-2/3 regression | `file/write` is prospective-only in the owner catalog; schema/evaluator/correction return only sealed same-owner replacement alternatives for existing targets, while revision authority remains in File preflight/candidate manifest and Runtime transitions remain Orchestrator-private. |
 
 ## D. Optional And Deferred Work
 
@@ -97,9 +98,9 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 
 ## Judgment
 
-The prior persisted counterexample remains a regression baseline, not a supported schema lineage. SO-MC-12..17 now
-close its code and automated owner/convergence defects; live closure still requires one fresh current development baseline
-candidate/dispatch/receipt/evidence/terminal chain after data cleanup. Managed mock verification, aggregate revision growth and correct
+The prior persisted counterexamples remain regression baselines, not a supported schema lineage. SO-MC-12..18 now
+close their code and automated owner/convergence defects; live closure still requires one fresh current development baseline
+candidate/dispatch/receipt/evidence/terminal chain after the SO-MC-18 build is deployed against fresh data. Managed mock verification, aggregate revision growth and correct
 per-attempt fail-closed behavior cannot substitute for bounded forward convergence.
 
 ## Navigation

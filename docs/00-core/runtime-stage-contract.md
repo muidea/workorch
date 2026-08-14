@@ -156,6 +156,13 @@ owner result。semantic provider request 前，SM-2/SM-4 必须已通过 typed p
 admissibility catalog；manifest/hash/schema/evaluator 只暴露该 snapshot/revision 中的 operation、target、selector、
 constraint 与 recipe vocabulary。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
 
+同一 proposal 的 operation kind、concrete variant 与 target policy 必须来自同一条 owner catalog fact；catalog
+已列出的现有目标不得使用仅允许 prospective target 的 create-only fact。若相同 evidence kind 与 target policy
+在同一 owner snapshot 中存在合法 replacement kind/variant，strict evaluator 与同-manifest correction 只能返回该
+sealed alternative，不能解析 owner diagnostic 文本、扩宽 catalog，或把 existing target 改写成 prospective target。
+target content/repository revision 不是 provider 字段；它由 capability owner 的 snapshot/preflight 观测并在 SM-3
+candidate manifest/dispatch 前绑定。该约束只改变 SM-2/SM-3 的 admissible value intersection，不新增状态机或 owner。
+
 canonical capability owner 对 proposal 返回无副作用 feasibility observation。SM-2 校验 current
 workspace/run/definition/seed identity、完整 CWI 覆盖、template/profile 与 owner catalog 交集以及完整 owner batch 后，
 通过 private internal event 原子封存 `CoverageEvidenceBinding`、`RuntimeCWIReconciliationContract`、binding set/hash
