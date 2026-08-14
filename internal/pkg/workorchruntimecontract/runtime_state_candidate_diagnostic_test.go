@@ -1,6 +1,10 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
 
 func TestRuntimeStateRecordClonePreservesCandidateFailureDiagnostic(t *testing.T) {
 	diagnostic := &RuntimeCandidateFailureDiagnostic{
@@ -19,5 +23,18 @@ func TestRuntimeStateRecordClonePreservesCandidateFailureDiagnostic(t *testing.T
 	diagnostic.Allowed[0] = "mutated"
 	if got.Allowed[0] != "replacement" {
 		t.Fatalf("clone aliases candidate diagnostic: %+v", got)
+	}
+}
+
+func TestRuntimeStateRecordCloneDetachesDefinitionFocuses(t *testing.T) {
+	state := RuntimeStateRecord{Facts: RuntimeFacts{DefinitionFocuses: []CoverageFocus{{
+		ID: "definition-focus-1", SliceID: "slice-1",
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+	}}}}
+	clone := state.Clone()
+	clone.Facts.DefinitionFocuses[0].CoverageWorkItemIDs[0] = "cwi-mutated"
+	if state.Facts.DefinitionFocuses[0].CoverageWorkItemIDs[0] != "cwi-1" {
+		t.Fatal("RuntimeStateRecord clone aliases immutable definition focus")
 	}
 }

@@ -169,6 +169,22 @@ func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.Ru
 			aggregate.Facts.DefinitionSeed = seed
 		}
 	}
+	// Direct fixtures frequently mutate their source focus after constructing a
+	// base aggregate. Re-project the immutable declaration before the fixture
+	// enters production validation; production creates it exactly once in
+	// RuntimeBootstrap.InitialFacts.
+	queue := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
+	queue = append(queue, aggregate.Facts.CompletedFocuses...)
+	items := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItem, len(aggregate.Facts.DefinitionSeed.CoverageItems))
+	for _, item := range aggregate.Facts.DefinitionSeed.CoverageItems {
+		items[item.ID] = item
+	}
+	for index := range queue {
+		if queue[index].SliceID == "" && len(queue[index].CoverageWorkItemIDs) == 1 {
+			queue[index].SliceID = items[queue[index].CoverageWorkItemIDs[0]].SliceID
+		}
+	}
+	aggregate.Facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses(queue)
 	if aggregate.Facts.CWILedgerSchemaVersion == "" {
 		// Test-only post-semantic fixtures begin from the same unbound activation
 		// shape as production. Do not let an older fixture's hand-written binding
@@ -223,8 +239,7 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 	if facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent || ledger.Manifest == nil || ledger.Document == nil {
 		t.Fatalf("test semantic projection requires initialized ledger and complete document")
 	}
-	sourceFocuses := append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...)
-	sourceFocuses = append(sourceFocuses, facts.CompletedFocuses...)
+	sourceFocuses := facts.DefinitionFocuses
 	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, *ledger.Document, ledger.Feasibilities, sourceFocuses)
 	if err != nil {
 		t.Fatalf("compile test semantic bindings for canonical projection: %v", err)

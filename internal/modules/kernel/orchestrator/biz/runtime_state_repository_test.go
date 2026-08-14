@@ -4361,6 +4361,7 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  bootstrap.Activation,
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", DefinitionSeed: bootstrap.DefinitionSeed, EvidenceRevision: "evidence-v1-00000000000000000000",
+		DefinitionFocuses: runtimecontract.CompileRuntimeDefinitionFocuses(bootstrap.Focuses),
 		Focus:             bootstrap.Focuses[0],
 		Coverage:          []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities:      runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},

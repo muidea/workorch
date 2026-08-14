@@ -75,7 +75,8 @@ request 应按 cacheability 从高到低组织：
   `CorrectionDirective`；owner feasibility、Run/repair/recovery action、governance/continuation、raw reason、
   raw evidence/assessment summary 与 operation payload 均不得渲染，也不得由 prompt 文案补充未封存的 allowed 值
 - semantic-plan 使用同一 C0～C5 顺序：C0 中立 semantic schema/rules，C1 完整 Goal/DoD，C2 execution/capability
-  contract，C3 Definition seed + sealed semantic manifest/schema；manifest 必须包含 provider request 前已获取的 owner
+  contract 与 immutable DefinitionFocus declarations，C3 Definition seed + sealed semantic manifest/schema；上一 semantic
+  generation 的 operation/target/binding 只能进入 volatile lineage，不能回写 C2 declaration。manifest 必须包含 provider request 前已获取的 owner
   admissibility snapshot/revision 与 bounded target/selector/constraint/recipe vocabulary，C4 attempt 0/1 与 provider-safe rejection，C5
   acceptance slice refs。C4 不得渲染 `OriginalMessage`、raw provider body 或 details content。
 - semantic owner 报告 catalog `stale | prerequisite_required` 时，原 request/session 都只保留 audit，不把 owner

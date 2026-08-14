@@ -30,9 +30,9 @@ type CoverageFocus struct {
 	AssessmentID        string
 	AssessmentText      string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
-	// CoverageEvidenceBindings are activation-compiled declarations for this
-	// focus's exact CWI set. They are not a coverage ledger; only SM-2 may
-	// convert a sealed-operation receipt match into CWI credit.
+	// CoverageEvidenceBindings are SM-2-sealed, generation-specific proof
+	// bindings for this focus's exact CWI set. They are not a coverage ledger;
+	// only SM-2 may convert a sealed-operation receipt match into CWI credit.
 	CoverageEvidenceBindings []CoverageEvidenceBinding
 	// EvidenceDeclarationRef records the profile/template declaration that
 	// supplied semantic proof for this focus.  It is opaque to Runtime and
@@ -487,10 +487,15 @@ type RuntimeFacts struct {
 	// DefinitionSeed is the persisted, non-authoritative semantic planning
 	// input. Only the Orchestrator semantic planning ledger may turn it into
 	// proof bindings.
-	DefinitionSeed   RuntimeDefinitionSeed
-	EvidenceRevision string
-	Focus            CoverageFocus
-	RemainingFocuses []CoverageFocus
+	DefinitionSeed RuntimeDefinitionSeed
+	// DefinitionFocuses are the immutable activation declarations for each CWI.
+	// They remain separate from Focus/RemainingFocuses/CompletedFocuses because
+	// those queues are replaced with generation-specific semantic bindings by
+	// SM-2. Only fresh activation may populate this declaration queue.
+	DefinitionFocuses []CoverageFocus
+	EvidenceRevision  string
+	Focus             CoverageFocus
+	RemainingFocuses  []CoverageFocus
 	// CompletedFocuses retains the already-advanced SM-2 queue entries.  It is
 	// required to deterministically requeue a profile-declared dependent focus
 	// when later accepted source evidence invalidates its prior closure.
@@ -502,7 +507,7 @@ type RuntimeFacts struct {
 	Capabilities     RuntimeCapabilities
 	Resources        RuntimeResourceFacts
 	Activation       RuntimeActivationContext
-	// ReconciliationContract is the activation-sealed CWI proof declaration.
+	// ReconciliationContract is the SM-2-sealed generation-specific CWI proof contract.
 	// It is persisted as part of the Orchestrator aggregate facts so a resume
 	// never reconstructs reconciliation authority from mutable profile text.
 	ReconciliationContract RuntimeCWIReconciliationContract
@@ -1342,6 +1347,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.DefinitionRevision = strings.TrimSpace(f.DefinitionRevision)
 	f.CWILedgerSchemaVersion = strings.TrimSpace(f.CWILedgerSchemaVersion)
 	f.DefinitionSeed = f.DefinitionSeed.Clone()
+	f.DefinitionFocuses = normalizeCoverageFocusQueue(f.DefinitionFocuses)
 	f.EvidenceRevision = strings.TrimSpace(f.EvidenceRevision)
 	f.Focus = f.Focus.Normalized()
 	f.RemainingFocuses = normalizeCoverageFocusQueue(f.RemainingFocuses)
@@ -1411,6 +1417,11 @@ func (f RuntimeFacts) Validate() error {
 		}
 		if f.DefinitionSeed.DefinitionRevision != f.DefinitionRevision {
 			return fmt.Errorf("runtime facts definition seed revision mismatch")
+		}
+		if len(f.DefinitionFocuses) != 0 {
+			if err := ValidateRuntimeDefinitionFocuses(f.DefinitionSeed, f.DefinitionFocuses); err != nil {
+				return fmt.Errorf("runtime facts definition focuses: %w", err)
+			}
 		}
 	}
 	if f.Focus.ID == "" {

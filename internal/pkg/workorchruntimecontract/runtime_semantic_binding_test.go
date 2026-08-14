@@ -190,6 +190,30 @@ func TestValidateRuntimeSemanticPlanSourceDeclarationsRejectsVariantBeforeFeasib
 	}
 }
 
+func TestValidateRuntimeSemanticPlanSourceDeclarationsDoesNotReusePriorGenerationOperationKind(t *testing.T) {
+	proofSet := RuntimeSemanticCWIProofSet{
+		CoverageWorkItemID: "cwi-1",
+		Proposals: []RuntimeSemanticProofProposal{{
+			CoverageWorkItemID: "cwi-1", OperationKind: RuntimeBlockKindPatchApply,
+			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+		}},
+	}
+	priorGeneration := CoverageFocus{
+		ID: "semantic-focus-generation-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, AcceptedStepKinds: []string{StepKindFileWrite},
+	}
+	if err := validateRuntimeSemanticProofSetSource(proofSet, &priorGeneration); err == nil || !strings.Contains(err.Error(), "outside source declaration") {
+		t.Fatalf("prior generation must demonstrate the old false declaration gate, got %v", err)
+	}
+	definitionDeclaration := CoverageFocus{
+		ID: "definition-focus-cwi-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+	}
+	if err := validateRuntimeSemanticProofSetSource(proofSet, &definitionDeclaration); err != nil {
+		t.Fatalf("immutable declaration must allow an owner-feasible next-generation operation kind: %v", err)
+	}
+}
+
 func TestRuntimeSemanticFeasibilitySetUsesProposalIdentityWithinOneCWI(t *testing.T) {
 	manifest, document, facts, _ := semanticIndependentProofSetFixture(t)
 	if err := ValidateRuntimeSemanticFeasibilitySet(manifest, document, facts, true); err != nil {

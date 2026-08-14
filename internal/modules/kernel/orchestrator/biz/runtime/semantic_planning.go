@@ -938,8 +938,7 @@ func (c *RuntimeController) observeSemanticPlanBatchDocument(ctx context.Context
 			return false, err
 		}
 		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
-			sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
+			sourceFocuses := aggregate.Facts.DefinitionFocuses
 			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, sourceFocuses); err != nil {
 				return false, err
 			}
@@ -1201,8 +1200,7 @@ func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceI
 			return false, fmt.Errorf("%w: semantic plan document cannot be evaluated from phase %q", common.ErrConflict, ledger.Phase)
 		}
 		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
-			sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
+			sourceFocuses := aggregate.Facts.DefinitionFocuses
 			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, sourceFocuses); err != nil {
 				return false, err
 			}
@@ -1483,8 +1481,7 @@ func (c *RuntimeController) sealSemanticContract(ctx context.Context, workspaceI
 	if aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot seal while a dispatch is active", common.ErrConflict)
 	}
-	sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
-	sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
+	sourceFocuses := aggregate.Facts.DefinitionFocuses
 	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, *ledger.Document, ledger.Feasibilities, sourceFocuses)
 	if err != nil {
 		return RuntimeAggregate{}, err

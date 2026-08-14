@@ -257,13 +257,13 @@ EOF
   exit 1
 fi
 
-# Schema v6 has one output-token authority: the LLM-owner ProviderCeiling.
+# Schema v7 retains one output-token authority: the LLM-owner ProviderCeiling.
 # Configuration, activation, policy and execution contracts must not regain
 # stage-specific token fields or a selector mode.
 legacy_stage_token_authority_matches="$(source_matches 'OutputTokenBudgetMode|semanticPlanMaxOutputTokens|candidateMaxOutputTokens|SemanticPlanMaxOutputTokens|CandidateMaxOutputTokens' internal application config web || true)"
 if [[ -n "$legacy_stage_token_authority_matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: schema-v6 production code/config reintroduced
+Boundary contract violation: schema-v7 production code/config reintroduced
 stage-specific output-token authority. Use persisted ProviderCeiling and the
 sealed ExpectedDocument value.
 

@@ -200,7 +200,8 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 	}
 	facts := RuntimeFacts{
 		WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: b.Definition.Revision,
-		DefinitionSeed: b.DefinitionSeed.Clone(), EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
+		DefinitionSeed: b.DefinitionSeed.Clone(), DefinitionFocuses: CompileRuntimeDefinitionFocuses(b.Focuses),
+		EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
 		RemainingFocuses:  append([]CoverageFocus(nil), b.Focuses[1:]...),
 		Activation:        b.Activation.Clone(),
 		StateChange:       NewRuntimeStateChangeLedger(b.StateChangeRequirement),

@@ -63,6 +63,18 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	if len(facts.Activation.Skills) != 1 || facts.Activation.Skills[0].Instruction != "typed instruction" {
 		t.Fatalf("initial facts lost activation: %+v", facts.Activation)
 	}
+	if len(facts.DefinitionFocuses) != 2 {
+		t.Fatalf("initial facts definition focus count = %d", len(facts.DefinitionFocuses))
+	}
+	for _, declaration := range facts.DefinitionFocuses {
+		if len(declaration.AcceptedStepKinds) != 0 || len(declaration.TargetRefs) != 0 || declaration.ValidationRecipeID != "" || len(declaration.RequiredCheckRefs) != 0 || len(declaration.CoverageEvidenceBindings) != 0 {
+			t.Fatalf("definition focus retained generation-specific authority: %+v", declaration)
+		}
+	}
+	facts.Focus.AcceptedStepKinds = []string{RuntimeBlockKindPatchApply}
+	if len(facts.DefinitionFocuses[0].AcceptedStepKinds) != 0 {
+		t.Fatal("semantic generation mutation changed immutable definition focus")
+	}
 	cloned.Focuses[0].ID = "focus-2"
 	if SameRuntimeBootstrap(bootstrap, cloned) {
 		t.Fatal("focus drift was not detected")

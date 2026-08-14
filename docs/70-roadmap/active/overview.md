@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap
 
-Last Updated: 2026-08-13
+Last Updated: 2026-08-14
 
 ## Purpose
 
@@ -17,8 +17,8 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | --- | --- |
 | Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
 | Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **Mandatory regression reference.** CWI-SO-13/14/16/18 automated matrices remain required, but their former schema-v5 deployed-only exit is superseded by SO-MC schema-v6 live closure. |
-| Model-capability output and state ownership | **Live closure pending.** SO-MC-01..09 are code/automated-closed: schema v6 removes stage token authority, ExpectedDocument uses the selected model's typed ProviderCeiling, prompt/schema enforce compact complete JSON, Approval uses owner-private observed facts, and all repository gates pass. SO-MC-10 real-provider fresh deployed proof remains. |
+| CWI reconciliation | **Mandatory regression reference.** CWI-SO-13/14/16/18 matrices remain required; schema-v7 adds immutable declaration / generation binding separation after the latest live counterexample. |
+| Model-capability output and state ownership | **Live closure pending.** Schema-v6 `run-002` proved 29000 model ceiling, recovery, dispatch, File receipt and evidence advance, then exposed old-generation `file/write` being reused as a declaration against new `patch/apply`. SO-MC-11 closes this in schema v7; SO-MC-10 requires a fresh v7 terminal proof. |
 | Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
 | 22-component EventHub structure | Completed/archive baseline. It remains a boundary regression, not an active Runtime authority queue. |
 
@@ -27,12 +27,12 @@ claims are archived and cannot override a current persisted aggregate counterexa
 | ID | Work | Required result | Plan |
 | --- | --- | --- | --- |
 | CWI-SO | Mandatory Runtime admission regression matrix | Definition, presentation and execution order remain distinct; only an eligible CWI can become the unbound current focus; semantic order and seal use the same exact closure; settled CWI still require typed reopen. | [Runtime CWI regression plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| SO-MC | Runtime single-owner and model-capability output closure | Remove configuration token authority, introduce the schema-v6 boundary, seal model-declared effective ceiling into ExpectedDocument, enforce compact complete JSON, and verify one owner-private mutation path per state. | [SO-MC plan](runtime-single-owner-model-capability-output-closure-plan.md) |
+| SO-MC | Runtime single-owner and model-capability output closure | Retain model-ceiling closure, introduce schema-v7 immutable declaration / binding-generation separation, and verify one owner-private mutation path per state. | [SO-MC plan](runtime-single-owner-model-capability-output-closure-plan.md) |
 | WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
 | OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
 The prior CWI automated matrix remains mandatory regression coverage, but its schema-v5 deployed-only queue is
-superseded by `SO-MC`. The next live proof must use the fresh schema-v6 path after model-capability output and owner
+superseded by `SO-MC`. The next live proof must use the fresh schema-v7 path after model-capability output and owner
 boundary closure; a provider, capability owner, UI, projection or managed mock result cannot substitute for persisted
 Orchestrator-owned closure.
 

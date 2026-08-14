@@ -16,11 +16,10 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 }
 
 // CompileRuntimeSemanticBindingsWithSourceFocuses compiles one complete
-// semantic document with the persisted source focus declarations that remain
-// relevant to its eligible CWI rows. Semantic proposals choose only within the
-// sealed manifest; source declarations supply bounded selector replay data
-// that capability owners require after the source focus is replaced by the
-// newly sealed semantic focus.
+// semantic document with immutable fresh-activation declarations for its
+// eligible CWI rows. Semantic proposals choose only within the sealed
+// manifest; a previous generation's focus/binding must never be supplied as a
+// source declaration.
 func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility, sourceFocuses []CoverageFocus) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest = manifest.Normalized()
 	document = document.Normalized()

@@ -357,7 +357,7 @@ func TestGMMR2StartupCurrentSchemaDuplicateCWILedgerMarksRunFreshActivationWitho
 	}
 }
 
-func TestGMMR2DirectDrivePreCWILedgerSchemaMarksRunFreshActivationWithoutRetry(t *testing.T) {
+func TestGMMR2DirectDriveSchemaV6MarksRunFreshActivationWithoutRetry(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-v2")
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
@@ -365,7 +365,7 @@ func TestGMMR2DirectDrivePreCWILedgerSchemaMarksRunFreshActivationWithoutRetry(t
 	runs := memoryrepo.NewRunRepository()
 	bootstrap := runtimeBootstrap()
 	legacy := runtimeStateRecordFromAggregate(runtimeAggregate(t, 11))
-	legacy.SchemaVersion = 5
+	legacy.SchemaVersion = 6
 	run := runtimeRunForTestBootstrap(common.RunStateActive, bootstrap)
 	run.RuntimeState = &legacy
 	if err := runs.Create(ctx, run); err != nil {

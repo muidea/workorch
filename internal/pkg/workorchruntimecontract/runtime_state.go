@@ -162,11 +162,12 @@ type RuntimeStateRecord struct {
 }
 
 // RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
-// Version 6 removes activation-sealed stage token limits. ProviderCeiling is
-// the sole persisted model capability fact and ExpectedDocument is the sole
-// resolved request budget. Earlier aggregates require a fresh activation
-// instead of an in-place reinterpretation.
-const RuntimeStateSchemaVersionCurrent uint32 = 6
+// Version 7 separates immutable activation declarations from generation-
+// specific semantic focus bindings. ProviderCeiling remains the sole persisted
+// model capability fact and ExpectedDocument the sole resolved request budget.
+// Earlier aggregates require a fresh activation instead of an in-place
+// reinterpretation.
+const RuntimeStateSchemaVersionCurrent uint32 = 7
 
 // ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")
@@ -336,6 +337,9 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
+	}
+	if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {
+		return fmt.Errorf("runtime state definition focuses: %w", err)
 	}
 	if err := ValidateRuntimeStateCWILedger(r.Facts, r.Reconciliation); err != nil {
 		return err
@@ -786,6 +790,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret := r
 	ret.Definition = r.Definition.Clone()
 	ret.Facts = r.Facts.Normalized()
+	ret.Facts.DefinitionFocuses = CompileRuntimeDefinitionFocuses(r.Facts.DefinitionFocuses)
 	ret.SemanticPlanning = r.SemanticPlanning.Clone()
 	ret.Reconciliation = r.Reconciliation.Clone()
 	ret.CoverageProofLineage = NormalizeRuntimeCoverageProofLineage(r.CoverageProofLineage)

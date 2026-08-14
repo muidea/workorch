@@ -4,11 +4,13 @@ Status: active
 
 Type: implementation-closure-plan
 
-Last Updated: 2026-08-13
+Last Updated: 2026-08-14
 
-Implementation status (2026-08-13): SO-MC-01 through SO-MC-09 are code/automated-closed; focused/full/race/vet/fmt,
-boundary, isolated managed file-backed and build gates pass. SO-MC-10 remains live-pending and requires a real-provider
-fresh schema-v6 persisted proof; managed/mock verification cannot close it.
+Implementation status (2026-08-14): SO-MC-01 through SO-MC-09 remain code/automated-closed. The first real-provider
+schema-v6 run proved model-ceiling, complete-document recovery, sealed dispatch, File receipt and evidence advance, then
+exposed a generation/declaration authority defect. SO-MC-11 closes that defect with schema v7 and immutable
+`DefinitionFocuses`; focused/full/vet/fmt/boundary/release gates pass. SO-MC-10 remains live-pending until a fresh
+schema-v7 run reaches terminal delivery.
 
 ## 1. Purpose And Authority
 
@@ -40,6 +42,14 @@ fresh schema-v6 persisted proof; managed/mock verification cannot close it.
 2. prompt/schema 没有把完整、紧凑、有限 JSON 的边界统一传达给 LLM。
 
 因此不能只提高一个常量，也不能只切换为“使用 provider ceiling”。必须同时关闭 token 唯一权威、ExpectedDocument identity、输出引导和 owner-private mutation 边界。
+
+2026-08-14 的 fresh schema-v6 `run-002` 进一步证明：selected model 的 `ProviderCeiling` 与两类
+ExpectedDocument 均为 29000；attempt 0 unknown-field rejection 后，attempt 1 复用 authority/manifest/stable prefix 并形成
+sealed dispatch；File owner create receipt 的 target/hash 与工作区一致，assessment dispatch 已提交，evidence revision 从 0
+推进到 2，且没有 duplicate side effect。随后资源变化重开同一 CWI 时，owner catalog 已允许带 base revision 的
+`patch/apply`，但 semantic admission 错把上一 generation 的 `file/write` focus 当作 immutable source declaration，最终以
+`runtime_contract_defect` 终止。该反例要求 schema v7 显式分离 immutable Definition declaration 与 generation binding；
+不得通过扩宽 File 权限或跨 owner 指定 CWI 状态修补。
 
 ## 3. Non-Negotiable Production Path
 
@@ -198,17 +208,20 @@ Mandatory invariants:
 
 ## 10. Runtime Schema Boundary
 
-This closure upgrades Runtime aggregate schema from v5 to v6 because schema-v5 activation and stable-prefix identity persist stage token limits. Ignoring those fields in place would change an existing Run's authority across restart.
+The token closure upgraded Runtime aggregate schema from v5 to v6 because schema-v5 activation and stable-prefix identity persisted stage token limits. The generation closure now upgrades v6 to v7 because v6 does not persist immutable source declarations separately from semantic focus bindings. Reinterpreting a v6 focus in place would change existing authority across restart.
 
-Schema v6:
+Schema v7 retains the v6 token rules and additionally:
 
 - removes semantic/candidate stage token authority from activation/execution contract;
 - keeps ProviderCeiling as the sole persisted model capability fact;
 - keeps ExpectedDocument as the resolved per-request value;
 - removes stage token configuration from stable-prefix hashing;
 - retains ceiling revision, ExpectedDocument hash and request identity fences.
+- persists activation-only `DefinitionFocuses` separately from SM-2 generation focus queues;
+- validates semantic documents and seal output only against immutable declarations;
+- lets receipt/resource-change retirement and reseal replace generation bindings without widening declarations.
 
-Schema v5 is not implicitly migrated or reinterpreted. Resume returns `fresh_activation_required` with zero provider/capability work. Explicit restart creates a new schema-v6 Run with new activation/request lineage and no predecessor candidate, request or CWI credit.
+Schema v6 and earlier are not implicitly migrated or reinterpreted. Resume returns `fresh_activation_required` with zero provider/capability work. Explicit restart creates a new schema-v7 Run with new activation/request lineage and no predecessor candidate, request or CWI credit.
 
 ## 11. Approval Owner Closure
 
@@ -225,7 +238,7 @@ Remove `Target common.ApprovalState` from the private event. External commands c
 
 | Component | Required change | Forbidden result |
 | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | schema v6; remove stage token authority; retain pure ProviderCeiling/ExpectedDocument validation | I/O, retry choice, state mutation, model-specific branching |
+| `internal/pkg/workorchruntimecontract` | schema v7; remove stage token authority; separate immutable declaration from binding generation; retain pure ProviderCeiling/ExpectedDocument validation | I/O, retry choice, state mutation, model-specific branching |
 | `internal/pkg/workorchconfig` | remove stage token and mode fields/defaults/values | second token authority |
 | `internal/pkg/workorchruntimepolicy` | remove stage token policy projection | runtime override of model ceiling |
 | `application/workorchd/.../activationports` | stop copying token limits; seal provider selection only | runtime ceiling calculation or retry |
@@ -313,10 +326,19 @@ Exit: all automated gates pass and active docs contain one implementation queue.
 ### SO-MC-10 — Fresh deployed live closure
 
 - Build and deploy the verified binary.
-- Explicitly restart into a fresh schema-v6 Run.
+- Explicitly restart into a fresh schema-v7 Run.
 - Inspect persisted ceiling, ExpectedDocument, request audit, candidate, dispatch, receipt, evidence and delivery.
 
 Exit: at least one legal CandidateAttempt, SealedDispatch, exact owner receipt and binding-matched evidence exist. Correct fail-closed alone is insufficient for live closure.
+
+### SO-MC-11 — Immutable declaration / binding-generation separation
+
+- Persist fresh activation declarations independently from mutable SM-2 focus queues.
+- Route receipt-driven retirement, CWI reopen and reseal through existing Orchestrator private events and aggregate CAS.
+- Reject schema-v6 Resume before provider/capability work.
+- Prove a prior `file/write` generation cannot constrain a new owner-feasible `patch/apply` generation.
+
+Exit: code/automated closure passes without File-specific Runtime branching or a fifth state machine; fresh schema-v7 live proof remains SO-MC-10.
 
 ## 14. Verification Matrix
 
@@ -413,14 +435,14 @@ The following do not close this plan:
 - concatenate partial provider output;
 - ask Application/UI to Resume after truncation;
 - weaken strict schema, semantic seal, target policy or File overwrite protection;
-- migrate schema-v5 aggregate in place;
+- migrate schema-v6 or earlier aggregate in place;
 - mark live closure after a fail-closed run that never reaches dispatch.
 
 ## 18. Completion Criteria
 
-Code closure requires SO-MC-01 through SO-MC-09 and all automated gates. Live closure additionally requires SO-MC-10 with persisted proof that:
+Code closure requires SO-MC-01 through SO-MC-09 plus SO-MC-11 and all automated gates. Live closure additionally requires SO-MC-10 with persisted proof that:
 
-1. schema-v6 activation contains no stage token authority;
+1. schema-v7 activation contains no stage token authority and persists immutable DefinitionFocus declarations;
 2. ProviderCeiling comes from the selected model's current capability revision;
 3. ExpectedDocument and actual provider request use the exact effective ceiling;
 4. prompt/schema enforce complete compact bounded JSON;

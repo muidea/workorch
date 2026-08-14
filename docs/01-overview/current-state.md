@@ -133,15 +133,18 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
    最新部署 Run 已证明 schema-v5 semantic seal、eligible focus、stable authority、whole-document recovery 和
    fail-closed 零副作用边界正常，但 operations document 连续三次达到 WorkOrch 封存的 8192-token 上限，未形成
    CandidateAttempt、Dispatch、Receipt 或 Evidence。这使原 schema-v5 deployed-only 验收失效：配置/activation 中的
-   stage token authority 必须删除，fresh Runtime 升级为 schema v6，由 LLM owner 对当前 model 返回唯一 typed
+   stage token authority 必须删除；该部分已在 schema v6 完成，由 LLM owner 对当前 model 返回唯一 typed
    `ProviderCeiling`，Orchestrator 将 `EffectiveMaxOutputTokens` 封存为 `ExpectedDocument` 的具体请求值；同时 prompt、
    schema、strict decoder 与 evaluator 必须从同一 manifest 约束完整紧凑 JSON。所有正式状态继续只由唯一 owner 的
    private internal event/reducer 迁移，Approval 的 target-state 私有输入也必须改为 granted/rejected observed fact。
    详见 [SO-MC active plan](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)。
-   当前 SO-MC-01～08 已完成代码与定向回归，schema v6、token 唯一权威、ExpectedDocument 等值、紧凑有界 JSON、
+   当前 SO-MC-01～09 已完成代码与自动化回归，token 唯一权威、ExpectedDocument 等值、紧凑有界 JSON、
    whole-document recovery 与 Approval fact-event 均已落地；SO-MC-09 的 fmt/vet/full/race/boundary/isolated managed
-   file-backed/build 门禁已通过。SO-MC-10 仍需真实 provider 的 fresh deployed persisted proof，managed mock 不构成
-   live closure。
+   file-backed/build 门禁已通过。2026-08-14 fresh schema-v6 `run-002` 已证明 29000 ceiling、attempt recovery、sealed
+   dispatch、File create receipt 与 evidence advance，但资源变化后的下一 semantic generation 错把旧 `file/write` binding
+   当作 immutable declaration，拒绝 owner-feasible `patch/apply`。SO-MC-11 因此以 schema v7 分离 activation-only
+   `DefinitionFocuses` 与 SM-2 generation focus queue；schema v6 Resume 只返回 `fresh_activation_required` 且零 owner work。
+   SO-MC-10 仍需 fresh schema-v7 terminal persisted proof，managed mock 不构成 live closure。
 2. **Runtime CWI 单 owner 矩阵继续作为必需回归基线，不再独立定义实施顺序。**
    `run-073`～`run-082` 表明 canonical identity、retirement、target/catalog、variant、dependency 与 proof authority
    曾被按 live 反例逐项补齐；近期提交审计还确认 provider artifact/metric authority 曾发生引入后撤回的真实反转。
@@ -152,7 +155,7 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
    CWI 时在同一 CAS 以 `eligible_closure_changed` 退休 generation；SM-3 complete admission 在 dispatch 前拒绝 target 漂移，
    File owner 将 `file/write` 限定为 create-only，已有文件替换必须使用带 owner-observed `baseHash` 的 `patch/apply`；
    Decision/Approval 生命周期也只经各自 private event/reducer 更新。跨 owner typed fact、owner receipt/evidence、Run
-   lifecycle 与 terminal delivery 仍符合 owner 边界；这些自动化结果必须纳入 SO-MC schema-v6 回归，不再以部署
+   lifecycle 与 terminal delivery 仍符合 owner 边界；这些自动化结果必须纳入 SO-MC schema-v7 回归，不再以部署
    schema-v5 二进制作为独立 exit。不得通过削弱 semantic seal/owner preflight、解析 message、让
    Application/LLM/capability owner 创建或排序 current focus、新增全局索引或第五状态机规避。普通用户仍只提供
    Goal/DoD/template/directory，所有正式状态仍只由唯一 owner 的 private internal event/reducer 变更。详见
