@@ -13,6 +13,12 @@
 - Approval 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordApprovalEvidenceCommand`，并接收 `RecordApprovalEvidenceResult`。
 - approve/reject command 只提供不可变授权事实；目标状态、解决人、时间戳和 repository update 只允许经 Approval-private lifecycle event/reducer 完成。
 
+## Owner 内部职责边界
+
+- `owner.go` 只保留 Approval Biz 的构造、订阅与生命周期；`command_router.go` 是唯一 command ingress，并用静态穷尽分类器将 Topic 委派到 query、resolution 或 delete handler，未知 Topic fail closed。
+- `query_commands.go` 只读 Approval repository；`resolution_commands.go` 保持 scope admission、Approval-private reducer、evidence、notification 和返回 scope 校验的既有顺序；approve/reject 共享同一 owner transaction，不形成两个状态机。
+- `approval_scope.go` 只负责 workspace/run/step fence 与无 scope 唯一对象解析；`approval_notification.go` 只发布 Owner 已提交的 immutable lifecycle fact。
+
 ## 相关约束
 
 - Approval 操作必须携带 workspace/run/approval scope；同 ID 跨 workspace 或 run 冲突时不得误操作。

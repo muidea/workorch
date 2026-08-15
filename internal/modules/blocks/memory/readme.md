@@ -13,6 +13,12 @@
 - `application/workorchd`、`kernel/orchestrator` 和 `kernel/governance` 通过 EventHub 查询、搜索或写入 Memory；LLM 只消费 Orchestrator 组织后的有界记忆上下文。
 - Eventstream 和 projection 按需订阅 Memory 的具体通知。
 
+## Owner 内部职责边界
+
+- `owner.go` 只保留 Memory Biz 的构造、订阅与生命周期；`command_router.go` 是唯一 command ingress，并静态穷尽地区分 MemoryItem 与 MemoryRecallTrace 两个命令族，未知 Topic fail closed。
+- `item_commands.go` 内聚 item CRUD/search，`recall_trace_commands.go` 内聚 recall trace upsert/query/delete；两者仍共享同一 Memory Biz、repository group、workspace context fence 和 notification authority。
+- `memory_notification.go` 只在对应 owner repository 操作成功后发布 item lifecycle 或 recall recorded fact，不允许外围组件补发、重建或代写 Memory 状态。
+
 ## 相关约束
 
 - 所有 MemoryItem 和 RecallTrace 操作必须携带 workspace scope；delete 前必须读取对象并校验 WorkspaceID。

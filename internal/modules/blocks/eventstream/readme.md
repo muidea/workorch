@@ -23,6 +23,18 @@ module ID 和 EventHub 合同身份均为 `blocks/eventstream`。
   EventHub lane helper，不保存业务 payload mapper 或全局字段索引。
 - workspace purge 必须携带 WorkspaceID，并只删除该 workspace 的 EventRecord。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `pkg/recordpayload` 仍是唯一 audit wire codec package；原 842 行 payload 文件已按 workspace/run/definition、
+  decision/approval/governance、result/artifact/continuation、memory/recall、LLM usage 事件族分成纯 typed codec 文件。
+  字段 key 仍只在 `payload.go` 定义，wire version 仍只在 `version.go` 定义。
+- `biz/event_stream_service.go`、唯一 repository append authority、workspace revision/high-watermark/index、query/purge 与
+  `EventRecordAppendedData` 发布顺序均未修改。codec 文件不持有 Hub/repository，不依据审计 payload 修复任何 owner。
+- C22-06 Eventstream 切片完成后，非测试 Go 为 16 个文件/1,884 LOC，测试保持 5 个文件/1,002 LOC，package
+  保持 6；最大 codec 文件从 `pkg/recordpayload/payload.go` 842 行降为
+  `pkg/recordpayload/governance_payload.go` 211 行，组件最大生产文件变为未修改的 append owner
+  `biz/event_stream_service.go` 796 行；至少 500 行生产文件从 2 个降为 1 个，生产 `CC>30` 继续为 0。
+
 ## 相关约束
 
 - Eventstream 不得把投影或审计记录当成 owner state，也不得据此修复 Workspace、Run、Result 或治理状态。

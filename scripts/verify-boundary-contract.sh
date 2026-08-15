@@ -227,20 +227,20 @@ fi
 # The state owners and Runtime drive must use the checked binder rather
 # than silently replacing a pre-existing workspace context from a command.
 workspace_scope_bindings=(
-  "internal/modules/blocks/run/biz/owner.go"
+  "internal/modules/blocks/run/biz/command_router.go"
   "internal/modules/blocks/run/biz/lifecycle_handler.go"
-  "internal/modules/blocks/workspace/biz/owner.go"
+  "internal/modules/blocks/workspace/biz/command_router.go"
   "internal/modules/blocks/result/biz/owner.go"
   "internal/modules/blocks/result/biz/lifecycle_handler.go"
-  "internal/modules/blocks/decision/biz/owner.go"
-  "internal/modules/blocks/approval/biz/owner.go"
-  "internal/modules/blocks/memory/biz/owner.go"
+  "internal/modules/blocks/decision/biz/command_router.go"
+  "internal/modules/blocks/approval/biz/command_router.go"
+  "internal/modules/blocks/memory/biz/command_router.go"
   "internal/modules/blocks/eventstream/biz/event_stream_service.go"
   "internal/modules/kernel/orchestrator/biz/runtime_drive.go"
   "internal/modules/kernel/orchestrator/biz/runtime_operation_executor.go"
   "internal/modules/kernel/orchestrator/biz/governance_evidence_command.go"
   "internal/modules/kernel/orchestrator/biz/owner.go"
-  "internal/modules/kernel/governance/biz/service.go"
+  "internal/modules/kernel/governance/biz/worker_reconciliation.go"
   "internal/modules/application/workorchd/biz/workspace_command_gateway.go"
 )
 for path in "${workspace_scope_bindings[@]}"; do
@@ -738,6 +738,7 @@ fi
 
 if ! grep -q -F -- 'TopicOpenRuntimeGovernanceRequest' internal/modules/blocks/decision/pkg/events/topics.go ||
    ! grep -q -F -- 'decisionevents.TopicOpenRuntimeGovernanceRequest' internal/modules/blocks/decision/biz/owner.go ||
+   ! grep -q -F -- 'func (m *Biz) handleRuntimeGovernanceRequest' internal/modules/blocks/decision/biz/runtime_governance_adapter.go ||
    ! grep -q -F -- 'blocks/decision/pkg/events' internal/modules/kernel/orchestrator/biz/runtime_governance_request_adapter.go; then
   echo "boundary contract violation: Decision owner Runtime governance request contract is not registered or consumed" >&2
   exit 1
@@ -894,7 +895,7 @@ fi
 file_policy="internal/modules/blocks/file/biz/file_owner_feasibility_policy.go"
 if [[ ! -f "$file_policy" ]] ||
    ! grep -q -F -- 'evaluateFileOwnerFeasibilityPolicy' internal/modules/blocks/file/biz/owner.go ||
-   ! grep -q -F -- 'evaluateFileOwnerFeasibilityPolicy' internal/modules/blocks/file/biz/file_runtime_adapter.go; then
+   ! grep -q -F -- 'evaluateFileOwnerFeasibilityPolicy' internal/modules/blocks/file/biz/file_runtime_feasibility.go; then
   echo "boundary contract violation: File semantic and operation feasibility do not share one owner policy" >&2
   exit 1
 fi
@@ -1306,7 +1307,8 @@ fi
 # file move or consumer replacement requires an ownership review here.
 runtime_effect_policy_consumers=(
   "internal/pkg/workorchruntimecontract/candidate_contract_manifest.go:RuntimeConvergenceEffectPolicyFor"
-  "internal/modules/blocks/llm/biz/runtime_candidate_provider.go:RuntimeConvergenceEffectInstruction"
+  "internal/modules/blocks/llm/biz/runtime_candidate_contract.go:RuntimeConvergenceEffectInstruction"
+  "internal/modules/blocks/llm/biz/runtime_candidate_schema.go:RuntimeConvergenceEffectInstruction"
   "internal/pkg/workorchruntimecontract/runtime_effect_scope.go:RuntimeConvergenceEffectPolicyFor"
   "internal/pkg/workorchruntimecontract/runtime_effect_resolve.go:RuntimeConvergenceEffectPolicyFor"
   "internal/pkg/workorchruntimecontract/runtime_operation_receipt.go:RuntimeConvergenceEffectPolicyFor"
@@ -2207,7 +2209,7 @@ for required_field in PredecessorRunID PredecessorResultID; do
 		exit 1
 	fi
 done
-if ! grep -q -F -- 'ev.Source() != "kernel/orchestrator"' internal/modules/blocks/run/biz/owner.go; then
+if ! grep -q -F -- 'ev.Source() != "kernel/orchestrator"' internal/modules/blocks/run/biz/runtime_state_commands.go; then
 	echo "boundary contract violation: opaque Runtime aggregate updates must authenticate the Orchestrator source" >&2
 	exit 1
 fi
@@ -2216,7 +2218,7 @@ fi
 # mirror. Keep its struct limited to the LLM owner's narrow provider-safe
 # values so owner actions, recovery continuation, raw facts and repair hints
 # cannot reach a future candidate request by accident.
-c4_projection_file="internal/modules/blocks/llm/biz/runtime_candidate_provider.go"
+c4_projection_file="internal/modules/blocks/llm/biz/runtime_candidate_context.go"
 matches="$(
   sed -n '/^type runtimeCandidateExecutionTailProjection struct {/,/^}/p' "$c4_projection_file" |
     grep -n -E -- 'RuntimeAction|RuntimeRepairHint|RuntimeContinuationContext|FailureFact|EvidenceFact|RuntimeAssessmentFact|RuntimeRejectedOperationShape' || true

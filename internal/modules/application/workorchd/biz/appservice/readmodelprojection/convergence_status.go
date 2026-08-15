@@ -15,25 +15,43 @@ func mapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectionco
 		RunID:       snapshot.Run.ID,
 		RunState:    snapshot.Run.State,
 	}
-	if snapshot.GapBaseline != nil {
-		ret.CurrentFocusID = focusIDFromMap(snapshot.GapBaseline.CurrentFocus)
-		ret.SuggestedNextAction = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
-		ret.CurrentGap = firstNonEmptyString(ret.CurrentGap, currentGapFromTodoItems(snapshot.GapBaseline.TodoItems))
-		ret.MissingEvidenceKinds = compactUniqueStrings(requiredEvidenceKindsFromTodoItems(snapshot.GapBaseline.TodoItems))
-		ret.AcceptedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs))
-		ret.RejectedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.RejectedEvidenceRefs))
-		if refs := compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs); len(refs) > 0 {
-			ret.LatestAcceptedEvidenceRef = refs[len(refs)-1]
-		}
-		if open := len(snapshot.GapBaseline.OpenCoverageWorkItems); open > 0 {
-			ret.RemainingCoverageItemCount = open
-		}
-		if reason := strings.TrimSpace(snapshot.GapBaseline.NextAction.Reason); reason != "" {
-			ret.GapSummary = reason
-		}
+	applyGapBaselineConvergenceStatus(&ret, snapshot.GapBaseline)
+	applyAcceptanceConvergenceStatus(&ret, snapshot.Acceptance)
+	applyTaskProgressConvergenceStatus(&ret, snapshot.TaskProgress)
+	applyActivationConvergenceStatus(&ret)
+	applyDecisionEligibilityConvergenceStatus(&ret, snapshot.Steps)
+	if !finalizeConvergenceStatus(&ret, snapshot.Workspace.ID) {
+		return nil
 	}
-	if snapshot.Acceptance.CurrentFocus != nil {
-		focus := snapshot.Acceptance.CurrentFocus
+	return &ret
+}
+
+func applyGapBaselineConvergenceStatus(ret *projectioncontract.ConvergenceStatus, baseline *projectioncontract.GapBaseline) {
+	if ret == nil || baseline == nil {
+		return
+	}
+	ret.CurrentFocusID = focusIDFromMap(baseline.CurrentFocus)
+	ret.SuggestedNextAction = strings.TrimSpace(baseline.NextAction.Kind)
+	ret.CurrentGap = firstNonEmptyString(ret.CurrentGap, currentGapFromTodoItems(baseline.TodoItems))
+	ret.MissingEvidenceKinds = compactUniqueStrings(requiredEvidenceKindsFromTodoItems(baseline.TodoItems))
+	ret.AcceptedEvidenceCount = len(compactUniqueStrings(baseline.AcceptedEvidenceRefs))
+	ret.RejectedEvidenceCount = len(compactUniqueStrings(baseline.RejectedEvidenceRefs))
+	if refs := compactUniqueStrings(baseline.AcceptedEvidenceRefs); len(refs) > 0 {
+		ret.LatestAcceptedEvidenceRef = refs[len(refs)-1]
+	}
+	if open := len(baseline.OpenCoverageWorkItems); open > 0 {
+		ret.RemainingCoverageItemCount = open
+	}
+	if reason := strings.TrimSpace(baseline.NextAction.Reason); reason != "" {
+		ret.GapSummary = reason
+	}
+}
+
+func applyAcceptanceConvergenceStatus(ret *projectioncontract.ConvergenceStatus, acceptance projectioncontract.AcceptanceProjection) {
+	if ret == nil {
+		return
+	}
+	if focus := acceptance.CurrentFocus; focus != nil {
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, focus.ID)
 		ret.CurrentSliceID = firstNonEmptyString(ret.CurrentSliceID, focus.SliceID)
 		if ret.AcceptedEvidenceCount == 0 {
@@ -52,10 +70,10 @@ func mapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectionco
 			ret.GapSummary = strings.TrimSpace(focus.FailureSignature)
 		}
 	}
-	if snapshot.Acceptance.ActiveSliceID != "" {
-		ret.CurrentSliceID = firstNonEmptyString(ret.CurrentSliceID, snapshot.Acceptance.ActiveSliceID)
+	if acceptance.ActiveSliceID != "" {
+		ret.CurrentSliceID = firstNonEmptyString(ret.CurrentSliceID, acceptance.ActiveSliceID)
 	}
-	if budget := snapshot.Acceptance.Budget; budget != nil {
+	if budget := acceptance.Budget; budget != nil {
 		ret.RepairAttempts = budget.RepairAttempts
 		ret.MaxRepairAttempts = budget.MaxRepairAttemptsPerFocus
 		ret.RepeatedFailureSignatureCount = budget.RepeatedFailureSignatures
@@ -69,24 +87,27 @@ func mapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectionco
 			ret.GapSummary = firstNonEmptyString(budget.LastDecisionReason, budget.LastNoDeltaReason)
 		}
 	}
-	// TaskProgress / Runtime / AssessmentOutcome are authoritative product-boundary summaries.
-	progress := snapshot.TaskProgress
-	if progress.Runtime != nil {
-		rv2 := progress.Runtime
-		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, rv2.CurrentFocusID)
-		ret.ConvergenceState = strings.TrimSpace(rv2.ConvergenceState)
-		if rv2.AcceptedEvidenceCount > ret.AcceptedEvidenceCount {
-			ret.AcceptedEvidenceCount = rv2.AcceptedEvidenceCount
+}
+
+func applyTaskProgressConvergenceStatus(ret *projectioncontract.ConvergenceStatus, progress projectioncontract.TaskProgress) {
+	if ret == nil {
+		return
+	}
+	if runtime := progress.Runtime; runtime != nil {
+		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, runtime.CurrentFocusID)
+		ret.ConvergenceState = strings.TrimSpace(runtime.ConvergenceState)
+		if runtime.AcceptedEvidenceCount > ret.AcceptedEvidenceCount {
+			ret.AcceptedEvidenceCount = runtime.AcceptedEvidenceCount
 		}
-		if rv2.RejectedEvidenceCount > ret.RejectedEvidenceCount {
-			ret.RejectedEvidenceCount = rv2.RejectedEvidenceCount
+		if runtime.RejectedEvidenceCount > ret.RejectedEvidenceCount {
+			ret.RejectedEvidenceCount = runtime.RejectedEvidenceCount
 		}
-		ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, rv2.MissingEvidenceKinds...))
+		ret.MissingEvidenceKinds = compactUniqueStrings(append(ret.MissingEvidenceKinds, runtime.MissingEvidenceKinds...))
 		if ret.CurrentGap == "" {
-			ret.CurrentGap = firstNonEmptyString(rv2.FailureClass, rv2.FailureCode)
+			ret.CurrentGap = firstNonEmptyString(runtime.FailureClass, runtime.FailureCode)
 		}
 		if ret.GapSummary == "" {
-			ret.GapSummary = firstNonEmptyString(rv2.FailureMessage, rv2.FailureSignature)
+			ret.GapSummary = firstNonEmptyString(runtime.FailureMessage, runtime.FailureSignature)
 		}
 	}
 	outcome := progress.AssessmentOutcome
@@ -100,29 +121,43 @@ func mapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectionco
 	if ret.GapSummary == "" && strings.TrimSpace(outcome.LatestRejectedReason) != "" {
 		ret.GapSummary = strings.TrimSpace(outcome.LatestRejectedReason)
 	}
-	if isTerminalRunStateForActivation(ret.RunState) && ret.RemainingCoverageItemCount > 0 {
+}
+
+func applyActivationConvergenceStatus(ret *projectioncontract.ConvergenceStatus) {
+	if ret != nil && isTerminalRunStateForActivation(ret.RunState) && ret.RemainingCoverageItemCount > 0 {
 		ret.NextActivationRequired = true
 	}
-	if denied := latestDecisionEligibilityDenied(snapshot.Steps); denied != nil {
+}
+
+func applyDecisionEligibilityConvergenceStatus(ret *projectioncontract.ConvergenceStatus, steps []projectioncontract.StepView) {
+	if ret == nil {
+		return
+	}
+	if denied := latestDecisionEligibilityDenied(steps); denied != nil {
 		ret.DecisionEligibilityDenied = true
 		ret.DecisionNotEligibleReason = denied.reason
 		ret.DecisionNotEligibleStepID = denied.stepID
 	}
-	ret.DecisionCause = convergenceDecisionCause(ret)
-	if ret.WorkspaceID == "" && snapshot.Workspace.ID != "" {
-		ret.WorkspaceID = snapshot.Workspace.ID
+	ret.DecisionCause = convergenceDecisionCause(*ret)
+}
+
+func finalizeConvergenceStatus(ret *projectioncontract.ConvergenceStatus, workspaceID string) bool {
+	if ret == nil {
+		return false
+	}
+	if ret.WorkspaceID == "" && workspaceID != "" {
+		ret.WorkspaceID = workspaceID
 	}
 	if ret.RunID == "" {
-		return nil
+		return false
 	}
-	// Default gap summary from structured fields when still empty.
 	if ret.GapSummary == "" && ret.CurrentGap != "" {
 		ret.GapSummary = ret.CurrentGap
 	}
 	if ret.GapSummary == "" && ret.RemainingCoverageItemCount > 0 {
 		ret.GapSummary = fmt.Sprintf("%d coverage items remaining", ret.RemainingCoverageItemCount)
 	}
-	return &ret
+	return true
 }
 
 func isTerminalRunStateForActivation(state string) bool {

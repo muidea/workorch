@@ -17,6 +17,8 @@
   terminal delivery fact；delivery 不携带 RuntimeAction 或独立 administrative kind。
 - Runtime accepted/rejected Result 由 Result owner 消费该事实、在自身 reducer 中构造并持久化；结果 ID 同时包含
   workspace/run scope，重复 terminal delivery 必须幂等。
+- terminal material 只在统一 `CloneResult` 边界执行一次深拷贝；Result owner 不在进入该边界前重复复制顶层
+  evidence/artifact slice。该转换必须继续通过隔离回归和 allocation benchmark。
 - `application/workorchd`、Eventstream 和 projection 按需导入本 block 的事件合同查询或订阅。
 
 ## 相关约束

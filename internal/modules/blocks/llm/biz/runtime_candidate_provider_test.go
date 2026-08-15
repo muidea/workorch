@@ -274,7 +274,7 @@ func TestRuntimeSemanticPlanProviderRejectsMixedDocumentFields(t *testing.T) {
 	}
 }
 
-func runtimeSemanticProviderTestRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
+func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	definition := runtimecontract.RuntimeDefinitionContext{
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver a bounded artifact",

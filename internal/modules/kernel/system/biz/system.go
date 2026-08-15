@@ -26,15 +26,11 @@ type Dependencies struct {
 	BackgroundRoutine task.BackgroundRoutine
 }
 
-func New(eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) (*System, error) {
-	if eventHub == nil {
+func NewWithDependencies(deps Dependencies) (*System, error) {
+	if deps.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &System{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine)}, nil
-}
-
-func NewWithDependencies(deps Dependencies) (*System, error) {
-	return New(deps.EventHub, deps.BackgroundRoutine)
+	return &System{Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine)}, nil
 }
 
 func (s *System) Start(ctx context.Context) error {

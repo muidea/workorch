@@ -14,6 +14,17 @@
   target ref、owner stable factual category、完整安全 original diagnostic 和 evidence/ref，不返回跨组件 Status 双权威。
 - runtime policy、Governance 和 Approval 在远程副作用执行前完成准入。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `RuntimeAdapter` 仍是唯一 SSH capability adapter；原 366 行文件按 operation/result ingress、target/session/
+  credential validation、SSH transport/credential materialization 与 output bounder 分成同 package 的四个职责文件。
+  当前 diagnostic 只是在唯一 ingress 上映射 timeout/command failure，没有足够独立规则形成额外 facade 或 package。
+- `ProbeOperation` 继续只验证结构化 target/session/credential 和本地 private-key 文件，不打开网络；执行仍只有
+  一次受 timeout 约束的 SSH process。临时 private key/askpass 仍由 transport 内同一 cleanup 闭包释放，secret
+  不进入 typed result、diagnostic 或 projection。
+- C22-05 SSH 清理后，非测试 Go 为 17 个文件/1,054 LOC，测试保持 5 个文件/414 LOC，package 保持 4；
+  最大生产文件从 `ssh_runtime_adapter.go` 366 行降为 `owner.go` 248 行，生产 `CC>30` 继续为 0。
+
 ## 相关约束
 
 - target、session 和 credential 必须使用结构化引用；secret 不得进入事件、投影或日志。

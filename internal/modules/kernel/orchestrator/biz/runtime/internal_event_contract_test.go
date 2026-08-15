@@ -54,6 +54,107 @@ func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T
 	}
 }
 
+func TestRuntimeInternalEventDispatcherRoutesEveryKindToExactlyOnePayloadFamily(t *testing.T) {
+	kinds, _, _ := runtimeInternalEventSourceFacts(t)
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "internal_event.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse runtime internal event dispatcher: %v", err)
+	}
+
+	var dispatcher *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "ApplyInternalEvent" {
+			continue
+		}
+		dispatcher = function
+		break
+	}
+	if dispatcher == nil {
+		t.Fatal("RuntimeController.ApplyInternalEvent is missing")
+	}
+
+	var gate *ast.SwitchStmt
+	ast.Inspect(dispatcher.Body, func(node ast.Node) bool {
+		statement, ok := node.(*ast.SwitchStmt)
+		if !ok {
+			return true
+		}
+		gate = statement
+		return false
+	})
+	if gate == nil {
+		t.Fatal("ApplyInternalEvent has no exhaustive kind gate")
+	}
+
+	wantRoute := map[runtimeInternalEventPayloadClass]string{
+		runtimeInternalEventPayloadActivation:  "applyActivationInternalEvent",
+		runtimeInternalEventPayloadAuthority:   "applyAuthorityInternalEvent",
+		runtimeInternalEventPayloadTransaction: "applyTransactionInternalEvent",
+		runtimeInternalEventPayloadDelivery:    "applyDeliveryInternalEvent",
+	}
+	counts := map[string]int{}
+	defaultFailClosed := false
+	for _, statement := range gate.Body.List {
+		clause, ok := statement.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		route := runtimeInternalEventClauseRoute(clause)
+		if len(clause.List) == 0 {
+			defaultFailClosed = route == "unsupportedRuntimeInternalEvent"
+			continue
+		}
+		for _, expression := range clause.List {
+			identifier, ok := expression.(*ast.Ident)
+			if !ok {
+				t.Fatalf("dispatcher case uses non-static kind expression %T", expression)
+			}
+			kind, known := kinds[identifier.Name]
+			if !known {
+				t.Fatalf("dispatcher handles undeclared kind %s", identifier.Name)
+			}
+			payloadClass, classified := runtimeInternalFactPayloadClass(kind)
+			if !classified {
+				t.Fatalf("dispatcher kind %s has no payload class", identifier.Name)
+			}
+			if route != wantRoute[payloadClass] {
+				t.Fatalf("dispatcher kind %s routes through %q, want %q", identifier.Name, route, wantRoute[payloadClass])
+			}
+			counts[identifier.Name]++
+		}
+	}
+	if !defaultFailClosed {
+		t.Fatal("ApplyInternalEvent default route does not fail closed")
+	}
+	for name := range kinds {
+		if counts[name] != 1 {
+			t.Fatalf("dispatcher kind %s route count = %d, want exactly 1", name, counts[name])
+		}
+	}
+}
+
+func runtimeInternalEventClauseRoute(clause *ast.CaseClause) string {
+	for _, statement := range clause.Body {
+		returnStatement, ok := statement.(*ast.ReturnStmt)
+		if !ok || len(returnStatement.Results) == 0 {
+			continue
+		}
+		call, ok := returnStatement.Results[0].(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		switch function := call.Fun.(type) {
+		case *ast.Ident:
+			return function.Name
+		case *ast.SelectorExpr:
+			return function.Sel.Name
+		}
+	}
+	return ""
+}
+
 func TestRuntimeInternalEventEnvelopeContainsOnlyScopeAndConcretePayloads(t *testing.T) {
 	typeOfEvent := reflect.TypeOf(RuntimeInternalEvent{})
 	expected := []struct {

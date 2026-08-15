@@ -249,118 +249,26 @@ func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result Prerequ
 func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite runtimecontract.RuntimePrerequisite, result PrerequisiteResult) error {
 	switch prerequisite.Kind {
 	case runtimecontract.PrerequisiteKindManifest:
-		if result.Manifest == nil || strings.TrimSpace(result.Manifest.Revision) == "" {
-			return fmt.Errorf("manifest prerequisite returned no manifest")
-		}
-		facts.Resources.Manifest = result.Manifest
+		return applyManifestPrerequisiteResult(facts, result)
 	case runtimecontract.PrerequisiteKindTargetSnapshot:
-		if result.TargetSnapshot == nil || result.TargetSnapshot.TargetRef != prerequisite.SubjectRef || !result.TargetSnapshot.Complete() {
-			return fmt.Errorf("target snapshot prerequisite returned no complete snapshot for %q", prerequisite.SubjectRef)
-		}
-		facts.Resources.TargetSnapshots = append(facts.Resources.TargetSnapshots, *result.TargetSnapshot)
+		return applyTargetSnapshotPrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindTargetSelection:
-		if result.TargetSelection == nil {
-			return fmt.Errorf("target selection prerequisite returned no selection")
-		}
-		selection := result.TargetSelection.Normalized()
-		if selection.PrerequisiteID != prerequisite.ID || selection.OwnerModuleID != prerequisite.OwnerModuleID || selection.TargetRole != prerequisite.SubjectRef || selection.SelectorRef != prerequisite.TargetSelectorRef || selection.SelectorOwnerRef != prerequisite.TargetSelectorOwnerRef || selection.SelectorSubjectRef != prerequisite.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(selection.SelectorCandidateRefs, prerequisite.TargetSelectorCandidateRefs) || selection.ProspectiveTargetRef != prerequisite.ProspectiveTargetRef {
-			return fmt.Errorf("target selection prerequisite returned a mismatched selection")
-		}
-		if err := selection.Validate(); err != nil {
-			return fmt.Errorf("target selection prerequisite returned invalid selection: %w", err)
-		}
-		facts.Resources.TargetSelection = &selection
+		return applyTargetSelectionPrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindFailureTarget:
-		if facts.Failure == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
-			return fmt.Errorf("failure target prerequisite has no typed failure identity")
-		}
-		if result.FailureTarget == nil || strings.TrimSpace(result.FailureTarget.Signature) == "" || len(result.FailureTarget.TargetRefs) == 0 {
-			return fmt.Errorf("failure target prerequisite returned no typed target identity")
-		}
-		failure := facts.Failure.Normalized()
-		if strings.TrimSpace(result.FailureTarget.Signature) != failure.Signature || !sameRuntimeTargetRefs(result.FailureTarget.TargetRefs, failure.TargetRefs) {
-			return fmt.Errorf("failure target prerequisite does not match current typed failure")
-		}
-		target := *result.FailureTarget
-		target.Signature = strings.TrimSpace(target.Signature)
-		target.TargetRefs = normalizeRuntimeTargetRefs(target.TargetRefs)
-		facts.Resources.FailureTarget = &target
+		return applyFailureTargetPrerequisiteResult(facts, result)
 	case runtimecontract.PrerequisiteKindCapability:
-		if result.Capabilities == nil || !capabilitiesSatisfy(*result.Capabilities, prerequisite.CapabilityClass, prerequisite.RequiredCapabilities) {
-			return fmt.Errorf("capability prerequisite returned no required capabilities")
-		}
-		// Owner merges are additive and must not replace another owner's sealed kinds.
-		facts.Capabilities.StateChangeKinds = mergeCapabilityKinds(facts.Capabilities.StateChangeKinds, result.Capabilities.StateChangeKinds)
-		facts.Capabilities.ValidationKinds = mergeCapabilityKinds(facts.Capabilities.ValidationKinds, result.Capabilities.ValidationKinds)
-		facts.Capabilities.GovernanceKinds = mergeCapabilityKinds(facts.Capabilities.GovernanceKinds, result.Capabilities.GovernanceKinds)
+		return applyCapabilityPrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindCapabilityState:
-		if result.CapabilityState == nil || result.CapabilityState.RequirementID != prerequisite.ID || result.CapabilityState.OwnerModuleID != prerequisite.OwnerModuleID || result.CapabilityState.CapabilityStateKind != prerequisite.CapabilityStateKind || result.CapabilityState.SubjectRef != prerequisite.SubjectRef {
-			return fmt.Errorf("capability-state prerequisite returned a mismatched snapshot")
-		}
-		facts.Resources.CapabilityStates = append(facts.Resources.CapabilityStates, *result.CapabilityState)
+		return applyCapabilityStatePrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindValidationScratch:
-		if result.ValidationScratch == nil || strings.TrimSpace(result.ValidationScratch.Reference) == "" || strings.TrimSpace(result.ValidationScratch.Revision) == "" {
-			return fmt.Errorf("validation scratch prerequisite returned no scratch reference")
-		}
-		facts.Resources.ValidationScratch = result.ValidationScratch
+		return applyValidationScratchPrerequisiteResult(facts, result)
 	case runtimecontract.PrerequisiteKindProviderCeiling:
-		if result.ProviderCeiling == nil {
-			return fmt.Errorf("provider ceiling prerequisite returned no ceiling")
-		}
-		if err := result.ProviderCeiling.Validate(); err != nil {
-			return fmt.Errorf("provider ceiling prerequisite returned invalid ceiling: %w", err)
-		}
-		if result.ProviderCeiling.MaxBytes < prerequisite.MinimumBytes {
-			return fmt.Errorf("provider ceiling prerequisite returned an insufficient ceiling")
-		}
-		if target := facts.Activation.ProviderSelection.Target.Normalized(); target.ProviderID != "" || target.ModelID != "" {
-			if !result.ProviderCeiling.Selection.Target.Same(target) {
-				return fmt.Errorf("provider ceiling target does not match activation target")
-			}
-		}
-		facts.Resources.ProviderCeiling = result.ProviderCeiling
+		return applyProviderCeilingPrerequisiteResult(facts, prerequisite, result)
 	case runtimecontract.PrerequisiteKindOperationAdmissibility:
-		if result.OperationAdmissibility == nil {
-			return fmt.Errorf("operation admissibility prerequisite returned no inventory")
-		}
-		inventory := result.OperationAdmissibility.Normalized()
-		if inventory.PrerequisiteID != prerequisite.ID || inventory.OwnerModuleID != prerequisite.OwnerModuleID {
-			return fmt.Errorf("operation admissibility prerequisite returned a mismatched inventory")
-		}
-		if err := inventory.Validate(); err != nil {
-			return fmt.Errorf("operation admissibility prerequisite returned invalid inventory: %w", err)
-		}
-		if inventory.AcquisitionBinding != "" && !runtimeCapabilityStateBindingExists(facts.Resources.CapabilityStates, inventory.OwnerModuleID, inventory.AcquisitionBinding) {
-			return fmt.Errorf("operation admissibility inventory references an unknown owner capability-state acquisition binding")
-		}
-		// Owner inventories establish admissibility facts for SM-2 and must
-		// remain complete enough to cover a target produced by an accepted
-		// earlier operation.  They are not the per-request candidate-context
-		// projection controlled by MaxCandidateContextItems.
-		maxItems := runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems
-		if maxItems < 1 || len(inventory.TargetRefs) > maxItems || len(inventory.SelectorRefs) > maxItems {
-			return fmt.Errorf("operation admissibility inventory exceeds owner inventory bound")
-		}
-		required := make([]string, 0, len(prerequisite.RequiredCapabilities))
-		for _, kind := range prerequisite.RequiredCapabilities {
-			if canonical := runtimecontract.CanonicalRuntimeBlockKind(kind); canonical != "" {
-				required = append(required, canonical)
-			}
-		}
-		available := map[string]struct{}{}
-		for _, kind := range inventory.OperationKinds {
-			available[kind] = struct{}{}
-		}
-		for _, kind := range required {
-			if _, ok := available[kind]; !ok {
-				return fmt.Errorf("operation admissibility inventory does not include required kind %q", kind)
-			}
-		}
-		facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
+		return applyOperationAdmissibilityPrerequisiteResult(facts, prerequisite, result)
 	default:
 		return fmt.Errorf("unsupported prerequisite kind %q", prerequisite.Kind)
 	}
-	return nil
 }
 
 func runtimeCapabilityStateBindingExists(values []runtimecontract.RuntimeCapabilityStateSnapshot, owner, binding string) bool {

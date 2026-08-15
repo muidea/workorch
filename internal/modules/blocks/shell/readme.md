@@ -18,6 +18,23 @@
 - Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入；只有本 block 返回独立 typed
   `GovernanceRequirement` 时才可进入治理，普通失败或 budget exhaustion 不能创建 ticket。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `RuntimeAdapter` 仍是唯一 Shell capability adapter；原 1,977 行混合文件已按 catalog/admissibility、validation
+  preflight、feasibility、execution transaction、workspace effect observation、managed resource、runner/output bound、
+  policy 与 diagnostic 分为同 package 的 owner-private 文件。没有新增 Block、service facade、共享可变 executor、
+  registry、EventHub round trip 或 receipt owner。
+- `ExecuteOperation` 仍是唯一公开执行入口，并继续按 policy/evidence/timeout/validation preflight、before observation、
+  一次物理 process、after observation、typed diagnostic/receipt 的原顺序封口。AST 回归冻结其中恰好一处
+  `exec.CommandContext`、一处 `Start` 和一处 `Wait`；拆分没有增加 command retry、后台进程或第二 effect path。
+- state-changing effect、managed validation resource、bounded stdout/stderr 和 validation evidence 仍由同一 Shell
+  owner 的具体类型表达；policy/diagnostic helper 不修改 Runtime authority，也不把 process 结果直接判为 coverage。
+- C22-05 Shell 切片完成后，非测试 Go 为 26 个文件/3,600 LOC，测试为 13 个文件/2,680 LOC，package 保持 4；
+  最大生产文件从 `shell_runtime_adapter.go` 1,977 行降为 `owner.go` 598 行，至少 500 行生产文件从 2 个降为 1 个，
+  生产 `CC>30` 继续为 0。`BenchmarkRuntimeAdapterExecuteBoundedCommand` 的 20 次、3 轮样本为
+  `531,749～538,546 ns/op`、`78,664～79,141 B/op`、`147～149 allocs/op`，每次迭代恰好启动一个前台进程，
+  不执行 repository load/CAS 或 EventHub 调用。
+
 ## 相关约束
 
 - command、工作目录、运行时间和输出大小必须有界，不能默认启动后台长期任务。

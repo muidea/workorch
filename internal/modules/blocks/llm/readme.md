@@ -4,7 +4,7 @@ Status: active
 
 Type: module-readme
 
-Last Updated: 2026-08-11
+Last Updated: 2026-08-16
 
 ## 职责
 
@@ -42,6 +42,25 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     只能改变下次进程启动使用的 persisted configuration；它们不得改变运行中的 catalog、Responses、embedding、
     provider ceiling 或 sealed-ceiling revision 校验。application 通过 typed active-configuration query 比较
     persisted revision，未匹配时投影 `restartRequired` 并拒绝 catalog refresh。
+
+## 当前内聚收口切片（2026-08-16）
+
+- Runtime operations candidate 渲染按 `request`、`context`、`contract/instruction`、`schema` 与 provider
+  transaction 分文件；semantic plan 渲染按 admission/finalization、prompt、projection、instruction、diagnostic
+  与 integrity 分文件。所有 helper 均为同一 LLM Biz 的 private 纯函数，没有新增 Block、service facade、状态机、
+  mutation entry、EventHub round trip 或 provider client。
+- `runtimeProviderRequest` 仍是 operations/semantic document 的唯一静态穷尽入口；`GenerateCandidate` 仍只执行一次
+  `completeProviderWithSealedCeiling` 物理调用。请求渲染不读取当前 catalog 重新选择模型，也不创建 attempt、retry、
+  correction、governance 或 terminal authority。
+- C0～C5 section ID、顺序、cacheability/protected 标记、stable prefix identity、sealed ceiling、预算门禁和
+  audit-safe/provider-safe diagnostic 分界保持不变。语义纠正中的 existing-target 事实仍只投影 File owner catalog
+  与 revision，不把 LLM 建议升级为 admissibility authority。
+- C22-05 LLM 切片完成后，非测试 Go 为 34 个文件/7,323 LOC，测试为 16 个文件/3,653 LOC，package 保持 7；
+  最大生产文件由 `runtime_candidate_provider.go` 1,873 行降为 `owner.go` 1,026 行，至少 500 行生产文件从 4 个
+  降为 3 个。生产 `CC>30` 从 `2 / 40` 降为 `1 / 39`；剩余项是本切片外的 HTTP Responses stream parser。
+- focused benchmark `BenchmarkRuntimeSemanticPlanProviderRequest` 在 100 次、3 轮采样中为
+  `618,084～628,553 ns/op`、`457,319～460,374 B/op`、`5,855～5,856 allocs/op`，作为后续 request rendering
+  优化的初始基线。
 
 ## EventHub 合同
 

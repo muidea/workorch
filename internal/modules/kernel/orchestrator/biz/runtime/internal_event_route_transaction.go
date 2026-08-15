@@ -1,0 +1,258 @@
+package runtime
+
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+// applyTransactionInternalEvent keeps the transaction payload family behind
+// one private route, then delegates to cohesive planning, candidate/dispatch,
+// or governance handlers. No delegate owns persistence or another entry point.
+func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
+	switch event.Kind {
+	case RuntimeInternalEventSemanticPlanRequestStarted,
+		RuntimeInternalEventSemanticPlanEvaluated,
+		RuntimeInternalEventSemanticPlanCorrectionRequired,
+		RuntimeInternalEventCandidateRequestEnsured,
+		RuntimeInternalEventSemanticPlanBatchCompiled,
+		RuntimeInternalEventSemanticPlanBatchAdvanced,
+		RuntimeInternalEventSemanticPlanBatchFeasibilityObserved,
+		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
+		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
+		RuntimeInternalEventCandidateRequestSubmitted,
+		RuntimeInternalEventCandidateRequestOutcomeObserved,
+		RuntimeInternalEventCandidateRequestRecoveryRequired,
+		RuntimeInternalEventCandidateDocumentObserved,
+		RuntimeInternalEventCandidateRequestStaleObserved,
+		RuntimeInternalEventCandidateRequestTerminated:
+		return c.applyPlanningTransactionInternalEvent(ctx, event)
+	case RuntimeInternalEventCandidateAttemptBegun,
+		RuntimeInternalEventCandidateDocumentRejected,
+		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateFeasibilityObserved,
+		RuntimeInternalEventCandidatePrerequisiteStaleObserved,
+		RuntimeInternalEventCandidatePrerequisiteObserved,
+		RuntimeInternalEventCandidateSealed,
+		RuntimeInternalEventGovernanceDispatchSealed,
+		RuntimeInternalEventCandidateRejected,
+		RuntimeInternalEventOperationReceiptObserved,
+		RuntimeInternalEventDispatchExecutionRequested:
+		return c.applyCandidateDispatchTransactionInternalEvent(ctx, event)
+	case RuntimeInternalEventGovernanceResolutionObserved:
+		return c.applyGovernanceResolutionTransactionInternalEvent(ctx, event)
+	default:
+		return unsupportedRuntimeInternalEvent(event.Kind)
+	}
+}
+
+func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
+	result := RuntimeInternalEventResult{}
+	switch event.Kind {
+	case RuntimeInternalEventSemanticPlanRequestStarted:
+		if event.Transaction.SemanticManifest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.startSemanticPlanRequest(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticManifest, event.Transaction.StablePrefixHash, event.Transaction.LogicalRequestID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanEvaluated:
+		if event.Transaction.SemanticDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.evaluateSemanticPlan(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.SemanticDocument)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanCorrectionRequired:
+		if event.Transaction.SemanticDiagnostic == nil {
+			return result, common.ErrInvalidArgument
+		}
+		if event.Transaction.ExpectedDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.requireSemanticPlanCorrection(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.StablePrefixHash, event.Transaction.LogicalRequestID, *event.Transaction.ExpectedDocument, *event.Transaction.SemanticDiagnostic)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestEnsured:
+		ensured, err := c.planning.ensureCandidateRequestSessionWithExpected(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.DocumentKind, event.Transaction.StablePrefixHash, event.Transaction.ManifestHash, event.Transaction.CorrectionHash, event.Transaction.ExpectedDocument)
+		result.Aggregate = ensured.Aggregate
+		result.CandidateSession = ensured.Session
+		if ensured.AuthorityFailure != nil {
+			failure := *ensured.AuthorityFailure
+			result.PendingAuthorityFailure = &failure
+		}
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchCompiled:
+		if event.Transaction.SemanticPlanBatch == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.compileSemanticPlanBatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatch)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchAdvanced:
+		if event.Transaction.SemanticPlanBatch == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.advanceSemanticPlanBatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatch, event.Transaction.SemanticPlanBatchNextState)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchFeasibilityObserved:
+		if event.Transaction.SemanticPlanBatchFeasibilityResult == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.observeSemanticPlanBatchFeasibility(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatchFeasibilityResult)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchDocumentObserved:
+		if event.Transaction.SemanticPlanBatchDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.observeSemanticPlanBatchDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatchDocument)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanBatchDocumentsMerged:
+		if event.Transaction.SemanticPlanMergedDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.mergeSemanticPlanBatchDocuments(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanMergedDocument)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestSubmitted:
+		aggregate, err := c.planning.markCandidateRequestSubmitted(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.Sequence, event.Transaction.PhysicalCallID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestOutcomeObserved:
+		if event.Transaction.RequestOutcome == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.recordCandidateRequestTransportOutcome(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.RequestOutcome)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestRecoveryRequired:
+		if event.Transaction.ProviderDocumentOutcome == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.recordCandidateRequestRecoveryRequired(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.ProviderDocumentOutcome)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateDocumentObserved:
+		aggregate, err := c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestStaleObserved:
+		if event.Transaction.Stale == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.Stale)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRequestTerminated:
+		if event.Transaction.RequestOutcome == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.planning.terminateCandidateRequestSession(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.RequestOutcome)
+		result.Aggregate = aggregate
+		return result, err
+	default:
+		return unsupportedRuntimeInternalEvent(event.Kind)
+	}
+}
+
+func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
+	result := RuntimeInternalEventResult{}
+	switch event.Kind {
+	case RuntimeInternalEventCandidateAttemptBegun:
+		if event.Transaction.Manifest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.beginCandidateAttempt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.StablePrefixHash, *event.Transaction.Manifest, event.Transaction.LogicalRequestID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateDocumentRejected:
+		if event.Transaction.Manifest == nil || event.Transaction.CandidateFailure == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.rejectCompletedCandidateDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.StablePrefixHash, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.CandidateFailure)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateProposalObserved:
+		if event.Transaction.Manifest == nil || event.Transaction.Candidate == nil {
+			return result, common.ErrInvalidArgument
+		}
+		admission, err := c.candidateDispatch.admitCandidateProposal(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.Candidate)
+		result.Aggregate = admission.Aggregate
+		result.Admission = &admission
+		return result, err
+	case RuntimeInternalEventCandidateFeasibilityObserved:
+		if event.Transaction.CandidateFeasibility == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.recordCandidateFeasibility(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.CandidateFeasibility)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidatePrerequisiteStaleObserved:
+		if event.Transaction.Stale == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.invalidateCandidateAttemptForPrerequisiteStale(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.Stale)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidatePrerequisiteObserved:
+		if event.Transaction.PrerequisiteRequest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.invalidateCandidateAttemptForFeasibilityPrerequisite(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.PrerequisiteRequest)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateSealed:
+		if event.Transaction.Manifest == nil || event.Transaction.Candidate == nil {
+			return result, common.ErrInvalidArgument
+		}
+		admission, err := c.candidateDispatch.admitAndSealCandidateAttempt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.Candidate)
+		result.Aggregate = admission.Aggregate
+		result.Admission = &admission
+		return result, err
+	case RuntimeInternalEventGovernanceDispatchSealed:
+		if event.Transaction.Manifest == nil || event.Transaction.Candidate == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.sealGovernanceDispatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.Manifest, *event.Transaction.Candidate)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventCandidateRejected:
+		if event.Transaction.CandidateFailure == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.failCandidateAttempt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.CandidateFailure)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventOperationReceiptObserved:
+		if event.Transaction.OperationReceipt == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, receipt, err := c.candidateDispatch.commitOperationReceipt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.DispatchID, event.Transaction.Fence, *event.Transaction.OperationReceipt)
+		result.Aggregate = aggregate
+		result.Receipt = &receipt
+		return result, err
+	case RuntimeInternalEventDispatchExecutionRequested:
+		if event.Transaction.Executor == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.executeActiveDispatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Executor, event.Transaction.RecoveryOperationID, event.Transaction.RecoveryBudgetAttempt)
+		result.Aggregate = aggregate
+		return result, err
+	default:
+		return unsupportedRuntimeInternalEvent(event.Kind)
+	}
+}
+
+func (c *RuntimeController) applyGovernanceResolutionTransactionInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
+	if event.Kind != RuntimeInternalEventGovernanceResolutionObserved || event.Transaction.GovernanceResolution == nil {
+		return RuntimeInternalEventResult{}, common.ErrInvalidArgument
+	}
+	commit, err := c.authority.commitGovernanceResolution(ctx, *event.Transaction.GovernanceResolution)
+	return RuntimeInternalEventResult{
+		Aggregate: commit.Aggregate,
+		Evidence:  &commit,
+	}, err
+}

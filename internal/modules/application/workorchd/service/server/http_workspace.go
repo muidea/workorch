@@ -21,6 +21,13 @@ import (
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
+	registerWorkspaceResourceReadRoutes(router, state)
+	registerWorkspaceProjectionReadRoutes(router, state)
+	registerWorkspaceContextReadRoutes(router, state)
+	registerWorkspaceDefinitionReadRoutes(router, state)
+}
+
+func registerWorkspaceResourceReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.workspaceListRequests.Add(1)
 		items, projection, err := state.listProjectedWorkspaces()
@@ -72,6 +79,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Workspace: appmodelcore.ProjectWorkspace(item),
 		})
 	})
+}
+
+func registerWorkspaceProjectionReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "snapshot" {
@@ -195,6 +205,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			RuntimeView: view,
 		})
 	})
+}
+
+func registerWorkspaceContextReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory-recalls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "memory-recalls" {
@@ -233,6 +246,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			SoulBindings: item,
 		})
 	})
+}
+
+func registerWorkspaceDefinitionReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "goals" {
@@ -387,6 +403,15 @@ func projectionHTTPStatus(err error) int {
 }
 
 func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverState) {
+	registerWorkspaceCreateRoute(router, state)
+	registerWorkspaceInferenceWriteRoutes(router, state)
+	registerWorkspaceDeleteRoute(router, state)
+	registerWorkspaceExecutionWriteRoute(router, state)
+	registerWorkspaceContextWriteRoute(router, state)
+	registerWorkspaceDefinitionWriteRoutes(router, state)
+}
+
+func registerWorkspaceCreateRoute(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.workspaceCreateRequests.Add(1)
 		var req workorchmanagementcontract.WorkspaceCreateRequest
@@ -407,6 +432,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			Workspace: appmodelcore.ProjectWorkspace(item),
 		})
 	})
+}
+
+func registerWorkspaceInferenceWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-selection", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "llm-selection" {
@@ -458,6 +486,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		state.upsertProjectedWorkspace(item)
 		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: appmodelcore.ProjectWorkspace(item)})
 	})
+}
+
+func registerWorkspaceDeleteRoute(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "" {
@@ -487,6 +518,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		state.deleteProjectedWorkspace(workspaceID)
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+func registerWorkspaceExecutionWriteRoute(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-activations", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "execution-activations" {
@@ -525,6 +559,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		}
 		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, "execution-activation", command))
 	})
+}
+
+func registerWorkspaceContextWriteRoute(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "soul-bindings" {
@@ -549,6 +586,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			SoulBindings: item,
 		})
 	})
+}
+
+func registerWorkspaceDefinitionWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "goals" {

@@ -16,6 +16,22 @@
   result 返回唯一 receipt outcome、changed refs、bounded evidence/ref 与 original diagnostic。
 - Orchestrator 和 Approval 流程在写操作进入本 block 前完成策略准入和必要授权。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `RuntimeAdapter` 仍是唯一 Git capability adapter；原 1,026 行文件已按 capability-state observation、operation
+  ingress、read operations、write operations、repository inspection、Git CLI runner、pathspec guard、output codec 与
+  result normalization 分成同 package 的 owner-private 文件。没有借用 Shell executor，也没有新增 Block、service
+  facade、EventHub round trip、repository、receipt owner 或命令 registry。
+- `SupportedRuntimeOperationVariants` 仍与 typed descriptor 做穷尽比对；`ExecuteOperation` 继续静态分派到 read/write，
+  `git init`、add、commit 和 status/diff/log/show/branch 的 policy、timeout、pathspec、bounded output 与 error category
+  顺序未变。
+- `CapabilityState` 只产生 read-only repository snapshot；durable `CapabilityStateReceiptStore` 仍是 Git owner 内唯一
+  receipt authority，保持 workspace partition、same-key idempotency/conflict 和 restart reload，不与 operation receipt
+  或 Shell state 合并。
+- C22-05 Git 切片完成后，非测试 Go 为 24 个文件/2,538 LOC，测试保持 8 个文件/1,345 LOC，package 保持 4；
+  最大生产文件从 `git_runtime_adapter.go` 1,026 行降为 `owner.go` 700 行，至少 500 行生产文件从 2 个降为 1 个，
+  生产 `CC>30` 继续为 0。
+
 ## 相关约束
 
 - Git 操作只能作用于 workspace deliverable repository。

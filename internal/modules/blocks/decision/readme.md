@@ -15,6 +15,13 @@
 - `runtime_governance` ticket resolved 后，本 block 通过 Orchestrator 定义的 `CommitRuntimeGovernanceTicketResolutionCommand` 提交 resolution identity、scope、outcome 与 summary；Orchestrator 仅提交 evidence/fact，不由 application scheduler 猜测 authority snapshot 或 dispatch、更不直接恢复 Run。
 - EventHub command 与应用调用只能提交不可变 resolution/proposal fact；ticket 及 Runtime governance proposal 的状态选择、时间戳和 repository update 只允许经 Decision-private lifecycle event/reducer 完成。
 
+## Owner 内部职责边界
+
+- `owner.go` 只保留 Decision Biz 的构造、订阅与生命周期；`command_router.go` 是普通 Decision command 的唯一入口，使用静态穷尽分类器将 Topic 委派到 ticket query/mutation 或 resolution handler，未知 Topic fail closed。
+- `ticket_commands.go` 只处理 ticket 查询与删除，`resolution_commands.go` 只处理 resolution 查询、删除和普通解决事务；二者共享 `decision_scope.go` 的 workspace/run/step fence，不建立第二个 Owner 或 repository facade。
+- `runtime_governance_adapter.go` 只负责 Runtime governance request、proposal 提交和 disposition 映射；proposal 状态仍由 `lifecycle_internal_event.go` 的 Decision-private reducer 选择，reconciliation 仍重放同一 adapter。
+- `decision_notification.go` 只在 Owner transaction 成功后发布 ticket lifecycle 通知；resolution evidence、repository 写入和通知的既有顺序不变。
+
 ## 相关约束
 
 - Ticket、Resolution 和 evidence command 必须携带 workspace/run/ticket scope，跨 workspace 重复 ID 不得误解析。

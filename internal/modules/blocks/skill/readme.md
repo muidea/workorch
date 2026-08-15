@@ -2,7 +2,7 @@
 
 ## 功能说明
 
-`blocks/skill` 管理 Skill registry，负责 Skill 的创建、查询、列表、更新以及指令内容、metadata、binding 和 provenance 的正式状态。
+`blocks/skill` 管理 Skill registry，负责 Skill 的创建、查询、列表以及指令内容、metadata、binding 和 provenance 的正式状态。当前没有公开 update/delete command。
 
 ## 组件交互及合同
 

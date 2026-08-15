@@ -23,6 +23,23 @@
   观测到的目标 revision；其中 `patch/apply file_write` 必须携带在执行时再次核对的 `baseHash`，
   `text_replace | unified_diff` 也必须通过对应的 owner preflight/replay 合同。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `RuntimeAdapter` 仍是唯一 File capability adapter；原混合文件已按 snapshot/manifest、target selection、
+  admissibility catalog、feasibility/replay proof、path guard 与 content helper 分成 owner-private 语义文件。
+  没有新增 Block、service facade、通用 capability executor、可变 registry、EventHub round trip 或 effect entry。
+- target selection 保持单一公开方法，并在内部顺序执行 request normalization、selector admission、File manifest
+  observation 与具体 selector policy。未知 selector 继续返回 typed unsupported observation；prospective、profile
+  candidates、unique entry 和 workspace scope 不共享外部状态，也不从 Goal/DoD、后缀或内容推导目标。
+- admissibility 与 feasibility 仍消费同一 File policy：`file/write` 只发布
+  `prospective_owner_target`，已有目标 replacement 只能使用 `file/edit` 或合法 `patch/apply` variant，并继续校验
+  owner-observed revision/baseHash。focused benchmark 同时覆盖 target、catalog 与 read-only feasibility，结束后核对
+  目标内容未变化，因此该路径的 File-private effect call、repository load/CAS 均为 0。
+- C22-05 File 切片完成后，非测试 Go 为 24 个文件/4,166 LOC，测试为 8 个文件/2,448 LOC，package 保持 4；
+  最大生产文件从 `file_runtime_adapter.go` 1,067 行降为 `owner.go` 829 行，至少 500 行生产文件从 4 个降为 3 个，
+  生产 `CC>30` 从 `1 / 36` 降为 0。`BenchmarkRuntimeAdapterTargetCatalogFeasibility` 的 100 次、3 轮样本为
+  `121,240～137,759 ns/op`、`44,929～45,016 B/op`、`766 allocs/op`。
+
 ## 相关约束
 
 - 所有路径必须限定在 workspace internal/deliverable 允许范围内，并防止路径逃逸。

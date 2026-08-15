@@ -28,6 +28,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   由 BackgroundRoutine 提前驱动。
 
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `blocks/run/pkg/events` 定义具体 command 与 `RunCommandResult`；所有返回实体在离开 owner 前显式深拷贝。
+- 常规命令保持唯一入口 `handleCommand -> executeCommand`，并在同一次 `commandMu` 读锁与 workspace scope
+  fence 内，静态穷尽地委派到 create、Run query、Step query、Checkpoint query、opaque Runtime state store 和
+  resource cleanup 六个 owner-private handler。它们不构成新的 Owner、状态机、CAS authority 或 EventHub facade。
 - Run create 只接收 predecessor Run/Result 引用，不接收完整 `RunLineage`。Run owner 自行派生 active lineage state
   并清空 successor；调用方不能选择 owner 私有 lineage 状态。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。

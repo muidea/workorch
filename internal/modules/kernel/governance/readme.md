@@ -14,6 +14,21 @@
 - application 和 Eventstream 按需导入 `kernel/governance/pkg/events` 消费治理 trace 与通知。
 - AutoGovernanceTrace 只记录治理协调过程，不替代 Decision、Approval 或 Run 的正式状态。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `Service` 仍是唯一 Governance lifecycle/coordination component；原 1,909 行文件已按 service lifecycle/command、
+  worker/reconciliation、ticket policy、approval policy、typed payload parser、trace store query/budget 与共享纯 helper
+  分成同 package 的 owner-private 文件。没有新增 Module、state machine、worker queue、trace repository、EventHub
+  round trip、resume callback 或跨 owner service/repository。
+- ticket/approval evaluator 仍只产生 Governance owner 的 evaluation fact，并通过 Decision/Approval typed resolve command
+  提交；worker 继续串行消费同一 `governanceWork` queue。blocked-run reconciliation 只重读具体 owner fact，不直接
+  迁移 Run 或 Runtime aggregate。
+- `AutoGovernanceTrace` 仍是唯一协调状态，trace 的 resolved/closed/shared-budget 查询均只经过原 repository；payload
+  parser 是纯 typed payload 读取，不构造通用 map authority，也不改变 event contract。
+- C22-06 Governance 切片完成后，非测试 Go 为 17 个文件/2,576 LOC，测试保持 5 个文件/2,135 LOC，package
+  保持 5；最大生产文件从 `biz/service.go` 1,909 行降为 `biz/payload_parser.go` 485 行，至少 500 行生产文件从
+  1 个降为 0，生产 `CC>30` 继续为 0。
+
 ## 相关约束
 
 - 生产依赖只能包含 Governance 自身 repository 与 EventHub，不得注入其他 owner reader、resolver、resume callback、service 或 repository。

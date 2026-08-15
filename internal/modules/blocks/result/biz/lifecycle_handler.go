@@ -139,7 +139,7 @@ func resultFromTerminalMaterial(material resultevents.ResultMaterial) *resultmod
 		ID: material.ID, WorkspaceID: material.WorkspaceID, RunID: material.RunID,
 		GoalID: material.GoalID, DoDID: material.DoDID, Title: material.Title, Summary: material.Summary,
 		SourceType: material.SourceType, SourceRef: material.SourceRef,
-		EvidenceRefs: append([]string(nil), material.EvidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), material.ArtifactRefs...),
+		EvidenceRefs: material.EvidenceRefs, ArtifactRefs: material.ArtifactRefs,
 		DoDAssessment: material.DoDAssessment, SummaryDetail: material.SummaryDetail, RuntimeCloseout: material.RuntimeCloseout,
 	})
 }

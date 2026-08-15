@@ -74,7 +74,10 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   `Load`、`QueryOperationReceipt` 两个 scoped read；所有 reducer handler 均为 package-private。internal event 不得成为跨 owner EventHub envelope。
 - private internal fact 的 layer/SM/effect/source/scope/identity 分类只在 `biz/runtime` 以 exhaustive switch 固化；它不是
   EventHub topic、生产 registry 或跨组件 lookup。fact 词汇按 activation、SM-2 authority、SM-3 transaction、SM-4
-  delivery 分别落在 `internal_event_{activation,authority,transaction,delivery}.go`，dispatcher 仍唯一且穷举。完整性测试从全部 fact 常量源核对 dispatcher/classification，不在
+  delivery 分别落在 `internal_event_{activation,authority,transaction,delivery}.go`；唯一 exported dispatcher 在完成
+  envelope 校验后，通过四个 package-private payload-family route 委派，但自身仍显式穷举全部 kind。route 只调用共享
+  mutation kernel 上的私有 component，不持有 repository/CAS、EventHub 或第二 mutation entry。完整性测试从全部 fact
+  常量源核对 dispatcher/classification，并冻结每个 kind 只进入一个 family；不在
   `internal/pkg/events` 或 `workorchruntimecontract` 建立全局索引。
 - `RuntimeInternalEvent` 只保留 `Kind + Scope + Activation|Authority|Transaction|Delivery` 四类 concrete payload；
   每个 kind 必须精确匹配一个非空 payload family。缺 scope、未知 metadata、missing/wrong/multiple payload 均在任何
@@ -94,6 +97,11 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   提交预算并以 operation identity/fenced attempt 授权重试，不在 SM-3 事件内修改 SM-4 ledger。Controller 的
   package-private compatibility adapter 只复用同一 dispatcher，不能形成额外 mutation entry；外部仍只能使用
   `ApplyInternalEvent`、`Load`、`QueryOperationReceipt`。
+- `RuntimeAggregate.Validate` 仍是一次完整、顺序固定且 fail-fast 的 aggregate validation；activation、SM-2、SM-3、
+  SM-4 与 cross-machine fence 仅以 private validator 分段。evidence commit 的 receipt admission、fact derivation、
+  exact-CWI credit 与 completion 共用一次 transition commit；prerequisite kind handler 为纯 aggregate 变换；active
+  dispatch 的 preflight、claim/recovery、owner call 与 receipt projection 仍按原顺序运行，并共享唯一 CAS 与 recovery
+  budget handoff。
 - 所有跨状态机推进都使用 persisted aggregate + typed EventHub command/result。
 - projection failure 不得覆盖 reducer terminal；重启不得重复 prerequisite/candidate/side effect。
 - 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。

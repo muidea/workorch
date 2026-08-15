@@ -14,6 +14,23 @@
   result 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回 source refs、bounded summary、truncation
   metadata、owner stable factual category、完整安全 original diagnostic 和 evidence/ref，不返回跨组件 Status 双权威。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `RuntimeAdapter` 仍是唯一 MCP capability adapter；原 1,389 行混合文件已按 core ingress/catalog、HTTP transport、
+  short/long-lived stdio operation、long-lived session manager、stdio process session、JSON-RPC codec、operation
+  contract 与 result normalization 分成同 package 的 owner-private 文件。没有新增 Block、registry facade、
+  EventHub round trip、receipt owner、通用 capability executor 或第二 session authority。
+- MCP Registry 仍通过 typed EventHub query 独立拥有 Server/Capability；MCP adapter 只保存原有一个 `sessionMu` 和
+  一个 workspace/server-keyed `sessions` map。短生命周期 stdio 每次关闭自身 session；长生命周期 stdio 继续由
+  同一 manager 做 create-or-reuse、idle eviction、failure eviction 和 adapter close。
+- HTTP/stdio 都继续消费同一 operation contract、JSON argument codec、bounded response parser、tool `isError`
+  detection 与 result normalization；transport helper 不解释 effect scope、coverage、retry、governance 或 terminal。
+- C22-05 MCP 切片完成后，非测试 Go 为 24 个文件/2,799 LOC，测试为 9 个文件/2,183 LOC，package 保持 4；
+  最大生产文件从 `mcp_runtime_adapter.go` 1,389 行降为 `owner.go` 776 行，至少 500 行生产文件从 2 个降为 1 个，
+  生产 `CC>30` 继续为 0。`BenchmarkRuntimeAdapterHTTPToolCall` 的 50 次、3 轮样本为
+  `317,444～349,474 ns/op`、`12,375～12,694 B/op`、`112～113 allocs/op`，计数器确认每次 operation
+  恰好一次 HTTP transport call。
+
 ## 相关约束
 
 - 未注册或不匹配的 Server/Capability 不得调用。

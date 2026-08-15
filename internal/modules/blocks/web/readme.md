@@ -15,6 +15,21 @@
   query/url；result 返回唯一 receipt outcome、source refs、bounded summary、truncation、provider diagnostic 和
   evidence/ref。
 
+## 当前内聚收口切片（2026-08-16）
+
+- `RuntimeAdapter` 仍是唯一 Web capability adapter；原 863 行文件已按 operation ingress/admissibility、search、
+  fetch、provider transport、provider configuration cache、URL/SSRF policy、Approval typed query、result mapping、
+  content byte bounder 与纯 helper 分成同 package 的 owner-private 文件。没有新增 Block、service/repository 注入、
+  EventHub round trip、provider retry、receipt owner 或通用 transport executor。
+- Approval 仍只通过 scoped typed getter 查询并校验 run/action/provider/context；policy helper 只返回 allowed/denied/
+  approval-required facts，不创建 Approval，不修改 Runtime authority。search/fetch 仍各执行至多一次 provider request，
+  final URL 继续重走同一 SSRF/approval policy。
+- response body 与 fetch content 分别在 transport 和 content bounder 处执行原有 byte ceiling；result normalization
+  继续返回 source/hash/truncation/evidence，不写 Memory/Result，也不把外部内容直接判为 coverage。
+- C22-05 Web 切片完成后，非测试 Go 为 25 个文件/2,026 LOC，测试为 6 个文件/765 LOC，package 保持 6；
+  最大生产文件从 `runtime_adapter.go` 863 行降为 `owner.go` 364 行，至少 500 行生产文件从 1 个降为 0，生产
+  `CC>30` 继续为 0。
+
 ## 相关约束
 
 - query、URL、响应大小和执行时间必须有界，并区分 provider/network failure 与 contract violation。

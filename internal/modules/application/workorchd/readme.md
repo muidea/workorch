@@ -32,7 +32,7 @@
   definition patch。该编排不让 application 选择 SM-2 next action，也不绕过 SM-3 sealed dispatch。
 - WorkspaceTemplate 中的 capability / version-control 声明只作为定义与 activation 输入；application 不直接执行 Git、Shell、File 或其他 capability 副作用。
 
-### 当前内聚收口切片（2026-08-15）
+### 当前内聚收口切片（2026-08-16）
 
 - `readmodelprojection` 仍只有一个 manager/store/revision 规则；微型 mapper 已机械归并为 140 个生产文件，workspace/run/context/evidence/activity/governance
   六族已通过 typed facade 统一 application 调用；公开面精确限定为六个 facade factory 和两个 snapshot input，
@@ -43,8 +43,14 @@
 - `biz/workspaceCommandGateway` 是 send-only concrete Workspace intent gateway；它不选择 focus、重试、Resume 或
   Runtime transition。`production_transport_boundary_test.go` 与 repository boundary gate 防止 server 重新传播
   runtimecore/EventHub/root appservice、Session/cache authority 或 projection lifecycle。
-- WD0-WD8 已完成 code/automated closure；当前指标为 Workorchd 650 个生产文件/56,173 LOC、server 41 个生产文件/
-  8,142 LOC、readmodelprojection 140 个生产文件/17,087 LOC/8 个 exported declaration。deployed HTTP/SSE/CLI
+- `ApplicationPorts.Validate` 只按 Workspace、Definition、Run、Governance、Registry、Memory、Configuration 七组
+  named validator 顺序 fail-closed；Workspace HTTP 注册按 resource/projection/context/definition 与
+  create/inference/delete/execution/context/definition endpoint family 分段，route/method/DTO/status code 不变。
+- `workspaceviewcore.Store`、唯一 `sync.RWMutex` 与 revision/high-watermark authority 仍只在 `store.go` 声明；其
+  lifecycle/status、revision、mutation、query、metrics、clone 实现按语义分文件。`readmodelprojection` 的 workspace
+  diff/equality/convergence normalization 也按纯规则分段，未新增 projection state、I/O 或 export。
+- WD0-WD8 与 C22-04 已完成 code/automated closure；当前指标为 Workorchd 659 个生产文件/56,414 LOC、server 42 个
+  生产文件/8,230 LOC、readmodelprojection 142 个生产文件/17,187 LOC/8 个 exported declaration。deployed HTTP/SSE/CLI
   regression 与 SO-MC-10 fresh-data live proof 仍是 active。
 
 ## 相关约束
