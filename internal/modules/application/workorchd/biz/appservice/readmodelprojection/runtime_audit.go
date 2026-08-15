@@ -9,10 +9,10 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// MapRuntimeAudit projects persisted Runtime metadata for observation. It
+// mapRuntimeAudit projects persisted Runtime metadata for observation. It
 // intentionally never returns raw snapshot content, candidate parameters or
 // owner-private tool payloads, and it does not infer transitions from history.
-func MapRuntimeAudit(run appmodelcore.Run) *projectioncontract.RuntimeAudit {
+func mapRuntimeAudit(run appmodelcore.Run) *projectioncontract.RuntimeAudit {
 	if run.RuntimeState == nil {
 		return nil
 	}

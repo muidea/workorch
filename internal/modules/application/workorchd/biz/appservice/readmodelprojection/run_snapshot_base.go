@@ -8,29 +8,29 @@ import (
 
 func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []projectioncontract.StepView, currentStep *projectioncontract.StepView) readmodelcore.RunSnapshotState {
 	ret := readmodelcore.RunSnapshotState{
-		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.Run),
+		Workspace:             mapWorkspaceWithRunProjection(input.Workspace, input.Run),
 		Run:                   runtimecore.MapRun(input.Run),
 		Step:                  currentStep,
 		Steps:                 stepViews,
-		ToolCalls:             MapToolCalls(input.ToolCalls),
-		Patches:               MapPatches(input.Patches),
-		LLMContextBudgets:     MapLLMContextBudgetTraces(stepViews),
-		LLMUsageTraces:        MapLLMUsageTracesFromEventRecords(MapEventRecords(input.LLMUsageEventRecords), string(input.Run.ID)),
-		ValidationResults:     MapValidationResults(input.Validations),
-		RuntimeCheckpoints:    MapRuntimeCheckpoints(input.Checkpoints),
-		Results:               MapResults(input.Results),
-		Artifacts:             MapArtifacts(input.Artifacts),
-		ArtifactContinuations: MapArtifactContinuations(input.ArtifactContinuations),
-		MemoryRecallTraces:    MapMemoryRecallTraces(input.MemoryRecallTraces),
-		EventRecords:          MapProjectedEventRecords(input.EventRecords),
+		ToolCalls:             mapToolCalls(input.ToolCalls),
+		Patches:               mapPatches(input.Patches),
+		LLMContextBudgets:     mapLLMContextBudgetTraces(stepViews),
+		LLMUsageTraces:        mapLLMUsageTracesFromEventRecords(mapEventRecords(input.LLMUsageEventRecords), string(input.Run.ID)),
+		ValidationResults:     mapValidationResults(input.Validations),
+		RuntimeCheckpoints:    mapRuntimeCheckpoints(input.Checkpoints),
+		Results:               mapResults(input.Results),
+		Artifacts:             mapArtifacts(input.Artifacts),
+		ArtifactContinuations: mapArtifactContinuations(input.ArtifactContinuations),
+		MemoryRecallTraces:    mapMemoryRecallTraces(input.MemoryRecallTraces),
+		EventRecords:          mapProjectedEventRecords(input.EventRecords),
 		Decisions:             input.Decisions,
 		Approvals:             input.Approvals,
 	}
 	applyRunSnapshotCurrentStepToRun(&ret, currentStep)
-	ret.LLMContextBudgetSummary = SummarizeLLMContextBudgets(ret.LLMContextBudgets)
-	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
-	ret.Acceptance = MapAcceptanceProjection(ret.Run)
-	ret.Outcome = MapRunOutcome(ret)
+	ret.LLMContextBudgetSummary = summarizeLLMContextBudgets(ret.LLMContextBudgets)
+	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
+	ret.Acceptance = mapAcceptanceProjection(ret.Run)
+	ret.Outcome = mapRunOutcome(ret)
 	return ret
 }
 
@@ -39,6 +39,6 @@ func applyRunSnapshotCurrentStepToRun(snapshot *readmodelcore.RunSnapshotState, 
 		return
 	}
 	snapshot.Run.CurrentStepID = currentStep.ID
-	snapshot.Run.CurrentStepKind = CanonicalStepKind(currentStep.Kind)
+	snapshot.Run.CurrentStepKind = canonicalStepKind(currentStep.Kind)
 	snapshot.Run.CurrentStepState = currentStep.State
 }

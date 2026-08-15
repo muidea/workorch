@@ -24,7 +24,7 @@ func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testin
 		},
 	}}}
 
-	audit := MapRuntimeAudit(run)
+	audit := mapRuntimeAudit(run)
 	if audit == nil || len(audit.Grounding.ActivePrerequisites) != 1 || len(audit.Grounding.RetiredPrerequisites) != 1 {
 		t.Fatalf("prerequisite lifecycle audit = %+v", audit)
 	}
@@ -51,7 +51,7 @@ func TestMapRuntimeAuditPreservesFailureOriginalDiagnosticWithoutAction(t *testi
 		},
 	}}}
 
-	audit := MapRuntimeAudit(run)
+	audit := mapRuntimeAudit(run)
 	if audit == nil || audit.Failure == nil || audit.Failure.Code != "definition_mismatch" ||
 		audit.Failure.OriginalDiagnostic == nil || audit.Failure.OriginalDiagnostic.OwnerModuleID != "blocks/run" ||
 		audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
@@ -98,7 +98,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		Evidence: runtimecontract.RuntimeOperationEvidence{EvidenceRefs: []string{"artifact/audit"}, EvidenceTags: []string{"metric/audit"}, Validation: observation},
 	}}}}
 
-	audit := MapRuntimeAudit(run)
+	audit := mapRuntimeAudit(run)
 	if audit == nil || len(audit.Focus.CoverageBindings) != 1 || len(audit.CoverageBindings) != 2 || len(audit.Dispatches) != 1 || len(audit.AcceptedEvidence) != 1 || len(audit.OperationReceipts) != 1 {
 		t.Fatalf("binding audit missing chain: %+v", audit)
 	}

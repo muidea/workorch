@@ -10,6 +10,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -54,10 +55,8 @@ func (m *Biz) prepareRuntimeGovernanceRequest(ctx context.Context, aggregate run
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	dispatch := aggregate.ActiveDispatch
-	for _, request := range aggregate.GovernanceRequests {
-		if request.DispatchID == dispatch.ID && request.AuthoritySnapshotID == dispatch.Transaction.AuthoritySnapshotID {
-			return aggregate, nil
-		}
+	if _, found := governancecheck.RequestForDispatch(aggregate.GovernanceRequests, dispatch.ID, dispatch.Transaction.AuthoritySnapshotID); found {
+		return aggregate, nil
 	}
 	dependency := dispatch.Candidate.Governance.ExternalDependency
 	ticketID := common.TicketID("runtime-" + dispatch.ID)
@@ -75,7 +74,7 @@ func (m *Biz) prepareRuntimeGovernanceRequest(ctx context.Context, aggregate run
 		DependencyKind: dependency.Kind, SubjectRef: dependency.SubjectRef,
 	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventGovernanceRequestObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, GovernanceRequest: &request,
+		Kind: runtime.RuntimeInternalEventGovernanceRequestObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{GovernanceRequest: &request},
 	})
 	return updated.Aggregate, err
 }

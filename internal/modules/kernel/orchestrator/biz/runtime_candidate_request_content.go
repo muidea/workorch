@@ -118,8 +118,7 @@ func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Cont
 		return runtime.RuntimeAggregate{}, "", "", err
 	}
 	updatedEvent, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidateDocumentObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID,
+		Kind: runtime.RuntimeInternalEventCandidateDocumentObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID},
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, "", "", err

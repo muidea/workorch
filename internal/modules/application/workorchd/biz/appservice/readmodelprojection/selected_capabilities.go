@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func SelectedRuntimeCapabilitiesFromRun(run *runmodel.Run, catalog map[string]projectioncontract.RuntimeCapability) []projectioncontract.RuntimeCapability {
+func selectedRuntimeCapabilitiesFromRun(run *runmodel.Run, catalog map[string]projectioncontract.RuntimeCapability) []projectioncontract.RuntimeCapability {
 	if run == nil || run.RuntimeBootstrap == nil {
 		return nil
 	}

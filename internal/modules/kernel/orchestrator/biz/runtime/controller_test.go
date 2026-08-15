@@ -157,11 +157,9 @@ func TestRuntimeControllerActivationInternalEventIsTheBootstrapMutationBoundary(
 	definition := controllerDefinition()
 
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind:                 RuntimeInternalEventActivationObserved,
-		WorkspaceID:          facts.WorkspaceID,
-		RunID:                facts.RunID,
-		ActivationFacts:      &facts,
-		ActivationDefinition: &definition,
+		Kind: RuntimeInternalEventActivationObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID,
+			RunID: facts.RunID}, Activation: &RuntimeInternalActivationPayload{ActivationFacts: &facts,
+			ActivationDefinition: &definition},
 	})
 	if err != nil {
 		t.Fatalf("activation internal event: %v", err)
@@ -173,11 +171,9 @@ func TestRuntimeControllerActivationInternalEventIsTheBootstrapMutationBoundary(
 	wrongScope := facts
 	wrongScope.RunID = "run-other"
 	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind:                 RuntimeInternalEventActivationObserved,
-		WorkspaceID:          facts.WorkspaceID,
-		RunID:                facts.RunID,
-		ActivationFacts:      &wrongScope,
-		ActivationDefinition: &definition,
+		Kind: RuntimeInternalEventActivationObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID,
+			RunID: facts.RunID}, Activation: &RuntimeInternalActivationPayload{ActivationFacts: &wrongScope,
+			ActivationDefinition: &definition},
 	}); err == nil {
 		t.Fatal("activation with mismatched event scope succeeded")
 	}
@@ -203,7 +199,7 @@ func TestRuntimeControllerApplyInternalEventPersistsOwnerFactOnce(t *testing.T) 
 		Code:  "internal-event-regression", Signature: "internal-event-regression", Message: "owner-local test fact",
 	}
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventFailureObserved, WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID, FailureFact: &fact,
+		Kind: RuntimeInternalEventFailureObserved, Scope: RuntimeInternalEventScope{WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{FailureFact: &fact},
 	})
 	if err != nil {
 		t.Fatalf("ApplyInternalEvent: %v", err)
@@ -215,7 +211,7 @@ func TestRuntimeControllerApplyInternalEventPersistsOwnerFactOnce(t *testing.T) 
 		t.Fatalf("owner fact was not persisted through internal event: %+v", committed.Aggregate.Facts.Failure)
 	}
 	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventFailureObserved, WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID, FailureFact: &fact,
+		Kind: RuntimeInternalEventFailureObserved, Scope: RuntimeInternalEventScope{WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{FailureFact: &fact},
 	})
 	if err != nil {
 		t.Fatalf("duplicate terminal internal event: %v", err)
@@ -353,7 +349,7 @@ func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorks
 				return
 			}
 			committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-				Kind: RuntimeInternalEventAssessmentObserved, WorkspaceID: current.workspaceID, RunID: current.runID,
+				Kind: RuntimeInternalEventAssessmentObserved, Scope: RuntimeInternalEventScope{WorkspaceID: current.workspaceID, RunID: current.runID}, Authority: &RuntimeInternalAuthorityPayload{},
 			})
 			results <- outcome{scenario: current, aggregate: committed.Aggregate, err: err}
 		}()

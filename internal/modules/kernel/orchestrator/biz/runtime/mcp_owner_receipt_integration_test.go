@@ -57,9 +57,9 @@ func sendRuntimeOperationFeasibilityProbeForTest(ctx context.Context, hub magice
 	}
 	switch value := data.(type) {
 	case fileevents.ProbeRuntimeOperationFeasibilityResult:
-		return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: value.OperationID, AdmissibilitySnapshotID: value.AdmissibilitySnapshotID, CapabilityStateBinding: value.CapabilityStateBinding, CandidateManifestHash: value.CandidateManifestHash, Outcome: value.Outcome, Feedback: value.Feedback, ReplayProof: value.ReplayProof, Stale: value.Stale, PrerequisiteRequest: value.PrerequisiteRequest}, nil
+		return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: value.OperationID, AdmissibilitySnapshotID: value.AdmissibilitySnapshotID, CapabilityStateBinding: value.CapabilityStateBinding, CandidateManifestHash: value.CandidateManifestHash, OwnerPolicy: value.OwnerPolicy, ConstraintImpact: value.ConstraintImpact, Outcome: value.Outcome, Feedback: value.Feedback, ReplayProof: value.ReplayProof, Stale: value.Stale, PrerequisiteRequest: value.PrerequisiteRequest}, nil
 	case mcpevents.ProbeRuntimeOperationFeasibilityResult:
-		return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: value.OperationID, AdmissibilitySnapshotID: value.AdmissibilitySnapshotID, CapabilityStateBinding: value.CapabilityStateBinding, CandidateManifestHash: value.CandidateManifestHash, Outcome: value.Outcome, Feedback: value.Feedback, ReplayProof: value.ReplayProof, Stale: value.Stale, PrerequisiteRequest: value.PrerequisiteRequest}, nil
+		return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: value.OperationID, AdmissibilitySnapshotID: value.AdmissibilitySnapshotID, CapabilityStateBinding: value.CapabilityStateBinding, CandidateManifestHash: value.CandidateManifestHash, OwnerPolicy: value.OwnerPolicy, ConstraintImpact: value.ConstraintImpact, Outcome: value.Outcome, Feedback: value.Feedback, ReplayProof: value.ReplayProof, Stale: value.Stale, PrerequisiteRequest: value.PrerequisiteRequest}, nil
 	default:
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("invalid test feasibility result %T", data)
 	}

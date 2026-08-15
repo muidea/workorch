@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func MapLLMContextBudgetTraces(steps []projectioncontract.StepView) []projectioncontract.LLMContextBudgetTrace {
+func mapLLMContextBudgetTraces(steps []projectioncontract.StepView) []projectioncontract.LLMContextBudgetTrace {
 	if len(steps) == 0 {
 		return nil
 	}

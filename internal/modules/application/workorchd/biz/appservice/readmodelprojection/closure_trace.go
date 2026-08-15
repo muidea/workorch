@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapClosureTraces(snapshot readmodelcore.RunSnapshotState) []workorchprojectioncontract.ClosureTrace {
+func mapClosureTraces(snapshot readmodelcore.RunSnapshotState) []workorchprojectioncontract.ClosureTrace {
 	ret := make([]workorchprojectioncontract.ClosureTrace, 0)
 	for _, step := range snapshot.Steps {
 		trace, ok := closureTraceFromStep(step)

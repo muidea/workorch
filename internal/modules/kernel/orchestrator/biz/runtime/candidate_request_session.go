@@ -12,16 +12,22 @@ import (
 // ensureCandidateRequestSession CAS-creates the provider-I/O ledger for one
 // sealed authority transaction. It intentionally allocates no candidate
 // attempt: only a complete document may enter the candidate admission path.
-func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected *runtimecontract.RuntimeExpectedDocumentContract) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+type candidateRequestSessionEnsureResult struct {
+	Aggregate        RuntimeAggregate
+	Session          runtimecontract.RuntimeCandidateRequestSession
+	AuthorityFailure *runtimecontract.FailureFact
+}
+
+func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected *runtimecontract.RuntimeExpectedDocumentContract) (candidateRequestSessionEnsureResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" || expected == nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
+		return candidateRequestSessionEnsureResult{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+		return candidateRequestSessionEnsureResult{}, err
 	}
 	if err := candidateRequestSessionActionAllowed(aggregate, documentKind); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+		return candidateRequestSessionEnsureResult{}, err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
 	if documentKind == runtimecontract.RuntimeProviderDocumentOperations &&
@@ -29,10 +35,10 @@ func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx contex
 		!operationRequestSessionExistsForAuthority(aggregate.CandidateRequestSessions, transaction) &&
 		equivalentOwnerInfeasibilityExists(aggregate.CandidateAttempts, transaction.AuthorityInputID) {
 		if strings.TrimSpace(correctionHash) != "" {
-			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: owner infeasibility cannot authorize correction attempt 1", common.ErrConflict)
+			return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: owner infeasibility cannot authorize correction attempt 1", common.ErrConflict)
 		}
-		terminal, terminalErr := c.terminalizeEquivalentAuthorityNoProgress(ctx, aggregate)
-		return terminal, runtimecontract.RuntimeCandidateRequestSession{}, terminalErr
+		failure := equivalentAuthorityNoProgressFailure(aggregate)
+		return candidateRequestSessionEnsureResult{AuthorityFailure: &failure}, nil
 	}
 	session := runtimecontract.RuntimeCandidateRequestSession{
 		DocumentKind: documentKind,
@@ -48,28 +54,38 @@ func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx contex
 	value.StablePrefixHash = session.StablePrefixHash
 	value.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(value)
 	if err := value.Validate(); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: invalid expected document contract", common.ErrInvalidArgument)
+		return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: invalid expected document contract", common.ErrInvalidArgument)
 	}
 	session.ExpectedDocument = &value
 	if idx, existing, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, session.LogicalRequestID); found {
 		if err := validateCurrentCandidateRequestSession(aggregate, existing); err != nil {
-			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+			return candidateRequestSessionEnsureResult{}, err
 		}
 		if existing.DocumentKind != session.DocumentKind || existing.StablePrefixHash != session.StablePrefixHash || existing.ManifestHash != session.ManifestHash || existing.CorrectionHash != session.CorrectionHash || existing.Transaction != session.Transaction || !sameRuntimeExpectedDocument(existing.ExpectedDocument, session.ExpectedDocument) {
-			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: runtime candidate request session identity conflicts", common.ErrConflict)
+			return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: runtime candidate request session identity conflicts", common.ErrConflict)
 		}
-		return aggregate, aggregate.CandidateRequestSessions[idx].Clone(), nil
+		return candidateRequestSessionEnsureResult{Aggregate: aggregate, Session: aggregate.CandidateRequestSessions[idx].Clone()}, nil
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, session)
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+		return candidateRequestSessionEnsureResult{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
+		return candidateRequestSessionEnsureResult{}, err
 	}
-	return aggregate, session.Clone(), nil
+	return candidateRequestSessionEnsureResult{Aggregate: aggregate, Session: session.Clone()}, nil
+}
+
+func equivalentAuthorityNoProgressFailure(aggregate RuntimeAggregate) runtimecontract.FailureFact {
+	transaction := aggregate.Decision.AuthorityTransaction()
+	return runtimecontract.FailureFact{
+		Class:     runtimecontract.FailureClassNoProgressExhausted,
+		Code:      "equivalent_authority_no_progress",
+		Signature: "equivalent-authority/" + transaction.AuthorityInputID,
+		Message:   "unchanged authority inputs already produced the same owner infeasibility",
+	}
 }
 
 func operationRequestSessionExistsForAuthority(sessions []runtimecontract.RuntimeCandidateRequestSession, transaction runtimecontract.AuthorityTransaction) bool {
@@ -92,7 +108,7 @@ func sameRuntimeExpectedDocument(left, right *runtimecontract.RuntimeExpectedDoc
 // before observing a provider outcome. A restart with this marker but without
 // an outcome must be classified as submission-unknown by the drive; it must
 // never create an attempt or resend a known call as a new candidate request.
-func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || sequence <= 0 || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -136,7 +152,7 @@ func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, w
 // recordCandidateRequestTransportOutcome preserves transient provider failure
 // separately from candidate attempts and repair. The next physical call uses
 // the same logical ID and the same sequence after recovery budget accounting.
-func (c *RuntimeController) recordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) recordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -178,7 +194,7 @@ func (c *RuntimeController) recordCandidateRequestTransportOutcome(ctx context.C
 // document fact as SM-4 recovery authority. The next call starts the same
 // sealed expected document from the beginning; no raw suffix is retained or
 // assembled into Runtime authority.
-func (c *RuntimeController) recordCandidateRequestRecoveryRequired(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) recordCandidateRequestRecoveryRequired(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -225,7 +241,7 @@ func (c *RuntimeController) recordCandidateRequestRecoveryRequired(ctx context.C
 // completeCandidateRequestDocument commits only the fact that an opaque,
 // complete document is now available in the Orchestrator-owned content store.
 // Candidate attempt allocation remains a separate subsequent transition.
-func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -262,7 +278,7 @@ func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context
 // terminateCandidateRequestSession closes non-candidate provider outcomes.
 // The caller separately records the typed SM-2 failure fact; this method never
 // reduces authority, changes a budget, or opens governance by itself.
-func (c *RuntimeController) terminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) terminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}

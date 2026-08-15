@@ -38,7 +38,7 @@ func isTerminalOutcomeEligibleResult(item projectioncontract.Result, run appmode
 	case common.ResultStateAccepted:
 		return common.RunState(run.State) == common.RunStateCompleted
 	case common.ResultStateRejected:
-		return IsTerminalRunState(run.State) && common.RunState(run.State) != common.RunStateSuperseded
+		return isTerminalRunState(run.State) && common.RunState(run.State) != common.RunStateSuperseded
 	default:
 		return false
 	}
@@ -52,7 +52,7 @@ func isTerminalOutcomeEligibleResultForSnapshot(item projectioncontract.Result, 
 	case common.ResultStateAccepted:
 		return common.RunState(snapshot.Run.State) == common.RunStateCompleted && !snapshotHasActiveCoverageWorkItems(snapshot)
 	case common.ResultStateRejected:
-		return IsTerminalRunState(snapshot.Run.State) && common.RunState(snapshot.Run.State) != common.RunStateSuperseded
+		return isTerminalRunState(snapshot.Run.State) && common.RunState(snapshot.Run.State) != common.RunStateSuperseded
 	default:
 		return false
 	}

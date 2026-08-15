@@ -1,12 +1,12 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/grounding"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -63,7 +63,7 @@ func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSema
 				break
 			}
 		}
-		if !relevant || runtimeSemanticCatalogCoversFocusTargets(catalog, facts.Focus, requiredTargets) {
+		if !relevant || grounding.CatalogCoversFocusTargets(catalog, facts.Focus, requiredTargets) {
 			continue
 		}
 		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, catalog.PrerequisiteID)
@@ -87,55 +87,11 @@ func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSema
 // list grow. The selector is authority only when the exact accepted
 // kind/variant publishes the typed policy.
 func runtimeSemanticCatalogCoversFocusTargets(catalog runtimecontract.RuntimeOperationAdmissibility, focus runtimecontract.CoverageFocus, requiredTargets []string) bool {
-	if allRuntimeTargetRefsContained(requiredTargets, catalog.TargetRefs) {
-		return true
-	}
-	variantsByKind := make(map[string][]string)
-	for _, variant := range focus.AcceptedOperationVariants {
-		kind := runtimecontract.CanonicalRuntimeBlockKind(variant.Kind)
-		variantsByKind[kind] = append(variantsByKind[kind], variant.VariantID)
-	}
-	policy := runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
-	if strings.TrimSpace(focus.ProspectiveTargetRef) != "" {
-		policy = runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget
-	}
-	for _, rawKind := range focus.AcceptedStepKinds {
-		kind := runtimecontract.CanonicalRuntimeBlockKind(rawKind)
-		if kind == "" || !runtimeStringIncluded(catalog.OperationKinds, kind) {
-			continue
-		}
-		variantIDs := variantsByKind[kind]
-		if len(variantIDs) == 0 {
-			for _, variant := range catalog.OperationVariants {
-				if variant.Kind == kind {
-					variantIDs = append(variantIDs, variant.VariantID)
-				}
-			}
-			if len(variantIDs) == 0 {
-				variantIDs = []string{""}
-			}
-		}
-		for _, variantID := range variantIDs {
-			allowed, selectors, _, _, err := runtimecontract.RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, kind, variantID, policy)
-			if err == nil && allowed && len(selectors) != 0 {
-				return true
-			}
-		}
-	}
-	return false
+	return grounding.CatalogCoversFocusTargets(catalog, focus, requiredTargets)
 }
 
 func allRuntimeTargetRefsContained(required, available []string) bool {
-	set := make(map[string]struct{}, len(available))
-	for _, value := range normalizeRuntimeTargetRefs(available) {
-		set[value] = struct{}{}
-	}
-	for _, value := range normalizeRuntimeTargetRefs(required) {
-		if _, found := set[value]; !found {
-			return false
-		}
-	}
-	return true
+	return grounding.TargetRefsContained(required, available)
 }
 
 func runtimeSemanticCatalogScopeGapSignature(gap RuntimeSemanticCatalogScopeGap) string {
@@ -147,159 +103,29 @@ func runtimeSemanticCatalogScopeGapSignature(gap RuntimeSemanticCatalogScopeGap)
 // moves its prerequisite back to pending, and records an idempotency fence.
 // No recovery budget is consumed: focus advance is expected authority
 // progression, not an owner resource failure.
-func (c *RuntimeController) invalidateSemanticCatalogForFocusScope(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, gap RuntimeSemanticCatalogScopeGap) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	signature := runtimeSemanticCatalogScopeGapSignature(gap)
-	if prerequisiteInvalidationExists(aggregate, signature) {
-		return aggregate, nil
-	}
-	current, found := NextRuntimeSemanticCatalogScopeGap(aggregate)
-	if !found || current.PrerequisiteID != strings.TrimSpace(gap.PrerequisiteID) ||
-		current.ObservationID != strings.TrimSpace(gap.ObservationID) || current.OwnerModuleID != strings.TrimSpace(gap.OwnerModuleID) ||
-		current.CatalogSnapshotID != strings.TrimSpace(gap.CatalogSnapshotID) || current.FocusID != strings.TrimSpace(gap.FocusID) ||
-		!sameRuntimeTargetRefs(current.RequiredTargetRefs, gap.RequiredTargetRefs) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog focus-scope gap does not match current authority", common.ErrConflict)
-	}
-	if aggregate.ActiveDispatch != nil || runtimeAggregateHasCurrentCandidateWork(aggregate) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog focus-scope invalidation requires no current candidate or dispatch", common.ErrConflict)
-	}
-	var observation runtimecontract.RuntimePrerequisiteObservation
-	for _, value := range aggregate.Facts.Resources.PrerequisiteObservations {
-		if value.ObservationID == current.ObservationID {
-			observation = value
-			break
-		}
-	}
-	facts, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservations(aggregate.Facts, []runtimecontract.RuntimePrerequisiteObservation{observation})
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
-		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
-		OriginalClass: "semantic_catalog_focus_scope", OriginalCode: "semantic_catalog_focus_scope_mismatch",
-		OriginalMessage: "owner catalog target scope does not cover the current semantic focus",
-		Signature:       signature, TargetRefs: append([]string(nil), current.RequiredTargetRefs...),
-		ExpectedRevision: current.CatalogSnapshotID, ObservedRevision: current.FocusID,
-	}
-	if err := diagnostic.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
-		// The owner dependency remains current. Only the bounded catalog request
-		// scope changes for the new focus, so recording that dependency as stale
-		// would incorrectly reject the owner's fresh same-revision response.
-		RefreshDiagnostic: &diagnostic,
-	})
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	expectedRevision := aggregate.StateRevision
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// SemanticManifestCatalogFreshnessGaps compares every owner catalog in the
-// active semantic manifest with the current typed admissibility and
-// prerequisite-observation facts. A catalog is current only when both facts
-// carry the same snapshot identity; a matching prerequisite ID alone is not a
-// freshness proof after a durable receipt.
 func SemanticManifestCatalogFreshnessGaps(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) []RuntimeSemanticCatalogFreshnessGap {
 	manifest = manifest.Normalized()
-	gaps := make([]RuntimeSemanticCatalogFreshnessGap, 0)
-	for _, catalog := range manifest.OwnerCatalogs {
-		catalog = catalog.Normalized()
-		currentCatalog, catalogFound := currentOperationAdmissibility(aggregate.Facts, catalog)
-		currentObservation, observationFound := CurrentSemanticCatalogObservation(aggregate, catalog)
-		gap := RuntimeSemanticCatalogFreshnessGap{
-			PrerequisiteID:        catalog.PrerequisiteID,
-			ManifestSnapshotID:    catalog.SnapshotID,
-			ManifestObservationID: "",
-		}
-		// Prerequisite IDs are expected to be globally unique inside Runtime,
-		// but retain the owner fence here as well.  A malformed or legacy
-		// observation from another owner must remain a gap rather than being
-		// reported as the manifest's observation lineage.
-		for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
-			observation = observation.Normalized()
-			if observation.PrerequisiteID == catalog.PrerequisiteID &&
-				observation.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility &&
-				observation.OwnerModuleID == catalog.OwnerModuleID {
-				// Preserve an observation identity in the gap only when the
-				// observation itself is a valid owner fact. A malformed or wrong-kind
-				// record proves a gap, but must not become audit lineage for the
-				// retired manifest.
-				if err := observation.Validate(); err == nil {
-					gap.ManifestObservationID = observation.ObservationID
-				}
-				break
-			}
-		}
-		if catalogFound {
-			gap.CurrentSnapshotID = currentCatalog.SnapshotID
-		}
-		if observationFound {
-			gap.CurrentObservationID = currentObservation.ObservationID
-		}
-		if !catalogFound || currentCatalog.SnapshotID != catalog.SnapshotID ||
-			runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(currentCatalog) != catalog.SnapshotID ||
-			!observationFound || currentObservation.ContentHash != catalog.SnapshotID ||
-			currentObservation.PrerequisiteID != catalog.PrerequisiteID || currentObservation.OwnerModuleID != catalog.OwnerModuleID {
-			gaps = append(gaps, gap)
-		}
+	compared := grounding.CompareCatalogFreshness(manifest.OwnerCatalogs, aggregate.Facts)
+	gaps := make([]RuntimeSemanticCatalogFreshnessGap, 0, len(compared))
+	for _, gap := range compared {
+		gaps = append(gaps, RuntimeSemanticCatalogFreshnessGap{
+			PrerequisiteID: gap.PrerequisiteID, ManifestSnapshotID: gap.ManifestSnapshotID,
+			CurrentSnapshotID: gap.CurrentSnapshotID, ManifestObservationID: gap.ManifestObservationID,
+			CurrentObservationID: gap.CurrentObservationID,
+		})
 	}
-	sort.SliceStable(gaps, func(left, right int) bool { return gaps[left].PrerequisiteID < gaps[right].PrerequisiteID })
 	return gaps
 }
 
 func currentOperationAdmissibility(facts runtimecontract.RuntimeFacts, wanted runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeOperationAdmissibility, bool) {
-	wanted = wanted.Normalized()
-	for _, candidate := range facts.Resources.OperationAdmissibilities {
-		candidate = candidate.Normalized()
-		if candidate.PrerequisiteID == wanted.PrerequisiteID && candidate.OwnerModuleID == wanted.OwnerModuleID {
-			// A matching ID is not enough to establish current authority.  A
-			// malformed owner fact must fail closed even if a forged SnapshotID
-			// happens to equal the manifest identity.
-			if err := candidate.Validate(); err != nil {
-				return runtimecontract.RuntimeOperationAdmissibility{}, false
-			}
-			return candidate, true
-		}
-	}
-	return runtimecontract.RuntimeOperationAdmissibility{}, false
+	return grounding.CurrentOperationAdmissibility(facts, wanted)
 }
 
 // CurrentSemanticCatalogObservation returns the exact current observation for
 // one manifest catalog. It intentionally rejects an observation that merely
 // shares a prerequisite ID while carrying a different snapshot hash.
 func CurrentSemanticCatalogObservation(aggregate RuntimeAggregate, catalog runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimePrerequisiteObservation, bool) {
-	catalog = catalog.Normalized()
-	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
-		observation = observation.Normalized()
-		if observation.PrerequisiteID == catalog.PrerequisiteID && observation.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility && observation.OwnerModuleID == catalog.OwnerModuleID && observation.ContentHash == catalog.SnapshotID {
-			if err := observation.Validate(); err == nil {
-				return observation, true
-			}
-		}
-	}
-	return runtimecontract.RuntimePrerequisiteObservation{}, false
+	return grounding.CurrentCatalogObservation(aggregate.Facts.Resources.PrerequisiteObservations, catalog)
 }
 
 // invalidatePrerequisitesForReadOnlyStale applies an owner-observed freshness
@@ -311,67 +137,6 @@ func CurrentSemanticCatalogObservation(aggregate RuntimeAggregate, catalog runti
 // immutable audit lineage, not live SM-3 work; rejecting them would make a
 // later local prerequisite stale unable to converge after an external receipt
 // resource change.
-func (c *RuntimeController) invalidatePrerequisitesForReadOnlyStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	stale = stale.Normalized()
-	if err := stale.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
-	if prerequisiteInvalidationExists(aggregate, signature) {
-		return aggregate, nil
-	}
-	if aggregate.ActiveDispatch != nil || runtimeAggregateHasCurrentCandidateWork(aggregate) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: read-only prerequisite stale requires no current candidate or dispatch", common.ErrConflict)
-	}
-	expectedRevision := aggregate.StateRevision
-	facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	facts.Recovery = ledger
-	staleCopy := stale
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
-		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
-	})
-	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
-			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
-		}
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// runtimeAggregateHasCurrentCandidateWork distinguishes active SM-3 work from
-// immutable lineage that belongs to a prior authority snapshot.  Resource
-// receipt invalidation intentionally keeps the accepted candidate/session that
-// authorized the durable effect; a later SM-2 stale fact may proceed only when
-// it cannot invalidate a current provider request or pending candidate.
 func runtimeAggregateHasCurrentCandidateWork(aggregate RuntimeAggregate) bool {
 	transaction := aggregate.Decision.AuthorityTransaction()
 	if transaction.AuthoritySnapshotID == "" {
@@ -402,394 +167,19 @@ func runtimeAggregateHasCurrentCandidateWork(aggregate RuntimeAggregate) bool {
 // stale authority is an SM-2 prerequisite fact, not an SM-3 candidate
 // rejection. The session is retained as terminal audit lineage while the
 // reducer seals a new authority around the reacquired active prerequisite.
-func (c *RuntimeController) invalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	stale = stale.Normalized()
-	if err := stale.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
-	if prerequisiteInvalidationExists(aggregate, signature) {
-		return aggregate, nil
-	}
-	idx, session, err := currentCandidateRequestSession(aggregate, logicalRequestID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if !session.ProviderSubmitted {
-		return RuntimeAggregate{}, fmt.Errorf("%w: stale candidate response does not match a submitted physical call", common.ErrConflict)
-	}
-
-	expectedRevision := aggregate.StateRevision
-	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	facts.Recovery = ledger
-	staleCopy := stale
-	aggregate.CandidateRequestSessions[idx].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
-	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = false
-	aggregate.CandidateRequestSessions[idx].LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
-		Class: runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
-		Code:  "prerequisite_stale", Signature: runtimecontract.StableRuntimePrerequisiteStaleSignature(stale),
-	}
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature: signature, PrerequisiteIDs: affectedPrerequisites, ObservationIDs: affectedObservations,
-		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
-	})
-	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
-			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
-		}
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// invalidateCandidateAttemptForPrerequisiteStale abandons an unsealed
-// candidate request/proposal after an owner read-only probe proves that one
-// prerequisite observation is obsolete. It is deliberately not
-// failCandidateAttempt: no candidate retry, repair debt, provider retry, or
-// evidence is created.
-func (c *RuntimeController) invalidateCandidateAttemptForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	stale = stale.Normalized()
-	if err := stale.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
-	if prerequisiteInvalidationExists(aggregate, signature) {
-		return aggregate, nil
-	}
-	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
-	idx, _, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
-	}
-	expectedRevision := aggregate.StateRevision
-	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	facts.Recovery = ledger
-	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
-	aggregate.CandidateAttempts[idx].Proposal = nil
-	aggregate.CandidateAttempts[idx].Feasibilities = nil
-	aggregate.CandidateAttempts[idx].Failure = nil
-	staleCopy := stale
-	aggregate.CandidateAttempts[idx].Stale = &staleCopy
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature: signature, PrerequisiteIDs: affectedPrerequisites, ObservationIDs: affectedObservations,
-		InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
-	})
-	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
-			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
-		}
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// invalidateCandidateAttemptForFeasibilityPrerequisite abandons an unsealed
-// candidate when its owning capability proves that correcting the operation
-// requires a missing current owner fact. Unlike a failed candidate attempt it
-// spends neither the 0/1 contract retry nor the focus repair budget: the next
-// candidate runs only after a new authority is sealed around the acquired fact.
-func (c *RuntimeController) invalidateCandidateAttemptForFeasibilityPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, request runtimecontract.RuntimeOperationPrerequisiteRequest) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	request = request.Normalized()
-	if err := request.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	// Duplicate owner delivery may arrive after the CAS committed a new
-	// prerequisite authority. The persisted invalidated attempt is the exact
-	// idempotency fence; do not reconstruct or consume any budget.
-	for _, record := range aggregate.CandidateAttempts {
-		if record.Attempt == attempt && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.PrerequisiteRequest != nil && record.PrerequisiteRequest.Same(request) {
-			return aggregate, nil
-		}
-	}
-	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
-	idx, record, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if !found || record.Proposal == nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
-	}
-	operation, found := candidateOperationByID(*record.Proposal, request.OperationID)
-	if !found || !runtimecontract.RuntimeOperationRequiresCurrentTargetSnapshot(operation) || !runtimeOperationTargetsRef(operation, request.SubjectRef) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: prerequisite request is not bound to the pending candidate operation", common.ErrConflict)
-	}
-	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-	if !known || descriptor.OwnerModuleID != request.OwnerModuleID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: prerequisite request owner does not match candidate operation", common.ErrConflict)
-	}
-	feasibility, found := candidateAttemptFeasibilityForOperation(record.Feasibilities, request.OperationID)
-	if !found || feasibility.Observation == nil || feasibility.Observation.PrerequisiteRequest == nil || !feasibility.Observation.PrerequisiteRequest.Same(request) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: prerequisite request has no matching persisted owner feasibility fact", common.ErrConflict)
-	}
-
-	expectedRevision := aggregate.StateRevision
-	facts := addFeasibilityPrerequisite(factsWithoutTargetSnapshot(aggregate.Facts, request), request)
-	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
-	aggregate.CandidateAttempts[idx].Proposal = nil
-	aggregate.CandidateAttempts[idx].Feasibilities = nil
-	aggregate.CandidateAttempts[idx].Failure = nil
-	aggregate.CandidateAttempts[idx].Stale = nil
-	requestCopy := request
-	aggregate.CandidateAttempts[idx].PrerequisiteRequest = &requestCopy
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// invalidateCandidateAttemptForOwnerInfeasibility is the SM-2/SM-3 handoff
-// for a completed owner feasibility probe. Unlike failCandidateAttempt it
-// never seals a CorrectionDisposition and never permits attempt 1. The
-// controller preserves the factual observation as immutable lineage, then lets
-// the owner reducer choose a fresh authority or a typed terminal. An
-// owner-contract-defect is terminal at this boundary: it is evidence that the
-// producing capability violated its own total emitted-code registry, not a
-// recoverable resource observation.
-func (c *RuntimeController) invalidateCandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
+func runtimeBindingContradictionIdentity(aggregate RuntimeAggregate, record runtimecontract.RuntimeCandidateAttemptRecord, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeBindingContradictionIdentity, common.CoverageWorkItemID, runtimecontract.RuntimeCWIBindingRef, error) {
 	observation = observation.Normalized()
-	if err := observation.Validate(); err != nil || (observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityContractDefect) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
-	idx, record, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if !found {
-		for _, historical := range aggregate.CandidateAttempts {
-			if historical.Attempt == attempt && historical.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && historical.OwnerFeasibility != nil &&
-				(reflect.DeepEqual(historical.OwnerFeasibility.Clone(), observation) || historical.BindingContradiction != nil) {
-				return aggregate, nil
-			}
-		}
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
-	}
-	if record.Proposal == nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
-	}
-	matched := false
-	matchedOperationID := ""
-	for _, feasibility := range record.Feasibilities {
-		if feasibility.Observation == nil {
-			continue
-		}
-		if reflect.DeepEqual(feasibility.Observation.Clone(), observation) {
-			matched = true
-			matchedOperationID = feasibility.OperationID
-			break
-		}
-	}
-	if !matched {
-		return RuntimeAggregate{}, fmt.Errorf("%w: owner infeasibility has no matching persisted feasibility observation", common.ErrConflict)
-	}
-
-	expectedRevision := aggregate.StateRevision
-	var contradiction *runtimecontract.RuntimeBindingContradictionIdentity
-	var contradictionCoverageID common.CoverageWorkItemID
-	var contradictionBinding runtimecontract.RuntimeCWIBindingRef
-	contradictionUnbound := false
-	if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.OwnerPolicy.PolicyRevision != "" {
-		identity, coverageID, bindingRef, contradictionErr := runtimeBindingContradictionIdentity(aggregate, record, matchedOperationID, observation)
-		if contradictionErr != nil {
-			contradictionUnbound = true
-		} else {
-			contradiction = &identity
-			contradictionCoverageID = coverageID
-			contradictionBinding = bindingRef
-		}
-	}
-	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
-	aggregate.CandidateAttempts[idx].Proposal = nil
-	aggregate.CandidateAttempts[idx].Feasibilities = nil
-	aggregate.CandidateAttempts[idx].Failure = nil
-	aggregate.CandidateAttempts[idx].Stale = nil
-	aggregate.CandidateAttempts[idx].PrerequisiteRequest = nil
-	copyObservation := observation.Clone()
-	aggregate.CandidateAttempts[idx].OwnerFeasibility = &copyObservation
-	aggregate.CandidateAttempts[idx].BindingContradiction = contradiction
-	facts := aggregate.Facts
-	if contradiction != nil {
-		for itemIndex := range facts.Coverage {
-			item := &facts.Coverage[itemIndex]
-			if item.ID != contradictionCoverageID || item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, contradictionBinding) {
-				continue
-			}
-			if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
-				return RuntimeAggregate{}, fmt.Errorf("runtime CWI binding retirement lineage exhausted")
-			}
-			item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
-				RetiredBindingRef: contradictionBinding, CausationRef: contradiction.ObservationHash,
-				Reason: "capability owner contradicted the sealed binding before dispatch",
-			})
-			item.CurrentBindingRef = nil
-			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
-		}
-		updated, updateErr := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{contradictionCoverageID})
-		if updateErr != nil {
-			return RuntimeAggregate{}, updateErr
-		}
-		facts = updated
-		contract, contractErr := canonicalRuntimeCWIReconciliationContract(facts)
-		if contractErr != nil {
-			return RuntimeAggregate{}, contractErr
-		}
-		facts.ReconciliationContract = contract
-		aggregate.Facts = facts
-		if _, supersedeErr := supersedeActiveReconciliationForCurrentContract(&aggregate); supersedeErr != nil {
-			return RuntimeAggregate{}, supersedeErr
-		}
-		if retireErr := retireSemanticPlanningGenerationForBindingContradiction(&aggregate, contradictionCoverageID, contradiction.ObservationHash); retireErr != nil {
-			return RuntimeAggregate{}, retireErr
-		}
-		facts = aggregate.Facts
-		facts.Failure = nil
-		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
-		if reduceErr != nil {
-			return RuntimeAggregate{}, reduceErr
-		}
-		aggregate.Facts = facts
-		aggregate.Decision = decision
-		aggregate.StateRevision++
-		if err := aggregate.Validate(); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		return aggregate, nil
-	}
-	diagnostic := observation.Feedback.OriginalDiagnostic
-	failure := runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassCandidateInfeasible, Code: diagnostic.OriginalCode,
-		Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage, TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
-	}
-	if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityContractDefect {
-		failure = runtimecontract.FailureFact{
-			Class:      runtimecontract.FailureClassRuntimeContractMisalignment,
-			Code:       "runtime_owner_contract_defect",
-			Signature:  "runtime-owner-contract-defect/" + diagnostic.Signature,
-			Message:    "capability owner emitted an undeclared feasibility code",
-			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
-		}
-	}
-	if contradictionUnbound {
-		failure = runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_contract_defect",
-			Signature:  "binding-contradiction-unbound/" + diagnostic.Signature,
-			Message:    "owner contradiction cannot be tied to one current binding",
-			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
-		}
-	}
-	// An owner that reports that the sealed validation recipe is unavailable
-	// cannot be repaired by asking for another candidate under the same
-	// validation authority. A valid alternative must arrive as a new sealed
-	// prerequisite/blueprint fact; absent that fact the factual outcome is a
-	// deterministic terminal, not a correction or random state change.
-	if observation.FailureCategory() == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
-		// The owner rejected the sealed recipe before any repair attempt or
-		// dispatch. This is an owner/capability contract gap, not exhausted
-		// repair progress; preserving that distinction prevents a zero-attempt
-		// prerequisite failure from being reported as no-progress exhaustion.
-		failure.Class = runtimecontract.FailureClassCandidateInfeasible
-		failure.Code = "validation_recipe_exhausted"
-		failure.Signature = "validation-recipe-exhausted/" + diagnostic.Signature
-		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage
-	}
-	facts.Failure = &failure
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-func runtimeBindingContradictionIdentity(aggregate RuntimeAggregate, record runtimecontract.RuntimeCandidateAttemptRecord, operationID string, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeBindingContradictionIdentity, common.CoverageWorkItemID, runtimecontract.RuntimeCWIBindingRef, error) {
-	if record.Proposal == nil || observation.Feedback == nil || observation.Feedback.OriginalDiagnostic == nil {
+	if record.Proposal == nil || !observation.SealedTargetAuthorizationContradicted() || observation.Feedback == nil || observation.Feedback.OriginalDiagnostic == nil || feasibility.Observation == nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
-	operation, found := candidateOperationByID(*record.Proposal, operationID)
-	if !found || len(operation.BindingRefs) != 1 || observation.OwnerPolicy.CatalogSnapshotID == "" {
+	if !reflect.DeepEqual(feasibility.Observation.Clone(), observation) ||
+		strings.TrimSpace(feasibility.AdmissibilitySnapshotID) != observation.OwnerPolicy.CatalogSnapshotID ||
+		strings.TrimSpace(feasibility.CandidateManifestHash) == "" || strings.TrimSpace(feasibility.CandidateManifestHash) != strings.TrimSpace(record.ManifestHash) {
+		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
+	}
+	operation, found := candidateOperationByID(*record.Proposal, feasibility.OperationID)
+	descriptor, descriptorFound := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || !descriptorFound || descriptor.OwnerModuleID != observation.OwnerPolicy.OwnerModuleID || len(operation.BindingRefs) != 1 || record.Transaction.FocusID == "" {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
 	var coverageID common.CoverageWorkItemID
@@ -802,30 +192,58 @@ func runtimeBindingContradictionIdentity(aggregate RuntimeAggregate, record runt
 			matches++
 		}
 	}
-	if matches != 1 || ref.SemanticManifestHash == "" || aggregate.SemanticPlanning.Manifest == nil || ref.SemanticManifestHash != aggregate.SemanticPlanning.Manifest.Hash {
+	if matches != 1 || ref.FocusID != record.Transaction.FocusID || !runtimeSemanticPlanningContainsManifest(aggregate.SemanticPlanning, ref.SemanticManifestHash) {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
-	diagnostic := observation.Feedback.OriginalDiagnostic.Normalized()
-	if diagnostic.OperationID != operation.ID || observation.OwnerPolicy.OwnerModuleID != diagnostic.OwnerModuleID ||
-		observation.OwnerPolicy.CatalogSnapshotID == "" || len(diagnostic.TargetRefs) == 0 || !sameRuntimeStringSet(operation.TargetRefs, diagnostic.TargetRefs) {
+	var reconciliationBinding runtimecontract.RuntimeCWIReconciliationBindingRef
+	reconciliationMatches := 0
+	for _, binding := range aggregate.Facts.ReconciliationContract.Bindings {
+		binding = binding.Normalized()
+		if binding.CoverageWorkItemID == coverageID && binding.BindingID == ref.BindingID && binding.BindingHash == ref.BindingHash {
+			reconciliationBinding = binding
+			reconciliationMatches++
+		}
+	}
+	if reconciliationMatches != 1 || !containsString(reconciliationBinding.OwnerModuleIDs, observation.OwnerPolicy.OwnerModuleID) ||
+		!containsString(reconciliationBinding.AllowedOperationKinds, operation.Kind) {
+		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
+	}
+	feedback := observation.Feedback.Normalized()
+	diagnostic := feedback.OriginalDiagnostic.Normalized()
+	if feedback.WorkspaceID != aggregate.Facts.WorkspaceID || feedback.RunID != aggregate.Facts.RunID ||
+		feedback.AuthoritySnapshotID != record.Transaction.AuthoritySnapshotID || feedback.DispatchID != "" ||
+		diagnostic.OperationID != operation.ID || observation.OwnerPolicy.OwnerModuleID != diagnostic.OwnerModuleID ||
+		strings.TrimSpace(diagnostic.ObservedRevision) == "" || len(diagnostic.TargetRefs) == 0 || !sameRuntimeStringSet(operation.TargetRefs, diagnostic.TargetRefs) {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
 	identity := runtimecontract.RuntimeBindingContradictionIdentity{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		AuthorityInputID: aggregate.Decision.AuthoritySnapshot.AuthorityInputID,
+		AuthorityInputID: record.Transaction.AuthorityInputID,
 		BindingID:        ref.BindingID, BindingSetHash: aggregate.Facts.ReconciliationContract.BindingSetHash,
 		ProposalHash:    runtimecontract.StableRuntimeCandidateHash(*record.Proposal),
-		ObservationHash: "binding-contradiction/" + diagnostic.Signature + "/" + diagnostic.ObservedRevision,
+		ObservationHash: "binding-contradiction/" + string(observation.ConstraintImpact) + "/" + diagnostic.Signature + "/" + diagnostic.ObservedRevision,
 		OwnerPolicy:     observation.OwnerPolicy, ObservedRevision: diagnostic.ObservedRevision,
 	}.Normalized()
-	if identity.ObservedRevision == "" {
-		identity.ObservedRevision = observation.OwnerPolicy.PolicyRevision
-		identity.ObservationHash = "binding-contradiction/" + diagnostic.Signature + "/" + identity.ObservedRevision
-	}
 	if err := identity.Validate(); err != nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, err
 	}
 	return identity, coverageID, ref, nil
+}
+
+func runtimeSemanticPlanningContainsManifest(ledger runtimecontract.RuntimeSemanticPlanningLedger, manifestHash string) bool {
+	manifestHash = strings.TrimSpace(manifestHash)
+	if manifestHash == "" {
+		return false
+	}
+	if ledger.Manifest != nil && strings.TrimSpace(ledger.Manifest.Hash) == manifestHash {
+		return true
+	}
+	for _, generation := range ledger.History {
+		if generation.Snapshot.Manifest != nil && strings.TrimSpace(generation.Snapshot.Manifest.Hash) == manifestHash {
+			return true
+		}
+	}
+	return false
 }
 
 func sameRuntimeStringSet(left, right []string) bool {
@@ -910,79 +328,6 @@ func addFeasibilityPrerequisite(facts runtimecontract.RuntimeFacts, request runt
 // invalidateActiveDispatchForPrerequisiteStale closes a sealed dispatch after
 // an owner has persisted a no-effect stale receipt. The stale receipt remains
 // diagnostic lineage only; it cannot create rejected evidence or repair debt.
-func (c *RuntimeController) invalidateActiveDispatchForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	receipt = receipt.Normalized()
-	if err := receipt.Validate(); err != nil || receipt.PrerequisiteStale == nil {
-		if err != nil {
-			return RuntimeAggregate{}, err
-		}
-		return RuntimeAggregate{}, fmt.Errorf("active dispatch refresh requires a generic stale receipt")
-	}
-	stale := receipt.PrerequisiteStale.Normalized()
-	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if prerequisiteInvalidationExists(aggregate, signature) {
-		return aggregate, nil
-	}
-	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.ID != strings.TrimSpace(dispatchID) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: stale receipt does not match active dispatch", common.ErrConflict)
-	}
-	if _, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, receipt.ExecutionKey, receipt.Fence); !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: stale receipt is not owner-persisted", common.ErrConflict)
-	}
-	expectedRevision := aggregate.StateRevision
-	facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	facts.Recovery = ledger
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
-		InvalidatedDependencies: invalidatedDependencies,
-		DispatchID:              dispatchID, OperationID: receipt.OperationID, Stale: &stale,
-	})
-	dispatch := *aggregate.ActiveDispatch
-	dispatch.State = DispatchStateInvalidated
-	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
-	aggregate.ActiveDispatch = nil
-	if !consumed {
-		facts.Failure = &runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassPrerequisiteRefreshExhausted, Code: "prerequisite_refresh_exhausted",
-			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
-		}
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// applyReceiptResourceChangeInvalidation is called while committing accepted
-// evidence. It keeps the accepted receipt/evidence and atomically retires any
-// intersecting owner observation for the next SM-2 authority. It never makes
-// the remaining operations of the current sealed SM-3 transaction stale:
-// their identity, targets, dependencies and effect contract were sealed before
-// the first owner side effect.
 func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatchID, operationID string, receipt runtimecontract.RuntimeOperationReceipt) (bool, error) {
 	if aggregate == nil {
 		return false, common.ErrInvalidArgument

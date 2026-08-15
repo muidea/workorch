@@ -28,9 +28,9 @@ func TestCurrentRunStatusStepTerminalRunPrefersFailedTerminalOverStaleCheckpoint
 		CurrentStepID: "run-terminal-selection/001-completed",
 	}}
 
-	got := CurrentRunStatusStep(run, steps, checkpoints, nil, nil)
+	got := currentRunStatusStep(run, steps, checkpoints, nil, nil)
 	if got == nil || got.ID != "run-terminal-selection/002-failed" {
-		t.Fatalf("CurrentRunStatusStep = %+v, want latest failed terminal step", got)
+		t.Fatalf("currentRunStatusStep = %+v, want latest failed terminal step", got)
 	}
 }
 
@@ -75,8 +75,8 @@ func TestCurrentRunStatusStepTerminalRunUsesCheckpointOrderForLexicallyEarlierFa
 		},
 	}
 
-	got := CurrentRunStatusStep(run, steps, checkpoints, nil, nil)
+	got := currentRunStatusStep(run, steps, checkpoints, nil, nil)
 	if got == nil || got.ID != "run-terminal-checkpoint-order/follow-up-final" {
-		t.Fatalf("CurrentRunStatusStep = %+v, want checkpoint-ordered final failure", got)
+		t.Fatalf("currentRunStatusStep = %+v, want checkpoint-ordered final failure", got)
 	}
 }

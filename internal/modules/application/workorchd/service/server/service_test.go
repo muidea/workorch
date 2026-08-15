@@ -3,11 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -60,20 +60,15 @@ func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
 	return true
 }
 
-func TestServiceStartupRequiresFrameworkRuntime(t *testing.T) {
+func TestServiceStartupRequiresTypedApplicationPortsAndBackgroundRoutine(t *testing.T) {
 	svc := NewService(Config{Addr: "127.0.0.1:0", Backend: "memory"})
 	routine := &recordingBackgroundRoutine{}
 
-	if err := svc.Startup(context.Background(), "workorch", nil, routine); err == nil {
-		t.Fatal("Startup returned nil error without runtime session")
+	if err := svc.StartupWithApplicationPorts(context.Background(), "workorch", ApplicationPorts{}, routine); err == nil {
+		t.Fatal("StartupWithApplicationPorts returned nil error without typed ports")
 	}
-	session, sessionErr := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if sessionErr != nil {
-		t.Fatalf("new runtime session: %v", sessionErr)
-	}
-	t.Cleanup(func() { _ = session.Close(context.Background()) })
-	if err := svc.Startup(context.Background(), "workorch", session, nil); err == nil {
-		t.Fatal("Startup returned nil error without background routine")
+	if err := svc.StartupWithApplicationPorts(context.Background(), "workorch", ApplicationPorts{}, nil); err == nil {
+		t.Fatal("StartupWithApplicationPorts returned nil error without background routine")
 	}
 }
 
@@ -91,8 +86,8 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	if !routine.asyncFunctionCalled {
 		t.Fatal("Run did not submit HTTP server through BackgroundRoutine.AsyncFunction")
 	}
-	if routine.asyncFunctionCalls != 2 {
-		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 1 {
+		t.Fatalf("Run submitted %d background functions, want only HTTP server; projection lifecycle belongs to Biz", routine.asyncFunctionCalls)
 	}
 	if routine.timerCalls != 0 {
 		t.Fatalf("Run submitted %d timers, want no legacy watchdog timer", routine.timerCalls)
@@ -150,8 +145,8 @@ func TestServiceRunDoesNotRecoverLegacyInactiveRunningWorkspace(t *testing.T) {
 	if err := svc.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if routine.asyncFunctionCalls != 2 {
-		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 1 {
+		t.Fatalf("Run submitted %d background functions, want only HTTP server; projection lifecycle belongs to Biz", routine.asyncFunctionCalls)
 	}
 	if routine.timerCalls != 0 {
 		t.Fatalf("Run submitted %d timers, want no legacy watchdog timer", routine.timerCalls)
@@ -172,7 +167,7 @@ func TestServiceRunDoesNotRecoverLegacyInactiveRunningWorkspace(t *testing.T) {
 	if runRecord.State != common.RunStateActive {
 		t.Fatalf("run = %+v, want legacy state left untouched", runRecord)
 	}
-	if err := svc.http.state.workspaceProjection.RebuildWorkspace(ctx, workspaceID); err != nil {
+	if err := svc.http.state.workspaceProjectionWriter.RebuildWorkspace(ctx, workspaceID); err != nil {
 		t.Fatalf("RebuildWorkspace: %v", err)
 	}
 	snapshot, err := svc.ReadWorkspaceViewSnapshot(ctx, workspaceID)
@@ -198,6 +193,27 @@ func TestServiceRunRequiresBackgroundRoutine(t *testing.T) {
 	}
 	if svc.runStarted.Load() {
 		t.Fatal("Run left service marked as started without background routine")
+	}
+}
+
+func TestProductionServiceRunFailsClosedWhenApplicationAdmissionIsMissing(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	svc := &Service{
+		http: newIsolatedTestHTTPServerWithBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, routine),
+		done: make(chan error, 1),
+	}
+	configureIsolatedTestSession(t, svc.http.state, svc.http.state.config)
+	svc.http.state.workspaceExecutionAdmission = nil
+
+	err := svc.Run(context.Background())
+	if err == nil || !strings.Contains(err.Message, "workspace execution admission") {
+		t.Fatalf("Run error = %v, want fail-closed missing execution admission", err)
+	}
+	if svc.runStarted.Load() {
+		t.Fatal("Run left production service marked as started after wiring failure")
+	}
+	if routine.asyncFunctionCalled {
+		t.Fatal("Run scheduled background work before validating production application ports")
 	}
 }
 

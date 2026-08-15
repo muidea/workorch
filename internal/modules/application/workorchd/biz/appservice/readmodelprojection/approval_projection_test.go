@@ -23,11 +23,11 @@ func TestMapApprovalProjectsResolutionFields(t *testing.T) {
 		Context:     mustProjectionPayload(t, map[string]any{"decision": "approved"}),
 	}
 
-	got := MapApproval(item, nil)
+	got := mapApproval(item, nil)
 	if got.ResolvedAt != item.ResolvedAt || got.ResolvedBy != item.ResolvedBy {
 		t.Fatalf("approval resolution fields = %+v, want %s/%s", got, item.ResolvedAt, item.ResolvedBy)
 	}
-	view := ProjectApprovalView(got)
+	view := projectApprovalView(got)
 	if len(view.Context.Fields) != 0 {
 		t.Fatalf("approval view context = %+v, want compact view without context", view.Context)
 	}

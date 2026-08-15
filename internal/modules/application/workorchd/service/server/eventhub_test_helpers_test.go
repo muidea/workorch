@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -51,7 +55,13 @@ func attachTestEventNotifications(state *serverState) {
 		func() { projection.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged) },
 		func() { records.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) },
 	)
-	state.workspaceProjection.SetEventPorts(workspaceviewcore.EventPorts{
+	observer, ok := state.workspaceProjection.(interface {
+		SetEventPorts(workspaceviewcore.EventPorts)
+	})
+	if !ok {
+		return
+	}
+	observer.SetEventPorts(workspaceviewcore.EventPorts{
 		ReadHighWatermarks: func(_ context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
 			items := make([]eventstreamevents.WorkspaceHighWatermark, 0, len(workspaceIDs))
 			for _, workspaceID := range workspaceIDs {
@@ -65,6 +75,55 @@ func attachTestEventNotifications(state *serverState) {
 	})
 }
 
+const testWorkspaceProjectionRebuildCoalesceDelay = 100 * time.Millisecond
+
+type testWorkspaceProjectionLoader struct{ state *serverState }
+
+func (l testWorkspaceProjectionLoader) ListWorkspaces(ctx context.Context) ([]appmodelcore.Workspace, error) {
+	if l.state == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return l.state.listWorkspaces(ctx, l.state.config.Backend, l.state.config.DataRoot)
+}
+
+func (l testWorkspaceProjectionLoader) ReadWorkspace(ctx context.Context, workspaceID string) (appmodelcore.Workspace, error) {
+	if l.state == nil {
+		return appmodelcore.Workspace{}, common.ErrInvalidArgument
+	}
+	return l.state.readWorkspace(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
+}
+
+func (l testWorkspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+	if l.state == nil {
+		return readmodelcore.WorkspaceSnapshotState{}, common.ErrInvalidArgument
+	}
+	return l.state.readProjectionSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
+}
+
+func installTestWorkspaceProjection(state *serverState) error {
+	if state == nil {
+		return common.ErrInvalidArgument
+	}
+	manager := workspaceviewcore.NewManager(workspaceviewcore.ManagerOptions{
+		Loader:               testWorkspaceProjectionLoader{state: state},
+		Schedule:             state.scheduleBackground,
+		RebuildCoalesceDelay: testWorkspaceProjectionRebuildCoalesceDelay,
+	})
+	state.workspaceProjection = manager
+	state.workspaceProjectionWriter = manager
+	state.eventUnsubscribes = append([]func(){manager.Close}, state.eventUnsubscribes...)
+	return nil
+}
+
+func newMuxWithState(state *serverState) http.Handler {
+	if lifecycle, ok := state.workspaceProjection.(interface {
+		Start(context.Context) error
+	}); ok {
+		_ = lifecycle.Start(state.backgroundContext())
+	}
+	return newMuxWithStateNoStart(state)
+}
+
 // These helpers keep raw EventHub access in test fixtures only. Production
 // server construction is session-backed and never retains the Hub.
 func newTestServerStateWithCommandHubAndBackground(config Config, hub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
@@ -72,7 +131,7 @@ func newTestServerStateWithCommandHubAndBackground(config Config, hub magicevent
 		hub = magicevent.NewHub(1024)
 	}
 	session, err := appservice.NewRuntimeSessionFromCommandHub(hub, backgroundRoutine)
-	return newServerStateWithRuntimeSessionAndBackground(config, session, backgroundRoutine, err)
+	return newSessionBackedTestServerState(config, session, backgroundRoutine, err)
 }
 
 func newTestHTTPServerWithCommandHubAndBackground(config Config, hub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
@@ -80,16 +139,11 @@ func newTestHTTPServerWithCommandHubAndBackground(config Config, hub magicevent.
 		hub = magicevent.NewHub(1024)
 	}
 	session, err := appservice.NewRuntimeSessionFromCommandHub(hub, backgroundRoutine)
-	return newHTTPServerWithRuntimeSessionAndBackground(config, session, backgroundRoutine, err)
+	return newSessionBackedTestHTTPServerWithError(config, session, backgroundRoutine, err)
 }
 
 func testStateCommandHub(state *serverState) magicevent.Hub {
-	if state == nil {
-		return nil
-	}
-	state.sharedSessionMu.RLock()
-	session := state.sharedSession
-	state.sharedSessionMu.RUnlock()
+	session := testRuntimeSession(state)
 	if session == nil {
 		return nil
 	}

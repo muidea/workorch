@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func ProjectPatch(item *runtimeevidencemodel.Patch) projectioncontract.Patch {
+func projectPatch(item *runtimeevidencemodel.Patch) projectioncontract.Patch {
 	if item == nil {
 		return projectioncontract.Patch{}
 	}

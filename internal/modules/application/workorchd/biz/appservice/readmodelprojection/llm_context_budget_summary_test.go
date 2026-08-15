@@ -8,7 +8,7 @@ import (
 )
 
 func TestSummarizeLLMContextBudgetsAggregatesTraceMetadata(t *testing.T) {
-	got := SummarizeLLMContextBudgets([]projectioncontract.LLMContextBudgetTrace{
+	got := summarizeLLMContextBudgets([]projectioncontract.LLMContextBudgetTrace{
 		{
 			StepID:               "step-a",
 			EstimatedInputTokens: 1000,
@@ -61,7 +61,7 @@ func TestSummarizeLLMContextBudgetsAddsRecentWindowTrend(t *testing.T) {
 			ContextUtilization:   utilization,
 		})
 	}
-	got := SummarizeLLMContextBudgets(items)
+	got := summarizeLLMContextBudgets(items)
 	if got.RecentWindowSize != llmContextBudgetRecentWindowSize ||
 		got.RecentTraceTotal != llmContextBudgetRecentWindowSize ||
 		got.RecentTruncatedCount != 2 ||

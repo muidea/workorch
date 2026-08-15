@@ -3,13 +3,13 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *RuntimeController) bindGovernanceRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimecontract.RuntimeGovernanceRequestRecord) (RuntimeAggregate, error) {
+func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimecontract.RuntimeGovernanceRequestRecord) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -21,27 +21,33 @@ func (c *RuntimeController) bindGovernanceRequest(ctx context.Context, workspace
 		return RuntimeAggregate{}, err
 	}
 	for _, current := range aggregate.GovernanceRequests {
-		if current == request {
+		if governancecheck.SameRequestRecord(current, request) {
 			return aggregate, nil
 		}
-		if current.TicketID == request.TicketID || (current.AuthoritySnapshotID == request.AuthoritySnapshotID && current.DispatchID == request.DispatchID) {
+		if governancecheck.RequestRecordConflicts(current, request) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: governed dispatch is already bound to another ticket", common.ErrConflict)
 		}
 	}
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch == nil ||
-		aggregate.ActiveDispatch.ID != request.DispatchID || aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID != request.AuthoritySnapshotID ||
-		aggregate.ActiveDispatch.Candidate.Governance == nil {
+	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.Governance == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance request does not match the active governed dispatch", common.ErrConflict)
 	}
 	dependency := aggregate.ActiveDispatch.Candidate.Governance.ExternalDependency
-	if strings.TrimSpace(dependency.Kind) != strings.TrimSpace(request.DependencyKind) || strings.TrimSpace(dependency.SubjectRef) != strings.TrimSpace(request.SubjectRef) {
+	dispatchFacts := governancecheck.DispatchFacts{
+		DecisionState: aggregate.Decision.State, DispatchID: aggregate.ActiveDispatch.ID,
+		AuthoritySnapshotID: aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		CandidateGovernance: aggregate.ActiveDispatch.Candidate.Governance != nil,
+		DependencyKind:      dependency.Kind, SubjectRef: dependency.SubjectRef,
+	}
+	if !governancecheck.GovernedDispatchMatches(dispatchFacts, request.DispatchID, request.AuthoritySnapshotID) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: governance request does not match the active governed dispatch", common.ErrConflict)
+	}
+	if !governancecheck.DependencyMatches(dependency.Kind, dependency.SubjectRef, request.DependencyKind, request.SubjectRef) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance request dependency does not match the sealed candidate", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
 	for idx := range aggregate.OperationGovernanceBindings {
 		binding := aggregate.OperationGovernanceBindings[idx].Normalized()
-		if binding.State != runtimecontract.RuntimeOperationGovernanceBindingSuspended ||
-			binding.DependencyKind != request.DependencyKind || binding.SubjectRef != request.SubjectRef {
+		if !governancecheck.SuspendedBindingMatchesRequest(binding, request) {
 			continue
 		}
 		binding.TicketID = request.TicketID
@@ -61,7 +67,7 @@ func (c *RuntimeController) bindGovernanceRequest(ctx context.Context, workspace
 	return aggregate, nil
 }
 
-func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (EvidenceCommitResult, error) {
+func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (EvidenceCommitResult, error) {
 	if c == nil || c.repository == nil {
 		return EvidenceCommitResult{}, common.ErrInvalidArgument
 	}
@@ -94,19 +100,25 @@ func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, reso
 		}
 		return EvidenceCommitResult{Disposition: CommitDispositionStale, Aggregate: aggregate}, nil
 	}
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch == nil ||
-		aggregate.ActiveDispatch.ID != resolution.DispatchID || aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID != resolution.AuthoritySnapshotID ||
-		aggregate.ActiveDispatch.Candidate.Governance == nil {
+	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.Governance == nil {
 		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution does not match the active governed dispatch", common.ErrConflict)
 	}
 	dependency := aggregate.ActiveDispatch.Candidate.Governance.ExternalDependency
-	if strings.TrimSpace(dependency.Kind) != resolution.DependencyKind || strings.TrimSpace(dependency.SubjectRef) != resolution.SubjectRef {
+	dispatchFacts := governancecheck.DispatchFacts{
+		DecisionState: aggregate.Decision.State, DispatchID: aggregate.ActiveDispatch.ID,
+		AuthoritySnapshotID: aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		CandidateGovernance: aggregate.ActiveDispatch.Candidate.Governance != nil,
+		DependencyKind:      dependency.Kind, SubjectRef: dependency.SubjectRef,
+	}
+	if !governancecheck.GovernedDispatchMatches(dispatchFacts, resolution.DispatchID, resolution.AuthoritySnapshotID) {
+		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution does not match the active governed dispatch", common.ErrConflict)
+	}
+	if !governancecheck.DependencyMatches(dependency.Kind, dependency.SubjectRef, resolution.DependencyKind, resolution.SubjectRef) {
 		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution dependency does not match the sealed candidate", common.ErrConflict)
 	}
 	bound := false
 	for _, request := range aggregate.GovernanceRequests {
-		if request.TicketID == resolution.TicketID && request.AuthoritySnapshotID == resolution.AuthoritySnapshotID && request.DispatchID == resolution.DispatchID &&
-			strings.TrimSpace(request.DependencyKind) == resolution.DependencyKind && strings.TrimSpace(request.SubjectRef) == resolution.SubjectRef {
+		if governancecheck.RequestBindsResolution(request, resolution) {
 			bound = true
 			break
 		}
@@ -117,13 +129,12 @@ func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, reso
 	grantedBindingIndex := -1
 	for idx := range aggregate.OperationGovernanceBindings {
 		binding := aggregate.OperationGovernanceBindings[idx].Normalized()
-		if binding.TicketID != resolution.TicketID || binding.GovernanceDispatchID != resolution.DispatchID ||
-			binding.GovernanceSnapshotID != resolution.AuthoritySnapshotID {
+		if !governancecheck.BindingMatchesResolution(binding, resolution) {
 			continue
 		}
 		switch resolution.Outcome {
 		case runtimecontract.RuntimeGovernanceResolutionOutcomeContinue:
-			if binding.State != runtimecontract.RuntimeOperationGovernanceBindingTicketBound {
+			if !governancecheck.BindingStateAllowsOutcome(binding.State, resolution.Outcome) {
 				return EvidenceCommitResult{}, fmt.Errorf("%w: governance continuation binding is not ticket_bound", common.ErrConflict)
 			}
 			binding.State = runtimecontract.RuntimeOperationGovernanceBindingGranted
@@ -135,7 +146,7 @@ func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, reso
 			}
 			grantedBindingIndex = idx
 		case runtimecontract.RuntimeGovernanceResolutionOutcomeFail:
-			if binding.State != runtimecontract.RuntimeOperationGovernanceBindingTicketBound {
+			if !governancecheck.BindingStateAllowsOutcome(binding.State, resolution.Outcome) {
 				return EvidenceCommitResult{}, fmt.Errorf("%w: governance rejection binding is not ticket_bound", common.ErrConflict)
 			}
 			binding.State = runtimecontract.RuntimeOperationGovernanceBindingRejected

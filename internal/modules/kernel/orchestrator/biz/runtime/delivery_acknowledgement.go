@@ -13,7 +13,7 @@ import (
 // controller's private internal-event dispatcher, so no adapter or sibling
 // owner can invoke a delivery-ledger transition directly. Duplicate identical
 // acknowledgements are idempotent; a conflicting owner receipt is rejected.
-func (c *RuntimeController) recordDeliveryAcknowledgement(ctx context.Context, acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement) (RuntimeAggregate, bool, error) {
+func (c *driveDeliveryComponent) recordDeliveryAcknowledgement(ctx context.Context, acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}

@@ -242,7 +242,7 @@ func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
 			},
 		},
 	}
-	progress := MapRuntimeProgress(snapshot)
+	progress := mapRunProgress(snapshot)
 	if progress.StepTotal != 4 {
 		t.Fatalf("step total = %d, want 4 dispatch units", progress.StepTotal)
 	}
@@ -265,7 +265,7 @@ func TestStepProgressStateTerminalFailedWins(t *testing.T) {
 			},
 		},
 	}
-	if got := StepProgressState(snapshot); got != "failed" {
+	if got := stepProgressState(snapshot); got != "failed" {
 		t.Fatalf("StepProgressState = %s, want failed", got)
 	}
 }

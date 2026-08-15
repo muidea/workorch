@@ -3,6 +3,7 @@ package runtime
 import (
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -107,16 +108,11 @@ func runtimeOperationForEvidence(aggregate RuntimeAggregate, evidence runtimecon
 }
 
 func runtimeOperationAllowedForFocus(focus runtimecontract.CoverageFocus, operation runtimecontract.RuntimeOperation) bool {
-	kind := runtimecontract.CanonicalRuntimeBlockKind(operation.Kind)
-	if stringIncluded(focus.RejectedStepKinds, kind) {
-		return false
-	}
-	return len(focus.AcceptedStepKinds) == 0 || stringIncluded(focus.AcceptedStepKinds, kind)
+	return proof.OperationAllowedForFocus(focus, operation)
 }
 
 func weakRuntimeEvidence(evidence runtimecontract.EvidenceFact) bool {
-	quality := common.EvidenceQuality(strings.TrimSpace(string(evidence.Quality)))
-	return evidence.ZeroWork || quality == common.EvidenceQualityInvalid || quality == common.EvidenceQualityInconclusive || quality == common.EvidenceQualitySkipped
+	return proof.WeakEvidence(evidence)
 }
 
 func runtimeEvidenceMatchesCoverageBindingWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {
@@ -140,33 +136,11 @@ func runtimeEvidenceBindingForCoverageWithLineage(facts runtimecontract.RuntimeF
 func runtimeEvidenceShowsExecutableBehaviorWithLineage(facts runtimecontract.RuntimeFacts, focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) bool {
 	_ = operation // binding, not operation-name heuristics, defines behavior proof.
 	binding, found := runtimeEvidenceBindingForCoverageWithLineage(facts, focus, coverageID, evidence, proofLineage)
-	if found && evidence.Validation != nil {
-		proof, proofFound := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
-		if proofFound {
-			observation := evidence.Validation.Normalized()
-			if observation.RecipeID != proof.ValidationRecipeID {
-				return false
-			}
-			for _, required := range proof.RequiredCheckRefs {
-				if !stringIncluded(observation.PassedChecks, required) {
-					return false
-				}
-			}
-			return len(proof.RequiredCheckRefs) != 0
-		}
-	}
-	// No non-empty PassedChecks fallback: a behavior proof without a declared
-	// binding recipe/check set is unavailable rather than implicitly satisfied.
-	return false
+	return found && proof.ValidationEvidenceShowsExecutableBehavior(binding, evidence)
 }
 
 func coverageWorkItemIDIncluded(values []common.CoverageWorkItemID, expected common.CoverageWorkItemID) bool {
-	for _, value := range values {
-		if value == expected {
-			return true
-		}
-	}
-	return false
+	return proof.CoverageWorkItemIncluded(values, expected)
 }
 
 func stringIncluded(values []string, expected string) bool {

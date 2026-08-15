@@ -51,8 +51,12 @@ func TestRuntimeCandidateAttemptBindingContradictionValidatesAndClones(t *testin
 		t.Fatal(err)
 	}
 	feedback.OriginalDiagnostic.OperationID = "write-target"
+	feedback.OriginalDiagnostic.ObservedRevision = "workspace-2"
 	policy := RuntimeOwnerPolicyIdentity{OwnerModuleID: RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: "catalog-1"}
-	observation := RuntimeOwnerFeasibilityObservation{Outcome: RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback, OwnerPolicy: policy}
+	observation := RuntimeOwnerFeasibilityObservation{
+		Outcome: RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback, OwnerPolicy: policy,
+		ConstraintImpact: RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted,
+	}
 	contradiction := RuntimeBindingContradictionIdentity{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthorityInputID: transaction.AuthorityInputID,
 		BindingID: "binding-1", BindingSetHash: "binding-set-1", ProposalHash: "proposal-1", ObservationHash: "observation-1",

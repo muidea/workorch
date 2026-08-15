@@ -1,24 +1,38 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+import llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 
-const (
-	EventPayloadStringLimit = 512
-	EventPayloadListLimit   = 16
-)
+// WD5 mechanical consolidation: same import contract; source list follows.
 
-func projectEventPayload(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
-	if len(payload.Fields) == 0 {
-		return workorcheventpayload.Payload{}
+// source: event_graph_canonicalization.go
+
+func canonicalizeEventRecordGraphNodes(value any) []map[string]any {
+	nodes := readModelMapSliceValue(value)
+	if len(nodes) == 0 {
+		return nil
 	}
-	fields := make([]workorcheventpayload.Field, 0, len(payload.Fields))
-	for _, field := range payload.Fields {
-		if !isEventPayloadAllowedKey(field.Name) {
-			continue
-		}
-		if projected, ok := projectEventPayloadValue(field.Value); ok {
-			fields = append(fields, workorcheventpayload.Field{Name: field.Name, Value: projected})
+	for idx := range nodes {
+		if kind, ok := nodes[idx]["kind"].(string); ok {
+			nodes[idx]["kind"] = llmcommon.CanonicalRuntimeBlockKind(kind)
 		}
 	}
-	return workorcheventpayload.New(fields...)
+	return nodes
+}
+
+// source: event_projection_helpers.go
+
+func canonicalStepKind(kind string) string {
+	return llmcommon.CanonicalRuntimeBlockKind(kind)
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	return cloneReadModelMap(input)
+}
+
+func mapDynamicValue(value any) map[string]any {
+	return readModelMapValue(value)
+}
+
+func mapDynamicSliceValue(value any) []map[string]any {
+	return readModelMapSliceValue(value)
 }

@@ -20,11 +20,11 @@ func TestWorkspaceOutcomeAndActivityPreferCurrentTerminalRunOverDefinitionHint(t
 			DefinitionRevision: definitionRevision, State: string(common.RunStateFailed), FailureReason: "semantic contract rejected",
 		}},
 	}
-	snapshot.Outcome = MapWorkspaceOutcome(snapshot)
+	snapshot.Outcome = mapWorkspaceOutcome(snapshot)
 	if snapshot.Outcome.RunID != "run-current" || snapshot.Outcome.State != string(common.RunStateFailed) || !snapshot.Outcome.Terminal || snapshot.Outcome.Reason != "semantic contract rejected" {
 		t.Fatalf("workspace outcome = %+v", snapshot.Outcome)
 	}
-	feed := BuildWorkspaceActivityFeedContent(snapshot)
+	feed := buildWorkspaceActivityFeedContent(snapshot)
 	found := false
 	for _, item := range feed.Items {
 		if item.Title == "outcome" {

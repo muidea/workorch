@@ -759,7 +759,7 @@ func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspac
 			candidate = projected
 		}
 	}
-	runID := common.RunID(readmodelprojection.SelectDisplayRunID(candidate))
+	runID := common.RunID(readmodelprojection.WorkspaceProjection().SelectDisplayRunID(candidate))
 	var runtimeStateRevision uint64
 	var evidenceSequence uint64
 	activityRevision := int64(0)
@@ -774,7 +774,7 @@ func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspac
 		// Snapshot may not yet have activity committed (overview-only path).
 		activityRevision = 0
 	}
-	changedSections := readmodelprojection.DiffWorkspaceProjectionSections(previous, candidate, changeKind)
+	changedSections := readmodelprojection.WorkspaceProjection().DiffSections(previous, candidate, changeKind)
 	portSections := make([]projectioncontract.WorkspaceProjectionSection, 0, len(changedSections))
 	for _, section := range changedSections {
 		portSections = append(portSections, projectioncontract.WorkspaceProjectionSection(section))

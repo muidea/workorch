@@ -8,8 +8,8 @@ import (
 	"time"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchprojectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -116,7 +116,7 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: appservice.PublicRunSnapshot(appservice.ProjectRunSnapshotDetail(item))})
+		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: readmodelprojection.RunProjection().PublicSnapshot(readmodelprojection.RunProjection().Detail(item))})
 	case "steps":
 		query := stepQueryFromRequest(r)
 		query.WorkspaceID = common.WorkspaceID(workspaceID)
@@ -203,7 +203,7 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: appservice.PublicRunObservability(item)})
+		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: readmodelprojection.RunProjection().PublicObservability(item)})
 	case "memory-recalls":
 		query := memoryRecallTraceQueryFromValues(r.URL.Query())
 		query.WorkspaceID = common.WorkspaceID(workspaceID)

@@ -420,6 +420,15 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	}
 	value := runtimecontract.RuntimeOperationFeasibilityObservation(observation)
 	value.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: ModuleID, PolicyRevision: fileOwnerFeasibilityPolicyRevision, CatalogSnapshotID: command.Admissibility.SnapshotID}
+	value.ConstraintImpact = ownerFeasibilityConstraintImpact(failure)
+	if value.ConstraintImpact != "" && value.Feedback != nil && value.Feedback.OriginalDiagnostic != nil {
+		value.Feedback.OriginalDiagnostic.ObservedRevision = command.Admissibility.ObservedRevision
+	}
+	value, err = runtimecontract.NormalizeRuntimeOperationFeasibilityObservation(value)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
 	result.Set(fileevents.ProbeRuntimeOperationFeasibilityResult(value), nil)
 }
 

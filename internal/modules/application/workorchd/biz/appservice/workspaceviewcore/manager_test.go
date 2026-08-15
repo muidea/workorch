@@ -1903,7 +1903,7 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 		t.Fatalf("changed activity revision = %d, want > %d", feed3.ActivityRevision, firstRevision)
 	}
 	// Read path must only page, not regenerate revision.
-	paged := readmodelprojection.PageWorkspaceActivityFeed(feed3, 1, "")
+	paged := readmodelprojection.ActivityProjection().PageWorkspaceFeed(feed3, 1, "")
 	if paged.ActivityRevision != feed3.ActivityRevision {
 		t.Fatalf("paged revision = %d, want store revision %d", paged.ActivityRevision, feed3.ActivityRevision)
 	}
@@ -2026,7 +2026,7 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 	firstRev := feed.ActivityRevision
 
 	// Final page of retained items still reports Truncated; NextCursor empty terminates.
-	fullPage := readmodelprojection.PageWorkspaceActivityFeed(feed, 200, "")
+	fullPage := readmodelprojection.ActivityProjection().PageWorkspaceFeed(feed, 200, "")
 	if !fullPage.Truncated {
 		t.Fatal("final page of store-truncated feed must keep Truncated=true")
 	}
@@ -2035,14 +2035,14 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 	}
 
 	// Read-limit paging of retained items advances then terminates.
-	page1 := readmodelprojection.PageWorkspaceActivityFeed(feed, 10, "")
+	page1 := readmodelprojection.ActivityProjection().PageWorkspaceFeed(feed, 10, "")
 	if !page1.Truncated || page1.NextCursor == "" || len(page1.Items) != 10 {
 		t.Fatalf("page1 truncated=%v cursor=%q items=%d", page1.Truncated, page1.NextCursor, len(page1.Items))
 	}
 	cursor := page1.NextCursor
 	seenEmpty := false
 	for hops := 0; hops < 40; hops++ {
-		last := readmodelprojection.PageWorkspaceActivityFeed(feed, 10, cursor)
+		last := readmodelprojection.ActivityProjection().PageWorkspaceFeed(feed, 10, cursor)
 		if last.NextCursor == "" {
 			// Terminal page: either empty (unknown/stale cursor) or last retained page.
 			if last.Truncated != true && len(last.Items) > 0 {
@@ -2058,7 +2058,7 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 		t.Fatal("paging did not terminate with empty NextCursor")
 	}
 	// Unknown cursor terminates with empty page (no full-feed replay).
-	unknown := readmodelprojection.PageWorkspaceActivityFeed(feed, 10, "not-a-real-cursor")
+	unknown := readmodelprojection.ActivityProjection().PageWorkspaceFeed(feed, 10, "not-a-real-cursor")
 	if len(unknown.Items) != 0 {
 		t.Fatalf("unknown cursor items = %d, want 0", len(unknown.Items))
 	}

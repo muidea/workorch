@@ -1,5 +1,53 @@
 package runtime
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
+// RuntimeInternalTransactionPayload contains semantic-plan, provider-request,
+// candidate, sealed-dispatch and receipt transaction facts. Whole-document
+// request recovery remains an SM-4 decision, but it mutates this same persisted
+// request transaction rather than a delivery ledger. This payload cannot carry
+// activation or terminal-delivery state.
+type RuntimeInternalTransactionPayload struct {
+	SemanticManifest                   *runtimecontract.RuntimeSemanticPlanManifest
+	SemanticDocument                   *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticPlanBatch                  *runtimecontract.RuntimeSemanticPlanBatch
+	SemanticPlanBatchNextState         runtimecontract.RuntimeSemanticPlanBatchState
+	SemanticPlanBatchFeasibilityResult *runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult
+	SemanticPlanBatchDocument          *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticPlanMergedDocument         *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
+
+	StablePrefixHash        string
+	DocumentKind            runtimecontract.RuntimeProviderDocumentKind
+	ManifestHash            string
+	CorrectionHash          string
+	LogicalRequestID        string
+	Sequence                int
+	PhysicalCallID          string
+	RequestOutcome          *runtimecontract.RuntimeCandidateRequestOutcome
+	ProviderDocumentOutcome *runtimecontract.RuntimeProviderDocumentOutcome
+	ExpectedDocument        *runtimecontract.RuntimeExpectedDocumentContract
+
+	Attempt              int
+	Manifest             *runtimecontract.RuntimeCandidateContractManifest
+	Candidate            *runtimecontract.RuntimeCandidate
+	CandidateFailure     *runtimecontract.RuntimeCandidateFailure
+	CandidateFeasibility *runtimecontract.RuntimeCandidateFeasibilityRecord
+	PrerequisiteRequest  *runtimecontract.RuntimeOperationPrerequisiteRequest
+	Stale                *runtimecontract.RuntimePrerequisiteStale
+
+	OperationReceipt *runtimecontract.RuntimeOperationReceipt
+	DispatchID       string
+	Fence            uint64
+	Executor         RuntimeOperationExecutor
+	// Recovery authorization is produced only after the independent SM-4
+	// RecoveryBudgetConsumed event commits.  The attempt is an exact persisted
+	// counter fence, not a request to mutate the budget from the SM-3 handler.
+	RecoveryOperationID   string
+	RecoveryBudgetAttempt int
+	GovernanceResolution  *runtimecontract.RuntimeGovernanceResolution
+}
+
 // SM-3 facts advance the provider/candidate/sealed-dispatch transaction. They
 // cannot select the next convergence action.
 const (

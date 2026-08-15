@@ -35,7 +35,7 @@ func TestMapDecisionProjectsFailureRecoveryFields(t *testing.T) {
 			"allowedRecoveryActions": []any{"replan", "terminate"},
 		}),
 	}
-	got := MapDecision(item, nil, nil)
+	got := mapDecision(item, nil, nil)
 	if got.FailureClass != "model_runtime_failed" ||
 		got.FailureSignature != "model-signature" ||
 		len(got.AllowedRecoveryActions) != 1 ||
@@ -44,7 +44,7 @@ func TestMapDecisionProjectsFailureRecoveryFields(t *testing.T) {
 		got.ResolvedBy != "auto-governance" {
 		t.Fatalf("projected decision recovery fields = %+v", got)
 	}
-	view := ProjectDecisionView(got)
+	view := projectDecisionView(got)
 	if len(view.Context.Fields) == 0 ||
 		view.FailureClass != got.FailureClass ||
 		len(view.AllowedRecoveryActions) != 1 ||
@@ -67,7 +67,7 @@ func TestMapDecisionFallsBackToContextRecoveryFields(t *testing.T) {
 			"allowedRecoveryActions": []any{"replan", "terminate"},
 		}),
 	}
-	got := MapDecision(item, nil, nil)
+	got := mapDecision(item, nil, nil)
 	if got.FailureClass != "runtime_failed" ||
 		got.FailureSignature != "class=runtime_failed|kind=llm/workspace_execution" ||
 		len(got.AllowedRecoveryActions) != 2 ||

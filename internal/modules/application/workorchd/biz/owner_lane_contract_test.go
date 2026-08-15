@@ -50,8 +50,9 @@ func TestSubmitWorkspaceRunBindsWorkspaceOwnerLane(t *testing.T) {
 
 	b := &Biz{
 		Base:    basebiz.New(ModuleID, hub, background),
-		session: &runtimecore.Session{},
+		runtime: newRuntimeComponent(&runtimecore.Session{}),
 	}
+	b.workspaceGate = &workspaceCommandGateway{hub: hub, runtime: b.runtime}
 	got, err := b.SubmitWorkspaceRun(ctx, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID,
 		RequestID:   requestID,

@@ -180,6 +180,49 @@ EOF
   exit 1
 fi
 
+# Workorchd production transport is intentionally narrower than the Biz
+# lifecycle owner. Test infrastructure may construct owner runtimes, but
+# non-test server code receives typed ApplicationPorts only.
+workorchd_server_transport_matches="$({
+  source_matches 'runtimecore|magicCommon/event|magicevent\.Hub|NewSimpleObserver|\.(Subscribe|Unsubscribe|Send|Post)\(|"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"' \
+    internal/modules/application/workorchd/service/server
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_server_transport_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workorchd production server must not retain
+runtimecore, EventHub, root appservice, observer, or direct event operations.
+Inject typed ApplicationPorts from Biz.
+
+$workorchd_server_transport_matches
+EOF
+  exit 1
+fi
+
+workorchd_server_compatibility_state_matches="$({
+  source_matches 'sharedSession|runtimeSessionErr|hasSharedSession|withSharedSession|compatRead|workspaceProjectionObserver|workspaceProjectionLifecycle|manageWorkspaceProjectionLifecycle|newWorkspaceProjectionManager|productionWiring' \
+    internal/modules/application/workorchd/service/server
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_server_compatibility_state_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workorchd production server retains a Session,
+cache-authority, projection-lifecycle, or dual-wiring compatibility path.
+
+$workorchd_server_compatibility_state_matches
+EOF
+  exit 1
+fi
+
+numeric_projection_family_files="$(find internal/modules/application/workorchd/biz/appservice/readmodelprojection -maxdepth 1 -type f -name 'projection_family_[0-9]*.go' -print)"
+if [[ -n "$numeric_projection_family_files" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: numeric read-model projection family filenames
+must be replaced by semantic responsibility names.
+
+$numeric_projection_family_files
+EOF
+  exit 1
+fi
+
 # Workspace scope is per EventHub execution, never component-instance state.
 # The state owners and Runtime drive must use the checked binder rather
 # than silently replacing a pre-existing workspace context from a command.
@@ -198,7 +241,7 @@ workspace_scope_bindings=(
   "internal/modules/kernel/orchestrator/biz/governance_evidence_command.go"
   "internal/modules/kernel/orchestrator/biz/owner.go"
   "internal/modules/kernel/governance/biz/service.go"
-  "internal/modules/application/workorchd/biz/owner.go"
+  "internal/modules/application/workorchd/biz/workspace_command_gateway.go"
 )
 for path in "${workspace_scope_bindings[@]}"; do
   if ! grep -q -E -- 'BindRuntimeWorkspaceContext|resultCommandContext' "$path"; then
@@ -864,7 +907,7 @@ authority_transaction_shape="$(sed -n '/^type AuthorityTransaction struct {/,/^}
 if ! grep -q -E -- 'AuthorityInputID[[:space:]]+string' <<<"$authority_snapshot_shape" ||
    ! grep -q -E -- 'AuthorityInput[[:space:]]+RuntimeEquivalentAuthorityInputIdentity' <<<"$authority_snapshot_shape" ||
    ! grep -q -E -- 'AuthorityInputID[[:space:]]+string' <<<"$authority_transaction_shape" ||
-   ! grep -q -F -- 'equivalentOwnerInfeasibilityExists' internal/modules/kernel/orchestrator/biz/runtime/controller.go; then
+   ! grep -q -F -- 'equivalentOwnerInfeasibilityExists' internal/modules/kernel/orchestrator/biz/runtime/candidate_dispatch_transition.go; then
   echo "boundary contract violation: equivalent Runtime authority can bypass the no-progress fence" >&2
   exit 1
 fi
@@ -1085,7 +1128,7 @@ if [[ ! -f internal/pkg/workorchruntimecontract/runtime_complete_admission.go ]]
 fi
 runtime_complete_admission_consumers="$(
   grep -R -Hn -F --include='*.go' --exclude='*_test.go' -- 'RuntimeCompleteAdmissionInput' internal |
-    grep -v -E -- 'internal/pkg/workorchruntimecontract/runtime_complete_admission\.go:|internal/modules/kernel/orchestrator/biz/runtime/controller\.go:' || true
+    grep -v -E -- 'internal/pkg/workorchruntimecontract/runtime_complete_admission\.go:|internal/modules/kernel/orchestrator/biz/runtime/candidate_dispatch_transition\.go:' || true
 )"
 if [[ -n "$runtime_complete_admission_consumers" ]]; then
   cat >&2 <<EOF
@@ -1099,14 +1142,14 @@ only in the owner-local admission dispatcher from canonical aggregate facts.
 EOF
   exit 1
 fi
-if ! grep -q -F -- 'func admitRuntimeDispatch(' internal/modules/kernel/orchestrator/biz/runtime/controller.go ||
-   ! grep -q -F -- 'EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{' internal/modules/kernel/orchestrator/biz/runtime/controller.go; then
+if ! grep -q -F -- 'func admitRuntimeDispatch(' internal/modules/kernel/orchestrator/biz/runtime/candidate_dispatch_transition.go ||
+   ! grep -q -F -- 'EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{' internal/modules/kernel/orchestrator/biz/runtime/candidate_dispatch_transition.go; then
   echo "boundary contract violation: Orchestrator complete-admission dispatcher is missing" >&2
   exit 1
 fi
 runtime_dispatch_builder_bypasses="$(
   grep -R -Hn -F --include='*.go' --exclude='*_test.go' -- 'SealDispatchWithManifestAndFeasibilities(' internal/modules/kernel/orchestrator/biz/runtime |
-    grep -v -E -- 'dispatch_commit\.go:.*func SealDispatchWithManifestAndFeasibilities|controller\.go:' || true
+    grep -v -E -- 'dispatch_commit\.go:.*func SealDispatchWithManifestAndFeasibilities|candidate_dispatch_transition\.go:' || true
 )"
 if [[ -n "$runtime_dispatch_builder_bypasses" ]]; then
   cat >&2 <<EOF
@@ -1312,8 +1355,8 @@ fi
 # A generic SM-2 failure transition cannot replace current authority while an
 # SM-3 dispatch remains active. Receipt/candidate/dispatch-specific transitions
 # must close or advance that dispatch in the same aggregate CAS.
-if ! grep -q -F -- 'if aggregate.ActiveDispatch != nil {' "$runtime_transition_root/controller.go" ||
-   ! grep -q -F -- 'active dispatch failures require a dispatch/receipt-specific transition' "$runtime_transition_root/controller.go"; then
+if ! grep -q -F -- 'if aggregate.ActiveDispatch != nil {' "$runtime_transition_root/authority_transition.go" ||
+   ! grep -q -F -- 'active dispatch failures require a dispatch/receipt-specific transition' "$runtime_transition_root/authority_transition.go"; then
   cat >&2 <<EOF
 Boundary contract violation: RecordFailureFact lacks the active-dispatch fence.
 

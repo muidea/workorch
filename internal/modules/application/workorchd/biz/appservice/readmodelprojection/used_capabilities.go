@@ -10,13 +10,13 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func UsedRuntimeCapabilities(snapshot readmodelcore.RunSnapshotState, run *runmodel.Run, catalog map[string]projectioncontract.RuntimeCapability) []projectioncontract.RuntimeCapability {
+func usedRuntimeCapabilities(snapshot readmodelcore.RunSnapshotState, run *runmodel.Run, catalog map[string]projectioncontract.RuntimeCapability) []projectioncontract.RuntimeCapability {
 	selected := runtimeCapabilityIndex(snapshot.SelectedCapabilities)
 	used := map[string]projectioncontract.RuntimeCapability{}
 	order := make([]string, 0)
 	if len(snapshot.ToolCalls) > 0 {
 		for _, toolCall := range snapshot.ToolCalls {
-			identity := RuntimeCapabilityIdentity(toolCall)
+			identity := runtimeCapabilityIdentity(toolCall)
 			if identity.ID == "" {
 				continue
 			}

@@ -7,7 +7,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func AppliedPatchTargetCount(items []projectioncontract.Patch) int {
+func appliedPatchTargetCount(items []projectioncontract.Patch) int {
 	if len(items) == 0 {
 		return 0
 	}

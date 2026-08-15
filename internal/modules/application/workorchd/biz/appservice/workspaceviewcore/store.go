@@ -75,7 +75,7 @@ func (e *workspaceProjectionEntry) syncSnapshotWorkspace() {
 		return
 	}
 	e.Snapshot.Workspace = workspaceWithSnapshotGovernance(e.Workspace, e.Snapshot)
-	e.Snapshot = readmodelprojection.NormalizeWorkspaceGovernanceProjection(e.Snapshot)
+	e.Snapshot = readmodelprojection.GovernanceProjection().NormalizeWorkspace(e.Snapshot)
 	e.Workspace = cloneWorkspace(e.Snapshot.Workspace)
 }
 
@@ -126,7 +126,7 @@ func snapshotDecisionBlocker(snapshot readmodelcore.WorkspaceSnapshotState, acti
 	if snapshot.Run != nil {
 		preferredID = firstNonEmptyViewString(preferredID, snapshot.Run.BlockingTicketID)
 	}
-	if readmodelprojection.HasOpenDecisionBlocker(snapshot.Decisions, workspaceID, activeRunID, preferredID) {
+	if readmodelprojection.GovernanceProjection().HasOpenDecisionBlocker(snapshot.Decisions, workspaceID, activeRunID, preferredID) {
 		return preferredID, true
 	}
 	for _, item := range snapshot.Decisions {
@@ -150,7 +150,7 @@ func snapshotApprovalBlocker(snapshot readmodelcore.WorkspaceSnapshotState, acti
 	if snapshot.Run != nil {
 		preferredID = firstNonEmptyViewString(preferredID, snapshot.Run.BlockingApprovalID)
 	}
-	if readmodelprojection.HasOpenApprovalBlocker(snapshot.Approvals, workspaceID, activeRunID, preferredID) {
+	if readmodelprojection.GovernanceProjection().HasOpenApprovalBlocker(snapshot.Approvals, workspaceID, activeRunID, preferredID) {
 		return preferredID, true
 	}
 	for _, item := range snapshot.Approvals {
@@ -539,7 +539,7 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 		}
 		entry := s.cloneEntryForReplace(item.ID)
 		if snapshot, ok := snapshots[item.ID]; ok && strings.TrimSpace(snapshot.Workspace.ID) != "" {
-			snapshot = readmodelprojection.ProjectWorkspaceSnapshotDetail(snapshot)
+			snapshot = readmodelprojection.WorkspaceProjection().Detail(snapshot)
 			item = snapshot.Workspace
 			entry.Snapshot = cloneWorkspaceSnapshot(snapshot)
 			entry.HasSnapshot = true
@@ -655,7 +655,7 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) {
 	if s == nil || strings.TrimSpace(snapshot.Workspace.ID) == "" {
 		return
 	}
-	snapshot = readmodelprojection.ProjectWorkspaceSnapshotDetail(snapshot)
+	snapshot = readmodelprojection.WorkspaceProjection().Detail(snapshot)
 	workspaceID := snapshot.Workspace.ID
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -680,8 +680,8 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) {
 	s.advanceGlobalRevision()
 	// Commit activity feed in the same transaction as the snapshot revision.
 	// Content changes advance ActivityRevision to this entry.Revision; unchanged keeps previous.
-	candidateContent := readmodelprojection.BuildWorkspaceActivityFeedContent(entry.Snapshot)
-	committed := readmodelprojection.CommitActivityFeedTransaction(previousActivity, candidateContent, entry.Revision)
+	candidateContent := readmodelprojection.ActivityProjection().BuildWorkspaceFeed(entry.Snapshot)
+	committed := readmodelprojection.ActivityProjection().CommitWorkspaceFeed(previousActivity, candidateContent, entry.Revision)
 	committed.StreamGeneration = s.streamGeneration
 	entry.Activity = cloneWorkspaceActivityFeed(committed)
 	entry.HasActivity = true
@@ -1101,13 +1101,13 @@ func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.
 	if entry.HasWorkspace {
 		snapshot.Workspace = workspaceWithSnapshotGovernance(entry.Workspace, snapshot)
 	}
-	return readmodelprojection.NormalizeWorkspaceGovernanceProjection(snapshot)
+	return readmodelprojection.GovernanceProjection().NormalizeWorkspace(snapshot)
 }
 
 func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshotState {
 	snapshot := normalizedEntryListSnapshot(entry)
 	if entry == nil || !entry.HasSnapshot {
-		return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
+		return readmodelprojection.WorkspaceProjection().Summary(snapshot)
 	}
 	source := entry.Snapshot
 	snapshot.Outcome = source.Outcome
@@ -1119,7 +1119,7 @@ func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelco
 	}
 	snapshot.SchedulerDiagnostics = source.SchedulerDiagnostics
 	snapshot.LLMUsageSummary = source.LLMUsageSummary
-	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
+	return readmodelprojection.WorkspaceProjection().Summary(snapshot)
 }
 
 func normalizedEntrySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshotState {
@@ -1130,7 +1130,7 @@ func normalizedEntrySnapshot(entry *workspaceProjectionEntry) readmodelcore.Work
 	if entry.HasWorkspace {
 		snapshot.Workspace = workspaceWithSnapshotGovernance(entry.Workspace, snapshot)
 	}
-	return readmodelprojection.NormalizeWorkspaceGovernanceProjection(snapshot)
+	return readmodelprojection.GovernanceProjection().NormalizeWorkspace(snapshot)
 }
 
 func (s *Store) NeedsSnapshot(workspaceID string) bool {
@@ -1205,7 +1205,7 @@ func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotS
 }
 
 func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
-	return readmodelprojection.WorkspacePromptMode(snapshot)
+	return readmodelprojection.GovernanceProjection().PromptMode(snapshot)
 }
 
 func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {

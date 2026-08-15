@@ -13,39 +13,39 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
-// ProjectWorkspaceRuntimeView builds a RuntimeView without activity authority.
+// projectWorkspaceRuntimeView builds a RuntimeView without activity authority.
 // Production reads supply store-owned activity through
-// ProjectWorkspaceRuntimeViewWithActivity.
-func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshotState, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
-	return ProjectWorkspaceRuntimeViewWithActivity(snapshot, projectioncontract.WorkspaceActivityFeed{}, false, activityLimit, beforeCursor)
+// projectWorkspaceRuntimeViewWithActivity.
+func projectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshotState, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+	return projectWorkspaceRuntimeViewWithActivity(snapshot, projectioncontract.WorkspaceActivityFeed{}, false, activityLimit, beforeCursor)
 }
 
-// ProjectWorkspaceRuntimeViewWithActivity builds RuntimeView using a store-owned
+// projectWorkspaceRuntimeViewWithActivity builds RuntimeView using a store-owned
 // activity feed when available. ActivityRevision is never regenerated on read.
-func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshotState, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
-	displayRunID := SelectDisplayRunID(snapshot)
+func projectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshotState, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+	displayRunID := selectDisplayRunID(snapshot)
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	var activity projectioncontract.WorkspaceActivityFeed
 	if hasStoredActivity {
-		activity = PageWorkspaceActivityFeed(storedActivity, activityLimit, beforeCursor)
+		activity = pageWorkspaceActivityFeed(storedActivity, activityLimit, beforeCursor)
 	}
 	if activity.DisplayRunID == "" {
 		activity.DisplayRunID = displayRunID
 	}
 
 	progress := snapshot.TaskProgress
-	if runtimeSummary := RuntimeProgressSummary(progress.Runtime); runtimeSummary != "" {
+	if runtimeSummary := runtimeProgressSummary(progress.Runtime); runtimeSummary != "" {
 		// Runtime progress must produce an observable summary when revision/focus/action change.
 		progress.Summary = runtimeSummary
 	}
 
-	revision := WorkspaceRefreshRevisionFromSnapshot(snapshot, activity.ActivityRevision)
+	revision := workspaceRefreshRevisionFromSnapshot(snapshot, activity.ActivityRevision)
 	revision.StreamGeneration = strings.TrimSpace(activity.StreamGeneration)
 	acceptance := workspaceRuntimeAcceptance(snapshot.Acceptance, snapshot.Workspace.ID, displayRunID, &revision)
 	blockingDecision := selectBlockingDecision(snapshot, activeRunID)
 	blockingApproval := selectBlockingApproval(snapshot, activeRunID)
 	runState := ""
-	if run := SelectDisplayRun(snapshot); run != nil {
+	if run := selectDisplayRun(snapshot); run != nil {
 		runState = strings.TrimSpace(run.State)
 	}
 	if runState == "" {
@@ -58,7 +58,7 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 		DisplayRunID:      displayRunID,
 		Projection:        projectioncontract.ProjectionStatusFromWorkspaceViewModel(snapshot.ViewModel),
 		Revision:          revision,
-		PromptMode:        firstNonEmptyTimelineString(snapshot.ViewModel.PromptMode, WorkspacePromptMode(snapshot)),
+		PromptMode:        firstNonEmptyTimelineString(snapshot.ViewModel.PromptMode, workspacePromptMode(snapshot)),
 		RunState:          runState,
 		TaskProgress:      progress,
 		RunHeartbeat:      snapshot.RunHeartbeat,
@@ -107,8 +107,8 @@ func workspaceRuntimeAcceptance(
 	return acceptance
 }
 
-// RuntimeProgressSummary renders a compact progress line from Runtime.
-func RuntimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string {
+// runtimeProgressSummary renders a compact progress line from Runtime.
+func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string {
 	if runtime == nil {
 		return ""
 	}
@@ -140,8 +140,8 @@ func RuntimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 	return strings.Join(parts, " | ")
 }
 
-// WorkspaceRefreshRevisionFromSnapshot extracts multi-domain revisions.
-func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, activityRevision int64) projectioncontract.WorkspaceRefreshRevision {
+// workspaceRefreshRevisionFromSnapshot extracts multi-domain revisions.
+func workspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, activityRevision int64) projectioncontract.WorkspaceRefreshRevision {
 	revision := projectioncontract.WorkspaceRefreshRevision{
 		WorkspaceRevision:       snapshot.ViewModel.WorkspaceRevision,
 		ProjectedSourceRevision: snapshot.ViewModel.ProjectedSourceRevision,
@@ -208,11 +208,11 @@ func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshotState, activ
 	return nil
 }
 
-// DiffWorkspaceProjectionSections compares previous and candidate snapshots and
+// diffWorkspaceProjectionSections compares previous and candidate snapshots and
 // returns only sections that actually changed. changeKind is used solely for
 // coarse lifecycle events (overview/deleted/baseline) when no typed candidate
 // content is available.
-func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.WorkspaceSnapshotState, changeKind string) []string {
+func diffWorkspaceProjectionSections(previous, candidate readmodelcore.WorkspaceSnapshotState, changeKind string) []string {
 	changeKind = strings.ToLower(strings.TrimSpace(changeKind))
 	sections := make([]string, 0, 8)
 	add := func(name string) {
@@ -302,9 +302,9 @@ func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.Workspace
 	}
 
 	// Compare activity content by typed fields, not fingerprint/hash revisions.
-	prevActivity := BuildWorkspaceActivityFeedContent(previous)
-	candActivity := BuildWorkspaceActivityFeedContent(candidate)
-	if !ActivityFeedContentEqual(prevActivity, candActivity) {
+	prevActivity := buildWorkspaceActivityFeedContent(previous)
+	candActivity := buildWorkspaceActivityFeedContent(candidate)
+	if !activityFeedContentEqual(prevActivity, candActivity) {
 		add("activity")
 	}
 

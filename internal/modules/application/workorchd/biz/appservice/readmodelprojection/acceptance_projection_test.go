@@ -97,7 +97,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		ExecutionKey: "exec-2", Fence: 1, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Feedback: &receiptFeedback,
 	})
-	projection := MapAcceptanceProjection(appmodelcore.Run{ID: "run-1", RuntimeState: &state})
+	projection := mapAcceptanceProjection(appmodelcore.Run{ID: "run-1", RuntimeState: &state})
 	if projection.ActiveSliceID != "slice-1" || projection.CurrentFocus == nil || projection.CurrentFocus.ID != "focus-1" || projection.Budget == nil || projection.Budget.RepairAttempts != 2 {
 		t.Fatalf("acceptance projection = %+v", projection)
 	}

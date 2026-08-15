@@ -10,6 +10,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -277,7 +278,7 @@ func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.Runtim
 		// outer drive acquire the current owner fact on the next transition.
 		if report := runtime.InspectRuntimeAuthorityInvariants(aggregate); len(report.Violations) != 0 {
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventReconcileAuthority, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				Kind: runtime.RuntimeInternalEventReconcileAuthority, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 			})
 			return updated.Aggregate, err
 		}
@@ -287,7 +288,7 @@ func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.Runtim
 		}
 		if stale != nil {
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventPrerequisitesReadOnlyStaleObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Stale: stale,
+				Kind: runtime.RuntimeInternalEventPrerequisitesReadOnlyStaleObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{Stale: stale},
 			})
 			return updated.Aggregate, err
 		}
@@ -295,7 +296,7 @@ func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.Runtim
 			return runtime.RuntimeAggregate{}, feasibilityErr
 		} else if feasibility != nil {
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventFeasibilityObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, FeasibilityFact: feasibility,
+				Kind: runtime.RuntimeInternalEventFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{FeasibilityFact: feasibility},
 			})
 			return updated.Aggregate, err
 		}
@@ -312,7 +313,7 @@ func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.Runtim
 	}
 	if aggregate.ActiveDispatch.Candidate.Assessment != nil {
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind: runtime.RuntimeInternalEventAssessmentObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			Kind: runtime.RuntimeInternalEventAssessmentObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 		})
 		return updated.Aggregate, err
 	}
@@ -367,18 +368,17 @@ func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchest
 	if aggregate.ActiveDispatch == nil {
 		return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("governed Runtime wait has no active dispatch")
 	}
-	for _, request := range aggregate.GovernanceRequests {
-		if request.DispatchID == aggregate.ActiveDispatch.ID && request.AuthoritySnapshotID == aggregate.Decision.AuthoritySnapshot.ID {
-			return orchestratorevents.DriveRuntimeResult{
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
-				DefinitionRevision:  aggregate.Facts.DefinitionRevision,
-				AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
-				DispatchID:          request.DispatchID,
-				State:               aggregate.Decision.State,
-				BlockingTicketID:    request.TicketID,
-			}, nil
-		}
+	request, found := governancecheck.RequestForDispatch(aggregate.GovernanceRequests, aggregate.ActiveDispatch.ID, aggregate.Decision.AuthoritySnapshot.ID)
+	if found {
+		return orchestratorevents.DriveRuntimeResult{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
+			DefinitionRevision:  aggregate.Facts.DefinitionRevision,
+			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+			DispatchID:          request.DispatchID,
+			State:               aggregate.Decision.State,
+			BlockingTicketID:    request.TicketID,
+		}, nil
 	}
 	return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("governed Runtime wait has no bound ticket")
 }

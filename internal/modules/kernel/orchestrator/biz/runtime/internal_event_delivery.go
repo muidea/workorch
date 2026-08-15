@@ -1,5 +1,24 @@
 package runtime
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
+// RuntimeInternalDeliveryPayload contains only SM-4 reconciliation, recovery,
+// drive and terminal-delivery facts. It cannot rebuild SM-2 authority or carry
+// an SM-3 operation executor.
+type RuntimeInternalDeliveryPayload struct {
+	ReconciliationRequest *runtimecontract.RuntimeCWIReconciliationRequest
+	FailureFact           *runtimecontract.FailureFact
+
+	DeliveryAcknowledgement *runtimecontract.RuntimeDeliveryAcknowledgement
+	RecoveryBudgetKind      runtimecontract.RuntimeRecoveryBudgetKind
+	DriveLease              *runtimecontract.RuntimeDriveLease
+	LeaseGeneration         uint64
+	LeaseNow                string
+	TerminationKind         runtimecontract.RuntimeTerminationKind
+	RequestedBy             string
+	Reason                  string
+}
+
 // SM-4 facts drive persisted delivery/recovery work. They may schedule from
 // already persisted authority but cannot rebuild SM-2 or SM-3 state.
 const (

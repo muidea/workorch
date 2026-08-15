@@ -193,7 +193,7 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 		return nil
 	}
 	_, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventTerminalDeliveryAcknowledged, WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID, DeliveryAcknowledgement: acknowledgement,
+		Kind: runtime.RuntimeInternalEventTerminalDeliveryAcknowledged, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{DeliveryAcknowledgement: acknowledgement},
 	})
 	return err
 }

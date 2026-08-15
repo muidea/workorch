@@ -96,6 +96,20 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	if retry.ContextBudget.CachePlan.StablePrefixHash != initial.ContextBudget.CachePlan.StablePrefixHash {
 		t.Fatal("semantic correction changed stable prefix")
 	}
+	for _, name := range []string{"WorkspaceDefinitionHash", "CapabilityContractHash"} {
+		initialPlan := initial.ContextBudget.CachePlan
+		retryPlan := retry.ContextBudget.CachePlan
+		var initialHash, retryHash string
+		switch name {
+		case "WorkspaceDefinitionHash":
+			initialHash, retryHash = initialPlan.WorkspaceDefinitionHash, retryPlan.WorkspaceDefinitionHash
+		case "CapabilityContractHash":
+			initialHash, retryHash = initialPlan.CapabilityContractHash, retryPlan.CapabilityContractHash
+		}
+		if initialHash == "" || initialHash != retryHash {
+			t.Fatalf("semantic correction changed stable %s: initial=%q retry=%q", name, initialHash, retryHash)
+		}
+	}
 	tail := retry.PromptContext.Sections[4].Content
 	if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.coverageOrder"`) || !strings.Contains(tail, `"requiredBeforeId":"cwi-000"`) {
 		t.Fatalf("semantic correction tail is not provider-safe: %s", tail)
@@ -116,6 +130,67 @@ func TestRuntimeSemanticCorrectionBoundaryClonesNestedValues(t *testing.T) {
 	clonedDirective.Violations[0].RequiredBeforeID = "changed"
 	if rejection.FieldViolations[0].Required[0] != "cwi-000 before cwi-001" || directive.Violations[0].RequiredBeforeID != "cwi-000" {
 		t.Fatal("LLM owner boundary retained caller-owned nested storage")
+	}
+}
+
+func TestRuntimeSemanticExistingTargetCorrectionCarriesOwnerRevisionAndReplacementFact(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	catalog := request.SemanticManifest.OwnerCatalogs[0].Normalized()
+	catalog.OperationKinds = append(catalog.OperationKinds, runtimecontract.RuntimeBlockKindPatchApply)
+	catalog.OperationVariants = append(catalog.OperationVariants, runtimecontract.RuntimeOperationAdmissibilityVariant{
+		Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace",
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+		ConstraintRefs:        []string{"existing-target"},
+	})
+	catalog.TargetRefs = []string{"existing.go"}
+	catalog.ConstraintRefs = append(catalog.ConstraintRefs, "existing-target")
+	catalog.ObservedRevision = "tree-v2"
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	request.SemanticManifest.OwnerCatalogs = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	request.SemanticManifest.AllowedOperationKinds = append(request.SemanticManifest.AllowedOperationKinds, runtimecontract.RuntimeBlockKindPatchApply)
+	request.SemanticManifest.AllowedTargetPolicies = append(request.SemanticManifest.AllowedTargetPolicies, runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OriginalClass: "semantic_feasibility", OriginalCode: "operation_target_exists", OriginalMessage: "private owner failure must not be rendered",
+		Signature: "file/operation-target-exists", TargetRefs: []string{"existing.go"}, ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2",
+	}
+	violation := runtimecontract.RuntimeSemanticContractViolation{
+		Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].target.policy", CoverageWorkItemID: "cwi-001", ProposalIndex: 0,
+		Rule: runtimecontract.RuntimeSemanticConstraintAllowedValue, Actual: string(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget), Allowed: []string{string(runtimecontract.RuntimeOperationTargetPolicyExactTarget)},
+	}
+	diagnostic.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{violation}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent, PlanStep: request.SemanticContext.PlanStep,
+		ManifestHash: request.SemanticManifest.Hash, DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash,
+		StablePrefixHash: request.StablePrefixHash, SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*diagnostic), Attempt: 1,
+		Violations: []runtimecontract.RuntimeSemanticContractViolation{violation},
+	}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	request.CandidateAttempt = 1
+	request.PreviousSemanticRejection = diagnostic
+	request.SemanticCorrectionDirective = &directive
+	providerRequest, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail := providerRequest.PromptContext.Sections[4].Content
+	authority := providerRequest.PromptContext.Sections[3].Content
+	for _, want := range []string{"\"existingTarget\"", "\"observedRevision\":\"tree-v2\"", "\"catalogSnapshotId\":\"" + catalog.SnapshotID + "\"", "patch/apply/text_replace", "\"existingTargetObserved\":true"} {
+		if !strings.Contains(tail, want) {
+			t.Fatalf("semantic correction tail lost %q: %s", want, tail)
+		}
+	}
+	if strings.Contains(tail, diagnostic.OriginalMessage) || strings.Contains(tail, "file/write is create-only") {
+		t.Fatalf("semantic correction tail leaked owner message: %s", tail)
+	}
+	for _, want := range []string{catalog.SnapshotID, "tree-v2", "existing-target"} {
+		if !strings.Contains(authority, want) {
+			t.Fatalf("sealed C3 authority lost latest catalog fact %q: %s", want, authority)
+		}
+	}
+	if providerRequest.ContextBudget.CachePlan.StablePrefixHash != request.StablePrefixHash || providerRequest.ContextBudget.CachePlan.WorkspaceDefinitionHash == "" || providerRequest.ContextBudget.CachePlan.CapabilityContractHash == "" {
+		t.Fatalf("semantic correction changed stable cache groups: %+v", providerRequest.ContextBudget.CachePlan)
 	}
 }
 

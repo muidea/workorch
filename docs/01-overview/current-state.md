@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-14
+Last Updated: 2026-08-15
 
 
 ## LLM Provider（2026-07-15）
@@ -64,6 +64,19 @@ Last Updated: 2026-08-14
 - terminal delivery 统一为 persisted terminal → Result owner → Workspace owner → Run owner；SM-4 只保存
   delivery acknowledgement 并对缺失回执执行幂等重试。
 - projection readiness 通过 EventStream typed high-watermark 查询核对真实 source revision；stale/degraded projection 不再通过 `/readyz`。
+- 2026-08-15 O7/O8 代码收口已完成自动化验证：Orchestrator 仍只有一个 Runtime aggregate、一个
+  `ApplyInternalEvent` dispatcher 和一个 CAS coordinator；SM-2/SM-3/SM-4 handler 已按 owner facet 物理分组，
+  CandidateRequestEnsured 的 SM-2 failure 与 SM-3 request 写入分成两个 private event，执行恢复预算也通过独立
+  `recovery_budget_consumed` event 提交；recovery operation/attempt 授权只允许在 dispatch envelope 中成对出现，
+  半截或错用字段在 aggregate load 前 fail-closed。该记录不包含部署或 fresh-data live 结论，SO-MC-10 仍待验证。
+- 2026-08-15 Workorchd WD0-WD8 已完成代码/自动化验证：生产 `service/server` 只接收 typed `ApplicationPorts`，
+  不再导入 `runtimecore`、EventHub 或根 appservice，也不保存 Session、cache-authority callback、projection lifecycle
+  或双 wiring state；`biz/runtimeComponent` 是唯一长生命周期 Session owner，`biz/projection.Component` 是唯一
+  projection Start/Close/store owner，`workspaceCommandGateway` 只发送 concrete Workspace intent/result。
+  `readmodelprojection` 由 404 个生产文件归并为 140 个职责文件，公开面从 230 收窄为六个 typed facade factory
+  与两个 snapshot input；`definitionquality`、`content`、`setupdraft` 各自吸收原 `core/ports` 薄配对，纯 forwarding
+  与 snapshot-cache artifact authorization 已删除。包内测试 runtime 不扩展生产 Service API；该切片未改变任何
+  正式 owner 状态或四状态机迁移，deployed HTTP/SSE/CLI 与 fresh-data live proof 仍待执行。
 
 一句话架构真值：
 

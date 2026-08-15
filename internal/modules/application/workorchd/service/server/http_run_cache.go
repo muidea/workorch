@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/content"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -30,7 +29,7 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 	}
 	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		cached = s.attachSchedulerDiagnosticsToRunSnapshot(ctx, cached)
-		status := appservice.RunStatusFromSnapshot(cached)
+		status := readmodelprojection.RunProjection().Status(cached)
 		if waitState == "" || status.State == waitState {
 			return status, waitState == "" || status.State == waitState, nil
 		}
@@ -139,43 +138,16 @@ func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (
 }
 
 func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
-	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
-		var ret readmodelcore.WorkspaceSnapshotState
-		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
-			var err error
-			ret, err = appservice.ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
-			return err
-		})
-		return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
-	}
 	ret, err := s.readWorkspaceSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
 }
 
 func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
-	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
-		var ret readmodelcore.WorkspaceSnapshotState
-		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
-			var err error
-			ret, err = appservice.ReadWorkspaceDetailSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
-			return err
-		})
-		return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
-	}
 	ret, err := s.readWorkspaceDetailSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
 }
 
-func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (contentcore.ArtifactContent, error) {
-	if cached, ok := s.cachedRunSnapshotByArtifactURI(artifactURI); ok && s.hasSharedSession() {
-		var ret contentcore.ArtifactContent
-		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
-			var err error
-			ret, err = appservice.ReadArtifactContentWithRunSnapshotWithSession(ctx, session, artifactURI, cached)
-			return err
-		})
-		return ret, err
-	}
+func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (content.ArtifactContent, error) {
 	return s.readArtifactContent(ctx, s.config.Backend, s.config.DataRoot, artifactURI)
 }
 

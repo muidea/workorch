@@ -10,7 +10,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func MapAcceptanceProjection(run appmodelcore.Run) projectioncontract.AcceptanceProjection {
+func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.AcceptanceProjection {
 	if run.RuntimeState == nil {
 		return emptyAcceptanceProjection()
 	}
@@ -83,7 +83,7 @@ func MapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 	projection.SemanticPlanning = runtimeSemanticPlanningProjection(*run.RuntimeState)
 	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
 	projection.Governance = runtimeGovernanceStatuses(*run.RuntimeState)
-	projection.Audit = MapRuntimeAudit(run)
+	projection.Audit = mapRuntimeAudit(run)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
 }
@@ -220,12 +220,12 @@ func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []proje
 	return ret
 }
 
-func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AcceptanceProjection {
+func mapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AcceptanceProjection {
 	if snapshot.Run != nil {
-		return MapAcceptanceProjection(*snapshot.Run)
+		return mapAcceptanceProjection(*snapshot.Run)
 	}
 	if run := selectWorkspaceAcceptanceRun(snapshot); run != nil {
-		return MapAcceptanceProjection(*run)
+		return mapAcceptanceProjection(*run)
 	}
 	return emptyAcceptanceProjection()
 }

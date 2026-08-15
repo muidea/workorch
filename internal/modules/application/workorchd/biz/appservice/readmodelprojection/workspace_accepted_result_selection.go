@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func SelectAcceptedResultRun(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, results []*resultmodel.Result) *runmodel.Run {
+func selectAcceptedResultRun(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, results []*resultmodel.Result) *runmodel.Run {
 	var selected *resultmodel.Result
 	for _, item := range results {
 		if item == nil || item.WorkspaceID != workspaceID || item.State != common.ResultStateAccepted || item.RunID == "" {
@@ -16,7 +16,7 @@ func SelectAcceptedResultRun(workspaceID common.WorkspaceID, runs map[common.Run
 		if run == nil || run.State != common.RunStateCompleted {
 			continue
 		}
-		if selected == nil || ResultProjectionTime(item) >= ResultProjectionTime(selected) {
+		if selected == nil || resultProjectionTime(item) >= resultProjectionTime(selected) {
 			selected = item
 		}
 	}

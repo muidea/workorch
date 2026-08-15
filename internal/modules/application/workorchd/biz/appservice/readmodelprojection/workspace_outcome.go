@@ -41,7 +41,7 @@ func latestWorkspaceDefinitionRevision(snapshot readmodelcore.WorkspaceSnapshotS
 	return workspacecontracts.ExecutionDefinitionRevision(goalID, goalRevision, dodID, dodRevision)
 }
 
-func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceOutcome {
+func mapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceOutcome {
 	ret := projectioncontract.WorkspaceOutcome{
 		WorkspaceID:       snapshot.Workspace.ID,
 		State:             snapshot.Workspace.State,
@@ -69,6 +69,6 @@ func applySelectedWorkspaceRunOutcome(ret *projectioncontract.WorkspaceOutcome, 
 		Results:   snapshot.Results,
 		Artifacts: snapshot.Artifacts,
 	}
-	outcome := MapRunOutcome(runSnapshot)
+	outcome := mapRunOutcome(runSnapshot)
 	applyWorkspaceRunOutcome(ret, outcome)
 }

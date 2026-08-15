@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionquality"
 )
 
 func TestCheckGoalDoDQualityWithBackendFromStoredDefinitionsReady(t *testing.T) {
@@ -26,7 +26,7 @@ func TestCheckGoalDoDQualityWithBackendFromStoredDefinitionsReady(t *testing.T) 
 		t.Fatalf("DefineDoDWithBackend: %v", err)
 	}
 
-	check, err := CheckGoalDoDQualityWithBackend(context.Background(), "file", dataRoot, qualitycore.Command{
+	check, err := CheckGoalDoDQualityWithBackend(context.Background(), "file", dataRoot, definitionquality.Command{
 		WorkspaceID: workspace.ID,
 		GoalID:      goal.ID,
 		DoDID:       dod.ID,
@@ -52,7 +52,7 @@ func TestCheckGoalDoDQualityWithBackendDraftNeedsRefinement(t *testing.T) {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
 
-	check, err := CheckGoalDoDQualityWithBackend(context.Background(), "file", dataRoot, qualitycore.Command{
+	check, err := CheckGoalDoDQualityWithBackend(context.Background(), "file", dataRoot, definitionquality.Command{
 		WorkspaceID: workspace.ID,
 		GoalText:    "修一下",
 		DoDItems:    []string{"完成"},
@@ -72,7 +72,7 @@ func TestCheckGoalDoDQualityWithBackendDraftNeedsRefinement(t *testing.T) {
 }
 
 func TestCheckGoalDoDQualityWithBackendRequiresWorkspaceID(t *testing.T) {
-	if _, err := CheckGoalDoDQualityWithBackend(context.Background(), "file", t.TempDir(), qualitycore.Command{}); err == nil {
+	if _, err := CheckGoalDoDQualityWithBackend(context.Background(), "file", t.TempDir(), definitionquality.Command{}); err == nil {
 		t.Fatal("expected invalid argument")
 	}
 }

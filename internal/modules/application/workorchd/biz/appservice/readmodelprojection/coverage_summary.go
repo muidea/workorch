@@ -10,7 +10,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func CoverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) map[string]any {
+func coverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) map[string]any {
 	ctx := snapshot.CoverageWorkItemContext
 	ret := map[string]any{}
 	for _, key := range []string{"summary", "currentFocus", "omittedCount", "fullLedgerRef"} {
@@ -64,11 +64,11 @@ func coverageSummaryStatusCounts(items []map[string]any) map[string]int {
 	return ret
 }
 
-func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) *projectioncontract.GapBaseline {
+func gapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) *projectioncontract.GapBaseline {
 	return derivedGapBaselineFromRunSnapshot(snapshot)
 }
 
-func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) []projectioncontract.GapDiagnostic {
+func authorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) []projectioncontract.GapDiagnostic {
 	var ret []projectioncontract.GapDiagnostic
 	for idx := range snapshot.Steps {
 		source := "step.input.authorityDiagnostics"
@@ -109,11 +109,11 @@ func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSna
 func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) []projectioncontract.GapDiagnostic {
 	var ret []projectioncontract.GapDiagnostic
 	for _, step := range snapshot.Steps {
-		outputResources := MapSliceValue(step.Output["validationResources"])
+		outputResources := mapDynamicSliceValue(step.Output["validationResources"])
 		resources := outputResources
 		sourceField := "output"
 		if len(resources) == 0 && readModelStepStateTerminal(step.State) {
-			resources = MapSliceValue(step.Input["validationResources"])
+			resources = mapDynamicSliceValue(step.Input["validationResources"])
 			sourceField = "input"
 		}
 		for _, resource := range resources {
@@ -167,7 +167,7 @@ func readModelStepStateTerminal(state string) bool {
 }
 
 func authorityDiagnosticsFromRaw(defaultSource string, value any) []projectioncontract.GapDiagnostic {
-	items := MapSliceValue(value)
+	items := mapDynamicSliceValue(value)
 	if len(items) == 0 {
 		return nil
 	}
@@ -200,7 +200,7 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) 
 	ctx := snapshot.CoverageWorkItemContext
 	authority := map[string]any{}
 	if len(ctx) == 0 {
-		ctx = MapValue(authority["coverageWorkItemContext"])
+		ctx = mapDynamicValue(authority["coverageWorkItemContext"])
 	}
 	if len(ctx) == 0 {
 		return nil
@@ -210,7 +210,7 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) 
 		RunID:              snapshot.Run.ID,
 		DefinitionRevision: stringValue(ctx, "definitionRevision"),
 		BaselineRevision:   stringValue(ctx, "coverageBaselineHash", "baselineRevision"),
-		CurrentFocus:       CloneMap(MapValue(ctx["currentFocus"])),
+		CurrentFocus:       cloneMap(mapDynamicValue(ctx["currentFocus"])),
 	}
 	if value := stringValue(authority, "definitionRevision"); value != "" {
 		baseline.DefinitionRevision = value
@@ -218,12 +218,12 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) 
 	if value := stringValue(authority, "baselineRevision"); value != "" {
 		baseline.BaselineRevision = value
 	}
-	if focus := MapValue(authority["currentFocus"]); len(focus) > 0 {
-		baseline.CurrentFocus = CloneMap(focus)
+	if focus := mapDynamicValue(authority["currentFocus"]); len(focus) > 0 {
+		baseline.CurrentFocus = cloneMap(focus)
 	}
-	unresolved := MapSliceValue(ctx["unresolvedItems"])
+	unresolved := mapDynamicSliceValue(ctx["unresolvedItems"])
 	if len(unresolved) == 0 {
-		unresolved = MapSliceValue(ctx["currentFocusItems"])
+		unresolved = mapDynamicSliceValue(ctx["currentFocusItems"])
 	}
 	baseline.OpenCoverageWorkItems = readModelMapSliceValue(unresolved)
 	baseline.AcceptedEvidenceRefs = gapEvidenceRefsFromCoverageItems(snapshot.CoverageWorkItems, true)
@@ -236,7 +236,7 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) 
 	}
 	baseline.TodoItems = gapTodoItemsFromCoverageItems(unresolved)
 	baseline.NextAction = gapNextActionFromSnapshot(snapshot, len(unresolved))
-	if nextAction := gapNextActionFromMap(MapValue(authority["nextAction"])); nextAction.Kind != "" {
+	if nextAction := gapNextActionFromMap(mapDynamicValue(authority["nextAction"])); nextAction.Kind != "" {
 		baseline.NextAction = nextAction
 	}
 	if baseline.DefinitionRevision == "" && baseline.BaselineRevision == "" && len(baseline.OpenCoverageWorkItems) == 0 && len(baseline.CurrentFocus) == 0 && len(baseline.AcceptedEvidenceRefs) == 0 && len(baseline.RejectedEvidenceRefs) == 0 {
@@ -344,12 +344,12 @@ func gapBaselineFromMap(input map[string]any) *projectioncontract.GapBaseline {
 		RunID:                 stringValue(input, "runId"),
 		DefinitionRevision:    stringValue(input, "definitionRevision"),
 		BaselineRevision:      stringValue(input, "baselineRevision", "coverageBaselineHash"),
-		CurrentFocus:          CloneMap(MapValue(input["currentFocus"])),
+		CurrentFocus:          cloneMap(mapDynamicValue(input["currentFocus"])),
 		OpenCoverageWorkItems: readModelMapSliceValue(input["openCoverageWorkItems"]),
 		AcceptedEvidenceRefs:  readModelStringSliceValue(input["acceptedEvidenceRefs"]),
 		RejectedEvidenceRefs:  readModelStringSliceValue(input["rejectedEvidenceRefs"]),
 		TodoItems:             gapTodoItemsFromPersistedBaseline(input["todoItems"]),
-		NextAction:            gapNextActionFromMap(MapValue(input["nextAction"])),
+		NextAction:            gapNextActionFromMap(mapDynamicValue(input["nextAction"])),
 	}
 	if ret.DefinitionRevision == "" && ret.BaselineRevision == "" && len(ret.OpenCoverageWorkItems) == 0 && len(ret.TodoItems) == 0 && len(ret.CurrentFocus) == 0 && len(ret.AcceptedEvidenceRefs) == 0 && len(ret.RejectedEvidenceRefs) == 0 {
 		return nil
@@ -409,7 +409,7 @@ func gapTodoItemsFromPersistedBaseline(value any) []projectioncontract.GapTodoIt
 			Status:                stringValue(item, "status"),
 			Priority:              intValue(item, "priority"),
 			Reason:                stringValue(item, "reason"),
-			Metadata:              CloneMap(MapValue(item["metadata"])),
+			Metadata:              cloneMap(mapDynamicValue(item["metadata"])),
 		})
 	}
 	return ret
@@ -538,12 +538,12 @@ func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshotState) proje
 func gapNextActionFocusItem(snapshot readmodelcore.RunSnapshotState) map[string]any {
 	ctx := snapshot.CoverageWorkItemContext
 	for _, key := range []string{"currentFocus"} {
-		if item := MapValue(ctx[key]); len(item) > 0 {
+		if item := mapDynamicValue(ctx[key]); len(item) > 0 {
 			return item
 		}
 	}
 	for _, key := range []string{"unresolvedItems", "currentFocusItems"} {
-		items := MapSliceValue(ctx[key])
+		items := mapDynamicSliceValue(ctx[key])
 		if len(items) > 0 {
 			return items[0]
 		}

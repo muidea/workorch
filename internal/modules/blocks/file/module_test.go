@@ -152,7 +152,9 @@ func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *t
 		operation.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible || operation.Feedback == nil || operation.Feedback.OriginalDiagnostic == nil ||
 		semantic.Observation.OriginalDiagnostic.OriginalCode != "operation_target_exists" || operation.Feedback.OriginalDiagnostic.OriginalCode != "operation_target_exists" ||
 		semantic.Observation.OwnerPolicy.PolicyRevision == "" || semantic.Observation.OwnerPolicy != operation.OwnerPolicy ||
-		semantic.Observation.OwnerPolicy.CatalogSnapshotID != catalog.SnapshotID {
+		semantic.Observation.OwnerPolicy.CatalogSnapshotID != catalog.SnapshotID ||
+		operation.ConstraintImpact != runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted ||
+		operation.Feedback.OriginalDiagnostic.ObservedRevision != catalog.ObservedRevision {
 		t.Fatalf("semantic/operation File policy drifted: semantic=%+v operation=%+v", semantic, operation)
 	}
 }

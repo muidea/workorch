@@ -181,8 +181,7 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 		return
 	}
 	terminated, err := m.submitRuntimeInternalEvent(ev.Context(), runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventTerminationRequested, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
-		TerminationKind: cmd.Kind, RequestedBy: cmd.RequestedBy, Reason: cmd.Reason,
+		Kind: runtime.RuntimeInternalEventTerminationRequested, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{TerminationKind: cmd.Kind, RequestedBy: cmd.RequestedBy, Reason: cmd.Reason},
 	})
 	if err != nil {
 		setOrchestratorAck(result, err)
@@ -715,7 +714,7 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 						retry = runtimeLeaseRequestForFailure(failure, err, source, time.Second)
 					}
 					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
-						if _, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure}); recordErr != nil {
+						if _, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{FailureFact: &failure}}); recordErr != nil {
 							slog.Warn("workorch Runtime exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 						} else {
 							retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "owner-transient-terminal", Delay: time.Second, Source: source}
@@ -735,7 +734,7 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 				}
 				return
 			}
-			recorded, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure})
+			recorded, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{FailureFact: &failure}})
 			if recordErr != nil {
 				slog.Warn("workorch Runtime drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 				return

@@ -26,7 +26,7 @@ func TestWorkspaceSnapshotFromModelsProjectsBaseWorkspaceView(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-workspace-snapshot-projection")
 	activeRunID := common.RunID("run-active-workspace-projection")
-	got := WorkspaceSnapshotFromModels(WorkspaceSnapshotModelInput{
+	got := workspaceSnapshotFromModels(WorkspaceSnapshotModelInput{
 		Workspace:     &workspacemodel.Workspace{ID: workspaceID, Title: "workspace projection", State: common.WorkspaceStateActive, ActiveRunID: activeRunID},
 		ProjectionRun: &runmodel.Run{ID: activeRunID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Runs: []*runmodel.Run{
@@ -73,7 +73,7 @@ func TestSelectTerminalResultRunIgnoresAcceptedSlice(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-terminal-result-slice")
 	runID := common.RunID("run-terminal-result-slice")
-	result, run := SelectTerminalResultRun(workspaceID, map[common.RunID]*runmodel.Run{
+	result, run := selectTerminalResultRun(workspaceID, map[common.RunID]*runmodel.Run{
 		runID: {ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
 	}, []*resultmodel.Result{
 		{
@@ -189,7 +189,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			{ID: "approval-run-only", State: "pending", RunID: string(runID)},
 		},
 	}
-	got := WorkspaceSnapshotWithRunSnapshot(base, runSnapshot)
+	got := workspaceSnapshotWithRunSnapshot(base, runSnapshot)
 
 	if got.Run == nil || got.Run.ID != string(runID) {
 		t.Fatalf("Run = %+v, want merged run", got.Run)
@@ -251,7 +251,7 @@ func TestWorkspaceSnapshotFromModelsProjectsArtifactContinuations(t *testing.T) 
 	t.Parallel()
 
 	workspaceID := common.WorkspaceID("ws-workspace-continuation-projection")
-	got := WorkspaceSnapshotFromModels(WorkspaceSnapshotModelInput{
+	got := workspaceSnapshotFromModels(WorkspaceSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
 		ArtifactContinuations: []*orchestratormodel.ArtifactContinuation{
 			{ID: "continuation-workspace", WorkspaceID: workspaceID, RunID: "run-continuation"},

@@ -22,7 +22,7 @@ func closureTraceFromStep(step workorchprojectioncontract.StepView) (workorchpro
 		readModelStringValue(output["error"]),
 		readModelStringValue(output["reason"]),
 	))
-	trace.MissingDoDItems = MissingDoDItemsFromStepOutput(output)
+	trace.MissingDoDItems = missingDoDItemsFromStepOutput(output)
 	trace.EvidenceRefs = compactUniqueStrings([]string{step.ID})
 	ok := trace.GraphFollowUp ||
 		trace.AssessmentOnly ||

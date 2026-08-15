@@ -31,7 +31,7 @@ type workspaceSnapshotModels struct {
 }
 
 func (models workspaceSnapshotModels) selectProjectionRun() *runmodel.Run {
-	return readmodelprojection.SelectWorkspaceProjectionRun(models.Workspace, models.Runs, models.Results, models.EventRecords)
+	return readmodelprojection.WorkspaceProjection().SelectProjectionRun(models.Workspace, models.Runs, models.Results, models.EventRecords)
 }
 
 func (models workspaceSnapshotModels) projectionInput(projectionRun *runmodel.Run) readmodelprojection.WorkspaceSnapshotModelInput {

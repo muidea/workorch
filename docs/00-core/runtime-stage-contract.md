@@ -66,6 +66,14 @@ focus/binding、evidence、capability/catalog、prerequisite freshness 或 owner
 AuthoritySnapshot；Run 只能比较随 opaque Runtime record 持久化的 lifecycle fence，不得解码 SM-2/3/4 内容选择 SM-1
 迁移。
 
+`OwnerPolicy` 只标识 observation 的 owner、policy revision 与 catalog snapshot，绝不隐式表示 binding contradiction。
+只有 capability owner 显式返回 owner-neutral `sealed_target_authorization_contradicted` constraint impact，且
+Orchestrator 将它精确关联到 persisted candidate attempt/operation、current CWI binding、reconciliation binding、owner
+catalog、authority transaction、target set 与 observed resource revision 后，SM-2 才可退休该 binding。binding 自身封存的
+semantic manifest 可以位于 active ledger，也可以位于 immutable generation history；不得要求它等于另一个 CWI 的最新
+global manifest。`observation_unknown`、无效/无效应 patch、replay-proof unavailable 等 candidate-local observation 即使携带
+OwnerPolicy，也只能留在 SM-3 invalidated-attempt/no-progress 路径，不能重开 CWI 或形成 binding contradiction。
+
 任何非当前 aggregate 不得原地迁移、忽略旧字段、重解释 authority 或通过 Restart 包装为当前数据。Resume/drive
 只能返回 `fresh_activation_required`，且不得产生 provider/capability work；Restart 由 Run owner 返回
 `data_reset_required`，不得创建悬挂的 replacement intent。清理开发数据后，新 Run 从当前 bootstrap 开始，
@@ -436,6 +444,10 @@ sealed authority + preflight ready
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
+- claimed operation 在没有 receipt 时，只能由 SM-3 返回一个只读的 recovery-budget handoff；SM-3 不得直接修改
+  SM-4 的 recovery ledger。后续 `recovery_budget_consumed` private event 由 SM-4 独立 CAS 提交预算，并以
+  `operation ID + exact persisted recovery attempt` 作为下一次安全重放的授权 fence；授权字段不属于其他 transaction
+  fact，缺失、半截或错用的 envelope 必须在 aggregate load 前拒绝。
 - 同一 dispatch 内 accepted receipt 造成的资源 revision 变化是内生事实：它可以使后续 SM-2 prerequisite
   observation 失效，但不得仅因此结束尚有 sealed operation 的 active dispatch。全部 operation 成功或任一
   operation rejected/stale 后，SM-3 才结算 dispatch 并交回 SM-2 reduce。

@@ -7,7 +7,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
-func OrderedApprovalsForGovernancePage(items []*approvalmodel.Approval) []*approvalmodel.Approval {
+func orderedApprovalsForGovernancePage(items []*approvalmodel.Approval) []*approvalmodel.Approval {
 	ordered := append([]*approvalmodel.Approval(nil), items...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		left, right := ordered[i], ordered[j]
@@ -19,7 +19,7 @@ func OrderedApprovalsForGovernancePage(items []*approvalmodel.Approval) []*appro
 	return ordered
 }
 
-func OrderedDecisionTicketsForGovernancePage(items []*decisionmodel.Ticket) []*decisionmodel.Ticket {
+func orderedDecisionTicketsForGovernancePage(items []*decisionmodel.Ticket) []*decisionmodel.Ticket {
 	ordered := append([]*decisionmodel.Ticket(nil), items...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		left, right := ordered[i], ordered[j]

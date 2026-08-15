@@ -28,16 +28,16 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) projec
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,
 	}
-	if currentStep := readmodelprojection.CurrentRunStatusStep(item, related.steps, related.checkpoints, related.decisions, related.approvals); currentStep != nil {
+	if currentStep := readmodelprojection.RunProjection().CurrentStatusStep(item, related.steps, related.checkpoints, related.decisions, related.approvals); currentStep != nil {
 		ret.CurrentStepID = string(currentStep.ID)
-		ret.CurrentStepKind = readmodelprojection.CanonicalStepKind(currentStep.Kind)
+		ret.CurrentStepKind = readmodelprojection.RunProjection().CanonicalStepKind(currentStep.Kind)
 		ret.CurrentStepState = string(currentStep.State)
 	}
 	runView := runtimecore.MapRun(item)
-	ret.Acceptance = readmodelprojection.MapAcceptanceProjection(runView)
-	ret.ConvergenceStatus = readmodelprojection.MapConvergenceStatus(readmodelcore.RunSnapshotState{
+	ret.Acceptance = readmodelprojection.RunProjection().Acceptance(runView)
+	ret.ConvergenceStatus = readmodelprojection.RunProjection().Convergence(readmodelcore.RunSnapshotState{
 		Run:        runView,
-		Steps:      readmodelprojection.MapSteps(related.steps),
+		Steps:      readmodelprojection.RunProjection().Steps(related.steps),
 		Acceptance: ret.Acceptance,
 	})
 	if ret.ConvergenceStatus == nil {

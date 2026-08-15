@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/grounding"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -831,31 +832,11 @@ func runtimeStringsContain(values []string, wanted string) bool {
 // creation observation; the reducer never derives a file path from Goal, DoD,
 // manifest ordering, or provider text.
 func hasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
-	selection := currentFocusTargetSelection(facts)
-	if selection == nil {
-		return false
-	}
-	value := selection.Normalized()
-	focus := facts.Focus.Normalized()
-	return value.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
-		value.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
-		value.TargetRole == focus.TargetRole && value.SelectorRef == focus.TargetSelectorRef &&
-		value.SelectorOwnerRef == focus.TargetSelectorOwnerRef && value.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
-		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(value.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
-		value.ProspectiveTargetRef != "" && value.ProspectiveTargetRef == focus.ProspectiveTargetRef
+	return grounding.HasOwnerGroundedCreationScope(facts)
 }
 
 func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
-	selection := currentFocusTargetSelection(facts)
-	if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || selection.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-		return false
-	}
-	// A complete existing-workspace scope has the bounded target set. An empty
-	// scope is legal only when activation sealed an owning profile/subject pair;
-	// File never obtains that authority from Goal/DoD prose or directory names.
-	return len(selection.TargetRefs) != 0 ||
-		(selection.CandidateCount == 0 && len(selection.CandidateTargetRefs) == 0 && selection.ProspectiveTargetRef == "" &&
-			selection.SelectorOwnerRef != "" && selection.SelectorSubjectRef != "")
+	return grounding.HasOwnerGroundedTargetScope(facts)
 }
 
 // targetSelectionHasConcreteTarget is intentionally narrower than an owner
@@ -863,7 +844,7 @@ func hasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 // scope is only a bounded File feasibility inventory and must not enter facts
 // that are interpreted as a repair target.
 func targetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSelection) bool {
-	return selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) != 0
+	return grounding.TargetSelectionHasConcreteTarget(selection)
 }
 
 func hasCurrentFocusTargetBoundStateChangeEvidence(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) bool {

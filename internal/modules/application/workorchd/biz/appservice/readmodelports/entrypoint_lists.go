@@ -14,7 +14,7 @@ func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTr
 	if err != nil {
 		return nil, err
 	}
-	return readmodelprojection.MapMemoryRecallTraces(items), nil
+	return readmodelprojection.ActivityProjection().MemoryRecallTraces(items), nil
 }
 
 func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
@@ -22,5 +22,5 @@ func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, q
 	if err != nil {
 		return nil, err
 	}
-	return readmodelprojection.MapEventRecords(items), nil
+	return readmodelprojection.ActivityProjection().EventRecords(items), nil
 }

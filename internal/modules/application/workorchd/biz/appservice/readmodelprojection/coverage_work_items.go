@@ -7,7 +7,7 @@ import (
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func MapCoverageWorkItems(items []*orchestratormodel.CoverageWorkItem) []map[string]any {
+func mapCoverageWorkItems(items []*orchestratormodel.CoverageWorkItem) []map[string]any {
 	if len(items) == 0 {
 		return nil
 	}

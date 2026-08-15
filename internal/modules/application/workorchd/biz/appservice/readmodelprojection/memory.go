@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []projectioncontract.MemoryRecallTrace {
+func mapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []projectioncontract.MemoryRecallTrace {
 	if len(items) == 0 {
 		return nil
 	}

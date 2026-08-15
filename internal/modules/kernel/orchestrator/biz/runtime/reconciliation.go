@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -11,7 +12,7 @@ import (
 // ensureReconciliationRequest seals the SM-4 input into the Orchestrator
 // aggregate. It is intentionally idempotent: a duplicate request returns the
 // persisted ledger without another CAS or owner query.
-func (c *RuntimeController) ensureReconciliationRequest(ctx context.Context, request runtimecontract.RuntimeCWIReconciliationRequest) (RuntimeAggregate, bool, error) {
+func (c *driveDeliveryComponent) ensureReconciliationRequest(ctx context.Context, request runtimecontract.RuntimeCWIReconciliationRequest) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
@@ -113,7 +114,7 @@ func (c *RuntimeController) ensureReconciliationRequest(ctx context.Context, req
 // applies the only legal SM-2 reconciliation transition in one CAS. An
 // observation can preserve existing credit or reopen it; it can never create
 // new credit on a run that has not produced a matching sealed receipt.
-func (c *RuntimeController) commitReconciliationBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batch runtimecontract.RuntimeCWIReconciliationBatch) (RuntimeAggregate, bool, error) {
+func (c *authorityComponent) commitReconciliationBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batch runtimecontract.RuntimeCWIReconciliationBatch) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
@@ -206,20 +207,7 @@ func (c *RuntimeController) commitReconciliationBatch(ctx context.Context, works
 }
 
 func reconciliationHistoryContainsExactBatch(history []runtimecontract.RuntimeCWIReconciliationGeneration, batch runtimecontract.RuntimeCWIReconciliationBatch) bool {
-	batch = batch.Normalized()
-	if batch.Hash == "" {
-		return false
-	}
-	for _, generation := range history {
-		generation = generation.Normalized()
-		if generation.Batch == nil || generation.Batch.Hash != batch.Hash {
-			continue
-		}
-		if batch.ValidateForRequest(generation.Request) == nil {
-			return true
-		}
-	}
-	return false
+	return proof.ReconciliationHistoryContainsExactBatch(history, batch)
 }
 
 func reconcileCoverage(
@@ -243,42 +231,30 @@ func reconcileCoverage(
 		if !found || item.CurrentBindingRef == nil || item.CurrentBindingRef.BindingID != binding.BindingID || item.CurrentBindingRef.BindingHash != binding.BindingHash {
 			return nil, nil, nil, fmt.Errorf("%w: reconciliation binding %q is no longer current for CWI %q", common.ErrConflict, binding.BindingID, binding.CoverageWorkItemID)
 		}
-		observations := make([]runtimecontract.RuntimeCWIReconciliationObservation, 0, len(binding.OwnerModuleIDs))
-		for _, observation := range batch.Observations {
-			if observation.CoverageWorkItemID == binding.CoverageWorkItemID && observation.BindingID == binding.BindingID {
-				observations = append(observations, observation)
-			}
-		}
-		allSatisfied := len(observations) == len(binding.OwnerModuleIDs)
-		for _, observation := range observations {
-			if observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
-				allSatisfied = false
-			}
-		}
+		comparison := proof.CompareReconciliationBinding(binding, batch)
 		disposition := runtimecontract.RuntimeCWIReconciliationDispositionPrerequisite
 		// Scope selects which CWI bindings are observed; it is not a credit
 		// invalidation policy. A satisfied row belongs to this Runtime aggregate
 		// and remains satisfied when every exact owner observation still holds,
 		// including a workspace_full generation. Fresh restart predecessor credit
 		// is rejected when the new aggregate is formed, not repaired here.
-		if allSatisfied && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+		if comparison.AllOwnersSatisfied && item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			disposition = runtimecontract.RuntimeCWIReconciliationDispositionRetain
 		} else if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			disposition = runtimecontract.RuntimeCWIReconciliationDispositionReopen
 		}
-		observationRef := runtimecontract.StableRuntimeCWIReconciliationObservationSetRef(observations)
 		results = append(results, runtimecontract.RuntimeCWIReconciliationResult{
 			RequestID: request.RequestID, WorkspaceID: request.WorkspaceID, RunID: request.RunID,
 			Generation: request.Generation, BatchHash: batch.Hash, CoverageItemID: binding.CoverageWorkItemID,
-			BindingID: binding.BindingID, Disposition: disposition, ObservationRef: observationRef,
+			BindingID: binding.BindingID, Disposition: disposition, ObservationRef: comparison.ObservationRef,
 		})
 		if disposition == runtimecontract.RuntimeCWIReconciliationDispositionReopen {
 			lineage := runtimecontract.RuntimeCWIReconciliationReopenedLineage{
 				RequestID: request.RequestID, WorkspaceID: request.WorkspaceID, RunID: request.RunID,
 				Generation: request.Generation, BatchHash: batch.Hash, CoverageWorkItemID: binding.CoverageWorkItemID,
-				BindingID: binding.BindingID, ObservationRef: observationRef,
+				BindingID: binding.BindingID, ObservationRef: comparison.ObservationRef,
 				PreviousEvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-				Reason:               reconciliationReopenReason(observations),
+				Reason:               comparison.UnsatisfiedReason,
 			}
 			reopened = append(reopened, lineage)
 			triggers = append(triggers, runtimeCWIReopenTrigger{
@@ -289,16 +265,4 @@ func reconcileCoverage(
 		}
 	}
 	return results, reopened, triggers, nil
-}
-
-func reconciliationReopenReason(observations []runtimecontract.RuntimeCWIReconciliationObservation) string {
-	for _, observation := range observations {
-		if observation.Status == runtimecontract.RuntimeCWIReconciliationObservationStale {
-			return "current-run owner observation is stale"
-		}
-		if observation.Status == runtimecontract.RuntimeCWIReconciliationObservationUnverifiable {
-			return "current-run owner observation is unverifiable"
-		}
-	}
-	return "current-run owner observation no longer satisfies the sealed proof"
 }

@@ -9,7 +9,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
+func normalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	snapshot.Workspace.State = string(common.CanonicalWorkspaceOwnerState(common.WorkspaceState(snapshot.Workspace.State)))
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if activeRunID == "" && snapshot.Run != nil {
@@ -76,7 +76,7 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 	return snapshot
 }
 
-func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
+func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	workspace := snapshot.Workspace
 	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
 	if activeRunID == "" && snapshot.Run != nil {
@@ -90,7 +90,7 @@ func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	}
 	switch common.WorkspaceState(workspace.State) {
 	case common.WorkspaceStateBlockedOnApproval:
-		if HasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
+		if hasOpenApprovalBlocker(snapshot.Approvals, workspace.ID, activeRunID, workspace.BlockingApprovalID) {
 			return "approval"
 		}
 	case common.WorkspaceStateActive:
@@ -119,7 +119,7 @@ func openDecisionBlockerID(items []projectioncontract.Decision, workspaceID, run
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
 	preferredID = strings.TrimSpace(preferredID)
-	if HasOpenDecisionBlocker(items, workspaceID, runID, preferredID) {
+	if hasOpenDecisionBlocker(items, workspaceID, runID, preferredID) {
 		return preferredID
 	}
 	for _, item := range items {
@@ -137,7 +137,7 @@ func openApprovalBlockerID(items []projectioncontract.Approval, workspaceID, run
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
 	preferredID = strings.TrimSpace(preferredID)
-	if HasOpenApprovalBlocker(items, workspaceID, runID, preferredID) {
+	if hasOpenApprovalBlocker(items, workspaceID, runID, preferredID) {
 		return preferredID
 	}
 	for _, item := range items {

@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
-func ProjectResultView(item projectioncontract.Result) projectioncontract.Result {
+func projectResultView(item projectioncontract.Result) projectioncontract.Result {
 	return projectioncontract.Result{
 		ID:            item.ID,
 		WorkspaceID:   item.WorkspaceID,

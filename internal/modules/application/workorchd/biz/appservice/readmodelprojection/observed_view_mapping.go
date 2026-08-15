@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapObserved(items []observed.SnapshotItem) []projectioncontract.ObservedView {
+func mapObserved(items []observed.SnapshotItem) []projectioncontract.ObservedView {
 	if len(items) == 0 {
 		return nil
 	}

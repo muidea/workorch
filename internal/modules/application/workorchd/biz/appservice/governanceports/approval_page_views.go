@@ -17,14 +17,14 @@ func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 	if err != nil {
 		return appmodelcore.ApprovalPage{}, err
 	}
-	pageApprovals, limit, cursorAfterID, nextCursor, hasMore := readmodelprojection.PageApprovals(filtered, query)
+	pageApprovals, limit, cursorAfterID, nextCursor, hasMore := readmodelprojection.GovernanceProjection().PageApprovals(filtered, query)
 	approvals := make([]workorchprojectioncontract.Approval, 0, len(pageApprovals))
 	for _, item := range pageApprovals {
 		summary, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
 		if err != nil {
 			return appmodelcore.ApprovalPage{}, err
 		}
-		approvals = append(approvals, readmodelprojection.ProjectApprovalView(readmodelprojection.MapApproval(item, summary)))
+		approvals = append(approvals, readmodelprojection.GovernanceProjection().ProjectApprovalView(readmodelprojection.GovernanceProjection().MapApproval(item, summary)))
 	}
 	return appmodelcore.ApprovalPage{
 		WorkspaceID: strings.TrimSpace(string(query.WorkspaceID)),

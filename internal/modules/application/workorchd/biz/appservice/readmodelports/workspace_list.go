@@ -65,8 +65,8 @@ func ListProjectedWorkspaces(
 		if err != nil {
 			return nil, err
 		}
-		projectionRun := readmodelprojection.SelectWorkspaceProjectionRun(item, runItems, resultItems, eventRecordItems)
-		ret = append(ret, readmodelprojection.MapWorkspaceWithRunProjection(item, projectionRun))
+		projectionRun := readmodelprojection.WorkspaceProjection().SelectProjectionRun(item, runItems, resultItems, eventRecordItems)
+		ret = append(ret, readmodelprojection.WorkspaceProjection().MapWorkspace(item, projectionRun))
 	}
 	return ret, nil
 }

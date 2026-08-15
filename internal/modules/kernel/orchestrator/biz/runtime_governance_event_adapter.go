@@ -9,6 +9,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -36,15 +37,8 @@ func (m *Biz) handleRuntimeGovernanceTicketResolutionLocked(event magicevent.Eve
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
 	}
-	var binding *runtimecontract.RuntimeGovernanceRequestRecord
-	for idx := range aggregate.GovernanceRequests {
-		if aggregate.GovernanceRequests[idx].TicketID == command.TicketID {
-			value := aggregate.GovernanceRequests[idx]
-			binding = &value
-			break
-		}
-	}
-	if binding == nil {
+	binding, found := governancecheck.RequestForTicket(aggregate.GovernanceRequests, command.TicketID)
+	if !found {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance ticket has no persisted binding", common.ErrConflict))
 		return
 	}
@@ -116,7 +110,7 @@ func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, re
 		return
 	}
 	commitEvent, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, WorkspaceID: command.Resolution.WorkspaceID, RunID: command.Resolution.RunID, GovernanceResolution: &command.Resolution,
+		Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: command.Resolution.WorkspaceID, RunID: command.Resolution.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{GovernanceResolution: &command.Resolution},
 	})
 	if err != nil {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)

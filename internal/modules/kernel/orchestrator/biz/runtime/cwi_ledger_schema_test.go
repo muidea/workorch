@@ -165,14 +165,13 @@ func TestEligibleFocusProjectionSelectsLaterEligibleCWIAndIsIdempotent(t *testin
 		DoDID: "dod-neutral", DoDDefinition: "all neutral coverage is satisfied", CapabilityContract: []string{"neutral-capability"},
 	}
 	initialized, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventActivationObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
-		ActivationFacts: &facts, ActivationDefinition: &definition,
+		Kind: RuntimeInternalEventActivationObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Activation: &RuntimeInternalActivationPayload{ActivationFacts: &facts, ActivationDefinition: &definition},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID})
+	result, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +181,7 @@ func TestEligibleFocusProjectionSelectsLaterEligibleCWIAndIsIdempotent(t *testin
 	if initialized.Aggregate.StateRevision >= result.Aggregate.StateRevision {
 		t.Fatalf("projection did not commit a new revision: before=%d after=%d", initialized.Aggregate.StateRevision, result.Aggregate.StateRevision)
 	}
-	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID})
+	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{}})
 	if err != nil {
 		t.Fatal(err)
 	}

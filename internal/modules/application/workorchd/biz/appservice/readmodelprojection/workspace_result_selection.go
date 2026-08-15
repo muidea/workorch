@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func SelectTerminalResultRun(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, results []*resultmodel.Result) (*resultmodel.Result, *runmodel.Run) {
+func selectTerminalResultRun(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, results []*resultmodel.Result) (*resultmodel.Result, *runmodel.Run) {
 	var selected *resultmodel.Result
 	for _, item := range results {
 		if item == nil || item.WorkspaceID != workspaceID || item.RunID == "" {
@@ -24,7 +24,7 @@ func SelectTerminalResultRun(workspaceID common.WorkspaceID, runs map[common.Run
 		if run == nil || !isTerminalOutcomeEligibleModelResult(item, run) {
 			continue
 		}
-		if selected == nil || ResultProjectionTime(item) >= ResultProjectionTime(selected) {
+		if selected == nil || resultProjectionTime(item) >= resultProjectionTime(selected) {
 			selected = item
 		}
 	}
@@ -42,7 +42,7 @@ func isTerminalOutcomeEligibleModelResult(item *resultmodel.Result, run *runmode
 	case common.ResultStateAccepted:
 		return run.State == common.RunStateCompleted
 	case common.ResultStateRejected:
-		return IsTerminalProjectionRunState(run.State) && run.State != common.RunStateSuperseded
+		return isTerminalProjectionRunState(run.State) && run.State != common.RunStateSuperseded
 	default:
 		return false
 	}

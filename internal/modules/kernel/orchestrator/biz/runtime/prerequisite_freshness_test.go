@@ -447,10 +447,10 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	if _, err := controller.recordCandidateProposal(ctx, facts.WorkspaceID, facts.RunID, 0, candidate); err != nil {
 		t.Fatal(err)
 	}
-	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "file/target-not-regular", Message: "owner rejected non-regular target", TargetRefs: []string{"target.txt"}}
+	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_replay_proof_unavailable", Signature: "file/replay-proof-unavailable", Message: "patch preview did not prove a durable change", TargetRefs: []string{"target.txt"}}
 	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: beforeAuthority,
-	}, runtimecontract.RuntimeFeedbackDomainFeasibility, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular), runtimecontract.RuntimeModuleFile, failure)
+	}, runtimecontract.RuntimeFeedbackDomainFeasibility, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown), runtimecontract.RuntimeModuleFile, failure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,6 +471,7 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	expectedDiagnostic := feedback.OriginalDiagnostic.CloneOriginal()
 	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
 		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
+		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,
@@ -478,8 +479,14 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	}); err != nil {
 		t.Fatal(err)
 	}
+	savesBeforeWrongEvent := repository.saves
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
+	}); !errors.Is(err, common.ErrInvalidArgument) || repository.saves != savesBeforeWrongEvent {
+		t.Fatalf("candidate-local owner fact crossed the SM-2 contradiction event: err=%v saves=%d", err, repository.saves)
+	}
 	ownerEvent, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+		Kind: RuntimeInternalEventOwnerFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -510,9 +517,48 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		t.Fatalf("owner diagnostic changed across persisted reload:\n got=%+v\nwant=%+v", reloadedDiagnostic, expectedDiagnostic)
 	}
 	requestSessionsBeforeFence := len(reloaded.CandidateRequestSessions)
-	fenced, err := restarted.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "owner-infeasible-new-authority")
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		reloaded.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(reloaded.Facts, reloaded.Decision, nil),
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	expected := runtimeTestOperationsExpectedDocument(reloaded, manifest.Hash, 0)
+	savesBeforeFence := repository.saves
+	revisionBeforeFence := reloaded.StateRevision
+	finding, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventCandidateRequestEnsured,
+		Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{
+			DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
+			StablePrefixHash: "owner-infeasible-new-authority",
+			ManifestHash:     manifest.Hash,
+			ExpectedDocument: &expected,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finding.PendingAuthorityFailure == nil || finding.PendingAuthorityFailure.Code != "equivalent_authority_no_progress" ||
+		finding.Aggregate.Facts.WorkspaceID != "" || finding.CandidateSession.LogicalRequestID != "" ||
+		repository.saves != savesBeforeFence || repository.aggregate.StateRevision != revisionBeforeFence ||
+		len(repository.aggregate.CandidateRequestSessions) != requestSessionsBeforeFence {
+		t.Fatalf("candidate request finding crossed the SM-3 mutation boundary: result=%+v saves=%d aggregate=%+v", finding, repository.saves, repository.aggregate)
+	}
+	terminalEvent, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventFailureObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{FailureFact: finding.PendingAuthorityFailure},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fenced := terminalEvent.Aggregate
+	if repository.saves != savesBeforeFence+1 || fenced.StateRevision != revisionBeforeFence+1 {
+		t.Fatalf("authority failure transition did not use exactly one independent CAS: revision=%d saves=%d", fenced.StateRevision, repository.saves)
 	}
 	if fenced.Decision.State != runtimecontract.ConvergenceStateFailed || fenced.Decision.Terminal == nil || fenced.Decision.Terminal.Code != "equivalent_authority_no_progress" ||
 		fenced.Facts.Failure == nil || fenced.Facts.Failure.Code != "equivalent_authority_no_progress" || len(fenced.CandidateAttempts) != 1 ||
@@ -536,7 +582,7 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 	}
 	saves := repository.saves
 	duplicateEvent, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+		Kind: RuntimeInternalEventOwnerFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
 	})
 	if err != nil || duplicateEvent.Aggregate.StateRevision != repository.aggregate.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate owner observation rewrote aggregate: duplicate=%+v saves=%d err=%v", duplicateEvent.Aggregate, repository.saves, err)
@@ -597,7 +643,8 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	feedback.OriginalDiagnostic.ObservedRevision = "tree-v1"
 	ownerObservation := runtimecontract.RuntimeOwnerFeasibilityObservation{
 		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
-		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
+		OwnerPolicy:      runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
+		ConstraintImpact: runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted,
 	}
 	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: "write-target", AdmissibilitySnapshotID: inventory.SnapshotID,
@@ -605,8 +652,50 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	}); err != nil {
 		t.Fatal(err)
 	}
+	preContradiction, err := controller.Load(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractID := runtimecontract.StableAuthorityContractID(facts.WorkspaceID, facts.RunID, preContradiction.Decision.AuthorityTransaction())
+	_, pendingRecord, found := pendingCandidateAttempt(preContradiction.CandidateAttempts, facts.WorkspaceID, facts.RunID, contractID, 0)
+	if !found || len(pendingRecord.Feasibilities) != 1 {
+		t.Fatalf("binding contradiction fixture has no exact persisted feasibility: %+v", pendingRecord)
+	}
+	// run-003 kept the cwi-027 binding's semantic manifest in immutable history
+	// while the active ledger had advanced to a different CWI generation. Exact
+	// correlation must use the binding's persisted generation, not the unrelated
+	// latest global manifest.
+	historicalAggregate := preContradiction
+	oldLedger := preContradiction.SemanticPlanning.Clone()
+	oldLedger.History = nil
+	historicalAggregate.SemanticPlanning.History = []runtimecontract.RuntimeSemanticPlanningGeneration{{Snapshot: oldLedger}}
+	currentManifest := *historicalAggregate.SemanticPlanning.Manifest
+	currentManifest.Hash = "runtime-semantic-manifest-unrelated-current"
+	historicalAggregate.SemanticPlanning.Manifest = &currentManifest
+	identity, historicalCoverageID, historicalBinding, identityErr := runtimeBindingContradictionIdentity(
+		historicalAggregate, pendingRecord, pendingRecord.Feasibilities[0], ownerObservation,
+	)
+	if identityErr != nil || historicalCoverageID != facts.Coverage[0].ID || !runtimecontract.SameRuntimeCWIBindingRef(historicalBinding, binding) ||
+		identity.AuthorityInputID != pendingRecord.Transaction.AuthorityInputID {
+		t.Fatalf("historical semantic generation did not correlate exact contradiction: identity=%+v coverage=%q binding=%+v err=%v transaction=%+v currentBinding=%+v reconciliation=%+v currentManifest=%+v historyManifest=%+v feasibility=%+v",
+			identity, historicalCoverageID, historicalBinding, identityErr, pendingRecord.Transaction, binding, historicalAggregate.Facts.ReconciliationContract,
+			historicalAggregate.SemanticPlanning.Manifest, historicalAggregate.SemanticPlanning.History[0].Snapshot.Manifest, pendingRecord.Feasibilities[0])
+	}
+	unknownGeneration := historicalAggregate
+	unknownGeneration.Facts.Coverage = append([]runtimecontract.RuntimeCoverageItemFact(nil), historicalAggregate.Facts.Coverage...)
+	for index := range unknownGeneration.Facts.Coverage {
+		if unknownGeneration.Facts.Coverage[index].CurrentBindingRef == nil {
+			continue
+		}
+		unknownRef := unknownGeneration.Facts.Coverage[index].CurrentBindingRef.Clone()
+		unknownRef.SemanticManifestHash = "runtime-semantic-manifest-unknown"
+		unknownGeneration.Facts.Coverage[index].CurrentBindingRef = &unknownRef
+	}
+	if _, _, _, err := runtimeBindingContradictionIdentity(unknownGeneration, pendingRecord, pendingRecord.Feasibilities[0], ownerObservation); err == nil {
+		t.Fatal("binding contradiction accepted an unknown semantic generation")
+	}
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -690,7 +779,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	}
 	saves := repository.saves
 	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
 	})
 	if err != nil || duplicate.Aggregate.StateRevision != retired.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate binding contradiction was not a no-op: %+v err=%v saves=%d", duplicate.Aggregate, err, repository.saves)
@@ -698,7 +787,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	staleObservation := ownerObservation.Clone()
 	staleObservation.Feedback.OriginalDiagnostic.Signature = "file/stale-target-exists"
 	stale, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, Attempt: 0, OwnerFeasibility: &staleObservation,
+		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &staleObservation},
 	})
 	if err != nil || stale.Aggregate.StateRevision != retired.StateRevision || repository.saves != saves {
 		t.Fatalf("stale binding contradiction was not a no-op: %+v err=%v saves=%d", stale.Aggregate, err, repository.saves)
@@ -759,7 +848,7 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+		Kind: RuntimeInternalEventOwnerFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -780,7 +869,7 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 	}
 	saves := repository.saves
 	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventOwnerFeasibilityObserved, WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID, Attempt: 0, OwnerFeasibility: &ownerObservation,
+		Kind: RuntimeInternalEventOwnerFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: initialized.Facts.WorkspaceID, RunID: initialized.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
 	})
 	if err != nil || duplicate.Aggregate.StateRevision != aggregate.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate owner contract defect rewrote aggregate: aggregate=%+v saves=%d err=%v", duplicate.Aggregate, repository.saves, err)

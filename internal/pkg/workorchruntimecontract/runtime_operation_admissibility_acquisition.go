@@ -79,6 +79,7 @@ type RuntimeOperationFeasibilityObservation struct {
 	CapabilityStateBinding  string
 	CandidateManifestHash   string
 	OwnerPolicy             RuntimeOwnerPolicyIdentity
+	ConstraintImpact        RuntimeOwnerFeasibilityConstraintImpact
 	Outcome                 RuntimeOwnerFeasibilityOutcome
 	Feedback                *RuntimeFeedback
 	ReplayProof             *RuntimeOperationReplayProof
@@ -156,9 +157,21 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 	result.CapabilityStateBinding = strings.TrimSpace(result.CapabilityStateBinding)
 	result.CandidateManifestHash = strings.TrimSpace(result.CandidateManifestHash)
 	result.OwnerPolicy = result.OwnerPolicy.Normalized()
+	result.ConstraintImpact = RuntimeOwnerFeasibilityConstraintImpact(strings.TrimSpace(string(result.ConstraintImpact)))
 	result.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(result.Outcome)))
 	if result.OperationID == "" || result.AdmissibilitySnapshotID == "" {
 		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility result requires operation and admissibility identity")
+	}
+	if !ValidRuntimeOwnerFeasibilityConstraintImpact(result.ConstraintImpact) {
+		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility has unknown constraint impact %q", result.ConstraintImpact)
+	}
+	if result.OwnerPolicy.OwnerModuleID != "" || result.OwnerPolicy.PolicyRevision != "" || result.OwnerPolicy.CatalogSnapshotID != "" {
+		if err := result.OwnerPolicy.Validate(); err != nil {
+			return RuntimeOperationFeasibilityObservation{}, err
+		}
+	}
+	if result.ConstraintImpact != "" && result.Outcome != RuntimeOwnerFeasibilityInfeasible {
+		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility constraint impact requires infeasible outcome")
 	}
 	switch result.Outcome {
 	case RuntimeOwnerFeasibilityFeasible:
@@ -214,8 +227,35 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 	if feedback.Domain != RuntimeFeedbackDomainFeasibility || feedback.StableCategory != RuntimeFeedbackCategory(category) || feedback.OriginalDiagnostic == nil {
 		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility feedback does not match owner outcome")
 	}
+	if result.ConstraintImpact != "" {
+		if category != RuntimeOwnerFeasibilityCategoryPolicyDisallowed {
+			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility constraint impact requires policy-disallowed category")
+		}
+		if err := result.OwnerPolicy.Validate(); err != nil {
+			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility constraint impact requires owner policy identity: %w", err)
+		}
+		if feedback.OriginalDiagnostic.OwnerModuleID != result.OwnerPolicy.OwnerModuleID || strings.TrimSpace(feedback.OriginalDiagnostic.ObservedRevision) == "" {
+			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility constraint impact requires matching owner and observed resource revision")
+		}
+	}
 	result.Feedback = &feedback
 	return result, nil
+}
+
+// RuntimeOwnerFeasibilityObservationFromOperation converts the concrete
+// capability-owner operation result into the persisted Orchestrator fact
+// without interpreting owner diagnostic text or selecting a transition.
+func RuntimeOwnerFeasibilityObservationFromOperation(result RuntimeOperationFeasibilityObservation) (RuntimeOwnerFeasibilityObservation, error) {
+	result, err := NormalizeRuntimeOperationFeasibilityObservation(result)
+	if err != nil {
+		return RuntimeOwnerFeasibilityObservation{}, err
+	}
+	observation := RuntimeOwnerFeasibilityObservation{
+		Outcome: result.Outcome, OwnerPolicy: result.OwnerPolicy,
+		ConstraintImpact: result.ConstraintImpact, Feedback: result.Feedback,
+		Stale: result.Stale, PrerequisiteRequest: result.PrerequisiteRequest,
+	}
+	return observation, observation.Validate()
 }
 
 func NewRuntimeOperationFeasibilityObservation(request RuntimeOperationFeasibilityRequest, category RuntimeOwnerFeasibilityCategory, failure *FailureFact, stale *RuntimePrerequisiteStale, prerequisiteRequest *RuntimeOperationPrerequisiteRequest, replayProof *RuntimeOperationReplayProof) (RuntimeOperationFeasibilityObservation, error) {

@@ -5,14 +5,14 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 )
 
-func RunSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshotState {
-	stepViews := MapSteps(input.Steps)
-	currentStep := CurrentRunSnapshotStepForRun(
+func runSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshotState {
+	stepViews := mapSteps(input.Steps)
+	currentStep := currentRunSnapshotStepForRun(
 		input.Run,
 		stepViews,
-		DecisionStepID(input.SelectedTicket),
-		ApprovalStepID(input.SelectedApproval),
-		MapRuntimeCheckpoints(input.Checkpoints),
+		decisionStepID(input.SelectedTicket),
+		approvalStepID(input.SelectedApproval),
+		mapRuntimeCheckpoints(input.Checkpoints),
 	)
 	observedItems := observed.BuildWorkorchSnapshot(
 		input.Workspace,

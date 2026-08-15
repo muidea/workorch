@@ -1,5 +1,42 @@
 package runtime
 
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+// RuntimeInternalAuthorityPayload contains only SM-2 authority/focus facts.
+// It cannot carry an executor, request transport state or delivery ledger.
+type RuntimeInternalAuthorityPayload struct {
+	ReconciliationBatch *runtimecontract.RuntimeCWIReconciliationBatch
+
+	SemanticFeasibility *runtimecontract.RuntimeSemanticProofFeasibility
+	SemanticDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic
+	// SemanticFailureCode is an Orchestrator-selected bounded terminal code.
+	// It remains separate from SemanticDiagnostic so the producer-authored
+	// diagnostic can be persisted byte-for-byte.
+	SemanticFailureCode       string
+	SemanticBatchID           string
+	SemanticRefreshGeneration int
+	ManifestHash              string
+	LogicalRequestID          string
+	CWIBindingRetirement      *RuntimeCWIBindingRetirementFact
+	SemanticCatalogScopeGap   *RuntimeSemanticCatalogScopeGap
+	SemanticCoverageOrder     []common.CoverageWorkItemID
+	SemanticOrderManifestHash string
+
+	PrerequisiteResult  *PrerequisiteResult
+	Stale               *runtimecontract.RuntimePrerequisiteStale
+	FeasibilityFact     *runtimecontract.RuntimeFeasibilityFact
+	FailureFact         *runtimecontract.FailureFact
+	CloseActiveDispatch bool
+
+	Attempt                   int
+	OwnerFeasibility          *runtimecontract.RuntimeOwnerFeasibilityObservation
+	GovernanceRequest         *runtimecontract.RuntimeGovernanceRequestRecord
+	RepairSurfaceConfirmation *runtimecontract.RuntimeRepairSurfaceConfirmation
+}
+
 // SM-2 facts are observations used by authority/focus convergence. They never
 // execute operations or project another owner's state.
 const (

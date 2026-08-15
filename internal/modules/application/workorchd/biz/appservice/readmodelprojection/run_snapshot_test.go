@@ -19,7 +19,7 @@ func TestRunSnapshotFromModelsTerminalRunPrefersFailedStepOverStaleCheckpoint(t 
 	workspaceID := common.WorkspaceID("ws-terminal-snapshot-step")
 	runID := common.RunID("run-terminal-snapshot-step")
 	failedStepID := common.StepID("run-terminal-snapshot-step/contract-retry-final")
-	got := RunSnapshotFromModels(RunSnapshotModelInput{
+	got := runSnapshotFromModels(RunSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:          runID,
@@ -62,7 +62,7 @@ func TestRunSnapshotFromModelsRunningRunDoesNotProjectCompletedStepAsActive(t *t
 	workspaceID := common.WorkspaceID("ws-running-completed-step")
 	runID := common.RunID("run-running-completed-step")
 	stepID := common.StepID("run-running-completed-step/graph-001/002-build")
-	got := RunSnapshotFromModels(RunSnapshotModelInput{
+	got := runSnapshotFromModels(RunSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
 		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
@@ -82,7 +82,7 @@ func TestRunSnapshotFromModelsRunningRunDoesNotProjectCompletedStepAsActive(t *t
 	if got.Step != nil || got.Run.CurrentStepID != "" || got.TaskProgress.CurrentStepID != "" {
 		t.Fatalf("current step projection = step:%+v run:%q progress:%q, want no active current step for running completed terminal gap", got.Step, got.Run.CurrentStepID, got.TaskProgress.CurrentStepID)
 	}
-	status := MapRunStatus(got)
+	status := mapRunStatus(got)
 	if status.CurrentStepID != "" || status.CurrentStepState != "" {
 		t.Fatalf("status current step = %q/%q, want no active current step", status.CurrentStepID, status.CurrentStepState)
 	}
@@ -91,7 +91,7 @@ func TestRunSnapshotFromModelsRunningRunDoesNotProjectCompletedStepAsActive(t *t
 func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
 	t.Parallel()
 
-	got := CoverageSummaryFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := coverageSummaryFromRunSnapshot(readmodelcore.RunSnapshotState{
 		CoverageWorkItems: []map[string]any{
 			{"id": "open-item", "status": "open"},
 			{"id": "empty-status-item"},
@@ -137,20 +137,20 @@ func TestRunOutcomeIgnoresAcceptedResultWhenCompletedRunHasOpenCoverage(t *testi
 		}},
 	}
 
-	if HasAcceptedRunResult(snapshot) {
+	if hasAcceptedRunResult(snapshot) {
 		t.Fatalf("HasAcceptedRunResult = true, want false while coverage is open")
 	}
-	if got := ResultProgressState(snapshot); got == "completed" {
+	if got := resultProgressState(snapshot); got == "completed" {
 		t.Fatalf("ResultProgressState = %q, want non-completed while coverage is open", got)
 	}
-	outcome := MapRunOutcome(snapshot)
+	outcome := mapRunOutcome(snapshot)
 	if outcome.Accepted || outcome.State == "accepted" || outcome.ResultID != "" {
 		t.Fatalf("MapRunOutcome = %+v, want accepted result ineligible while coverage is open", outcome)
 	}
 	if outcome.State != "failed" || outcome.Reason != "run completed without accepted result" {
 		t.Fatalf("MapRunOutcome = %+v, want completed drift fallback failure", outcome)
 	}
-	diagnostics := AuthorityDiagnosticsFromRunSnapshot(snapshot)
+	diagnostics := authorityDiagnosticsFromRunSnapshot(snapshot)
 	if len(diagnostics) != 1 || diagnostics[0].Code != "completion_gate_failed_but_run_completed" {
 		t.Fatalf("AuthorityDiagnostics = %+v, want completion gate drift diagnostic", diagnostics)
 	}
@@ -161,7 +161,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 
 	workspaceID := "ws-partial-assessment-outcome"
 	runID := "run-partial-assessment-outcome"
-	progress := MapLocalizedTaskProgress(readmodelcore.RunSnapshotState{
+	progress := mapLocalizedTaskProgress(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: workspaceID},
 		Run: appmodelcore.Run{
 			ID:          runID,
@@ -213,7 +213,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
 	t.Parallel()
 
-	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := gapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			State: "running",
 		},
@@ -244,7 +244,7 @@ func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
 func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testing.T) {
 	t.Parallel()
 
-	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := gapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			State: "running",
 		},
@@ -275,7 +275,7 @@ func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testi
 func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(projectioncontract.StepView{
+	projected := projectStepView(projectioncontract.StepView{
 		ID:    "run-a/step-current-contract",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -328,7 +328,7 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(projectioncontract.StepView{
+	projected := projectStepView(projectioncontract.StepView{
 		ID:    "run-a/legacy-step",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -348,7 +348,7 @@ func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.
 func TestProjectStepViewPrefersValidationCurrentActionOverStaleRepairPackage(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(projectioncontract.StepView{
+	projected := projectStepView(projectioncontract.StepView{
 		ID:    "run-a/step-command-contract",
 		Kind:  "llm/workspace_execution",
 		State: "failed",
@@ -408,7 +408,7 @@ func readModelStringSliceContains(values []string, want string) bool {
 func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := authorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-completed-open-coverage",
 			State: string(common.RunStateCompleted),
@@ -436,7 +436,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t 
 func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := authorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-stale-validation-resource",
 			State: string(common.RunStateActive),
@@ -472,7 +472,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *t
 func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationResourcesWithoutOutput(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := authorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-terminal-pending-validation-resource",
 			State: string(common.RunStateActive),
@@ -502,7 +502,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationReso
 func TestAuthorityDiagnosticsFromRunSnapshotIgnoresClosedValidationResources(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
+	got := authorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-closed-validation-resource",
 			State: string(common.RunStateActive),
@@ -536,7 +536,7 @@ func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-run-recovery-projection")
 	runID := common.RunID("run-recovery-projection")
 	currentStepID := common.StepID("step-current")
-	got := RunRecoverySnapshotFromModels(RunSnapshotModelInput{
+	got := runRecoverySnapshotFromModels(RunSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "recovery workspace", State: common.WorkspaceStateActive},
 		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{
@@ -565,7 +565,7 @@ func TestRunSnapshotProjectsRejectedExecutionGraphAsTaskPlan(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-rejected-graph-task-plan")
 	runID := common.RunID("run-rejected-graph-task-plan")
 	rootStepID := common.StepID("step-rejected-graph")
-	got := RunSnapshotFromModels(RunSnapshotModelInput{
+	got := runSnapshotFromModels(RunSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task plan projection", State: common.WorkspaceStateActive},
 		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive},
 		Steps: []*runmodel.Step{{
@@ -617,7 +617,7 @@ func TestRunSnapshotProjectsRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
 	rootStepID := common.StepID("step-original-plan")
 	retryStepID := common.StepID("step-retry")
 	ticketID := common.TicketID("ticket-retry-exhausted")
-	got := RunSnapshotFromModels(RunSnapshotModelInput{
+	got := runSnapshotFromModels(RunSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "task retry projection", State: common.WorkspaceStateActive},
 		Run: &runmodel.Run{
 			ID:               runID,

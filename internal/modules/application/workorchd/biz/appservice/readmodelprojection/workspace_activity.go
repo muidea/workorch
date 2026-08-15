@@ -16,7 +16,7 @@ const (
 	maxRuntimeViewActivityLimit     = 200
 )
 
-// BuildWorkspaceActivityFeedContent builds the full bounded activity item set for a
+// buildWorkspaceActivityFeedContent builds the full bounded activity item set for a
 // snapshot without assigning ActivityRevision. Projection store transactions must
 // decide revision: advance to the transaction revision when content changes,
 // otherwise keep the previous revision.
@@ -25,9 +25,9 @@ const (
 // dropped and store-level Truncated=true is saved with NextCursor empty (FR03).
 // Dropped history is not pageable; empty NextCursor terminates client paging.
 // RuntimeView read only paginates retained items and must preserve Truncated.
-func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceActivityFeed {
+func buildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceActivityFeed {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	displayRunID := SelectDisplayRunID(snapshot)
+	displayRunID := selectDisplayRunID(snapshot)
 	items := collectWorkspaceActivityItems(snapshot, displayRunID)
 	sortWorkspaceActivityItems(items)
 	items = dedupeWorkspaceActivityItems(items)
@@ -54,9 +54,9 @@ func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshotS
 	}
 }
 
-// CommitActivityFeedTransaction assigns ActivityRevision for a projection store
+// commitActivityFeedTransaction assigns ActivityRevision for a projection store
 // transaction. Content equality is typed field comparison, not hash/fingerprint.
-func CommitActivityFeedTransaction(previous projectioncontract.WorkspaceActivityFeed, candidateContent projectioncontract.WorkspaceActivityFeed, transactionRevision int64) projectioncontract.WorkspaceActivityFeed {
+func commitActivityFeedTransaction(previous projectioncontract.WorkspaceActivityFeed, candidateContent projectioncontract.WorkspaceActivityFeed, transactionRevision int64) projectioncontract.WorkspaceActivityFeed {
 	ret := cloneActivityFeed(candidateContent)
 	// Runtime progress is a stream of successive snapshots. Keep the prior
 	// items for the same workspace/display run and merge the newly projected
@@ -81,7 +81,7 @@ func CommitActivityFeedTransaction(previous projectioncontract.WorkspaceActivity
 	if transactionRevision < 0 {
 		transactionRevision = 0
 	}
-	if ActivityFeedContentEqual(previous, ret) {
+	if activityFeedContentEqual(previous, ret) {
 		ret.ActivityRevision = previous.ActivityRevision
 		return ret
 	}
@@ -107,15 +107,15 @@ func CommitActivityFeedTransaction(previous projectioncontract.WorkspaceActivity
 	return ret
 }
 
-// PageWorkspaceActivityFeed applies limit/beforeCursor to a stored feed without
+// pageWorkspaceActivityFeed applies limit/beforeCursor to a stored feed without
 // regenerating ActivityRevision.
 //
-// Store-level Truncated (set when BuildWorkspaceActivityFeedContent drops items
+// Store-level Truncated (set when buildWorkspaceActivityFeedContent drops items
 // beyond maxRuntimeViewActivityLimit) is preserved even when the current page is
 // the last page of the retained feed. Read-limit truncation and store-cap
 // truncation are therefore distinguishable: a final page with Truncated=true means
 // earlier history was dropped from the store, not merely paged out.
-func PageWorkspaceActivityFeed(feed projectioncontract.WorkspaceActivityFeed, limit int, beforeCursor string) projectioncontract.WorkspaceActivityFeed {
+func pageWorkspaceActivityFeed(feed projectioncontract.WorkspaceActivityFeed, limit int, beforeCursor string) projectioncontract.WorkspaceActivityFeed {
 	ret := cloneActivityFeed(feed)
 	storeTruncated := feed.Truncated
 	if limit <= 0 {
@@ -151,10 +151,10 @@ func PageWorkspaceActivityFeed(feed projectioncontract.WorkspaceActivityFeed, li
 	return ret
 }
 
-// ActivityFeedContentEqual compares activity content without revision.
+// activityFeedContentEqual compares activity content without revision.
 // Truncated/NextCursor are store-owned boundary facts and must participate so
 // cap transitions advance ActivityRevision and ChangedSections (FR03).
-func ActivityFeedContentEqual(a, b projectioncontract.WorkspaceActivityFeed) bool {
+func activityFeedContentEqual(a, b projectioncontract.WorkspaceActivityFeed) bool {
 	if strings.TrimSpace(a.WorkspaceID) != strings.TrimSpace(b.WorkspaceID) {
 		return false
 	}
@@ -167,11 +167,11 @@ func ActivityFeedContentEqual(a, b projectioncontract.WorkspaceActivityFeed) boo
 	if strings.TrimSpace(a.NextCursor) != strings.TrimSpace(b.NextCursor) {
 		return false
 	}
-	return ActivityItemsEqual(a.Items, b.Items)
+	return activityItemsEqual(a.Items, b.Items)
 }
 
-// ActivityItemsEqual compares ordered activity items by typed fields.
-func ActivityItemsEqual(a, b []projectioncontract.WorkspaceActivityItem) bool {
+// activityItemsEqual compares ordered activity items by typed fields.
+func activityItemsEqual(a, b []projectioncontract.WorkspaceActivityItem) bool {
 	if len(a) != len(b) {
 		return false
 	}

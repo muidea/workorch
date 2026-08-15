@@ -7,7 +7,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapStep(item *runmodel.Step) *projectioncontract.StepView {
+func mapStep(item *runmodel.Step) *projectioncontract.StepView {
 	if item == nil {
 		return nil
 	}
@@ -23,13 +23,13 @@ func MapStep(item *runmodel.Step) *projectioncontract.StepView {
 	}
 }
 
-func MapSteps(items []*runmodel.Step) []projectioncontract.StepView {
+func mapSteps(items []*runmodel.Step) []projectioncontract.StepView {
 	if len(items) == 0 {
 		return nil
 	}
 	out := make([]projectioncontract.StepView, 0, len(items))
 	for _, item := range items {
-		mapped := MapStep(item)
+		mapped := mapStep(item)
 		if mapped == nil {
 			continue
 		}

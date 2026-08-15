@@ -22,7 +22,7 @@ func RunTaskProgress(ctx context.Context, readers RunSnapshotReaders, runID comm
 	if err != nil {
 		return projectioncontract.TaskProgress{}, err
 	}
-	return readmodelprojection.RunSnapshotTaskProgress(snapshot), nil
+	return readmodelprojection.RunProjection().TaskProgress(snapshot), nil
 }
 
 func RunContextBundle(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (projectioncontract.ContextBundle, error) {
@@ -30,7 +30,7 @@ func RunContextBundle(ctx context.Context, readers RunSnapshotReaders, runID com
 	if err != nil {
 		return projectioncontract.ContextBundle{}, err
 	}
-	return readmodelprojection.MapRunContextBundle(snapshot), nil
+	return readmodelprojection.ContextProjection().RunBundle(snapshot), nil
 }
 
 func RunTaskDecompositions(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) ([]projectioncontract.TaskDecomposition, error) {
@@ -38,29 +38,29 @@ func RunTaskDecompositions(ctx context.Context, readers RunSnapshotReaders, runI
 	if err != nil {
 		return nil, err
 	}
-	return readmodelprojection.RunSnapshotTaskDecompositions(snapshot), nil
+	return readmodelprojection.RunProjection().TaskDecompositions(snapshot), nil
 }
 
 func RunStatusFromSnapshot(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunStatus {
-	return readmodelprojection.MapRunStatus(snapshot)
+	return readmodelprojection.RunProjection().Status(snapshot)
 }
 
 func RunObservabilityFromSnapshot(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunObservabilityState {
-	return readmodelprojection.MapRunObservability(snapshot)
+	return readmodelprojection.RunProjection().Observability(snapshot)
 }
 
 func ProjectRunSnapshotDetail(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunSnapshotState {
-	return readmodelprojection.ProjectRunSnapshotDetail(snapshot)
+	return readmodelprojection.RunProjection().Detail(snapshot)
 }
 
 func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
-	return readmodelprojection.ProjectWorkspaceSnapshotDetail(snapshot)
+	return readmodelprojection.WorkspaceProjection().Detail(snapshot)
 }
 
 func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
-	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
+	return readmodelprojection.WorkspaceProjection().Summary(snapshot)
 }
 
 func ProjectDecisionView(item projectioncontract.Decision) projectioncontract.Decision {
-	return readmodelprojection.ProjectDecisionView(item)
+	return readmodelprojection.GovernanceProjection().ProjectDecisionView(item)
 }

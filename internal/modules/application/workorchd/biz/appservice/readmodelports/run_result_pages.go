@@ -19,7 +19,7 @@ func ReadRunResultsPage(ctx context.Context, hub magicevent.Hub, query workorchq
 	if err != nil {
 		return readmodelcore.ResultPage{}, err
 	}
-	return readmodelprojection.PageRunResults(items, query), nil
+	return readmodelprojection.EvidenceProjection().PageResults(items, query), nil
 }
 
 func ReadRunPatchesPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.PatchPage, error) {
@@ -31,7 +31,7 @@ func ReadRunPatchesPage(ctx context.Context, hub magicevent.Hub, query workorchq
 	if err != nil {
 		return readmodelcore.PatchPage{}, err
 	}
-	return readmodelprojection.PageRunPatches(items, query), nil
+	return readmodelprojection.EvidenceProjection().PagePatches(items, query), nil
 }
 
 func ReadRunValidationResultsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ValidationResultPage, error) {
@@ -43,7 +43,7 @@ func ReadRunValidationResultsPage(ctx context.Context, hub magicevent.Hub, query
 	if err != nil {
 		return readmodelcore.ValidationResultPage{}, err
 	}
-	return readmodelprojection.PageRunValidationResults(items, query), nil
+	return readmodelprojection.EvidenceProjection().PageValidationResults(items, query), nil
 }
 
 func ReadRunArtifactsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ArtifactPage, error) {
@@ -55,5 +55,5 @@ func ReadRunArtifactsPage(ctx context.Context, hub magicevent.Hub, query workorc
 	if err != nil {
 		return readmodelcore.ArtifactPage{}, err
 	}
-	return readmodelprojection.PageRunArtifacts(items, query), nil
+	return readmodelprojection.EvidenceProjection().PageArtifacts(items, query), nil
 }

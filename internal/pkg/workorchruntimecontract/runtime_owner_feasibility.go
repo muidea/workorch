@@ -55,11 +55,35 @@ const (
 	RuntimeOwnerFeasibilityCategoryOwnerContractDefect RuntimeOwnerFeasibilityCategory = "owner_contract_defect"
 )
 
+// RuntimeOwnerFeasibilityConstraintImpact identifies the sealed, owner-neutral
+// constraint contradicted by a side-effect-free owner observation. It is a
+// factual scope only: it does not request binding retirement, retry, replan or
+// any other Runtime transition.
+type RuntimeOwnerFeasibilityConstraintImpact string
+
+const (
+	// RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
+	// means the owner's current resource observation disproves the target
+	// authorization sealed for the proposed operation. Candidate-local failures
+	// such as an ineffective patch leave ConstraintImpact empty.
+	RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted RuntimeOwnerFeasibilityConstraintImpact = "sealed_target_authorization_contradicted"
+)
+
+func ValidRuntimeOwnerFeasibilityConstraintImpact(impact RuntimeOwnerFeasibilityConstraintImpact) bool {
+	switch RuntimeOwnerFeasibilityConstraintImpact(strings.TrimSpace(string(impact))) {
+	case "", RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted:
+		return true
+	default:
+		return false
+	}
+}
+
 // RuntimeOwnerFeasibilityObservation is a pure persisted value. It carries no
 // Runtime action, retry, terminal, governance or aggregate mutation fields.
 type RuntimeOwnerFeasibilityObservation struct {
 	Outcome             RuntimeOwnerFeasibilityOutcome
 	OwnerPolicy         RuntimeOwnerPolicyIdentity
+	ConstraintImpact    RuntimeOwnerFeasibilityConstraintImpact
 	Feedback            *RuntimeFeedback
 	Stale               *RuntimePrerequisiteStale
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
@@ -68,6 +92,7 @@ type RuntimeOwnerFeasibilityObservation struct {
 func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibilityObservation {
 	o.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(o.Outcome)))
 	o.OwnerPolicy = o.OwnerPolicy.Normalized()
+	o.ConstraintImpact = RuntimeOwnerFeasibilityConstraintImpact(strings.TrimSpace(string(o.ConstraintImpact)))
 	if o.Feedback != nil {
 		feedback := o.Feedback.CloneOriginal()
 		o.Feedback = &feedback
@@ -85,6 +110,9 @@ func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibility
 
 func (o RuntimeOwnerFeasibilityObservation) Validate() error {
 	o = o.Normalized()
+	if !ValidRuntimeOwnerFeasibilityConstraintImpact(o.ConstraintImpact) {
+		return fmt.Errorf("unknown owner feasibility constraint impact %q", o.ConstraintImpact)
+	}
 	if o.OwnerPolicy.OwnerModuleID != "" || o.OwnerPolicy.PolicyRevision != "" || o.OwnerPolicy.CatalogSnapshotID != "" {
 		if err := o.OwnerPolicy.Validate(); err != nil {
 			return err
@@ -135,6 +163,20 @@ func (o RuntimeOwnerFeasibilityObservation) Validate() error {
 			return fmt.Errorf("owner contract-defect feedback requires contract-defect outcome")
 		}
 	}
+	if o.ConstraintImpact != "" {
+		if o.Outcome != RuntimeOwnerFeasibilityInfeasible || o.Feedback == nil ||
+			o.FailureCategory() != RuntimeOwnerFeasibilityCategoryPolicyDisallowed {
+			return fmt.Errorf("owner feasibility constraint impact requires a policy-disallowed infeasible observation")
+		}
+		if err := o.OwnerPolicy.Validate(); err != nil {
+			return fmt.Errorf("owner feasibility constraint impact requires owner policy identity: %w", err)
+		}
+		diagnostic := o.Feedback.Normalized().OriginalDiagnostic
+		if diagnostic == nil || diagnostic.OwnerModuleID != o.OwnerPolicy.OwnerModuleID ||
+			strings.TrimSpace(diagnostic.ObservedRevision) == "" {
+			return fmt.Errorf("owner feasibility constraint impact requires matching owner and observed resource revision")
+		}
+	}
 	return nil
 }
 
@@ -151,10 +193,19 @@ func (o RuntimeOwnerFeasibilityObservation) Clone() RuntimeOwnerFeasibilityObser
 	return o.Normalized()
 }
 
-// RuntimeOwnerFeasibilityObservationFromOutcome is the only conversion from a
-// cross-owner factual outcome into the persisted neutral observation contract.
-// It is pure and intentionally does not derive a candidate correction
-// directive, retry, or terminal disposition.
+// SealedTargetAuthorizationContradicted reports only the explicit typed owner
+// fact. Policy identity or diagnostic text alone never implies a binding
+// contradiction.
+func (o RuntimeOwnerFeasibilityObservation) SealedTargetAuthorizationContradicted() bool {
+	o = o.Normalized()
+	return o.Outcome == RuntimeOwnerFeasibilityInfeasible &&
+		o.ConstraintImpact == RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
+}
+
+// RuntimeOwnerFeasibilityObservationFromOutcome converts a generic cross-owner
+// factual outcome that has no operation-specific owner policy impact. It is
+// pure and intentionally does not derive a candidate correction directive,
+// retry, or terminal disposition.
 func RuntimeOwnerFeasibilityObservationFromOutcome(outcome RuntimeOwnerFeasibilityOutcome, feedback *RuntimeFeedback, stale *RuntimePrerequisiteStale, prerequisiteRequest *RuntimeOperationPrerequisiteRequest) (RuntimeOwnerFeasibilityObservation, error) {
 	observation := RuntimeOwnerFeasibilityObservation{
 		Outcome: outcome, Feedback: feedback, Stale: stale, PrerequisiteRequest: prerequisiteRequest,

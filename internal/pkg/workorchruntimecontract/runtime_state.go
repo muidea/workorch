@@ -723,7 +723,7 @@ func ValidateRuntimeCandidateAttemptRecordsForScope(workspaceID common.Workspace
 		}
 		if value.BindingContradiction != nil {
 			identity := value.BindingContradiction.Normalized()
-			if err := identity.Validate(); err != nil || identity.WorkspaceID != workspaceID || identity.RunID != runID || identity.AuthorityInputID != value.Transaction.AuthorityInputID || value.State != RuntimeCandidateAttemptStateInvalidated || value.OwnerFeasibility == nil {
+			if err := identity.Validate(); err != nil || identity.WorkspaceID != workspaceID || identity.RunID != runID || identity.AuthorityInputID != value.Transaction.AuthorityInputID || value.State != RuntimeCandidateAttemptStateInvalidated || value.OwnerFeasibility == nil || !value.OwnerFeasibility.SealedTargetAuthorizationContradicted() {
 				return fmt.Errorf("runtime candidate binding contradiction identity mismatch")
 			}
 		}

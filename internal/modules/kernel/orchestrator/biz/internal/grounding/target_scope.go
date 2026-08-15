@@ -1,0 +1,196 @@
+package grounding
+
+import (
+	"sort"
+	"strings"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+// NormalizeTargetRefs canonicalizes a detached target set for exact owner
+// fact comparison. It does not infer, discover, or authorize a target.
+func NormalizeTargetRefs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, found := seen[value]; found {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+// SameTargetRefs compares two target sets after canonical normalization.
+func SameTargetRefs(left, right []string) bool {
+	left = NormalizeTargetRefs(left)
+	right = NormalizeTargetRefs(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+// CurrentFocusTargetSelection returns only the File-owner selection committed
+// as a satisfied Focus-scoped prerequisite for the current Focus. A raw
+// resource pointer is audit lineage, not target authority.
+func CurrentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecontract.RuntimeTargetSelection {
+	facts = facts.Normalized()
+	if facts.Resources.TargetSelection == nil {
+		return nil
+	}
+	selection := facts.Resources.TargetSelection.Normalized()
+	for _, prerequisite := range facts.Prerequisites.Satisfied {
+		if prerequisite.ID == selection.PrerequisiteID &&
+			prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection &&
+			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus &&
+			prerequisite.FocusID == facts.Focus.ID {
+			return &selection
+		}
+	}
+	return nil
+}
+
+// HasOwnerGroundedCreationScope recognizes only a persisted File-owner create
+// observation matching the activation-sealed selector and prospective target.
+func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
+	selection := CurrentFocusTargetSelection(facts)
+	if selection == nil {
+		return false
+	}
+	value := selection.Normalized()
+	focus := facts.Focus.Normalized()
+	return value.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
+		value.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+		value.TargetRole == focus.TargetRole && value.SelectorRef == focus.TargetSelectorRef &&
+		value.SelectorOwnerRef == focus.TargetSelectorOwnerRef && value.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
+		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(value.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
+		value.ProspectiveTargetRef != "" && value.ProspectiveTargetRef == focus.ProspectiveTargetRef
+}
+
+// HasOwnerGroundedTargetScope recognizes a bounded existing File inventory. An
+// empty scope is authoritative only when it retains an activation-sealed owner
+// and subject identity.
+func HasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
+	selection := CurrentFocusTargetSelection(facts)
+	if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
+		selection.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		return false
+	}
+	return len(selection.TargetRefs) != 0 ||
+		(selection.CandidateCount == 0 && len(selection.CandidateTargetRefs) == 0 &&
+			selection.ProspectiveTargetRef == "" && selection.SelectorOwnerRef != "" &&
+			selection.SelectorSubjectRef != "")
+}
+
+// TargetSelectionHasConcreteTarget distinguishes an exact selected target from
+// an owner scope. Only the former is a concrete repair surface.
+func TargetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSelection) bool {
+	selection = selection.Normalized()
+	return selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) != 0
+}
+
+// OwnerGroundedTargetScopeMaySelectNewFileTarget preserves File's bounded
+// workspace-scope adjudication only while no higher-precedence target fact has
+// been sealed for the current focus.
+func OwnerGroundedTargetScopeMaySelectNewFileTarget(facts runtimecontract.RuntimeFacts) bool {
+	facts = facts.Normalized()
+	if !HasOwnerGroundedTargetScope(facts) || len(facts.Focus.TargetRefs) != 0 {
+		return false
+	}
+	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) != 0 {
+		return false
+	}
+	if facts.Failure != nil && len(facts.Failure.TargetRefs) != 0 {
+		return false
+	}
+	return facts.RepairDirective == nil || len(facts.RepairDirective.TargetRefs) == 0
+}
+
+// RepairTargets projects the single persisted target-precedence set shared by
+// SM-2 prerequisite acquisition and SM-3 admission. It never discovers or
+// invents a target.
+func RepairTargets(facts runtimecontract.RuntimeFacts) []string {
+	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
+		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
+	}
+	if len(facts.Focus.TargetRefs) > 0 {
+		return append([]string(nil), facts.Focus.TargetRefs...)
+	}
+	if selection := CurrentFocusTargetSelection(facts); selection != nil && TargetSelectionHasConcreteTarget(*selection) {
+		return append([]string(nil), selection.TargetRefs...)
+	}
+	if selection := CurrentFocusTargetSelection(facts); HasOwnerGroundedCreationScope(facts) && selection != nil {
+		return []string{selection.ProspectiveTargetRef}
+	}
+	if facts.RepairDirective != nil && len(facts.RepairDirective.TargetRefs) > 0 {
+		return append([]string(nil), facts.RepairDirective.TargetRefs...)
+	}
+	return nil
+}
+
+// WorkspaceScopeTargets returns the canonical bounded inventory observed by
+// File. It does not authorize targets outside that inventory.
+func WorkspaceScopeTargets(selection *runtimecontract.RuntimeTargetSelection) []string {
+	if selection == nil {
+		return nil
+	}
+	value := selection.Normalized()
+	return append([]string(nil), value.CandidateTargetRefs...)
+}
+
+// TargetRefsAllWithin requires a non-empty submitted target set whose every
+// member belongs to the non-empty allowed set.
+func TargetRefsAllWithin(targetRefs, allowedTargets []string) bool {
+	if len(targetRefs) == 0 || len(allowedTargets) == 0 {
+		return false
+	}
+	allowed := make(map[string]struct{}, len(allowedTargets))
+	for _, target := range allowedTargets {
+		if target = strings.TrimSpace(target); target != "" {
+			allowed[target] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return false
+	}
+	for _, target := range targetRefs {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			return false
+		}
+		if _, found := allowed[target]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+// TargetRefsIntersect reports exact normalized membership intersection.
+func TargetRefsIntersect(left, right []string) bool {
+	seen := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, value := range right {
+		if value = strings.TrimSpace(value); value != "" {
+			if _, found := seen[value]; found {
+				return true
+			}
+		}
+	}
+	return false
+}

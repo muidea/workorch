@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
@@ -17,55 +15,11 @@ import (
 )
 
 const (
-	workspaceProjectionStateBuilding = workspaceviewcore.StateBuilding
 	workspaceProjectionStateReady    = workspaceviewcore.StateReady
 	workspaceProjectionStateStale    = workspaceviewcore.StateStale
 	workspaceProjectionStateDegraded = workspaceviewcore.StateDegraded
 	workspaceProjectionStateFailed   = workspaceviewcore.StateFailed
-	workspaceProjectionStateStopped  = workspaceviewcore.StateStopped
-
-	workspaceProjectionRebuildCoalesceDelay = 100 * time.Millisecond
 )
-
-type workspaceProjectionLoader struct {
-	state *serverState
-}
-
-func newWorkspaceProjectionManager(state *serverState) *workspaceviewcore.Manager {
-	return workspaceviewcore.NewManager(workspaceviewcore.ManagerOptions{
-		Loader:               workspaceProjectionLoader{state: state},
-		Schedule:             state.scheduleBackground,
-		RebuildCoalesceDelay: workspaceProjectionRebuildCoalesceDelay,
-	})
-}
-
-func (l workspaceProjectionLoader) ListWorkspaces(ctx context.Context) ([]appmodelcore.Workspace, error) {
-	if l.state == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return l.state.listWorkspaces(ctx, l.state.config.Backend, l.state.config.DataRoot)
-}
-
-func (l workspaceProjectionLoader) ReadWorkspace(ctx context.Context, workspaceID string) (appmodelcore.Workspace, error) {
-	if l.state == nil {
-		return appmodelcore.Workspace{}, common.ErrInvalidArgument
-	}
-	return l.state.readWorkspace(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
-}
-
-func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
-	if l.state == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, common.ErrInvalidArgument
-	}
-	return l.state.readProjectionSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
-}
-
-func (s *serverState) startWorkspaceProjection(ctx context.Context) error {
-	if s == nil || s.workspaceProjection == nil {
-		return nil
-	}
-	return s.workspaceProjection.Start(ctx)
-}
 
 func (s *serverState) workspaceProjectionStatus() projectioncontract.ProjectionStatus {
 	if s == nil || s.workspaceProjection == nil {
@@ -145,7 +99,7 @@ func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID 
 	if err != nil {
 		return readmodelcore.WorkspaceSnapshotState{}, err
 	}
-	return appservice.ProjectWorkspaceSnapshotDetail(snapshot), nil
+	return readmodelprojection.WorkspaceProjection().Detail(snapshot), nil
 }
 
 func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshotState, projected readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
@@ -160,7 +114,7 @@ func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshotState
 }
 
 func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshotState, projected projectioncontract.WorkspaceViewModel) readmodelcore.WorkspaceSnapshotState {
-	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
+	normalized := readmodelprojection.GovernanceProjection().NormalizeWorkspace(detail)
 	detail = normalized
 	viewModel := projected
 	if strings.TrimSpace(viewModel.WorkspaceID) == "" {
@@ -169,30 +123,64 @@ func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshotSta
 	if strings.TrimSpace(viewModel.WorkspaceID) == "" {
 		viewModel.WorkspaceID = normalized.Workspace.ID
 	}
-	viewModel.PromptMode = readmodelprojection.WorkspacePromptMode(normalized)
+	viewModel.PromptMode = readmodelprojection.GovernanceProjection().PromptMode(normalized)
 	detail.ViewModel = viewModel
 	detail.Workspace.ViewModel = workspaceMetadataViewModelFromProjection(viewModel)
 	return detail
 }
 
 func (s *serverState) upsertProjectedWorkspace(workspace appmodelcore.Workspace) {
-	if s == nil || s.workspaceProjection == nil {
+	if s == nil || s.workspaceProjectionWriter == nil {
 		return
 	}
-	s.workspaceProjection.UpsertWorkspace(workspace)
+	s.workspaceProjectionWriter.UpsertWorkspace(workspace)
+}
+
+func (s *serverState) deleteProjectedWorkspace(workspaceID string) {
+	if s == nil || s.workspaceProjectionWriter == nil {
+		return
+	}
+	s.workspaceProjectionWriter.DeleteWorkspace(workspaceID)
+}
+
+func (s *serverState) applyProjectedRunCommandAccepted(update workspaceviewcore.RunCommandAcceptedUpdate) bool {
+	if s == nil || s.workspaceProjectionWriter == nil {
+		return false
+	}
+	return s.workspaceProjectionWriter.ApplyRunCommandAccepted(update)
+}
+
+func (s *serverState) applyProjectedRunCommandQueued(update workspaceviewcore.RunCommandQueuedUpdate) bool {
+	if s == nil || s.workspaceProjectionWriter == nil {
+		return false
+	}
+	return s.workspaceProjectionWriter.ApplyRunCommandQueued(update)
+}
+
+func (s *serverState) applyProjectedRunCommandRejected(update workspaceviewcore.RunCommandRejectedUpdate) bool {
+	if s == nil || s.workspaceProjectionWriter == nil {
+		return false
+	}
+	return s.workspaceProjectionWriter.ApplyRunCommandRejected(update)
 }
 
 func (s *serverState) rebuildProjectedWorkspace(ctx context.Context, workspaceID string) {
-	if s == nil || s.workspaceProjection == nil || workspaceID == "" {
+	if s == nil || s.workspaceProjectionWriter == nil || workspaceID == "" {
 		return
 	}
-	if err := s.workspaceProjection.RebuildWorkspace(ctx, workspaceID); err != nil {
+	if err := s.workspaceProjectionWriter.RebuildWorkspace(ctx, workspaceID); err != nil {
 		slog.Warn("workorch workspace projection refresh failed", "workspaceID", workspaceID, "err", err)
 	}
 }
 
 func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context, items []projectioncontract.Decision) {
 	if s == nil {
+		return
+	}
+	if batchWriter, ok := s.workspaceProjectionWriter.(WorkspaceProjectionBatchWriter); ok {
+		if err := batchWriter.RebuildWorkspacesForDecisions(ctx, items); err != nil {
+			slog.Warn("workorch workspace projection decision refresh failed", "err", err)
+		}
 		return
 	}
 	seen := map[string]struct{}{}
@@ -210,6 +198,12 @@ func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context
 
 func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context, items []projectioncontract.Approval) {
 	if s == nil {
+		return
+	}
+	if batchWriter, ok := s.workspaceProjectionWriter.(WorkspaceProjectionBatchWriter); ok {
+		if err := batchWriter.RebuildWorkspacesForApprovals(ctx, items); err != nil {
+			slog.Warn("workorch workspace projection approval refresh failed", "err", err)
+		}
 		return
 	}
 	seen := map[string]struct{}{}

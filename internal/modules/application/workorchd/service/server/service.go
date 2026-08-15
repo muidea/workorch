@@ -12,8 +12,6 @@ import (
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -33,20 +31,20 @@ func NewService(config Config) *Service {
 	return &Service{config: normalizeConfig(config)}
 }
 
-func (s *Service) Startup(ctx context.Context, serviceName string, session *runtimecore.Session, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+// StartupWithApplicationPorts is the production Application Module path. Biz
+// owns the runtime session and supplies only narrow typed callbacks; the HTTP
+// service does not retain that session or an EventHub handle.
+func (s *Service) StartupWithApplicationPorts(ctx context.Context, serviceName string, ports ApplicationPorts, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	if s == nil {
 		return cd.NewError(cd.IllegalParam, "workorch service is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if session == nil {
-		return cd.NewError(cd.IllegalParam, "workorch runtime session is not configured")
-	}
 	if backgroundRoutine == nil {
 		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
 	}
-	s.http = NewHTTPServerWithRuntimeSessionAndBackground(s.config, session, backgroundRoutine)
+	s.http = NewHTTPServerWithApplicationPorts(s.config, ports, backgroundRoutine)
 	s.done = make(chan error, 1)
 	s.runStarted.Store(false)
 	if err := s.http.Validate(ctx); err != nil {
@@ -66,15 +64,38 @@ func (s *Service) SetWorkspaceRunScheduler(scheduler WorkspaceRunScheduler) {
 	s.http.state.workspaceRunScheduler = scheduler
 }
 
+// SetWorkspaceExecutionAdmission installs the Biz-owned execution use case.
+// The typed production constructor never falls back to a server-local queue.
+func (s *Service) SetWorkspaceExecutionAdmission(admission WorkspaceExecutionAdmission) {
+	if s == nil || s.http == nil || s.http.state == nil {
+		return
+	}
+	s.http.state.workspaceExecutionAdmission = admission
+}
+
+// SetWorkspaceProjection binds the single Biz-owned derived projection to the
+// transport. The server may read and forward observations through this port,
+// but it does not start or close the injected component.
+func (s *Service) SetWorkspaceProjection(projection WorkspaceProjection) {
+	if s == nil || s.http == nil || s.http.state == nil {
+		return
+	}
+	s.http.state.workspaceProjection = projection
+}
+
+// SetWorkspaceProjectionWriter binds the Biz-owned derived-write port. The
+// server uses it only after an owner command has succeeded; it cannot mutate
+// Runtime/Run authority through this port.
+func (s *Service) SetWorkspaceProjectionWriter(writer WorkspaceProjectionWriter) {
+	if s == nil || s.http == nil || s.http.state == nil {
+		return
+	}
+	s.http.state.workspaceProjectionWriter = writer
+}
+
 func (s *Service) SetServiceStoppedNotifier(notifier func(workorchdevents.ServiceStoppedData)) {
 	if s != nil {
 		s.serviceStoppedNotifier = notifier
-	}
-}
-
-func (s *Service) SetWorkspaceProjectionEventPorts(ports workspaceviewcore.EventPorts) {
-	if s != nil && s.http != nil && s.http.state != nil && s.http.state.workspaceProjection != nil {
-		s.http.state.workspaceProjection.SetEventPorts(ports)
 	}
 }
 
@@ -94,24 +115,17 @@ func (s *Service) RecordRunStateChanged(ctx context.Context, data runevents.RunS
 }
 
 // RecordRuntimeDriveObserved stores the Orchestrator's immutable SM-4
-// telemetry in process-local metrics and invalidates the read-only workspace
-// projection. It neither persists authority nor invokes a Runtime command, so
-// replay/reconnect cannot affect state transitions.
+// telemetry in process-local transport metrics. The Biz-owned projection
+// component consumes the same typed observation through its own port.
 func (s *Service) RecordRuntimeDriveObserved(_ context.Context, data orchestratorevents.RuntimeDriveObservedData) {
 	if s != nil && s.http != nil && s.http.state != nil {
 		s.http.state.RecordRuntimeDriveObserved(data)
-		if s.http.state.workspaceProjection != nil {
-			s.http.state.workspaceProjection.HandleRuntimeDriveObserved(data)
-		}
 	}
 }
 
 func (s *Service) RecordEventRecordAppended(ctx context.Context, data eventstreamevents.EventRecordData) {
 	if s != nil && s.http != nil && s.http.state != nil {
 		s.http.state.RecordEventRecordAppended(ctx, data)
-		if s.http.state.workspaceProjection != nil {
-			_ = s.http.state.workspaceProjection.HandleEventRecord(ctx, data)
-		}
 	}
 }
 
@@ -135,9 +149,24 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
 	}
-	if err := s.http.state.startWorkspaceProjection(s.http.state.backgroundContext()); err != nil {
+	if s.http.state.workspaceProjection == nil {
 		s.runStarted.Store(false)
-		return cd.NewError(cd.Unexpected, "workspace projection startup failed: "+err.Error())
+		return cd.NewError(cd.IllegalParam, "workspace projection is not configured")
+	}
+	// These ports are assembled by Biz and are part of the single application
+	// boundary. Starting an HTTP listener with one missing would make handlers
+	// fail later and could re-enable a second server-local path.
+	if s.http.state.workspaceExecutionAdmission == nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.IllegalParam, "workspace execution admission is not configured")
+	}
+	if s.http.state.workspaceRunScheduler == nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.IllegalParam, "workspace run scheduler is not configured")
+	}
+	if s.http.state.workspaceProjectionWriter == nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.IllegalParam, "workspace projection writer is not configured")
 	}
 	if err := s.http.state.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
 		s.runStarted.Store(false)
@@ -210,13 +239,16 @@ func (s *Service) ReadWorkspaceActivity(ctx context.Context, workspaceID string)
 }
 
 func (s *Service) RebuildWorkspaceProjection(ctx context.Context) (int64, error) {
-	if s == nil || s.http == nil || s.http.state == nil || s.http.state.workspaceProjection == nil {
+	if s == nil || s.http == nil || s.http.state == nil {
 		return 0, errors.New("workspace projection is not configured")
 	}
-	if err := s.http.state.workspaceProjection.RebuildAll(ctx); err != nil {
+	if s.http.state.workspaceProjectionWriter == nil {
+		return 0, errors.New("workspace projection is not configured")
+	}
+	if err := s.http.state.workspaceProjectionWriter.RebuildAll(ctx); err != nil {
 		return 0, err
 	}
-	return s.http.state.workspaceProjection.Status().GlobalRevision, nil
+	return s.http.state.workspaceProjectionStatus().GlobalRevision, nil
 }
 
 func (s *Service) Done() <-chan error {

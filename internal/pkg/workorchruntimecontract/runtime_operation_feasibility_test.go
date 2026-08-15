@@ -84,6 +84,36 @@ func TestNewRuntimeOperationFeasibilityObservationEnforcesOuterXOR(t *testing.T)
 		infeasible.Feedback.OriginalDiagnostic.OriginalCode != failure.Code || infeasible.Feedback.OriginalDiagnostic.OriginalMessage != failure.Message {
 		t.Fatalf("infeasible feedback lost owner diagnostic: %+v", infeasible.Feedback)
 	}
+	contradiction := infeasible
+	contradictionFeedback := infeasible.Feedback.CloneOriginal()
+	contradiction.Feedback = &contradictionFeedback
+	contradiction.Feedback.StableCategory = runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed)
+	contradiction.Feedback.OriginalDiagnostic.OriginalCode = "operation_target_exists"
+	contradiction.Feedback.OriginalDiagnostic.ObservedRevision = inventory.ObservedRevision
+	contradiction.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-policy-v1", CatalogSnapshotID: inventory.SnapshotID,
+	}
+	contradiction.ConstraintImpact = runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
+	contradiction, err = runtimecontract.NormalizeRuntimeOperationFeasibilityObservation(contradiction)
+	if err != nil {
+		t.Fatalf("explicit operation contradiction rejected: %v", err)
+	}
+	ownerContradiction, err := runtimecontract.RuntimeOwnerFeasibilityObservationFromOperation(contradiction)
+	if err != nil || !ownerContradiction.SealedTargetAuthorizationContradicted() || ownerContradiction.OwnerPolicy != contradiction.OwnerPolicy {
+		t.Fatalf("operation contradiction conversion = %+v err=%v", ownerContradiction, err)
+	}
+	missingObservedRevision := contradiction
+	missingRevisionFeedback := contradiction.Feedback.CloneOriginal()
+	missingObservedRevision.Feedback = &missingRevisionFeedback
+	missingObservedRevision.Feedback.OriginalDiagnostic.ObservedRevision = ""
+	if _, err := runtimecontract.NormalizeRuntimeOperationFeasibilityObservation(missingObservedRevision); err == nil {
+		t.Fatal("operation contradiction without observed revision was accepted")
+	}
+	unknownImpact := contradiction
+	unknownImpact.ConstraintImpact = "owner_private_transition"
+	if _, err := runtimecontract.NormalizeRuntimeOperationFeasibilityObservation(unknownImpact); err == nil {
+		t.Fatal("unknown operation constraint impact was accepted")
+	}
 	tampered := infeasible
 	tamperedFeedback := infeasible.Feedback.CloneOriginal()
 	tampered.Feedback = &tamperedFeedback

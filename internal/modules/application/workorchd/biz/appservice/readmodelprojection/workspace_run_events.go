@@ -6,15 +6,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func SelectLatestRunByEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *runmodel.Run {
-	selected := SelectLatestRunEvent(workspaceID, runs, eventRecords)
+func selectLatestRunByEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *runmodel.Run {
+	selected := selectLatestRunEvent(workspaceID, runs, eventRecords)
 	if selected == nil {
 		return nil
 	}
 	return runs[selected.RunID]
 }
 
-func SelectLatestRunEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *eventstreammodel.EventRecord {
+func selectLatestRunEvent(workspaceID common.WorkspaceID, runs map[common.RunID]*runmodel.Run, eventRecords []*eventstreammodel.EventRecord) *eventstreammodel.EventRecord {
 	var selected *eventstreammodel.EventRecord
 	var selectedNonSuperseded *eventstreammodel.EventRecord
 	for _, item := range eventRecords {

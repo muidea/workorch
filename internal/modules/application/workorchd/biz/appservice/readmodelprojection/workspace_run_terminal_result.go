@@ -12,8 +12,8 @@ func selectTerminalWorkspaceResultRun(workspace *workspacemodel.Workspace, candi
 	if workspace == nil {
 		return nil
 	}
-	result, resultRun := SelectTerminalResultRun(workspace.ID, candidates, results)
-	if resultRun != nil && ResultModelNotBeforeEvent(result, latestEvent) {
+	result, resultRun := selectTerminalResultRun(workspace.ID, candidates, results)
+	if resultRun != nil && resultModelNotBeforeEvent(result, latestEvent) {
 		return resultRun
 	}
 	return nil

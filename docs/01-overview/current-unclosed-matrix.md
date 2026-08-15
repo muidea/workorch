@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-14
+Last Updated: 2026-08-15
 
 ## Purpose
 
@@ -96,12 +96,20 @@ compact complete-JSON prompt/schema limits, and completes target-state removal f
 | OPT-1 | optional | One deployed file-patch validation/closeout proof. |
 | CAND-LLM-BUDGET | deferred | Provider failover, tokenizer precision, native usage precision, and differentiated context-too-large handling. |
 
+## E. Internal Cohesion Queues
+
+| Item | Status | Owner | Required closure |
+| --- | --- | --- | --- |
+| OIC (Orchestrator internal cohesion) | O0-O8 code/automated-closed; deployed verification pending | `kernel/orchestrator` | One Runtime aggregate, one `ApplyInternalEvent`, one CAS coordinator, five owner-local facets and stateless focused rules are covered by structure/restart/budget tests. A fresh-data run must still prove existing-target replacement continues to `cwi-027` and terminal delivery. |
+| WIC (Workorchd internal cohesion) | WD0-WD8 code/automated-closed; deployed verification pending | `application/workorchd` | Keep one Application Module and the closed typed boundary/export whitelist; run deployed HTTP/SSE/CLI regression after the latest build. No code-side helper/session/projection-lifecycle compatibility item remains open. |
+
 ## Judgment
 
-The prior persisted counterexamples remain regression baselines, not a supported schema lineage. SO-MC-12..18 now
-close their code and automated owner/convergence defects; live closure still requires one fresh current development baseline
-candidate/dispatch/receipt/evidence/terminal chain after the SO-MC-18 build is deployed against fresh data. Managed mock verification, aggregate revision growth and correct
-per-attempt fail-closed behavior cannot substitute for bounded forward convergence.
+The prior persisted counterexamples remain regression baselines, not a supported schema lineage. SO-MC-12..18 and O0-O8 now
+close their code and automated owner/convergence defects; WIC has also completed WD0-WD8 code/automated closure. Live
+closure still requires one fresh current development baseline candidate/dispatch/receipt/evidence/terminal chain after the
+target build is deployed against fresh data. Managed mock verification, aggregate revision growth and correct per-attempt
+fail-closed behavior cannot substitute for bounded forward convergence.
 
 ## Navigation
 

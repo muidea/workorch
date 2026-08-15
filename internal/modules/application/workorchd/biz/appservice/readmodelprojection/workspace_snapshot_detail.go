@@ -26,12 +26,12 @@ const (
 	workspaceSnapshotTraceStringLimit              = 1024
 )
 
-func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
+func projectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	ret := snapshot
 	projectWorkspaceSnapshotCompactFields(&ret)
-	ret = NormalizeWorkspaceGovernanceProjection(ret)
+	ret = normalizeWorkspaceGovernanceProjection(ret)
 	if ret.ContextBundle == nil {
-		ret = WorkspaceSnapshotWithContextBundle(ret)
+		ret = workspaceSnapshotWithContextBundle(ret)
 	}
 	if ret.ContextBundle != nil {
 		projected := projectContextBundleView(*ret.ContextBundle)
@@ -42,7 +42,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshotStat
 		limit := len(ret.Decisions)
 		projected := make([]projectioncontract.Decision, 0, limit)
 		for _, item := range ret.Decisions {
-			projected = append(projected, ProjectDecisionView(item))
+			projected = append(projected, projectDecisionView(item))
 		}
 		ret.Decisions = projected
 	}
@@ -51,11 +51,11 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshotStat
 		limit := len(ret.Approvals)
 		projected := make([]projectioncontract.Approval, 0, limit)
 		for _, item := range ret.Approvals {
-			projected = append(projected, ProjectApprovalView(item))
+			projected = append(projected, projectApprovalView(item))
 		}
 		ret.Approvals = projected
 	}
-	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
+	ret.ConvergenceStatus = mapWorkspaceConvergenceStatus(ret)
 	return ret
 }
 
@@ -93,7 +93,7 @@ func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshotStat
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if activeRunID != "" {
 		for _, item := range snapshot.Decisions {
-			if strings.TrimSpace(item.RunID) == activeRunID && !IsResolvedDecisionState(item.State) {
+			if strings.TrimSpace(item.RunID) == activeRunID && !isResolvedDecisionState(item.State) {
 				add(item)
 			}
 		}
@@ -138,7 +138,7 @@ func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshotStat
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if activeRunID != "" {
 		for _, item := range snapshot.Approvals {
-			if strings.TrimSpace(item.RunID) == activeRunID && !IsResolvedApprovalState(item.State) {
+			if strings.TrimSpace(item.RunID) == activeRunID && !isResolvedApprovalState(item.State) {
 				add(item)
 			}
 		}
@@ -171,7 +171,7 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshotS
 	if len(ret.LLMUsageTraces) > 0 {
 		projected := make([]projectioncontract.LLMUsageTrace, 0, len(ret.LLMUsageTraces))
 		for _, item := range ret.LLMUsageTraces {
-			projected = append(projected, ProjectLLMUsageTraceView(item))
+			projected = append(projected, projectLLMUsageTraceView(item))
 		}
 		ret.LLMUsageTraces = projected
 	}
@@ -200,7 +200,7 @@ func projectWorkspaceSnapshotRuntimeFields(ret *readmodelcore.WorkspaceSnapshotS
 		return
 	}
 	if ret.Step != nil {
-		projected := ProjectStepView(*ret.Step)
+		projected := projectStepView(*ret.Step)
 		ret.Step = &projected
 	}
 }
@@ -333,7 +333,7 @@ func compactWorkspaceSnapshotRun(item appmodelcore.Run) appmodelcore.Run {
 	return item
 }
 
-func ProjectLLMUsageTraceView(item projectioncontract.LLMUsageTrace) projectioncontract.LLMUsageTrace {
+func projectLLMUsageTraceView(item projectioncontract.LLMUsageTrace) projectioncontract.LLMUsageTrace {
 	item.ContextBudget = compactTracePayload(item.ContextBudget)
 	item.CacheUsage = compactTracePayload(item.CacheUsage)
 	item.CacheMarkers = compactTracePayload(item.CacheMarkers)

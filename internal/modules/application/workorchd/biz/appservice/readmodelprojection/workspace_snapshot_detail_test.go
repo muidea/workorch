@@ -47,7 +47,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 		})
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
+	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-compact",
 			ActiveRunID:      "run-0",
@@ -92,7 +92,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testing.T) {
 	t.Parallel()
 
-	got := ProjectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshotState{
+	got := projectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-summary-compact", ActiveRunID: "run-summary-compact"},
 		Run: &appmodelcore.Run{
 			ID:          "run-summary-compact",
@@ -182,7 +182,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 		})
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
+	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-runtime-compact"},
 		Step: &projectioncontract.StepView{
 			ID:    "current-step",
@@ -278,7 +278,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 		}),
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
+	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-context-typed"},
 		ContextBundle: &projectioncontract.ContextBundle{
 			WorkspaceID: "ws-context-typed",
@@ -365,7 +365,7 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 		Reason:      "current approval",
 	})
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
+	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-governance-compact", ActiveRunID: "run-active"},
 		TaskProgress: projectioncontract.TaskProgress{
 			BlockingTicketID:   "active-blocking-decision",
@@ -425,7 +425,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 		})
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
+	got := projectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace:          appmodelcore.Workspace{ID: "ws-compact-derived"},
 		ExecutionSections:  sections,
 		MemoryRecallTraces: recalls,

@@ -23,9 +23,9 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/content"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -223,9 +223,8 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 		return
 	}
 	existingCommandHub := testStateCommandHub(state)
-	if state.sharedSession != nil {
-		_ = state.sharedSession.Close(context.Background())
-		state.sharedSession = nil
+	if session := clearTestRuntimeSession(state); session != nil {
+		_ = session.Close(context.Background())
 	}
 	runtime, err := testkit.TryNewRuntime(
 		config.Backend,
@@ -237,7 +236,7 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 	}
 	session := appservice.NewRuntimeSession(runtime)
 	session.SetRepositoryConfig(config.Backend, config.DataRoot)
-	state.configureSessionBackedOperations(session)
+	configureSessionBackedTestOperations(state, session)
 	attachTestEventNotifications(state)
 	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
 }
@@ -247,7 +246,8 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 type directWorkspaceRunScheduler struct{ state *serverState }
 
 func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
-	if p.state == nil || p.state.sharedSession == nil || command.WorkspaceID == "" || command.RequestID == "" {
+	session := testRuntimeSession(p.state)
+	if session == nil || command.WorkspaceID == "" || command.RequestID == "" {
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	// This test adapter follows the production boundary exactly: compile an
@@ -263,7 +263,7 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
 	case "restart":
 		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
-		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, p.state.sharedSession.Borrow(), string(command.WorkspaceID), appmodelcore.ActivateWorkspaceExecutionCommand{})
+		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, session.Borrow(), string(command.WorkspaceID), appmodelcore.ActivateWorkspaceExecutionCommand{})
 		if err != nil {
 			p.state.projectRejectedSchedulerCommand(command, err)
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
@@ -272,7 +272,7 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 	default:
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
-	hub, err := p.state.sharedSession.RequiredCommandHub()
+	hub, err := session.RequiredCommandHub()
 	if err != nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
@@ -726,7 +726,7 @@ func TestServerStateUsesRuntimeSession(t *testing.T) {
 	if testStateCommandHub(state) == nil {
 		t.Fatal("test runtime session infrastructure is unavailable")
 	}
-	if state.sharedSession == nil {
+	if testRuntimeSession(state) == nil {
 		t.Fatal("server state runtime session = nil")
 	}
 	if err := state.validate(ctx, "", ""); err != nil {
@@ -2316,14 +2316,14 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			cmd.WorkspaceID = workspaceID
 			return cmd, nil
 		}
-		state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd qualitycore.Command) (qualitycore.Check, error) {
+		state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd definitionquality.Command) (definitionquality.Check, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("goal/dod quality check event hub = %#v, want injected hub", got)
 			}
 			if cmd.WorkspaceID != "ws-native-read" || cmd.GoalID != "goal-native" || cmd.DoDID != "dod-native" {
 				t.Fatalf("quality check cmd = %+v, want ws-native-read/goal-native/dod-native", cmd)
 			}
-			return qualitycore.Check{
+			return definitionquality.Check{
 				WorkspaceID:       cmd.WorkspaceID,
 				GoalID:            cmd.GoalID,
 				DoDID:             cmd.DoDID,
@@ -2781,7 +2781,7 @@ func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
 		}}, nil
 	}
 	generateCalls := 0
-	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd setupdraftcore.GenerationCommand) (setupdraftcore.Draft, error) {
+	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd setupdraft.GenerationCommand) (setupdraft.Draft, error) {
 		generateCalls++
 		if cmd.TemplateID != "generic-template" || len(cmd.Messages) == 0 {
 			t.Fatalf("draft command = %+v, want template and user messages", cmd)
@@ -2797,7 +2797,7 @@ func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
 				t.Fatalf("second draft messages = %+v, want full multi-turn history with assistant draft", cmd.Messages)
 			}
 		}
-		return setupdraftcore.Draft{
+		return setupdraft.Draft{
 			GoalText:          "Generated goal from " + cmd.Messages[len(cmd.Messages)-1].Content,
 			GenerationSummary: "Draft revised from current context",
 			DoDItems: []string{`
@@ -2877,7 +2877,7 @@ func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
 			DoDItems: []string{"Template DoD"},
 		}}, nil
 	}
-	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd setupdraftcore.GenerationCommand) (setupdraftcore.Draft, error) {
+	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd setupdraft.GenerationCommand) (setupdraft.Draft, error) {
 		if cmd.TemplateID != "generic-template" {
 			t.Fatalf("draft command template = %q, want restored template", cmd.TemplateID)
 		}
@@ -2887,7 +2887,7 @@ func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
 		if len(cmd.CurrentDraft.ClarifyingQuestions) != 0 {
 			t.Fatalf("draft command current draft = %+v, want stale clarifications cleared before revision", cmd.CurrentDraft)
 		}
-		return setupdraftcore.Draft{ClarifyingQuestions: []string{"Need more details"}}, nil
+		return setupdraft.Draft{ClarifyingQuestions: []string{"Need more details"}}, nil
 	}
 	handler := newMuxWithState(state)
 
@@ -3050,13 +3050,13 @@ func TestDetailContentEndpointsRequireExplicitRefsBeforeReading(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var artifactReads atomic.Int32
 	var rawReads atomic.Int32
-	state.readArtifactContent = func(context.Context, string, string, string) (contentcore.ArtifactContent, error) {
+	state.readArtifactContent = func(context.Context, string, string, string) (content.ArtifactContent, error) {
 		artifactReads.Add(1)
-		return contentcore.ArtifactContent{}, errors.New("artifact reader should not be called without uri")
+		return content.ArtifactContent{}, errors.New("artifact reader should not be called without uri")
 	}
-	state.readRuntimeRawContent = func(context.Context, string, string, string) (contentcore.RuntimeRawContent, error) {
+	state.readRuntimeRawContent = func(context.Context, string, string, string) (content.RuntimeRawContent, error) {
 		rawReads.Add(1)
-		return contentcore.RuntimeRawContent{}, errors.New("runtime raw reader should not be called without ref")
+		return content.RuntimeRawContent{}, errors.New("runtime raw reader should not be called without ref")
 	}
 	handler := newMuxWithState(state)
 
@@ -3083,7 +3083,7 @@ func TestDetailContentEndpointsRequireExplicitRefsBeforeReading(t *testing.T) {
 	}
 }
 
-func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
+func TestArtifactContentEndpointDoesNotAuthorizeFromTransportCache(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	workspaceID := "ws-http-artifact-cache"
@@ -3098,7 +3098,7 @@ func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 	}
 	session := newOwnerRuntimeSession(t, "file", dataRoot)
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
-	state.configureSessionBackedOperations(session)
+	configureSessionBackedTestOperations(state, session)
 	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
 		Artifacts: []projectioncontract.Artifact{{
@@ -3121,14 +3121,8 @@ func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 	rec := httptest.NewRecorder()
 	newMuxWithState(state).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); got != "text/markdown; charset=utf-8" {
-		t.Fatalf("content-type = %q, want cached metadata content type", got)
-	}
-	if rec.Body.String() != "cached HTTP artifact payload" {
-		t.Fatalf("body = %q, want cached artifact payload", rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 because transport cache is not artifact authority, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -3172,7 +3166,7 @@ func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
 	handler := server.http.Handler
 
 	workspace := createWorkspaceForHTTP(t, handler, "http projected workspace", "workspaces/ws-http-projected")
-	if err := server.state.workspaceProjection.RebuildWorkspace(context.Background(), workspace.ID); err != nil {
+	if err := server.state.workspaceProjectionWriter.RebuildWorkspace(context.Background(), workspace.ID); err != nil {
 		t.Fatalf("RebuildWorkspace: %v", err)
 	}
 
@@ -3212,7 +3206,7 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 	waitForCondition(t, time.Second, func() bool {
 		return state.workspaceProjectionStatus().State == workspaceProjectionStateReady
 	})
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -4640,12 +4634,12 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 	workspaceID := common.WorkspaceID("ws-explicit-compact-detail")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	state.workspaceProjection.UpsertWorkspace(appmodelcore.Workspace{
+	state.workspaceProjectionWriter.UpsertWorkspace(appmodelcore.Workspace{
 		ID:          string(workspaceID),
 		State:       string(common.WorkspaceStateActive),
 		ActiveRunID: "run-explicit-compact-detail",
 	})
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:                   string(workspaceID),
 			State:                string(common.WorkspaceStateActive),
@@ -4721,7 +4715,7 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-summary-no-detail-hydrate")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -4768,7 +4762,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-detail-prompt-same-source")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -4823,7 +4817,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-observability-full-read")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -5714,7 +5708,7 @@ func TestWorkorchDActivationEnqueueFailureProjectsRejected(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background unavailable")}
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-enqueue-failure", State: "active"},
 	})
 	handler := newMuxWithState(state)
@@ -5743,7 +5737,7 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
 	const workspaceID = "ws-scheduler-reject-recover"
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
+	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: workspaceID, State: "active"},
 	})
 

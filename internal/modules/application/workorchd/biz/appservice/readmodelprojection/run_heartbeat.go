@@ -14,7 +14,7 @@ import (
 
 const runHeartbeatStalledThreshold = 10 * time.Minute
 
-func MapRunHeartbeat(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.RunHeartbeat {
+func mapRunHeartbeat(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.RunHeartbeat {
 	return mapRunHeartbeatAt(snapshot, time.Now().UTC())
 }
 

@@ -25,7 +25,7 @@ func WorkspaceSummarySnapshot(ctx context.Context, readers WorkspaceSnapshotRead
 	if err != nil {
 		return readmodelcore.WorkspaceSnapshotState{}, err
 	}
-	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot), nil
+	return readmodelprojection.WorkspaceProjection().Summary(snapshot), nil
 }
 
 func WorkspaceObservabilitySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
@@ -40,7 +40,7 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 	}
 
 	projectionRun := models.selectProjectionRun()
-	ret := readmodelprojection.WorkspaceSnapshotFromModels(models.projectionInput(projectionRun))
+	ret := readmodelprojection.WorkspaceProjection().SnapshotFromModels(models.projectionInput(projectionRun))
 	if projectionRun == nil {
 		return ret, nil
 	}
@@ -59,7 +59,7 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 			return readmodelcore.WorkspaceSnapshotState{}, err
 		}
 	}
-	ret = readmodelprojection.WorkspaceSnapshotWithRunSnapshot(ret, &selectedRunSnapshot)
+	ret = readmodelprojection.WorkspaceProjection().SnapshotWithRunSnapshot(ret, &selectedRunSnapshot)
 	if cachedRunSnapshot != nil &&
 		cachedRunSnapshot.Run.WorkspaceID == string(workspaceID) &&
 		cachedRunSnapshot.TaskProgress.WorkspaceID != "" {

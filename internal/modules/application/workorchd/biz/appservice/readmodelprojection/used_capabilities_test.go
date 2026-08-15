@@ -40,7 +40,7 @@ func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeMCPDispatch(t *tes
 		RuntimeState: &runtimecontract.RuntimeStateRecord{CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{dispatch}},
 	}
 
-	snapshot := RunSnapshotFromModels(RunSnapshotModelInput{
+	snapshot := runSnapshotFromModels(RunSnapshotModelInput{
 		Workspace: &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive},
 		Run:       run,
 	})

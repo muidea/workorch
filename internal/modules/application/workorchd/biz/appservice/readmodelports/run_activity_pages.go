@@ -21,7 +21,7 @@ func ReadRunStepsPage(ctx context.Context, hub magicevent.Hub, query workorchque
 	if err != nil {
 		return readmodelcore.StepPage{}, err
 	}
-	return readmodelprojection.PageRunSteps(items, query), nil
+	return readmodelprojection.EvidenceProjection().PageSteps(items, query), nil
 }
 
 func ReadRunToolCallsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error) {
@@ -33,7 +33,7 @@ func ReadRunToolCallsPage(ctx context.Context, hub magicevent.Hub, query workorc
 	if err != nil {
 		return readmodelcore.ToolCallPage{}, err
 	}
-	return readmodelprojection.PageRunToolCalls(items, query), nil
+	return readmodelprojection.EvidenceProjection().PageToolCalls(items, query), nil
 }
 
 func ReadRunRuntimeCheckpointsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error) {
@@ -45,7 +45,7 @@ func ReadRunRuntimeCheckpointsPage(ctx context.Context, hub magicevent.Hub, quer
 	if err != nil {
 		return readmodelcore.RuntimeCheckpointPage{}, err
 	}
-	return readmodelprojection.PageRunRuntimeCheckpoints(items, query), nil
+	return readmodelprojection.EvidenceProjection().PageCheckpoints(items, query), nil
 }
 
 func runScopedContext(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) (context.Context, common.RunID, error) {

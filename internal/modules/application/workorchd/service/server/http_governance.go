@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -47,7 +47,7 @@ func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverStat
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Decision: appservice.ProjectDecisionView(item),
+			Decision: readmodelprojection.GovernanceProjection().ProjectDecisionView(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -113,7 +113,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Decision: appservice.ProjectDecisionView(item),
+			Decision: readmodelprojection.GovernanceProjection().ProjectDecisionView(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/decisions/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -228,7 +228,7 @@ func projectDecisionViews(items []projectioncontract.Decision) []projectioncontr
 	}
 	ret := make([]projectioncontract.Decision, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, appservice.ProjectDecisionView(item))
+		ret = append(ret, readmodelprojection.GovernanceProjection().ProjectDecisionView(item))
 	}
 	return ret
 }

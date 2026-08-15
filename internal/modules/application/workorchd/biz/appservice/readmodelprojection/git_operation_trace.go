@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapGitOperationTraces(steps []workorchprojectioncontract.StepView) []workorchprojectioncontract.GitOperationTrace {
+func mapGitOperationTraces(steps []workorchprojectioncontract.StepView) []workorchprojectioncontract.GitOperationTrace {
 	if len(steps) == 0 {
 		return nil
 	}

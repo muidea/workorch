@@ -8,7 +8,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
-func ResultProjectionTime(item *resultmodel.Result) string {
+func resultProjectionTime(item *resultmodel.Result) string {
 	if item == nil {
 		return ""
 	}
@@ -18,11 +18,11 @@ func ResultProjectionTime(item *resultmodel.Result) string {
 	return item.CreatedAt
 }
 
-func ResultModelNotBeforeEvent(result *resultmodel.Result, event *eventstreammodel.EventRecord) bool {
+func resultModelNotBeforeEvent(result *resultmodel.Result, event *eventstreammodel.EventRecord) bool {
 	if result == nil || event == nil {
 		return result != nil
 	}
-	resultAt := ResultProjectionTime(result)
+	resultAt := resultProjectionTime(result)
 	eventAt := strings.TrimSpace(event.OccurredAt)
 	if resultAt == "" || eventAt == "" {
 		return resultAt >= eventAt

@@ -17,7 +17,7 @@ func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 	if err != nil {
 		return appmodelcore.DecisionPage{}, err
 	}
-	pageTickets, limit, cursorAfterID, nextCursor, hasMore := readmodelprojection.PageDecisionTickets(filtered, query)
+	pageTickets, limit, cursorAfterID, nextCursor, hasMore := readmodelprojection.GovernanceProjection().PageDecisionTickets(filtered, query)
 	resolutionMap, err := ResolutionsForTickets(ctx, hub, pageTickets)
 	if err != nil {
 		return appmodelcore.DecisionPage{}, err
@@ -28,7 +28,7 @@ func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 		if err != nil {
 			return appmodelcore.DecisionPage{}, err
 		}
-		decisions = append(decisions, readmodelprojection.ProjectDecisionView(readmodelprojection.MapDecision(item, resolutionMap[decisionResolutionMapKey(item)], summary)))
+		decisions = append(decisions, readmodelprojection.GovernanceProjection().ProjectDecisionView(readmodelprojection.GovernanceProjection().MapDecision(item, resolutionMap[decisionResolutionMapKey(item)], summary)))
 	}
 	return appmodelcore.DecisionPage{
 		WorkspaceID: strings.TrimSpace(string(query.WorkspaceID)),

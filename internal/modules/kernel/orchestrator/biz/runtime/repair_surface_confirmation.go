@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -13,7 +14,7 @@ import (
 // a state transition. The receipt/evidence transaction is the only producer
 // of the Shell fact; this method makes the following File handoff explicit and
 // rejects stale/forged observations before any File query is used.
-func (c *RuntimeController) recordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
+func (c *authorityComponent) recordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || observation.Validate() != nil || observation.WorkspaceID != workspaceID || observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -30,7 +31,7 @@ func (c *RuntimeController) recordValidationFailureObservation(ctx context.Conte
 // recordRepairSurfaceConfirmation is the sole SM-2 transition from a File
 // fact to repair authority. File cannot select the action, and Shell cannot
 // promote its diagnostic candidates without this exact confirmation.
-func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) (RuntimeAggregate, error) {
+func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || confirmation.Validate() != nil || confirmation.Observation.WorkspaceID != workspaceID || confirmation.Observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -116,23 +117,11 @@ func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context,
 }
 
 func repairSurfaceConfirmationExists(aggregate RuntimeAggregate, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
-	signature := runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(confirmation)
-	for _, record := range aggregate.RepairSurfaceConfirmations {
-		if record.Signature == signature || runtimecontract.SameRuntimeRepairSurfaceConfirmation(record.Confirmation, confirmation) {
-			return true
-		}
-	}
-	return false
+	return proof.RepairSurfaceConfirmationExists(aggregate.RepairSurfaceConfirmations, confirmation)
 }
 
 func repairSurfaceConfirmationIdentityConflict(aggregate RuntimeAggregate, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
-	identity := runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(confirmation)
-	for _, record := range aggregate.RepairSurfaceConfirmations {
-		if record.IdentitySignature == identity || runtimecontract.SameRuntimeRepairSurfaceConfirmationIdentity(record.Confirmation, confirmation) {
-			return !runtimecontract.SameRuntimeRepairSurfaceConfirmation(record.Confirmation, confirmation)
-		}
-	}
-	return false
+	return proof.RepairSurfaceConfirmationIdentityConflict(aggregate.RepairSurfaceConfirmations, confirmation)
 }
 
 // sealedValidationFailureObservationMatches binds the diagnostic candidates
@@ -140,20 +129,18 @@ func repairSurfaceConfirmationIdentityConflict(aggregate RuntimeAggregate, confi
 // Orchestrator-side causation check; File subsequently verifies the current
 // resource revision. Neither check interprets diagnostic text.
 func sealedValidationFailureObservationMatches(aggregate RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) bool {
-	observation = observation.Normalized()
-	if observation.TargetRole != strings.TrimSpace(aggregate.Facts.Focus.TargetRole) {
-		return false
-	}
+	operations := make([]proof.SealedValidationOperation, 0)
 	for _, dispatch := range aggregate.CompletedDispatches {
-		if dispatch.ID != observation.DispatchID || dispatch.Transaction.AuthoritySnapshotID != observation.AuthoritySnapshotID || dispatch.Candidate.Validation == nil {
+		if dispatch.Candidate.Validation == nil {
 			continue
 		}
 		for _, operation := range dispatch.Candidate.Validation.Operations {
 			value := operation.Operation.Normalized()
-			if value.ID == observation.OperationID && sameRuntimeTargetRefs(value.TargetRefs, observation.ValidationScopeTargetRefs) {
-				return true
-			}
+			operations = append(operations, proof.SealedValidationOperation{
+				DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
+				OperationID: value.ID, TargetRefs: append([]string(nil), value.TargetRefs...),
+			})
 		}
 	}
-	return false
+	return proof.ValidationFailureObservationMatchesSealedOperation(aggregate.Facts.Focus.TargetRole, operations, observation)
 }

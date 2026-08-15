@@ -7,16 +7,16 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func CurrentRunSnapshotStepForRun(run *runmodel.Run, steps []projectioncontract.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
-	if run != nil && IsTerminalRunState(string(run.State)) {
+func currentRunSnapshotStepForRun(run *runmodel.Run, steps []projectioncontract.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
+	if run != nil && isTerminalRunState(string(run.State)) {
 		if step := currentRunSnapshotTerminalStep(steps, checkpoints); step != nil {
 			return step
 		}
 	}
-	return CurrentRunSnapshotStep(steps, decisionStep, approvalStep, checkpoints)
+	return currentRunSnapshotStep(steps, decisionStep, approvalStep, checkpoints)
 }
 
-func CurrentRunSnapshotStep(steps []projectioncontract.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
+func currentRunSnapshotStep(steps []projectioncontract.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
 	if decisionStep != "" {
 		if step := stepByID(steps, decisionStep); step != nil {
 			return step
@@ -29,7 +29,7 @@ func CurrentRunSnapshotStep(steps []projectioncontract.StepView, decisionStep st
 	}
 	if checkpoint := latestRuntimeCheckpoint(checkpoints); checkpoint != nil {
 		if step := stepByID(steps, checkpoint.CurrentStepID); step != nil {
-			if runningCompletedSnapshotStepWouldMasqueradeAsActive(step) && LatestNonTerminalSnapshotStep(steps) == nil {
+			if runningCompletedSnapshotStepWouldMasqueradeAsActive(step) && latestNonTerminalSnapshotStep(steps) == nil {
 				return nil
 			}
 			return step
@@ -38,10 +38,10 @@ func CurrentRunSnapshotStep(steps []projectioncontract.StepView, decisionStep st
 	if len(steps) == 0 {
 		return nil
 	}
-	if step := LatestNonTerminalSnapshotStep(steps); step != nil {
+	if step := latestNonTerminalSnapshotStep(steps); step != nil {
 		return step
 	}
-	if step := TerminalSnapshotStep(steps); step != nil {
+	if step := terminalSnapshotStep(steps); step != nil {
 		if runningCompletedSnapshotStepWouldMasqueradeAsActive(step) {
 			return nil
 		}

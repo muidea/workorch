@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/content"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -20,7 +20,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func (m *serverMetrics) render(config Config, projection *workspaceviewcore.Manager) string {
+func (m *serverMetrics) render(config Config, projection WorkspaceProjection) string {
 	body := fmt.Sprintf(
 		"# TYPE workorch_http_requests_total counter\n"+
 			"workorch_http_requests_total{endpoint=\"healthz\"} %d\n"+
@@ -157,7 +157,7 @@ func (m *serverMetrics) renderRuntimeDriveMetrics() string {
 	return b.String()
 }
 
-func renderWorkspaceProjectionMetrics(projection *workspaceviewcore.Manager, serverMetrics *serverMetrics) string {
+func renderWorkspaceProjectionMetrics(projection WorkspaceProjection, serverMetrics *serverMetrics) string {
 	var metrics workspaceviewcore.Metrics
 	if projection != nil {
 		metrics = projection.Metrics()
@@ -479,7 +479,7 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 	}
 }
 
-func writeArtifactContent(w http.ResponseWriter, item contentcore.ArtifactContent) {
+func writeArtifactContent(w http.ResponseWriter, item content.ArtifactContent) {
 	contentType := strings.TrimSpace(item.ContentType)
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -495,7 +495,7 @@ func writeArtifactContent(w http.ResponseWriter, item contentcore.ArtifactConten
 	_, _ = w.Write(item.Content)
 }
 
-func writeRuntimeRawContent(w http.ResponseWriter, item contentcore.RuntimeRawContent) {
+func writeRuntimeRawContent(w http.ResponseWriter, item content.RuntimeRawContent) {
 	contentType := strings.TrimSpace(item.ContentType)
 	if contentType == "" {
 		contentType = "application/octet-stream"

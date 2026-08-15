@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-// SelectDisplayRunID chooses the run that should drive RuntimeView history and
+// selectDisplayRunID chooses the run that should drive RuntimeView history and
 // progress. Priority:
 // 1. current active run
 // 2. current decision/approval blocker run
@@ -18,7 +18,7 @@ import (
 //
 // Historical runs may drive activity/summary only; they must never become the
 // sole authority for active prompt mode or control state.
-func SelectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
+func selectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	if id := strings.TrimSpace(snapshot.Workspace.ActiveRunID); id != "" {
 		return id
 	}
@@ -133,8 +133,8 @@ func runIsNewer(candidate, current appmodelcore.Run) bool {
 	return strings.TrimSpace(candidate.ID) > strings.TrimSpace(current.ID)
 }
 
-func SelectDisplayRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
-	displayRunID := SelectDisplayRunID(snapshot)
+func selectDisplayRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
+	displayRunID := selectDisplayRunID(snapshot)
 	if displayRunID == "" {
 		return nil
 	}

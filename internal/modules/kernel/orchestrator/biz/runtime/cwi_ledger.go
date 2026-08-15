@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -164,40 +165,14 @@ func runtimeCoverageByID(values []runtimecontract.RuntimeCoverageItemFact) map[c
 }
 
 func coverageBindingForRuntimeCWI(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageEvidenceBinding, bool) {
-	for _, binding := range focus.Normalized().CoverageEvidenceBindings {
-		if binding.CoverageWorkItemID == coverageID {
-			return binding.Clone(), true
-		}
-	}
-	return runtimecontract.CoverageEvidenceBinding{}, false
+	return proof.CoverageBindingForCoverage(focus, coverageID)
 }
 
 // currentRuntimeCWIBindingForFocus is the one read-only canonical binding
 // fence shared by SM-3 admission and SM-2 evidence attribution. It only reads
 // the persisted Orchestrator aggregate; it never derives or repairs a binding.
 func currentRuntimeCWIBindingForFocus(facts runtimecontract.RuntimeFacts, coverageID common.CoverageWorkItemID) (runtimecontract.RuntimeCoverageItemFact, bool) {
-	facts = facts.Normalized()
-	coverageID = common.CoverageWorkItemID(strings.TrimSpace(string(coverageID)))
-	if facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent || coverageID == "" {
-		return runtimecontract.RuntimeCoverageItemFact{}, false
-	}
-	item, found := runtimeCoverageByID(facts.Coverage)[coverageID]
-	if !found || item.CurrentBindingRef == nil {
-		return runtimecontract.RuntimeCoverageItemFact{}, false
-	}
-	current := item.CurrentBindingRef.Normalized()
-	if err := current.Validate(); err != nil {
-		return runtimecontract.RuntimeCoverageItemFact{}, false
-	}
-	binding, found := coverageBindingForRuntimeCWI(facts.Focus, coverageID)
-	if !found {
-		return runtimecontract.RuntimeCoverageItemFact{}, false
-	}
-	wanted := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, current.SemanticManifestHash)
-	if !runtimecontract.SameRuntimeCWIBindingRef(current, wanted) {
-		return runtimecontract.RuntimeCoverageItemFact{}, false
-	}
-	return item, true
+	return proof.CurrentCWIBindingForFocus(facts, coverageID)
 }
 
 func runtimeCWIPendingFocus(source runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) runtimecontract.CoverageFocus {
@@ -727,7 +702,7 @@ func installRuntimeCWIFocusProjection(facts runtimecontract.RuntimeFacts, curren
 // projectEligibleRuntimeFocus is the sole CAS-writing entry for applying an
 // accepted semantic execution order. The event carries only immutable order
 // identity; this reducer reloads and recomputes the eligible closure.
-func (c *RuntimeController) projectEligibleRuntimeFocus(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifestHash string, acceptedOrder []common.CoverageWorkItemID) (RuntimeAggregate, error) {
+func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifestHash string, acceptedOrder []common.CoverageWorkItemID) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -959,7 +934,7 @@ func applyRuntimeCWIReopen(aggregate *RuntimeAggregate, triggers []runtimeCWIReo
 // retireRuntimeCWIBinding is the sole no-effect binding retirement CAS. A
 // semantic generation may have been retired earlier, but that transition does
 // not make this CWI mutation implicit.
-func (c *RuntimeController) retireRuntimeCWIBinding(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact RuntimeCWIBindingRetirementFact) (RuntimeAggregate, error) {
+func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact RuntimeCWIBindingRetirementFact) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}

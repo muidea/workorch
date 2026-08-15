@@ -345,9 +345,38 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventDispatchExecutionRequested, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		Executor: eventRuntimeOperationExecutor{hub: m.EventHub()},
-	})
-	return updated.Aggregate, err
+	var recoveryOperationID string
+	var recoveryBudgetAttempt int
+	for transition := 0; transition <= runtimecontract.RuntimeRecoveryBudgetLimit; transition++ {
+		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:        runtime.RuntimeInternalEventDispatchExecutionRequested,
+			Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{Executor: eventRuntimeOperationExecutor{hub: m.EventHub()}, RecoveryOperationID: recoveryOperationID, RecoveryBudgetAttempt: recoveryBudgetAttempt},
+		})
+		recoveryOperationID, recoveryBudgetAttempt = "", 0
+		operationID, required := runtime.RuntimeOperationRecoveryBudgetRequired(err)
+		if !required {
+			return updated.Aggregate, err
+		}
+		if operationID == "" {
+			return runtime.RuntimeAggregate{}, common.ErrConflict
+		}
+		budget, budgetErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:     runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+			Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+			Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetOperationRecovery},
+		})
+		if budgetErr != nil {
+			return runtime.RuntimeAggregate{}, budgetErr
+		}
+		if budget.Aggregate.Facts.WorkspaceID != aggregate.Facts.WorkspaceID || budget.Aggregate.Facts.RunID != aggregate.Facts.RunID {
+			return runtime.RuntimeAggregate{}, common.ErrConflict
+		}
+		aggregate = budget.Aggregate
+		if budget.BudgetConsumed {
+			recoveryOperationID = operationID
+			recoveryBudgetAttempt = budget.Aggregate.Facts.Recovery.OperationRecoveryAttempts
+		}
+	}
+	return runtime.RuntimeAggregate{}, common.ErrConflict
 }

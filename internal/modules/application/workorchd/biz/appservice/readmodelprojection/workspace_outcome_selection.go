@@ -5,13 +5,39 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
+// WD5 mechanical consolidation: same import contract; source list follows.
+
+// source: workspace_outcome_event_selection.go
+
+func latestWorkspaceRunForOutcome(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
+	if len(snapshot.Runs) == 0 {
+		return nil
+	}
+	runsByID := workspaceOutcomeRunsByID(snapshot.Runs)
+	selectedEvent := latestWorkspaceOutcomeRunEvent(snapshot, runsByID)
+	if selectedEvent != nil {
+		if result := latestTerminalWorkspaceResult(snapshot.Results, runsByID); result != nil && resultNotBeforeEvent(*result, *selectedEvent) {
+			if run := runsByID[result.RunID]; run != nil {
+				return run
+			}
+		}
+		return runsByID[selectedEvent.RunID]
+	}
+	if run := workspaceOutcomeRunFromResultFallback(snapshot.Results, runsByID); run != nil {
+		return run
+	}
+	return &snapshot.Runs[len(snapshot.Runs)-1]
+}
+
+// source: workspace_outcome_selection.go
+
 func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
 	if snapshot.Workspace.ActiveRunID != "" {
-		if activeRun := workspaceRunByID(snapshot, snapshot.Workspace.ActiveRunID); activeRun != nil && !IsTerminalRunState(activeRun.State) {
+		if activeRun := workspaceRunByID(snapshot, snapshot.Workspace.ActiveRunID); activeRun != nil && !isTerminalRunState(activeRun.State) {
 			return activeRun
 		}
 	}
-	if snapshot.Run != nil && !IsTerminalRunState(snapshot.Run.State) {
+	if snapshot.Run != nil && !isTerminalRunState(snapshot.Run.State) {
 		return snapshot.Run
 	}
 	selectedRun := latestWorkspaceRunForOutcome(snapshot)

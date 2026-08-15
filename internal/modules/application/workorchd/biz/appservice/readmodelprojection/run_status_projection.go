@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRunStatus(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunStatus {
+func mapRunStatus(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunStatus {
 	ret := projectioncontract.RunStatus{
 		ID:          snapshot.Run.ID,
 		WorkspaceID: snapshot.Run.WorkspaceID,
@@ -26,7 +26,7 @@ func MapRunStatus(snapshot readmodelcore.RunSnapshotState) projectioncontract.Ru
 		ret.DiagnosticLineage = snapshot.Step.ID
 	}
 	ret.CurrentActionLabel = currentActionLabelFromRunSnapshot(snapshot)
-	ret.ConvergenceStatus = MapConvergenceStatus(snapshot)
+	ret.ConvergenceStatus = mapConvergenceStatus(snapshot)
 	ret.Acceptance = projectioncontract.CloneAcceptanceProjection(snapshot.Acceptance)
 	return ret
 }

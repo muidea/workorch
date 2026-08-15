@@ -29,7 +29,7 @@ func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
 		Patches:                 []projectioncontract.Patch{{ID: "patch-1", AffectedFiles: []string{"one.go"}}},
 	}
 
-	public := PublicRunSnapshot(state)
+	public := publicRunSnapshot(state)
 	if public.Workspace.ID != state.Workspace.ID || public.Run.ID != state.Run.ID {
 		t.Fatalf("public resources not preserved: %+v", public)
 	}
@@ -64,7 +64,7 @@ func TestPublicWorkspaceSnapshotAndObservabilityPreserveNilAndRunCollections(t *
 			{ID: "run-1", WorkspaceID: "workspace-1", RuntimeState: &runtimecontract.RuntimeStateRecord{}},
 		},
 	}
-	workspace := PublicWorkspaceSnapshot(workspaceState)
+	workspace := publicWorkspaceSnapshot(workspaceState)
 	if workspace.Run != nil {
 		t.Fatalf("nil active run changed to %+v", workspace.Run)
 	}
@@ -83,7 +83,7 @@ func TestPublicWorkspaceSnapshotAndObservabilityPreserveNilAndRunCollections(t *
 		Run:      appmodelcore.Run{ID: "run-1", WorkspaceID: "workspace-1", RuntimeState: &runtimecontract.RuntimeStateRecord{}},
 		Timeline: []projectioncontract.RuntimeTimelineItem{{ID: "timeline-1", Data: map[string]any{"target": "one"}}},
 	}
-	observability := PublicRunObservability(observabilityState)
+	observability := publicRunObservability(observabilityState)
 	observability.Timeline[0].ID = "changed"
 	observability.Timeline[0].Data["target"] = "changed"
 	if observability.Run.ID != "run-1" {

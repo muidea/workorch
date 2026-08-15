@@ -5,16 +5,16 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type fakeWorkspaceSetupDraftGenerator struct {
-	request setupdraftcore.GenerationRequest
-	draft   setupdraftcore.Draft
+	request setupdraft.GenerationRequest
+	draft   setupdraft.Draft
 }
 
-func (f *fakeWorkspaceSetupDraftGenerator) GenerateWorkspaceSetupDraft(_ context.Context, request setupdraftcore.GenerationRequest) (setupdraftcore.Draft, error) {
+func (f *fakeWorkspaceSetupDraftGenerator) GenerateWorkspaceSetupDraft(_ context.Context, request setupdraft.GenerationRequest) (setupdraft.Draft, error) {
 	f.request = request
 	return f.draft, nil
 }
@@ -34,7 +34,7 @@ func TestGenerateWorkspaceSetupDraftWithSessionUsesTemplateAndNormalizesDoD(t *t
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	generator := &fakeWorkspaceSetupDraftGenerator{draft: setupdraftcore.Draft{
+	generator := &fakeWorkspaceSetupDraftGenerator{draft: setupdraft.Draft{
 		GoalText: "Generated goal",
 		DoDItems: []string{`
 ### 1. Acceptance
@@ -46,10 +46,10 @@ func TestGenerateWorkspaceSetupDraftWithSessionUsesTemplateAndNormalizesDoD(t *t
 		Confidence:          "unexpected",
 	}}
 
-	draft, err := GenerateWorkspaceSetupDraftWithSession(context.Background(), session, setupdraftcore.GenerationCommand{
+	draft, err := GenerateWorkspaceSetupDraftWithSession(context.Background(), session, setupdraft.GenerationCommand{
 		TemplateID: "generic-template",
-		Workspace:  setupdraftcore.Workspace{Title: "Draft workspace"},
-		Messages:   []setupdraftcore.Message{{Role: "user", Content: "Need a clear setup"}},
+		Workspace:  setupdraft.Workspace{Title: "Draft workspace"},
+		Messages:   []setupdraft.Message{{Role: "user", Content: "Need a clear setup"}},
 	}, generator)
 	if err != nil {
 		t.Fatalf("GenerateWorkspaceSetupDraftWithSession: %v", err)
@@ -69,11 +69,11 @@ func TestGenerateWorkspaceSetupDraftWithSessionUsesTemplateAndNormalizesDoD(t *t
 	}
 }
 
-func TestParseWorkspaceSetupDraftCompletionAcceptsEnvelope(t *testing.T) {
+func TestSetupDraftParseCompletionAcceptsEnvelope(t *testing.T) {
 	payload := []byte(`{"draft":{"goalText":"Goal","doDItems":["### Section","- [ ] item"],"clarifyingQuestions":["question?"],"confidence":"high"}}`)
-	draft, err := ParseWorkspaceSetupDraftCompletion(payload)
+	draft, err := setupdraft.ParseCompletion(payload)
 	if err != nil {
-		t.Fatalf("ParseWorkspaceSetupDraftCompletion: %v", err)
+		t.Fatalf("setupdraft.ParseCompletion: %v", err)
 	}
 	if draft.GoalText != "Goal" || draft.Confidence != "high" || !draft.NeedsClarification {
 		t.Fatalf("draft = %+v, want normalized envelope draft", draft)
@@ -83,11 +83,11 @@ func TestParseWorkspaceSetupDraftCompletionAcceptsEnvelope(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceSetupDraftCompletionAcceptsCommonAliases(t *testing.T) {
+func TestSetupDraftParseCompletionAcceptsCommonAliases(t *testing.T) {
 	payload := []byte(`{"draft":{"goal":"Alias goal","definitionOfDone":["first item","second item"],"clarifying_questions":["question?"],"generation_summary":"summary"}}`)
-	draft, err := ParseWorkspaceSetupDraftCompletion(payload)
+	draft, err := setupdraft.ParseCompletion(payload)
 	if err != nil {
-		t.Fatalf("ParseWorkspaceSetupDraftCompletion: %v", err)
+		t.Fatalf("setupdraft.ParseCompletion: %v", err)
 	}
 	if draft.GoalText != "Alias goal" || !reflect.DeepEqual(draft.DoDItems, []string{"first item", "second item"}) {
 		t.Fatalf("draft = %+v, want alias goal and DoD", draft)
@@ -98,7 +98,7 @@ func TestParseWorkspaceSetupDraftCompletionAcceptsCommonAliases(t *testing.T) {
 }
 
 func TestNormalizeWorkspaceSetupDraftAddsReadableClarificationForEmptyDraft(t *testing.T) {
-	draft := NormalizeWorkspaceSetupDraft(setupdraftcore.Draft{})
+	draft := setupdraft.NormalizeDraft(setupdraft.Draft{})
 	if !draft.NeedsClarification || len(draft.ClarifyingQuestions) == 0 {
 		t.Fatalf("draft = %+v, want readable clarification", draft)
 	}
@@ -110,13 +110,13 @@ func TestGenerateWorkspaceSetupDraftWithSessionPreservesCurrentDraftOnPartialOut
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	generator := &fakeWorkspaceSetupDraftGenerator{draft: setupdraftcore.Draft{
+	generator := &fakeWorkspaceSetupDraftGenerator{draft: setupdraft.Draft{
 		ClarifyingQuestions: []string{"Need more details"},
 	}}
-	draft, err := GenerateWorkspaceSetupDraftWithSession(context.Background(), session, setupdraftcore.GenerationCommand{
-		Workspace: setupdraftcore.Workspace{Title: "Draft workspace"},
-		Messages:  []setupdraftcore.Message{{Role: "user", Content: "Need a clear setup"}},
-		CurrentDraft: setupdraftcore.Draft{
+	draft, err := GenerateWorkspaceSetupDraftWithSession(context.Background(), session, setupdraft.GenerationCommand{
+		Workspace: setupdraft.Workspace{Title: "Draft workspace"},
+		Messages:  []setupdraft.Message{{Role: "user", Content: "Need a clear setup"}},
+		CurrentDraft: setupdraft.Draft{
 			GoalText: "Existing goal",
 			DoDItems: []string{"Existing DoD"},
 		},
@@ -133,7 +133,7 @@ func TestGenerateWorkspaceSetupDraftWithSessionPreservesCurrentDraftOnPartialOut
 }
 
 func TestWorkspaceSetupDraftRevisionBaselineClearsStaleClarifications(t *testing.T) {
-	draft := WorkspaceSetupDraftRevisionBaseline(setupdraftcore.Draft{
+	draft := setupdraft.RevisionBaseline(setupdraft.Draft{
 		GoalText:            "Existing goal",
 		DoDItems:            []string{"Existing DoD"},
 		ClarifyingQuestions: []string{"Old question"},

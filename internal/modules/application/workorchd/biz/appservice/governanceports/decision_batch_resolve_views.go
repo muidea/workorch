@@ -61,7 +61,7 @@ func BatchResolveDecisionViews(ctx context.Context, hub magicevent.Hub, traces g
 		if autoErr != nil {
 			return nil, autoErr
 		}
-		ret = append(ret, readmodelprojection.MapDecision(item, resolution, autoGovernance))
+		ret = append(ret, readmodelprojection.GovernanceProjection().MapDecision(item, resolution, autoGovernance))
 	}
 	return ret, nil
 }

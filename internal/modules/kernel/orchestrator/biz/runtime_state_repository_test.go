@@ -141,7 +141,7 @@ func runtimeFileBackedManagedValidationEvidencePolicy() runtimecontract.RuntimeE
 // used by production; tests must not retain a second direct mutation route.
 func commitRuntimeAssessmentForTest(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
 	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventAssessmentObserved, WorkspaceID: workspaceID, RunID: runID,
+		Kind: runtime.RuntimeInternalEventAssessmentObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 	})
 	return result.Aggregate, err
 }
@@ -405,8 +405,7 @@ func TestRuntimeStateRepositoryFileReloadRetainsSemanticPlanningGenerationHistor
 	}
 	old := sealed.SemanticPlanning.Clone()
 	retiredResult, err := firstController.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventSemanticCatalogInvalidated, WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
-		ManifestHash: old.Manifest.Hash, LogicalRequestID: old.LogicalRequestID,
+		Kind: runtime.RuntimeInternalEventSemanticCatalogInvalidated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{ManifestHash: old.Manifest.Hash, LogicalRequestID: old.LogicalRequestID},
 	})
 	if err != nil {
 		stopFirst()

@@ -6,73 +6,21 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-// commitSemanticPlanning is the sole CAS boundary for the semantic sub-ledger.
-// The callback is owner-local and can only change the ledger; capability facts
-// and provider documents reach it through RuntimeInternalEvent after scope and
-// lineage checks.
-func (c *RuntimeController) commitSemanticPlanning(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, mutate func(RuntimeAggregate, *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error)) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || mutate == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic planning scope mismatch", common.ErrConflict)
-	}
-	expectedRevision := aggregate.StateRevision
-	ledger := aggregate.SemanticPlanning.Clone()
-	changed, err := mutate(aggregate, &ledger)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if !changed {
-		return aggregate, nil
-	}
-	if err := ledger.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.SemanticPlanning = ledger
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
 
 // runtimeSemanticBatchDocument is the runtime-owner-local lookup for the
 // active proof document. The drive package has a similarly shaped helper for
 // its own adapter layer; keeping this lookup here avoids exposing a registry or
 // cross-package mutable ledger accessor.
 func runtimeSemanticBatchDocument(values []runtimecontract.RuntimeSemanticPlanDocument, batchID string) (runtimecontract.RuntimeSemanticPlanDocument, bool) {
-	batchID = strings.TrimSpace(batchID)
-	for _, value := range values {
-		if value.BatchID == batchID {
-			return value.Clone(), true
-		}
-	}
-	return runtimecontract.RuntimeSemanticPlanDocument{}, false
+	return semanticplan.DocumentByBatchID(values, batchID)
 }
 
 func runtimeSemanticBatch(values []runtimecontract.RuntimeSemanticPlanBatch, batchID string) (runtimecontract.RuntimeSemanticPlanBatch, bool) {
-	batchID = strings.TrimSpace(batchID)
-	for _, value := range values {
-		if value.BatchID == batchID {
-			return value.Clone(), true
-		}
-	}
-	return runtimecontract.RuntimeSemanticPlanBatch{}, false
+	return semanticplan.BatchByID(values, batchID)
 }
 
 func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) error {
@@ -87,25 +35,15 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 	if len(eligible) == 0 {
 		return fmt.Errorf("%w: runtime semantic manifest has no eligible CWI", common.ErrConflict)
 	}
-	expected, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
-		aggregate.Facts.WorkspaceID,
-		aggregate.Facts.RunID,
-		aggregate.Definition,
-		aggregate.Facts.DefinitionSeed,
-		aggregate.Facts.Activation.ExecutionContract,
-		aggregate.Facts.Resources.OperationAdmissibilities,
-		eligible,
-	)
-	if err != nil {
-		return fmt.Errorf("%w: runtime semantic manifest cannot compile from canonical CWI ledger: %v", common.ErrConflict, err)
-	}
-	if manifest.WorkspaceID != aggregate.Facts.WorkspaceID || manifest.RunID != aggregate.Facts.RunID ||
-		manifest.DefinitionRevision != aggregate.Facts.DefinitionRevision || manifest.DefinitionSeedHash != aggregate.Facts.DefinitionSeed.Hash ||
-		manifest.OperationContractRevision != aggregate.Facts.Activation.ExecutionContract.OperationContractRevision ||
-		manifest.Hash != expected.Hash {
-		return fmt.Errorf("%w: runtime semantic manifest identity is stale", common.ErrConflict)
-	}
-	return nil
+	return semanticplan.ValidateManifestIdentity(semanticplan.ManifestIdentity{
+		WorkspaceID:      aggregate.Facts.WorkspaceID,
+		RunID:            aggregate.Facts.RunID,
+		Definition:       aggregate.Definition,
+		DefinitionSeed:   aggregate.Facts.DefinitionSeed,
+		Execution:        aggregate.Facts.Activation.ExecutionContract,
+		Admissibilities:  aggregate.Facts.Resources.OperationAdmissibilities,
+		EligibleCoverage: eligible,
+	}, manifest)
 }
 
 // semanticCatalogInvalidationLineage binds a retired semantic generation to
@@ -559,193 +497,12 @@ func resetSemanticPlanningForInvalidatedCatalog(aggregate *RuntimeAggregate, rea
 
 // requireSemanticContract is the SM-2 entry fence. Initialization already
 // persists this phase; duplicate delivery is therefore a read-only no-op.
-func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, feasibilityBatchID string, refreshGeneration int) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || refreshGeneration < 0 {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	feasibilityBatchID = strings.TrimSpace(feasibilityBatchID)
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batch runtimecontract.RuntimeSemanticPlanBatch) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic planning scope mismatch", common.ErrConflict)
-	}
-	ledger := aggregate.SemanticPlanning.Clone()
-	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
-		if feasibilityBatchID == "" {
-			return aggregate, nil
-		}
-		if refreshGeneration < len(ledger.FeasibilityGaps) {
-			gap := ledger.FeasibilityGaps[refreshGeneration]
-			if gap.RefreshGeneration == refreshGeneration && gap.FeasibilityBatchID == feasibilityBatchID {
-				return aggregate, nil
-			}
-		}
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh event is stale", common.ErrConflict)
-	}
-	if feasibilityBatchID == "" || ledger.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired ||
-		ledger.Manifest == nil || ledger.Document == nil || ledger.FeasibilityBatchID != feasibilityBatchID ||
-		ledger.CatalogRefreshAttempts != refreshGeneration {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh has no matching feasibility batch", common.ErrConflict)
-	}
-
-	gapFact, found := refreshableRuntimeSemanticFeasibility(ledger.Feasibilities)
-	if !found || gapFact.OriginalDiagnostic == nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic feasibility batch has no refreshable owner fact", common.ErrConflict)
-	}
-	catalog, found := runtimeSemanticCatalogForOwner(*ledger.Manifest, gapFact.OwnerModuleID)
-	if !found || catalog.SnapshotID != gapFact.CatalogSnapshotID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic feasibility catalog identity is stale", common.ErrConflict)
-	}
-	observation, found := semanticCatalogPrerequisiteObservation(aggregate.Facts, catalog, gapFact.CatalogObservationID)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog prerequisite observation is not current", common.ErrConflict)
-	}
-
-	facts := aggregate.Facts
-	var prerequisiteIDs, observationIDs []string
-	var invalidatedDependencies []runtimecontract.RuntimeFreshnessDependency
-	var stale *runtimecontract.RuntimePrerequisiteStale
-	if gapFact.Status == runtimecontract.RuntimeSemanticFeasibilityStale {
-		value, staleErr := runtimeSemanticCatalogStale(observation, *gapFact.OriginalDiagnostic)
-		if staleErr != nil {
-			return RuntimeAggregate{}, staleErr
-		}
-		facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err = invalidatePrerequisiteObservationsForStale(facts, value)
-		if err != nil {
-			return RuntimeAggregate{}, err
-		}
-		stale = &value
-	} else {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh requires a stale owner revision", common.ErrConflict)
-	}
-	recovery, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if !consumed {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh budget exhausted", common.ErrConflict)
-	}
-	facts.Recovery = recovery
-
-	invalidation := runtimecontract.RuntimePrerequisiteInvalidationRecord{
-		Signature:       fmt.Sprintf("semantic-catalog-refresh/%d/%s/%s", refreshGeneration, feasibilityBatchID, ledger.FeasibilitySetHash),
-		PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
-		InvalidatedDependencies: invalidatedDependencies, Stale: stale,
-	}
-	if err := invalidation.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-
-	gap := runtimecontract.RuntimeSemanticFeasibilityGap{
-		RefreshGeneration: refreshGeneration,
-		ManifestHash:      ledger.Manifest.Hash, DocumentHash: ledger.DocumentHash,
-		FeasibilityBatchID: ledger.FeasibilityBatchID, FeasibilitySetHash: ledger.FeasibilitySetHash,
-		Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), ledger.Feasibilities...),
-		Rejections:    append([]runtimecontract.RuntimeOriginalDiagnostic(nil), ledger.Rejections...),
-	}
-	ledger.FeasibilityGaps = append(ledger.FeasibilityGaps, gap)
-	ledger.CatalogRefreshAttempts++
-	// Keep the stale generation as an immutable history snapshot, then clear
-	// every active manifest/order/batch/fact field in one owner-local reset.
-	// The invalidation record is installed before comparison so the history can
-	// point to the exact durable stale event.
-	aggregate.SemanticPlanning = ledger
-	aggregate.Facts = facts
-	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, invalidation)
-	retired, resetErr := resetSemanticPlanningForInvalidatedCatalog(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementCatalogRefresh)
-	if resetErr != nil {
-		return RuntimeAggregate{}, resetErr
-	}
-	if !retired {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog refresh cannot retire an active dispatch", common.ErrConflict)
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	expectedRevision := aggregate.StateRevision
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// invalidateSemanticCatalogGeneration is the private SM-2 handoff used by
-// semantic feasibility probing when the active manifest no longer has a
-// current owner observation. It is intentionally separate from the generic
-// stale-refresh event: missing/mismatched current facts must reopen a fresh
-// semantic generation, but must not invent a capability-owner prerequisite
-// command or consume the bounded stale-refresh budget.
-func (c *RuntimeController) invalidateSemanticCatalogGeneration(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifestHash, logicalRequestID string) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(manifestHash) == "" || strings.TrimSpace(logicalRequestID) == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation scope mismatch", common.ErrConflict)
-	}
-	manifestHash = strings.TrimSpace(manifestHash)
-	logicalRequestID = strings.TrimSpace(logicalRequestID)
-	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
-		// The reset is the idempotency fence. A duplicate probe after the CAS
-		// already opened the fresh generation must match one exact retired
-		// generation identity. A resource rollback can legally recreate the
-		// same manifest hash under a new logical request, so hash-only matching
-		// would let a delayed old event acknowledge or retire the wrong
-		// generation.
-		for _, history := range aggregate.SemanticPlanning.History {
-			if history.Snapshot.Manifest != nil && history.Snapshot.Manifest.Hash == manifestHash && history.Snapshot.LogicalRequestID == logicalRequestID {
-				return aggregate, nil
-			}
-		}
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation does not match a retired generation", common.ErrConflict)
-	}
-	if aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Manifest.Hash != manifestHash || aggregate.SemanticPlanning.LogicalRequestID != logicalRequestID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation manifest is not current", common.ErrConflict)
-	}
-	if aggregate.ActiveDispatch != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation cannot retire an active dispatch", common.ErrConflict)
-	}
-	gaps, current := semanticPlanningCatalogsCurrent(aggregate, *aggregate.SemanticPlanning.Manifest)
-	if current {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic catalog invalidation has no stale owner observation", common.ErrConflict)
-	}
-	expectedRevision := aggregate.StateRevision
-	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// compileSemanticPlanBatch persists a batch compiled from an already accepted
-// provider-authored order. It is intentionally an Orchestrator-private CAS
-// transition; callers cannot mutate the semantic ledger directly.
-func (c *RuntimeController) compileSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batch runtimecontract.RuntimeSemanticPlanBatch) (RuntimeAggregate, error) {
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil || ledger.CoverageOrderDocument == nil || ledger.Document == nil || ledger.Document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || ledger.ActiveBatchID != "" {
 			return false, fmt.Errorf("%w: semantic batch requires an accepted coverage order", common.ErrConflict)
 		}
@@ -818,7 +575,11 @@ func (c *RuntimeController) compileSemanticPlanBatch(ctx context.Context, worksp
 		ledger.NextBatchSequence = requesting.Sequence + 1
 		ledger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), requesting.PendingCoverageWorkItemIDs...)
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 // SemanticPlanActiveCoverageIDsForDrive selects the owner-local anchor for the
@@ -898,8 +659,12 @@ func currentRuntimeCWIBindingExecutionLocked(aggregate RuntimeAggregate) bool {
 	return false
 }
 
-func (c *RuntimeController) advanceSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, identity runtimecontract.RuntimeSemanticPlanBatch, next runtimecontract.RuntimeSemanticPlanBatchState) (RuntimeAggregate, error) {
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+func (c *planningTransactionComponent) advanceSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, identity runtimecontract.RuntimeSemanticPlanBatch, next runtimecontract.RuntimeSemanticPlanBatchState) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		for idx := range ledger.Batches {
 			if ledger.Batches[idx].BatchID != identity.BatchID {
 				continue
@@ -923,11 +688,19 @@ func (c *RuntimeController) advanceSemanticPlanBatch(ctx context.Context, worksp
 			return true, nil
 		}
 		return false, fmt.Errorf("%w: semantic batch is missing", common.ErrConflict)
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
-func (c *RuntimeController) observeSemanticPlanBatchFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult) (RuntimeAggregate, error) {
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+func (c *planningTransactionComponent) observeSemanticPlanBatchFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		for _, existing := range ledger.BatchFeasibilityResults {
 			if existing.BatchID != result.BatchID {
 				continue
@@ -970,16 +743,24 @@ func (c *RuntimeController) observeSemanticPlanBatchFeasibility(ctx context.Cont
 		}
 		ledger.BatchFeasibilityResults = append(ledger.BatchFeasibilityResults, result.Normalized())
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
-func (c *RuntimeController) observeSemanticPlanBatchDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) observeSemanticPlanBatchDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	document = document.Normalized()
 	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && len(document.CoverageOrder) != 0 {
 		document.CoverageOrder = nil
 		document = document.Normalized()
 	}
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil || ledger.Document == nil || document.BatchID == "" {
 			return false, fmt.Errorf("%w: semantic batch document identity is incomplete", common.ErrConflict)
 		}
@@ -1022,11 +803,19 @@ func (c *RuntimeController) observeSemanticPlanBatchDocument(ctx context.Context
 		}
 		ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
-func (c *RuntimeController) mergeSemanticPlanBatchDocuments(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, merged runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+func (c *planningTransactionComponent) mergeSemanticPlanBatchDocuments(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, merged runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		// A response-loss replay arrives after the durable merge CAS cleared the
 		// active batch. Match the persisted immutable hash before consulting the
 		// working-state guards; duplicate private events are a read-only no-op and
@@ -1083,11 +872,19 @@ func (c *RuntimeController) mergeSemanticPlanBatchDocuments(ctx context.Context,
 		// own bounded proof batch after this one settles.
 		ledger.Phase = runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
-func (c *RuntimeController) mergeSemanticPlanBatchFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, values []runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+func (c *planningTransactionComponent) mergeSemanticPlanBatchFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, values []runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.MergedDocument == nil || ledger.Manifest == nil {
 			return false, fmt.Errorf("%w: semantic feasibility merge has no merged document", common.ErrConflict)
 		}
@@ -1112,7 +909,11 @@ func (c *RuntimeController) mergeSemanticPlanBatchFeasibilities(ctx context.Cont
 		ledger.FeasibilitySetHash = hash
 		ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(*ledger.Manifest, *ledger.MergedDocument)
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 func refreshableRuntimeSemanticFeasibility(values []runtimecontract.RuntimeSemanticProofFeasibility) (runtimecontract.RuntimeSemanticProofFeasibility, bool) {
@@ -1166,14 +967,18 @@ func runtimeSemanticCatalogStale(observation runtimecontract.RuntimePrerequisite
 }
 
 // startSemanticPlanRequest is the only SM-3 transition that opens attempt 0.
-func (c *RuntimeController) startSemanticPlanRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimecontract.RuntimeSemanticPlanManifest, stablePrefixHash, logicalRequestID string) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) startSemanticPlanRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimecontract.RuntimeSemanticPlanManifest, stablePrefixHash, logicalRequestID string) (RuntimeAggregate, error) {
 	manifest = manifest.Normalized()
 	stablePrefixHash = strings.TrimSpace(stablePrefixHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
 	if stablePrefixHash == "" || logicalRequestID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if (ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequestOpen || ledger.Phase == runtimecontract.RuntimeSemanticPlanningOrderRequestOpen) && ledger.Manifest != nil && ledger.Manifest.Hash == manifest.Hash && ledger.StablePrefixHash == stablePrefixHash && ledger.LogicalRequestID == logicalRequestID && ledger.Attempt == 0 {
 			return false, nil
 		}
@@ -1189,12 +994,16 @@ func (c *RuntimeController) startSemanticPlanRequest(ctx context.Context, worksp
 		ledger.StablePrefixHash = stablePrefixHash
 		ledger.LogicalRequestID = logicalRequestID
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 // evaluateSemanticPlan persists one complete accepted provider document. It
 // cannot create feasibility, binding, dispatch, coverage or terminal facts.
-func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) evaluateSemanticPlan(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
 	document = document.Normalized()
 	// A proof response is focus-local and must not carry a second global order
@@ -1204,7 +1013,11 @@ func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceI
 		document.CoverageOrder = nil
 		document = document.Normalized()
 	}
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		documentHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
 		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && document.BatchID == "" {
 			return false, fmt.Errorf("%w: semantic proof document requires active batch identity", common.ErrConflict)
@@ -1299,13 +1112,21 @@ func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceI
 		ledger.Document = &document
 		ledger.DocumentHash = documentHash
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 // requireSemanticFeasibility is the SM-2 handoff from an accepted proposal to
 // a bounded owner-probe batch.
-func (c *RuntimeController) requireSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+func (c *planningTransactionComponent) requireSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
 			return false, nil
 		}
@@ -1333,14 +1154,22 @@ func (c *RuntimeController) requireSemanticFeasibility(ctx context.Context, work
 		}
 		ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(*ledger.Manifest, feasibilityDocument)
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 // observeSemanticFeasibility persists one canonical owner's factual result.
 // Conflicting duplicates are rejected instead of replacing owner history.
-func (c *RuntimeController) observeSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observation runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observation runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
 	batchID = strings.TrimSpace(batchID)
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil || ledger.Document == nil || ledger.FeasibilityBatchID != batchID {
 			return false, fmt.Errorf("%w: semantic feasibility batch is stale", common.ErrConflict)
 		}
@@ -1411,12 +1240,16 @@ func (c *RuntimeController) observeSemanticFeasibility(ctx context.Context, work
 			}
 		}
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 // requireSemanticPlanCorrection records the complete attempt-0 rejection and
 // opens exactly one correction identity under the same manifest/prefix.
-func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID string, expected runtimecontract.RuntimeExpectedDocumentContract, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID string, expected runtimecontract.RuntimeExpectedDocumentContract, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
 	stablePrefixHash = strings.TrimSpace(stablePrefixHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
 	if stablePrefixHash == "" || logicalRequestID == "" {
@@ -1425,7 +1258,11 @@ func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, w
 	if err := rejection.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Manifest == nil {
 			return false, fmt.Errorf("%w: semantic correction has no sealed manifest", common.ErrConflict)
 		}
@@ -1459,7 +1296,11 @@ func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, w
 		ledger.CorrectionDirective = &value
 		ledger.Rejections = append(ledger.Rejections, *rejection.CloneOriginal())
 		return true, nil
-	})
+	}(transaction.aggregate, &transaction.ledger)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
 func validateSemanticPlanCorrectionScope(ledger runtimecontract.RuntimeSemanticPlanningLedger, directive runtimecontract.RuntimeSemanticCorrectionDirective) error {
@@ -1506,99 +1347,6 @@ func validateSemanticPlanCorrectionScope(ledger runtimecontract.RuntimeSemanticP
 // compiles binding/focus/reconciliation values from the persisted document and
 // complete owner batch inside the same CAS as the semantic ledger seal. No
 // caller may submit a binding hash or focus as external authority.
-func (c *RuntimeController) sealSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic seal scope mismatch", common.ErrConflict)
-	}
-	ledger := aggregate.SemanticPlanning.Clone()
-	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
-		if aggregate.Facts.ReconciliationContract.BindingSetHash != ledger.SealedBindingSetHash {
-			return RuntimeAggregate{}, fmt.Errorf("%w: sealed semantic ledger and reconciliation contract differ", common.ErrConflict)
-		}
-		return aggregate, nil
-	}
-	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ledger.Manifest == nil || ledger.Document == nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract is not seal-ready", common.ErrConflict)
-	}
-	if aggregate.ActiveDispatch != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot seal while a dispatch is active", common.ErrConflict)
-	}
-	sourceFocuses := aggregate.Facts.DefinitionFocuses
-	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, *ledger.Document, ledger.Feasibilities, sourceFocuses)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	pendingFocuses, err := semanticPendingFocuses(aggregate.Facts, ledger.PendingCoverageIDs, focuses)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	sealedFacts, err := sealRuntimeCWIBindings(aggregate.Facts, ledger.Manifest.Hash, focuses, pendingFocuses)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	reconciliation, err := canonicalRuntimeCWIReconciliationContract(sealedFacts)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	coverageOrderHash := runtimecontract.StableRuntimeSemanticPlanCoverageOrderHash(*ledger.CoverageOrderDocument)
-	lineage := []string{ledger.Manifest.Hash, coverageOrderHash, ledger.DocumentHash, ledger.FeasibilityBatchID, ledger.FeasibilitySetHash, reconciliation.BindingSetHash}
-	ledger.Phase = runtimecontract.RuntimeSemanticPlanningSealed
-	ledger.SealedBindingSetHash = reconciliation.BindingSetHash
-	ledger.SealedLineageRefs = lineage
-	if err := ledger.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	expectedRevision := aggregate.StateRevision
-	aggregate.SemanticPlanning = ledger
-	aggregate.Facts = sealedFacts
-	aggregate.Facts.Capabilities = runtimeCapabilitiesWithSemanticProofs(aggregate.Facts.Capabilities, focuses)
-	aggregate.Facts.ReconciliationContract = reconciliation
-	if _, err := supersedeActiveReconciliationForCurrentContract(&aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts.RepairDirective = nil
-	aggregate.Facts.Feasibility = nil
-	aggregate.Facts.Failure = nil
-	aggregate.Facts = aggregate.Facts.Normalized()
-	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	previousFocusID := aggregate.Facts.Focus.ID
-	advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
-	if advanceErr != nil {
-		return RuntimeAggregate{}, advanceErr
-	}
-	aggregate.Facts = advanced
-	if aggregate.Facts.Focus.ID != previousFocusID {
-		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
-			return RuntimeAggregate{}, err
-		}
-	}
-	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// semanticPendingFocuses keeps unsealed CWI as inert, deterministic focus
-// placeholders.  They remain visible in the Run aggregate but have no proof
-// binding and therefore cannot pass SM-3.  A later Orchestrator-only semantic
-// transaction replaces each placeholder with its matching sealed focus.
 func semanticPendingFocuses(facts runtimecontract.RuntimeFacts, pending []common.CoverageWorkItemID, sealed []runtimecontract.CoverageFocus) ([]runtimecontract.CoverageFocus, error) {
 	sealedCoverage := make(map[common.CoverageWorkItemID]struct{})
 	for _, focus := range sealed {
@@ -1762,61 +1510,6 @@ func runtimeCapabilitiesWithSemanticProofs(capabilities runtimecontract.RuntimeC
 
 // failSemanticContract is the only semantic terminal transition. It preserves
 // the producer-authored diagnostic and never creates governance work.
-func (c *RuntimeController) failSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, terminalCode string, failure runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
-	if err := failure.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic failure scope mismatch", common.ErrConflict)
-	}
-	ledger := aggregate.SemanticPlanning.Clone()
-	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed && ledger.Failure != nil && ledger.Failure.Signature == failure.Signature && ledger.Failure.OriginalCode == failure.OriginalCode && ledger.Failure.OriginalMessage == failure.OriginalMessage {
-		return aggregate, nil
-	}
-	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed || ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
-		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot fail from phase %q", common.ErrConflict, ledger.Phase)
-	}
-	ledger.Phase = runtimecontract.RuntimeSemanticPlanningFailed
-	ledger.Failure = failure.CloneOriginal()
-	if err := ledger.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	expectedRevision := aggregate.StateRevision
-	aggregate.SemanticPlanning = ledger
-	aggregate.Facts.Failure = &runtimecontract.FailureFact{
-		Class:              semanticFailureClassForFailureCode(terminalCode, failure),
-		Code:               "semantic_contract_failed",
-		Signature:          failure.Signature,
-		Message:            failure.OriginalMessage,
-		OriginalDiagnostic: failure.CloneOriginal(),
-	}
-	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "semantic_contract_failed" {
-		return RuntimeAggregate{}, fmt.Errorf("runtime semantic failure did not seal a terminal decision")
-	}
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
-// semanticFailureClass preserves the historical code-only helper for tests and
-// owner-local callers.  Production terminalization uses the full diagnostic so
-// provider/owner classes are not erased when a semantic contract is sealed.
 func semanticFailureClass(code string) runtimecontract.FailureClass {
 	return semanticFailureClassForDiagnostic(runtimecontract.RuntimeOriginalDiagnostic{OriginalCode: code})
 }

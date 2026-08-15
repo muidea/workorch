@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -44,12 +43,4 @@ func ReadRunStatusFromEnv(ctx context.Context, runID string) (projectioncontract
 	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.RunStatus, error) {
 		return ReadRunStatusWithSession(ctx, session, runID)
 	})
-}
-
-func RunStatusFromSnapshot(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunStatus {
-	return readmodelports.RunStatusFromSnapshot(snapshot)
-}
-
-func RunObservabilityFromSnapshot(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunObservabilityState {
-	return readmodelports.RunObservabilityFromSnapshot(snapshot)
 }

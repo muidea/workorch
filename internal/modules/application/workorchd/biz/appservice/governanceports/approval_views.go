@@ -27,7 +27,7 @@ func ApprovalViewForItem(ctx context.Context, traces governancecore.AutoGovernan
 	if err != nil {
 		return workorchprojectioncontract.Approval{}, err
 	}
-	return readmodelprojection.MapApproval(item, autoGovernance), nil
+	return readmodelprojection.GovernanceProjection().MapApproval(item, autoGovernance), nil
 }
 
 func ApprovalViewsForQuery(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, workspaceID string, runID string) ([]workorchprojectioncontract.Approval, error) {

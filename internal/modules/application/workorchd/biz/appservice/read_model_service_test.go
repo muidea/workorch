@@ -69,7 +69,7 @@ func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.Run
 }
 
 func TestProjectStepOutputKeepsMCPStructuredEvidence(t *testing.T) {
-	output := readmodelprojection.ProjectStepOutput("mcp/tool_call", map[string]any{
+	output := readmodelprojection.RunProjection().StepOutput("mcp/tool_call", map[string]any{
 		"operation": "mcp/tool_call",
 		"serverId":  "mcp-stdio",
 		"tool":      "repo.summary",
@@ -341,7 +341,7 @@ func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *t
 }
 
 func TestMapGitOperationTracesProjectsStructuredOutput(t *testing.T) {
-	traces := readmodelprojection.MapGitOperationTraces([]projectioncontract.StepView{
+	traces := readmodelprojection.ActivityProjection().GitOperationTraces([]projectioncontract.StepView{
 		{
 			ID:   "step-git-commit",
 			Kind: gitcommon.StepKindWrite,
@@ -551,7 +551,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 		})
 	}
 
-	projected := ProjectRunSnapshotDetail(snapshot)
+	projected := readmodelprojection.RunProjection().Detail(snapshot)
 
 	if projected.Step == nil || projected.Step.Input != nil || projected.Step.Output["rawOutput"] != nil || projected.Step.Output["summary"] != "kept" {
 		t.Fatalf("current step projection = %+v, want raw input/output omitted and summary kept", projected.Step)
@@ -1545,7 +1545,7 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 			},
 		},
 	}
-	quality := readmodelprojection.MapResultQuality(snapshot)
+	quality := readmodelprojection.RunProjection().ResultQuality(snapshot)
 	if len(quality) != 1 {
 		t.Fatalf("result quality = %+v, want one trace", quality)
 	}
@@ -1607,7 +1607,7 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 			},
 		},
 	}
-	quality := readmodelprojection.MapResultQuality(snapshot)
+	quality := readmodelprojection.RunProjection().ResultQuality(snapshot)
 	if len(quality) != 1 {
 		t.Fatalf("result quality = %+v, want one trace", quality)
 	}
@@ -1756,7 +1756,7 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 		}},
 	}
 
-	observability := readmodelprojection.MapRunObservability(snapshot)
+	observability := readmodelprojection.RunProjection().Observability(snapshot)
 
 	if observability.TaskProgress.Summary != "cached task progress" {
 		t.Fatalf("task progress = %+v, want cached projection", observability.TaskProgress)
@@ -1773,7 +1773,7 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 }
 
 func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
-	items := readmodelprojection.MapWebSourceTraces([]projectioncontract.StepView{
+	items := readmodelprojection.ActivityProjection().WebSourceTraces([]projectioncontract.StepView{
 		{
 			ID:    "run-web/step-search",
 			Kind:  webcommon.StepKindSearch,
@@ -1826,7 +1826,7 @@ func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
 		items[1].ApprovalID != "approval-web" {
 		t.Fatalf("fetch trace = %+v, want normalized fetched source", items[1])
 	}
-	observability := readmodelprojection.MapRunObservability(readmodelcore.RunSnapshotState{
+	observability := readmodelprojection.RunProjection().Observability(readmodelcore.RunSnapshotState{
 		Run:        appmodelcore.Run{ID: "run-web", WorkspaceID: "ws-web"},
 		WebSources: items,
 	})
@@ -1889,7 +1889,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 		}},
 	}
 
-	observability := readmodelprojection.MapRunObservability(snapshot)
+	observability := readmodelprojection.RunProjection().Observability(snapshot)
 
 	if observability.Evidence.EventTotal != 1 || len(observability.WebSources) != 1 {
 		t.Fatalf("observability = %+v, want event count and web source projection", observability)
@@ -1961,7 +1961,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 			},
 		},
 	}
-	traces := readmodelprojection.MapLLMContextBudgetTraces(steps)
+	traces := readmodelprojection.ActivityProjection().LLMContextBudgetTraces(steps)
 	if len(traces) != 1 {
 		t.Fatalf("traces = %+v, want one llm context budget trace", traces)
 	}
@@ -1983,7 +1983,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		contextWindowTokens != 200000 {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}
-	observability := readmodelprojection.MapRunObservability(readmodelcore.RunSnapshotState{
+	observability := readmodelprojection.RunProjection().Observability(readmodelcore.RunSnapshotState{
 		Run:               appmodelcore.Run{ID: "run-ctx", WorkspaceID: "ws-ctx"},
 		LLMContextBudgets: traces,
 	})
@@ -2011,9 +2011,9 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 		},
 	}
 
-	bundle := readmodelprojection.MapRunContextBundle(snapshot)
-	compressed := readmodelprojection.CompressedContextFromLocalizedRunSnapshot(snapshot)
-	progress := readmodelprojection.RunSnapshotTaskProgress(snapshot)
+	bundle := readmodelprojection.ContextProjection().RunBundle(snapshot)
+	compressed := readmodelprojection.ContextProjection().CompressedRunContext(snapshot)
+	progress := readmodelprojection.RunProjection().TaskProgress(snapshot)
 
 	if bundle.TaskProgress.Summary != "cached progress reused" || bundle.Recovery.Mode != "complete" {
 		t.Fatalf("bundle progress/recovery = %+v/%+v, want cached task progress", bundle.TaskProgress, bundle.Recovery)
@@ -2043,8 +2043,8 @@ func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
 		}},
 	}
 
-	progress := readmodelprojection.RunSnapshotTaskProgress(snapshot)
-	decompositions := readmodelprojection.RunSnapshotTaskDecompositions(snapshot)
+	progress := readmodelprojection.RunProjection().TaskProgress(snapshot)
+	decompositions := readmodelprojection.RunProjection().TaskDecompositions(snapshot)
 
 	if progress.Summary != "cached derived progress" {
 		t.Fatalf("progress = %+v, want cached snapshot progress", progress)
@@ -2189,7 +2189,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 	workspaceID := common.WorkspaceID("ws-stream-blocked-timeline")
 	runID := common.RunID("run-stream-blocked-timeline")
 	stepID := "run-stream-blocked-timeline/zz-llm-repair-step"
-	timeline := readmodelprojection.RuntimeTimeline(readmodelcore.RunSnapshotState{
+	timeline := readmodelprojection.ActivityProjection().Timeline(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:          string(runID),
 			WorkspaceID: string(workspaceID),
@@ -2250,7 +2250,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 
 func TestRuntimeTimelineUsesStreamDiagnosticsWhenRawEventsAreRefOnly(t *testing.T) {
 	stepID := "run-stream-diagnostics/llm-1"
-	timeline := readmodelprojection.RuntimeTimeline(readmodelcore.RunSnapshotState{
+	timeline := readmodelprojection.ActivityProjection().Timeline(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: "run-stream-diagnostics", WorkspaceID: "ws-stream-diagnostics", State: string(common.RunStateActive)},
 		Steps: []projectioncontract.StepView{{
 			ID:    stepID,
@@ -2293,7 +2293,7 @@ func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 			"delta": "chunk-" + strconv.Itoa(idx+1),
 		})
 	}
-	timeline := readmodelprojection.RuntimeTimeline(readmodelcore.RunSnapshotState{
+	timeline := readmodelprojection.ActivityProjection().Timeline(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: "run-large-stream", WorkspaceID: "ws-large-stream", State: string(common.RunStateActive)},
 		Steps: []projectioncontract.StepView{{
 			ID:    stepID,
@@ -2497,7 +2497,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		},
 	}
 
-	traces := readmodelprojection.MapLLMUsageTracesFromEventRecords(records, "run-1")
+	traces := readmodelprojection.ActivityProjection().LLMUsageTracesFromRecords(records, "run-1")
 	if len(traces) != 2 {
 		t.Fatalf("llm usage traces length = %d, want 2", len(traces))
 	}
@@ -2514,7 +2514,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		t.Fatalf("trace[1].CacheUsage = %+v, want provider cache usage", traces[1].CacheUsage)
 	}
 
-	summary := readmodelprojection.SummarizeLLMUsage(traces)
+	summary := readmodelprojection.ActivityProjection().LLMUsageSummary(traces)
 	if summary.EntryTotal != 2 ||
 		summary.EstimatedEntries != 1 ||
 		summary.ProviderNativeEntries != 1 {
@@ -2568,7 +2568,7 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 		}),
 	}}
 
-	projected := readmodelprojection.MapProjectedEventRecords(items)
+	projected := readmodelprojection.ActivityProjection().ProjectedEventRecords(items)
 
 	if len(projected) != 1 {
 		t.Fatalf("projected = %+v, want one event", projected)
@@ -2616,7 +2616,7 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 		}),
 	}}
 
-	mapped := readmodelprojection.MapEventRecords(items)
+	mapped := readmodelprojection.ActivityProjection().EventRecords(items)
 
 	if len(mapped) != 1 {
 		t.Fatalf("mapped = %+v, want one event", mapped)
@@ -2634,7 +2634,7 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 }
 
 func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) {
-	summary := readmodelprojection.SummarizeLLMUsage([]projectioncontract.LLMUsageTrace{
+	summary := readmodelprojection.ActivityProjection().LLMUsageSummary([]projectioncontract.LLMUsageTrace{
 		{
 			ProviderID:   "provider-a",
 			Provider:     "compatible",
@@ -2859,7 +2859,7 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 		},
 	}
 
-	progress := readmodelprojection.MapLocalizedTaskProgress(snapshot)
+	progress := readmodelprojection.ContextProjection().LocalizedTaskProgress(snapshot)
 	if progress.RepairLoop.State != "repairing" ||
 		progress.RepairLoop.AttemptCount != 2 ||
 		progress.RepairLoop.LastAttempt != 2 ||
@@ -2933,7 +2933,7 @@ func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) 
 		},
 	}
 
-	progress := readmodelprojection.MapLocalizedTaskProgress(snapshot)
+	progress := readmodelprojection.ContextProjection().LocalizedTaskProgress(snapshot)
 	signals := progress.RepairLoop.StructuredFailureSignals
 	messages := readModelStringSliceValue(signals["messages"])
 	foundCurrentPatchMessage := false
@@ -3000,7 +3000,7 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 		},
 	}
 
-	progress := readmodelprojection.MapLocalizedTaskProgress(snapshot)
+	progress := readmodelprojection.ContextProjection().LocalizedTaskProgress(snapshot)
 	if progress.RepairLoop.State != "escalated_decision" ||
 		!progress.RepairLoop.Escalated ||
 		progress.RepairLoop.EscalationTicketID != "ticket-repair-exhausted" ||
@@ -3062,8 +3062,8 @@ func TestMapClosureTracesProjectsGraphLimitAssessmentAndMissingDoD(t *testing.T)
 		},
 	}
 
-	snapshot.ClosureTraces = readmodelprojection.MapClosureTraces(snapshot)
-	observability := readmodelprojection.MapRunObservability(snapshot)
+	snapshot.ClosureTraces = readmodelprojection.ActivityProjection().ClosureTraces(snapshot)
+	observability := readmodelprojection.RunProjection().Observability(snapshot)
 	if len(snapshot.ClosureTraces) != 2 {
 		t.Fatalf("closureTraces = %+v, want two traces", snapshot.ClosureTraces)
 	}
@@ -3181,7 +3181,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	if err != nil {
 		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
 	}
-	lightweight := readmodelprojection.CompressedContextFromLocalizedRunSnapshot(snapshot)
+	lightweight := readmodelprojection.ContextProjection().CompressedRunContext(snapshot)
 	wantLightweight := bundle.CompressedContext
 	lightweight.SourceSectionRefs = nil
 	wantLightweight.SourceSectionRefs = nil
@@ -3196,7 +3196,7 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	if err != nil {
 		t.Fatalf("readRunRecoverySnapshot: %v", err)
 	}
-	recoveryCompressed := readmodelprojection.CompressedContextFromLocalizedRunSnapshot(recoverySnapshot)
+	recoveryCompressed := readmodelprojection.ContextProjection().CompressedRunContext(recoverySnapshot)
 	wantRecoveryCompressed := bundle.CompressedContext
 	recoveryCompressed.SourceSectionRefs = nil
 	wantRecoveryCompressed.SourceSectionRefs = nil
@@ -4503,7 +4503,7 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.State != "accepted" || !outcome.Accepted || outcome.RunID != latestRunID || outcome.Summary != "latest accepted result" {
 		t.Fatalf("outcome = %+v, want latest accepted run despite stale task progress", outcome)
 	}
@@ -4546,7 +4546,7 @@ func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutco
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.RunID != "run-active" || outcome.State != string(common.RunStateActive) || outcome.Terminal || outcome.Accepted {
 		t.Fatalf("outcome = %+v, want active effective run instead of historical terminal outcome", outcome)
 	}
@@ -4586,7 +4586,7 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" || outcome.RunID != "" {
 		t.Fatalf("outcome = %+v, want no accepted terminal outcome after definition change", outcome)
 	}
@@ -4631,7 +4631,7 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		CoverageSummary: map[string]any{"open": 1, "failed": 1},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want running non-terminal outcome without accepted slice promotion", outcome)
 	}
@@ -4666,7 +4666,7 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.MapRunOutcome(snapshot)
+	outcome := readmodelprojection.RunProjection().Outcome(snapshot)
 	if outcome.Accepted || outcome.Terminal || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want running non-terminal run outcome without accepted slice promotion", outcome)
 	}
@@ -4699,10 +4699,10 @@ func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
 		},
 	}
 
-	if got := readmodelprojection.ResultProgressState(snapshot); got == "completed" {
+	if got := readmodelprojection.RunProjection().ResultProgressState(snapshot); got == "completed" {
 		t.Fatalf("ResultProgressState = %q, want non-completed for accepted slice on running run", got)
 	}
-	if readmodelprojection.HasAcceptedRunResult(snapshot) {
+	if readmodelprojection.RunProjection().HasAcceptedResult(snapshot) {
 		t.Fatal("HasAcceptedRunResult = true, want false for accepted slice on running run")
 	}
 }
@@ -4730,7 +4730,7 @@ func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if !outcome.Accepted || !outcome.Terminal || outcome.State != "accepted" || outcome.ResultID != "run-final-accepted/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want final accepted terminal outcome", outcome)
 	}
@@ -4759,7 +4759,7 @@ func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.Accepted || !outcome.Terminal || outcome.State != "failed" || outcome.ResultID != "run-final-rejected/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want final rejected terminal outcome", outcome)
 	}
@@ -4822,7 +4822,7 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.RunID != "run-new" {
 		t.Fatalf("outcome runId = %q, want latest terminal result run", outcome.RunID)
 	}
@@ -4854,7 +4854,7 @@ func TestMapRunOutcomeKeepsSupersededRunFromStaleRejectedResult(t *testing.T) {
 		},
 	}
 
-	outcome := readmodelprojection.MapRunOutcome(snapshot)
+	outcome := readmodelprojection.RunProjection().Outcome(snapshot)
 	if outcome.State != string(common.RunStateSuperseded) || outcome.Accepted || outcome.ResultID != "" {
 		t.Fatalf("outcome = %+v, want superseded without stale rejected result", outcome)
 	}
@@ -4908,7 +4908,7 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.RunID != "run-latest-failed" || outcome.State != "failed" || outcome.Accepted {
 		t.Fatalf("outcome = %+v, want latest failed run event over historical accepted result", outcome)
 	}
@@ -4956,7 +4956,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.RunID != "run-001-replan-001" || outcome.State != "failed" || outcome.Reason != "stuck running run recovered" {
 		t.Fatalf("outcome = %+v, want failed replacement run over newer superseded marker", outcome)
 	}
@@ -4993,7 +4993,7 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.RunID != "run-001-replan-001" || outcome.State != "failed" || outcome.Reason != "replacement failed" {
 		t.Fatalf("outcome = %+v, want replacement failed run when event page only has superseded run", outcome)
 	}
@@ -5050,7 +5050,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 		},
 	}
 
-	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	outcome := readmodelprojection.WorkspaceProjection().Outcome(snapshot)
 	if outcome.RunID != "run-current-failed" || outcome.ResultID != "run-current-failed/result/dod-assessment" {
 		t.Fatalf("outcome = %+v, want newer terminal result over stale run event", outcome)
 	}

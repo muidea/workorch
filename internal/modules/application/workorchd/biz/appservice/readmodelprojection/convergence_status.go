@@ -9,7 +9,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectioncontract.ConvergenceStatus {
+func mapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectioncontract.ConvergenceStatus {
 	ret := projectioncontract.ConvergenceStatus{
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		RunID:       snapshot.Run.ID,
@@ -146,7 +146,7 @@ func convergenceDecisionCause(status projectioncontract.ConvergenceStatus) strin
 	return "governance_required"
 }
 
-func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshotState) *projectioncontract.ConvergenceStatus {
+func mapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshotState) *projectioncontract.ConvergenceStatus {
 	run := appmodelcore.Run{}
 	if snapshot.Run != nil {
 		run = *snapshot.Run
@@ -175,7 +175,7 @@ func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshotState
 		TaskProgress: snapshot.TaskProgress,
 		Steps:        nil,
 	}
-	ret := MapConvergenceStatus(runSnapshot)
+	ret := mapConvergenceStatus(runSnapshot)
 	if ret != nil {
 		ret.LatestEffectiveProgressAt = snapshot.RunHeartbeat.LatestEffectiveProgressAt
 		ret.LastProgressAt = firstNonEmptyString(snapshot.RunHeartbeat.LatestEffectiveProgressAt, ret.LastProgressAt)

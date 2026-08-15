@@ -13,7 +13,7 @@ import (
 // scheduleDriveLease records the only durable authority that may later cause
 // an SM-4 recovery drive. A duplicate for the same aggregate revision and
 // failure signature is a pure read: it must not create another timer chain.
-func (c *RuntimeController) scheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
+func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument
 	}
@@ -55,7 +55,7 @@ func (c *RuntimeController) scheduleDriveLease(ctx context.Context, workspaceID 
 // claimDriveLease consumes a due persisted schedule. A timer never creates a
 // retry: it may only move the exact lease it was given from scheduled to
 // running. A stale or early timer performs no drive and no side effect.
-func (c *RuntimeController) claimDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease, now string) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
+func (c *driveDeliveryComponent) claimDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease, now string) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument
 	}
@@ -110,7 +110,7 @@ func (c *RuntimeController) claimDriveLease(ctx context.Context, workspaceID com
 
 // releaseDriveLease clears the running lease after its drive returned. It is
 // generation-fenced, so an old worker cannot remove a newer retry schedule.
-func (c *RuntimeController) releaseDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, generation uint64) (RuntimeAggregate, bool, error) {
+func (c *driveDeliveryComponent) releaseDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, generation uint64) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || generation == 0 {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
@@ -136,7 +136,7 @@ func (c *RuntimeController) releaseDriveLease(ctx context.Context, workspaceID c
 // recoverDriveLease converts an interrupted running lease into a new scheduled
 // generation. It is called only by startup recovery after the aggregate was
 // loaded; a live timer never guesses this transition.
-func (c *RuntimeController) recoverDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dueAt string) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
+func (c *driveDeliveryComponent) recoverDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dueAt string) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dueAt) == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument
 	}

@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *projectioncontract.AutoGovernanceSummary) projectioncontract.Decision {
+func mapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *projectioncontract.AutoGovernanceSummary) projectioncontract.Decision {
 	if item == nil {
 		return projectioncontract.Decision{}
 	}

@@ -41,7 +41,7 @@ func DecisionsForRun(ctx context.Context, tickets readmodelcore.DecisionTicketRe
 		if err != nil {
 			return RunDecisions{}, err
 		}
-		ret.Items = append(ret.Items, readmodelprojection.MapDecision(item, resolution, summary))
+		ret.Items = append(ret.Items, readmodelprojection.GovernanceProjection().MapDecision(item, resolution, summary))
 		if run.BlockingTicketID != "" && item.ID == run.BlockingTicketID {
 			ret.SelectedTicket = item
 			ret.SelectedResolution = resolution
@@ -69,7 +69,7 @@ func DecisionsForWorkspaceItems(ctx context.Context, resolutions readmodelcore.D
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, readmodelprojection.MapDecision(item, resolved[decisionResolutionMapKey(item)], summary))
+		ret = append(ret, readmodelprojection.GovernanceProjection().MapDecision(item, resolved[decisionResolutionMapKey(item)], summary))
 	}
 	return ret, nil
 }

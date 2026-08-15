@@ -26,7 +26,7 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 			{ID: "run-latest", WorkspaceID: "ws-1", CreatedAt: "2026-07-15T00:00:00Z"},
 		},
 	}
-	if got := SelectDisplayRunID(snapshot); got != "run-active" {
+	if got := selectDisplayRunID(snapshot); got != "run-active" {
 		t.Fatalf("active display run = %q, want run-active", got)
 	}
 
@@ -37,23 +37,23 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 		RunID: "run-blocker",
 		State: "open",
 	}}
-	if got := SelectDisplayRunID(snapshot); got != "run-blocker" {
+	if got := selectDisplayRunID(snapshot); got != "run-blocker" {
 		t.Fatalf("blocker display run = %q, want run-blocker", got)
 	}
 
 	snapshot.Workspace.BlockingTicketID = ""
 	snapshot.Decisions = nil
-	if got := SelectDisplayRunID(snapshot); got != "run-outcome" {
+	if got := selectDisplayRunID(snapshot); got != "run-outcome" {
 		t.Fatalf("outcome display run = %q, want run-outcome", got)
 	}
 
 	snapshot.Outcome.RunID = ""
-	if got := SelectDisplayRunID(snapshot); got != "run-progress" {
+	if got := selectDisplayRunID(snapshot); got != "run-progress" {
 		t.Fatalf("progress display run = %q, want run-progress", got)
 	}
 
 	snapshot.TaskProgress.RunID = ""
-	if got := SelectDisplayRunID(snapshot); got != "run-latest" {
+	if got := selectDisplayRunID(snapshot); got != "run-latest" {
 		t.Fatalf("latest display run = %q, want run-latest", got)
 	}
 }
@@ -97,9 +97,9 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 		},
 	}
 
-	content := BuildWorkspaceActivityFeedContent(snapshot)
-	committed := CommitActivityFeedTransaction(projectioncontract.WorkspaceActivityFeed{}, content, 17)
-	feed := PageWorkspaceActivityFeed(committed, 2, "")
+	content := buildWorkspaceActivityFeedContent(snapshot)
+	committed := commitActivityFeedTransaction(projectioncontract.WorkspaceActivityFeed{}, content, 17)
+	feed := pageWorkspaceActivityFeed(committed, 2, "")
 	if feed.WorkspaceID != "ws-activity" || feed.DisplayRunID != "run-1" {
 		t.Fatalf("feed scope = %+v", feed)
 	}
@@ -110,7 +110,7 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 		t.Fatalf("committed activity revision = %d, want transaction 17", committed.ActivityRevision)
 	}
 	// Unchanged content keeps previous revision.
-	again := CommitActivityFeedTransaction(committed, content, 18)
+	again := commitActivityFeedTransaction(committed, content, 18)
 	if again.ActivityRevision != 17 {
 		t.Fatalf("unchanged activity revision = %d, want keep 17", again.ActivityRevision)
 	}
@@ -122,7 +122,7 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 		t.Fatalf("items = %d, want 2", len(feed.Items))
 	}
 	// FR03: store-cap content itself uses Truncated=true with empty NextCursor.
-	// content from BuildWorkspaceActivityFeedContent is unbounded by page limit.
+	// Content from buildWorkspaceActivityFeedContent is unbounded by page limit.
 	if content.Truncated {
 		t.Fatalf("small content must not be store-cap truncated: %+v", content)
 	}
@@ -167,7 +167,7 @@ func TestCommitActivityFeedTransactionAppendsSameRunRuntimeProgress(t *testing.T
 			RuntimeStateRevision: 2,
 		}},
 	}
-	merged := CommitActivityFeedTransaction(previous, candidate, 5)
+	merged := commitActivityFeedTransaction(previous, candidate, 5)
 	if len(merged.Items) != 2 {
 		t.Fatalf("merged activity items = %d, want 2: %+v", len(merged.Items), merged.Items)
 	}
@@ -180,7 +180,7 @@ func TestCommitActivityFeedTransactionAppendsSameRunRuntimeProgress(t *testing.T
 	newRun := candidate
 	newRun.DisplayRunID = "run-2"
 	newRun.Items[0].RunID = "run-2"
-	reset := CommitActivityFeedTransaction(merged, newRun, 6)
+	reset := commitActivityFeedTransaction(merged, newRun, 6)
 	if len(reset.Items) != 1 || reset.Items[0].ID != "runtime-run-1-rev-2" {
 		t.Fatalf("new run should reset stream, got %+v", reset.Items)
 	}
@@ -222,7 +222,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 		},
 	}
 
-	view := ProjectWorkspaceRuntimeView(snapshot, 10, "")
+	view := projectWorkspaceRuntimeView(snapshot, 10, "")
 	if view.DisplayRunID != "run-runtime" || view.ActiveRunID != "run-runtime" {
 		t.Fatalf("ids = active=%q display=%q", view.ActiveRunID, view.DisplayRunID)
 	}
@@ -255,7 +255,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 		}},
 	}
 
-	view := ProjectWorkspaceRuntimeView(base, 10, "")
+	view := projectWorkspaceRuntimeView(base, 10, "")
 	if view.Acceptance.SemanticPlanning == nil || view.Acceptance.SemanticPlanning.RunID != "run-current" ||
 		view.Revision.RuntimeStateRevision != 12 {
 		t.Fatalf("current semantic planning/runtime revision = %+v/%+v", view.Acceptance.SemanticPlanning, view.Revision)
@@ -265,7 +265,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 	staleRun.Acceptance.SemanticPlanning = &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-stale", StateRevision: 12, State: "planning",
 	}
-	if got := ProjectWorkspaceRuntimeView(staleRun, 10, ""); got.Acceptance.SemanticPlanning != nil {
+	if got := projectWorkspaceRuntimeView(staleRun, 10, ""); got.Acceptance.SemanticPlanning != nil {
 		t.Fatalf("cross-run semantic planning survived projection: %+v", got.Acceptance.SemanticPlanning)
 	}
 
@@ -273,7 +273,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 	staleRevision.Acceptance.SemanticPlanning = &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 11, State: "planning",
 	}
-	if got := ProjectWorkspaceRuntimeView(staleRevision, 10, ""); got.Acceptance.SemanticPlanning != nil {
+	if got := projectWorkspaceRuntimeView(staleRevision, 10, ""); got.Acceptance.SemanticPlanning != nil {
 		t.Fatalf("cross-revision semantic planning survived projection: %+v", got.Acceptance.SemanticPlanning)
 	}
 
@@ -282,7 +282,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 	withoutProgress.Acceptance.SemanticPlanning = &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 15, State: "planning",
 	}
-	got := ProjectWorkspaceRuntimeView(withoutProgress, 10, "")
+	got := projectWorkspaceRuntimeView(withoutProgress, 10, "")
 	if got.Acceptance.SemanticPlanning == nil || got.Revision.RuntimeStateRevision != 15 {
 		t.Fatalf("semantic planning did not establish missing runtime high-watermark: %+v/%+v", got.Acceptance.SemanticPlanning, got.Revision)
 	}
@@ -332,10 +332,10 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 func TestRuntimeProgressSummaryChangesWithRevision(t *testing.T) {
 	t.Parallel()
 
-	first := RuntimeProgressSummary(&projectioncontract.RuntimeProgress{
+	first := runtimeProgressSummary(&projectioncontract.RuntimeProgress{
 		StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
-	second := RuntimeProgressSummary(&projectioncontract.RuntimeProgress{
+	second := runtimeProgressSummary(&projectioncontract.RuntimeProgress{
 		StateRevision: 2, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
 	if first == "" || second == "" || first == second {
@@ -398,7 +398,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 	candidate.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), previous.LLMUsageTraces...)
 	candidate.LLMUsageTraces[0].TotalTokens = 42
 
-	sections := DiffWorkspaceProjectionSections(previous, candidate, "detail")
+	sections := diffWorkspaceProjectionSections(previous, candidate, "detail")
 	want := map[string]bool{
 		"governance": true,
 		"result":     true,
@@ -415,7 +415,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 	}
 
 	// Unchanged content must not mark sections via ChangeKind fallback.
-	unchanged := DiffWorkspaceProjectionSections(previous, previous, "detail")
+	unchanged := diffWorkspaceProjectionSections(previous, previous, "detail")
 	if len(unchanged) != 0 {
 		t.Fatalf("unchanged detail diff = %v, want empty (no ChangeKind fallback)", unchanged)
 	}
@@ -512,7 +512,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		Provider: "p2", Model: "m1", EntryTotal: 1, TotalTokens: 10,
 	}}
 
-	sections := DiffWorkspaceProjectionSections(previous, candidate, "detail")
+	sections := diffWorkspaceProjectionSections(previous, candidate, "detail")
 	want := map[string]bool{
 		"governance": true,
 		"result":     true,
@@ -622,12 +622,12 @@ func TestActivityFeedContentEqualIncludesTruncationBoundary(t *testing.T) {
 	}
 	capped := base
 	capped.Truncated = true
-	if ActivityFeedContentEqual(base, capped) {
+	if activityFeedContentEqual(base, capped) {
 		t.Fatal("Truncated change must break content equality")
 	}
 	// Empty NextCursor on both still differs only by Truncated.
 	capped.NextCursor = ""
-	if ActivityFeedContentEqual(base, capped) {
+	if activityFeedContentEqual(base, capped) {
 		t.Fatal("Truncated=true with empty cursor must still differ")
 	}
 }

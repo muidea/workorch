@@ -58,8 +58,7 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 			return
 		}
 		committed, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
-			Kind: runtime.RuntimeInternalEventOperationReceiptObserved, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
-			DispatchID: command.DispatchID, Fence: command.Fence, OperationReceipt: &command.Receipt,
+			Kind: runtime.RuntimeInternalEventOperationReceiptObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{DispatchID: command.DispatchID, Fence: command.Fence, OperationReceipt: &command.Receipt},
 		})
 		if err != nil {
 			result.Set(nil, runtimeOperationMagicFailure(err))

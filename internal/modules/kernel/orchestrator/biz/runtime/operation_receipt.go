@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -23,8 +24,8 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 			return runtimecontract.RuntimeOperationReceipt{}, false, err
 		}
 		execution := runtimecontract.RuntimeOperationExecutionRecord{ExecutionKey: executionKey, Fence: fence}
-		persisted := governanceGrantForExecution(aggregate, execution)
-		if persisted == nil || !runtimecontract.SameRuntimeOperationGovernanceGrant(*persisted, value) {
+		persisted := governancecheck.GrantForExecution(aggregate.OperationGovernanceBindings, execution)
+		if persisted == nil || !governancecheck.SameGrant(*persisted, value) {
 			return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: governance grant does not match persisted binding", common.ErrConflict)
 		}
 	}
@@ -41,7 +42,7 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	return receipt, true, nil
 }
 
-func (c *RuntimeController) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || fence == 0 {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}

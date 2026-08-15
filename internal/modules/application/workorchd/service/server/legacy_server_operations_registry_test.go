@@ -1,0 +1,214 @@
+package server
+
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+)
+
+// Soul/template/skill/MCP registry adapters are grouped here so registry
+// mutations do not get mixed with Runtime execution or read-model code.
+func (s *serverState) configureRegistryOperations(session *runtimecore.Session) {
+	s.createSoul = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
+		var ret workorchmanagementcontract.Soul
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.CreateSoulWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.updateSoul = func(ctx context.Context, _, _ string, soulID string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
+		var ret workorchmanagementcontract.Soul
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.UpdateSoulWithSession(ctx, session, soulID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.deleteSoul = func(ctx context.Context, _, _, soulID string) error {
+		return withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			return appservice.DeleteSoulWithSession(ctx, session, soulID)
+		})
+	}
+	s.deleteWorkspaceTemplate = func(ctx context.Context, _, _, templateID string) error {
+		return withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			return appservice.DeleteWorkspaceTemplateWithSession(ctx, session, templateID)
+		})
+	}
+	s.readSoul = func(ctx context.Context, _, _, soulID string) (workorchmanagementcontract.Soul, error) {
+		var ret workorchmanagementcontract.Soul
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ReadSoulWithSession(ctx, session, soulID)
+			return err
+		})
+		return ret, err
+	}
+	s.listSouls = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.Soul, error) {
+		var ret []workorchmanagementcontract.Soul
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListSoulsWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.createWorkspaceTemplate = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+		var ret workorchmanagementcontract.WorkspaceTemplate
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.CreateWorkspaceTemplateWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.updateWorkspaceTemplate = func(ctx context.Context, _, _ string, templateID string, cmd workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+		var ret workorchmanagementcontract.WorkspaceTemplate
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.UpdateWorkspaceTemplateWithSession(ctx, session, templateID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.listWorkspaceTemplates = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
+		var ret []workorchmanagementcontract.WorkspaceTemplate
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListWorkspaceTemplatesWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.createSkill = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.SkillMutation) (workorchmanagementcontract.Skill, error) {
+		var ret workorchmanagementcontract.Skill
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.CreateSkillWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readSkill = func(ctx context.Context, _, _, skillID string, query contextregistrycore.SkillQuery) (workorchmanagementcontract.Skill, error) {
+		var ret workorchmanagementcontract.Skill
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ReadSkillWithSession(ctx, session, skillID, query)
+			return err
+		})
+		return ret, err
+	}
+	s.listSkills = func(ctx context.Context, _, _ string, query contextregistrycore.SkillQuery) ([]workorchmanagementcontract.Skill, error) {
+		var ret []workorchmanagementcontract.Skill
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListSkillsWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+	s.createMCPServer = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
+		var ret workorchmanagementcontract.MCPServer
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.CreateMCPServerWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.updateMCPServer = func(ctx context.Context, _, _ string, serverID string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
+		var ret workorchmanagementcontract.MCPServer
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.UpdateMCPServerWithSession(ctx, session, serverID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readMCPServer = func(ctx context.Context, _, _, serverID string) (workorchmanagementcontract.MCPServer, error) {
+		var ret workorchmanagementcontract.MCPServer
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ReadMCPServerWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServers = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.MCPServer, error) {
+		var ret []workorchmanagementcontract.MCPServer
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListMCPServersWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServerTools = func(ctx context.Context, _, _, serverID string) ([]workorchmanagementcontract.MCPTool, error) {
+		var ret []workorchmanagementcontract.MCPTool
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListMCPServerToolsWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServerResources = func(ctx context.Context, _, _, serverID string) ([]workorchmanagementcontract.MCPResource, error) {
+		var ret []workorchmanagementcontract.MCPResource
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListMCPServerResourcesWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPServerPrompts = func(ctx context.Context, _, _, serverID string) ([]workorchmanagementcontract.MCPPrompt, error) {
+		var ret []workorchmanagementcontract.MCPPrompt
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListMCPServerPromptsWithSession(ctx, session, serverID)
+			return err
+		})
+		return ret, err
+	}
+	s.createMCPCapability = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
+		var ret workorchmanagementcontract.MCPCapability
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.CreateMCPCapabilityWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.updateMCPCapability = func(ctx context.Context, _, _, capabilityID string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
+		var ret workorchmanagementcontract.MCPCapability
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.UpdateMCPCapabilityWithSession(ctx, session, capabilityID, cmd)
+			return err
+		})
+		return ret, err
+	}
+	s.readMCPCapability = func(ctx context.Context, _, _, capabilityID string) (workorchmanagementcontract.MCPCapability, error) {
+		var ret workorchmanagementcontract.MCPCapability
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ReadMCPCapabilityWithSession(ctx, session, capabilityID)
+			return err
+		})
+		return ret, err
+	}
+	s.listMCPCapabilities = func(ctx context.Context, _, _ string, query contextregistrycore.MCPCapabilityQuery) ([]workorchmanagementcontract.MCPCapability, error) {
+		var ret []workorchmanagementcontract.MCPCapability
+		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListMCPCapabilitiesWithSession(ctx, session, query)
+			return err
+		})
+		return ret, err
+	}
+}

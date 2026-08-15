@@ -9,7 +9,7 @@ import (
 )
 
 func WorkspaceExecutionActivationSnapshot(workspace *workspacemodel.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceExecutionActivationState {
-	snapshot := readmodelprojection.ActivationSnapshot(workspace, run, goal, dod)
+	snapshot := readmodelprojection.WorkspaceProjection().Activation(workspace, run, goal, dod)
 	return readmodelcore.WorkspaceExecutionActivationState{
 		Workspace: snapshot.Workspace,
 		Run:       runtimecore.MapRun(run),

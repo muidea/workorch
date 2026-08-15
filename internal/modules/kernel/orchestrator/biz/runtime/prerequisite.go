@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/grounding"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -194,18 +195,7 @@ func ownerGroundedCreationTarget(facts runtimecontract.RuntimeFacts, target stri
 // pointer is not authority by itself: it can be historical audit lineage or a
 // malformed aggregate and must never skip a current acquisition.
 func currentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecontract.RuntimeTargetSelection {
-	facts = facts.Normalized()
-	if facts.Resources.TargetSelection == nil {
-		return nil
-	}
-	selection := facts.Resources.TargetSelection.Normalized()
-	for _, prerequisite := range facts.Prerequisites.Satisfied {
-		if prerequisite.ID == selection.PrerequisiteID && prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection &&
-			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == facts.Focus.ID {
-			return &selection
-		}
-	}
-	return nil
+	return grounding.CurrentFocusTargetSelection(facts)
 }
 
 func focusScopedRuntimeRequirement(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) runtimecontract.RuntimeRequirement {

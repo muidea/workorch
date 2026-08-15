@@ -27,11 +27,11 @@ func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
 		},
 	}
 
-	got := NormalizeWorkspaceGovernanceProjection(snapshot)
+	got := normalizeWorkspaceGovernanceProjection(snapshot)
 	if got.Workspace.State != string(common.WorkspaceStateActive) ||
 		got.Workspace.BlockingTicketID != "" ||
 		got.TaskProgress.BlockingTicketID != "" ||
-		WorkspacePromptMode(got) == "decision" {
+		workspacePromptMode(got) == "decision" {
 		t.Fatalf("normalized snapshot = %+v, want active workspace without decision prompt when ticket is not open", got)
 	}
 }
@@ -54,11 +54,11 @@ func TestNormalizeWorkspaceGovernanceRequiresPendingApproval(t *testing.T) {
 		},
 	}
 
-	got := NormalizeWorkspaceGovernanceProjection(snapshot)
+	got := normalizeWorkspaceGovernanceProjection(snapshot)
 	if got.Workspace.State == string(common.WorkspaceStateBlockedOnApproval) ||
 		got.Workspace.BlockingApprovalID != "" ||
 		got.TaskProgress.BlockingApprovalID != "" ||
-		WorkspacePromptMode(got) == "approval" {
+		workspacePromptMode(got) == "approval" {
 		t.Fatalf("normalized snapshot = %+v, want no blocked approval without pending approval", got)
 	}
 }
@@ -87,11 +87,11 @@ func TestProjectWorkspaceSnapshotSummaryKeepsBlockingDecision(t *testing.T) {
 		}},
 	}
 
-	got := ProjectWorkspaceSnapshotSummary(snapshot)
+	got := projectWorkspaceSnapshotSummary(snapshot)
 	if got.Workspace.State != string(common.WorkspaceStateActive) ||
 		got.Workspace.BlockingTicketID != "ticket-open" ||
-		WorkspacePromptMode(got) != "decision" {
-		t.Fatalf("summary governance = workspace:%+v mode=%s, want active decision prompt", got.Workspace, WorkspacePromptMode(got))
+		workspacePromptMode(got) != "decision" {
+		t.Fatalf("summary governance = workspace:%+v mode=%s, want active decision prompt", got.Workspace, workspacePromptMode(got))
 	}
 	if len(got.Decisions) != 1 || got.Decisions[0].ID != "ticket-open" {
 		t.Fatalf("summary decisions = %+v, want blocking decision retained", got.Decisions)

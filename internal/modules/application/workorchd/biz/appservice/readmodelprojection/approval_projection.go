@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapApproval(item *approvalmodel.Approval, autoGovernance *projectioncontract.AutoGovernanceSummary) projectioncontract.Approval {
+func mapApproval(item *approvalmodel.Approval, autoGovernance *projectioncontract.AutoGovernanceSummary) projectioncontract.Approval {
 	if item == nil {
 		return projectioncontract.Approval{}
 	}

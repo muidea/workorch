@@ -43,7 +43,7 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 	}
 	first := newRecord("audit-event-1", "2026-07-25T00:00:00Z")
 	later := newRecord("audit-event-2", "2026-07-25T00:00:01Z")
-	traces := MapLLMUsageTracesFromEventRecords([]projectioncontract.EventRecord{first, first, later}, "run-audit")
+	traces := mapLLMUsageTracesFromEventRecords([]projectioncontract.EventRecord{first, first, later}, "run-audit")
 	if len(traces) != 2 || traces[0].ID != "audit-event-1" || traces[1].ID != "audit-event-2" {
 		t.Fatalf("replayed audit traces=%+v", traces)
 	}

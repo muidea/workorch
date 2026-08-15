@@ -6,9 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
@@ -23,14 +21,21 @@ type WorkspaceRunScheduler interface {
 	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error)
 }
 
+func (s *serverState) enqueueWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error) {
+	if s == nil {
+		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrInvalidArgument
+	}
+	if s.workspaceExecutionAdmission != nil {
+		return s.workspaceExecutionAdmission.EnqueueWorkspaceExecution(ctx, topic, command)
+	}
+	return workorchdevents.WorkspaceRunRequestedCommand{}, fmt.Errorf("%w: workspace execution admission is not configured", common.ErrConflict)
+}
+
 func (s *serverState) updateWorkspaceLLMSelection(ctx context.Context, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
-	var ret appmodelcore.Workspace
-	err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
-		var err error
-		ret, err = appservice.UpdateWorkspaceLLMSelectionWithSession(ctx, session, workspaceID, selection, expectedRevision)
-		return err
-	})
-	return ret, err
+	if s != nil && s.updateWorkspaceLLMSelectionPort != nil {
+		return s.updateWorkspaceLLMSelectionPort(ctx, workspaceID, selection, expectedRevision)
+	}
+	return appmodelcore.Workspace{}, fmt.Errorf("%w: workspace LLM selection application port is not configured", common.ErrConflict)
 }
 
 func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
@@ -100,12 +105,23 @@ func firstNonEmptySchedulerString(values ...string) string {
 // prepareWorkspaceRunSchedulerCommand establishes one immutable request
 // correlation for HTTP, TUI and local EventHub scheduler entries.
 func prepareWorkspaceRunSchedulerCommand(topic string, command workorchdevents.WorkspaceRunRequestedCommand) workorchdevents.WorkspaceRunRequestedCommand {
+	return normalizeWorkspaceExecutionCommandAt(topic, command, time.Now().UTC())
+}
+
+// normalizeWorkspaceExecutionCommandAt establishes one immutable request
+// correlation using an explicit clock.  Keeping the clock outside the
+// normalizer makes request identity reproducible in the application use-case
+// tests without making time an authority input.
+func normalizeWorkspaceExecutionCommandAt(topic string, command workorchdevents.WorkspaceRunRequestedCommand, now time.Time) workorchdevents.WorkspaceRunRequestedCommand {
 	if strings.TrimSpace(command.RequestID) == "" {
+		if now.IsZero() {
+			now = time.Unix(0, 0).UTC()
+		}
 		parts := []string{
 			"workorchd",
 			schedulerKindFromTopic(topic),
 			strings.TrimSpace(string(command.WorkspaceID)),
-			fmt.Sprintf("%d", time.Now().UTC().UnixNano()),
+			fmt.Sprintf("%d", now.UTC().UnixNano()),
 		}
 		for idx, part := range parts {
 			if part == "" {
@@ -116,6 +132,13 @@ func prepareWorkspaceRunSchedulerCommand(topic string, command workorchdevents.W
 	}
 	command.Source = schedulerCommandSource(command.Source, "http")
 	return command
+}
+
+// NormalizeWorkspaceExecutionCommandAt is the deterministic variant used by
+// application-owned execution coordination.  It only fills request
+// identity/source and never selects an owner state transition.
+func NormalizeWorkspaceExecutionCommandAt(topic string, command workorchdevents.WorkspaceRunRequestedCommand, now time.Time) workorchdevents.WorkspaceRunRequestedCommand {
+	return normalizeWorkspaceExecutionCommandAt(topic, command, now)
 }
 
 func schedulerAcceptedHTTPBody(config Config, action string, command workorchdevents.WorkspaceRunRequestedCommand) map[string]any {
@@ -222,14 +245,14 @@ func schedulerSubjectID(topic string, command workorchdevents.WorkspaceRunReques
 }
 
 func (s *serverState) projectAcceptedSchedulerCommand(command workorchdevents.WorkspaceRunRequestedCommand) {
-	if s == nil || s.workspaceProjection == nil {
+	if s == nil {
 		return
 	}
 	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
 	if strings.TrimSpace(workspaceID) == "" {
 		return
 	}
-	s.workspaceProjection.ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
+	s.applyProjectedRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
 		WorkspaceID:    workspaceID,
 		RunID:          "",
 		Intent:         strings.TrimSpace(command.Intent),
@@ -245,7 +268,7 @@ func (s *serverState) projectAcceptedSchedulerCommand(command workorchdevents.Wo
 // disposition.  Queued is merely HTTP transport state; it is never evidence
 // that a Run was activated.
 func (s *serverState) projectOwnerSchedulerOutcome(command workorchdevents.WorkspaceRunRequestedCommand, outcome workorchdevents.WorkspaceRunRequestedResult) {
-	if s == nil || s.workspaceProjection == nil {
+	if s == nil {
 		return
 	}
 	workspaceID := strings.TrimSpace(string(outcome.WorkspaceID))
@@ -258,14 +281,14 @@ func (s *serverState) projectOwnerSchedulerOutcome(command workorchdevents.Works
 	disposition := string(outcome.Outcome)
 	diagnostic := runtimecontract.RuntimeExecutionIntentReasonSummary(outcome.Reason)
 	if outcome.Outcome == runtimecontract.RuntimeExecutionIntentReconciliationRequested || outcome.Outcome == runtimecontract.RuntimeExecutionIntentReplacementPending {
-		s.workspaceProjection.ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
+		s.applyProjectedRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
 			WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent,
 			Reason: command.Reason, Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
 			AcceptedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		return
 	}
-	s.workspaceProjection.ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
+	s.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
 		WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent,
 		Reason: command.Reason, Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
 		RejectedAt: time.Now().UTC().Format(time.RFC3339Nano), Error: diagnostic,
@@ -273,14 +296,14 @@ func (s *serverState) projectOwnerSchedulerOutcome(command workorchdevents.Works
 }
 
 func (s *serverState) projectQueuedSchedulerCommand(command workorchdevents.WorkspaceRunRequestedCommand) {
-	if s == nil || s.workspaceProjection == nil {
+	if s == nil {
 		return
 	}
 	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
 	if workspaceID == "" {
 		return
 	}
-	s.workspaceProjection.ApplyRunCommandQueued(workspaceviewcore.RunCommandQueuedUpdate{
+	s.applyProjectedRunCommandQueued(workspaceviewcore.RunCommandQueuedUpdate{
 		WorkspaceID:    workspaceID,
 		RunID:          "",
 		Intent:         strings.TrimSpace(command.Intent),
@@ -293,7 +316,7 @@ func (s *serverState) projectQueuedSchedulerCommand(command workorchdevents.Work
 }
 
 func (s *serverState) projectRejectedSchedulerCommand(command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
-	if s == nil || s.workspaceProjection == nil {
+	if s == nil {
 		return
 	}
 	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
@@ -304,7 +327,7 @@ func (s *serverState) projectRejectedSchedulerCommand(command workorchdevents.Wo
 	if cause != nil {
 		errText = cause.Error()
 	}
-	s.workspaceProjection.ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
+	s.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
 		WorkspaceID:    workspaceID,
 		RunID:          "",
 		Intent:         strings.TrimSpace(command.Intent),

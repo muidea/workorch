@@ -15,7 +15,7 @@ import (
 func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 	t.Parallel()
 
-	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
+	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
@@ -68,7 +68,7 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 func TestMapRunHeartbeatMarksLiveRunWithNoActivity(t *testing.T) {
 	t.Parallel()
 
-	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
+	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
@@ -82,7 +82,7 @@ func TestMapRunHeartbeatMarksLiveRunWithNoActivity(t *testing.T) {
 func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *testing.T) {
 	t.Parallel()
 
-	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
+	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
@@ -116,7 +116,7 @@ func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *test
 }
 
 func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testing.T) {
-	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
+	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs:      []appmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)}},
 		Acceptance: projectioncontract.AcceptanceProjection{Budget: &projectioncontract.ConvergenceBudget{
@@ -131,7 +131,7 @@ func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testin
 func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *testing.T) {
 	t.Parallel()
 
-	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
+	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision)},

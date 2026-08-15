@@ -8,7 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func MapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *runmodel.Run) appmodelcore.Workspace {
+func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *runmodel.Run) appmodelcore.Workspace {
 	ret := workspacecore.MapWorkspace(workspace)
 	if run == nil {
 		return ret
@@ -16,8 +16,8 @@ func MapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *run
 	if run.State == common.RunStatePending {
 		return ret
 	}
-	ret.State = string(WorkspaceProjectionState(run.State))
-	if IsTerminalProjectionRunState(run.State) {
+	ret.State = string(workspaceProjectionState(run.State))
+	if isTerminalProjectionRunState(run.State) {
 		ret.ActiveRunID = ""
 		ret.BlockingTicketID = ""
 		ret.BlockingApprovalID = ""

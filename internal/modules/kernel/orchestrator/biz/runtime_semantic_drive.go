@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/requestcontent"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -22,17 +24,13 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	case runtimecontract.RuntimeSemanticPlanningRequired:
 		if retirement, found := runtime.NextRuntimeCWIBindingRetirementFact(aggregate); found {
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind:        runtime.RuntimeInternalEventCWIBindingRetired,
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				CWIBindingRetirement: &retirement,
+				Kind: runtime.RuntimeInternalEventCWIBindingRetired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{CWIBindingRetirement: &retirement},
 			})
 			return updated.Aggregate, err
 		}
 		if gap, found := runtime.NextRuntimeSemanticCatalogScopeGap(aggregate); found {
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind:        runtime.RuntimeInternalEventSemanticCatalogScopeInvalidated,
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				SemanticCatalogScopeGap: &gap,
+				Kind: runtime.RuntimeInternalEventSemanticCatalogScopeInvalidated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticCatalogScopeGap: &gap},
 			})
 			return updated.Aggregate, err
 		}
@@ -50,11 +48,13 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 		if len(eligibleCoverage) == 0 {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_no_eligible_cwi", "semantic planning was requested without an eligible canonical CWI", nil)
 		}
-		manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
-			aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition,
-			aggregate.Facts.DefinitionSeed, aggregate.Facts.Activation.ExecutionContract,
-			aggregate.Facts.Resources.OperationAdmissibilities, eligibleCoverage,
-		)
+		manifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
+			Execution:        aggregate.Facts.Activation.ExecutionContract,
+			Admissibilities:  aggregate.Facts.Resources.OperationAdmissibilities,
+			EligibleCoverage: eligibleCoverage,
+		})
 		if err != nil {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
 		}
@@ -65,17 +65,14 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 			return runtime.RuntimeAggregate{}, err
 		}
 		started, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind:        runtime.RuntimeInternalEventSemanticPlanRequestStarted,
-			WorkspaceID: ensured.Facts.WorkspaceID, RunID: ensured.Facts.RunID,
-			SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: session.LogicalRequestID,
+			Kind: runtime.RuntimeInternalEventSemanticPlanRequestStarted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: ensured.Facts.WorkspaceID, RunID: ensured.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: session.LogicalRequestID},
 		})
 		return started.Aggregate, err
 	case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningOrderAccepted:
 		projected, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind: runtime.RuntimeInternalEventEligibleFocusProjected, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			SemanticOrderManifestHash: ledger.Manifest.Hash, SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), ledger.CoverageOrderDocument.CoverageOrder...),
+			Kind: runtime.RuntimeInternalEventEligibleFocusProjected, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticOrderManifestHash: ledger.Manifest.Hash, SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), ledger.CoverageOrderDocument.CoverageOrder...)},
 		})
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
@@ -88,7 +85,7 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	case runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted:
-		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticFeasibilityRequired, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID})
+		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticFeasibilityRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{}})
 		return updated.Aggregate, err
 	case runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete:
 		var activeBatch *runtimecontract.RuntimeSemanticPlanBatch
@@ -148,7 +145,7 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
-		sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticContractSealed, WorkspaceID: merged.Facts.WorkspaceID, RunID: merged.Facts.RunID})
+		sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: merged.Facts.WorkspaceID, RunID: merged.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{}})
 		return sealed.Aggregate, err
 	case runtimecontract.RuntimeSemanticPlanningFeasibilityRequired:
 		// Merge clears ActiveBatchID only after the accepted focus document and
@@ -157,8 +154,7 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 		// never fan out a second owner probe or reinterpret the merged document.
 		if ledger.ActiveBatchID == "" && ledger.MergedDocument != nil {
 			sealed, sealErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind:        runtime.RuntimeInternalEventSemanticContractSealed,
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 			})
 			return sealed.Aggregate, sealErr
 		}
@@ -171,13 +167,7 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 }
 
 func runtimeSemanticBatchDocument(values []runtimecontract.RuntimeSemanticPlanDocument, batchID string) (runtimecontract.RuntimeSemanticPlanDocument, bool) {
-	batchID = strings.TrimSpace(batchID)
-	for _, value := range values {
-		if value.BatchID == batchID {
-			return value.Clone(), true
-		}
-	}
-	return runtimecontract.RuntimeSemanticPlanDocument{}, false
+	return semanticplan.DocumentByBatchID(values, batchID)
 }
 
 func runtimeSemanticPrerequisitesPending(values []runtimecontract.RuntimePrerequisite) bool {
@@ -317,6 +307,13 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		value := ledger.CorrectionDirective.Clone()
 		correction = &value
 	}
+	if _, contentErr := requestcontent.BuildSemanticPlanRequestContent(requestcontent.SemanticPlanRequestInput{
+		Manifest: manifest, StablePrefixHash: ledger.StablePrefixHash, Attempt: ledger.Attempt,
+		PreviousRejection: previous, CorrectionDirective: correction,
+		RemainingRecoveryAttempt: expected.MaxRecoveryAttempts - ledger.Attempt,
+	}); contentErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_context_invalid", contentErr.Error(), nil)
+	}
 	preflight, err := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
@@ -433,9 +430,7 @@ func (m *Biz) compileRuntimeSemanticPlanBatch(ctx context.Context, aggregate run
 		return runtime.RuntimeAggregate{}, err
 	}
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticPlanBatchCompiled,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticPlanBatch: &batch,
+		Kind: runtime.RuntimeInternalEventSemanticPlanBatchCompiled, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticPlanBatch: &batch},
 	})
 	return result.Aggregate, err
 }
@@ -454,10 +449,8 @@ func (m *Biz) mergeRuntimeSemanticPlanFocusBatchDocument(ctx context.Context, ag
 		return runtime.RuntimeAggregate{}, err
 	}
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:                       runtime.RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
-		WorkspaceID:                aggregate.Facts.WorkspaceID,
-		RunID:                      aggregate.Facts.RunID,
-		SemanticPlanMergedDocument: &merged,
+		Kind: runtime.RuntimeInternalEventSemanticPlanBatchDocumentsMerged, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID,
+			RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticPlanMergedDocument: &merged},
 	})
 	return result.Aggregate, err
 }
@@ -467,9 +460,7 @@ func (m *Biz) advanceRuntimeSemanticPlanBatch(ctx context.Context, aggregate run
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic batch identity is empty", common.ErrInvalidArgument)
 	}
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticPlanBatchAdvanced,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticPlanBatch: &batch, SemanticPlanBatchNextState: next,
+		Kind: runtime.RuntimeInternalEventSemanticPlanBatchAdvanced, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticPlanBatch: &batch, SemanticPlanBatchNextState: next},
 	})
 	return result.Aggregate, err
 }
@@ -479,9 +470,7 @@ func (m *Biz) observeRuntimeSemanticPlanBatchFeasibility(ctx context.Context, ag
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic batch feasibility identity is empty", common.ErrInvalidArgument)
 	}
 	eventResult, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticPlanBatchFeasibilityObserved,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticPlanBatchFeasibilityResult: &result,
+		Kind: runtime.RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticPlanBatchFeasibilityResult: &result},
 	})
 	return eventResult.Aggregate, err
 }
@@ -499,9 +488,7 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	document, decodeErr := runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(*ledger.Manifest, payload)
 	if decodeErr == nil {
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind:        runtime.RuntimeInternalEventSemanticPlanEvaluated,
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			LogicalRequestID: session.LogicalRequestID, SemanticDocument: &document,
+			Kind: runtime.RuntimeInternalEventSemanticPlanEvaluated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, SemanticDocument: &document},
 		})
 		return updated.Aggregate, err
 	}
@@ -529,10 +516,8 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		return runtime.RuntimeAggregate{}, err
 	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticPlanCorrectionRequired,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: correctionSession.LogicalRequestID,
-		ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic,
+		Kind: runtime.RuntimeInternalEventSemanticPlanCorrectionRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: correctionSession.LogicalRequestID,
+			ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic},
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
@@ -575,9 +560,7 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_catalog_refresh_exhausted", fact.OriginalDiagnostic.OriginalMessage, fact.OriginalDiagnostic)
 			}
 			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind:        runtime.RuntimeInternalEventSemanticContractRequired,
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				SemanticBatchID: ledger.FeasibilityBatchID, SemanticRefreshGeneration: ledger.CatalogRefreshAttempts,
+				Kind: runtime.RuntimeInternalEventSemanticContractRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticBatchID: ledger.FeasibilityBatchID, SemanticRefreshGeneration: ledger.CatalogRefreshAttempts},
 			})
 			return updated.Aggregate, err
 		case runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired:
@@ -608,8 +591,7 @@ func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate run
 		return m.probeRuntimeSemanticProposal(ctx, aggregate, proposal)
 	}
 	sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticContractSealed,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
 	})
 	return sealed.Aggregate, err
 }
@@ -666,11 +648,9 @@ func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtim
 		// SM-2 event; do not send a nil observation to a capability owner and do
 		// not terminalize this as a generic runtime contract defect.
 		refreshed, refreshErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind:             runtime.RuntimeInternalEventSemanticCatalogInvalidated,
-			WorkspaceID:      aggregate.Facts.WorkspaceID,
-			RunID:            aggregate.Facts.RunID,
-			ManifestHash:     ledger.Manifest.Hash,
-			LogicalRequestID: ledger.LogicalRequestID,
+			Kind: runtime.RuntimeInternalEventSemanticCatalogInvalidated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID,
+				RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{ManifestHash: ledger.Manifest.Hash,
+				LogicalRequestID: ledger.LogicalRequestID},
 		})
 		return refreshed.Aggregate, refreshErr
 	}
@@ -683,9 +663,7 @@ func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtim
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_probe_invalid", err.Error(), nil)
 	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticFeasibilityObserved,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticBatchID: ledger.FeasibilityBatchID, SemanticFeasibility: &response.Observation,
+		Kind: runtime.RuntimeInternalEventSemanticFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticBatchID: ledger.FeasibilityBatchID, SemanticFeasibility: &response.Observation},
 	})
 	return updated.Aggregate, err
 }
@@ -746,9 +724,7 @@ func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventSemanticContractFailed,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		SemanticFailureCode: strings.TrimSpace(code), SemanticDiagnostic: &diagnostic,
+		Kind: runtime.RuntimeInternalEventSemanticContractFailed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticFailureCode: strings.TrimSpace(code), SemanticDiagnostic: &diagnostic},
 	})
 	return updated.Aggregate, err
 }

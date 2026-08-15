@@ -10,21 +10,19 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
+	executionusecase "github.com/muidea/workorch/internal/modules/application/workorchd/biz/execution"
+	projectioncomponent "github.com/muidea/workorch/internal/modules/application/workorchd/biz/projection"
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -35,8 +33,11 @@ const ModuleID = modulecommon.ModuleID
 type Biz struct {
 	basebiz.Base
 	service       *server.Service
-	session       *runtimecore.Session
+	runtime       *runtimeComponent
+	workspaceGate *workspaceCommandGateway
 	cliDispatcher *appservice.CLICommandDispatcher
+	execution     *executionusecase.UseCase
+	projection    *projectioncomponent.Component
 }
 
 func New() *Biz { return &Biz{} }
@@ -51,24 +52,31 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	}
 	b.Base = basebiz.New(ModuleID, commandHub, backgroundRoutine)
 	b.service = server.NewService(config)
-	session, sessionErr := appservice.NewRuntimeSessionFromCommandHub(b.EventHub(), b.BackgroundRoutine())
-	if sessionErr != nil {
+	runtime, runtimeErr := newRuntimeComponentFromCommandHub(b.EventHub(), b.BackgroundRoutine())
+	if runtimeErr != nil {
 		b.service = nil
-		return cd.NewError(cd.IllegalParam, sessionErr.Error())
+		return cd.NewError(cd.IllegalParam, runtimeErr.Error())
 	}
-	b.session = session
-	if err := b.service.Startup(ctx, modulecommon.ServiceName, b.session, b.BackgroundRoutine()); err != nil {
-		_ = b.session.Close(ctx)
-		b.session = nil
+	b.runtime = runtime
+	b.workspaceGate = &workspaceCommandGateway{hub: b.EventHub(), runtime: runtime}
+	applicationPorts := runtime.applicationPorts()
+	if err := b.service.StartupWithApplicationPorts(ctx, modulecommon.ServiceName, applicationPorts, b.BackgroundRoutine()); err != nil {
+		_ = b.runtime.close(ctx)
+		b.runtime = nil
+		b.workspaceGate = nil
 		b.service = nil
 		return err
 	}
-	b.service.SetWorkspaceRunScheduler(b)
-	b.service.SetServiceStoppedNotifier(b.publishServiceStopped)
-	b.service.SetWorkspaceProjectionEventPorts(workspaceviewcore.EventPorts{
+	b.projection = projectioncomponent.New(applicationProjectionLoader{config: config, ports: applicationPorts.Workspace}, b.BackgroundRoutine(), workspaceviewcore.EventPorts{
 		ReadHighWatermarks: b.readWorkspaceProjectionHighWatermarks,
 		PublishChanged:     b.publishWorkspaceProjectionChanged,
 	})
+	b.service.SetWorkspaceProjection(b.projection)
+	b.service.SetWorkspaceProjectionWriter(b.projection)
+	b.execution = executionusecase.New(b, executionProjection{projection: b.projection, transport: b.service}, b.BackgroundRoutine())
+	b.service.SetWorkspaceExecutionAdmission(b.execution)
+	b.service.SetWorkspaceRunScheduler(b)
+	b.service.SetServiceStoppedNotifier(b.publishServiceStopped)
 	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
 	b.SubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged)
 	b.SubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.NotificationDestination, runevents.TopicRunStateChanged, b.handleRunStateChanged)
@@ -85,16 +93,21 @@ func (b *Biz) publishServiceStopped(data workorchdevents.ServiceStoppedData) {
 }
 
 func (b *Biz) Start(ctx context.Context) *cd.Error {
-	if b == nil || b.service == nil || b.session == nil {
+	if b == nil || b.service == nil || !b.runtime.ready() || b.projection == nil {
 		return cd.NewError(cd.IllegalParam, "workorch module is not configured")
 	}
+	if err := b.projection.Start(ctx); err != nil {
+		return cd.NewError(cd.Unexpected, fmt.Sprintf("workspace projection start failed: %v", err))
+	}
 	if err := b.service.Run(ctx); err != nil {
+		b.projection.Close()
 		return cd.NewError(err.Code, fmt.Sprintf("workorch service run failed: %s", err.Message))
 	}
-	b.cliDispatcher = appservice.NewCLICommandDispatcher(b.session, b.EventHub(), b.service)
+	b.cliDispatcher = b.runtime.newCLICommandDispatcher(b.EventHub(), b.service)
 	if err := b.cliDispatcher.Run(); err != nil {
 		b.cliDispatcher = nil
 		b.service.Shutdown(ctx)
+		b.projection.Close()
 		return cd.NewError(cd.IllegalParam, fmt.Sprintf("workorch cli dispatcher run failed: %v", err))
 	}
 	return nil
@@ -113,13 +126,29 @@ func (b *Biz) Stop(ctx context.Context) {
 	b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
 	b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
 	b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
+	if b.execution != nil {
+		_ = b.execution.Close(ctx)
+		b.execution = nil
+	}
 	if b.service != nil {
 		b.service.Shutdown(ctx)
+		// Clear injected ports only after the HTTP server has stopped. During
+		// graceful shutdown an in-flight handler can still finish against the
+		// live projection, while the closed execution use case already fails
+		// closed for new admissions.
+		b.service.SetWorkspaceExecutionAdmission(nil)
+		b.service.SetWorkspaceProjection(nil)
+		b.service.SetWorkspaceProjectionWriter(nil)
 	}
-	if b.session != nil {
-		_ = b.session.Close(ctx)
-		b.session = nil
+	if b.projection != nil {
+		_ = b.projection.CloseContext(ctx)
 	}
+	b.projection = nil
+	if b.runtime != nil {
+		_ = b.runtime.close(ctx)
+		b.runtime = nil
+	}
+	b.workspaceGate = nil
 	b.service = nil
 }
 
@@ -147,6 +176,9 @@ func (b *Biz) handleRuntimeDriveObserved(event magicevent.Event, _ magicevent.Re
 	data, ok := event.Data().(orchestratorevents.RuntimeDriveObservedData)
 	if ok && event.Source() == "kernel/orchestrator" && data.Validate() == nil && b != nil && b.service != nil {
 		b.service.RecordRuntimeDriveObserved(event.Context(), data)
+		if b.projection != nil {
+			b.projection.HandleRuntimeDriveObserved(data)
+		}
 	}
 }
 
@@ -154,6 +186,9 @@ func (b *Biz) handleEventRecordAppended(event magicevent.Event, _ magicevent.Res
 	data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 	if ok && b != nil && b.service != nil {
 		b.service.RecordEventRecordAppended(event.Context(), data.Record)
+		if b.projection != nil {
+			_ = b.projection.HandleEventRecord(event.Context(), data.Record)
+		}
 	}
 }
 
@@ -197,59 +232,10 @@ func (b *Biz) publishWorkspaceProjectionChanged(ctx context.Context, data workor
 // Workspace/Run lifecycle transition. Both resume and restart are forwarded as
 // one typed Workspace-owner intent.
 func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
-	if b == nil || b.EventHub() == nil || b.session == nil {
-		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
+	if b == nil || b.workspaceGate == nil {
+		return workorchdevents.WorkspaceRunRequestedResult{}, errRuntimeComponentUnavailable
 	}
-	workspaceID := common.WorkspaceID(command.WorkspaceID)
-	if workspaceID == "" || command.RequestID == "" {
-		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
-	}
-	ctx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
-	if err != nil {
-		return workorchdevents.WorkspaceRunRequestedResult{}, err
-	}
-	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Priority: command.Priority}
-	switch command.Intent {
-	case "resume":
-		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
-	case "restart":
-		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
-		// The application owns the long-lived session.  The appservice
-		// *WithSession compiler closes the session it receives, so compile from
-		// a borrowed session and keep the owner session available for subsequent
-		// workspace intents and HTTP/TUI reads.
-		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, b.session.Borrow(), string(workspaceID), appmodelcore.ActivateWorkspaceExecutionCommand{})
-		if err != nil {
-			return workorchdevents.WorkspaceRunRequestedResult{}, err
-		}
-		intent.Bootstrap = bootstrap
-	default:
-		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
-	response := b.SendEvent(event)
-	if response == nil {
-		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
-	}
-	if err := response.Error(); err != nil {
-		if err.Cause != nil {
-			return workorchdevents.WorkspaceRunRequestedResult{}, err.Cause
-		}
-		return workorchdevents.WorkspaceRunRequestedResult{}, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return workorchdevents.WorkspaceRunRequestedResult{}, resultErr
-	}
-	result, ok := data.(workspaceevents.WorkspaceExecutionIntentResult)
-	if !ok || result.WorkspaceID != workspaceID || result.RequestID != command.RequestID || result.Kind != intent.Kind {
-		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
-	}
-	if err := result.Validate(); err != nil {
-		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: Workspace execution intent result: %v", common.ErrConflict, err)
-	}
-	return workorchdevents.WorkspaceRunRequestedResult(runtimecontract.RuntimeExecutionIntentAdmission(result)), nil
+	return b.workspaceGate.submit(ctx, command)
 }
 
 func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicevent.Result) {
@@ -260,7 +246,15 @@ func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicev
 		}
 		return
 	}
-	response, err := b.SubmitWorkspaceRun(event.Context(), command)
+	var (
+		response workorchdevents.WorkspaceRunRequestedResult
+		err      error
+	)
+	if b == nil || b.execution == nil {
+		err = fmt.Errorf("%w: workspace execution use case is not configured", common.ErrConflict)
+	} else {
+		response, err = b.execution.SubmitWorkspaceExecution(event.Context(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command)
+	}
 	if err != nil {
 		if result != nil {
 			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})

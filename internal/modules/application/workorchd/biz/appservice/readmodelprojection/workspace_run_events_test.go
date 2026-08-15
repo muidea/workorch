@@ -43,7 +43,7 @@ func TestSelectWorkspaceProjectionRunUsesLatestTerminalRunWhenWorkspaceHasNoActi
 		Payload:     mustWorkspaceRunEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 	}}
 
-	selected := SelectWorkspaceProjectionRun(workspace, runs, nil, eventRecords)
+	selected := selectWorkspaceProjectionRun(workspace, runs, nil, eventRecords)
 	if selected == nil || selected.ID != latestRunID {
 		t.Fatalf("selected run = %+v, want latest failed successor %s", selected, latestRunID)
 	}
@@ -84,7 +84,7 @@ func TestSelectLatestRunEventPrefersReplacementRunOverNewerSupersededMarker(t *t
 		},
 	}
 
-	selected := SelectLatestRunEvent(workspaceID, runs, records)
+	selected := selectLatestRunEvent(workspaceID, runs, records)
 	if selected == nil || selected.RunID != replacementRunID {
 		t.Fatalf("selected event = %+v, want replacement failed run", selected)
 	}
@@ -117,7 +117,7 @@ func TestSelectLatestRunEventReturnsNilWhenOnlySupersededRunEventsAreAvailableAn
 		},
 	}
 
-	if selected := SelectLatestRunEvent(workspaceID, runs, records); selected != nil {
+	if selected := selectLatestRunEvent(workspaceID, runs, records); selected != nil {
 		t.Fatalf("selected event = %+v, want nil so caller can fall back to replacement run", selected)
 	}
 }

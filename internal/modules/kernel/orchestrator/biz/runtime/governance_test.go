@@ -212,7 +212,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err := controller.recordOperationGovernanceRequired(context.Background(), "ws-v2", "run-v2", "write-1", RuntimeOperationExecutionResult{
+	next, err := controller.candidateDispatch.recordOperationGovernanceRequired(context.Background(), "ws-v2", "run-v2", "write-1", RuntimeOperationExecutionResult{
 		EventID: "gov-event-1", OperationID: "write-1", Receipt: committed, Governance: &requirement,
 	})
 	if err != nil {

@@ -31,7 +31,7 @@ func DecisionViewForTicket(ctx context.Context, hub magicevent.Hub, traces gover
 	if err != nil {
 		return workorchprojectioncontract.Decision{}, err
 	}
-	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
+	return readmodelprojection.GovernanceProjection().MapDecision(item, resolution, autoGovernance), nil
 }
 
 func DecisionViewsForQuery(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, workspaceID string, runID string) ([]workorchprojectioncontract.Decision, error) {

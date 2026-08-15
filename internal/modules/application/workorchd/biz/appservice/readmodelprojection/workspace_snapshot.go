@@ -6,30 +6,30 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcore.WorkspaceSnapshotState {
+func workspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcore.WorkspaceSnapshotState {
 	ret := readmodelcore.WorkspaceSnapshotState{
-		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.ProjectionRun),
+		Workspace:             mapWorkspaceWithRunProjection(input.Workspace, input.ProjectionRun),
 		Goals:                 definitioncore.MapGoals(input.Goals),
 		DoDs:                  definitioncore.MapDoDs(input.DoDs),
 		Runs:                  mapWorkspaceSnapshotRuns(input.Workspace, input.Runs),
-		Results:               MapResults(input.Results),
-		Artifacts:             MapArtifacts(input.Artifacts),
-		ArtifactContinuations: MapArtifactContinuations(input.ArtifactContinuations),
-		Patches:               MapPatches(input.Patches),
-		EventRecords:          MapProjectedEventRecords(input.EventRecords),
+		Results:               mapResults(input.Results),
+		Artifacts:             mapArtifacts(input.Artifacts),
+		ArtifactContinuations: mapArtifactContinuations(input.ArtifactContinuations),
+		Patches:               mapPatches(input.Patches),
+		EventRecords:          mapProjectedEventRecords(input.EventRecords),
 		Decisions:             input.Decisions,
 		Approvals:             input.Approvals,
 	}
-	ret.LLMUsageTraces = MapLLMUsageTracesFromEventRecords(MapEventRecords(input.LLMUsageEventRecords), "")
-	ret.LLMContextBudgetSummary = SummarizeLLMContextBudgets(ret.LLMContextBudgets)
-	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
-	ret.Acceptance = MapWorkspaceAcceptanceProjection(ret)
-	ret.TaskProgress = MapLocalizedWorkspaceTaskProgress(ret)
-	ret.Outcome = MapWorkspaceOutcome(ret)
+	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(mapEventRecords(input.LLMUsageEventRecords), "")
+	ret.LLMContextBudgetSummary = summarizeLLMContextBudgets(ret.LLMContextBudgets)
+	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
+	ret.Acceptance = mapWorkspaceAcceptanceProjection(ret)
+	ret.TaskProgress = mapLocalizedWorkspaceTaskProgress(ret)
+	ret.Outcome = mapWorkspaceOutcome(ret)
 	ret.Result = workspaceSnapshotResultByID(ret.Results, ret.Outcome.ResultID)
-	ret.RunHeartbeat = MapRunHeartbeat(ret)
-	ret.ConvergenceStatus = MapWorkspaceConvergenceStatus(ret)
-	ret = WorkspaceSnapshotWithContextBundle(ret)
+	ret.RunHeartbeat = mapRunHeartbeat(ret)
+	ret.ConvergenceStatus = mapWorkspaceConvergenceStatus(ret)
+	ret = workspaceSnapshotWithContextBundle(ret)
 	return ret
 }
 

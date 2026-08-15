@@ -24,14 +24,25 @@ func assertOwnerFeasibilityCategories(t *testing.T, wantCodes []string) {
 		t.Fatalf("owner feasibility registry size=%d want=%d", len(ownerFeasibilityCategories), len(wantCodes))
 	}
 	for _, code := range wantCodes {
-		category := ownerFeasibilityCategory(&runtimecontract.FailureFact{Code: code})
+		failure := &runtimecontract.FailureFact{Code: code}
+		category := ownerFeasibilityCategory(failure)
 		if !runtimecontract.ValidRuntimeOwnerFeasibilityCategory(category) || category == runtimecontract.RuntimeOwnerFeasibilityCategoryOwnerContractDefect {
 			t.Fatalf("declared code %q category=%q", code, category)
+		}
+		impact := ownerFeasibilityConstraintImpact(failure)
+		if code == "operation_target_exists" && impact != runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted {
+			t.Fatalf("existing-target code impact=%q", impact)
+		}
+		if code != "operation_target_exists" && impact != "" {
+			t.Fatalf("candidate-local code %q unexpectedly contradicted sealed target authorization: %q", code, impact)
 		}
 	}
 	for _, code := range []string{"", "shell_operation_invalid", "owner_new_unmapped_code"} {
 		if category := ownerFeasibilityCategory(&runtimecontract.FailureFact{Code: code}); category != runtimecontract.RuntimeOwnerFeasibilityCategoryOwnerContractDefect {
 			t.Fatalf("undeclared or cross-owner code %q category=%q, want owner contract defect", code, category)
 		}
+	}
+	if impact := ownerFeasibilityConstraintImpact(nil); impact != "" {
+		t.Fatalf("nil failure impact=%q", impact)
 	}
 }

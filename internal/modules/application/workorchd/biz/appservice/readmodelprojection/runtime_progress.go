@@ -7,12 +7,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRuntimeProgress(snapshot readmodelcore.RunSnapshotState) workorchprojectioncontract.RunProgress {
+func mapRunProgress(snapshot readmodelcore.RunSnapshotState) workorchprojectioncontract.RunProgress {
 	ret := workorchprojectioncontract.RunProgress{
 		State:     snapshot.Run.State,
 		StepTotal: len(snapshot.Steps),
 		Blocked:   snapshot.Run.BlockingTicketID != "" || snapshot.Run.BlockingApprovalID != "",
-		Terminal:  IsTerminalRunState(snapshot.Run.State),
+		Terminal:  isTerminalRunState(snapshot.Run.State),
 	}
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID

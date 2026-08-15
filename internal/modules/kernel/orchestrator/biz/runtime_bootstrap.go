@@ -35,12 +35,10 @@ func (m *Biz) initializeRuntimeFromRun(ctx context.Context, run *runmodel.Run) (
 		return runtime.RuntimeAggregate{}, err
 	}
 	applied, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:                   runtime.RuntimeInternalEventActivationObserved,
-		WorkspaceID:            run.WorkspaceID,
-		RunID:                  run.ID,
-		ActivationFacts:        &facts,
-		ActivationDefinition:   &bootstrap.Definition,
-		ActivationRequirements: append([]runtimecontract.RuntimeRequirement(nil), bootstrap.Requirements...),
+		Kind: runtime.RuntimeInternalEventActivationObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: run.WorkspaceID,
+			RunID: run.ID}, Activation: &runtime.RuntimeInternalActivationPayload{ActivationFacts: &facts,
+			ActivationDefinition:   &bootstrap.Definition,
+			ActivationRequirements: append([]runtimecontract.RuntimeRequirement(nil), bootstrap.Requirements...)},
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err

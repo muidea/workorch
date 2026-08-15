@@ -1,19 +1,24 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 )
 
 func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T) {
-	kinds, dispatched := runtimeInternalEventSourceFacts(t)
+	kinds, dispatched, sourcePayloadClasses := runtimeInternalEventSourceFacts(t)
 	seenValues := map[RuntimeInternalEventKind]string{}
 	for name, kind := range kinds {
 		if previous, exists := seenValues[kind]; exists {
@@ -36,16 +41,177 @@ func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T
 		if !dispatched[name] {
 			t.Fatalf("runtime internal fact %s is not handled by ApplyInternalEvent", name)
 		}
+		payloadClass, payloadClassified := runtimeInternalFactPayloadClass(kind)
+		if !payloadClassified {
+			t.Fatalf("runtime internal fact %s has no concrete payload classification", name)
+		}
+		if payloadClass != sourcePayloadClasses[name] {
+			t.Fatalf("runtime internal fact %s payload class = %s, want source class %s", name, payloadClass, sourcePayloadClasses[name])
+		}
 	}
-	if len(kinds) != len(dispatched) {
-		t.Fatalf("dispatcher/internal fact count mismatch: kinds=%d dispatched=%d", len(kinds), len(dispatched))
+	if len(kinds) != len(dispatched) || len(kinds) != len(sourcePayloadClasses) {
+		t.Fatalf("dispatcher/internal fact/payload count mismatch: kinds=%d dispatched=%d payloads=%d", len(kinds), len(dispatched), len(sourcePayloadClasses))
+	}
+}
+
+func TestRuntimeInternalEventEnvelopeContainsOnlyScopeAndConcretePayloads(t *testing.T) {
+	typeOfEvent := reflect.TypeOf(RuntimeInternalEvent{})
+	expected := []struct {
+		name   string
+		typeOf reflect.Type
+	}{
+		{name: "Kind", typeOf: reflect.TypeOf(RuntimeInternalEventKind(""))},
+		{name: "Scope", typeOf: reflect.TypeOf(RuntimeInternalEventScope{})},
+		{name: "Activation", typeOf: reflect.TypeOf((*RuntimeInternalActivationPayload)(nil))},
+		{name: "Authority", typeOf: reflect.TypeOf((*RuntimeInternalAuthorityPayload)(nil))},
+		{name: "Transaction", typeOf: reflect.TypeOf((*RuntimeInternalTransactionPayload)(nil))},
+		{name: "Delivery", typeOf: reflect.TypeOf((*RuntimeInternalDeliveryPayload)(nil))},
+	}
+	if typeOfEvent.NumField() != len(expected) {
+		t.Fatalf("RuntimeInternalEvent fields = %d, want %d narrow envelope fields", typeOfEvent.NumField(), len(expected))
+	}
+	for index, field := range expected {
+		actual := typeOfEvent.Field(index)
+		if actual.Name != field.name || actual.Type != field.typeOf {
+			t.Fatalf("RuntimeInternalEvent field[%d] = %s %s, want %s %s", index, actual.Name, actual.Type, field.name, field.typeOf)
+		}
+	}
+}
+
+type internalEventEnvelopeRepository struct {
+	loads int
+	saves int
+}
+
+func (r *internalEventEnvelopeRepository) Load(context.Context, common.WorkspaceID, common.RunID) (RuntimeAggregate, error) {
+	r.loads++
+	return RuntimeAggregate{}, common.ErrNotFound
+}
+
+func (r *internalEventEnvelopeRepository) Save(context.Context, RuntimeAggregate, uint64) error {
+	r.saves++
+	return nil
+}
+
+func TestRuntimeInternalEventEnvelopeRejectsMalformedPayloadBeforeLoadOrCAS(t *testing.T) {
+	repository := &internalEventEnvelopeRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := RuntimeInternalEventScope{WorkspaceID: "ws-envelope", RunID: "run-envelope"}
+	tests := []struct {
+		name  string
+		event RuntimeInternalEvent
+	}{
+		{
+			name:  "missing payload",
+			event: RuntimeInternalEvent{Kind: RuntimeInternalEventReconcileAuthority, Scope: scope},
+		},
+		{
+			name: "wrong payload",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventReconcileAuthority,
+				Scope:       scope,
+				Transaction: &RuntimeInternalTransactionPayload{},
+			},
+		},
+		{
+			name: "multiple payloads",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventReconcileAuthority,
+				Scope:       scope,
+				Authority:   &RuntimeInternalAuthorityPayload{},
+				Transaction: &RuntimeInternalTransactionPayload{},
+			},
+		},
+		{
+			name: "missing scope",
+			event: RuntimeInternalEvent{
+				Kind:      RuntimeInternalEventReconcileAuthority,
+				Authority: &RuntimeInternalAuthorityPayload{},
+			},
+		},
+		{
+			name: "unknown metadata",
+			event: RuntimeInternalEvent{
+				Kind:      RuntimeInternalEventKind("unknown"),
+				Scope:     scope,
+				Authority: &RuntimeInternalAuthorityPayload{},
+			},
+		},
+		{
+			name: "recovery authorization on non-dispatch transaction",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventCandidateRequestSubmitted,
+				Scope:       scope,
+				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: 1},
+			},
+		},
+		{
+			name: "partial recovery authorization identity",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventDispatchExecutionRequested,
+				Scope:       scope,
+				Transaction: &RuntimeInternalTransactionPayload{RecoveryBudgetAttempt: 1},
+			},
+		},
+		{
+			name: "partial recovery authorization attempt",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventDispatchExecutionRequested,
+				Scope:       scope,
+				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery"},
+			},
+		},
+		{
+			name: "blank recovery authorization identity",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventDispatchExecutionRequested,
+				Scope:       scope,
+				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: " \t", RecoveryBudgetAttempt: 1},
+			},
+		},
+		{
+			name: "negative recovery authorization attempt",
+			event: RuntimeInternalEvent{
+				Kind:        RuntimeInternalEventDispatchExecutionRequested,
+				Scope:       scope,
+				Transaction: &RuntimeInternalTransactionPayload{RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: -1},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, applyErr := controller.ApplyInternalEvent(context.Background(), test.event)
+			if !errors.Is(applyErr, common.ErrInvalidArgument) {
+				t.Fatalf("ApplyInternalEvent error = %v, want invalid argument", applyErr)
+			}
+			if repository.loads != 0 || repository.saves != 0 {
+				t.Fatalf("malformed envelope reached persistence: loads=%d saves=%d", repository.loads, repository.saves)
+			}
+		})
+	}
+}
+
+func TestRuntimeInternalEventEnvelopeAcceptsUnauthenticatedAndCompleteRecoveryDispatch(t *testing.T) {
+	scope := RuntimeInternalEventScope{WorkspaceID: "ws-envelope", RunID: "run-envelope"}
+	for _, event := range []RuntimeInternalEvent{
+		{Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{}},
+		{Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{
+			RecoveryOperationID: "op-recovery", RecoveryBudgetAttempt: 2,
+		}},
+	} {
+		if err := event.validateEnvelope(); err != nil {
+			t.Fatalf("valid dispatch recovery envelope rejected: %v", err)
+		}
 	}
 }
 
 // runtimeInternalEventSourceFacts derives completeness from the owner-private
 // source itself. The test intentionally keeps no manually maintained global
 // topic/type index.
-func runtimeInternalEventSourceFacts(t *testing.T) (map[string]RuntimeInternalEventKind, map[string]bool) {
+func runtimeInternalEventSourceFacts(t *testing.T) (map[string]RuntimeInternalEventKind, map[string]bool, map[string]runtimeInternalEventPayloadClass) {
 	t.Helper()
 	fileSet := token.NewFileSet()
 	packages, err := parser.ParseDir(fileSet, ".", func(info os.FileInfo) bool {
@@ -60,7 +226,9 @@ func runtimeInternalEventSourceFacts(t *testing.T) (map[string]RuntimeInternalEv
 	}
 
 	kinds := map[string]RuntimeInternalEventKind{}
-	for _, file := range parsed.Files {
+	payloadClasses := map[string]runtimeInternalEventPayloadClass{}
+	for filename, file := range parsed.Files {
+		sourceClass := runtimeInternalEventSourcePayloadClass(filepath.Base(filename))
 		ast.Inspect(file, func(node ast.Node) bool {
 			declaration, ok := node.(*ast.GenDecl)
 			if !ok || declaration.Tok != token.CONST {
@@ -81,6 +249,10 @@ func runtimeInternalEventSourceFacts(t *testing.T) (map[string]RuntimeInternalEv
 					t.Fatalf("decode runtime internal fact %s: %v", value.Names[0].Name, decodeErr)
 				}
 				kinds[value.Names[0].Name] = RuntimeInternalEventKind(decoded)
+				if sourceClass == "" {
+					t.Fatalf("runtime internal fact %s is not declared in a concrete payload source", value.Names[0].Name)
+				}
+				payloadClasses[value.Names[0].Name] = sourceClass
 			}
 			return false
 		})
@@ -105,5 +277,20 @@ func runtimeInternalEventSourceFacts(t *testing.T) (map[string]RuntimeInternalEv
 		}
 		return true
 	})
-	return kinds, dispatched
+	return kinds, dispatched, payloadClasses
+}
+
+func runtimeInternalEventSourcePayloadClass(filename string) runtimeInternalEventPayloadClass {
+	switch filename {
+	case "internal_event_activation.go":
+		return runtimeInternalEventPayloadActivation
+	case "internal_event_authority.go":
+		return runtimeInternalEventPayloadAuthority
+	case "internal_event_transaction.go":
+		return runtimeInternalEventPayloadTransaction
+	case "internal_event_delivery.go":
+		return runtimeInternalEventPayloadDelivery
+	default:
+		return ""
+	}
 }

@@ -4,7 +4,7 @@ Status: active architecture inventory
 
 Type: component-function-complexity-inventory
 
-Last Updated: 2026-08-14
+Last Updated: 2026-08-15
 
 本文是当前 22 个运行单元的结构盘点，不新增 Module、Block、Initiator 或状态机，也不改变现有
 Owner 合约。后续简化应以本文的证据和优先级为入口，遵守仓库的 `go-multi-module-dev` 运行单元约束以及
@@ -99,6 +99,56 @@ Owner 合约。后续简化应以本文的证据和优先级为入口，遵守�
    各约 45 KB。三个能力 Block 的复杂度主要来自 provider/安全/恢复合同叠加。
 4. `kernel/governance/biz/service.go` 约 58.5 KB；`eventstream/pkg/recordpayload/payload.go` 约 35.3 KB。
    两者功能边界仍清晰，但单文件可读性和变更冲突风险较高。
+
+### 2.2 O7 working-tree delta（2026-08-15）
+
+O7 的物理拆分是在同一 Orchestrator owner 内完成的，下面数字是当前 working tree（包含尚未提交的
+owner-local transition 文件），不能与 2.1 的 Git-tracked 基线直接当作性能对比：
+
+- `internal/modules/kernel/orchestrator` 当前为 104 个生产 Go 文件、约 27,788 行，91 个测试文件、约
+  45,871 行；22 个 framework 运行单元仍为 1 Initiator + 4 Modules + 17 Blocks。
+- `biz/runtime/controller.go` 已收窄到 154 行，仅保留初始化、唯一 `ApplyInternalEvent`、`Load` 和 scoped
+  `QueryOperationReceipt`；组件 compatibility facade 独立为 owner-private adapter，不能作为外部 mutation entry。
+- 最大 Runtime 生产热点由旧 controller/executor 混合面转为职责明确的 `semantic_planning.go`（1,642 行）、
+  `reducer.go`（1,156 行）、`cwi_ledger.go`（1,072 行）和 `dispatch_commit.go`（988 行）；新增的
+  authority/candidate/planning/drive/execution transition 文件均只承载一个 owner facet。
+- `dispatch_execution_requested` 与 `recovery_budget_consumed` 已拆成两个 owner-private event；SM-3 不再直接
+  修改 SM-4 budget。该路径新增的是显式 handoff identity，不是新的 aggregate、CAS、EventHub topic 或 retry authority。
+
+因此 O7 的复杂度收益以“混合职责、跨组件写入和隐式恢复路径减少”为主，文件数增加属于有意的职责分组。
+
+### 2.3 O8 automated closure delta（2026-08-15）
+
+O8 只固化 O0-O7 已完成的边界，不新增运行单元或 Runtime 状态。当前可核对的结构/性能事实为：
+
+- `application/workorchd` 当前为 650 个生产 Go 文件、56,173 行与 153 个测试文件、41,573 行；`biz/appservice`
+  有 25 个一级子包、根目录 54 个生产文件。WD1-WD4 的职责物理分组、WD5 的机械归并/公开面收窄、WD6 的
+  薄包/forwarding 归并与 WD7 的 transport boundary 清理共同形成
+  当前 working-tree delta，不是新增 Application Module 或状态 Owner。
+- `readmodelprojection` 当前为 140 个生产文件/17,087 行、精确 8 个 exported declaration；workspace/run/context/evidence/activity/governance
+  六族均通过 typed facade 统一 production 调用，除两个 snapshot input 外所有 helper 均为 package-private；
+  `service/server` 为 41 个生产文件/8,142 行。生产 server 的 runtimecore/EventHub/root appservice import 扫描为空，
+  长生命周期 Session 只由 `biz/runtimeComponent` 持有；server 不再保存 projection lifecycle、兼容 cache authority
+  或双 wiring state。
+- `RuntimeInternalEvent` 仍只有 `Kind + Scope +` 四类 concrete payload；recovery operation ID/attempt 只在
+  `dispatch_execution_requested` 成对出现，非 dispatch、半截和非正 attempt 均在 repository load 前拒绝。
+- `RuntimeController` 的 production exported surface 仍为 `ApplyInternalEvent`、`Load`、`QueryOperationReceipt`；
+  `RuntimeTransitionCoordinator.Commit` 仍是唯一 repository `Save` 调用点。
+- O7 的 104 个生产文件/约 27,788 行与 91 个测试文件/约 45,871 行是职责物理分组后的 working-tree 盘点，
+  不能被“文件数增加”误读成新 Owner；重点热点仍是 `semantic_planning.go`、`reducer.go`、`cwi_ledger.go`、
+  `dispatch_commit.go`，后续只允许按一句话职责继续收敛。
+- 当前自动化门禁包含 full test、full race、fmt、vet、build、boundary contract 和 diff check；这些门禁通过只证明
+  code/automated closure，不能替代部署后的 existing-target replacement 与 `cwi-027` 正向 live proof。
+
+### 2.4 WIC working-tree delta（2026-08-15）
+
+- `qualitycore+qualityports` 已收敛到 `definitionquality`，`contentcore+contentports` 已收敛到 `content`，
+  `setupdraftcore+setupdraftports` 已收敛到 `setupdraft`；旧 import/path 由结构测试和源码扫描防止复生。
+- projection 归并只改变文件组织和 package-private 物理边界，未改变 DTO、排序、截断、clone 或 high-watermark；
+  content/setupdraft 归并只改变 Go package 路径，未改变 owner command/result、LLM request 或 File/result read 行为。
+- WD8 稳定基线已复盘为 650 个生产文件/56,173 LOC、153 个测试文件/41,573 LOC；readmodelprojection 精确
+  8 个公开声明，server 的 EventHub/root appservice/Session/lifecycle 扫描为零。后续只减少文件数而扩大 exported
+  facade、EventHub 访问或 runtime session 传播，仍不计为复杂度收益。
 
 ## 3. 逐组件功能与复杂度评估
 
@@ -248,27 +298,33 @@ Orchestrator / Run
 5. `semantic_planning.go` 优先按 manifest、request session、owner feasibility、seal/retirement 四组分文件；
    `controller.go` 优先按 activation、authority、transaction、delivery controller 分文件，package 与 Owner 不变。
 
-### 8.2 Application：Owner 边界干净，包图和公开面过度膨胀
+### 8.2 Application：Owner 边界干净，包图和公开面过度膨胀（基线与当前切片）
 
 排除 `biz/testkit` 和测试文件后，`application/workorchd` 没有生产代码导入其他 Owner 的 `biz` 包；跨 Owner
 访问保持在 `pkg/events`、owner model/read port 和 EventHub 上。问题主要位于 application 自己的内部组织：
 
-- `biz/appservice` 有 28 个一级子包和 9 组 `*core + *ports` 配对；
-- appservice 根目录仍有 55 个生产文件和 23 个测试文件；
-- `readmodelprojection` 有 404 个生产文件、27 个测试文件、230 个 exported declaration；
+- 2026-08-14 基线为 `biz/appservice` 28 个一级子包和 9 组 `*core + *ports` 配对；当前 working tree 已归并
+  三组低风险薄配对，保留 25 个一级子包；
+- appservice 根目录有 54 个生产文件；保留项均承担 session/backend boundary、协调或稳定 application ingress，
+  projection/setupdraft/cache-authority 纯转调 wrapper 已删除；
+- 当前 `readmodelprojection` 有 140 个生产文件、精确 8 个 exported declaration；六族 typed facade
+  已统一 production 调用，其余 helper 均为 package-private；
 - `readmodelports` 有 51 个文件和 111 个 exported declaration；
-- `service/server` 有 29 个生产文件、8,629 LOC，`http_types.go` 单文件约 94 KB；
+- 当前 `service/server` 有 41 个生产文件、8,142 LOC；HTTP DTO 已分散到职责文件，生产路径不再导入
+  `runtimecore`/EventHub/root appservice，也不拥有 projection Start/Close；
+- `biz/runtimeComponent` 是唯一持有长生命周期 Session 的结构边界，`runtimeApplicationPorts` 只保存 borrow
+  callback；
 - application 生产面引用 26 个 owner event/model package，属于天然高 fan-out adapter。
 
 因此不能通过继续增加 `core/ports` 包来降低复杂度。建议按下面顺序处理：
 
 1. 先冻结六类 application 职责：`server transport`、`activation use-case`、`owner command ports`、`owner read
    ports`、`projection/read model`、`runtime session`；新代码必须归入其中之一。
-2. 对 `readmodelprojection` 先做 API 收口：按 workspace/run/decision/approval/LLM/evidence 六个投影族建立少量
-   package-private facade，逐步降低 230 个 exported declaration；随后再按同一事件族合并零散文件。
+2. `readmodelprojection` API 收口已完成：六族 facade factory 加两个 typed snapshot input 构成 8 个声明的精确
+   whitelist；继续改动必须保持该上限，不能重新导出 mapper helper。
 3. `http_types.go` 只按 endpoint DTO 家族拆文件，不建立新的 service package，也不让 HTTP DTO 进入 EventHub。
-4. 先评估 `contentcore+contentports`、`setupdraftcore+setupdraftports` 等无反向依赖的薄配对；
-   `definition`、`readmodel`、`governance`、`activation` 当前存在经 projection/ports 回流的依赖，不能机械合并。
+4. `contentcore+contentports`、`setupdraftcore+setupdraftports` 与 `qualitycore+qualityports` 的低风险归并已完成；
+   `definition`、`readmodel`、`governance`、`activation` 当前仍存在经 projection/ports 回流的依赖，不能机械合并。
 5. appservice 根目录的 forwarding service 应逐一归并到对应 use-case/port；保留 facade 只限稳定的应用入口，
    不得保留一层只有转调、无边界校验的 wrapper。
 
@@ -278,6 +334,6 @@ Orchestrator / Run
 |---|---|---|---|---|
 | P0-A | Orchestrator | 把 `RuntimeInternalEvent` 的 61 字段按四类具体 payload 分组，并保持一个 exhaustive dispatcher | 直接降低非法字段组合和 switch 认知成本，不改变状态迁移 | 不改 EventHub 合同、不拆 Owner、不改 reducer 语义 |
 | P0-B | Orchestrator | 将 `semantic_planning.go` 和 `controller.go` 按职责拆文件，补 dispatcher/metadata 完整性测试 | 纯组织变化可先降低冲突面，为后续消重提供边界 | 不抽通用回调事务、不增加第二 CAS 入口 |
-| P0-C | workorchd | 为 readmodel projection 建立六个 package-private 入口并减少 exported declaration | 先收窄调用图，再合并 404 个文件，风险可控 | 不修改 projection 内容、不让 projection 发 owner command |
-| P0-D | workorchd | 归并无环的薄 `core/ports` 配对和 appservice forwarding wrapper | 删除包间转调与重复 DTO | 不机械合并存在循环依赖的配对 |
+| P0-C | workorchd | 为 readmodel projection 建立六个 package-private 入口并减少 exported declaration | **完成：** WD5 将公开面从 230 收窄为精确 8 个，并以 AST whitelist/production-call 扫描固化 | 不修改 projection 内容、不让 projection 发 owner command |
+| P0-D | workorchd | 归并无环的薄 `core/ports` 配对和 appservice forwarding wrapper | **完成：** 三组薄配对已归并，projection/setupdraft/cache-authority 纯 wrapper 已删除；稳定 session/application ingress 保留 | 不机械合并存在循环依赖的配对 |
 | P0-E | Run/LLM/File/Shell | 分别完成 owner 内部职责文件重组后再做行为消重 | 避免同时改变核心状态与 capability 行为 | 不建立通用执行 Block、不共享可变 adapter |

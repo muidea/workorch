@@ -5,14 +5,14 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
-func DecisionStepID(item *decisionmodel.Ticket) string {
+func decisionStepID(item *decisionmodel.Ticket) string {
 	if item == nil {
 		return ""
 	}
 	return string(item.StepID)
 }
 
-func ApprovalStepID(item *approvalmodel.Approval) string {
+func approvalStepID(item *approvalmodel.Approval) string {
 	if item == nil {
 		return ""
 	}

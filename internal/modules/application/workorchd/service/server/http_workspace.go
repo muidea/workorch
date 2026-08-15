@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionquality"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -102,7 +102,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 				Backend:    state.config.Backend,
 				DataRoot:   state.config.DataRoot,
 				Projection: projection,
-				Snapshot:   appservice.PublicWorkspaceSnapshot(item),
+				Snapshot:   readmodelprojection.WorkspaceProjection().PublicSnapshot(item),
 			})
 			return
 		case workspaceSnapshotViewSummary:
@@ -123,7 +123,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 				Backend:    state.config.Backend,
 				DataRoot:   state.config.DataRoot,
 				Projection: projection,
-				Snapshot:   appservice.PublicWorkspaceSnapshot(appservice.ProjectWorkspaceSnapshotSummary(item)),
+				Snapshot:   readmodelprojection.WorkspaceProjection().PublicSnapshot(readmodelprojection.WorkspaceProjection().Summary(item)),
 			})
 			return
 		}
@@ -147,7 +147,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Backend:    state.config.Backend,
 			DataRoot:   state.config.DataRoot,
 			Projection: projection,
-			Snapshot:   appservice.PublicWorkspaceSnapshot(appservice.ProjectWorkspaceSnapshotDetail(item)),
+			Snapshot:   readmodelprojection.WorkspaceProjection().PublicSnapshot(readmodelprojection.WorkspaceProjection().Detail(item)),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runtime-view", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -179,14 +179,14 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			item = mergeWorkspaceProjectionOverlay(item, projected)
 			projection = projectedStatus
 		}
-		item = appservice.ProjectWorkspaceSnapshotDetail(item)
+		item = readmodelprojection.WorkspaceProjection().Detail(item)
 		// CR01/TC10: use store-owned activity so ActivityRevision is transactional
 		// authority and survives read path without fingerprint regeneration.
 		storedActivity, hasStoredActivity := workorchprojectioncontract.WorkspaceActivityFeed{}, false
 		if state.workspaceProjection != nil {
 			storedActivity, hasStoredActivity = state.workspaceProjection.ReadWorkspaceActivity(workspaceID)
 		}
-		view := appservice.ProjectWorkspaceRuntimeViewWithActivity(item, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
+		view := readmodelprojection.WorkspaceProjection().RuntimeViewWithActivity(item, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
 		writeJSON(w, http.StatusOK, workspaceRuntimeViewResponse{
 			Service:     "workorch",
 			Backend:     state.config.Backend,
@@ -484,9 +484,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
-		if state.workspaceProjection != nil {
-			state.workspaceProjection.DeleteWorkspace(workspaceID)
-		}
+		state.deleteProjectedWorkspace(workspaceID)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-activations", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -520,9 +518,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			return
 		}
 		command.Intent = intent
-		command = prepareWorkspaceRunSchedulerCommand(topic, command)
-		if err := state.enqueueWorkorchDSchedulerCommand(topic, command); err != nil {
-			writeBusinessError(w, err)
+		command, commandErr = state.enqueueWorkspaceExecution(r.Context(), topic, command)
+		if commandErr != nil {
+			writeBusinessError(w, commandErr)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, "execution-activation", command))
@@ -683,7 +681,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
-		item, err := state.checkGoalDoDQuality(r.Context(), state.config.Backend, state.config.DataRoot, qualitycore.Command{
+		item, err := state.checkGoalDoDQuality(r.Context(), state.config.Backend, state.config.DataRoot, definitionquality.Command{
 			WorkspaceID: workspaceID,
 			GoalID:      req.GoalID,
 			DoDID:       req.DoDID,

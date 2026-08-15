@@ -39,7 +39,7 @@ func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governa
 	if err != nil {
 		return workorchprojectioncontract.Decision{}, err
 	}
-	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
+	return readmodelprojection.GovernanceProjection().MapDecision(item, resolution, autoGovernance), nil
 }
 
 func decisionResolutionMissingRequiredInfo(semantic governancesemantics.DecisionNormalization, payload workorcheventpayload.Payload) bool {

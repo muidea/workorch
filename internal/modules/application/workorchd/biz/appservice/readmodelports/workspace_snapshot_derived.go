@@ -13,7 +13,7 @@ func WorkspaceTaskProgress(ctx context.Context, readers WorkspaceSnapshotReaders
 	if err != nil {
 		return projectioncontract.TaskProgress{}, err
 	}
-	return readmodelprojection.WorkspaceSnapshotTaskProgress(snapshot), nil
+	return readmodelprojection.WorkspaceProjection().SnapshotTaskProgress(snapshot), nil
 }
 
 func WorkspaceContextBundle(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) (projectioncontract.ContextBundle, error) {
@@ -23,13 +23,13 @@ func WorkspaceContextBundle(ctx context.Context, readers WorkspaceSnapshotReader
 		return projectioncontract.ContextBundle{}, err
 	}
 	if snapshot.TaskProgress.RunID == "" {
-		return readmodelprojection.WorkspaceContextBundleFromSnapshots(snapshot, nil), nil
+		return readmodelprojection.ContextProjection().WorkspaceBundle(snapshot, nil), nil
 	}
 	runSnapshot, err := RunSnapshot(ctx, effectiveWorkspaceRunSnapshotReaders(readers), common.RunID(snapshot.TaskProgress.RunID))
 	if err != nil {
 		return projectioncontract.ContextBundle{}, err
 	}
-	return readmodelprojection.WorkspaceContextBundleFromSnapshots(snapshot, &runSnapshot), nil
+	return readmodelprojection.ContextProjection().WorkspaceBundle(snapshot, &runSnapshot), nil
 }
 
 func WorkspaceTaskDecompositions(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) ([]projectioncontract.TaskDecomposition, error) {
@@ -38,11 +38,11 @@ func WorkspaceTaskDecompositions(ctx context.Context, readers WorkspaceSnapshotR
 		return nil, err
 	}
 	if len(snapshot.TaskDecompositions) > 0 || snapshot.TaskProgress.RunID == "" {
-		return readmodelprojection.WorkspaceTaskDecompositionsFromSnapshots(snapshot, nil), nil
+		return readmodelprojection.WorkspaceProjection().TaskDecompositionsFromSnapshots(snapshot, nil), nil
 	}
 	runSnapshot, err := RunSnapshot(ctx, effectiveWorkspaceRunSnapshotReaders(readers), common.RunID(snapshot.TaskProgress.RunID))
 	if err != nil {
 		return nil, err
 	}
-	return readmodelprojection.WorkspaceTaskDecompositionsFromSnapshots(snapshot, &runSnapshot), nil
+	return readmodelprojection.WorkspaceProjection().TaskDecompositionsFromSnapshots(snapshot, &runSnapshot), nil
 }

@@ -53,9 +53,7 @@ func (m *Biz) reconcileRuntimeWorkspaceWithCommand(ctx context.Context, run *run
 	}
 	if sealRequest {
 		result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind:        runtime.RuntimeInternalEventReconciliationRequested,
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			ReconciliationRequest: &desired,
+			Kind: runtime.RuntimeInternalEventReconciliationRequested, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{ReconciliationRequest: &desired},
 		})
 		return result.Aggregate, true, err
 	}
@@ -70,9 +68,7 @@ func (m *Biz) reconcileRuntimeWorkspaceWithCommand(ctx context.Context, run *run
 	}
 	batch := m.queryRuntimeReconciliationBatch(ctx, request, aggregate, deliverableDirectory, internalDirectory, workspaceErr)
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventReconciliationBatchObserved,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		ReconciliationBatch: &batch,
+		Kind: runtime.RuntimeInternalEventReconciliationBatchObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{ReconciliationBatch: &batch},
 	})
 	return result.Aggregate, true, err
 }

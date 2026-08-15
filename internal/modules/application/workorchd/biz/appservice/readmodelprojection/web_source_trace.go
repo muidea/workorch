@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapWebSourceTraces(steps []workorchprojectioncontract.StepView) []workorchprojectioncontract.WebSourceTrace {
+func mapWebSourceTraces(steps []workorchprojectioncontract.StepView) []workorchprojectioncontract.WebSourceTrace {
 	if len(steps) == 0 {
 		return nil
 	}

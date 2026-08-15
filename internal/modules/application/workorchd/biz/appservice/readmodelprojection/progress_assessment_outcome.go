@@ -9,11 +9,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TaskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshotState) projectioncontract.AssessmentOutcome {
-	return assessmentOutcomeFromResults(RunScopedResults(snapshot), snapshot.CoverageWorkItems)
+func taskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshotState) projectioncontract.AssessmentOutcome {
+	return assessmentOutcomeFromResults(runScopedResults(snapshot), snapshot.CoverageWorkItems)
 }
 
-func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AssessmentOutcome {
+func workspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AssessmentOutcome {
 	return assessmentOutcomeFromResults(snapshot.Results, nil)
 }
 
@@ -96,9 +96,9 @@ func resultDiagnosticsReason(item projectioncontract.Result) string {
 
 func coverageDeltaSatisfiedCount(context map[string]any) int {
 	for _, source := range []map[string]any{
-		MapValue(context["coverageDelta"]),
-		MapValue(context["latestCoverageDelta"]),
-		MapValue(MapValue(context["convergenceBudget"])["coverageDelta"]),
+		mapDynamicValue(context["coverageDelta"]),
+		mapDynamicValue(context["latestCoverageDelta"]),
+		mapDynamicValue(mapDynamicValue(context["convergenceBudget"])["coverageDelta"]),
 	} {
 		if value, ok := intFromAny(source["newlySatisfiedCoverageCount"], source["satisfiedDelta"], source["acceptedCoverageDelta"]); ok {
 			return value

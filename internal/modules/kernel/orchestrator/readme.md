@@ -76,6 +76,24 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   EventHub topic、生产 registry 或跨组件 lookup。fact 词汇按 activation、SM-2 authority、SM-3 transaction、SM-4
   delivery 分别落在 `internal_event_{activation,authority,transaction,delivery}.go`，dispatcher 仍唯一且穷举。完整性测试从全部 fact 常量源核对 dispatcher/classification，不在
   `internal/pkg/events` 或 `workorchruntimecontract` 建立全局索引。
+- `RuntimeInternalEvent` 只保留 `Kind + Scope + Activation|Authority|Transaction|Delivery` 四类 concrete payload；
+  每个 kind 必须精确匹配一个非空 payload family。缺 scope、未知 metadata、missing/wrong/multiple payload 均在任何
+  Runtime aggregate load/CAS 前拒绝，payload 不得复制 workspace/run identity。SM-3 claimed-operation recovery 只允许
+  `dispatch_execution_requested` 携带成对的 `RecoveryOperationID + RecoveryBudgetAttempt`；SM-4 必须先通过独立
+  `recovery_budget_consumed` event 持久化 exact counter，其他 transaction、半截授权或非正 attempt 一律在 envelope
+  校验阶段 fail-closed。
+- `biz/runtime` 内部的状态机职责使用五个私有组件表达，但仍是一个 Orchestrator owner、一个 aggregate 和一个
+  CAS 边界：`runtimeMutationKernel` 唯一持有 Runtime repository port 与 `RuntimeTransitionCoordinator`；
+  `authorityComponent` 只处理 SM-2 authority/focus 事实，`planningTransactionComponent` 只处理 SM-3
+  semantic/request ledger，`candidateDispatchComponent` 只处理 candidate/dispatch/receipt，
+  `driveDeliveryComponent` 只处理 SM-4 lease/recovery/delivery。组件只嵌入同一个 kernel，不持有 sibling、EventHub、
+  lifecycle 或第二份 aggregate。当前 dispatcher 已路由 semantic/request ledger、authority facts/reconciliation/
+  governance、candidate admission/receipt/execution 与 drive/delivery lease/budget/ack handler；prerequisite freshness
+  的 candidate/planning/authority transition 也已按 owner 分文件。执行恢复先由
+  `candidateDispatchComponent` 返回只读 recovery-budget handoff，再由独立 `recovery_budget_consumed` SM-4 event
+  提交预算并以 operation identity/fenced attempt 授权重试，不在 SM-3 事件内修改 SM-4 ledger。Controller 的
+  package-private compatibility adapter 只复用同一 dispatcher，不能形成额外 mutation entry；外部仍只能使用
+  `ApplyInternalEvent`、`Load`、`QueryOperationReceipt`。
 - 所有跨状态机推进都使用 persisted aggregate + typed EventHub command/result。
 - projection failure 不得覆盖 reducer terminal；重启不得重复 prerequisite/candidate/side effect。
 - 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。
@@ -107,6 +125,21 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   kind/variant/parameter → target → binding → effect/dependency → replay 的固定顺序返回 `accepted` 或完整
   `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不得伪装为
   candidate rejection。
+- 当前唯一结构 evaluator 是 `biz/internal/candidateadmission.Evaluate`；`biz/runtime/candidate_admission.go`
+  只投影当前 authority/attempt/evidence lineage、调用该 evaluator 一次，并在返回后执行 SM-3 owner-local
+  rejection seal。repair closure、validation-only gap 与 owner-grounded target scope 都在 replay 前由同一 evaluator
+  判定；`biz/internal/grounding` 提供 target-selection/repair-target 的唯一纯比较实现。focused package 不读取
+  aggregate repository、不调用 EventHub、不探测 capability owner，也不返回 correction、retry、terminal 或 next action。
+- `biz/internal/proof` 是 SM-2/SM-3 事实比较的唯一纯入口：它承载 reconciliation batch/owner observation
+  重放、repair-surface confirmation 与 validation causation、current-CWI/binding lineage、owner receipt/binding
+  proof 和 evidence attribution；Runtime 只投影 aggregate 私有事实、把 proof finding 映射为 retain/reopen/
+  prerequisite/credit 或 CAS。`grounding` 承载 target-set 与 validation target freshness 比较。两者不持有
+  aggregate、ledger、repository/EventHub、预算或状态转换，不会产生第二个 Owner。
+- `biz/internal/governancecheck` 是治理身份与 factual mapping 的唯一纯入口：request/dispatch、operation
+  binding/execution/receipt、ticket/resolution、grant/resume fence 及 dependency source 必须先在该包比较；它只返回
+  detached finding，不创建 ticket、不关闭 dispatch、不写 evidence、不运行 reducer。operation-scoped governance
+  receipt 的 closeout 属于 `candidateDispatchComponent`，request/resolution mutation 与 resume dispatch 仍属于
+  `authorityComponent`；两者共享同一 mutation kernel 和 CAS coordinator，且仅由既有 Owner 私有事件触发。
 - owner probe 前只允许用 kind 解析 manifest 中的 owner/authorization identity，该解析不做 admission；
   unknown kind 零 owner call，可解析 kind 只调用无副作用 probe。evaluator 仍优先返回顺序中更早的
   field/target 违例，owner observation 不得形成第二套 first-failure 路由。
@@ -130,6 +163,13 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   `RuntimeOwnerFeasibilityOutcome`；失败只携带一份 `RuntimeFeedback.OriginalDiagnostic`，不得并行保存
   `Feasible bool`、`FailureFact` 或重复的 code/reason/target 字段。stale、prerequisite request 与 replay proof 只能作为
   outcome-specific detail，重启必须原样恢复 diagnostic 的顺序、重复项和有界详情元数据。
+- `RuntimeOwnerPolicyIdentity` 只证明 observation 来源，不是 SM-2 transition signal。只有 owner 显式给出
+  `sealed_target_authorization_contradicted` constraint impact，并同时匹配 persisted attempt/operation、candidate
+  manifest、catalog snapshot、authority transaction、current CWI/binding、reconciliation binding、target set 和 observed
+  resource revision，Orchestrator 才提交 `semantic_binding_contradiction_observed`。binding 的 semantic manifest 可在当前
+  ledger 或 immutable generation history 中；不得与另一个 CWI 的最新 manifest 强行相等。普通
+  `observation_unknown`/replay-proof unavailable 仍提交 `owner_feasibility_observed`，只失效当前候选并进入有界
+  no-progress 处理，不退休 binding、不重开 CWI。
 - operation receipt 只以 `RuntimeOperationReceipt.Outcome` 表达 owner result，并只以
   `RuntimeFeedback.OriginalDiagnostic` 传播 rejected diagnostic；跨 EventHub receipt 不再携带 `FailureFact`。只有
   Orchestrator owner-private adapter/reducer 可从该 diagnostic 重建内部 `FailureFact`。raw validation stdout/stderr

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -216,31 +217,7 @@ func runtimeEvidenceAppliesToCoverageWorkItemWithLineage(
 	coverageID common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	facts = facts.Normalized()
-	item, bound := currentRuntimeCWIBindingForFocus(facts, coverageID)
-	if !bound || (item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound &&
-		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled) {
-		return false
-	}
-	if runtimecontract.EvidenceAppliesToCoverageWorkItem(facts.Focus, evidence, coverageID) {
-		// Binding references are stable identifiers, while a re-seal may keep
-		// that identifier and replace its hash after a catalog refresh. A source
-		// row makes the old binding hash explicit, so it must agree with the
-		// current binding before the ordinary exact-binding path can apply.
-		// Otherwise credit can only return through an equivalent resolution.
-		if source, found := runtimeCoverageProofLineageSourceForEvidence(lineage, facts, evidence, coverageID); found {
-			binding, bindingFound := coverageEvidenceBindingForCoverage(facts.Focus, coverageID)
-			if bindingFound && source.SourceBindingRef == binding.ID && source.SourceBindingHash == binding.Hash {
-				return true
-			}
-		} else {
-			return true
-		}
-	}
-	if !coverageWorkItemIDIncluded(evidence.CoverageWorkItemIDs, coverageID) || weakRuntimeEvidence(evidence) {
-		return false
-	}
-	return runtimeEvidenceHasEquivalentCoverageProofLineage(facts, evidence, coverageID, lineage)
+	return proof.EvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, lineage)
 }
 
 // runtimeEvidenceAppliesToCurrentCoverageWithLineage is the SM-2 attribution
@@ -253,7 +230,7 @@ func runtimeEvidenceAppliesToCurrentCoverageWithLineage(
 	evidence runtimecontract.EvidenceFact,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	return runtimeEvidenceAppliesToCoverageIDsWithLineage(facts, evidence, facts.Focus.CoverageWorkItemIDs, lineage)
+	return proof.EvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, lineage)
 }
 
 // runtimeEvidenceAppliesToCoverageIDsWithLineage narrows the same predicate to
@@ -265,19 +242,7 @@ func runtimeEvidenceAppliesToCoverageIDsWithLineage(
 	coverageIDs []common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	facts = facts.Normalized()
-	if len(coverageIDs) == 0 || facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent {
-		return false
-	}
-	for _, coverageID := range coverageIDs {
-		if !coverageWorkItemIDIncluded(facts.Focus.CoverageWorkItemIDs, coverageID) {
-			continue
-		}
-		if runtimeEvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, lineage) {
-			return true
-		}
-	}
-	return false
+	return proof.EvidenceAppliesToCoverageIDsWithLineage(facts, evidence, coverageIDs, lineage)
 }
 
 // runtimeAcceptedEvidenceAppliesToCurrentFocusWithLineage retains the narrow
@@ -289,72 +254,7 @@ func runtimeAcceptedEvidenceAppliesToCurrentFocusWithLineage(
 	evidence runtimecontract.EvidenceFact,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	if len(evidence.CoverageWorkItemIDs) == 0 {
-		return runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence)
-	}
-	return runtimeEvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, lineage)
-}
-
-func runtimeEvidenceHasEquivalentCoverageProofLineage(
-	facts runtimecontract.RuntimeFacts,
-	evidence runtimecontract.EvidenceFact,
-	coverageID common.CoverageWorkItemID,
-	lineage []runtimecontract.RuntimeCoverageProofLineage,
-) bool {
-	if len(lineage) == 0 || evidence.ID == "" || evidence.Kind == "" {
-		return false
-	}
-	currentBinding, found := coverageEvidenceBindingForCoverage(facts.Focus, coverageID)
-	if !found {
-		return false
-	}
-	currentIdentity, err := runtimecontract.DeriveCoverageEvidenceProofIdentity(currentBinding, evidence.Kind)
-	if err != nil {
-		return false
-	}
-	if source, found := runtimeCoverageProofLineageSourceForEvidence(lineage, facts, evidence, coverageID); found {
-		for _, resolution := range lineage {
-			resolution = resolution.Normalized()
-			if resolution.Kind != runtimecontract.RuntimeCoverageProofLineageKindResolution ||
-				resolution.SourceLineageID != source.ID ||
-				resolution.CurrentBindingRef != currentBinding.ID || resolution.CurrentBindingHash != currentBinding.Hash ||
-				resolution.Disposition != runtimecontract.RuntimeCoverageProofLineageDispositionEquivalent ||
-				!runtimecontract.SameCoverageEvidenceProofIdentity(resolution.CurrentProofIdentity, currentIdentity) {
-				continue
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func runtimeCoverageProofLineageSourceForEvidence(
-	lineage []runtimecontract.RuntimeCoverageProofLineage,
-	facts runtimecontract.RuntimeFacts,
-	evidence runtimecontract.EvidenceFact,
-	coverageID common.CoverageWorkItemID,
-) (runtimecontract.RuntimeCoverageProofLineage, bool) {
-	for _, source := range lineage {
-		source = source.Normalized()
-		if source.Kind != runtimecontract.RuntimeCoverageProofLineageKindSource ||
-			source.WorkspaceID != facts.WorkspaceID || source.RunID != facts.RunID ||
-			source.SourceEvidenceID != evidence.ID || source.CoverageWorkItemID != coverageID ||
-			source.EvidenceKind != evidence.Kind || !runtimeEvidenceReferencesBinding(evidence, source.SourceBindingRef) {
-			continue
-		}
-		return source, true
-	}
-	return runtimecontract.RuntimeCoverageProofLineage{}, false
-}
-
-func runtimeEvidenceReferencesBinding(evidence runtimecontract.EvidenceFact, bindingRef string) bool {
-	bindingRef = strings.TrimSpace(bindingRef)
-	for _, value := range evidence.BindingRefs {
-		if strings.TrimSpace(value) == bindingRef {
-			return true
-		}
-	}
-	return false
+	return proof.AcceptedEvidenceAppliesToCurrentFocusWithLineage(facts, evidence, lineage)
 }
 
 func runtimeCoverageProofLineageArgument(values [][]runtimecontract.RuntimeCoverageProofLineage) []runtimecontract.RuntimeCoverageProofLineage {

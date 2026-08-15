@@ -52,15 +52,15 @@ func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.R
 
 	input := models.projectionInput(item)
 	if recovery {
-		return readmodelprojection.RunRecoverySnapshotFromModels(input), nil
+		return readmodelprojection.RunProjection().RecoverySnapshot(input), nil
 	}
 	input.SelectedTicket = models.Decisions.SelectedTicket
 	input.SelectedResolution = models.Decisions.SelectedResolution
 	input.SelectedApproval = models.Approvals.SelectedApproval
 	input.PublishedEvents = readers.Published
-	ret := readmodelprojection.RunSnapshotFromModels(input)
+	ret := readmodelprojection.RunProjection().Snapshot(input)
 	if loadMode == runSnapshotLoadViewCompact {
-		ret = readmodelprojection.ProjectRunSnapshotCompact(ret)
+		ret = readmodelprojection.RunProjection().Compact(ret)
 	}
 	return ret, nil
 }

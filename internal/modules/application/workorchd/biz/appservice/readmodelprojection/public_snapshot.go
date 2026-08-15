@@ -6,9 +6,9 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-// PublicRunSnapshot projects application-private read-model state to the
+// publicRunSnapshot projects application-private read-model state to the
 // protocol DTO. Private workspace and run state never crosses this boundary.
-func PublicRunSnapshot(state readmodelcore.RunSnapshotState) projectioncontract.RunSnapshot {
+func publicRunSnapshot(state readmodelcore.RunSnapshotState) projectioncontract.RunSnapshot {
 	return projectioncontract.CloneRunSnapshot(projectioncontract.RunSnapshot{
 		Workspace:               appmodelcore.ProjectWorkspace(state.Workspace),
 		Run:                     appmodelcore.ProjectRun(state.Run),
@@ -53,9 +53,9 @@ func PublicRunSnapshot(state readmodelcore.RunSnapshotState) projectioncontract.
 	})
 }
 
-// PublicWorkspaceSnapshot projects application-private read-model state to
+// publicWorkspaceSnapshot projects application-private read-model state to
 // the protocol DTO while preserving every public observation.
-func PublicWorkspaceSnapshot(state readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceSnapshot {
+func publicWorkspaceSnapshot(state readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceSnapshot {
 	ret := projectioncontract.WorkspaceSnapshot{
 		Workspace:               appmodelcore.ProjectWorkspace(state.Workspace),
 		ViewModel:               state.ViewModel,
@@ -99,7 +99,7 @@ func PublicWorkspaceSnapshot(state readmodelcore.WorkspaceSnapshotState) project
 	return projectioncontract.CloneWorkspaceSnapshot(ret)
 }
 
-func PublicRunObservability(state readmodelcore.RunObservabilityState) projectioncontract.RunObservability {
+func publicRunObservability(state readmodelcore.RunObservabilityState) projectioncontract.RunObservability {
 	return projectioncontract.CloneRunObservability(projectioncontract.RunObservability{
 		Run:                     appmodelcore.ProjectRun(state.Run),
 		Outcome:                 state.Outcome,
@@ -128,10 +128,10 @@ func PublicRunObservability(state readmodelcore.RunObservabilityState) projectio
 	})
 }
 
-func PublicWorkspaceExecutionActivation(state readmodelcore.WorkspaceExecutionActivationState) projectioncontract.WorkspaceExecutionActivation {
+func publicWorkspaceExecutionActivation(state readmodelcore.WorkspaceExecutionActivationState) projectioncontract.WorkspaceExecutionActivation {
 	return projectioncontract.WorkspaceExecutionActivation{
 		Workspace: appmodelcore.ProjectWorkspace(state.Workspace),
 		Run:       appmodelcore.ProjectRun(state.Run),
-		Snapshot:  PublicWorkspaceSnapshot(state.Snapshot),
+		Snapshot:  publicWorkspaceSnapshot(state.Snapshot),
 	}
 }

@@ -35,7 +35,7 @@ func ApprovalsForRun(ctx context.Context, approvals readmodelcore.ApprovalReader
 		if err != nil {
 			return RunApprovals{}, err
 		}
-		ret.Items = append(ret.Items, readmodelprojection.MapApproval(item, summary))
+		ret.Items = append(ret.Items, readmodelprojection.GovernanceProjection().MapApproval(item, summary))
 		if run.BlockingApprovalID != "" && item.ID == run.BlockingApprovalID {
 			ret.SelectedApproval = item
 			continue
@@ -57,7 +57,7 @@ func ApprovalsForWorkspaceItems(ctx context.Context, traces readmodelcore.AutoGo
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, readmodelprojection.MapApproval(item, summary))
+		ret = append(ret, readmodelprojection.GovernanceProjection().MapApproval(item, summary))
 	}
 	return ret, nil
 }

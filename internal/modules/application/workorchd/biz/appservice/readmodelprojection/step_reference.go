@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func PreviousStepID(step *runmodel.Step) common.StepID {
+func previousStepID(step *runmodel.Step) common.StepID {
 	if step == nil {
 		return ""
 	}
@@ -22,7 +22,7 @@ func PreviousStepID(step *runmodel.Step) common.StepID {
 	return ""
 }
 
-func PreviousStepIDSnapshot(step projectioncontract.StepView) string {
+func previousStepIDSnapshot(step projectioncontract.StepView) string {
 	if step.Input == nil {
 		return ""
 	}

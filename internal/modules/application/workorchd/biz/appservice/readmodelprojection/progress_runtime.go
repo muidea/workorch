@@ -18,7 +18,7 @@ func applyRuntimeProgress(progress *projectioncontract.TaskProgress, run *runmod
 	applyRuntimeProgressToMilestones(progress, summary, string(common.CanonicalRunState(run.State)))
 	applyRuntimeProgressToRepairLoop(progress, summary, *run.RuntimeState)
 	applyRuntimeProgressToCurrentStep(progress, summary, *run.RuntimeState)
-	if runtimeSummary := RuntimeProgressSummary(&summary); runtimeSummary != "" {
+	if runtimeSummary := runtimeProgressSummary(&summary); runtimeSummary != "" {
 		progress.Summary = runtimeSummary
 	} else if progress.Summary == "" && strings.TrimSpace(summary.FailureMessage) != "" {
 		progress.Summary = strings.TrimSpace(summary.FailureMessage)
@@ -194,7 +194,7 @@ func applyRuntimeProgressToMilestones(progress *projectioncontract.TaskProgress,
 			}
 		}
 	}
-	progress.CurrentMilestone = CurrentProgressMilestone(progress.Milestones)
+	progress.CurrentMilestone = currentProgressMilestone(progress.Milestones)
 }
 
 func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
