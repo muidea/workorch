@@ -10,6 +10,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -155,105 +156,150 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 	if m == nil || m.runtimeController == nil || m.EventHub() == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.DriveRuntimeResult{}, common.ErrInvalidArgument
 	}
-	run, err := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
+	run, aggregate, err := m.initializeRuntimeDrive(ctx, command)
 	if err != nil {
-		return orchestratorevents.DriveRuntimeResult{}, err
-	}
-	if run.RuntimeActivationStatus != nil && run.RuntimeActivationStatus.Disposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
-		return orchestratorevents.DriveRuntimeResult{}, &runtimeFreshActivationRequiredError{
-			WorkspaceID: command.WorkspaceID, RunID: command.RunID, RuntimeStateRef: run.RuntimeActivationStatus.RuntimeStateRef,
-		}
-	}
-	aggregate, err := m.initializeRuntimeFromRun(ctx, run)
-	if err != nil {
-		if incompatibility, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(err); incompatible && run.RuntimeState != nil {
-			runtimeStateRef := runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
-			if factErr := m.applyRunRuntimeStateIncompatible(ctx, run.WorkspaceID, run.ID, runtimeStateRef, incompatibility, err); factErr != nil {
-				return orchestratorevents.DriveRuntimeResult{}, factErr
-			}
-			return orchestratorevents.DriveRuntimeResult{}, &runtimeFreshActivationRequiredError{
-				WorkspaceID: run.WorkspaceID, RunID: run.ID, RuntimeStateRef: runtimeStateRef,
-			}
-		}
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	for transition := 0; transition < runtimeDriveTransitionLimit; transition++ {
-		previousRevision := aggregate.StateRevision
-		previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
-		// A sealed SM-2 terminal is immutable. SM-4 may only deliver/replay it;
-		// semantic planning must never rewrite an already judged outcome during
-		// startup recovery.
-		if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
-			return runtimeTerminalDriveResult(aggregate), nil
-		}
-		// Semantic planning is a persisted SM-2/SM-3 prerequisite for every
-		// operation authority. SM-4 may only re-drive its current phase; it must
-		// not let the provisional bootstrap focus enter the operations pipeline.
-		if !runtime.SemanticOperationAuthorityReady(aggregate) && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
-			aggregate, err = m.driveRuntimeSemanticPlanning(ctx, aggregate)
-			if err != nil {
-				return orchestratorevents.DriveRuntimeResult{}, err
-			}
-			if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
-				return runtimeTerminalDriveResult(aggregate), nil
-			}
-			if aggregate.StateRevision <= previousRevision {
-				return orchestratorevents.DriveRuntimeResult{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime semantic planning made no persisted progress at revision %d", previousRevision)}
-			}
-			if runtime.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
-				return orchestratorevents.DriveRuntimeResult{}, &runtimePersistedDrivePendingError{Revision: aggregate.StateRevision}
-			}
-			continue
-		}
-		if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
-			return runtimeTerminalDriveResult(aggregate), nil
-		}
-		// Reconciliation is an SM-2 preflight input. The request and complete
-		// owner-observation batch are persisted through the same internal-event
-		// CAS boundary before any candidate, operation or governance path runs.
-		if aggregate.Facts.ReconciliationContract.SchemaVersion != "" &&
-			(aggregate.Reconciliation.Batch == nil || reconciliationRequestNeedsRefresh(run, aggregate, command)) &&
-			aggregate.ActiveDispatch == nil && aggregate.Decision.State != runtimecontract.ConvergenceStateComplete && aggregate.Decision.State != runtimecontract.ConvergenceStateFailed {
-			updated, changed, reconciliationErr := m.reconcileRuntimeWorkspaceWithCommand(ctx, run, aggregate, command)
-			if reconciliationErr != nil {
-				return orchestratorevents.DriveRuntimeResult{}, reconciliationErr
-			}
-			aggregate = updated
-			if changed {
-				if aggregate.StateRevision <= previousRevision {
-					return orchestratorevents.DriveRuntimeResult{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime reconciliation made no persisted progress at revision %d", previousRevision)}
-				}
-				continue
-			}
-		}
-		switch aggregate.Decision.State {
-		case runtimecontract.ConvergenceStateNeedPrerequisite:
-			aggregate, err = m.prepareRuntimePrerequisites(ctx, aggregate)
-		case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
-			aggregate, err = m.driveRuntimeDecision(ctx, aggregate, stablePrefixHash)
-		case runtimecontract.ConvergenceStateComplete, runtimecontract.ConvergenceStateFailed:
-			return runtimeTerminalDriveResult(aggregate), nil
-		default:
-			return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("unsupported Runtime convergence state %q", aggregate.Decision.State)
-		}
+		outcome, err := m.driveOneRuntimeTransition(ctx, run, aggregate, command, stablePrefixHash)
 		if err != nil {
 			return orchestratorevents.DriveRuntimeResult{}, err
 		}
-		if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance && aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Governance != nil {
-			return runtimeGovernedWaitDriveResult(aggregate)
+		if outcome.result != nil {
+			return *outcome.result, nil
 		}
-		if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
-			return runtimeTerminalDriveResult(aggregate), nil
-		}
-		if aggregate.StateRevision <= previousRevision {
-			return orchestratorevents.DriveRuntimeResult{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime drive made no persisted progress at revision %d", previousRevision)}
-		}
-		if runtime.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
-			return orchestratorevents.DriveRuntimeResult{}, &runtimePersistedDrivePendingError{Revision: aggregate.StateRevision}
-		}
+		aggregate = outcome.aggregate
 	}
 	return orchestratorevents.DriveRuntimeResult{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime drive exceeded %d persisted transitions", runtimeDriveTransitionLimit)}
+}
+
+type runtimeDriveTransitionOutcome struct {
+	aggregate runtime.RuntimeAggregate
+	result    *orchestratorevents.DriveRuntimeResult
+}
+
+func (m *Biz) initializeRuntimeDrive(ctx context.Context, command orchestratorevents.DriveRuntimeCommand) (*runmodel.Run, runtime.RuntimeAggregate, error) {
+	run, err := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
+	if err != nil {
+		return nil, runtime.RuntimeAggregate{}, err
+	}
+	if run.RuntimeActivationStatus != nil && run.RuntimeActivationStatus.Disposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
+		return nil, runtime.RuntimeAggregate{}, &runtimeFreshActivationRequiredError{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, RuntimeStateRef: run.RuntimeActivationStatus.RuntimeStateRef,
+		}
+	}
+	aggregate, err := m.initializeRuntimeFromRun(ctx, run)
+	if err == nil {
+		return run, aggregate, nil
+	}
+	incompatibility, incompatible := runtimecontract.RuntimeStateIncompatibilityFromError(err)
+	if !incompatible || run.RuntimeState == nil {
+		return nil, runtime.RuntimeAggregate{}, err
+	}
+	runtimeStateRef := runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
+	if factErr := m.applyRunRuntimeStateIncompatible(ctx, run.WorkspaceID, run.ID, runtimeStateRef, incompatibility, err); factErr != nil {
+		return nil, runtime.RuntimeAggregate{}, factErr
+	}
+	return nil, runtime.RuntimeAggregate{}, &runtimeFreshActivationRequiredError{WorkspaceID: run.WorkspaceID, RunID: run.ID, RuntimeStateRef: runtimeStateRef}
+}
+
+func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand, stablePrefixHash string) (runtimeDriveTransitionOutcome, error) {
+	previousRevision := aggregate.StateRevision
+	previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
+	if runtimeConvergenceTerminal(aggregate.Decision.State) {
+		return terminalRuntimeDriveTransition(aggregate), nil
+	}
+	if !runtime.SemanticOperationAuthorityReady(aggregate) && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
+		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousConvergence)
+	}
+	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+		return terminalRuntimeDriveTransition(aggregate), nil
+	}
+	updated, changed, err := m.driveOneRuntimeReconciliationTransition(ctx, run, aggregate, command)
+	if err != nil {
+		return runtimeDriveTransitionOutcome{}, err
+	}
+	if changed {
+		if updated.StateRevision <= previousRevision {
+			return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime reconciliation made no persisted progress at revision %d", previousRevision)}
+		}
+		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
+	}
+	updated, err = m.advanceRuntimeConvergence(ctx, updated, stablePrefixHash)
+	if err != nil {
+		return runtimeDriveTransitionOutcome{}, err
+	}
+	return finishRuntimeConvergenceTransition(updated, previousRevision, previousConvergence)
+}
+
+func runtimeConvergenceTerminal(state runtimecontract.ConvergenceState) bool {
+	return state == runtimecontract.ConvergenceStateComplete || state == runtimecontract.ConvergenceStateFailed
+}
+
+func terminalRuntimeDriveTransition(aggregate runtime.RuntimeAggregate) runtimeDriveTransitionOutcome {
+	result := runtimeTerminalDriveResult(aggregate)
+	return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}
+}
+
+func (m *Biz) driveOneRuntimeSemanticTransition(ctx context.Context, aggregate runtime.RuntimeAggregate, previousRevision uint64, previousConvergence string) (runtimeDriveTransitionOutcome, error) {
+	updated, err := m.driveRuntimeSemanticPlanning(ctx, aggregate)
+	if err != nil {
+		return runtimeDriveTransitionOutcome{}, err
+	}
+	if updated.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+		return terminalRuntimeDriveTransition(updated), nil
+	}
+	if updated.StateRevision <= previousRevision {
+		return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime semantic planning made no persisted progress at revision %d", previousRevision)}
+	}
+	if runtime.RuntimeConvergenceProgressSignature(updated) == previousConvergence {
+		return runtimeDriveTransitionOutcome{}, &runtimePersistedDrivePendingError{Revision: updated.StateRevision}
+	}
+	return runtimeDriveTransitionOutcome{aggregate: updated}, nil
+}
+
+func (m *Biz) driveOneRuntimeReconciliationTransition(ctx context.Context, run *runmodel.Run, aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand) (runtime.RuntimeAggregate, bool, error) {
+	required := aggregate.Facts.ReconciliationContract.SchemaVersion != "" &&
+		(aggregate.Reconciliation.Batch == nil || reconciliationRequestNeedsRefresh(run, aggregate, command)) &&
+		aggregate.ActiveDispatch == nil && !runtimeConvergenceTerminal(aggregate.Decision.State)
+	if !required {
+		return aggregate, false, nil
+	}
+	return m.reconcileRuntimeWorkspaceWithCommand(ctx, run, aggregate, command)
+}
+
+func (m *Biz) advanceRuntimeConvergence(ctx context.Context, aggregate runtime.RuntimeAggregate, stablePrefixHash string) (runtime.RuntimeAggregate, error) {
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedPrerequisite:
+		return m.prepareRuntimePrerequisites(ctx, aggregate)
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
+		return m.driveRuntimeDecision(ctx, aggregate, stablePrefixHash)
+	case runtimecontract.ConvergenceStateComplete, runtimecontract.ConvergenceStateFailed:
+		return aggregate, nil
+	default:
+		return runtime.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime convergence state %q", aggregate.Decision.State)
+	}
+}
+
+func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, previousRevision uint64, previousConvergence string) (runtimeDriveTransitionOutcome, error) {
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance && aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Governance != nil {
+		result, err := runtimeGovernedWaitDriveResult(aggregate)
+		if err != nil {
+			return runtimeDriveTransitionOutcome{}, err
+		}
+		return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}, nil
+	}
+	if runtimeConvergenceTerminal(aggregate.Decision.State) {
+		return terminalRuntimeDriveTransition(aggregate), nil
+	}
+	if aggregate.StateRevision <= previousRevision {
+		return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime drive made no persisted progress at revision %d", previousRevision)}
+	}
+	if runtime.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
+		return runtimeDriveTransitionOutcome{}, &runtimePersistedDrivePendingError{Revision: aggregate.StateRevision}
+	}
+	return runtimeDriveTransitionOutcome{aggregate: aggregate}, nil
 }
 
 func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.RuntimeAggregate, stablePrefixHash string) (runtime.RuntimeAggregate, error) {

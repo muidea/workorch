@@ -22,148 +22,152 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	ledger := aggregate.SemanticPlanning.Clone()
 	switch ledger.Phase {
 	case runtimecontract.RuntimeSemanticPlanningRequired:
-		if retirement, found := runtime.NextRuntimeCWIBindingRetirementFact(aggregate); found {
-			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventCWIBindingRetired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{CWIBindingRetirement: &retirement},
-			})
-			return updated.Aggregate, err
-		}
-		if gap, found := runtime.NextRuntimeSemanticCatalogScopeGap(aggregate); found {
-			updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventSemanticCatalogScopeInvalidated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticCatalogScopeGap: &gap},
-			})
-			return updated.Aggregate, err
-		}
-		// Semantic Planning consumes committed owner facts. It must not create
-		// a second prerequisite path: capability-state acquisition (especially
-		// Git) is always committed before operation admissibility by the shared
-		// Orchestrator dispatcher.
-		if runtimeSemanticPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
-			return m.prepareRuntimePrerequisites(ctx, aggregate)
-		}
-		if aggregate.Facts.Resources.ProviderCeiling == nil {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
-		}
-		eligibleCoverage := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
-		if len(eligibleCoverage) == 0 {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_no_eligible_cwi", "semantic planning was requested without an eligible canonical CWI", nil)
-		}
-		manifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-			Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
-			Execution:        aggregate.Facts.Activation.ExecutionContract,
-			Admissibilities:  aggregate.Facts.Resources.OperationAdmissibilities,
-			EligibleCoverage: eligibleCoverage,
-		})
-		if err != nil {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
-		}
-		stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-		expected := runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, 0)
-		ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "", expected)
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		started, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind: runtime.RuntimeInternalEventSemanticPlanRequestStarted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: ensured.Facts.WorkspaceID, RunID: ensured.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: session.LogicalRequestID},
-		})
-		return started.Aggregate, err
+		return m.driveRuntimeSemanticRequired(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningOrderAccepted:
-		projected, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-			Kind: runtime.RuntimeInternalEventEligibleFocusProjected, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticOrderManifestHash: ledger.Manifest.Hash, SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), ledger.CoverageOrderDocument.CoverageOrder...)},
-		})
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		aggregate = projected.Aggregate
-		ledger = aggregate.SemanticPlanning.Clone()
-		batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
-		logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
-		return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)
+		return m.driveRuntimeSemanticOrderAccepted(ctx, aggregate, ledger)
 	case runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen:
 		return m.requestRuntimeSemanticPlanDocument(ctx, aggregate)
 	case runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted:
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticFeasibilityRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{}})
 		return updated.Aggregate, err
 	case runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete:
-		var activeBatch *runtimecontract.RuntimeSemanticPlanBatch
-		for idx := range ledger.Batches {
-			if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
-				value := ledger.Batches[idx].Clone()
-				activeBatch = &value
-				break
-			}
-		}
-		if activeBatch == nil {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_batch_identity_missing", "completed semantic proof batch has no active batch identity", nil)
-		}
-		// Owner observations first complete feasibility, then the private
-		// Orchestrator transition accepts the immutable batch identity. Keep this
-		// transition separate from owner facts so CompletedBatchIDs is only sealed
-		// when the focus document is merged and the active batch is cleared.
-		if activeBatch.State == runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete {
-			advanced, advanceErr := m.advanceRuntimeSemanticPlanBatch(ctx, aggregate, *activeBatch, runtimecontract.RuntimeSemanticPlanBatchAccepted)
-			if advanceErr != nil {
-				return runtime.RuntimeAggregate{}, advanceErr
-			}
-			aggregate = advanced
-			ledger = aggregate.SemanticPlanning.Clone()
-			for idx := range ledger.Batches {
-				if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
-					value := ledger.Batches[idx].Clone()
-					activeBatch = &value
-					break
-				}
-			}
-		}
-		batchResultFound := false
-		for _, result := range ledger.BatchFeasibilityResults {
-			if result.BatchID == activeBatch.BatchID {
-				batchResultFound = true
-				break
-			}
-		}
-		if !batchResultFound {
-			batchDocument, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, activeBatch.BatchID)
-			if !found {
-				return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_batch_document_missing", "completed semantic proof batch has no persisted document", nil)
-			}
-			result := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
-				BatchID: activeBatch.BatchID, BatchHash: activeBatch.Hash,
-				DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(batchDocument),
-				Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), ledger.Feasibilities...),
-			}
-			result.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
-			return m.observeRuntimeSemanticPlanBatchFeasibility(ctx, aggregate, result)
-		}
-		// A completed batch seals only the active focus/dependency closure.
-		// Pending CWI IDs are retained in the ledger for a later, independent
-		// SM-2 transaction; their owner facts must not block this focus.
-		merged, err := m.mergeRuntimeSemanticPlanFocusBatchDocument(ctx, aggregate, *activeBatch)
-		if err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
-		sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: merged.Facts.WorkspaceID, RunID: merged.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{}})
-		return sealed.Aggregate, err
+		return m.driveRuntimeSemanticFeasibilityComplete(ctx, aggregate, ledger)
 	case runtimecontract.RuntimeSemanticPlanningFeasibilityRequired:
-		// Merge clears ActiveBatchID only after the accepted focus document and
-		// complete owner facts are durably recorded. A crash in this short
-		// seal-ready window must resume with the existing proof identity; it must
-		// never fan out a second owner probe or reinterpret the merged document.
-		if ledger.ActiveBatchID == "" && ledger.MergedDocument != nil {
-			sealed, sealErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
-			})
-			return sealed.Aggregate, sealErr
-		}
-		return m.driveRuntimeSemanticFeasibility(ctx, aggregate)
+		return m.driveRuntimeSemanticFeasibilityRequired(ctx, aggregate, ledger)
 	case runtimecontract.RuntimeSemanticPlanningSealed, runtimecontract.RuntimeSemanticPlanningFailed:
 		return aggregate, nil
 	default:
 		return runtime.RuntimeAggregate{}, fmt.Errorf("unsupported runtime semantic planning phase %q", ledger.Phase)
 	}
+}
+
+func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
+	if retirement, found := runtime.NextRuntimeCWIBindingRetirementFact(aggregate); found {
+		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind: runtime.RuntimeInternalEventCWIBindingRetired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{CWIBindingRetirement: &retirement},
+		})
+		return updated.Aggregate, err
+	}
+	if gap, found := runtime.NextRuntimeSemanticCatalogScopeGap(aggregate); found {
+		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind: runtime.RuntimeInternalEventSemanticCatalogScopeInvalidated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticCatalogScopeGap: &gap},
+		})
+		return updated.Aggregate, err
+	}
+	if runtimeSemanticPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
+		return m.prepareRuntimePrerequisites(ctx, aggregate)
+	}
+	if aggregate.Facts.Resources.ProviderCeiling == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
+	}
+	eligibleCoverage := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
+	if len(eligibleCoverage) == 0 {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_no_eligible_cwi", "semantic planning was requested without an eligible canonical CWI", nil)
+	}
+	manifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
+		Execution: aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities,
+		EligibleCoverage: eligibleCoverage,
+	})
+	if err != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
+	}
+	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
+	expected := runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, 0)
+	ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "", expected)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	started, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventSemanticPlanRequestStarted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: ensured.Facts.WorkspaceID, RunID: ensured.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: session.LogicalRequestID},
+	})
+	return started.Aggregate, err
+}
+
+func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtime.RuntimeAggregate, error) {
+	projected, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventEligibleFocusProjected, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticOrderManifestHash: ledger.Manifest.Hash, SemanticCoverageOrder: append([]common.CoverageWorkItemID(nil), ledger.CoverageOrderDocument.CoverageOrder...)},
+	})
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	aggregate = projected.Aggregate
+	ledger = aggregate.SemanticPlanning.Clone()
+	batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
+	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
+	return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)
+}
+
+func (m *Biz) driveRuntimeSemanticFeasibilityComplete(ctx context.Context, aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtime.RuntimeAggregate, error) {
+	activeBatch := activeRuntimeSemanticBatch(ledger)
+	if activeBatch == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_batch_identity_missing", "completed semantic proof batch has no active batch identity", nil)
+	}
+	if activeBatch.State == runtimecontract.RuntimeSemanticPlanBatchFeasibilityComplete {
+		advanced, err := m.advanceRuntimeSemanticPlanBatch(ctx, aggregate, *activeBatch, runtimecontract.RuntimeSemanticPlanBatchAccepted)
+		if err != nil {
+			return runtime.RuntimeAggregate{}, err
+		}
+		aggregate, ledger = advanced, advanced.SemanticPlanning.Clone()
+		if refreshed := activeRuntimeSemanticBatch(ledger); refreshed != nil {
+			activeBatch = refreshed
+		}
+	}
+	if !runtimeSemanticBatchFeasibilityResultExists(ledger.BatchFeasibilityResults, activeBatch.BatchID) {
+		return m.observeCompletedRuntimeSemanticBatch(ctx, aggregate, ledger, *activeBatch)
+	}
+	merged, err := m.mergeRuntimeSemanticPlanFocusBatchDocument(ctx, aggregate, *activeBatch)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: merged.Facts.WorkspaceID, RunID: merged.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{}})
+	return sealed.Aggregate, err
+}
+
+func activeRuntimeSemanticBatch(ledger runtimecontract.RuntimeSemanticPlanningLedger) *runtimecontract.RuntimeSemanticPlanBatch {
+	for idx := range ledger.Batches {
+		if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
+			value := ledger.Batches[idx].Clone()
+			return &value
+		}
+	}
+	return nil
+}
+
+func runtimeSemanticBatchFeasibilityResultExists(results []runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult, batchID string) bool {
+	for _, result := range results {
+		if result.BatchID == batchID {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Biz) observeCompletedRuntimeSemanticBatch(ctx context.Context, aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger, batch runtimecontract.RuntimeSemanticPlanBatch) (runtime.RuntimeAggregate, error) {
+	document, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, batch.BatchID)
+	if !found {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_batch_document_missing", "completed semantic proof batch has no persisted document", nil)
+	}
+	result := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
+		BatchID: batch.BatchID, BatchHash: batch.Hash,
+		DocumentHash:  runtimecontract.StableRuntimeSemanticPlanDocumentHash(document),
+		Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), ledger.Feasibilities...),
+	}
+	result.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result)
+	return m.observeRuntimeSemanticPlanBatchFeasibility(ctx, aggregate, result)
+}
+
+func (m *Biz) driveRuntimeSemanticFeasibilityRequired(ctx context.Context, aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtime.RuntimeAggregate, error) {
+	if ledger.ActiveBatchID == "" && ledger.MergedDocument != nil {
+		sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind: runtime.RuntimeInternalEventSemanticContractSealed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{},
+		})
+		return sealed.Aggregate, err
+	}
+	return m.driveRuntimeSemanticFeasibility(ctx, aggregate)
 }
 
 func runtimeSemanticBatchDocument(values []runtimecontract.RuntimeSemanticPlanDocument, batchID string) (runtimecontract.RuntimeSemanticPlanDocument, bool) {
@@ -297,15 +301,9 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		PlanStep: expected.PlanStep, BatchID: expected.BatchID, BatchSequence: expected.BatchSequence,
 		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
 	}
-	var previous *runtimecontract.RuntimeOriginalDiagnostic
-	var correction *runtimecontract.RuntimeSemanticCorrectionDirective
-	if ledger.Attempt == 1 {
-		if len(ledger.Rejections) != 1 || ledger.CorrectionDirective == nil {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_correction_lineage_invalid", "semantic correction has no exact attempt-0 diagnostic", nil)
-		}
-		previous = ledger.Rejections[0].CloneOriginal()
-		value := ledger.CorrectionDirective.Clone()
-		correction = &value
+	previous, correction, correctionErr := runtimeSemanticCorrectionContext(ledger)
+	if correctionErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_correction_lineage_invalid", correctionErr.Error(), nil)
 	}
 	if _, contentErr := requestcontent.BuildSemanticPlanRequestContent(requestcontent.SemanticPlanRequestInput{
 		Manifest: manifest, StablePrefixHash: ledger.StablePrefixHash, Attempt: ledger.Attempt,
@@ -350,31 +348,54 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_contract_error", err.Error(), nil)
 	}
 	if response.Feedback != nil {
-		providerFailure := runtimeProviderRequestFailure(*response.Feedback)
-		providerDiagnostic := response.Feedback.OriginalDiagnostic.CloneOriginal()
-		if response.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderTransient {
-			outcome := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(providerFailure.Code, "provider_transient"), Signature: firstNonEmptyString(providerFailure.Signature, "provider-transient")}
-			updated, recordErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil)
-			if recordErr != nil {
-				return runtime.RuntimeAggregate{}, recordErr
-			}
-			if providerFailure.Code == "provider_body_idle_timeout" {
-				return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_body_idle_timeout", providerFailure.Reason, providerDiagnostic)
-			}
-			recovered, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(ctx, updated, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
-			if budgetErr != nil {
-				return runtime.RuntimeAggregate{}, budgetErr
-			}
-			if consumed {
-				return recovered, nil
-			}
-			return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_transport_exhausted", providerFailure.Reason, providerDiagnostic)
-		}
-		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, providerDiagnostic)
+		return m.handleRuntimeSemanticProviderFeedback(ctx, aggregate, session, *response.Feedback, physicalCallID)
 	}
 	if response.DocumentOutcome == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_missing", "semantic provider returned no typed document outcome", nil)
 	}
+	return m.handleRuntimeSemanticDocumentOutcome(ctx, aggregate, session, response, sequence, physicalCallID)
+}
+
+func runtimeSemanticCorrectionContext(ledger runtimecontract.RuntimeSemanticPlanningLedger) (*runtimecontract.RuntimeOriginalDiagnostic, *runtimecontract.RuntimeSemanticCorrectionDirective, error) {
+	if ledger.Attempt != 1 {
+		return nil, nil, nil
+	}
+	if len(ledger.Rejections) != 1 || ledger.CorrectionDirective == nil {
+		return nil, nil, fmt.Errorf("semantic correction has no exact attempt-0 diagnostic")
+	}
+	previous := ledger.Rejections[0].CloneOriginal()
+	value := ledger.CorrectionDirective.Clone()
+	return previous, &value, nil
+}
+
+func (m *Biz) handleRuntimeSemanticProviderFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, feedback runtimecontract.RuntimeFeedback, physicalCallID string) (runtime.RuntimeAggregate, error) {
+	providerFailure := runtimeProviderRequestFailure(feedback)
+	providerDiagnostic := feedback.OriginalDiagnostic.CloneOriginal()
+	if feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryProviderTransient {
+		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, providerDiagnostic)
+	}
+	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
+		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient,
+		Code:  firstNonEmptyString(providerFailure.Code, "provider_transient"), Signature: firstNonEmptyString(providerFailure.Signature, "provider-transient"),
+	}
+	updated, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	if providerFailure.Code == "provider_body_idle_timeout" {
+		return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_body_idle_timeout", providerFailure.Reason, providerDiagnostic)
+	}
+	recovered, consumed, err := m.runtimeConsumeRecoveryBudget(ctx, updated, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	if consumed {
+		return recovered, nil
+	}
+	return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_transport_exhausted", providerFailure.Reason, providerDiagnostic)
+}
+
+func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, sequence int, physicalCallID string) (runtime.RuntimeAggregate, error) {
 	switch response.DocumentOutcome.Disposition {
 	case runtimecontract.RuntimeProviderDocumentIncomplete:
 		updated, recoveryErr := m.runtimeCandidateRequestRecoveryRequired(ctx, aggregate, session.LogicalRequestID, physicalCallID, *response.DocumentOutcome)

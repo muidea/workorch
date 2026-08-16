@@ -288,52 +288,73 @@ func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement
 	case runtimecontract.PrerequisiteKindManifest:
 		return facts.Resources.Manifest != nil && facts.Resources.Manifest.Revision != ""
 	case runtimecontract.PrerequisiteKindTargetSnapshot:
-		for _, snapshot := range facts.Resources.TargetSnapshots {
-			if snapshot.TargetRef == requirement.SubjectRef && snapshot.Complete() {
-				return true
-			}
-		}
-		return false
+		return runtimeTargetSnapshotRequirementSatisfied(facts, requirement)
 	case runtimecontract.PrerequisiteKindTargetSelection:
-		selection := facts.Resources.TargetSelection
-		if selection == nil || selection.PrerequisiteID != runtimePrerequisiteID(requirement) {
-			return false
-		}
-		if requirement.Scope != runtimecontract.RuntimePrerequisiteScopeFocus {
-			return true
-		}
-		return currentFocusTargetSelection(facts) != nil
+		return runtimeTargetSelectionRequirementSatisfied(facts, requirement)
 	case runtimecontract.PrerequisiteKindFailureTarget:
-		if facts.Failure == nil || facts.Resources.FailureTarget == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
-			return false
-		}
-		target := *facts.Resources.FailureTarget
-		target.Signature = strings.TrimSpace(target.Signature)
-		failure := facts.Failure.Normalized()
-		return target.Signature == failure.Signature && sameRuntimeTargetRefs(target.TargetRefs, failure.TargetRefs)
+		return runtimeFailureTargetRequirementSatisfied(facts)
 	case runtimecontract.PrerequisiteKindCapability:
 		return capabilitiesSatisfy(facts.Capabilities, requirement.CapabilityClass, requirement.RequiredCapabilities)
 	case runtimecontract.PrerequisiteKindCapabilityState:
-		for _, snapshot := range facts.Resources.CapabilityStates {
-			if snapshot.OwnerModuleID == requirement.OwnerModuleID && snapshot.CapabilityStateKind == requirement.CapabilityStateKind && snapshot.SubjectRef == requirement.SubjectRef {
-				return true
-			}
-		}
-		return false
+		return runtimeCapabilityStateRequirementSatisfied(facts, requirement)
 	case runtimecontract.PrerequisiteKindValidationScratch:
 		return facts.Resources.ValidationScratch != nil && facts.Resources.ValidationScratch.Reference != "" && facts.Resources.ValidationScratch.Revision != ""
 	case runtimecontract.PrerequisiteKindProviderCeiling:
 		return facts.Resources.ProviderCeiling != nil && facts.Resources.ProviderCeiling.MaxBytes >= requirement.MinimumBytes
 	case runtimecontract.PrerequisiteKindOperationAdmissibility:
-		for _, inventory := range facts.Resources.OperationAdmissibilities {
-			if inventory.PrerequisiteID == runtimePrerequisiteID(requirement) && inventory.OwnerModuleID == requirement.OwnerModuleID {
-				return true
-			}
-		}
-		return false
+		return runtimeOperationAdmissibilityRequirementSatisfied(facts, requirement)
 	default:
 		return false
 	}
+}
+
+func runtimeTargetSnapshotRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) bool {
+	for _, snapshot := range facts.Resources.TargetSnapshots {
+		if snapshot.TargetRef == requirement.SubjectRef && snapshot.Complete() {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTargetSelectionRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) bool {
+	selection := facts.Resources.TargetSelection
+	if selection == nil || selection.PrerequisiteID != runtimePrerequisiteID(requirement) {
+		return false
+	}
+	if requirement.Scope != runtimecontract.RuntimePrerequisiteScopeFocus {
+		return true
+	}
+	return currentFocusTargetSelection(facts) != nil
+}
+
+func runtimeFailureTargetRequirementSatisfied(facts runtimecontract.RuntimeFacts) bool {
+	if facts.Failure == nil || facts.Resources.FailureTarget == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
+		return false
+	}
+	target := *facts.Resources.FailureTarget
+	target.Signature = strings.TrimSpace(target.Signature)
+	failure := facts.Failure.Normalized()
+	return target.Signature == failure.Signature && sameRuntimeTargetRefs(target.TargetRefs, failure.TargetRefs)
+}
+
+func runtimeCapabilityStateRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) bool {
+	for _, snapshot := range facts.Resources.CapabilityStates {
+		if snapshot.OwnerModuleID == requirement.OwnerModuleID && snapshot.CapabilityStateKind == requirement.CapabilityStateKind && snapshot.SubjectRef == requirement.SubjectRef {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeOperationAdmissibilityRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) bool {
+	prerequisiteID := runtimePrerequisiteID(requirement)
+	for _, inventory := range facts.Resources.OperationAdmissibilities {
+		if inventory.PrerequisiteID == prerequisiteID && inventory.OwnerModuleID == requirement.OwnerModuleID {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeCapabilityKinds(existing []string, incoming []string) []string {

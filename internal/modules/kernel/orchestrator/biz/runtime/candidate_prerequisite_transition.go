@@ -152,11 +152,8 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForFeasibilityPre
 // recoverable resource observation.
 
 func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	observation = observation.Normalized()
-	if err := observation.Validate(); err != nil || (observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityContractDefect) {
+	observation, err := normalizeOwnerInfeasibilityInput(c, workspaceID, runID, attempt, observation)
+	if err != nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
@@ -166,152 +163,30 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibi
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	idx, record, found := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !found {
-		for _, historical := range aggregate.CandidateAttempts {
-			if historical.Attempt == attempt && historical.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && historical.OwnerFeasibility != nil &&
-				(reflect.DeepEqual(historical.OwnerFeasibility.Clone(), observation) || historical.BindingContradiction != nil) {
-				return aggregate, nil
-			}
+		if duplicateOwnerInfeasibilityInvalidation(aggregate.CandidateAttempts, attempt, observation) {
+			return aggregate, nil
 		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
 	if record.Proposal == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
-	matched := false
-	var matchedFeasibility runtimecontract.RuntimeCandidateFeasibilityRecord
-	for _, feasibility := range record.Feasibilities {
-		if feasibility.Observation == nil {
-			continue
-		}
-		if reflect.DeepEqual(feasibility.Observation.Clone(), observation) {
-			matched = true
-			matchedFeasibility = feasibility
-			break
-		}
-	}
+	matchedFeasibility, matched := matchingOwnerInfeasibility(record.Feasibilities, observation)
 	if !matched {
 		return RuntimeAggregate{}, fmt.Errorf("%w: owner infeasibility has no matching persisted feasibility observation", common.ErrConflict)
 	}
 
 	expectedRevision := aggregate.StateRevision
-	var contradiction *runtimecontract.RuntimeBindingContradictionIdentity
-	var contradictionCoverageID common.CoverageWorkItemID
-	var contradictionBinding runtimecontract.RuntimeCWIBindingRef
-	contradictionUnbound := false
-	if observation.SealedTargetAuthorizationContradicted() {
-		identity, coverageID, bindingRef, contradictionErr := runtimeBindingContradictionIdentity(aggregate, record, matchedFeasibility, observation)
-		if contradictionErr != nil {
-			contradictionUnbound = true
-		} else {
-			contradiction = &identity
-			contradictionCoverageID = coverageID
-			contradictionBinding = bindingRef
-		}
+	contradiction := resolveOwnerBindingContradiction(aggregate, record, matchedFeasibility, observation)
+	invalidateCandidateAttemptForOwnerObservation(&aggregate, idx, observation, contradiction.identity)
+	if contradiction.identity != nil {
+		err = applyOwnerBindingContradiction(&aggregate, contradiction)
+	} else {
+		err = applyOwnerInfeasibilityFailure(&aggregate, observation, contradiction.unbound)
 	}
-	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
-	aggregate.CandidateAttempts[idx].Proposal = nil
-	aggregate.CandidateAttempts[idx].Feasibilities = nil
-	aggregate.CandidateAttempts[idx].Failure = nil
-	aggregate.CandidateAttempts[idx].Stale = nil
-	aggregate.CandidateAttempts[idx].PrerequisiteRequest = nil
-	copyObservation := observation.Clone()
-	aggregate.CandidateAttempts[idx].OwnerFeasibility = &copyObservation
-	aggregate.CandidateAttempts[idx].BindingContradiction = contradiction
-	facts := aggregate.Facts
-	if contradiction != nil {
-		for itemIndex := range facts.Coverage {
-			item := &facts.Coverage[itemIndex]
-			if item.ID != contradictionCoverageID || item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, contradictionBinding) {
-				continue
-			}
-			if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
-				return RuntimeAggregate{}, fmt.Errorf("runtime CWI binding retirement lineage exhausted")
-			}
-			item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
-				RetiredBindingRef: contradictionBinding, CausationRef: contradiction.ObservationHash,
-				Reason: "capability owner contradicted the sealed binding before dispatch",
-			})
-			item.CurrentBindingRef = nil
-			item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
-		}
-		updated, updateErr := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{contradictionCoverageID})
-		if updateErr != nil {
-			return RuntimeAggregate{}, updateErr
-		}
-		facts = updated
-		contract, contractErr := canonicalRuntimeCWIReconciliationContract(facts)
-		if contractErr != nil {
-			return RuntimeAggregate{}, contractErr
-		}
-		facts.ReconciliationContract = contract
-		aggregate.Facts = facts
-		if _, supersedeErr := supersedeActiveReconciliationForCurrentContract(&aggregate); supersedeErr != nil {
-			return RuntimeAggregate{}, supersedeErr
-		}
-		if retireErr := retireSemanticPlanningGenerationForBindingContradiction(&aggregate, contradictionCoverageID, contradiction.ObservationHash); retireErr != nil {
-			return RuntimeAggregate{}, retireErr
-		}
-		facts = aggregate.Facts
-		facts.Failure = nil
-		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
-		if reduceErr != nil {
-			return RuntimeAggregate{}, reduceErr
-		}
-		aggregate.Facts = facts
-		aggregate.Decision = decision
-		aggregate.StateRevision++
-		if err := aggregate.Validate(); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		return aggregate, nil
-	}
-	diagnostic := observation.Feedback.OriginalDiagnostic
-	failure := runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassCandidateInfeasible, Code: diagnostic.OriginalCode,
-		Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage, TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
-	}
-	if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityContractDefect {
-		failure = runtimecontract.FailureFact{
-			Class:      runtimecontract.FailureClassRuntimeContractMisalignment,
-			Code:       "runtime_owner_contract_defect",
-			Signature:  "runtime-owner-contract-defect/" + diagnostic.Signature,
-			Message:    "capability owner emitted an undeclared feasibility code",
-			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
-		}
-	}
-	if contradictionUnbound {
-		failure = runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_contract_defect",
-			Signature:  "binding-contradiction-unbound/" + diagnostic.Signature,
-			Message:    "owner contradiction cannot be tied to one current binding",
-			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
-		}
-	}
-	// An owner that reports that the sealed validation recipe is unavailable
-	// cannot be repaired by asking for another candidate under the same
-	// validation authority. A valid alternative must arrive as a new sealed
-	// prerequisite/blueprint fact; absent that fact the factual outcome is a
-	// deterministic terminal, not a correction or random state change.
-	if observation.FailureCategory() == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
-		// The owner rejected the sealed recipe before any repair attempt or
-		// dispatch. This is an owner/capability contract gap, not exhausted
-		// repair progress; preserving that distinction prevents a zero-attempt
-		// prerequisite failure from being reported as no-progress exhaustion.
-		failure.Class = runtimecontract.FailureClassCandidateInfeasible
-		failure.Code = "validation_recipe_exhausted"
-		failure.Signature = "validation-recipe-exhausted/" + diagnostic.Signature
-		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage
-	}
-	facts.Failure = &failure
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -320,6 +195,158 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibi
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+type ownerBindingContradiction struct {
+	identity   *runtimecontract.RuntimeBindingContradictionIdentity
+	coverageID common.CoverageWorkItemID
+	binding    runtimecontract.RuntimeCWIBindingRef
+	unbound    bool
+}
+
+func normalizeOwnerInfeasibilityInput(c *candidateDispatchComponent, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeOwnerFeasibilityObservation, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+		return runtimecontract.RuntimeOwnerFeasibilityObservation{}, common.ErrInvalidArgument
+	}
+	observation = observation.Normalized()
+	if err := observation.Validate(); err != nil || (observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityContractDefect) {
+		return runtimecontract.RuntimeOwnerFeasibilityObservation{}, common.ErrInvalidArgument
+	}
+	return observation, nil
+}
+
+func duplicateOwnerInfeasibilityInvalidation(attempts []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) bool {
+	for _, historical := range attempts {
+		if historical.Attempt == attempt && historical.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && historical.OwnerFeasibility != nil &&
+			(reflect.DeepEqual(historical.OwnerFeasibility.Clone(), observation) || historical.BindingContradiction != nil) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchingOwnerInfeasibility(feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeCandidateFeasibilityRecord, bool) {
+	for _, feasibility := range feasibilities {
+		if feasibility.Observation != nil && reflect.DeepEqual(feasibility.Observation.Clone(), observation) {
+			return feasibility, true
+		}
+	}
+	return runtimecontract.RuntimeCandidateFeasibilityRecord{}, false
+}
+
+func resolveOwnerBindingContradiction(aggregate RuntimeAggregate, record runtimecontract.RuntimeCandidateAttemptRecord, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) ownerBindingContradiction {
+	if !observation.SealedTargetAuthorizationContradicted() {
+		return ownerBindingContradiction{}
+	}
+	identity, coverageID, binding, err := runtimeBindingContradictionIdentity(aggregate, record, feasibility, observation)
+	if err != nil {
+		return ownerBindingContradiction{unbound: true}
+	}
+	return ownerBindingContradiction{identity: &identity, coverageID: coverageID, binding: binding}
+}
+
+func invalidateCandidateAttemptForOwnerObservation(aggregate *RuntimeAggregate, idx int, observation runtimecontract.RuntimeOwnerFeasibilityObservation, contradiction *runtimecontract.RuntimeBindingContradictionIdentity) {
+	record := &aggregate.CandidateAttempts[idx]
+	record.State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
+	record.Proposal = nil
+	record.Feasibilities = nil
+	record.Failure = nil
+	record.Stale = nil
+	record.PrerequisiteRequest = nil
+	copyObservation := observation.Clone()
+	record.OwnerFeasibility = &copyObservation
+	record.BindingContradiction = contradiction
+}
+
+func applyOwnerBindingContradiction(aggregate *RuntimeAggregate, contradiction ownerBindingContradiction) error {
+	facts := aggregate.Facts
+	if err := retireContradictedRuntimeCWIBinding(&facts, contradiction); err != nil {
+		return err
+	}
+	updated, err := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{contradiction.coverageID})
+	if err != nil {
+		return err
+	}
+	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
+	if err != nil {
+		return err
+	}
+	updated.ReconciliationContract = contract
+	aggregate.Facts = updated
+	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
+		return err
+	}
+	if err := retireSemanticPlanningGenerationForBindingContradiction(aggregate, contradiction.coverageID, contradiction.identity.ObservationHash); err != nil {
+		return err
+	}
+	facts = aggregate.Facts
+	facts.Failure = nil
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	return nil
+}
+
+func retireContradictedRuntimeCWIBinding(facts *runtimecontract.RuntimeFacts, contradiction ownerBindingContradiction) error {
+	for idx := range facts.Coverage {
+		item := &facts.Coverage[idx]
+		if item.ID != contradiction.coverageID || item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, contradiction.binding) {
+			continue
+		}
+		if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
+			return fmt.Errorf("runtime CWI binding retirement lineage exhausted")
+		}
+		item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
+			RetiredBindingRef: contradiction.binding, CausationRef: contradiction.identity.ObservationHash,
+			Reason: "capability owner contradicted the sealed binding before dispatch",
+		})
+		item.CurrentBindingRef = nil
+		item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+	}
+	return nil
+}
+
+func applyOwnerInfeasibilityFailure(aggregate *RuntimeAggregate, observation runtimecontract.RuntimeOwnerFeasibilityObservation, contradictionUnbound bool) error {
+	failure := ownerInfeasibilityFailure(observation, contradictionUnbound)
+	facts := aggregate.Facts
+	facts.Failure = &failure
+	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	return nil
+}
+
+func ownerInfeasibilityFailure(observation runtimecontract.RuntimeOwnerFeasibilityObservation, contradictionUnbound bool) runtimecontract.FailureFact {
+	diagnostic := observation.Feedback.OriginalDiagnostic
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateInfeasible, Code: diagnostic.OriginalCode,
+		Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage, TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
+	}
+	if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityContractDefect {
+		failure = runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_owner_contract_defect",
+			Signature: "runtime-owner-contract-defect/" + diagnostic.Signature, Message: "capability owner emitted an undeclared feasibility code",
+			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
+		}
+	}
+	if contradictionUnbound {
+		failure = runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_contract_defect",
+			Signature: "binding-contradiction-unbound/" + diagnostic.Signature, Message: "owner contradiction cannot be tied to one current binding",
+			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
+		}
+	}
+	if observation.FailureCategory() == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
+		failure.Class = runtimecontract.FailureClassCandidateInfeasible
+		failure.Code = "validation_recipe_exhausted"
+		failure.Signature = "validation-recipe-exhausted/" + diagnostic.Signature
+		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage
+	}
+	return failure
 }
 
 func (c *candidateDispatchComponent) invalidateActiveDispatchForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, error) {

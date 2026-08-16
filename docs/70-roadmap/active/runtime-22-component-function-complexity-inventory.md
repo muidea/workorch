@@ -596,3 +596,65 @@ intent 1。它们不属于本轮已定义的 C22 切片：Orchestrator 项涉及
 
 部署后 HTTP/SSE/CLI、fresh-data Runtime convergence、SO-MC-10 与 load test 仍按独立 live closure 验收；本轮
 没有部署、Resume/Restart 或真实外部 provider 操作，自动化通过不能替代该证据。
+
+## 10. 剩余 24 个高复杂函数收口快照（2026-08-16）
+
+第 9 节识别出的 24 个生产 `CC>30` 函数已完成后续结构收口。实现继续保持
+**1 Initiator + 4 Modules + 17 Blocks = 22 个运行单元**：没有新增 package、正式 Owner、状态机、aggregate、
+mutation entry、EventHub topic、repository/CAS、BackgroundRoutine、provider physical call 或跨 Owner 可变 helper。
+本轮只在原 Owner、原 package、原文件内引入命名 private helper，没有新增仅做转发的文件，也没有使用动态
+registry、reflect、callback transaction 或 `projection_family_N.go` 一类按编号切分的文件名。
+
+| 指标 | 第 9 节快照 | 本轮收口后 | 变化解释 |
+|---|---:|---:|---|
+| 非测试 Go | 1,141 文件 / 127,891 LOC | 1,141 文件 / 128,680 LOC | 文件/package 数不变；净增 789 LOC，用于同 Owner 的具名语义阶段、typed validation 和事务结果归一。 |
+| 测试 Go | 378 文件 / 113,917 LOC | 378 文件 / 113,917 LOC | 沿用既有 transition、invariant、restart、stale/duplicate、budget/guard 与 transport 回归。 |
+| 合计 | 1,519 文件 / 241,808 LOC | 1,519 文件 / 242,597 LOC | 没有以新文件或新 package 换取表面复杂度下降。 |
+| ≥500 行生产文件 | 36 | 36 | 数量不变；最大文件仍为 Orchestrator `semantic_planning.go`，由 1,642 行变为 1,686 行。 |
+| 生产 `CC>30` | 24，最大 60 | 0，最大不超过 30 | 原 24 个入口均拆为原 package 内可命名、可独立验证的语义步骤。 |
+
+本轮按 Owner 收口如下：
+
+- Orchestrator 20 个：拆分 authority invariant、prerequisite/freshness、CWI ledger、semantic planning、candidate
+  transaction、typed request/result adapter、bounded drive、recovery/lease 与 projection closeout。每次事务仍最多一次
+  aggregate Load/CAS；candidate request 与 feasibility probe 仍分别只有一次静态 EventHub round trip；驱动循环仍按
+  “一次迭代至多提交一次持久化转换”执行。
+- Workorchd 2 个：activation focus compiler 拆为 definition/profile/policy/slice/finalize 阶段；HTTP run action 保持
+  原静态穷尽 switch，只把各 typed response 分支委托给具名 writer，没有引入动态 action registry。
+- LLM 1 个：Responses SSE reader 拆为 reader state、frame decode、delta append、completed/incomplete finalize；仍只接纳
+  `output_text`，保持 guard、usage、partial response 与 `[DONE]` 语义。
+- Workspace 1 个：execution-intent ingress 拆为 owner context/definition、owner admission、typed Run command、result
+  identity validation；仍只有一次 SendEvent，fresh restart 的默认 LLM materialization 与 definition revision 校验顺序不变。
+
+四状态机影响说明：
+
+- SM-1：只调整 Workspace owner ingress 的内部结构；Run lifecycle transition semantics：`none`。
+- SM-2：只调整 authority invariant、prerequisite、CWI/semantic reconciliation 的内部求值阶段；authority/focus
+  transition semantics：`none`。
+- SM-3：只调整 candidate attempt、sealed dispatch、semantic document 与 closeout 的内部事务分段；candidate/sealed
+  dispatch transition semantics：`none`。
+- SM-4：只调整 bounded drive、request adapter、recovery/lease 与 projection delivery 的内部控制流；drive/recovery/
+  delivery transition semantics：`none`。
+
+关键顺序与基数保持不变：duplicate 仍先于 stale 判定，owner infeasibility 的优先级与 validation recipe 覆盖顺序
+不变，semantic proof batch 与 coverage-order 的 ledger 写入边界不变，scheduler cleanup 仍发生在 lifecycle unlock
+之前，fresh activation 仍只结束 local singleflight key，CAS/owner transient 仍不得变成 business terminal，投影重建
+仍不能反向构造 authority。
+
+性能对照沿用 LLM focused benchmark `BenchmarkRuntimeSemanticPlanProviderRequest`。100 次、3 轮样本为
+`642,381～702,037 ns/op`、`457,094～461,443 B/op`、`5,855～5,856 allocs/op`；与第 9 节记录的
+`618,084～628,553 ns/op`、`457,319～460,374 B/op`、`5,855～5,856 allocs/op` 相比，分配量保持同一范围，
+wall time 波动不作为回归结论。该 benchmark 冻结 provider request assembly；SSE parser 本轮由协议回归与 guard
+测试覆盖，不把静态复杂度下降解释为吞吐提升。
+
+最终自动化门禁全部通过：
+
+- 受影响 Owner 的 focused tests：Workorchd activation/server、LLM、Workspace、Orchestrator runtime 与完整
+  Orchestrator；
+- `make fmt-check`、`make vet`、`make verify-boundary-contract`、`make test`、`make test-race`、`make build`；
+- 22 单元 production `gocyclo --tests=false`：`0 issues`；新增 exported declaration、EventHub topic、新文件与新 package
+  审计均为 0。
+
+本节关闭的是 code/automated closure，不关闭 live closure。本轮没有部署、Resume/Restart、真实外部 provider、
+fresh-data Runtime convergence、HTTP/SSE/CLI 部署态回归或 load test；SO-MC-10 仍须以重新部署后的持续正向推进、
+revision-bound replacement 和最终 closure 证据单独验收。

@@ -33,6 +33,11 @@ type resolvedCoverageItem struct {
 	policy compiledEvidencePolicy
 }
 
+type coverageSliceBucket struct {
+	group runtimecontract.RuntimeAcceptanceSliceGroupPolicy
+	items []resolvedCoverageItem
+}
+
 // compiledEvidencePolicy is the neutral merge result for one coverage focus.
 // Description is audit-only and never enters reducer authority.
 type compiledEvidencePolicy struct {
@@ -80,74 +85,86 @@ func compileRuntimeCoverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD, 
 		return compiledCoverage{}, common.ErrInvalidArgument
 	}
 	activation = activation.Normalized()
-	stateChangeRequired := activation.ExecutionContract.StateChangePolicy == runtimecontract.RuntimeStateChangeMustProduce
-
-	// 1) Compile profile-owned bootstrap artifacts first. This is intentionally
-	// done in activation, before Runtime exists: the runtime only receives
-	// ordinary sealed Focus contracts and never derives a project layout from
-	// Goal prose, file suffixes, or provider output.
-	units := make([]workUnit, 0, len(dod.Items)+8)
-	bootstrapUnits, err := compileRuntimeBootstrapWorkUnits(goal, dod, activation.ExecutionContract.ProfileContracts)
+	units, err := compileRuntimeCoverageWorkUnits(goal, dod, activation.ExecutionContract.ProfileContracts)
 	if err != nil {
 		return compiledCoverage{}, err
 	}
-	units = append(units, bootstrapUnits...)
-	// 2) Generate item-level work units in definition order (one item identity per DoD/profile source).
-	for idx, item := range dod.Items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		units = append(units, workUnit{
-			sourceScope: "dodItem",
-			sourceID:    fmt.Sprintf("dod-%03d", idx+1),
-			text:        item,
-			order:       len(units) + 1,
-		})
+	allUnits := append([]workUnit(nil), units...)
+	resolved, err := resolveRuntimeCoverageItems(units, activation)
+	if err != nil {
+		return compiledCoverage{}, err
 	}
-	// profile required dimensions/deliverables keep stable source identity.
-	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(activation.ExecutionContract.ProfileContracts) {
-		for _, dimension := range profile.AcceptanceDimensions {
-			if !dimension.Required || strings.TrimSpace(dimension.ID) == "" {
-				continue
-			}
-			units = append(units, workUnit{
-				sourceScope: "acceptanceDimension", sourceID: dimension.ID, text: dimension.Description, order: len(units) + 1,
-			})
+	slicePolicy, groups, err := runtimeAcceptanceSlicePlan(activation, resolved)
+	if err != nil {
+		return compiledCoverage{}, err
+	}
+	buckets, err := assignRuntimeCoverageBuckets(resolved, groups)
+	if err != nil {
+		return compiledCoverage{}, err
+	}
+	compiled, err := compileRuntimeCoverageBuckets(buckets, slicePolicy)
+	if err != nil {
+		return compiledCoverage{}, err
+	}
+	return finalizeRuntimeCoverage(compiled, allUnits, activation.ExecutionContract.ProfileContracts, slicePolicy.MaxFocuses)
+}
+
+func compileRuntimeCoverageWorkUnits(goal *workspacemodel.Goal, dod *workspacemodel.DoD, profiles []runtimecontract.RuntimeProfileContract) ([]workUnit, error) {
+	// Profile-owned bootstrap artifacts are compiled before ordinary definition
+	// units. Runtime therefore receives only sealed Focus contracts and never
+	// derives a project layout from prose, suffixes, or provider output.
+	units, err := compileRuntimeBootstrapWorkUnits(goal, dod, profiles)
+	if err != nil {
+		return nil, err
+	}
+	for idx, item := range dod.Items {
+		if item = strings.TrimSpace(item); item != "" {
+			units = append(units, workUnit{sourceScope: "dodItem", sourceID: fmt.Sprintf("dod-%03d", idx+1), text: item})
 		}
-		for _, evidenceRole := range []string{"primary_state_change", "supplemental_evidence", ""} {
-			for _, deliverable := range profile.DeliverableExpectations {
-				if !deliverable.Required || deliverable.EvidenceRole != evidenceRole || strings.TrimSpace(deliverable.ID) == "" {
-					continue
-				}
+	}
+	units = appendRuntimeProfileWorkUnits(units, profiles)
+	for idx := range units {
+		units[idx].order = idx + 1
+		units[idx].itemID = common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", idx+1))
+	}
+	if len(units) == 0 {
+		return nil, fmt.Errorf("runtime coverage focus compiler produced no coverage items")
+	}
+	return units, nil
+}
+
+func appendRuntimeProfileWorkUnits(units []workUnit, profiles []runtimecontract.RuntimeProfileContract) []workUnit {
+	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
+		for _, dimension := range profile.AcceptanceDimensions {
+			if dimension.Required && strings.TrimSpace(dimension.ID) != "" {
+				units = append(units, workUnit{sourceScope: "acceptanceDimension", sourceID: dimension.ID, text: dimension.Description})
+			}
+		}
+		units = appendRuntimeDeliverableWorkUnits(units, profile.DeliverableExpectations)
+	}
+	return units
+}
+
+func appendRuntimeDeliverableWorkUnits(units []workUnit, deliverables []runtimecontract.RuntimeDeliverableExpectation) []workUnit {
+	for _, evidenceRole := range []string{"primary_state_change", "supplemental_evidence", ""} {
+		for _, deliverable := range deliverables {
+			if deliverable.Required && deliverable.EvidenceRole == evidenceRole && strings.TrimSpace(deliverable.ID) != "" {
 				units = append(units, workUnit{
-					sourceScope: "deliverable", sourceID: deliverable.ID, text: deliverable.Description,
-					evidenceRole: deliverable.EvidenceRole, order: len(units) + 1,
+					sourceScope: "deliverable", sourceID: deliverable.ID, text: deliverable.Description, evidenceRole: deliverable.EvidenceRole,
 				})
 			}
 		}
 	}
-	// Stable item IDs are assigned from original definition order before continuation filtering.
-	for idx := range units {
-		units[idx].order = idx + 1
-		units[idx].itemID = common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", units[idx].order))
-	}
-	allUnits := append([]workUnit(nil), units...)
-	if len(units) == 0 {
-		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no coverage items")
-	}
+	return units
+}
 
-	// Resolve per-item evidence policy first (item identity independent of slice size).
+func resolveRuntimeCoverageItems(units []workUnit, activation runtimecontract.RuntimeActivationContext) ([]resolvedCoverageItem, error) {
+	stateChangeRequired := activation.ExecutionContract.StateChangePolicy == runtimecontract.RuntimeStateChangeMustProduce
 	resolved := make([]resolvedCoverageItem, 0, len(units))
 	for _, unit := range units {
-		var policy compiledEvidencePolicy
-		if unit.bootstrapArtifact != nil {
-			policy, err = compileRuntimeBootstrapArtifactPolicy(unit)
-		} else {
-			policy, err = resolveCoverageEvidencePolicy(unit.sourceScope, unit.sourceID, activation, stateChangeRequired)
-		}
+		policy, err := resolveRuntimeCoverageItemPolicy(unit, activation, stateChangeRequired)
 		if err != nil {
-			return compiledCoverage{}, err
+			return nil, err
 		}
 		if unit.evidenceRole != "" {
 			policy.EvidenceRole = unit.evidenceRole
@@ -156,149 +173,139 @@ func compileRuntimeCoverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD, 
 		if itemID == "" {
 			itemID = common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", unit.order))
 		}
-		resolved = append(resolved, resolvedCoverageItem{
-			unit:   unit,
-			itemID: itemID,
-			policy: policy,
-		})
+		resolved = append(resolved, resolvedCoverageItem{unit: unit, itemID: itemID, policy: policy})
 	}
+	return resolved, nil
+}
 
-	// 2) Group into acceptance slices using typed policy (or 1 item = 1 slice default).
-	slicePolicy := runtimecontract.RuntimeAcceptanceSlicePolicy{
+func resolveRuntimeCoverageItemPolicy(unit workUnit, activation runtimecontract.RuntimeActivationContext, stateChangeRequired bool) (compiledEvidencePolicy, error) {
+	if unit.bootstrapArtifact != nil {
+		return compileRuntimeBootstrapArtifactPolicy(unit)
+	}
+	return resolveCoverageEvidencePolicy(unit.sourceScope, unit.sourceID, activation, stateChangeRequired)
+}
+
+func runtimeAcceptanceSlicePlan(activation runtimecontract.RuntimeActivationContext, resolved []resolvedCoverageItem) (runtimecontract.RuntimeAcceptanceSlicePolicy, []runtimecontract.RuntimeAcceptanceSliceGroupPolicy, error) {
+	policy := runtimecontract.RuntimeAcceptanceSlicePolicy{
 		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 		MaxWorkItems:  runtimecontract.RuntimeAcceptanceSliceDefaultMaxItems, MaxFocuses: runtimecontract.RuntimeAcceptanceFocusMaxCount,
 		MaxCandidateContextItems: runtimecontract.RuntimeCandidateContextItemsMaxCount,
 	}
 	if activation.ExecutionContract.AcceptanceSlicePolicy != nil {
-		slicePolicy = activation.ExecutionContract.AcceptanceSlicePolicy.Normalized()
+		policy = activation.ExecutionContract.AcceptanceSlicePolicy.Normalized()
 	}
-	if err := slicePolicy.Validate(); err != nil {
-		return compiledCoverage{}, err
+	if err := policy.Validate(); err != nil {
+		return runtimecontract.RuntimeAcceptanceSlicePolicy{}, nil, err
 	}
-
-	groups := slicePolicy.Groups
+	groups := policy.Groups
 	if len(groups) == 0 {
-		// Neutral fallback group: all remaining items, one focus per item when max=1.
 		groups = []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 			ID: "slice-default", Title: "Default acceptance", Scope: "default", Priority: 100,
-			MaxWorkItems: slicePolicy.MaxWorkItems, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
+			MaxWorkItems: policy.MaxWorkItems, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
 		}}
 	}
-	// A matched bootstrap recipe is an activation-time dependency, not a normal
-	// acceptance category.  In particular, an empty workspace cannot satisfy a
-	// generic source-change focus until its profile-declared first artifact has
-	// been selected and created.  Do not let a profile's ordinary acceptance
-	// groups (for example primary_state_change before remaining_acceptance)
-	// reorder that dependency behind an ungrounded focus.
-	//
-	// This remains an application compilation rule: the runtime only receives
-	// the resulting ordered Focus contracts and never interprets profile or
-	// artifact semantics.
-	hasBootstrapArtifacts := false
-	for _, item := range resolved {
-		if item.unit.bootstrapArtifact != nil {
-			hasBootstrapArtifacts = true
-			break
-		}
-	}
-	if hasBootstrapArtifacts {
+	if runtimeCoverageHasBootstrapArtifact(resolved) {
 		groups = append([]runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 			ID: "slice-bootstrap-artifact", Title: "Profile bootstrap artifacts", Scope: "bootstrap_artifact", Priority: -1,
 			MaxWorkItems: 1, Match: runtimecontract.RuntimeAcceptanceSliceMatch{SourceScopes: []string{"bootstrapArtifact"}},
 		}}, groups...)
 	}
+	return policy, groups, nil
+}
 
-	assigned := make([]bool, len(resolved))
-	type sliceBucket struct {
-		group runtimecontract.RuntimeAcceptanceSliceGroupPolicy
-		items []resolvedCoverageItem
-	}
-	buckets := make([]sliceBucket, 0, len(groups))
-	for _, group := range groups {
-		bucket := sliceBucket{group: group}
-		for idx, item := range resolved {
-			if assigned[idx] {
-				continue
-			}
-			if !matchAcceptanceSliceGroup(group, item.unit.sourceScope, item.unit.sourceID, item.policy) {
-				continue
-			}
-			assigned[idx] = true
-			bucket.items = append(bucket.items, item)
+func runtimeCoverageHasBootstrapArtifact(items []resolvedCoverageItem) bool {
+	for _, item := range items {
+		if item.unit.bootstrapArtifact != nil {
+			return true
 		}
-		if len(bucket.items) > 0 {
+	}
+	return false
+}
+
+func assignRuntimeCoverageBuckets(resolved []resolvedCoverageItem, groups []runtimecontract.RuntimeAcceptanceSliceGroupPolicy) ([]coverageSliceBucket, error) {
+	assigned := make([]bool, len(resolved))
+	buckets := make([]coverageSliceBucket, 0, len(groups))
+	for _, group := range groups {
+		bucket := coverageSliceBucket{group: group}
+		for idx, item := range resolved {
+			if !assigned[idx] && matchAcceptanceSliceGroup(group, item.unit.sourceScope, item.unit.sourceID, item.policy) {
+				assigned[idx] = true
+				bucket.items = append(bucket.items, item)
+			}
+		}
+		if len(bucket.items) != 0 {
 			buckets = append(buckets, bucket)
 		}
 	}
 	for idx, ok := range assigned {
 		if !ok {
-			return compiledCoverage{}, fmt.Errorf("coverage item %s/%s matched no acceptance slice group", resolved[idx].unit.sourceScope, resolved[idx].unit.sourceID)
+			return nil, fmt.Errorf("coverage item %s/%s matched no acceptance slice group", resolved[idx].unit.sourceScope, resolved[idx].unit.sourceID)
 		}
 	}
+	return buckets, nil
+}
 
-	focuses := make([]runtimecontract.CoverageFocus, 0, len(resolved))
-	slices := make([]runtimecontract.RuntimeAcceptanceSlice, 0, len(buckets))
-	coverageItems := make([]runtimecontract.RuntimeCoverageItem, 0, len(resolved))
+func compileRuntimeCoverageBuckets(buckets []coverageSliceBucket, policy runtimecontract.RuntimeAcceptanceSlicePolicy) (compiledCoverage, error) {
+	compiled := compiledCoverage{}
 	focusSeq := 0
 	for _, bucket := range buckets {
-		maxItems := slicePolicy.EffectiveMaxWorkItems(bucket.group)
-		// A slice is a bounded presentation and context unit.  It is deliberately
-		// not a coverage-credit unit: a single owner receipt must never acquire
-		// credit for multiple semantic CWI merely because they appear together in
-		// the UI/request batch.
-		ordinal := 0
-		for start := 0; start < len(bucket.items); start += maxItems {
-			end := start + maxItems
-			if end > len(bucket.items) {
-				end = len(bucket.items)
-			}
-			presentationChunk := bucket.items[start:end]
-			ordinal++
-			sliceID := fmt.Sprintf("%s-%03d", bucket.group.ID, ordinal)
-			ids := make([]common.CoverageWorkItemID, 0, len(presentationChunk))
-			requiredKinds := []string{}
-			for _, item := range presentationChunk {
-				ids = append(ids, item.itemID)
-				requiredKinds = stableStringUnion(requiredKinds, item.policy.RequiredEvidenceKinds)
-				coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
-					ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
-					TargetText: item.unit.text, Order: item.unit.order,
-				}.Normalized())
-			}
-			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{
-				ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
-				CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
-				CompletionPolicy: slicePolicy.CompletionPolicy, ResultPolicy: slicePolicy.ResultPolicy,
-			}.Normalized())
-
-			// Slices bound presentation and request batching only. Runtime
-			// authority has one focus per canonical CWI so a semantic binding,
-			// receipt, evidence transition, reopen and reconciliation entry all
-			// share one unambiguous identity.
-			for _, item := range presentationChunk {
-				focusSeq++
-				focus := newCompiledCoverageFocus(fmt.Sprintf("focus-%03d", focusSeq), sliceID, bucket.group.Scope, item)
-				if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
-					return compiledCoverage{}, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
-				}
-				focuses = append(focuses, focus)
+		maxItems := policy.EffectiveMaxWorkItems(bucket.group)
+		for start, ordinal := 0, 1; start < len(bucket.items); start, ordinal = start+maxItems, ordinal+1 {
+			end := min(start+maxItems, len(bucket.items))
+			var err error
+			focusSeq, err = appendRuntimeCoverageChunk(&compiled, bucket, bucket.items[start:end], policy, ordinal, focusSeq)
+			if err != nil {
+				return compiledCoverage{}, err
 			}
 		}
 	}
-	coverageItems, err = compileRuntimeCoverageDependencies(coverageItems, runtimeCoverageItemsFromWorkUnits(allUnits), activation.ExecutionContract.ProfileContracts)
+	return compiled, nil
+}
+
+func appendRuntimeCoverageChunk(compiled *compiledCoverage, bucket coverageSliceBucket, items []resolvedCoverageItem, policy runtimecontract.RuntimeAcceptanceSlicePolicy, ordinal, focusSeq int) (int, error) {
+	sliceID := fmt.Sprintf("%s-%03d", bucket.group.ID, ordinal)
+	ids := make([]common.CoverageWorkItemID, 0, len(items))
+	requiredKinds := []string{}
+	for _, item := range items {
+		ids = append(ids, item.itemID)
+		requiredKinds = stableStringUnion(requiredKinds, item.policy.RequiredEvidenceKinds)
+		compiled.CoverageItems = append(compiled.CoverageItems, runtimecontract.RuntimeCoverageItem{
+			ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
+			TargetText: item.unit.text, Order: item.unit.order,
+		}.Normalized())
+	}
+	compiled.Slices = append(compiled.Slices, runtimecontract.RuntimeAcceptanceSlice{
+		ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
+		CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
+		CompletionPolicy: policy.CompletionPolicy, ResultPolicy: policy.ResultPolicy,
+	}.Normalized())
+	for _, item := range items {
+		focusSeq++
+		focus := newCompiledCoverageFocus(fmt.Sprintf("focus-%03d", focusSeq), sliceID, bucket.group.Scope, item)
+		if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
+			return focusSeq, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
+		}
+		compiled.Focuses = append(compiled.Focuses, focus)
+	}
+	return focusSeq, nil
+}
+
+func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, profiles []runtimecontract.RuntimeProfileContract, maxFocuses int) (compiledCoverage, error) {
+	coverageItems, err := compileRuntimeCoverageDependencies(compiled.CoverageItems, runtimeCoverageItemsFromWorkUnits(allUnits), profiles)
 	if err != nil {
 		return compiledCoverage{}, err
 	}
 	if err := runtimecontract.ValidateRuntimeCoverageItemDependencies(coverageItems); err != nil {
 		return compiledCoverage{}, fmt.Errorf("compiled coverage dependencies: %w", err)
 	}
-	if len(focuses) == 0 {
+	if len(compiled.Focuses) == 0 {
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced no focuses")
 	}
-	if len(focuses) > slicePolicy.MaxFocuses {
-		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(focuses), slicePolicy.MaxFocuses)
+	if len(compiled.Focuses) > maxFocuses {
+		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(compiled.Focuses), maxFocuses)
 	}
-	return compiledCoverage{Focuses: focuses, Slices: slices, CoverageItems: coverageItems}, nil
+	compiled.CoverageItems = coverageItems
+	return compiled, nil
 }
 
 // compiledEvidencePolicyRequiresIndependentFocus identifies declarations that

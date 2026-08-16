@@ -567,118 +567,145 @@ func ensureOpenAICompatibleAPIRoot(path string) string {
 	return path + "/v1"
 }
 
+type responsesStreamEvent struct {
+	Type              string                     `json:"type"`
+	Delta             string                     `json:"delta,omitempty"`
+	Text              string                     `json:"text,omitempty"`
+	Response          *responsesResponse         `json:"response,omitempty"`
+	IncompleteDetails responsesIncompleteDetails `json:"incomplete_details,omitempty"`
+	Error             *providerResponseError     `json:"error,omitempty"`
+}
+
+type responsesStreamReader struct {
+	builder   strings.Builder
+	usage     *llmaudit.ProviderUsage
+	guard     *providerStreamGuard
+	emit      func(llmmodels.ProviderStreamEvent) error
+	completed bool
+}
+
 func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmaudit.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
-	var builder strings.Builder
-	var usage *llmaudit.ProviderUsage
-	guard := newProviderStreamGuard(defaultProviderStreamLimits)
-	completed := false
+	stream := &responsesStreamReader{guard: newProviderStreamGuard(defaultProviderStreamLimits), emit: emit}
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
+		data, ok := responsesStreamData(scanner.Text())
+		if !ok {
 			continue
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			completed = true
-			if emit != nil {
-				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
-					return "", nil, err
-				}
+		stop, preservePartial, err := stream.consume(data)
+		if err != nil {
+			if preservePartial {
+				return stream.builder.String(), stream.usage, err
 			}
-			break
-		}
-		if err := guard.observeDataEvent(); err != nil {
 			return "", nil, err
 		}
-		var event struct {
-			Type              string                     `json:"type"`
-			Delta             string                     `json:"delta,omitempty"`
-			Text              string                     `json:"text,omitempty"`
-			Response          *responsesResponse         `json:"response,omitempty"`
-			IncompleteDetails responsesIncompleteDetails `json:"incomplete_details,omitempty"`
-			Error             *providerResponseError     `json:"error,omitempty"`
-		}
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			return "", nil, fmt.Errorf("%w: invalid responses stream event: %v", common.ErrInvalidArgument, err)
-		}
-		if event.Error != nil {
-			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, event.Error.Summary())
-		}
-		if event.Response != nil {
-			if parsed := event.Response.Usage.ProviderUsage(); parsed != nil {
-				usage = parsed
-			}
-		}
-		// Responses interleaves reasoning, summaries and final output. Only the
-		// output_text channel is a provider-declared final document channel;
-		// reasoning is neither candidate content nor a continuation prefix.
-		if event.Type == "response.output_text.delta" && event.Delta != "" {
-			if err := guard.observeDelta(event.Delta); err != nil {
-				return "", nil, err
-			}
-			builder.WriteString(event.Delta)
-			if emit != nil {
-				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: event.Delta}); err != nil {
-					return "", nil, err
-				}
-			}
-		}
-		if event.Type == "response.output_text.done" && event.Text != "" && builder.Len() == 0 {
-			if err := guard.observeDelta(event.Text); err != nil {
-				return "", nil, err
-			}
-			builder.WriteString(event.Text)
-			if emit != nil {
-				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: event.Text}); err != nil {
-					return "", nil, err
-				}
-			}
-		}
-		if event.Type == "response.completed" {
-			if builder.Len() == 0 && event.Response != nil {
-				content := event.Response.Content()
-				if content != "" {
-					if err := guard.observeDelta(content); err != nil {
-						return "", nil, err
-					}
-					builder.WriteString(content)
-					if emit != nil {
-						if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: content}); err != nil {
-							return "", nil, err
-						}
-					}
-				}
-			}
-			completed = true
-			if emit != nil {
-				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
-					return "", nil, err
-				}
-			}
-		}
-		if event.Type == "response.incomplete" {
-			reason := event.IncompleteDetails.Reason
-			if event.Response != nil {
-				if reason == "" {
-					reason = event.Response.IncompleteDetails.Reason
-				}
-			}
-			if reason == "max_output_tokens" {
-				payload := []byte(builder.String())
-				return builder.String(), usage, &ProviderOutputLimitError{Payload: payload, Usage: usage}
-			}
-			return builder.String(), usage, fmt.Errorf("%w: llm provider stream incomplete: %s", common.ErrInvalidArgument, reason)
+		if stop {
+			break
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", nil, err
 	}
-	if !completed {
+	if !stream.completed {
 		return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before response.completed", common.ErrInvalidArgument)
 	}
-	return builder.String(), usage, nil
+	return stream.builder.String(), stream.usage, nil
+}
+
+func responsesStreamData(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
+}
+
+func (s *responsesStreamReader) consume(data string) (stop bool, preservePartial bool, err error) {
+	if data == "[DONE]" {
+		return true, false, s.complete()
+	}
+	if err := s.guard.observeDataEvent(); err != nil {
+		return false, false, err
+	}
+	event, err := decodeResponsesStreamEvent(data)
+	if err != nil {
+		return false, false, err
+	}
+	if event.Response != nil {
+		if usage := event.Response.Usage.ProviderUsage(); usage != nil {
+			s.usage = usage
+		}
+	}
+	switch event.Type {
+	case "response.output_text.delta":
+		return false, false, s.appendOutput(event.Delta, event.Delta != "")
+	case "response.output_text.done":
+		return false, false, s.appendOutput(event.Text, event.Text != "" && s.builder.Len() == 0)
+	case "response.completed":
+		return false, false, s.consumeCompleted(event.Response)
+	case "response.incomplete":
+		return false, true, s.incompleteError(event)
+	default:
+		return false, false, nil
+	}
+}
+
+func decodeResponsesStreamEvent(data string) (responsesStreamEvent, error) {
+	var event responsesStreamEvent
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		return responsesStreamEvent{}, fmt.Errorf("%w: invalid responses stream event: %v", common.ErrInvalidArgument, err)
+	}
+	if event.Error != nil {
+		return responsesStreamEvent{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, event.Error.Summary())
+	}
+	return event, nil
+}
+
+// appendOutput accepts only provider-declared final output. Reasoning and
+// summaries are neither document content nor continuation prefixes.
+func (s *responsesStreamReader) appendOutput(content string, accepted bool) error {
+	if !accepted {
+		return nil
+	}
+	if err := s.guard.observeDelta(content); err != nil {
+		return err
+	}
+	s.builder.WriteString(content)
+	if s.emit == nil {
+		return nil
+	}
+	return s.emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: content})
+}
+
+func (s *responsesStreamReader) consumeCompleted(response *responsesResponse) error {
+	if s.builder.Len() == 0 && response != nil {
+		if content := response.Content(); content != "" {
+			if err := s.appendOutput(content, true); err != nil {
+				return err
+			}
+		}
+	}
+	return s.complete()
+}
+
+func (s *responsesStreamReader) complete() error {
+	s.completed = true
+	if s.emit == nil {
+		return nil
+	}
+	return s.emit(llmmodels.ProviderStreamEvent{Type: "done"})
+}
+
+func (s *responsesStreamReader) incompleteError(event responsesStreamEvent) error {
+	reason := event.IncompleteDetails.Reason
+	if reason == "" && event.Response != nil {
+		reason = event.Response.IncompleteDetails.Reason
+	}
+	if reason == "max_output_tokens" {
+		return &ProviderOutputLimitError{Payload: []byte(s.builder.String()), Usage: s.usage}
+	}
+	return fmt.Errorf("%w: llm provider stream incomplete: %s", common.ErrInvalidArgument, reason)
 }
 
 func (e *providerResponseError) Summary() string {

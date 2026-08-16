@@ -62,11 +62,21 @@ type RuntimeAuthorityInvariantReport struct {
 // reducer.
 func InspectRuntimeAuthorityInvariants(aggregate RuntimeAggregate) RuntimeAuthorityInvariantReport {
 	facts := aggregate.Facts.Normalized()
+	report := newRuntimeAuthorityInvariantReport(aggregate, facts)
+	active, satisfied := report.inspectActivePrerequisites(facts)
+	retired := report.inspectRetiredPrerequisites(facts, active)
+	report.inspectPrerequisiteObservations(facts, satisfied, retired)
+	report.inspectTargetSelection(facts, satisfied)
+	report.inspectDecisionAndDispatch(aggregate, facts)
+	report.inspectProviderCeiling(aggregate, facts)
+	report.sort()
+	return report
+}
+
+func newRuntimeAuthorityInvariantReport(aggregate RuntimeAggregate, facts runtimecontract.RuntimeFacts) RuntimeAuthorityInvariantReport {
 	report := RuntimeAuthorityInvariantReport{
-		StateRevision:         aggregate.StateRevision,
-		FocusID:               facts.Focus.ID,
-		CandidateAttemptCount: len(aggregate.CandidateAttempts),
-		RepairAttempts:        facts.Repair.RepairAttempts,
+		StateRevision: aggregate.StateRevision, FocusID: facts.Focus.ID,
+		CandidateAttemptCount: len(aggregate.CandidateAttempts), RepairAttempts: facts.Repair.RepairAttempts,
 		PrerequisiteRefreshes: facts.Recovery.PrerequisiteRefreshes,
 	}
 	if facts.Resources.TargetSelection != nil {
@@ -78,75 +88,97 @@ func InspectRuntimeAuthorityInvariants(aggregate RuntimeAggregate) RuntimeAuthor
 	if aggregate.Decision.Terminal != nil {
 		report.TerminalCode = aggregate.Decision.Terminal.Code
 	}
+	return report
+}
 
+func (r *RuntimeAuthorityInvariantReport) inspectActivePrerequisites(facts runtimecontract.RuntimeFacts) (map[string]runtimecontract.RuntimePrerequisite, map[string]runtimecontract.RuntimePrerequisite) {
 	active := make(map[string]runtimecontract.RuntimePrerequisite, len(facts.Prerequisites.Pending)+len(facts.Prerequisites.Satisfied))
-	satisfied := make(map[string]runtimecontract.RuntimePrerequisite, len(facts.Prerequisites.Satisfied))
 	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...) {
 		active[prerequisite.ID] = prerequisite
-		report.ActivePrerequisiteIDs = append(report.ActivePrerequisiteIDs, prerequisite.ID)
+		r.ActivePrerequisiteIDs = append(r.ActivePrerequisiteIDs, prerequisite.ID)
 		if prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID != facts.Focus.ID {
-			report.addViolation(RuntimeAuthorityInvariantActiveFocusScope, prerequisite.ID, "", "", "active focus-scoped prerequisite is bound to a different focus")
+			r.addViolation(RuntimeAuthorityInvariantActiveFocusScope, prerequisite.ID, "", "", "active focus-scoped prerequisite is bound to a different focus")
 		}
 	}
+	satisfied := make(map[string]runtimecontract.RuntimePrerequisite, len(facts.Prerequisites.Satisfied))
 	for _, prerequisite := range facts.Prerequisites.Satisfied {
 		satisfied[prerequisite.ID] = prerequisite
 	}
+	return active, satisfied
+}
+
+func (r *RuntimeAuthorityInvariantReport) inspectRetiredPrerequisites(facts runtimecontract.RuntimeFacts, active map[string]runtimecontract.RuntimePrerequisite) map[string]runtimecontract.RuntimePrerequisite {
 	retired := make(map[string]runtimecontract.RuntimePrerequisite, len(facts.Prerequisites.Retired))
 	for _, prerequisite := range facts.Prerequisites.Retired {
 		retired[prerequisite.ID] = prerequisite
-		report.RetiredPrerequisiteIDs = append(report.RetiredPrerequisiteIDs, prerequisite.ID)
+		r.RetiredPrerequisiteIDs = append(r.RetiredPrerequisiteIDs, prerequisite.ID)
 		if _, exists := active[prerequisite.ID]; exists {
-			report.addViolation(RuntimeAuthorityInvariantActiveRetiredOverlap, prerequisite.ID, "", "", "prerequisite is both active and retired")
+			r.addViolation(RuntimeAuthorityInvariantActiveRetiredOverlap, prerequisite.ID, "", "", "prerequisite is both active and retired")
 		}
 		if prerequisite.Scope != runtimecontract.RuntimePrerequisiteScopeFocus || prerequisite.FocusID == "" {
-			report.addViolation(RuntimeAuthorityInvariantActiveRetiredOverlap, prerequisite.ID, "", "", "retired prerequisite is not focus-scoped")
+			r.addViolation(RuntimeAuthorityInvariantActiveRetiredOverlap, prerequisite.ID, "", "", "retired prerequisite is not focus-scoped")
 		}
 	}
+	return retired
+}
+
+func (r *RuntimeAuthorityInvariantReport) inspectPrerequisiteObservations(facts runtimecontract.RuntimeFacts, satisfied, retired map[string]runtimecontract.RuntimePrerequisite) {
 	for _, observation := range facts.Resources.PrerequisiteObservations {
-		report.ActivePrerequisiteObservationIDs = append(report.ActivePrerequisiteObservationIDs, observation.ObservationID)
+		r.ActivePrerequisiteObservationIDs = append(r.ActivePrerequisiteObservationIDs, observation.ObservationID)
 		prerequisite, exists := satisfied[observation.PrerequisiteID]
 		if !exists || prerequisite.Kind != observation.Kind || prerequisite.OwnerModuleID != observation.OwnerModuleID {
-			report.addViolation(RuntimeAuthorityInvariantObservationLifecycle, observation.PrerequisiteID, observation.ObservationID, "", "active observation has no matching satisfied prerequisite")
+			r.addViolation(RuntimeAuthorityInvariantObservationLifecycle, observation.PrerequisiteID, observation.ObservationID, "", "active observation has no matching satisfied prerequisite")
 		}
 	}
 	for _, observation := range facts.Resources.RetiredPrerequisiteObservations {
-		report.RetiredObservationIDs = append(report.RetiredObservationIDs, observation.ObservationID)
+		r.RetiredObservationIDs = append(r.RetiredObservationIDs, observation.ObservationID)
 		prerequisite, exists := retired[observation.PrerequisiteID]
 		if !exists || prerequisite.Kind != observation.Kind || prerequisite.OwnerModuleID != observation.OwnerModuleID {
-			report.addViolation(RuntimeAuthorityInvariantObservationLifecycle, observation.PrerequisiteID, observation.ObservationID, "", "retired observation has no matching retired prerequisite")
+			r.addViolation(RuntimeAuthorityInvariantObservationLifecycle, observation.PrerequisiteID, observation.ObservationID, "", "retired observation has no matching retired prerequisite")
 		}
 	}
-	if facts.Resources.TargetSelection != nil {
-		selection := facts.Resources.TargetSelection.Normalized()
-		prerequisite, exists := satisfied[selection.PrerequisiteID]
-		if !exists || prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSelection || prerequisite.Scope != runtimecontract.RuntimePrerequisiteScopeFocus || prerequisite.FocusID != facts.Focus.ID || prerequisite.OwnerModuleID != selection.OwnerModuleID {
-			report.addViolation(RuntimeAuthorityInvariantSelectionBinding, selection.PrerequisiteID, "", "", "target selection is not bound to the active current-focus prerequisite")
-		}
+}
+
+func (r *RuntimeAuthorityInvariantReport) inspectTargetSelection(facts runtimecontract.RuntimeFacts, satisfied map[string]runtimecontract.RuntimePrerequisite) {
+	if facts.Resources.TargetSelection == nil {
+		return
 	}
+	selection := facts.Resources.TargetSelection.Normalized()
+	prerequisite, exists := satisfied[selection.PrerequisiteID]
+	if !exists || prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSelection || prerequisite.Scope != runtimecontract.RuntimePrerequisiteScopeFocus || prerequisite.FocusID != facts.Focus.ID || prerequisite.OwnerModuleID != selection.OwnerModuleID {
+		r.addViolation(RuntimeAuthorityInvariantSelectionBinding, selection.PrerequisiteID, "", "", "target selection is not bound to the active current-focus prerequisite")
+	}
+}
+
+func (r *RuntimeAuthorityInvariantReport) inspectDecisionAndDispatch(aggregate RuntimeAggregate, facts runtimecontract.RuntimeFacts) {
 	if aggregate.Decision.Focus.ID != "" && aggregate.Decision.Focus.ID != facts.Focus.ID {
-		report.addViolation(RuntimeAuthorityInvariantDecisionFocus, "", "", aggregate.Decision.AuthoritySnapshot.ID, "sealed decision focus does not match persisted facts focus")
+		r.addViolation(RuntimeAuthorityInvariantDecisionFocus, "", "", aggregate.Decision.AuthoritySnapshot.ID, "sealed decision focus does not match persisted facts focus")
 	}
 	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Transaction.FocusID != facts.Focus.ID {
-		report.addViolation(RuntimeAuthorityInvariantDecisionFocus, "", "", aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID, "active dispatch focus does not match persisted facts focus")
+		r.addViolation(RuntimeAuthorityInvariantDecisionFocus, "", "", aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID, "active dispatch focus does not match persisted facts focus")
 	}
-	if runtimeDecisionRequestsCandidate(aggregate.Decision.State) && activeProviderCeilingRequirementUnsatisfied(facts) {
-		report.addViolation(RuntimeAuthorityInvariantProviderCeiling, providerCeilingPrerequisiteID(facts), "", aggregate.Decision.AuthoritySnapshot.ID, "candidate state has an unsatisfied activation-sealed provider ceiling prerequisite")
-	}
+}
 
-	sort.Strings(report.ActivePrerequisiteIDs)
-	sort.Strings(report.RetiredPrerequisiteIDs)
-	sort.Strings(report.ActivePrerequisiteObservationIDs)
-	sort.Strings(report.RetiredObservationIDs)
-	sort.Slice(report.Violations, func(left, right int) bool {
-		if report.Violations[left].Code != report.Violations[right].Code {
-			return report.Violations[left].Code < report.Violations[right].Code
+func (r *RuntimeAuthorityInvariantReport) inspectProviderCeiling(aggregate RuntimeAggregate, facts runtimecontract.RuntimeFacts) {
+	if runtimeDecisionRequestsCandidate(aggregate.Decision.State) && activeProviderCeilingRequirementUnsatisfied(facts) {
+		r.addViolation(RuntimeAuthorityInvariantProviderCeiling, providerCeilingPrerequisiteID(facts), "", aggregate.Decision.AuthoritySnapshot.ID, "candidate state has an unsatisfied activation-sealed provider ceiling prerequisite")
+	}
+}
+
+func (r *RuntimeAuthorityInvariantReport) sort() {
+	sort.Strings(r.ActivePrerequisiteIDs)
+	sort.Strings(r.RetiredPrerequisiteIDs)
+	sort.Strings(r.ActivePrerequisiteObservationIDs)
+	sort.Strings(r.RetiredObservationIDs)
+	sort.Slice(r.Violations, func(left, right int) bool {
+		if r.Violations[left].Code != r.Violations[right].Code {
+			return r.Violations[left].Code < r.Violations[right].Code
 		}
-		if report.Violations[left].PrerequisiteID != report.Violations[right].PrerequisiteID {
-			return report.Violations[left].PrerequisiteID < report.Violations[right].PrerequisiteID
+		if r.Violations[left].PrerequisiteID != r.Violations[right].PrerequisiteID {
+			return r.Violations[left].PrerequisiteID < r.Violations[right].PrerequisiteID
 		}
-		return report.Violations[left].ObservationID < report.Violations[right].ObservationID
+		return r.Violations[left].ObservationID < r.Violations[right].ObservationID
 	})
-	return report
 }
 
 func runtimeDecisionRequestsCandidate(state runtimecontract.ConvergenceState) bool {

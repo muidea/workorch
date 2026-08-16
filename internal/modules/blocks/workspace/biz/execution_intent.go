@@ -19,6 +19,15 @@ import (
 
 const workspaceExecutionIngressSource = "application/workorchd"
 
+type preparedWorkspaceExecutionIntent struct {
+	ctx                context.Context
+	command            workspaceevents.WorkspaceExecutionIntentCommand
+	workspace          *workspacemodel.Workspace
+	goal               *workspacemodel.Goal
+	dod                *workspacemodel.DoD
+	definitionRevision string
+}
+
 // handleExecutionIntentCommand is the Workspace owner ingress for both
 // /run resume and /run restart.  It has no caller-specified target state: the
 // owner derives the active Run selection and current Goal/DoD identity before
@@ -40,80 +49,117 @@ func (m *Biz) handleExecutionIntentCommand(ev magicevent.Event, result magiceven
 }
 
 func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.WorkspaceExecutionIntentResult, error) {
+	prepared, err := m.prepareWorkspaceExecutionIntent(ev)
+	if err != nil {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+	}
+	if result, admitted := prepared.ownerAdmission(); admitted {
+		return result, nil
+	}
+	forward := prepared.runCommand()
+	runResult, err := m.sendRunExecutionIntent(prepared.ctx, prepared.workspace.ID, forward)
+	if err != nil {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+	}
+	if err := validateRunExecutionIntentResult(runResult, prepared.workspace.ID, prepared.command.RequestID, forward.Kind); err != nil {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+	}
+	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
+}
+
+func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWorkspaceExecutionIntent, error) {
 	if m == nil || m.workspaces == nil || m.goals == nil || m.dods == nil || m.EventHub() == nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
+		return preparedWorkspaceExecutionIntent{}, common.ErrInvalidArgument
 	}
 	cmd, ok := ev.Data().(workspaceevents.WorkspaceExecutionIntentCommand)
 	if !ok || ev.Source() != workspaceExecutionIngressSource {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
+		return preparedWorkspaceExecutionIntent{}, common.ErrInvalidArgument
 	}
 	cmd = cmd.Normalized()
 	if err := cmd.Validate(); err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return preparedWorkspaceExecutionIntent{}, err
 	}
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 	if err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return preparedWorkspaceExecutionIntent{}, err
 	}
 	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return preparedWorkspaceExecutionIntent{}, err
 	}
 	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
 		workspace, err = m.materializeDefaultLLMSelectionFromBootstrap(ctx, workspace, cmd.Bootstrap)
 		if err != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err
+			return preparedWorkspaceExecutionIntent{}, err
 		}
 	}
 	goal, dod, err := m.currentExecutionDefinitions(ctx, workspace.ID)
 	if err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return preparedWorkspaceExecutionIntent{}, err
 	}
 	definitionRevision := workspacecontracts.ExecutionDefinitionRevision(
 		string(goal.ID), goal.DefinitionRevision,
 		string(dod.ID), dod.DefinitionRevision,
 	)
 	if definitionRevision == "" {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Workspace Goal/DoD content revision is incomplete", common.ErrConflict)
+		return preparedWorkspaceExecutionIntent{}, fmt.Errorf("%w: Workspace Goal/DoD content revision is incomplete", common.ErrConflict)
 	}
-	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
-		definition := cmd.Bootstrap.Definition.Normalized()
-		if definition.GoalID != goal.ID || definition.DoDID != dod.ID || definition.Revision != definitionRevision {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart bootstrap does not match Workspace current definition", common.ErrConflict)
-		}
+	if err := validateRestartExecutionDefinition(cmd, goal, dod, definitionRevision); err != nil {
+		return preparedWorkspaceExecutionIntent{}, err
 	}
+	return preparedWorkspaceExecutionIntent{
+		ctx: ctx, command: cmd, workspace: workspace, goal: goal, dod: dod, definitionRevision: definitionRevision,
+	}, nil
+}
 
-	resultValue := workspaceevents.WorkspaceExecutionIntentResult{
-		WorkspaceID: workspace.ID,
-		RequestID:   cmd.RequestID,
-		Kind:        cmd.Kind,
+func validateRestartExecutionDefinition(cmd workspaceevents.WorkspaceExecutionIntentCommand, goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string) error {
+	if cmd.Kind != runtimecontract.RuntimeExecutionIntentRestart {
+		return nil
 	}
-	if cmd.Kind == runtimecontract.RuntimeExecutionIntentResume && workspace.ActiveRunID == "" {
-		resultValue.Outcome = runtimecontract.RuntimeExecutionIntentRestartRequired
-		resultValue.Reason = runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent
-		return resultValue, nil
+	definition := cmd.Bootstrap.Definition.Normalized()
+	if definition.GoalID != goal.ID || definition.DoDID != dod.ID || definition.Revision != definitionRevision {
+		return fmt.Errorf("%w: restart bootstrap does not match Workspace current definition", common.ErrConflict)
 	}
+	return nil
+}
 
+func (p preparedWorkspaceExecutionIntent) ownerAdmission() (workspaceevents.WorkspaceExecutionIntentResult, bool) {
+	if p.command.Kind != runtimecontract.RuntimeExecutionIntentResume || p.workspace.ActiveRunID != "" {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, false
+	}
+	return workspaceevents.WorkspaceExecutionIntentResult{
+		WorkspaceID: p.workspace.ID,
+		RequestID:   p.command.RequestID,
+		Kind:        p.command.Kind,
+		Outcome:     runtimecontract.RuntimeExecutionIntentRestartRequired,
+		Reason:      runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent,
+	}, true
+}
+
+func (p preparedWorkspaceExecutionIntent) runCommand() runevents.WorkspaceExecutionIntentCommand {
 	runKind := runtimecontract.RuntimeExecutionIntentResume
-	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
+	if p.command.Kind == runtimecontract.RuntimeExecutionIntentRestart {
 		runKind = runtimecontract.RuntimeExecutionIntentRestart
 	}
 	forward := runevents.WorkspaceExecutionIntentCommand{
-		WorkspaceID:        workspace.ID,
-		RequestID:          cmd.RequestID,
+		WorkspaceID:        p.workspace.ID,
+		RequestID:          p.command.RequestID,
 		Kind:               runKind,
-		GoalID:             goal.ID,
-		DoDID:              dod.ID,
-		DefinitionRevision: definitionRevision,
-		Priority:           cmd.Priority,
+		GoalID:             p.goal.ID,
+		DoDID:              p.dod.ID,
+		DefinitionRevision: p.definitionRevision,
+		Priority:           p.command.Priority,
 	}
 	if runKind == runtimecontract.RuntimeExecutionIntentResume {
-		forward.RunID = workspace.ActiveRunID
+		forward.RunID = p.workspace.ActiveRunID
 	} else {
-		bootstrap := cmd.Bootstrap.Clone()
+		bootstrap := p.command.Bootstrap.Clone()
 		forward.Bootstrap = &bootstrap
 	}
+	return forward
+}
 
+func (m *Biz) sendRunExecutionIntent(ctx context.Context, workspaceID common.WorkspaceID, forward runevents.WorkspaceExecutionIntentCommand) (runevents.WorkspaceExecutionIntentResult, error) {
 	event := magicevent.NewEventWithContext(
 		runevents.TopicRunCommandWorkspaceExecutionIntent,
 		ModuleID,
@@ -123,30 +169,37 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		forward,
 	)
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), eventcontract.LaneScope{
-		SubjectType: "run", SubjectID: string(forward.RunID), WorkspaceID: string(workspace.ID), RunID: string(forward.RunID),
+		SubjectType: "run", SubjectID: string(forward.RunID), WorkspaceID: string(workspaceID), RunID: string(forward.RunID),
 	}))
 	response := m.SendEvent(event)
 	if response == nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
+		return runevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
 	}
 	if err := response.Error(); err != nil {
 		if err.Cause != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err.Cause
+			return runevents.WorkspaceExecutionIntentResult{}, err.Cause
 		}
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, resultErr
+		return runevents.WorkspaceExecutionIntentResult{}, resultErr
 	}
 	runResult, ok := data.(runevents.WorkspaceExecutionIntentResult)
-	if !ok || runResult.WorkspaceID != workspace.ID || runResult.RequestID != cmd.RequestID || runResult.Kind != runKind {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
+	if !ok {
+		return runevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
+	}
+	return runResult, nil
+}
+
+func validateRunExecutionIntentResult(runResult runevents.WorkspaceExecutionIntentResult, workspaceID common.WorkspaceID, requestID string, kind runtimecontract.RuntimeExecutionIntentKind) error {
+	if runResult.WorkspaceID != workspaceID || runResult.RequestID != requestID || runResult.Kind != kind {
+		return common.ErrConflict
 	}
 	if err := runResult.Validate(); err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Run execution intent result: %v", common.ErrConflict, err)
+		return fmt.Errorf("%w: Run execution intent result: %v", common.ErrConflict, err)
 	}
-	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
+	return nil
 }
 
 // materializeDefaultLLMSelectionFromBootstrap is an owner-local Workspace

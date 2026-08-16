@@ -429,57 +429,90 @@ func sealRuntimeCWIBindings(
 	if semanticManifestHash == "" || len(focuses) == 0 {
 		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
-	byID := make(map[common.CoverageWorkItemID]int, len(facts.Coverage))
-	for index, item := range facts.Coverage {
+	byID, err := runtimeCWICoverageIndexes(facts.Coverage)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	selected, err := selectedRuntimeCWIBindings(focuses, byID)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	if err := validateActiveRuntimeCWIBindingsSelected(facts, byID, selected); err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	if err := applySelectedRuntimeCWIBindings(&facts, byID, selected, semanticManifestHash); err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	if err := normalizeUnselectedRuntimeCWIs(&facts, selected); err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	focuses = appendRetainedRuntimeCWIFocuses(facts, focuses, byID, selected)
+	return projectRuntimeCWISealedFocuses(facts, focuses, pending)
+}
+
+func runtimeCWICoverageIndexes(coverage []runtimecontract.RuntimeCoverageItemFact) (map[common.CoverageWorkItemID]int, error) {
+	byID := make(map[common.CoverageWorkItemID]int, len(coverage))
+	for index, item := range coverage {
 		if item.ID == "" {
-			return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI semantic seal has an empty coverage item")
+			return nil, fmt.Errorf("runtime CWI semantic seal has an empty coverage item")
 		}
 		byID[item.ID] = index
 	}
+	return byID, nil
+}
+
+func selectedRuntimeCWIBindings(focuses []runtimecontract.CoverageFocus, byID map[common.CoverageWorkItemID]int) (map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding, error) {
 	selected := make(map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding)
 	for _, focus := range focuses {
 		focus = focus.Normalized()
 		for _, binding := range focus.CoverageEvidenceBindings {
 			binding = binding.Normalized()
 			if _, found := byID[binding.CoverageWorkItemID]; !found {
-				return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI semantic seal references unknown coverage %q", binding.CoverageWorkItemID)
+				return nil, fmt.Errorf("runtime CWI semantic seal references unknown coverage %q", binding.CoverageWorkItemID)
 			}
 			if _, duplicate := selected[binding.CoverageWorkItemID]; duplicate {
-				return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI semantic seal duplicates coverage %q", binding.CoverageWorkItemID)
+				return nil, fmt.Errorf("runtime CWI semantic seal duplicates coverage %q", binding.CoverageWorkItemID)
 			}
 			if _, found := coverageBindingForRuntimeCWI(focus, binding.CoverageWorkItemID); !found {
-				return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI semantic seal binding %q is outside its focus", binding.ID)
+				return nil, fmt.Errorf("runtime CWI semantic seal binding %q is outside its focus", binding.ID)
 			}
 			selected[binding.CoverageWorkItemID] = binding
 		}
 	}
 	if len(selected) == 0 {
-		return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI semantic seal has no binding")
+		return nil, fmt.Errorf("runtime CWI semantic seal has no binding")
 	}
+	return selected, nil
+}
+
+func validateActiveRuntimeCWIBindingsSelected(facts runtimecontract.RuntimeFacts, byID map[common.CoverageWorkItemID]int, selected map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding) error {
 	for _, coverageID := range facts.Focus.CoverageWorkItemIDs {
 		item := facts.Coverage[byID[coverageID]]
 		if item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateUnbound || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStatePlanning || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened {
 			if _, found := selected[coverageID]; !found {
-				return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI semantic seal omits active coverage %q", coverageID)
+				return fmt.Errorf("runtime CWI semantic seal omits active coverage %q", coverageID)
 			}
 		}
 	}
+	return nil
+}
 
+func applySelectedRuntimeCWIBindings(facts *runtimecontract.RuntimeFacts, byID map[common.CoverageWorkItemID]int, selected map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding, semanticManifestHash string) error {
 	for coverageID, binding := range selected {
 		index := byID[coverageID]
 		item := &facts.Coverage[index]
 		switch item.CWIConvergenceState {
 		case runtimecontract.RuntimeCWIConvergenceStateUnbound, runtimecontract.RuntimeCWIConvergenceStatePlanning, runtimecontract.RuntimeCWIConvergenceStateReopened:
 		default:
-			return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI %q cannot receive a semantic binding from state %q", coverageID, item.CWIConvergenceState)
+			return fmt.Errorf("runtime CWI %q cannot receive a semantic binding from state %q", coverageID, item.CWIConvergenceState)
 		}
 		if item.CurrentBindingRef != nil {
-			return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI %q already has a current binding", coverageID)
+			return fmt.Errorf("runtime CWI %q already has a current binding", coverageID)
 		}
 		ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, semanticManifestHash)
 		lineage, err := appendRuntimeCWIBindingLineage(item.BindingLineage, ref)
 		if err != nil {
-			return runtimecontract.RuntimeFacts{}, err
+			return err
 		}
 		item.BindingLineage = lineage
 		item.CurrentBindingRef = &ref
@@ -488,6 +521,10 @@ func sealRuntimeCWIBindings(
 			item.State = runtimecontract.RuntimeCoverageItemStateOpen
 		}
 	}
+	return nil
+}
+
+func normalizeUnselectedRuntimeCWIs(facts *runtimecontract.RuntimeFacts, selected map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding) error {
 	for index := range facts.Coverage {
 		item := &facts.Coverage[index]
 		if _, sealed := selected[item.ID]; sealed || item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled {
@@ -495,7 +532,7 @@ func sealRuntimeCWIBindings(
 		}
 		if item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateBound {
 			if item.CurrentBindingRef == nil {
-				return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime CWI %q retains an unrelated current binding", item.ID)
+				return fmt.Errorf("runtime CWI %q retains an unrelated current binding", item.ID)
 			}
 			// Existing canonical bindings, including an effect-locked binding from
 			// an older semantic generation, remain authoritative. The new batch may
@@ -505,6 +542,10 @@ func sealRuntimeCWIBindings(
 		item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
 		item.CurrentBindingRef = nil
 	}
+	return nil
+}
+
+func appendRetainedRuntimeCWIFocuses(facts runtimecontract.RuntimeFacts, focuses []runtimecontract.CoverageFocus, byID map[common.CoverageWorkItemID]int, selected map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding) []runtimecontract.CoverageFocus {
 	for _, source := range append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...) {
 		source = source.Normalized()
 		for _, coverageID := range source.CoverageWorkItemIDs {
@@ -518,8 +559,7 @@ func sealRuntimeCWIBindings(
 			focuses = append(focuses, runtimeCWIWithCoverage(source, []common.CoverageWorkItemID{coverageID}))
 		}
 	}
-
-	return projectRuntimeCWISealedFocuses(facts, focuses, pending)
+	return focuses
 }
 
 func canonicalRuntimeCWIReconciliationContract(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeCWIReconciliationContract, error) {
@@ -949,16 +989,8 @@ func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, worksp
 	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement scope mismatch", common.ErrConflict)
 	}
-	for _, item := range aggregate.Facts.Coverage {
-		if item.ID != fact.CoverageWorkItemID {
-			continue
-		}
-		for _, existing := range item.BindingRetirementLineage {
-			existing = existing.Normalized()
-			if runtimecontract.SameRuntimeCWIBindingRef(existing.RetiredBindingRef, fact.CurrentBindingRef) && existing.CausationRef == fact.CausationRef {
-				return aggregate, nil
-			}
-		}
+	if runtimeCWIBindingRetirementExists(aggregate.Facts.Coverage, fact) {
+		return aggregate, nil
 	}
 	if aggregate.StateRevision != fact.ExpectedStateRevision {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement state revision is stale", common.ErrConflict)
@@ -966,63 +998,9 @@ func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, worksp
 	if aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement has an active dispatch", common.ErrConflict)
 	}
-	index := -1
-	for idx := range aggregate.Facts.Coverage {
-		if aggregate.Facts.Coverage[idx].ID == fact.CoverageWorkItemID {
-			index = idx
-			break
-		}
-	}
-	if index < 0 {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement references unknown coverage %q", common.ErrConflict, fact.CoverageWorkItemID)
-	}
-	item := &aggregate.Facts.Coverage[index]
-	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound || item.CurrentBindingRef == nil ||
-		!runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, fact.CurrentBindingRef) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime CWI binding retirement does not match the current bound binding", common.ErrConflict)
-	}
-	if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
-		return RuntimeAggregate{}, fmt.Errorf("runtime CWI binding retirement lineage exceeds bounded limit %d", runtimecontract.RuntimeCWIBindingRetirementLineageLimit)
-	}
-	lineage := runtimecontract.RuntimeCWIBindingRetirementLineage{
-		RetiredBindingRef: fact.CurrentBindingRef,
-		CausationRef:      fact.CausationRef,
-		Reason:            fact.Reason,
-	}.Normalized()
-	if err := lineage.Validate(); err != nil {
+	if err := applyRuntimeCWIBindingRetirement(&aggregate, fact); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	item.BindingRetirementLineage = append(item.BindingRetirementLineage, lineage)
-	item.CurrentBindingRef = nil
-	item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
-
-	updated, err := replaceRuntimeCWIFocusProjection(aggregate.Facts, []common.CoverageWorkItemID{fact.CoverageWorkItemID})
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = updated
-	aggregate.Facts.ReconciliationContract = contract
-	if _, err := supersedeActiveReconciliationForCurrentContract(&aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(
-		aggregate.Facts,
-		nil,
-		sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
-		aggregate.OperationReceipts,
-	); err != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
-	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	aggregate.Facts = facts
-	aggregate.Decision = decision
 	expectedRevision := aggregate.StateRevision
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -1032,6 +1010,81 @@ func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, worksp
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func runtimeCWIBindingRetirementExists(coverage []runtimecontract.RuntimeCoverageItemFact, fact RuntimeCWIBindingRetirementFact) bool {
+	for _, item := range coverage {
+		if item.ID != fact.CoverageWorkItemID {
+			continue
+		}
+		for _, existing := range item.BindingRetirementLineage {
+			existing = existing.Normalized()
+			if runtimecontract.SameRuntimeCWIBindingRef(existing.RetiredBindingRef, fact.CurrentBindingRef) && existing.CausationRef == fact.CausationRef {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func applyRuntimeCWIBindingRetirement(aggregate *RuntimeAggregate, fact RuntimeCWIBindingRetirementFact) error {
+	index := runtimeCWICoverageIndex(aggregate.Facts.Coverage, fact.CoverageWorkItemID)
+	if index < 0 {
+		return fmt.Errorf("%w: runtime CWI binding retirement references unknown coverage %q", common.ErrConflict, fact.CoverageWorkItemID)
+	}
+	if err := retireCurrentRuntimeCWIBinding(&aggregate.Facts.Coverage[index], fact); err != nil {
+		return err
+	}
+	updated, err := replaceRuntimeCWIFocusProjection(aggregate.Facts, []common.CoverageWorkItemID{fact.CoverageWorkItemID})
+	if err != nil {
+		return err
+	}
+	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
+	if err != nil {
+		return err
+	}
+	updated.ReconciliationContract = contract
+	aggregate.Facts = updated
+	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
+		return err
+	}
+	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(aggregate.Facts, nil, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.OperationReceipts); err != nil {
+		return fmt.Errorf("%w: %v", common.ErrConflict, err)
+	}
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts, aggregate.Decision = facts, decision
+	return nil
+}
+
+func runtimeCWICoverageIndex(coverage []runtimecontract.RuntimeCoverageItemFact, coverageID common.CoverageWorkItemID) int {
+	for idx := range coverage {
+		if coverage[idx].ID == coverageID {
+			return idx
+		}
+	}
+	return -1
+}
+
+func retireCurrentRuntimeCWIBinding(item *runtimecontract.RuntimeCoverageItemFact, fact RuntimeCWIBindingRetirementFact) error {
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound || item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, fact.CurrentBindingRef) {
+		return fmt.Errorf("%w: runtime CWI binding retirement does not match the current bound binding", common.ErrConflict)
+	}
+	if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
+		return fmt.Errorf("runtime CWI binding retirement lineage exceeds bounded limit %d", runtimecontract.RuntimeCWIBindingRetirementLineageLimit)
+	}
+	lineage := runtimecontract.RuntimeCWIBindingRetirementLineage{
+		RetiredBindingRef: fact.CurrentBindingRef, CausationRef: fact.CausationRef, Reason: fact.Reason,
+	}.Normalized()
+	if err := lineage.Validate(); err != nil {
+		return err
+	}
+	item.BindingRetirementLineage = append(item.BindingRetirementLineage, lineage)
+	item.CurrentBindingRef = nil
+	item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+	return nil
 }
 
 func supersedeActiveReconciliationForCurrentContract(aggregate *RuntimeAggregate) (bool, error) {

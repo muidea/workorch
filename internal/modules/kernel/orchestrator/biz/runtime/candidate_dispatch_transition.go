@@ -13,23 +13,15 @@ import (
 )
 
 func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" {
+	if err := validateBeginCandidateAttemptInput(c, workspaceID, runID, attempt, stablePrefixHash, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+	if err := validateCandidateAttemptBeginAuthority(aggregate); err != nil {
 		return RuntimeAggregate{}, err
-	}
-	switch aggregate.Decision.State {
-	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
-	default:
-		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
-	}
-	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate request binding fence: %v", common.ErrConflict, err)
 	}
 	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
@@ -37,68 +29,15 @@ func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, 
 	transaction := aggregate.Decision.AuthorityTransaction()
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
 	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
-	if attempt == 0 && len(current) == 0 && equivalentOwnerInfeasibilityExists(aggregate.CandidateAttempts, transaction.AuthorityInputID) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: equivalent authority already produced owner infeasibility", common.ErrConflict)
+	plan, err := planCandidateAttemptBegin(aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest.Hash, logicalRequestID, contractID, transaction, current)
+	if err != nil {
+		return RuntimeAggregate{}, err
 	}
-	for _, record := range current {
-		if record.Attempt != attempt {
-			continue
-		}
-		if record.State == runtimecontract.RuntimeCandidateAttemptStatePending && record.StablePrefixHash == stablePrefixHash && record.Transaction == transaction && record.ManifestHash == manifest.Hash && record.LogicalRequestID == logicalRequestID {
-			return aggregate, nil
-		}
-		// Freshness invalidation does not consume the sealed attempt budget. If
-		// prerequisite re-acquisition converges to the same stable authority
-		// contract, recycle the persisted attempt 0 into a new pending proposal.
-		// The separate prerequisite invalidation ledger retains the stale audit.
-		if attempt == 0 && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.StablePrefixHash == stablePrefixHash {
-			expectedRevision := aggregate.StateRevision
-			for idx := range aggregate.CandidateAttempts {
-				candidateAttempt := &aggregate.CandidateAttempts[idx]
-				if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, *candidateAttempt) != contractID || candidateAttempt.Attempt != attempt {
-					continue
-				}
-				candidateAttempt.Transaction = transaction
-				candidateAttempt.StablePrefixHash = stablePrefixHash
-				candidateAttempt.ManifestHash = manifest.Hash
-				candidateAttempt.LogicalRequestID = logicalRequestID
-				candidateAttempt.State = runtimecontract.RuntimeCandidateAttemptStatePending
-				candidateAttempt.Proposal = nil
-				candidateAttempt.Feasibilities = nil
-				candidateAttempt.Failure = nil
-				candidateAttempt.Stale = nil
-				aggregate.StateRevision++
-				if err := aggregate.Validate(); err != nil {
-					return RuntimeAggregate{}, err
-				}
-				if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-					return RuntimeAggregate{}, err
-				}
-				return aggregate, nil
-			}
-		}
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is already %s", common.ErrConflict, attempt, record.State)
-	}
-	if attempt == 0 {
-		if len(current) != 0 {
-			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 0 is no longer available", common.ErrConflict)
-		}
-	} else {
-		first, ok := candidateAttemptRecord(current, 0)
-		if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifest.Hash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) {
-			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a failed same-contract attempt 0", common.ErrConflict)
-		}
-		// N6: the attempt-1 CAS entry itself is the correction budget fence.
-		// rejected_final / non-correctable attempt 0 must not open a second
-		// provider session even when callers bypass mainline routing.
-		if first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
-			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a sealed correctable_once attempt 0 failure", common.ErrConflict)
-		}
+	if plan.duplicate {
+		return aggregate, nil
 	}
 	expectedRevision := aggregate.StateRevision
-	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-		AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash, ManifestHash: manifest.Hash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
-	})
+	applyCandidateAttemptBegin(&aggregate, plan, contractID, transaction, attempt, stablePrefixHash, manifest.Hash, logicalRequestID)
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -107,6 +46,102 @@ func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, 
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+type candidateAttemptBeginPlan struct {
+	duplicate    bool
+	recycleIndex int
+}
+
+func validateBeginCandidateAttemptInput(c *candidateDispatchComponent, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash, logicalRequestID string) error {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func validateCandidateAttemptBeginAuthority(aggregate RuntimeAggregate) error {
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return err
+	}
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
+	default:
+		return fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+	}
+	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+		return fmt.Errorf("%w: candidate request binding fence: %v", common.ErrConflict, err)
+	}
+	return nil
+}
+
+func planCandidateAttemptBegin(aggregate RuntimeAggregate, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash, manifestHash, logicalRequestID, contractID string, transaction runtimecontract.AuthorityTransaction, current []runtimecontract.RuntimeCandidateAttemptRecord) (candidateAttemptBeginPlan, error) {
+	if attempt == 0 && len(current) == 0 && equivalentOwnerInfeasibilityExists(aggregate.CandidateAttempts, transaction.AuthorityInputID) {
+		return candidateAttemptBeginPlan{}, fmt.Errorf("%w: equivalent authority already produced owner infeasibility", common.ErrConflict)
+	}
+	if record, found := candidateAttemptRecord(current, attempt); found {
+		if record.State == runtimecontract.RuntimeCandidateAttemptStatePending && record.StablePrefixHash == stablePrefixHash && record.Transaction == transaction && record.ManifestHash == manifestHash && record.LogicalRequestID == logicalRequestID {
+			return candidateAttemptBeginPlan{duplicate: true}, nil
+		}
+		if attempt == 0 && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.StablePrefixHash == stablePrefixHash {
+			idx, ok := candidateAttemptIndex(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+			if ok {
+				return candidateAttemptBeginPlan{recycleIndex: idx}, nil
+			}
+		}
+		return candidateAttemptBeginPlan{}, fmt.Errorf("%w: candidate attempt %d is already %s", common.ErrConflict, attempt, record.State)
+	}
+	if err := validateCandidateAttemptSequence(current, attempt, stablePrefixHash, manifestHash, transaction); err != nil {
+		return candidateAttemptBeginPlan{}, err
+	}
+	return candidateAttemptBeginPlan{recycleIndex: -1}, nil
+}
+
+func validateCandidateAttemptSequence(current []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, stablePrefixHash, manifestHash string, transaction runtimecontract.AuthorityTransaction) error {
+	if attempt == 0 {
+		if len(current) != 0 {
+			return fmt.Errorf("%w: candidate attempt 0 is no longer available", common.ErrConflict)
+		}
+		return nil
+	}
+	first, ok := candidateAttemptRecord(current, 0)
+	if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifestHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) {
+		return fmt.Errorf("%w: candidate attempt 1 requires a failed same-contract attempt 0", common.ErrConflict)
+	}
+	if first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
+		return fmt.Errorf("%w: candidate attempt 1 requires a sealed correctable_once attempt 0 failure", common.ErrConflict)
+	}
+	return nil
+}
+
+func candidateAttemptIndex(values []runtimecontract.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string, attempt int) (int, bool) {
+	for idx, record := range values {
+		if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, record) == contractID && record.Attempt == attempt {
+			return idx, true
+		}
+	}
+	return 0, false
+}
+
+func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttemptBeginPlan, contractID string, transaction runtimecontract.AuthorityTransaction, attempt int, stablePrefixHash, manifestHash, logicalRequestID string) {
+	record := runtimecontract.RuntimeCandidateAttemptRecord{
+		AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash,
+		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
+	}
+	if plan.recycleIndex < 0 {
+		aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, record)
+		return
+	}
+	recycled := &aggregate.CandidateAttempts[plan.recycleIndex]
+	recycled.Transaction = transaction
+	recycled.StablePrefixHash = stablePrefixHash
+	recycled.ManifestHash = manifestHash
+	recycled.LogicalRequestID = logicalRequestID
+	recycled.State = runtimecontract.RuntimeCandidateAttemptStatePending
+	recycled.Proposal = nil
+	recycled.Feasibilities = nil
+	recycled.Failure = nil
+	recycled.Stale = nil
 }
 
 func equivalentOwnerInfeasibilityExists(attempts []runtimecontract.RuntimeCandidateAttemptRecord, authorityInputID string) bool {
@@ -137,43 +172,22 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
-	for _, record := range aggregate.CandidateAttempts {
-		if record.Attempt != attempt || record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
-			continue
-		}
-		if record.State == runtimecontract.RuntimeCandidateAttemptStateFailed {
-			return aggregate, nil
-		}
-		if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, record) != contractID || record.State != runtimecontract.RuntimeCandidateAttemptStatePending {
-			return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate document attempt %d is already %s", common.ErrConflict, attempt, record.State)
-		}
+	duplicate, err := inspectCompletedCandidateDocumentReplay(aggregate, workspaceID, runID, attempt, manifest.Hash, logicalRequestID, contractID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if duplicate {
+		return aggregate, nil
 	}
 	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	switch aggregate.Decision.State {
-	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
-	default:
+	if !runtimeDecisionAcceptsCandidateDocument(aggregate.Decision.State) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
-	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
-	idx, _, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if !pending {
-		if attempt == 0 {
-			if len(current) != 0 {
-				return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 0 is no longer available", common.ErrConflict)
-			}
-		} else {
-			first, ok := candidateAttemptRecord(current, 0)
-			if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifest.Hash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
-				return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a failed correctable same-contract attempt 0", common.ErrConflict)
-			}
-		}
-		aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-			AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash,
-			ManifestHash: manifest.Hash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
-		})
-		idx = len(aggregate.CandidateAttempts) - 1
+	idx, err := ensurePendingCompletedDocumentAttempt(&aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest.Hash, logicalRequestID, contractID, transaction)
+	if err != nil {
+		return RuntimeAggregate{}, err
 	}
 	expectedRevision := aggregate.StateRevision
 	if err := closeCandidateAttempt(&aggregate, idx, attempt, failure); err != nil {
@@ -187,6 +201,59 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func inspectCompletedCandidateDocumentReplay(aggregate RuntimeAggregate, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifestHash, logicalRequestID, contractID string) (bool, error) {
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt != attempt || record.ManifestHash != manifestHash || record.LogicalRequestID != logicalRequestID {
+			continue
+		}
+		if record.State == runtimecontract.RuntimeCandidateAttemptStateFailed {
+			return true, nil
+		}
+		if runtimecontract.CandidateAttemptAuthorityContractID(workspaceID, runID, record) != contractID || record.State != runtimecontract.RuntimeCandidateAttemptStatePending {
+			return false, fmt.Errorf("%w: completed candidate document attempt %d is already %s", common.ErrConflict, attempt, record.State)
+		}
+	}
+	return false, nil
+}
+
+func runtimeDecisionAcceptsCandidateDocument(state runtimecontract.ConvergenceState) bool {
+	switch state {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
+		return true
+	default:
+		return false
+	}
+}
+
+func ensurePendingCompletedDocumentAttempt(aggregate *RuntimeAggregate, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash, manifestHash, logicalRequestID, contractID string, transaction runtimecontract.AuthorityTransaction) (int, error) {
+	if idx, _, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt); pending {
+		return idx, nil
+	}
+	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
+	if err := validateCompletedDocumentAttemptSequence(current, attempt, stablePrefixHash, manifestHash, transaction); err != nil {
+		return 0, err
+	}
+	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
+		AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash,
+		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
+	})
+	return len(aggregate.CandidateAttempts) - 1, nil
+}
+
+func validateCompletedDocumentAttemptSequence(current []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, stablePrefixHash, manifestHash string, transaction runtimecontract.AuthorityTransaction) error {
+	if attempt == 0 {
+		if len(current) != 0 {
+			return fmt.Errorf("%w: candidate attempt 0 is no longer available", common.ErrConflict)
+		}
+		return nil
+	}
+	first, ok := candidateAttemptRecord(current, 0)
+	if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifestHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
+		return fmt.Errorf("%w: candidate attempt 1 requires a failed correctable same-contract attempt 0", common.ErrConflict)
+	}
+	return nil
 }
 
 // admitCandidateProposal atomically persists a candidate proposal or closes the
@@ -637,6 +704,25 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
+	failure = normalizeCandidateAttemptFailure(*aggregate, idx, attempt, failure)
+	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
+	failureCopy := failure
+	aggregate.CandidateAttempts[idx].Failure = &failureCopy
+	fact := candidateAttemptTerminalFailureFact(attempt, failure)
+	if fact == nil {
+		return nil
+	}
+	aggregate.Facts.Failure = fact
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	return nil
+}
+
+func normalizeCandidateAttemptFailure(aggregate RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure) runtimecontract.RuntimeCandidateFailure {
 	if failure.ValidationDiagnostic != nil {
 		diagnostic := failure.ValidationDiagnostic.Clone()
 		failure.ValidationDiagnostic = &diagnostic
@@ -653,25 +739,14 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 	// normalized to a matrix code first so attempt 0 schema/contract failures stay
 	// correctable instead of becoming an internal terminal defect.
 	if strings.TrimSpace(failure.Code) == "" {
-		switch failure.Class {
-		case runtimecontract.RuntimeCandidateFailureClassSchema:
-			failure.Code = "candidate_schema_invalid"
-		case runtimecontract.RuntimeCandidateFailureClassContract:
-			failure.Code = "candidate_contract_invalid"
-		case runtimecontract.RuntimeCandidateFailureClassInternal:
-			failure.Code = "runtime_contract_defect"
-		default:
-			// provider/transient classes remain non-correctable finals below.
-			failure.Code = strings.TrimSpace(string(failure.Class))
-		}
+		failure.Code = defaultCandidateFailureCode(failure.Class)
 	}
 	if strings.TrimSpace(failure.Signature) == "" {
 		failure.Signature = failure.Code
 	}
 	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: aggregate.CandidateAttempts[idx].ManifestHash}
 	originalCode := strings.TrimSpace(failure.Code)
-	originalClass := failure.Class
-	if sealed, directive, sealErr := SealCandidateRejection(&failure, manifest); sealErr == nil && sealed != nil {
+	if sealed, _, sealErr := SealCandidateRejection(&failure, manifest); sealErr == nil && sealed != nil {
 		// Attempt 0 must keep the first-failure code stable for diagnostics and
 		// attempt-1 gating. Seal may rewrite an incomplete correctable into
 		// runtime_contract_defect; that rewrite is only forced onto the attempt
@@ -682,28 +757,35 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 			failure = *sealed
 		} else {
 			failure.Diagnostic = sealed.Diagnostic
-			if failure.Diagnostic == nil && sealed.Diagnostic != nil {
-				failure.Diagnostic = sealed.Diagnostic.Clone()
-			}
-			// Preserve original class/code; empty objectives make attempt 1 refuse.
-			_ = directive
-			_ = originalClass
 		}
 	}
-	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
-	failureCopy := failure
-	aggregate.CandidateAttempts[idx].Failure = &failureCopy
-	needsReduce := false
+	return failure
+}
+
+func defaultCandidateFailureCode(class runtimecontract.RuntimeCandidateFailureClass) string {
+	switch class {
+	case runtimecontract.RuntimeCandidateFailureClassSchema:
+		return "candidate_schema_invalid"
+	case runtimecontract.RuntimeCandidateFailureClassContract:
+		return "candidate_contract_invalid"
+	case runtimecontract.RuntimeCandidateFailureClassInternal:
+		return "runtime_contract_defect"
+	default:
+		return strings.TrimSpace(string(class))
+	}
+}
+
+func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.RuntimeCandidateFailure) *runtimecontract.FailureFact {
 	if failure.Class == runtimecontract.RuntimeCandidateFailureClassInternal {
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
-		needsReduce = true
-	} else if attempt == 1 {
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+		return &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Signature: "candidate-internal", Message: failure.Reason}
+	}
+	if attempt == 1 {
+		return &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted",
 			Signature: "candidate-retry-exhausted", Message: failure.Reason,
 		}
-		needsReduce = true
-	} else if attempt == 0 && CandidateFailureIsRejectedFinal(&failure) {
+	}
+	if attempt == 0 && CandidateFailureIsRejectedFinal(&failure) {
 		// N6: explicit rejected_final attempt 0 seals terminal in the same CAS.
 		// Attempt 0 may still have one sealed correction.  A validation candidate
 		// infeasibility never fabricates state-change repair authority; exhaustion
@@ -720,18 +802,9 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 		if code == "candidate_retry_exhausted" {
 			class = runtimecontract.FailureClassCandidateExhausted
 		}
-		aggregate.Facts.Failure = &runtimecontract.FailureFact{
+		return &runtimecontract.FailureFact{
 			Class: class, Code: code, Signature: code, Message: message,
 		}
-		needsReduce = true
-	}
-	if needsReduce {
-		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
-		if reduceErr != nil {
-			return reduceErr
-		}
-		aggregate.Facts = facts
-		aggregate.Decision = decision
 	}
 	return nil
 }

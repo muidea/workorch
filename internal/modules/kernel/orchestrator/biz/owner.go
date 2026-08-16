@@ -625,154 +625,195 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 		WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationScheduled,
 		RecoveryGeneration: leaseGeneration, Source: source,
 	})
-	drive := func(driveCtx context.Context) {
-		var retry *runtimeRecoveryLeaseRequest
-		freshActivationRequired := false
-		// Keep the Runtime authority and its EventHub-backed dependencies
-		// alive until this entire drive/projection/recovery branch returns.
-		// A task that starts after Stop observes nil and exits without effects.
-		m.lifecycleMu.RLock()
-		if m.runtimeController == nil || m.EventHub() == nil {
-			m.lifecycleMu.RUnlock()
-			m.endRuntimeDrive(driveKey)
-			return
-		}
-		defer m.lifecycleMu.RUnlock()
-		m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
-			WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationRunning,
-			RecoveryGeneration: leaseGeneration, LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
-		})
-		// Register after the lifecycle unlock defer so all owner-local lease
-		// transitions complete while the Biz dependencies are still live.
-		defer func() {
-			if retry != nil && m.scheduleRuntimeRecoveryLease(driveCtx, workspaceID, runID, *retry) {
-				// Retain the local singleflight key while the persisted lease is
-				// waiting. The aggregate lease remains the cross-process authority.
-				return
-			}
-			if !freshActivationRequired && leaseGeneration != 0 {
-				if _, err := m.runtimeReleaseDriveLease(driveCtx, workspaceID, runID, leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
-					slog.Warn("workorch Runtime drive lease release failed", "workspaceID", workspaceID, "runID", runID, "generation", leaseGeneration, "err", err)
-				}
-			}
-			m.endRuntimeDrive(driveKey)
-		}()
-		if err := m.driveAndProjectRuntimeLockedWithCommand(driveCtx, orchestratorevents.DriveRuntimeCommand{
-			WorkspaceID: workspaceID, RunID: runID, ReconciliationRequestID: reconciliationRequestID, ReconciliationGeneration: reconciliationGeneration,
-		}); err != nil && !errors.Is(err, context.Canceled) {
-			var fresh *runtimeFreshActivationRequiredError
-			if errors.As(err, &fresh) {
-				freshActivationRequired = true
-				return
-			}
-			var persistedPending *runtimePersistedDrivePendingError
-			if errors.As(err, &persistedPending) {
-				slog.Debug("workorch Runtime persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)
-				retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persistedPending.Revision), Delay: time.Second, Source: source}
-				return
-			}
-			var projectionErr *runtimeProjectionError
-			if errors.As(err, &projectionErr) {
-				m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
-					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationDeliveryPending,
-					RecoveryGeneration: leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
-				})
-				slog.Warn("workorch Runtime projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-				_, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(driveCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
-				if budgetErr != nil {
-					slog.Warn("workorch Runtime terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
-					return
-				}
-				if consumed {
-					retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
-				}
-				return
-			}
-			slog.Warn("workorch Runtime drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-			// RVC-R13: CAS conflict / owner transient / delivery failures must not
-			// terminal a business Run as runtime contract defect.
-			failure := classifyRuntimeDriveFailure(err)
-			if revision, observed := runtimeDriveFailureObservedRevision(err); observed {
-				kind := orchestratorevents.RuntimeDriveObservationCASReload
-				if failure.Code != "cas_conflict" {
-					kind = orchestratorevents.RuntimeDriveObservationSemanticRejection
-				}
-				m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
-					WorkspaceID: workspaceID, RunID: runID, Kind: kind, AggregateRevision: revision,
-					RecoveryGeneration: leaseGeneration, FailureCategory: failure.Code, LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
-				})
-			}
-			if !runtime.FailureClassIsBusinessTerminal(failure.Class) {
-				slog.Warn("workorch Runtime drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
-				if budgetKind, ok := runtimeRecoveryBudgetKind(failure.Class); ok {
-					_, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(driveCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, budgetKind)
-					if budgetErr != nil {
-						slog.Warn("workorch Runtime recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
-						return
-					}
-					if consumed {
-						retry = runtimeLeaseRequestForFailure(failure, err, source, time.Second)
-					}
-					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
-						if _, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{FailureFact: &failure}}); recordErr != nil {
-							slog.Warn("workorch Runtime exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
-						} else {
-							retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "owner-transient-terminal", Delay: time.Second, Source: source}
-						}
-					}
-					if !consumed && failure.Class == runtimecontract.FailureClassCASConflict {
-						// The recovery ledger is bounded for observability, not a
-						// license to strand an active aggregate. A CAS conflict has
-						// no business-terminal meaning: reload/re-drive remains an
-						// Orchestrator-local SM-4 responsibility until the physical
-						// persistence race clears or a process restart inventories it.
-						// Back off after the persisted budget is exhausted so a
-						// pathological writer cannot spin the owner lane.
-						retry = runtimeLeaseRequestForFailure(failure, err, source, 5*time.Second)
-						slog.Error("workorch Runtime CAS recovery ledger exhausted; keeping owner-local re-drive pending", "source", source, "workspaceID", workspaceID, "runID", runID)
-					}
-				}
-				return
-			}
-			recorded, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{FailureFact: &failure}})
-			if recordErr != nil {
-				slog.Warn("workorch Runtime drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
-				return
-			}
-			aggregate := recorded.Aggregate
-			if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil {
-				slog.Warn("workorch Runtime drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
-				return
-			}
-			if projectErr := m.deliverRuntimeTerminal(driveCtx, aggregate); projectErr != nil {
-				m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
-					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationDeliveryPending,
-					AggregateRevision: aggregate.StateRevision, RecoveryGeneration: leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
-				})
-				slog.Warn("workorch Runtime drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
-				_, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(driveCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
-				if budgetErr != nil {
-					slog.Warn("workorch Runtime terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
-					return
-				}
-				if consumed {
-					retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
-				}
-			}
-		}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: workspaceID, runID: runID, source: source, driveKey: driveKey, leaseGeneration: leaseGeneration,
+		reconciliationRequestID: reconciliationRequestID, reconciliationGeneration: reconciliationGeneration,
 	}
 	bgCtx := orchestratorBackgroundContext(ctx, workspaceID)
 	// A timer already runs inside BackgroundRoutine. Execute the claimed lease
 	// there so the persisted running lease and local gate have no handoff gap.
 	if m.BackgroundRoutine() == nil || leaseGeneration != 0 {
-		drive(bgCtx)
+		m.runScheduledRuntimeDrive(bgCtx, request)
 		return nil
 	}
-	if err := m.BackgroundRoutine().AsyncFunction(func() { drive(bgCtx) }); err != nil {
+	if err := m.BackgroundRoutine().AsyncFunction(func() { m.runScheduledRuntimeDrive(bgCtx, request) }); err != nil {
 		m.endRuntimeDrive(driveKey)
 		return err
 	}
 	return nil
+}
+
+type scheduledRuntimeDriveRequest struct {
+	workspaceID              common.WorkspaceID
+	runID                    common.RunID
+	source                   string
+	driveKey                 string
+	leaseGeneration          uint64
+	reconciliationRequestID  string
+	reconciliationGeneration uint64
+}
+
+func (m *Biz) runScheduledRuntimeDrive(ctx context.Context, request scheduledRuntimeDriveRequest) {
+	var retry *runtimeRecoveryLeaseRequest
+	freshActivationRequired := false
+	m.lifecycleMu.RLock()
+	if m.runtimeController == nil || m.EventHub() == nil {
+		m.lifecycleMu.RUnlock()
+		m.endRuntimeDrive(request.driveKey)
+		return
+	}
+	defer m.lifecycleMu.RUnlock()
+	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: request.workspaceID, RunID: request.runID, Kind: orchestratorevents.RuntimeDriveObservationRunning,
+		RecoveryGeneration: request.leaseGeneration, LeaseState: runtimeDriveLeaseStateForGeneration(request.leaseGeneration), Source: request.source,
+	})
+	// Registered after lifecycle unlock so lease transitions finish while owner
+	// dependencies remain live.
+	defer m.finishScheduledRuntimeDrive(ctx, request, &retry, &freshActivationRequired)
+	err := m.driveAndProjectRuntimeLockedWithCommand(ctx, orchestratorevents.DriveRuntimeCommand{
+		WorkspaceID: request.workspaceID, RunID: request.runID,
+		ReconciliationRequestID: request.reconciliationRequestID, ReconciliationGeneration: request.reconciliationGeneration,
+	})
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	retry, freshActivationRequired = m.handleScheduledRuntimeDriveFailure(ctx, request, err)
+}
+
+func (m *Biz) finishScheduledRuntimeDrive(ctx context.Context, request scheduledRuntimeDriveRequest, retry **runtimeRecoveryLeaseRequest, freshActivationRequired *bool) {
+	if *retry != nil && m.scheduleRuntimeRecoveryLease(ctx, request.workspaceID, request.runID, **retry) {
+		return
+	}
+	if !*freshActivationRequired && request.leaseGeneration != 0 {
+		if _, err := m.runtimeReleaseDriveLease(ctx, request.workspaceID, request.runID, request.leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("workorch Runtime drive lease release failed", "workspaceID", request.workspaceID, "runID", request.runID, "generation", request.leaseGeneration, "err", err)
+		}
+	}
+	m.endRuntimeDrive(request.driveKey)
+}
+
+func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request scheduledRuntimeDriveRequest, err error) (*runtimeRecoveryLeaseRequest, bool) {
+	var fresh *runtimeFreshActivationRequiredError
+	if errors.As(err, &fresh) {
+		return nil, true
+	}
+	var persisted *runtimePersistedDrivePendingError
+	if errors.As(err, &persisted) {
+		slog.Debug("workorch Runtime persisted bounded retry state", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "revision", persisted.Revision)
+		return &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persisted.Revision), Delay: time.Second, Source: request.source}, false
+	}
+	var projectionErr *runtimeProjectionError
+	if errors.As(err, &projectionErr) {
+		return m.handleRuntimeProjectionRetry(ctx, request, err), false
+	}
+	slog.Warn("workorch Runtime drive failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+	failure := classifyRuntimeDriveFailure(err)
+	m.observeScheduledRuntimeDriveFailure(ctx, request, failure, err)
+	if !runtime.FailureClassIsBusinessTerminal(failure.Class) {
+		return m.handleRuntimeNonTerminalRetry(ctx, request, failure, err), false
+	}
+	return m.handleRuntimeBusinessTerminalFailure(ctx, request, failure), false
+}
+
+func (m *Biz) handleRuntimeProjectionRetry(ctx context.Context, request scheduledRuntimeDriveRequest, err error) *runtimeRecoveryLeaseRequest {
+	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: request.workspaceID, RunID: request.runID, Kind: orchestratorevents.RuntimeDriveObservationDeliveryPending,
+		RecoveryGeneration: request.leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(request.leaseGeneration), Source: request.source,
+	})
+	slog.Warn("workorch Runtime projection failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+	if m.consumeRuntimeDeliveryRetryBudget(ctx, request) {
+		return runtimeDeliveryRecoveryLease(request.source, "terminal-delivery")
+	}
+	return nil
+}
+
+func (m *Biz) observeScheduledRuntimeDriveFailure(ctx context.Context, request scheduledRuntimeDriveRequest, failure runtimecontract.FailureFact, err error) {
+	revision, observed := runtimeDriveFailureObservedRevision(err)
+	if !observed {
+		return
+	}
+	kind := orchestratorevents.RuntimeDriveObservationCASReload
+	if failure.Code != "cas_conflict" {
+		kind = orchestratorevents.RuntimeDriveObservationSemanticRejection
+	}
+	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: request.workspaceID, RunID: request.runID, Kind: kind, AggregateRevision: revision,
+		RecoveryGeneration: request.leaseGeneration, FailureCategory: failure.Code, LeaseState: runtimeDriveLeaseStateForGeneration(request.leaseGeneration), Source: request.source,
+	})
+}
+
+func (m *Biz) handleRuntimeNonTerminalRetry(ctx context.Context, request scheduledRuntimeDriveRequest, failure runtimecontract.FailureFact, driveErr error) *runtimeRecoveryLeaseRequest {
+	slog.Warn("workorch Runtime drive non-terminal failure", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "class", failure.Class, "err", driveErr)
+	budgetKind, ok := runtimeRecoveryBudgetKind(failure.Class)
+	if !ok {
+		return nil
+	}
+	_, consumed, err := m.runtimeConsumeRecoveryBudget(ctx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: request.workspaceID, RunID: request.runID}}, budgetKind)
+	if err != nil {
+		slog.Warn("workorch Runtime recovery budget commit failed", "workspaceID", request.workspaceID, "runID", request.runID, "kind", budgetKind, "err", err)
+		return nil
+	}
+	if consumed {
+		return runtimeLeaseRequestForFailure(failure, driveErr, request.source, time.Second)
+	}
+	if failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
+		return m.recordExhaustedOwnerTransient(ctx, request, failure)
+	}
+	if failure.Class == runtimecontract.FailureClassCASConflict {
+		slog.Error("workorch Runtime CAS recovery ledger exhausted; keeping owner-local re-drive pending", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID)
+		return runtimeLeaseRequestForFailure(failure, driveErr, request.source, 5*time.Second)
+	}
+	return nil
+}
+
+func (m *Biz) recordExhaustedOwnerTransient(ctx context.Context, request scheduledRuntimeDriveRequest, failure runtimecontract.FailureFact) *runtimeRecoveryLeaseRequest {
+	_, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventDriveFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: request.workspaceID, RunID: request.runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{FailureFact: &failure},
+	})
+	if err != nil {
+		slog.Warn("workorch Runtime exhausted operation recovery fact commit failed", "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+		return nil
+	}
+	return runtimeDeliveryRecoveryLease(request.source, "owner-transient-terminal")
+}
+
+func (m *Biz) handleRuntimeBusinessTerminalFailure(ctx context.Context, request scheduledRuntimeDriveRequest, failure runtimecontract.FailureFact) *runtimeRecoveryLeaseRequest {
+	recorded, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventDriveFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: request.workspaceID, RunID: request.runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{FailureFact: &failure},
+	})
+	if err != nil {
+		slog.Warn("workorch Runtime drive failure fact commit failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+		return nil
+	}
+	aggregate := recorded.Aggregate
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil {
+		slog.Warn("workorch Runtime drive failure did not reduce to terminal", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID)
+		return nil
+	}
+	if err := m.deliverRuntimeTerminal(ctx, aggregate); err != nil {
+		m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+			WorkspaceID: request.workspaceID, RunID: request.runID, Kind: orchestratorevents.RuntimeDriveObservationDeliveryPending,
+			AggregateRevision: aggregate.StateRevision, RecoveryGeneration: request.leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(request.leaseGeneration), Source: request.source,
+		})
+		slog.Warn("workorch Runtime drive failure delivery failed", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+		if m.consumeRuntimeDeliveryRetryBudget(ctx, request) {
+			return runtimeDeliveryRecoveryLease(request.source, "terminal-delivery")
+		}
+	}
+	return nil
+}
+
+func (m *Biz) consumeRuntimeDeliveryRetryBudget(ctx context.Context, request scheduledRuntimeDriveRequest) bool {
+	_, consumed, err := m.runtimeConsumeRecoveryBudget(ctx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: request.workspaceID, RunID: request.runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+	if err != nil {
+		slog.Warn("workorch Runtime terminal delivery budget commit failed", "workspaceID", request.workspaceID, "runID", request.runID, "err", err)
+		return false
+	}
+	return consumed
+}
+
+func runtimeDeliveryRecoveryLease(source, signature string) *runtimeRecoveryLeaseRequest {
+	return &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: signature, Delay: time.Second, Source: source}
 }
 
 type runtimeRecoveryLeaseRequest struct {

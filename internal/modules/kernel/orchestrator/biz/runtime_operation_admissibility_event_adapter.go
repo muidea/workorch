@@ -188,18 +188,46 @@ func normalizeRuntimeOperationFeasibilityOwnerResult(owner string, data any) (ru
 }
 
 func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, command runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
+	if hub == nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, common.ErrInvalidArgument
+	}
+	command, descriptor, err := normalizeRuntimeOperationFeasibilityRequest(command)
+	if err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	response, err := requestRuntimeOperationFeasibility(ctx, hub, command)
+	if err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	response, err = normalizeRuntimeOperationFeasibilityResponse(command, response)
+	if err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	if err := validateRuntimeOperationFeasibilityFeedback(command, descriptor, response); err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	if response.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
+		return normalizeFeasibleRuntimeOperationObservation(command, descriptor, response)
+	}
+	return normalizeInfeasibleRuntimeOperationObservation(command, descriptor, response)
+}
+
+func normalizeRuntimeOperationFeasibilityRequest(command runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityRequest, runtimecontract.RuntimeOperationDescriptor, error) {
 	operation := command.Operation.Normalized()
 	inventory := command.Admissibility.Normalized()
-	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" ||
+	if command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" ||
 		strings.TrimSpace(command.Transaction.AuthoritySnapshotID) == "" || operation.ID == "" || operation.Kind == "" {
-		return runtimecontract.RuntimeOperationFeasibilityObservation{}, common.ErrInvalidArgument
+		return runtimecontract.RuntimeOperationFeasibilityRequest{}, runtimecontract.RuntimeOperationDescriptor{}, common.ErrInvalidArgument
 	}
 	descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !ok || inventory.OwnerModuleID == "" || inventory.OwnerModuleID != descriptor.OwnerModuleID || !containsRuntimeOperationKind(inventory.OperationKinds, operation.Kind) {
-		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe has no matching owner admissibility inventory")
+		return runtimecontract.RuntimeOperationFeasibilityRequest{}, runtimecontract.RuntimeOperationDescriptor{}, fmt.Errorf("runtime operation feasibility probe has no matching owner admissibility inventory")
 	}
 	if err := inventory.Validate(); err != nil {
-		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+		return runtimecontract.RuntimeOperationFeasibilityRequest{}, runtimecontract.RuntimeOperationDescriptor{}, err
 	}
 	// N5: sealed candidate identity is required on the wire before any owner
 	// private probe. Owners re-validate the same fields and never rebuild them.
@@ -209,34 +237,51 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		CapabilityStateBinding: command.CapabilityStateBinding, CandidateManifestHash: command.CandidateManifestHash,
 		OperationAuthorization: command.OperationAuthorization,
 	}, descriptor.OwnerModuleID); err != nil {
-		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
-	}
-	if ctx == nil {
-		ctx = context.Background()
+		return runtimecontract.RuntimeOperationFeasibilityRequest{}, runtimecontract.RuntimeOperationDescriptor{}, err
 	}
 	command.Operation = operation
 	command.Admissibility = inventory
 	command.CandidateManifestHash = strings.TrimSpace(command.CandidateManifestHash)
 	command.OperationAuthorization = command.OperationAuthorization.Normalized()
-	if command.Observation != nil {
-		observation := command.Observation.Normalized()
-		if observation.PrerequisiteID != inventory.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != inventory.OwnerModuleID {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe has mismatched freshness observation")
-		}
-		if err := observation.Validate(); err != nil {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
-		}
-		command.Observation = &observation
+	if err := normalizeRuntimeFeasibilityFreshnessObservation(&command); err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityRequest{}, runtimecontract.RuntimeOperationDescriptor{}, err
 	}
-	if command.CurrentTargetSnapshot != nil {
-		snapshot := *command.CurrentTargetSnapshot
-		snapshot.TargetRef = strings.TrimSpace(snapshot.TargetRef)
-		snapshot.ContentHash = strings.TrimSpace(snapshot.ContentHash)
-		if !snapshot.Complete() {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe has an incomplete target snapshot")
-		}
-		command.CurrentTargetSnapshot = &snapshot
+	if err := normalizeRuntimeFeasibilityTargetSnapshot(&command); err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityRequest{}, runtimecontract.RuntimeOperationDescriptor{}, err
 	}
+	return command, descriptor, nil
+}
+
+func normalizeRuntimeFeasibilityFreshnessObservation(command *runtimecontract.RuntimeOperationFeasibilityRequest) error {
+	if command.Observation == nil {
+		return nil
+	}
+	observation := command.Observation.Normalized()
+	if observation.PrerequisiteID != command.Admissibility.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != command.Admissibility.OwnerModuleID {
+		return fmt.Errorf("runtime operation feasibility probe has mismatched freshness observation")
+	}
+	if err := observation.Validate(); err != nil {
+		return err
+	}
+	command.Observation = &observation
+	return nil
+}
+
+func normalizeRuntimeFeasibilityTargetSnapshot(command *runtimecontract.RuntimeOperationFeasibilityRequest) error {
+	if command.CurrentTargetSnapshot == nil {
+		return nil
+	}
+	snapshot := *command.CurrentTargetSnapshot
+	snapshot.TargetRef = strings.TrimSpace(snapshot.TargetRef)
+	snapshot.ContentHash = strings.TrimSpace(snapshot.ContentHash)
+	if !snapshot.Complete() {
+		return fmt.Errorf("runtime operation feasibility probe has an incomplete target snapshot")
+	}
+	command.CurrentTargetSnapshot = &snapshot
+	return nil
+}
+
+func requestRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, command runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
 	result, owner := sendRuntimeOperationFeasibilityOwnerCommand(ctx, hub, command)
 	if result == nil || owner == "" {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, common.ErrInvalidArgument
@@ -249,7 +294,15 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, prerequisiteMagicError(magicErr)
 	}
 	response, ok := normalizeRuntimeOperationFeasibilityOwnerResult(owner, data)
-	if !ok || response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID || response.CapabilityStateBinding != inventory.AcquisitionBinding {
+	if !ok {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
+	}
+	return response, nil
+}
+
+func normalizeRuntimeOperationFeasibilityResponse(command runtimecontract.RuntimeOperationFeasibilityRequest, response runtimecontract.RuntimeOperationFeasibilityObservation) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
+	operation, inventory := command.Operation, command.Admissibility
+	if response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID || response.CapabilityStateBinding != inventory.AcquisitionBinding {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
 	}
 	if response.CandidateManifestHash != command.CandidateManifestHash {
@@ -260,45 +313,44 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	} else {
 		response = normalized
 	}
+	return response, nil
+}
+
+func validateRuntimeOperationFeasibilityFeedback(command runtimecontract.RuntimeOperationFeasibilityRequest, descriptor runtimecontract.RuntimeOperationDescriptor, response runtimecontract.RuntimeOperationFeasibilityObservation) error {
 	if response.Feedback != nil {
 		feedback := response.Feedback.Normalized()
 		if feedback.WorkspaceID != command.WorkspaceID || feedback.RunID != command.RunID || feedback.AuthoritySnapshotID != command.Transaction.AuthoritySnapshotID || feedback.DispatchID != "" ||
-			feedback.OriginalDiagnostic == nil || feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID || feedback.OriginalDiagnostic.OperationID != operation.ID {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility feedback has mismatched scope or owner identity")
+			feedback.OriginalDiagnostic == nil || feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID || feedback.OriginalDiagnostic.OperationID != command.Operation.ID {
+			return fmt.Errorf("runtime operation feasibility feedback has mismatched scope or owner identity")
 		}
 	}
-	if response.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
-		if response.Stale != nil || response.PrerequisiteRequest != nil {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("feasible runtime operation probe returned failure facts")
-		}
-		if response.ReplayProof != nil {
-			proof := response.ReplayProof.Normalized()
-			if err := proof.Validate(); err != nil {
-				return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
-			}
-			if proof.OperationID != operation.ID || proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding || proof.OwnerModuleID != descriptor.OwnerModuleID {
-				return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned mismatched replay proof")
-			}
-			response.ReplayProof = &proof
-		}
+	return nil
+}
+
+func normalizeFeasibleRuntimeOperationObservation(command runtimecontract.RuntimeOperationFeasibilityRequest, descriptor runtimecontract.RuntimeOperationDescriptor, response runtimecontract.RuntimeOperationFeasibilityObservation) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
+	if response.Stale != nil || response.PrerequisiteRequest != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("feasible runtime operation probe returned failure facts")
+	}
+	if response.ReplayProof == nil {
 		return response, nil
 	}
+	proof := response.ReplayProof.Normalized()
+	if err := proof.Validate(); err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	if proof.OperationID != command.Operation.ID || proof.AdmissibilitySnapshotID != command.Admissibility.SnapshotID || proof.AcquisitionBinding != command.Admissibility.AcquisitionBinding || proof.OwnerModuleID != descriptor.OwnerModuleID {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned mismatched replay proof")
+	}
+	response.ReplayProof = &proof
+	return response, nil
+}
+
+func normalizeInfeasibleRuntimeOperationObservation(command runtimecontract.RuntimeOperationFeasibilityRequest, descriptor runtimecontract.RuntimeOperationDescriptor, response runtimecontract.RuntimeOperationFeasibilityObservation) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
 	if response.ReplayProof != nil {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("infeasible runtime operation probe cannot return replay proof")
 	}
 	if response.Stale != nil {
-		if response.PrerequisiteRequest != nil {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("stale runtime operation probe returned ordinary failure facts")
-		}
-		stale := response.Stale.Normalized()
-		if err := stale.Validate(); err != nil {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
-		}
-		if stale.OwnerModuleID != inventory.OwnerModuleID {
-			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("stale runtime operation probe returned mismatched owner")
-		}
-		response.Stale = &stale
-		return response, nil
+		return normalizeStaleRuntimeOperationObservation(command, response)
 	}
 	if response.Feedback == nil || response.Feedback.OriginalDiagnostic == nil {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("infeasible runtime operation probe requires original diagnostic feedback")
@@ -308,11 +360,26 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 		if err := request.Validate(); err != nil {
 			return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
 		}
-		if request.OperationID != operation.ID || request.OwnerModuleID != descriptor.OwnerModuleID {
+		if request.OperationID != command.Operation.ID || request.OwnerModuleID != descriptor.OwnerModuleID {
 			return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned mismatched prerequisite request")
 		}
 		response.PrerequisiteRequest = &request
 	}
+	return response, nil
+}
+
+func normalizeStaleRuntimeOperationObservation(command runtimecontract.RuntimeOperationFeasibilityRequest, response runtimecontract.RuntimeOperationFeasibilityObservation) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
+	if response.PrerequisiteRequest != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("stale runtime operation probe returned ordinary failure facts")
+	}
+	stale := response.Stale.Normalized()
+	if err := stale.Validate(); err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	if stale.OwnerModuleID != command.Admissibility.OwnerModuleID {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("stale runtime operation probe returned mismatched owner")
+	}
+	response.Stale = &stale
 	return response, nil
 }
 

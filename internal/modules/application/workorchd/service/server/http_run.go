@@ -102,145 +102,198 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 	ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
 	switch action {
 	case "":
-		s.metrics.runGetRequests.Add(1)
-		item, err := s.readRun(ctx, s.config.Backend, s.config.DataRoot, runID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: appmodelcore.ProjectRun(item)})
+		s.writeRunInstance(ctx, w, runID)
 	case "snapshot":
-		s.metrics.runSnapshotRequests.Add(1)
-		item, err := s.readRunSnapshotCached(ctx, runID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: readmodelprojection.RunProjection().PublicSnapshot(readmodelprojection.RunProjection().Detail(item))})
+		s.writeRunSnapshot(ctx, w, runID)
 	case "steps":
-		query := stepQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunSteps(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runStepsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Steps: page.Steps, Page: page})
+		s.writeRunSteps(ctx, w, r, workspaceID, runID)
 	case "tool-calls":
-		query := toolCallQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunToolCalls(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runToolCallsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ToolCalls: page.ToolCalls, Page: page})
+		s.writeRunToolCalls(ctx, w, r, workspaceID, runID)
 	case "runtime-checkpoints":
-		query := runtimeCheckpointQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunRuntimeCheckpoints(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runRuntimeCheckpointsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, RuntimeCheckpoints: page.RuntimeCheckpoints, Page: page})
+		s.writeRunRuntimeCheckpoints(ctx, w, r, workspaceID, runID)
 	case "results":
-		query := resultQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunResults(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Results: page.Results, Page: page})
+		s.writeRunResults(ctx, w, r, workspaceID, runID)
 	case "patches":
-		query := patchQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunPatches(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runPatchesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Patches: page.Patches, Page: page})
+		s.writeRunPatches(ctx, w, r, workspaceID, runID)
 	case "validation-results":
-		query := validationResultQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunValidationResults(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runValidationResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ValidationResults: page.ValidationResults, Page: page})
+		s.writeRunValidationResults(ctx, w, r, workspaceID, runID)
 	case "artifacts":
-		query := artifactQueryFromRequest(r)
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		page, err := s.listRunArtifacts(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runArtifactsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Artifacts: page.Artifacts, Page: page})
+		s.writeRunArtifacts(ctx, w, r, workspaceID, runID)
 	case "status":
-		s.metrics.runStatusRequests.Add(1)
-		started := time.Now()
-		item, waitMatched, err := s.readRunStatusWithWait(ctx, runID, r.URL.Query())
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runStatusResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Status: item, WaitMatched: waitMatched, WaitElapsedMs: int64(time.Since(started) / time.Millisecond)})
+		s.writeRunStatus(ctx, w, r, runID)
 	case "observability":
-		s.metrics.runObservabilityRequests.Add(1)
-		item, err := s.readRunObservabilityCached(ctx, runID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: readmodelprojection.RunProjection().PublicObservability(item)})
+		s.writeRunObservability(ctx, w, runID)
 	case "memory-recalls":
-		query := memoryRecallTraceQueryFromValues(r.URL.Query())
-		query.WorkspaceID = common.WorkspaceID(workspaceID)
-		query.RunID = common.RunID(runID)
-		items, err := s.listMemoryRecallTraces(ctx, s.config.Backend, s.config.DataRoot, query)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, memoryRecallTracesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, MemoryRecallTraces: items})
+		s.writeRunMemoryRecalls(ctx, w, r, workspaceID, runID)
 	case "task-progress":
-		s.metrics.runTaskProgressRequests.Add(1)
-		item, err := s.readRunTaskProgress(ctx, s.config.Backend, s.config.DataRoot, runID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, taskProgressResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskProgress: item})
+		s.writeRunTaskProgress(ctx, w, runID)
 	case "context-bundle":
-		s.metrics.runContextBundleRequests.Add(1)
-		item, err := s.readRunContextBundle(ctx, s.config.Backend, s.config.DataRoot, runID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, contextBundleResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ContextBundle: item})
+		s.writeRunContextBundle(ctx, w, runID)
 	case "task-decompositions":
-		s.metrics.runTaskDecompositionRequests.Add(1)
-		items, err := s.readRunTaskDecompositions(ctx, s.config.Backend, s.config.DataRoot, runID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, taskDecompositionsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskDecompositions: items})
+		s.writeRunTaskDecompositions(ctx, w, runID)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *serverState) writeRunInstance(ctx context.Context, w http.ResponseWriter, runID string) {
+	s.metrics.runGetRequests.Add(1)
+	item, err := s.readRun(ctx, s.config.Backend, s.config.DataRoot, runID)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: appmodelcore.ProjectRun(item)})
+}
+
+func (s *serverState) writeRunSnapshot(ctx context.Context, w http.ResponseWriter, runID string) {
+	s.metrics.runSnapshotRequests.Add(1)
+	item, err := s.readRunSnapshotCached(ctx, runID)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	projection := readmodelprojection.RunProjection()
+	writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: projection.PublicSnapshot(projection.Detail(item))})
+}
+
+func (s *serverState) writeRunSteps(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := stepQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunSteps(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runStepsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Steps: page.Steps, Page: page})
+}
+
+func (s *serverState) writeRunToolCalls(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := toolCallQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunToolCalls(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runToolCallsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ToolCalls: page.ToolCalls, Page: page})
+}
+
+func (s *serverState) writeRunRuntimeCheckpoints(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := runtimeCheckpointQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunRuntimeCheckpoints(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runRuntimeCheckpointsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, RuntimeCheckpoints: page.RuntimeCheckpoints, Page: page})
+}
+
+func (s *serverState) writeRunResults(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := resultQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunResults(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Results: page.Results, Page: page})
+}
+
+func (s *serverState) writeRunPatches(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := patchQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunPatches(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runPatchesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Patches: page.Patches, Page: page})
+}
+
+func (s *serverState) writeRunValidationResults(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := validationResultQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunValidationResults(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runValidationResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ValidationResults: page.ValidationResults, Page: page})
+}
+
+func (s *serverState) writeRunArtifacts(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := artifactQueryFromRequest(r)
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	page, err := s.listRunArtifacts(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runArtifactsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Artifacts: page.Artifacts, Page: page})
+}
+
+func (s *serverState) writeRunStatus(ctx context.Context, w http.ResponseWriter, r *http.Request, runID string) {
+	s.metrics.runStatusRequests.Add(1)
+	started := time.Now()
+	item, waitMatched, err := s.readRunStatusWithWait(ctx, runID, r.URL.Query())
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runStatusResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Status: item, WaitMatched: waitMatched, WaitElapsedMs: int64(time.Since(started) / time.Millisecond)})
+}
+
+func (s *serverState) writeRunObservability(ctx context.Context, w http.ResponseWriter, runID string) {
+	s.metrics.runObservabilityRequests.Add(1)
+	item, err := s.readRunObservabilityCached(ctx, runID)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: readmodelprojection.RunProjection().PublicObservability(item)})
+}
+
+func (s *serverState) writeRunMemoryRecalls(ctx context.Context, w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	query := memoryRecallTraceQueryFromValues(r.URL.Query())
+	query.WorkspaceID, query.RunID = common.WorkspaceID(workspaceID), common.RunID(runID)
+	items, err := s.listMemoryRecallTraces(ctx, s.config.Backend, s.config.DataRoot, query)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, memoryRecallTracesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, MemoryRecallTraces: items})
+}
+
+func (s *serverState) writeRunTaskProgress(ctx context.Context, w http.ResponseWriter, runID string) {
+	s.metrics.runTaskProgressRequests.Add(1)
+	item, err := s.readRunTaskProgress(ctx, s.config.Backend, s.config.DataRoot, runID)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, taskProgressResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskProgress: item})
+}
+
+func (s *serverState) writeRunContextBundle(ctx context.Context, w http.ResponseWriter, runID string) {
+	s.metrics.runContextBundleRequests.Add(1)
+	item, err := s.readRunContextBundle(ctx, s.config.Backend, s.config.DataRoot, runID)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, contextBundleResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ContextBundle: item})
+}
+
+func (s *serverState) writeRunTaskDecompositions(ctx context.Context, w http.ResponseWriter, runID string) {
+	s.metrics.runTaskDecompositionRequests.Add(1)
+	items, err := s.readRunTaskDecompositions(ctx, s.config.Backend, s.config.DataRoot, runID)
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, taskDecompositionsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskDecompositions: items})
 }
 
 func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *http.Request) {

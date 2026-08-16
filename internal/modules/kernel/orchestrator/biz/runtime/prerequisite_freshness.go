@@ -169,51 +169,22 @@ func runtimeAggregateHasCurrentCandidateWork(aggregate RuntimeAggregate) bool {
 // reducer seals a new authority around the reacquired active prerequisite.
 func runtimeBindingContradictionIdentity(aggregate RuntimeAggregate, record runtimecontract.RuntimeCandidateAttemptRecord, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeBindingContradictionIdentity, common.CoverageWorkItemID, runtimecontract.RuntimeCWIBindingRef, error) {
 	observation = observation.Normalized()
-	if record.Proposal == nil || !observation.SealedTargetAuthorizationContradicted() || observation.Feedback == nil || observation.Feedback.OriginalDiagnostic == nil || feasibility.Observation == nil {
+	if err := validateRuntimeBindingContradictionObservation(record, feasibility, observation); err != nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
-	if !reflect.DeepEqual(feasibility.Observation.Clone(), observation) ||
-		strings.TrimSpace(feasibility.AdmissibilitySnapshotID) != observation.OwnerPolicy.CatalogSnapshotID ||
-		strings.TrimSpace(feasibility.CandidateManifestHash) == "" || strings.TrimSpace(feasibility.CandidateManifestHash) != strings.TrimSpace(record.ManifestHash) {
+	operation, err := runtimeBindingContradictionOperation(record, feasibility, observation)
+	if err != nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
-	operation, found := candidateOperationByID(*record.Proposal, feasibility.OperationID)
-	descriptor, descriptorFound := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-	if !found || !descriptorFound || descriptor.OwnerModuleID != observation.OwnerPolicy.OwnerModuleID || len(operation.BindingRefs) != 1 || record.Transaction.FocusID == "" {
+	coverageID, ref, err := runtimeBindingContradictionCWI(aggregate, record.Transaction.FocusID, operation.BindingRefs[0])
+	if err != nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
-	var coverageID common.CoverageWorkItemID
-	var ref runtimecontract.RuntimeCWIBindingRef
-	matches := 0
-	for _, item := range aggregate.Facts.Coverage {
-		if item.CurrentBindingRef != nil && item.CurrentBindingRef.BindingID == operation.BindingRefs[0] {
-			coverageID = item.ID
-			ref = item.CurrentBindingRef.Clone()
-			matches++
-		}
-	}
-	if matches != 1 || ref.FocusID != record.Transaction.FocusID || !runtimeSemanticPlanningContainsManifest(aggregate.SemanticPlanning, ref.SemanticManifestHash) {
+	if err := validateRuntimeBindingContradictionReconciliation(aggregate, coverageID, ref, operation, observation); err != nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
-	var reconciliationBinding runtimecontract.RuntimeCWIReconciliationBindingRef
-	reconciliationMatches := 0
-	for _, binding := range aggregate.Facts.ReconciliationContract.Bindings {
-		binding = binding.Normalized()
-		if binding.CoverageWorkItemID == coverageID && binding.BindingID == ref.BindingID && binding.BindingHash == ref.BindingHash {
-			reconciliationBinding = binding
-			reconciliationMatches++
-		}
-	}
-	if reconciliationMatches != 1 || !containsString(reconciliationBinding.OwnerModuleIDs, observation.OwnerPolicy.OwnerModuleID) ||
-		!containsString(reconciliationBinding.AllowedOperationKinds, operation.Kind) {
-		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
-	}
-	feedback := observation.Feedback.Normalized()
-	diagnostic := feedback.OriginalDiagnostic.Normalized()
-	if feedback.WorkspaceID != aggregate.Facts.WorkspaceID || feedback.RunID != aggregate.Facts.RunID ||
-		feedback.AuthoritySnapshotID != record.Transaction.AuthoritySnapshotID || feedback.DispatchID != "" ||
-		diagnostic.OperationID != operation.ID || observation.OwnerPolicy.OwnerModuleID != diagnostic.OwnerModuleID ||
-		strings.TrimSpace(diagnostic.ObservedRevision) == "" || len(diagnostic.TargetRefs) == 0 || !sameRuntimeStringSet(operation.TargetRefs, diagnostic.TargetRefs) {
+	diagnostic, err := runtimeBindingContradictionDiagnostic(aggregate, record, operation, observation)
+	if err != nil {
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
 	}
 	identity := runtimecontract.RuntimeBindingContradictionIdentity{
@@ -228,6 +199,72 @@ func runtimeBindingContradictionIdentity(aggregate RuntimeAggregate, record runt
 		return runtimecontract.RuntimeBindingContradictionIdentity{}, "", runtimecontract.RuntimeCWIBindingRef{}, err
 	}
 	return identity, coverageID, ref, nil
+}
+
+func validateRuntimeBindingContradictionObservation(record runtimecontract.RuntimeCandidateAttemptRecord, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) error {
+	if record.Proposal == nil || !observation.SealedTargetAuthorizationContradicted() || observation.Feedback == nil || observation.Feedback.OriginalDiagnostic == nil || feasibility.Observation == nil {
+		return common.ErrInvalidArgument
+	}
+	if !reflect.DeepEqual(feasibility.Observation.Clone(), observation) || strings.TrimSpace(feasibility.AdmissibilitySnapshotID) != observation.OwnerPolicy.CatalogSnapshotID {
+		return common.ErrInvalidArgument
+	}
+	manifestHash := strings.TrimSpace(feasibility.CandidateManifestHash)
+	if manifestHash == "" || manifestHash != strings.TrimSpace(record.ManifestHash) {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func runtimeBindingContradictionOperation(record runtimecontract.RuntimeCandidateAttemptRecord, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeOperation, error) {
+	operation, found := candidateOperationByID(*record.Proposal, feasibility.OperationID)
+	descriptor, descriptorFound := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || !descriptorFound || descriptor.OwnerModuleID != observation.OwnerPolicy.OwnerModuleID || len(operation.BindingRefs) != 1 || record.Transaction.FocusID == "" {
+		return runtimecontract.RuntimeOperation{}, common.ErrInvalidArgument
+	}
+	return operation, nil
+}
+
+func runtimeBindingContradictionCWI(aggregate RuntimeAggregate, focusID, bindingID string) (common.CoverageWorkItemID, runtimecontract.RuntimeCWIBindingRef, error) {
+	var coverageID common.CoverageWorkItemID
+	var ref runtimecontract.RuntimeCWIBindingRef
+	matches := 0
+	for _, item := range aggregate.Facts.Coverage {
+		if item.CurrentBindingRef != nil && item.CurrentBindingRef.BindingID == bindingID {
+			coverageID, ref = item.ID, item.CurrentBindingRef.Clone()
+			matches++
+		}
+	}
+	if matches != 1 || ref.FocusID != focusID || !runtimeSemanticPlanningContainsManifest(aggregate.SemanticPlanning, ref.SemanticManifestHash) {
+		return "", runtimecontract.RuntimeCWIBindingRef{}, common.ErrInvalidArgument
+	}
+	return coverageID, ref, nil
+}
+
+func validateRuntimeBindingContradictionReconciliation(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID, ref runtimecontract.RuntimeCWIBindingRef, operation runtimecontract.RuntimeOperation, observation runtimecontract.RuntimeOwnerFeasibilityObservation) error {
+	var matched runtimecontract.RuntimeCWIReconciliationBindingRef
+	matches := 0
+	for _, binding := range aggregate.Facts.ReconciliationContract.Bindings {
+		binding = binding.Normalized()
+		if binding.CoverageWorkItemID == coverageID && binding.BindingID == ref.BindingID && binding.BindingHash == ref.BindingHash {
+			matched, matches = binding, matches+1
+		}
+	}
+	if matches != 1 || !containsString(matched.OwnerModuleIDs, observation.OwnerPolicy.OwnerModuleID) || !containsString(matched.AllowedOperationKinds, operation.Kind) {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func runtimeBindingContradictionDiagnostic(aggregate RuntimeAggregate, record runtimecontract.RuntimeCandidateAttemptRecord, operation runtimecontract.RuntimeOperation, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeOriginalDiagnostic, error) {
+	feedback := observation.Feedback.Normalized()
+	diagnostic := feedback.OriginalDiagnostic.Normalized()
+	if feedback.WorkspaceID != aggregate.Facts.WorkspaceID || feedback.RunID != aggregate.Facts.RunID || feedback.AuthoritySnapshotID != record.Transaction.AuthoritySnapshotID || feedback.DispatchID != "" {
+		return runtimecontract.RuntimeOriginalDiagnostic{}, common.ErrInvalidArgument
+	}
+	if diagnostic.OperationID != operation.ID || observation.OwnerPolicy.OwnerModuleID != diagnostic.OwnerModuleID || strings.TrimSpace(diagnostic.ObservedRevision) == "" || len(diagnostic.TargetRefs) == 0 || !sameRuntimeStringSet(operation.TargetRefs, diagnostic.TargetRefs) {
+		return runtimecontract.RuntimeOriginalDiagnostic{}, common.ErrInvalidArgument
+	}
+	return *diagnostic, nil
 }
 
 func runtimeSemanticPlanningContainsManifest(ledger runtimecontract.RuntimeSemanticPlanningLedger, manifestHash string) bool {

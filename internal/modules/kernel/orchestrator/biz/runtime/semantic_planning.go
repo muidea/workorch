@@ -1005,118 +1005,162 @@ func (c *planningTransactionComponent) startSemanticPlanRequest(ctx context.Cont
 // cannot create feasibility, binding, dispatch, coverage or terminal facts.
 func (c *planningTransactionComponent) evaluateSemanticPlan(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
-	document = document.Normalized()
-	// A proof response is focus-local and must not carry a second global order
-	// authority. Canonicalize the provider document before hashing/persisting so
-	// the immutable batch document and the Orchestrator merge have one identity.
-	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && len(document.CoverageOrder) != 0 {
-		document.CoverageOrder = nil
-		document = document.Normalized()
-	}
+	document = canonicalRuntimeSemanticPlanDocument(document)
 	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
-		documentHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
-		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && document.BatchID == "" {
-			return false, fmt.Errorf("%w: semantic proof document requires active batch identity", common.ErrConflict)
-		}
-		if ledger.LogicalRequestID == logicalRequestID {
-			if document.BatchID == "" && ledger.DocumentHash == documentHash {
-				return false, nil
-			}
-			for _, existing := range ledger.BatchDocuments {
-				if existing.BatchID == document.BatchID && runtimecontract.StableRuntimeSemanticPlanDocumentHash(existing) == documentHash {
-					return false, nil
-				}
-			}
-		}
-		if (ledger.Phase != runtimecontract.RuntimeSemanticPlanningOrderRequestOpen && ledger.Phase != runtimecontract.RuntimeSemanticPlanningRequestOpen && ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen && ledger.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired) || ledger.Manifest == nil || ledger.LogicalRequestID != logicalRequestID {
-			return false, fmt.Errorf("%w: semantic plan document has no matching request", common.ErrConflict)
-		}
-		if err := document.ValidateAgainstManifest(*ledger.Manifest); err != nil {
-			return false, err
-		}
-		// Every proof document is focus-local. A proof document without the
-		// Orchestrator-issued batch identity would be a second full-manifest
-		// authority path and could admit later CWI outside the active focus.
-		switch ledger.Phase {
-		case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen:
-			if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || document.BatchID != "" {
-				return false, fmt.Errorf("%w: initial semantic request requires coverage-order document", common.ErrConflict)
-			}
-		case runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen:
-			if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || document.BatchID == "" || document.BatchID != ledger.ActiveBatchID {
-				return false, fmt.Errorf("%w: proof request document is not bound to active batch", common.ErrConflict)
-			}
-		case runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
-			if ledger.ActiveBatchID == "" {
-				if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || document.BatchID != "" {
-					return false, fmt.Errorf("%w: coverage-order correction has invalid document identity", common.ErrConflict)
-				}
-			} else if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || document.BatchID != ledger.ActiveBatchID {
-				return false, fmt.Errorf("%w: proof-batch correction is outside active batch", common.ErrConflict)
-			}
-		default:
-			return false, fmt.Errorf("%w: semantic plan document cannot be evaluated from phase %q", common.ErrConflict, ledger.Phase)
-		}
-		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			sourceFocuses := aggregate.Facts.DefinitionFocuses
-			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, sourceFocuses); err != nil {
-				return false, err
-			}
-		}
-		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
-			// The global provider order is immutable lineage.  It remains separate
-			// from the current-focus proof document so later proof batches cannot
-			// broaden their authority by restating it.
-			order := document.Clone()
-			ledger.CoverageOrderDocument = &order
-			ledger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), order.CoverageOrder...)
-			ledger.Phase = runtimecontract.RuntimeSemanticPlanningOrderAccepted
-		} else if document.BatchID != "" {
-			if ledger.ActiveBatchID != document.BatchID {
-				return false, fmt.Errorf("%w: semantic batch document is not the active batch", common.ErrConflict)
-			}
-			for _, existing := range ledger.BatchDocuments {
-				if existing.BatchID != document.BatchID {
-					continue
-				}
-				if runtimecontract.StableRuntimeSemanticPlanDocumentHash(existing) == documentHash {
-					return false, nil
-				}
-				return false, fmt.Errorf("%w: conflicting semantic batch document", common.ErrConflict)
-			}
-			for idx := range ledger.Batches {
-				if ledger.Batches[idx].BatchID == document.BatchID {
-					advanced, advanceErr := runtimecontract.AdvanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchDocumentComplete)
-					if advanceErr != nil {
-						return false, advanceErr
-					}
-					advanced.DocumentHash = documentHash
-					advanced.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(advanced)
-					ledger.Batches[idx] = advanced
-					break
-				}
-			}
-			ledger.BatchDocuments = append(ledger.BatchDocuments, document.Clone())
-			ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
-			return true, nil
-		} else {
-			// The legacy full-document proposal path has no bounded focus and is
-			// intentionally unreachable. The batch branch above is the only proof
-			// admission path.
-			return false, fmt.Errorf("%w: semantic proof document has no active batch", common.ErrConflict)
-		}
-		ledger.Document = &document
-		ledger.DocumentHash = documentHash
-		return true, nil
-	}(transaction.aggregate, &transaction.ledger)
+	changed, err := evaluateSemanticPlanMutation(transaction.aggregate, &transaction.ledger, logicalRequestID, document)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
+}
+
+func canonicalRuntimeSemanticPlanDocument(document runtimecontract.RuntimeSemanticPlanDocument) runtimecontract.RuntimeSemanticPlanDocument {
+	document = document.Normalized()
+	// Proof responses are focus-local and cannot carry a second global order.
+	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && len(document.CoverageOrder) != 0 {
+		document.CoverageOrder = nil
+		document = document.Normalized()
+	}
+	return document
+}
+
+func evaluateSemanticPlanMutation(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (bool, error) {
+	documentHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
+	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && document.BatchID == "" {
+		return false, fmt.Errorf("%w: semantic proof document requires active batch identity", common.ErrConflict)
+	}
+	if semanticPlanDocumentReplay(*ledger, logicalRequestID, document, documentHash) {
+		return false, nil
+	}
+	if err := validateSemanticPlanDocumentRequest(*ledger, logicalRequestID, document); err != nil {
+		return false, err
+	}
+	if err := document.ValidateAgainstManifest(*ledger.Manifest); err != nil {
+		return false, err
+	}
+	if err := validateSemanticPlanDocumentPhase(*ledger, document); err != nil {
+		return false, err
+	}
+	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, aggregate.Facts.DefinitionFocuses); err != nil {
+			return false, err
+		}
+	}
+	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		applySemanticCoverageOrderDocument(ledger, document, documentHash)
+		return true, nil
+	}
+	if document.BatchID == "" {
+		return false, fmt.Errorf("%w: semantic proof document has no active batch", common.ErrConflict)
+	}
+	return applySemanticProofBatchDocument(ledger, document, documentHash)
+}
+
+func semanticPlanDocumentReplay(ledger runtimecontract.RuntimeSemanticPlanningLedger, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument, documentHash string) bool {
+	if ledger.LogicalRequestID != logicalRequestID {
+		return false
+	}
+	if document.BatchID == "" && ledger.DocumentHash == documentHash {
+		return true
+	}
+	for _, existing := range ledger.BatchDocuments {
+		if existing.BatchID == document.BatchID && runtimecontract.StableRuntimeSemanticPlanDocumentHash(existing) == documentHash {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSemanticPlanDocumentRequest(ledger runtimecontract.RuntimeSemanticPlanningLedger, logicalRequestID string, _ runtimecontract.RuntimeSemanticPlanDocument) error {
+	validPhase := ledger.Phase == runtimecontract.RuntimeSemanticPlanningOrderRequestOpen ||
+		ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequestOpen ||
+		ledger.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen ||
+		ledger.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired
+	if !validPhase || ledger.Manifest == nil || ledger.LogicalRequestID != logicalRequestID {
+		return fmt.Errorf("%w: semantic plan document has no matching request", common.ErrConflict)
+	}
+	return nil
+}
+
+func validateSemanticPlanDocumentPhase(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) error {
+	switch ledger.Phase {
+	case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen:
+		if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || document.BatchID != "" {
+			return fmt.Errorf("%w: initial semantic request requires coverage-order document", common.ErrConflict)
+		}
+	case runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen:
+		if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || document.BatchID == "" || document.BatchID != ledger.ActiveBatchID {
+			return fmt.Errorf("%w: proof request document is not bound to active batch", common.ErrConflict)
+		}
+	case runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
+		return validateSemanticCorrectionDocumentIdentity(ledger, document)
+	default:
+		return fmt.Errorf("%w: semantic plan document cannot be evaluated from phase %q", common.ErrConflict, ledger.Phase)
+	}
+	return nil
+}
+
+func validateSemanticCorrectionDocumentIdentity(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) error {
+	if ledger.ActiveBatchID == "" {
+		if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || document.BatchID != "" {
+			return fmt.Errorf("%w: coverage-order correction has invalid document identity", common.ErrConflict)
+		}
+		return nil
+	}
+	if document.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || document.BatchID != ledger.ActiveBatchID {
+		return fmt.Errorf("%w: proof-batch correction is outside active batch", common.ErrConflict)
+	}
+	return nil
+}
+
+func applySemanticCoverageOrderDocument(ledger *runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument, documentHash string) {
+	order := document.Clone()
+	ledger.CoverageOrderDocument = &order
+	ledger.PendingCoverageIDs = append([]common.CoverageWorkItemID(nil), order.CoverageOrder...)
+	ledger.Phase = runtimecontract.RuntimeSemanticPlanningOrderAccepted
+	ledger.Document = &document
+	ledger.DocumentHash = documentHash
+}
+
+func applySemanticProofBatchDocument(ledger *runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument, documentHash string) (bool, error) {
+	if ledger.ActiveBatchID != document.BatchID {
+		return false, fmt.Errorf("%w: semantic batch document is not the active batch", common.ErrConflict)
+	}
+	for _, existing := range ledger.BatchDocuments {
+		if existing.BatchID != document.BatchID {
+			continue
+		}
+		if runtimecontract.StableRuntimeSemanticPlanDocumentHash(existing) == documentHash {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w: conflicting semantic batch document", common.ErrConflict)
+	}
+	if err := advanceSemanticProofBatchDocument(ledger, document.BatchID, documentHash); err != nil {
+		return false, err
+	}
+	ledger.BatchDocuments = append(ledger.BatchDocuments, document.Clone())
+	ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
+	return true, nil
+}
+
+func advanceSemanticProofBatchDocument(ledger *runtimecontract.RuntimeSemanticPlanningLedger, batchID, documentHash string) error {
+	for idx := range ledger.Batches {
+		if ledger.Batches[idx].BatchID != batchID {
+			continue
+		}
+		advanced, err := runtimecontract.AdvanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchDocumentComplete)
+		if err != nil {
+			return err
+		}
+		advanced.DocumentHash = documentHash
+		advanced.Hash = runtimecontract.StableRuntimeSemanticPlanBatchHash(advanced)
+		ledger.Batches[idx] = advanced
+		break
+	}
+	return nil
 }
 
 // requireSemanticFeasibility is the SM-2 handoff from an accepted proposal to
