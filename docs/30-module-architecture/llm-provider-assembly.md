@@ -65,13 +65,17 @@ provider-facing request 保持连续分层：
 | --- | --- | --- |
 | C0 | system/schema/Runtime contract | long-lived |
 | C1 | Goal/DoD definition | definition-bound |
-| C2 | declarative capability/governance contract | activation-bound |
+| C2 | declarative capability/governance contract、profile owner-fact postcondition | activation-bound |
 | C3 | current authority/focus/required output | volatile |
 | C4 | recent evidence/failure/correction | volatile |
 | C5 | large refs/trace | ref-oriented |
 
 `StablePrefixHash` 覆盖稳定 prefix，意外漂移是 request-rendering defect。provider-specific cache metadata 只能改变
 transport hint，不能改变 section 内容或 Runtime authority。
+
+`RuntimeOwnerFactRequirement` 在 C2 只表达 immutable postcondition；current readiness/recipe/input binding 必须留在 C3
+sealed owner catalog。semantic instruction 必须禁止模型把 C2 declaration 当成 current fact 或发明 selectable identity；
+LLM result 不得决定 assessment credit、CWI reopen 或 owner-fact budget。
 
 ## Request Session Boundary
 

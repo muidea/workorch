@@ -112,12 +112,13 @@ func TestRuntimeAdapterAdmissibilityKeepsInputRequiringToolCallableButNotValidat
 		ID: common.MCPServerID("mcp-lsp-bridge"), Transport: "http", Endpoint: "http://mcp.invalid",
 		Enabled: true, AllowedTools: []string{"lsp_definition", "lsp_status"},
 	}
-	capability := func(name string, schema workorcheventpayload.Payload) *mcpmodel.Capability {
+	capability := func(name string, schema workorcheventpayload.Payload, applicability runtimecontract.RuntimeValidationProofApplicability) *mcpmodel.Capability {
 		return &mcpmodel.Capability{
 			ID: common.MCPCapabilityID("mcp-lsp-bridge:tool:" + name), ServerID: server.ID,
 			Kind: mcpmodel.CapabilityKindTool, Name: name, Enabled: true,
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
-			Schema: schema,
+			ValidationProofApplicability: string(applicability),
+			Schema:                       schema,
 		}
 	}
 	statusSchema := workorcheventpayload.New(workorcheventpayload.StringField("type", "object"))
@@ -126,7 +127,8 @@ func TestRuntimeAdapterAdmissibilityKeepsInputRequiringToolCallableButNotValidat
 		workorcheventpayload.StringArrayField("required", []string{"line", "path", "col"}),
 	)
 	adapter := NewRuntimeAdapter(staticMCPServerGetter{server: server, capabilities: []*mcpmodel.Capability{
-		capability("lsp_definition", definitionSchema), capability("lsp_status", statusSchema),
+		capability("lsp_definition", definitionSchema, runtimecontract.RuntimeValidationProofDirect),
+		capability("lsp_status", statusSchema, runtimecontract.RuntimeValidationProofAuxiliary),
 	}})
 
 	snapshot, err := adapter.runtimeOperationAdmissibilitySnapshot(context.Background())
@@ -136,16 +138,16 @@ func TestRuntimeAdapterAdmissibilityKeepsInputRequiringToolCallableButNotValidat
 	if len(snapshot.Capabilities) != 2 {
 		t.Fatalf("callable MCP capability count = %d, want 2", len(snapshot.Capabilities))
 	}
-	if got, want := snapshot.ValidationRecipes, []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("provider-visible validation recipes = %v, want %v", got, want)
+	if len(snapshot.ValidationRecipes) != 0 {
+		t.Fatalf("auxiliary/input-incomplete surfaces leaked provider-visible validation recipes: %v", snapshot.ValidationRecipes)
 	}
 	definition, found := runtimecontract.RuntimeValidationSurfaceForID(snapshot.ValidationSurfaces, "mcp/tool_call/mcp-lsp-bridge/lsp_definition")
 	if !found || definition.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired || definition.PrerequisiteRef == "" || definition.InputBindingRef != "" {
 		t.Fatalf("lsp_definition validation surface = %+v, want input-binding prerequisite", definition)
 	}
 	status, found := runtimecontract.RuntimeValidationSurfaceForID(snapshot.ValidationSurfaces, "mcp/tool_call/mcp-lsp-bridge/lsp_status")
-	if !found || status.Readiness != runtimecontract.RuntimeValidationSurfaceReady || status.InputBindingRef == "" || status.PrerequisiteRef != "" {
-		t.Fatalf("lsp_status validation surface = %+v, want ready empty-input binding", status)
+	if !found || status.Readiness != runtimecontract.RuntimeValidationSurfaceReady || status.ProofApplicability != runtimecontract.RuntimeValidationProofAuxiliary || status.InputBindingRef == "" || status.PrerequisiteRef != "" {
+		t.Fatalf("lsp_status validation surface = %+v, want ready auxiliary empty-input binding", status)
 	}
 }
 
@@ -1189,9 +1191,10 @@ func newMCPService(t *testing.T, server mcpmodel.Server) serverGetter {
 		capabilities = append(capabilities, &mcpmodel.Capability{
 			ID: common.MCPCapabilityID(string(server.ID) + ":tool:" + tool), ServerID: server.ID,
 			Kind: mcpmodel.CapabilityKindTool, Name: tool, Enabled: true,
-			EffectScope:      string(runtimecontract.RuntimeEffectNone),
-			IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
-			Schema:           workorcheventpayload.New(workorcheventpayload.StringField("type", "object")),
+			EffectScope:                  string(runtimecontract.RuntimeEffectNone),
+			IdempotencyClass:             string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+			ValidationProofApplicability: string(runtimecontract.RuntimeValidationProofDirect),
+			Schema:                       workorcheventpayload.New(workorcheventpayload.StringField("type", "object")),
 		})
 	}
 	return staticMCPServerGetter{server: &server, capabilities: capabilities}

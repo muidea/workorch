@@ -205,7 +205,7 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageDropsOnlySettledPredecessor(t 
 		},
 	}
 
-	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, []common.CoverageWorkItemID{"cwi-settled", "cwi-next"})
+	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-order", []common.CoverageWorkItemID{"cwi-settled", "cwi-next"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,11 +213,69 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageDropsOnlySettledPredecessor(t 
 		t.Fatalf("current semantic order = %+v, want only cwi-next", order)
 	}
 
-	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, []common.CoverageWorkItemID{"cwi-settled", "cwi-blocked", "cwi-next"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-order", []common.CoverageWorkItemID{"cwi-settled", "cwi-blocked", "cwi-next"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
 		t.Fatalf("blocked historical order error = %v", err)
 	}
-	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, []common.CoverageWorkItemID{"cwi-settled"})
+	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-order", []common.CoverageWorkItemID{"cwi-settled"})
 	if err != nil || len(changed) != 1 || changed[0] != "cwi-next" {
 		t.Fatalf("new eligible closure change = %+v, error = %v", changed, err)
+	}
+}
+
+func TestCurrentRuntimeCWIOrderFromSemanticLineageRetainsCurrentGenerationBoundQueueMember(t *testing.T) {
+	oldBinding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding-current", CoverageWorkItemID: "cwi-current", FocusID: "focus-current", DefinitionRevision: "definition-1",
+		Proofs:     []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, ValidationRecipeID: "recipe/current", RequiredCheckRefs: []string{"recipe/current"}}},
+		TargetRefs: []string{"target-current"}, DeclarationRef: "dod/current",
+	}.Normalized()
+	oldBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(oldBinding)
+	reboundBinding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding-rebound", CoverageWorkItemID: "cwi-rebound", FocusID: "focus-rebound", DefinitionRevision: "definition-1",
+		Proofs:     []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, ValidationRecipeID: "recipe/rebound", RequiredCheckRefs: []string{"recipe/rebound"}}},
+		TargetRefs: []string{"target-rebound"}, DeclarationRef: "dod/rebound",
+	}.Normalized()
+	reboundBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(reboundBinding)
+	oldRef := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(oldBinding, "manifest-previous")
+	reboundRef := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(reboundBinding, "manifest-current")
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionSeed:   runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-current", Order: 1}, {ID: "cwi-rebound", Order: 2}}},
+		Focus:            runtimecontract.CoverageFocus{ID: oldBinding.FocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-current"}, CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{oldBinding}},
+		RemainingFocuses: []runtimecontract.CoverageFocus{{ID: reboundBinding.FocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-rebound"}, CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{reboundBinding}}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{
+			{ID: "cwi-current", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateBound, CurrentBindingRef: &oldRef},
+			{ID: "cwi-rebound", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateBound, CurrentBindingRef: &reboundRef},
+		},
+	}
+
+	order, changed, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"})
+	if err != nil || len(order) != 1 || order[0] != "cwi-rebound" || len(changed) != 0 {
+		t.Fatalf("current-generation bound lineage = %+v, changed=%+v, error=%v", order, changed, err)
+	}
+	if pending := runtimeCWIPlanningMembersOfSemanticOrder(facts, order); len(pending) != 0 {
+		t.Fatalf("already-bound semantic order leaked into planning projection: %+v", pending)
+	}
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(facts, "manifest-stale", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+		t.Fatalf("stale bound semantic lineage error = %v", err)
+	}
+	drifted := facts
+	drifted.RemainingFocuses = append([]runtimecontract.CoverageFocus(nil), facts.RemainingFocuses...)
+	driftedFocus := drifted.RemainingFocuses[0]
+	driftedFocus.CoverageEvidenceBindings = append([]runtimecontract.CoverageEvidenceBinding(nil), driftedFocus.CoverageEvidenceBindings...)
+	driftedFocus.CoverageEvidenceBindings[0].TargetRefs = []string{"target-drift"}
+	drifted.RemainingFocuses[0] = driftedFocus
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(drifted, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+		t.Fatalf("drifted bound semantic lineage error = %v", err)
+	}
+	completed := facts
+	completed.RemainingFocuses = nil
+	completed.CompletedFocuses = []runtimecontract.CoverageFocus{facts.RemainingFocuses[0]}
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(completed, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+		t.Fatalf("completed bound semantic lineage error = %v", err)
+	}
+	blocked := facts
+	blocked.Coverage = append([]runtimecontract.RuntimeCoverageItemFact(nil), facts.Coverage...)
+	blocked.Coverage[1].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-current"}
+	if _, _, err := currentRuntimeCWIOrderFromSemanticLineage(blocked, "manifest-current", []common.CoverageWorkItemID{"cwi-rebound"}); err == nil || !strings.Contains(err.Error(), "non-settled ineligible") {
+		t.Fatalf("bound lineage with reopened prerequisite error = %v", err)
 	}
 }

@@ -172,6 +172,7 @@ func runtimeBootstrapFocusSeeds(values []runtimecontract.CoverageFocus) []runtim
 			CoverageWorkItemIDs:   append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
 			RequiredEvidenceKinds: append([]string(nil), value.RequiredEvidenceKinds...),
 			RequireAssessment:     value.RequireAssessment,
+			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
 		}.Normalized())
 	}
 	return ret

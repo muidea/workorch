@@ -424,7 +424,7 @@ func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 	}
 	foundLSPStatus := false
 	for _, capability := range capabilities {
-		if capability.ServerID == "mcp-lsp-bridge" && (capability.EffectScope == "" || capability.IdempotencyClass == "") {
+		if capability.ServerID == "mcp-lsp-bridge" && (capability.EffectScope == "" || capability.IdempotencyClass == "" || capability.ValidationProofApplicability == "") {
 			t.Fatalf("embedded MCP capability %q missing runtime metadata", capability.Name)
 		}
 		if capability.ServerID == "mcp-lsp-bridge" && capability.Name == "lsp_status" {
@@ -432,6 +432,12 @@ func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 			if capability.EffectScope != "none" || capability.IdempotencyClass != "safe_to_replay" {
 				t.Fatalf("lsp_status runtime metadata = %q/%q, want none/safe_to_replay", capability.EffectScope, capability.IdempotencyClass)
 			}
+			if capability.ValidationProofApplicability != "auxiliary" {
+				t.Fatalf("lsp_status proof applicability = %q, want auxiliary", capability.ValidationProofApplicability)
+			}
+		}
+		if capability.ServerID == "mcp-lsp-bridge" && capability.Name == "lsp_definition" && capability.ValidationProofApplicability != "direct" {
+			t.Fatalf("lsp_definition proof applicability = %q, want direct", capability.ValidationProofApplicability)
 		}
 	}
 	if !foundLSPStatus {
@@ -881,6 +887,14 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			assertStringListContains(t, accepted, "patch/apply")
 			assertStringListContains(t, accepted, "validation/managed_session")
 			assertStringListNotContains(t, accepted, "shell/command")
+			ownerFacts, ok := item["requiredOwnerFacts"].([]any)
+			if !ok || len(ownerFacts) != 1 {
+				t.Fatalf("validation_preparation requiredOwnerFacts = %+v, want one Shell postcondition", item["requiredOwnerFacts"])
+			}
+			ownerFact, ok := ownerFacts[0].(map[string]any)
+			if !ok || ownerFact["ownerModuleId"] != "blocks/shell" || ownerFact["factKind"] != "selectable_validation_surface" || ownerFact["operationKind"] != "validation/managed_session" {
+				t.Fatalf("validation_preparation requiredOwnerFacts = %+v, want selectable Shell managed-validation surface", ownerFacts)
+			}
 			validationPreparationEvidenceFound = true
 			continue
 		}

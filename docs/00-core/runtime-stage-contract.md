@@ -55,8 +55,8 @@ context-integrity/contract failure。recovery 复用同一 ExpectedDocument，�
 output。
 
 fresh activation 把不可变 `DefinitionFocuses` 与 SM-2 封存的 generation-specific
-`Focus/RemainingFocuses/CompletedFocuses` 分离。前者只包含 CWI、slice、required evidence/assessment 及声明式
-metric/artifact obligation 及可选 profile-declared selector identity，不得携带 resolved target、operation kind/variant、recipe/check 或 binding；后者可随 owner
+`Focus/RemainingFocuses/CompletedFocuses` 分离。前者只包含 CWI、slice、required evidence/assessment、声明式
+metric/artifact obligation、owner-fact postcondition 及可选 profile-declared selector identity，不得携带 resolved target、operation kind/variant、recipe/check 或 binding；后者可随 owner
 resource revision 退休、重开和重新封存。任何 semantic document admission、owner feasibility batch 与 final seal 都只能用
 `DefinitionFocuses` 检查 source declaration，禁止把上一 generation 的 accepted operation kind 当成下一 generation 的声明。
 
@@ -170,14 +170,23 @@ provider-visible allowed operation set。SM-3 接受 document 只形成 internal
 
 owner operation-admissibility catalog 必须把“可调用 operation”与“当前可作为验证证明的 surface”分开。每个
 `RuntimeValidationSurface` 由对应 capability owner 在一次一致 snapshot 中声明 `ready | prerequisite_required |
-unavailable`、input schema hash、owner-sealed input binding 或 prerequisite lineage、check refs、effect 与 replay class；
-只有已经具有完整 input binding、non-durable 且 safe-to-replay 的 `ready` surface
-才能进入 `ValidationRecipeRefs`。`prerequisite_required`/`unavailable` surface 仍随 aggregate 和 audit 持久化，但不得
+unavailable`、`direct | auxiliary | not_declared` proof applicability、input schema hash、owner-sealed input binding 或
+prerequisite lineage、check refs、effect 与 replay class；只有已经具有完整 input binding、non-durable、safe-to-replay，
+并由 owner 显式声明为 `direct` 的 `ready` surface 才能进入 `ValidationRecipeRefs`。`auxiliary`/`not_declared`、
+`prerequisite_required`/`unavailable` surface 仍随 aggregate 和 audit 持久化，但不得
 进入 provider schema、C3 ownerCatalog、correction allowed values 或 behavior probe。catalog 分类只读取 owner 本地/typed
 registry fact，不调用 provider/MCP endpoint、不创建 candidate/dispatch/receipt，也不触发状态转换；Orchestrator 不能
-根据 schema、tool 名称或 DoD 自行补 input binding。该 catalog disposition 不是 semantic-feasibility observation，
-不消耗 semantic attempt 或 prerequisite-refresh budget；若仍有合法 ready alternative，SM-3 只在该交集中规划，若无
+根据 schema、tool 名称、描述、category 或 DoD 自行补 input binding、推断 direct proof。该 catalog disposition 不是
+semantic-feasibility observation，不消耗 semantic attempt 或 prerequisite-refresh budget；若仍有合法 `ready + direct`
+alternative，SM-3 只在该交集中规划，若无
 可满足 required proof 的 alternative，则沿既有 bounded semantic-contract fail-closed 主线处理。
+
+profile 可以在 immutable DefinitionFocus 中声明中立的 `RuntimeOwnerFactRequirement`，但不能提交 owner 的目标状态或
+生成第二份 capability authority。当前支持的 `selectable_validation_surface` 只要求指定 capability owner 的当前 typed
+admissibility catalog 同时包含声明 operation kind、`ready + direct` surface 和同一 `ValidationRecipeRefs` identity。
+Workorchd 只把 profile 声明编译进 bootstrap/DefinitionFocus；capability owner 只发布 catalog；只有 Orchestrator SM-2
+可在 assessment commit 中读取该事实并决定 CWI credit。LLM assessment、operation 成功、文件变化或历史 recipe 均不能
+代替当前 owner fact。
 
 同一 proposal 的 operation kind、concrete variant 与 target policy 必须来自同一条 owner catalog fact；catalog
 已列出的现有目标不得使用仅允许 prospective target 的 create-only fact。若相同 evidence kind 与 target policy
@@ -203,6 +212,10 @@ typed observation/receipt：
 - `/run restart` 的 scope 固定为 `workspace_full`，新 Run 不继承 predecessor coverage；即使 owner observation
   显示已有文件、Git revision 或 endpoint readiness，也必须由新 Run 的 matching receipt 重新取得 credit。
 - observation 只能让 SM-2 保留已存在的 credit，或通过 `reopened` lineage 重开 CWI；它不能直接新增 credit。
+- reconciliation 重开后，同一 current semantic manifest 已精确重绑、仍位于 active/remaining focus queue，且所有声明
+  prerequisite 仍 settled+satisfied 的 CWI 可以保留在 executable lineage 中；较早的 effect-fenced current focus 不会因此
+  被越过。该 bound row 不重新获得 planning eligibility，duplicate/restart re-drive 只由 SM-2 过滤后保持零 CAS；stale
+  manifest/binding、completed row 或 prerequisite reopen 必须拒绝。
 - 一个 binding 的 owner receipt 与 observation 必须一对一且完整；缺失、重复、跨 workspace/run、binding/hash 或
   generation 不匹配均为合同错误。owner 的 exit 0、summary、通用 test、文件/Git 存在和 LLM claim 都不是 semantic
   proof。
@@ -404,10 +417,11 @@ load facts
 - `RequiredOutputContract` 必须是 current focus、owner-confirmed capability、evidence policy 和
   side-effect compatibility 的中立交集。operation 可行动性不足必须在 operation provider 前确定失败；semantic-plan
   LLM 只能在封存 catalog/selector/recipe family 内提出 proposal，不能自由猜测 owner capability。
-- validation catalog 必须同时保留 callable capability 与 ready/non-ready surface audit fact，但 provider projection 和
-  request-specific schema 只能包含 ready `ValidationRecipeRefs`；rendering boundary 必须再次按 readiness fail-closed，
-  不能把 `prerequisite_required` identity、schema/input binding、MCP effect metadata 或 Shell executable recipe 当作
-  model hint。readiness 或 binding 变化必须改变 owner catalog snapshot/manifest identity。
+- validation catalog 必须同时保留 callable capability、ready/non-ready 和 direct/auxiliary/not-declared surface audit fact，
+  但 provider projection 和 request-specific schema 只能包含 `ready + direct` 的 `ValidationRecipeRefs`；rendering boundary
+  必须再次按 readiness 与 proof applicability fail-closed，不能把 `prerequisite_required`/auxiliary identity、
+  schema/input binding、MCP effect metadata 或 Shell executable recipe 当作 model hint。readiness、proof applicability 或
+  binding 变化必须改变 owner catalog snapshot/manifest identity。
 - accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
   `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
   no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。
@@ -439,6 +453,13 @@ load facts
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
   选择该命令时的必要参数；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才可满足该 binding，
   不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
+- assessment 必须先独立证明 sealed binding 的其余 evidence/effect/quality 条件，再检查 current owner-fact postcondition。
+  只有“其余 proof 全部成立、owner fact 是唯一缺口”时，SM-2 才能在提交 assessment dispatch 的同一 CAS 中把 current
+  bound CWI 记为 `reopened`、清除 current binding、更新 reconciliation contract，并以 typed reopen lineage 退休当前
+  semantic generation。旧 binding/receipt/evidence/assessment 只保留 audit；SM-4 随后从同一 aggregate 幂等驱动新
+  semantic generation。普通 evidence gap 不得伪装为 owner-fact gap；同 CWI 重规划次数使用封存的
+  `MaxRepairAttemptsPerFocus` 有界，耗尽后以 `owner_fact_convergence_exhausted` fail-closed。duplicate/restart 不重复
+  reopen、request、effect 或预算扣减。
 - terminal `RuntimeResultCloseout` 以 canonical coverage ledger 为 closure authority。只有 canonical non-satisfied
   assessment/active gap 与当前 unsatisfied CWI 的交集可进入结构化 gap；producer 的 claimed disposition 或已满足 CWI
   的历史 gap 只能保留为 audit。top failure 依次使用 current `Facts.Failure`、current active/formal gap、terminal

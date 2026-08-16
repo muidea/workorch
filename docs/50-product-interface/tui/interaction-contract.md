@@ -49,6 +49,9 @@ Decision context adds `/decision answer`, `/decision terminate`, `/decision show
 `/run resume` requests continuation of the Workspace-selected current Run. `/run restart` requests a fresh definition-bound
 activation; it does not directly create or select a successor.
 
+Normal TUI creation uses `/workspace create <title> --template <template-id> --dir <path>`; both template and workspace
+directory are required before the Workspace owner command is submitted.
+
 ## Keyboard
 
 - `Enter`: submit or confirm selection;

@@ -111,6 +111,9 @@ func (b RuntimeBootstrap) Validate() error {
 		if err := ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
 			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
 		}
+		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
+			return fmt.Errorf("runtime bootstrap focus %s owner facts: %w", focus.ID, err)
+		}
 		if _, ok := seen[focus.ID]; ok {
 			return fmt.Errorf("runtime bootstrap focus %s is duplicated", focus.ID)
 		}
@@ -285,6 +288,7 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets && left.ValidationRecipeID == right.ValidationRecipeID &&
+		sameRuntimeOwnerFactRequirements(left.RequiredOwnerFacts, right.RequiredOwnerFacts) &&
 		sameCoverageEvidenceBindings(left.CoverageEvidenceBindings, right.CoverageEvidenceBindings) &&
 		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) && sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs) &&
 		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && SameRuntimeOperationVariantRefs(left.AcceptedOperationVariants, right.AcceptedOperationVariants) &&

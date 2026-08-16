@@ -97,6 +97,12 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 				writeHashString(h, variant.Kind)
 				writeHashString(h, variant.VariantID)
 			}
+			writeHashString(h, fmt.Sprintf("%d", len(requirement.RequiredOwnerFacts)))
+			for _, ownerFact := range requirement.RequiredOwnerFacts {
+				writeHashString(h, ownerFact.OwnerModuleID)
+				writeHashString(h, string(ownerFact.FactKind))
+				writeHashString(h, ownerFact.OperationKind)
+			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)
 		}

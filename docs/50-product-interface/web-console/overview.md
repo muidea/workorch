@@ -33,15 +33,16 @@ projection 观察面，不是第二套业务实现或 Runtime owner。
 `WorkspaceBoardPage` 的主读入口是 `GET /api/v1/workorch/workspaces` 返回的聚合列表与 projection status。它不会
 为了绘制每一张卡片分别读取 Goal、DoD 或 Run child pages。
 
-用户提交执行时，页面按需读取 Workspace snapshot 与服务配置：
+用户提交执行时，页面按需读取 Workspace snapshot：
 
-1. 若用户选择了新的模型/reasoning effort，先以 Workspace revision 调用
-   `PUT /workspaces/:workspaceId/llm-selection`；
-2. 再调用 `POST /workspaces/:workspaceId/execution-activations`；
-3. activation body 只发送 `intent`、`priority`、`requestId`、`reason`、`source`。
+1. 无 active Run、active Run 已终态或 owner 已标记 `fresh_activation_required` 时，主操作提交 `restart`；
+2. current-baseline 非终态 Run 的主操作提交 `resume`，同时提供独立的显式 `restart`；
+3. Resume 只读展示 Run 已封存 selection，不读取模型目录、不更新 Workspace preference；
+4. 只有显式 Restart 弹窗允许先通过 Workspace owner API 保存模型/reasoning 与 Soul，再提交 immutable intent；
+5. activation body 只发送 `intent`、`priority`、`requestId`、`reason`、`source`。
 
-前端本地 activation form 即使暂存 Goal/DoD、Soul 或 model 辅助字段，也不得把它们转发到 execution intent。
-Workspace 创建使用共享的 `WorkspaceSetupModal`，正常流程只要求 Template、Goal、DoD 与工作目录。
+activation form 不提供 Goal/DoD、Skill、MCP 或 Memory 的 per-run override；这些定义和策略只从 owner 当前状态编译。
+Workspace 创建使用共享的 `WorkspaceSetupModal`，正常流程要求 Template、Goal、DoD 与工作目录。
 
 ### Workspace Detail
 

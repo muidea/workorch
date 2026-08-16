@@ -87,7 +87,7 @@ provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-re
 | --- | --- | --- |
 | **C0** | stable runtime prefix（身份、中立 runtime 规则 / schema） | 最高 / 长寿命 |
 | **C1** | workspace definition（Goal/DoD 正文等 definition 快照） | 随 definition revision |
-| **C2** | capability contract / governance 声明 | 声明式稳定 |
+| **C2** | capability contract / governance 声明 / profile owner-fact postcondition | 声明式稳定 |
 | **C3** | current stage / focus bundle（required output、focus、action） | 随 decision 变 |
 | **C4** | volatile execution tail（failure、recent evidence、attempt diagnostics） | 易变 |
 | **C5** | large refs / trace | ref-only |
@@ -101,6 +101,8 @@ provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-re
 - raw stream、full provider payload、large artifact 默认 ref-only
 - `StablePrefixHash` 由 definition + execution contract 等稳定输入计算，并随 attempt 持久化
 - `stablePrefixHash` 意外漂移视为 request rendering bug
+- C2 `RuntimeOwnerFactRequirement` 只声明 postcondition；current owner catalog/readiness/recipe identity 留在 C3。
+  assessment、旧 catalog 或 C4 diagnostic 不得回写 C2，也不得由模型宣称事实已满足。
 
 core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 仅 adapter 层设置。
 

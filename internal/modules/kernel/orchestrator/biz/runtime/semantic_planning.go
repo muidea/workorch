@@ -201,9 +201,11 @@ func retireSemanticPlanningRequestSessions(aggregate *RuntimeAggregate, ledger r
 }
 
 // retireSemanticPlanningGenerationForCWIReopen starts a new semantic
-// generation after SM-2 invalidates accepted CWI credit. Catalog facts are not
-// presumed stale: the immutable history records only the exact CWI trigger
-// lineage, while the new generation recompiles its manifest from the canonical
+// generation after SM-2 retires a CWI's current binding because its prior
+// generation can no longer converge. The row may have held accepted credit or
+// may have reached assessment with an unmet owner postcondition. Catalog facts
+// are not presumed stale: immutable history records only the exact CWI trigger
+// lineage, while the new generation recompiles its manifest from canonical
 // eligible rows.
 func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, reopened []common.CoverageWorkItemID) error {
 	if aggregate == nil {
@@ -1463,7 +1465,7 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) error 
 	// absent from the immutable manifest/order. Retire that generation inside
 	// the same owner-local CAS that advanced SM-2; a later projection event must
 	// never be required to repair already-stale semantic authority.
-	_, closureChanged, err := currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, ledger.CoverageOrderDocument.CoverageOrder)
+	_, closureChanged, err := currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, ledger.Manifest.Hash, ledger.CoverageOrderDocument.CoverageOrder)
 	if err != nil {
 		return err
 	}

@@ -1757,7 +1757,7 @@ func TestModelEmptyWorkspaceGuidance(t *testing.T) {
 	m.width = 90
 	m.height = 18
 	view := stripANSI(m.View())
-	for _, want := range []string{"No workspaces found", "/workspace create <title> --dir <path>", "--template <template-id>", "/dod"} {
+	for _, want := range []string{"No workspaces found", "/workspace create <title> --template <template-id> --dir <path>", "/dod"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("empty workspace guidance missing %q:\n%s", want, view)
 		}
@@ -5036,6 +5036,24 @@ func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing
 	view := stripANSI(got.View())
 	if !strings.Contains(view, "bindings: planning,execution") {
 		t.Fatalf("view missing workspace binding summary:\n%s", view)
+	}
+}
+
+func TestParseWorkspaceCreateArgsRequiresTemplateAndDirectory(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "template", input: "workspace --dir /tmp/workspace", want: "--template"},
+		{name: "directory", input: "workspace --template template-a", want: "--dir"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseWorkspaceCreateArgs(test.input)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("parseWorkspaceCreateArgs(%q) error = %v, want %q", test.input, err, test.want)
+			}
+		})
 	}
 }
 

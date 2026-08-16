@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -373,15 +373,10 @@ export const workorchApi = {
     const body = await request<{ eventRecords: EventRecord[] }>(`${apiBase}/events${suffix}`);
     return body.eventRecords ?? [];
   },
-  resumeWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
-    const requestBody: WorkspaceExecutionActivationRequest = typeof goalIdOrRequest === 'object'
-      ? goalIdOrRequest
-      : { goalId: goalIdOrRequest, doDId };
+  submitWorkspaceExecution: async (workspaceId: string, requestBody: WorkspaceExecutionIntentRequest = {}) => {
     const commandIntent = requestBody.intent ?? 'resume';
-    // The activation endpoint is deliberately intent-only.  Context, model,
-    // Soul, skill and capability selection are owner state; never forward the
-    // legacy activation form fields even when an older caller still supplies
-    // them locally.
+    // The activation endpoint is deliberately intent-only. Configuration must
+    // already belong to the Workspace owner; Resume cannot inject a patch.
     const commandRequest: WorkspaceExecutionIntentRequest = {
       intent: commandIntent,
       requestId: requestBody.requestId || runCommandRequestId(commandIntent, workspaceId, 'workspace'),

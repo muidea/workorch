@@ -116,6 +116,37 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	}
 }
 
+func TestRuntimeSemanticProviderKeepsOwnerFactDeclarationInC2AndCurrentFactsInC3(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	requirement := runtimecontract.RuntimeOwnerFactRequirement{
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	request.SemanticContext.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{
+		ID: "software-dev", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+			ID: "validation_preparation", Scope: "deliverable",
+			AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{requirement},
+		}},
+	}}
+	request.StablePrefixHash = runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(
+		request.SemanticContext.Definition, request.SemanticContext.Activation.ExecutionContract,
+	)
+	providerRequest, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2 := providerRequest.PromptContext.Sections[2].Content
+	c3 := providerRequest.PromptContext.Sections[3].Content
+	for _, required := range []string{"RequiredOwnerFacts", runtimecontract.RuntimeModuleShell, string(runtimecontract.RuntimeOwnerFactSelectableValidationSurface), runtimecontract.RuntimeBlockKindManagedValidationSession} {
+		if !strings.Contains(c2, required) {
+			t.Fatalf("semantic C2 lost owner-fact declaration %q: %s", required, c2)
+		}
+	}
+	if strings.Contains(c3, "RequiredOwnerFacts") {
+		t.Fatalf("immutable owner-fact declaration leaked into volatile current catalog: %s", c3)
+	}
+}
+
 func TestRuntimeSemanticCorrectionBoundaryClonesNestedValues(t *testing.T) {
 	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
@@ -229,7 +260,8 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 }
 
 func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivateFacts(t *testing.T) {
-	readyID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")
+	readyID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "direct_probe")
+	auxiliaryID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")
 	requiresInputID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition")
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
@@ -239,13 +271,18 @@ func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivate
 			{
 				ID: readyID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
 				Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "status-schema", InputBindingRef: "private-empty-input-binding",
-				CheckRefs: []string{readyID}, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+				CheckRefs: []string{readyID}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			},
+			{
+				ID: auxiliaryID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+				Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "status-schema", InputBindingRef: "private-status-input-binding",
+				CheckRefs: []string{auxiliaryID}, ProofApplicability: runtimecontract.RuntimeValidationProofAuxiliary, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 			},
 			{
 				ID: requiresInputID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
 				Readiness: runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
 				InputSchemaHash: "definition-schema", PrerequisiteRef: "private-definition-input-prerequisite",
-				CheckRefs: []string{requiresInputID}, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+				CheckRefs: []string{requiresInputID}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 			},
 		},
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
@@ -263,7 +300,7 @@ func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivate
 	if !strings.Contains(providerContext, readyID) {
 		t.Fatalf("provider catalog lost ready recipe identity: %s", providerContext)
 	}
-	for _, forbidden := range []string{requiresInputID, "private-empty-input-binding", "private-definition-input-prerequisite", "MCPCapabilities", "ValidationSurfaces", "EffectScope", "IdempotencyClass"} {
+	for _, forbidden := range []string{auxiliaryID, requiresInputID, "private-empty-input-binding", "private-status-input-binding", "private-definition-input-prerequisite", "MCPCapabilities", "ValidationSurfaces", "EffectScope", "IdempotencyClass"} {
 		if strings.Contains(providerContext, forbidden) {
 			t.Fatalf("provider catalog leaked owner-private/non-ready fact %q: %s", forbidden, providerContext)
 		}

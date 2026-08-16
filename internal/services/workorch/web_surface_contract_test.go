@@ -69,14 +69,27 @@ func TestWebConsoleMutatingEndpointsStayWithinProductSurfaceContract(t *testing.
 
 func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.T) {
 	typesData := string(readWebConsoleFile(t, "src/types.ts"))
+	activationType := webSourceSection(t, typesData, "export type WorkspaceExecutionActivationRequest = {", "\n};")
 	for _, want := range []string{
-		"runId?: string;",
-		"intent?: 'resume' | 'restart';",
-		"runtimeActivation?: RuntimeActivationStatus;",
+		"intent: WorkspaceExecutionIntent;",
+		"llmTarget?: ProviderModelTarget;",
+		"reasoningEffort?: string;",
+		"soulBindings?: Record<string, string>;",
+		"priority?: number;",
 	} {
-		if !strings.Contains(typesData, want) {
+		if !strings.Contains(activationType, want) {
 			t.Fatalf("WorkspaceExecutionActivationRequest missing %q", want)
 		}
+	}
+	for _, forbidden := range []string{
+		"runId", "goalId", "doDId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds", "definitionRevision", "decisionId",
+	} {
+		if strings.Contains(activationType, forbidden) {
+			t.Fatalf("WorkspaceExecutionActivationRequest retains non-owner activation field %q", forbidden)
+		}
+	}
+	if !strings.Contains(typesData, "runtimeActivation?: RuntimeActivationStatus;") {
+		t.Fatal("Run projection must retain read-only RuntimeActivationStatus")
 	}
 
 	apiData := string(readWebConsoleFile(t, "src/api.ts"))
@@ -84,6 +97,7 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		t.Fatal("readWorkspaceSnapshotProjection must request explicit detail view")
 	}
 	for _, want := range []string{
+		"submitWorkspaceExecution: async (workspaceId: string, requestBody: WorkspaceExecutionIntentRequest = {}) => {",
 		"const commandIntent = requestBody.intent ?? 'resume';",
 		"intent: commandIntent,",
 		"runCommandRequestId(commandIntent, workspaceId, 'workspace')",
@@ -95,10 +109,64 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	}
 	for _, forbidden := range []string{
 		"body: JSON.stringify(activationRequest)",
+		"resumeWorkspaceExecution:",
+		"goalIdOrRequest",
 	} {
 		if strings.Contains(apiData, forbidden) {
-			t.Fatalf("resumeWorkspaceExecution forwards legacy activation form fields via %q", forbidden)
+			t.Fatalf("execution intent API retains legacy activation surface %q", forbidden)
 		}
+	}
+
+	detailData := string(readWebConsoleFile(t, "src/pages/WorkspaceDetailPage.tsx"))
+	for _, want := range []string{
+		"workspaceExecutionPrimaryIntent(snapshot)",
+		"primaryExecutionIntent === 'resume'",
+		"Resume 只继续当前 Run 已封存的定义、模型和执行上下文",
+		"commandIntent === 'restart'",
+		"workorchApi.submitWorkspaceExecution(targetWorkspaceId, { intent: commandIntent, priority: request.priority })",
+	} {
+		if !strings.Contains(detailData, want) {
+			t.Fatalf("WorkspaceDetailPage missing execution intent contract %q", want)
+		}
+	}
+	activationModal := webSourceSection(t, detailData, "title={activationIntent === 'restart'", "<FloatButton.BackTop")
+	for _, forbidden := range []string{
+		`name="goalId"`, `name="doDId"`, `name="skillIds"`, `name="mcpServerIds"`, `name="capabilityIds"`, `name="memoryIds"`,
+	} {
+		if strings.Contains(activationModal, forbidden) {
+			t.Fatalf("Workspace execution modal retains ignored form field %q", forbidden)
+		}
+	}
+
+	boardData := string(readWebConsoleFile(t, "src/pages/WorkspaceBoardPage.tsx"))
+	if strings.Contains(boardData, "updateWorkspaceLLMSelection") || strings.Contains(boardData, "activationReadyChatTarget") {
+		t.Fatal("Workspace board Resume/Restart must not mutate or derive Workspace selection")
+	}
+	helperData := string(readWebConsoleFile(t, "src/helpers.tsx"))
+	for _, want := range []string{
+		"export function workspaceExecutionPrimaryIntent",
+		"if (!activeRunID)",
+		"return 'restart';",
+		"return 'resume';",
+	} {
+		if !strings.Contains(helperData, want) {
+			t.Fatalf("workspace execution intent helper missing %q", want)
+		}
+	}
+}
+
+func TestWebWorkspaceSetupRequiresTemplateAndDirectory(t *testing.T) {
+	data := string(readWebConsoleFile(t, "src/pages/components/WorkspaceSetupModal.tsx"))
+	for _, want := range []string{
+		`name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true`,
+		`name="deliverableDirectory" label="工作目录" rules={[{ required: true`,
+	} {
+		if !strings.Contains(data, want) {
+			t.Fatalf("WorkspaceSetupModal missing required setup field %q", want)
+		}
+	}
+	if strings.Contains(data, "可选。选择后自动带入") || strings.Contains(data, "留空时自动使用") {
+		t.Fatal("WorkspaceSetupModal still describes required template/directory as optional")
 	}
 }
 
@@ -204,4 +272,17 @@ func containsAny(text string, needles []string) bool {
 		}
 	}
 	return false
+}
+
+func webSourceSection(t *testing.T, source string, startMarker string, endMarker string) string {
+	t.Helper()
+	start := strings.Index(source, startMarker)
+	if start < 0 {
+		t.Fatalf("web source missing start marker %q", startMarker)
+	}
+	end := strings.Index(source[start+len(startMarker):], endMarker)
+	if end < 0 {
+		t.Fatalf("web source after %q missing end marker %q", startMarker, endMarker)
+	}
+	return source[start : start+len(startMarker)+end]
 }

@@ -18,22 +18,36 @@ const (
 	RuntimeValidationSurfaceUnavailable          RuntimeValidationSurfaceReadiness = "unavailable"
 )
 
+// RuntimeValidationProofApplicability is the capability owner's declarative
+// statement about whether a technically ready surface may be used as direct
+// evidence for a CWI. It is independent from callability and input readiness:
+// an auxiliary surface may execute successfully without being allowed to
+// close direct validation coverage.
+type RuntimeValidationProofApplicability string
+
+const (
+	RuntimeValidationProofDirect      RuntimeValidationProofApplicability = "direct"
+	RuntimeValidationProofAuxiliary   RuntimeValidationProofApplicability = "auxiliary"
+	RuntimeValidationProofNotDeclared RuntimeValidationProofApplicability = "not_declared"
+)
+
 // RuntimeValidationSurface is the owner-neutral, immutable description of one
 // validation proof surface. ValidationRecipeRefs remains the provider-visible
-// ready-only set; this value preserves why another callable surface was not
-// exposed without leaking owner implementation or choosing a retry.
+// ready-and-direct set; this value preserves why another callable surface was
+// not exposed without leaking owner implementation or choosing a retry.
 type RuntimeValidationSurface struct {
-	ID               string
-	OwnerModuleID    string
-	OperationKind    string
-	Readiness        RuntimeValidationSurfaceReadiness
-	ReadinessReason  string
-	InputSchemaHash  string
-	InputBindingRef  string
-	PrerequisiteRef  string
-	CheckRefs        []string
-	EffectScope      RuntimeEffectScope
-	IdempotencyClass RuntimeOperationIdempotencyClass
+	ID                 string
+	OwnerModuleID      string
+	OperationKind      string
+	Readiness          RuntimeValidationSurfaceReadiness
+	ReadinessReason    string
+	InputSchemaHash    string
+	InputBindingRef    string
+	PrerequisiteRef    string
+	CheckRefs          []string
+	ProofApplicability RuntimeValidationProofApplicability
+	EffectScope        RuntimeEffectScope
+	IdempotencyClass   RuntimeOperationIdempotencyClass
 }
 
 func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
@@ -46,6 +60,10 @@ func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
 	s.InputBindingRef = strings.TrimSpace(s.InputBindingRef)
 	s.PrerequisiteRef = strings.TrimSpace(s.PrerequisiteRef)
 	s.CheckRefs = normalizeStrings(s.CheckRefs)
+	s.ProofApplicability = RuntimeValidationProofApplicability(strings.TrimSpace(string(s.ProofApplicability)))
+	if s.ProofApplicability == "" {
+		s.ProofApplicability = RuntimeValidationProofNotDeclared
+	}
 	s.EffectScope = NormalizeRuntimeEffectScope(s.EffectScope)
 	s.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(s.IdempotencyClass)
 	return s
@@ -71,6 +89,11 @@ func (s RuntimeValidationSurface) Validate() error {
 		strings.TrimSpace(string(raw.IdempotencyClass)) == "" ||
 		NormalizeRuntimeOperationIdempotencyClass(raw.IdempotencyClass) != RuntimeOperationIdempotencyClass(strings.TrimSpace(string(raw.IdempotencyClass))) {
 		return fmt.Errorf("runtime validation surface %q has invalid effect or idempotency", s.ID)
+	}
+	switch s.ProofApplicability {
+	case RuntimeValidationProofDirect, RuntimeValidationProofAuxiliary, RuntimeValidationProofNotDeclared:
+	default:
+		return fmt.Errorf("runtime validation surface %q has invalid proof applicability %q", s.ID, s.ProofApplicability)
 	}
 	switch s.Readiness {
 	case RuntimeValidationSurfaceReady:
@@ -111,10 +134,26 @@ func NormalizeRuntimeValidationSurfaces(values []RuntimeValidationSurface) []Run
 	return nilIfEmpty(ret)
 }
 
+// RuntimeReadyValidationRecipeRefs reports technical readiness for owner audit
+// and diagnostics. Provider selection must use
+// RuntimeSelectableValidationRecipeRefs instead.
 func RuntimeReadyValidationRecipeRefs(values []RuntimeValidationSurface) []string {
 	ret := make([]string, 0, len(values))
 	for _, value := range NormalizeRuntimeValidationSurfaces(values) {
 		if value.Readiness == RuntimeValidationSurfaceReady {
+			ret = append(ret, value.ID)
+		}
+	}
+	return normalizeStrings(ret)
+}
+
+// RuntimeSelectableValidationRecipeRefs returns the exact provider-selectable
+// proof surface. A successful/ready auxiliary probe remains audit evidence but
+// cannot be promoted into a semantic recipe or receive direct CWI credit.
+func RuntimeSelectableValidationRecipeRefs(values []RuntimeValidationSurface) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range NormalizeRuntimeValidationSurfaces(values) {
+		if value.Readiness == RuntimeValidationSurfaceReady && value.ProofApplicability == RuntimeValidationProofDirect {
 			ret = append(ret, value.ID)
 		}
 	}

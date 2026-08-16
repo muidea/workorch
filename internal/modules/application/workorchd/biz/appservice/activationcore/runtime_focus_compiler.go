@@ -60,6 +60,7 @@ type compiledEvidencePolicy struct {
 	RequireExecutableBehaviorEvidence bool
 	RequireCoverageTargets            bool
 	RequireAssessment                 bool
+	RequiredOwnerFacts                []runtimecontract.RuntimeOwnerFactRequirement
 	ValidationRecipeID                string
 	RequiredCheckRefs                 []string
 	MetricConstraints                 []string
@@ -314,7 +315,7 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 // workorchruntimecontract only validates the resulting immutable values.
 func compiledEvidencePolicyRequiresIndependentFocus(policy compiledEvidencePolicy) bool {
 	return containsRuntimeEvidenceKind(policy.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) ||
-		policy.RequireExecutableBehaviorEvidence || len(policy.MetricConstraints) != 0 || len(policy.ArtifactRefs) != 0
+		policy.RequireExecutableBehaviorEvidence || len(policy.RequiredOwnerFacts) != 0 || len(policy.MetricConstraints) != 0 || len(policy.ArtifactRefs) != 0
 }
 
 func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCoverageItem) runtimecontract.CoverageFocus {
@@ -335,7 +336,7 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 		AcceptedOperationVariants: policy.AcceptedOperationVariants, RejectedStepKinds: policy.RejectedStepKinds,
 		RequireDirectEvidence: policy.RequireDirectEvidence, RequireClaimEvidence: policy.RequireClaimEvidence,
 		RequireExecutableBehaviorEvidence: policy.RequireExecutableBehaviorEvidence, RequireCoverageTargets: policy.RequireCoverageTargets,
-		RequireAssessment: policy.RequireAssessment, ValidationRecipeID: policy.ValidationRecipeID,
+		RequireAssessment: policy.RequireAssessment, RequiredOwnerFacts: policy.RequiredOwnerFacts, ValidationRecipeID: policy.ValidationRecipeID,
 		RequiredCheckRefs: policy.RequiredCheckRefs, MetricConstraints: policy.MetricConstraints, ArtifactRefs: policy.ArtifactRefs,
 		EvidenceDeclarationRef: policy.SemanticProofDeclarationRef,
 	}.Normalized()
@@ -714,7 +715,7 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 func hasCWISemanticProofDeclaration(values []runtimecontract.RuntimeProfileEvidenceRequirement) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value.ValidationRecipeID) != "" || len(value.RequiredCheckRefs) != 0 ||
-			len(value.MetricConstraints) != 0 || len(value.ArtifactRefs) != 0 {
+			len(value.RequiredOwnerFacts) != 0 || len(value.MetricConstraints) != 0 || len(value.ArtifactRefs) != 0 {
 			return true
 		}
 	}
@@ -779,6 +780,7 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		base.RequiredCheckRefs = stableStringUnion(base.RequiredCheckRefs, requirement.RequiredCheckRefs)
 		base.MetricConstraints = stableStringUnion(base.MetricConstraints, requirement.MetricConstraints)
 		base.ArtifactRefs = stableStringUnion(base.ArtifactRefs, requirement.ArtifactRefs)
+		base.RequiredOwnerFacts = runtimecontract.NormalizeRuntimeOwnerFactRequirements(append(base.RequiredOwnerFacts, requirement.RequiredOwnerFacts...))
 		// Profile explicit primary_state_change implies state-change evidence.
 		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 			base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange})
@@ -812,6 +814,7 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	focus.RequiredCheckRefs = append([]string(nil), policy.RequiredCheckRefs...)
 	focus.MetricConstraints = append([]string(nil), policy.MetricConstraints...)
 	focus.ArtifactRefs = append([]string(nil), policy.ArtifactRefs...)
+	focus.RequiredOwnerFacts = append([]runtimecontract.RuntimeOwnerFactRequirement(nil), policy.RequiredOwnerFacts...)
 	focus.RequireAssessment = policy.RequireAssessment || focus.RequireAssessment
 	return focus.Normalized()
 }

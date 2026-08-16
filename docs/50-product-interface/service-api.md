@@ -90,8 +90,9 @@ LLM saves do not mutate the running LLM owner's frozen active snapshot. A mismat
 | `POST` | `/workspaces/:workspaceId/execution-activations` | submit `resume` or `restart` intent |
 
 Workspace creation fields are `title`, optional `description`, `deliverableDirectory` and `templateId`; identity is
-owner-generated. Goal write uses `text`; DoD write uses `items`. Normal workspace setup requires template, Goal, DoD and
-workspace directory; callers are not required to author raw context/evidence/target/recipe/check/artifact JSON.
+owner-generated. The owner-neutral wire DTO remains usable by administrative clients, while normal TUI/Web setup requires a
+selected template and an explicit workspace directory, followed by Goal and DoD. Callers are not required to author raw
+context/evidence/target/recipe/check/artifact JSON.
 
 ### Run Read Model
 
@@ -160,7 +161,9 @@ resolution. Runtime governance resolution returns through the typed Orchestrator
 | `GET` | `/workspaces/:workspaceId/memory-recalls` | workspace recall traces |
 
 Registry requests carry declarative definitions only. MCP Registry owns catalog/selection metadata; the MCP capability block
-owns concrete Runtime execution. Secrets and large content must not be copied into EventHub notifications or projections.
+owns concrete Runtime execution. Capability create/update/read DTOs expose the Registry-owned
+`validationProofApplicability` value (`direct | auxiliary | not_declared`); technical Runtime readiness remains an MCP execution
+fact and is not writable through this API. Secrets and large content must not be copied into EventHub notifications or projections.
 
 ### Setup Draft, Events And Raw Content
 

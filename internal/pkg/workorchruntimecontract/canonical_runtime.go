@@ -62,10 +62,14 @@ type CoverageFocus struct {
 	RequireExecutableBehaviorEvidence bool
 	RequireCoverageTargets            bool
 	RequireAssessment                 bool
-	ValidationRecipeID                string
-	RequiredCheckRefs                 []string
-	MetricConstraints                 []string
-	ArtifactRefs                      []string
+	// RequiredOwnerFacts are profile-declared postconditions evaluated only
+	// from current capability-owner catalogs when SM-2 commits assessment.
+	// They do not grant an operation or let another component mutate owner state.
+	RequiredOwnerFacts []RuntimeOwnerFactRequirement
+	ValidationRecipeID string
+	RequiredCheckRefs  []string
+	MetricConstraints  []string
+	ArtifactRefs       []string
 }
 
 type EvidenceLedger struct {
@@ -607,8 +611,9 @@ type RuntimeOperationAdmissibility struct {
 	// transport parameters inside their own boundary.
 	ValidationRecipeRefs []string
 	// ValidationSurfaces preserves both ready and non-ready owner facts. Only
-	// surfaces whose Readiness is ready may appear in ValidationRecipeRefs and
-	// therefore in a provider-visible semantic manifest.
+	// surfaces whose Readiness is ready and whose ProofApplicability is direct
+	// may appear in ValidationRecipeRefs and therefore in a provider-visible
+	// semantic manifest.
 	ValidationSurfaces []RuntimeValidationSurface
 	// MCPCapabilities is the exact owner-sealed capability metadata used for
 	// dynamic mcp/tool_call effect and replay checks. It is intentionally part
@@ -936,8 +941,8 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 				return fmt.Errorf("runtime validation surface %q is outside owner operation inventory", surface.ID)
 			}
 		}
-		if ready := RuntimeReadyValidationRecipeRefs(a.ValidationSurfaces); !sameStrings(ready, a.ValidationRecipeRefs) {
-			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match ready validation surfaces")
+		if selectable := RuntimeSelectableValidationRecipeRefs(a.ValidationSurfaces); !sameStrings(selectable, a.ValidationRecipeRefs) {
+			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match selectable validation surfaces")
 		}
 	}
 	if expected := StableRuntimeOperationAdmissibilitySnapshotID(a); a.SnapshotID != expected {
@@ -986,6 +991,7 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 		writeHashString(h, surface.InputBindingRef)
 		writeHashString(h, surface.PrerequisiteRef)
 		writeHashStrings(h, surface.CheckRefs)
+		writeHashString(h, string(surface.ProofApplicability))
 		writeHashString(h, string(surface.EffectScope))
 		writeHashString(h, string(surface.IdempotencyClass))
 	}
@@ -1473,6 +1479,11 @@ func (f RuntimeFacts) Validate() error {
 	if f.Focus.ID == "" {
 		return fmt.Errorf("runtime facts require a coverage focus")
 	}
+	for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
+		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
+			return fmt.Errorf("runtime focus %q owner facts: %w", focus.ID, err)
+		}
+	}
 	if err := f.Activation.Validate(); err != nil {
 		return err
 	}
@@ -1695,6 +1706,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
 	f.ProspectiveTargetRef = strings.TrimSpace(f.ProspectiveTargetRef)
+	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
 	f.RequiredCheckRefs = normalizeStrings(f.RequiredCheckRefs)
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)

@@ -149,17 +149,18 @@ type RuntimeAuditOperationAdmissibility struct {
 }
 
 type RuntimeAuditValidationSurface struct {
-	ID               string   `json:"id,omitempty"`
-	OwnerModuleID    string   `json:"ownerModuleId,omitempty"`
-	OperationKind    string   `json:"operationKind,omitempty"`
-	Readiness        string   `json:"readiness,omitempty"`
-	ReadinessReason  string   `json:"readinessReason,omitempty"`
-	InputSchemaHash  string   `json:"inputSchemaHash,omitempty"`
-	InputBindingRef  string   `json:"inputBindingRef,omitempty"`
-	PrerequisiteRef  string   `json:"prerequisiteRef,omitempty"`
-	CheckRefs        []string `json:"checkRefs,omitempty"`
-	EffectScope      string   `json:"effectScope,omitempty"`
-	IdempotencyClass string   `json:"idempotencyClass,omitempty"`
+	ID                 string   `json:"id,omitempty"`
+	OwnerModuleID      string   `json:"ownerModuleId,omitempty"`
+	OperationKind      string   `json:"operationKind,omitempty"`
+	Readiness          string   `json:"readiness,omitempty"`
+	ReadinessReason    string   `json:"readinessReason,omitempty"`
+	InputSchemaHash    string   `json:"inputSchemaHash,omitempty"`
+	InputBindingRef    string   `json:"inputBindingRef,omitempty"`
+	PrerequisiteRef    string   `json:"prerequisiteRef,omitempty"`
+	CheckRefs          []string `json:"checkRefs,omitempty"`
+	ProofApplicability string   `json:"proofApplicability,omitempty"`
+	EffectScope        string   `json:"effectScope,omitempty"`
+	IdempotencyClass   string   `json:"idempotencyClass,omitempty"`
 }
 
 type RuntimeAuditAuthority struct {

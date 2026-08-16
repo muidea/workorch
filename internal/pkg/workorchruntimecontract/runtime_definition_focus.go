@@ -29,6 +29,7 @@ func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []CoverageFocus {
 			RequireExecutableBehaviorEvidence: value.RequireExecutableBehaviorEvidence,
 			RequireCoverageTargets:            value.RequireCoverageTargets,
 			RequireAssessment:                 value.RequireAssessment,
+			RequiredOwnerFacts:                append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
 			MetricConstraints:                 append([]string(nil), value.MetricConstraints...),
 			ArtifactRefs:                      append([]string(nil), value.ArtifactRefs...),
 		}
@@ -75,6 +76,9 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Cove
 		}
 		if focus.TargetSelectorRef != "" && focus.TargetSelectorOwnerRef == "" {
 			return fmt.Errorf("runtime definition focus %q selector requires owner", focus.ID)
+		}
+		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
+			return fmt.Errorf("runtime definition focus %q owner facts: %w", focus.ID, err)
 		}
 	}
 	if len(seen) != len(items) {

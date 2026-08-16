@@ -90,6 +90,7 @@ type RuntimeProfileEvidenceRequirement struct {
 	RequiredCheckRefs           []string
 	MetricConstraints           []string
 	ArtifactRefs                []string
+	RequiredOwnerFacts          []RuntimeOwnerFactRequirement
 	CapabilityStateRequirements []RuntimeProfileCapabilityStateRequirement
 	RejectedStepKinds           []string
 	Description                 string
@@ -182,6 +183,14 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			for _, state := range item.CapabilityStateRequirements {
 				if !runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind(state.OwnerModuleID, item.AcceptedStepKinds) {
 					return fmt.Errorf("runtime profile evidence requirement %q capability-state owner %q does not own an accepted operation kind", item.ID, state.OwnerModuleID)
+				}
+			}
+			if err := ValidateRuntimeOwnerFactRequirements(item.RequiredOwnerFacts); err != nil {
+				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+			}
+			for _, ownerFact := range item.RequiredOwnerFacts {
+				if !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, ownerFact.OperationKind) {
+					return fmt.Errorf("runtime profile evidence requirement %q owner fact operation %q is outside accepted operation kinds", item.ID, ownerFact.OperationKind)
 				}
 			}
 		}
@@ -350,6 +359,16 @@ func runtimeProfileContainsTargetRef(values []string, target string) bool {
 	return false
 }
 
+func runtimeProfileContainsOperationKind(values []string, expected string) bool {
+	expected = CanonicalRuntimeBlockKind(expected)
+	for _, value := range values {
+		if CanonicalRuntimeBlockKind(value) == expected {
+			return true
+		}
+	}
+	return false
+}
+
 // runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind keeps capability-state
 // prerequisites bound to the same canonical owner contract as the evidence they
 // unlock. Profiles declare operation kinds, not EventHub destinations; accepting
@@ -429,6 +448,7 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.RequiredCheckRefs = normalizeStrings(value.RequiredCheckRefs)
 		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
+		value.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(value.RequiredOwnerFacts)
 		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
@@ -505,7 +525,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
-			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 		if len(l.CapabilityStateRequirements) != len(r.CapabilityStateRequirements) {

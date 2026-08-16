@@ -759,7 +759,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			return RuntimeAggregate{}, fmt.Errorf("%w: eligible focus projection semantic order is stale", common.ErrConflict)
 		}
 		var closureChanged []common.CoverageWorkItemID
-		projectionOrder, closureChanged, err = currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, acceptedOrder)
+		projectionOrder, closureChanged, err = currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, manifestHash, acceptedOrder)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
@@ -780,6 +780,15 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 				return RuntimeAggregate{}, err
 			}
+			return aggregate, nil
+		}
+		// A duplicate/restarted projection may observe rows that this exact
+		// semantic generation has already bound behind an effect-fenced current
+		// focus. Their queue placement is already canonical; only rows that are
+		// still eligible for planning may be passed to the pure eligibility
+		// projector, whose contract deliberately excludes bound authority.
+		projectionOrder = runtimeCWIPlanningMembersOfSemanticOrder(aggregate.Facts, projectionOrder)
+		if len(projectionOrder) == 0 {
 			return aggregate, nil
 		}
 	}
@@ -810,9 +819,15 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 // currentRuntimeCWIOrderFromSemanticLineage narrows an immutable accepted
 // semantic order after an earlier proof batch settled its CWI. Settled rows
 // remain audit lineage but are no longer members of the executable closure.
+// A row already bound by this exact semantic generation remains executable
+// lineage when an older effect-fenced focus keeps it in the remaining queue.
 // Every other eligibility change is stale authority and must start a fresh
 // semantic generation instead of being silently filtered.
-func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFacts, acceptedOrder []common.CoverageWorkItemID) ([]common.CoverageWorkItemID, []common.CoverageWorkItemID, error) {
+func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFacts, semanticManifestHash string, acceptedOrder []common.CoverageWorkItemID) ([]common.CoverageWorkItemID, []common.CoverageWorkItemID, error) {
+	semanticManifestHash = strings.TrimSpace(semanticManifestHash)
+	if semanticManifestHash == "" {
+		return nil, nil, fmt.Errorf("%w: semantic order lineage has no manifest identity", common.ErrConflict)
+	}
 	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
 	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(eligible))
 	for _, id := range eligible {
@@ -835,6 +850,10 @@ func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFact
 			continue
 		}
 		item, found := coverage[id]
+		if found && runtimeCWIBoundBySemanticLineage(facts, item, semanticManifestHash, coverage) {
+			ret = append(ret, id)
+			continue
+		}
 		if !found || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled ||
 			item.State != runtimecontract.RuntimeCoverageItemStateSatisfied || item.CurrentBindingRef == nil {
 			return nil, nil, fmt.Errorf("%w: semantic order lineage contains non-settled ineligible coverage %q", common.ErrConflict, id)
@@ -847,6 +866,54 @@ func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFact
 		}
 	}
 	return ret, changed, nil
+}
+
+// runtimeCWIBoundBySemanticLineage accepts only an exact current-generation
+// binding that is still present in the active focus queue and whose declared
+// prerequisites retain settled credit. It does not make bound rows generally
+// eligible for planning and cannot revive a stale or completed binding.
+func runtimeCWIBoundBySemanticLineage(
+	facts runtimecontract.RuntimeFacts,
+	item runtimecontract.RuntimeCoverageItemFact,
+	semanticManifestHash string,
+	coverage map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact,
+) bool {
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound ||
+		item.State == runtimecontract.RuntimeCoverageItemStateSatisfied || item.CurrentBindingRef == nil ||
+		item.CurrentBindingRef.SemanticManifestHash != semanticManifestHash {
+		return false
+	}
+	for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
+		prerequisite, found := coverage[prerequisiteID]
+		if !found || prerequisite.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled ||
+			prerequisite.State != runtimecontract.RuntimeCoverageItemStateSatisfied || prerequisite.CurrentBindingRef == nil {
+			return false
+		}
+	}
+	for _, focus := range append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...) {
+		binding, found := coverageBindingForRuntimeCWI(focus, item.ID)
+		if !found {
+			continue
+		}
+		ref := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(binding, semanticManifestHash)
+		return runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, ref)
+	}
+	return false
+}
+
+func runtimeCWIPlanningMembersOfSemanticOrder(facts runtimecontract.RuntimeFacts, acceptedOrder []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
+	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(eligible))
+	for _, id := range eligible {
+		eligibleSet[id] = struct{}{}
+	}
+	ret := make([]common.CoverageWorkItemID, 0, len(eligible))
+	for _, id := range acceptedOrder {
+		if _, found := eligibleSet[id]; found {
+			ret = append(ret, id)
+		}
+	}
+	return ret
 }
 
 func sameCoverageIDs(left, right []common.CoverageWorkItemID) bool {

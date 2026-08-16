@@ -29,6 +29,7 @@
     "riskLevel": "read_only",
     "effectScope": "ephemeral_session",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "direct",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -63,6 +64,7 @@
     "riskLevel": "workspace_state",
     "effectScope": "ephemeral_session",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "direct",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -109,6 +111,7 @@
     "riskLevel": "read_only",
     "effectScope": "none",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "direct",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -155,6 +158,7 @@
     "riskLevel": "read_only",
     "effectScope": "none",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "direct",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -202,6 +206,7 @@
     "riskLevel": "read_only",
     "effectScope": "none",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "direct",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -238,6 +243,7 @@
     "riskLevel": "read_only",
     "effectScope": "none",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "auxiliary",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -269,6 +275,7 @@
     "riskLevel": "read_only",
     "effectScope": "none",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "auxiliary",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -306,6 +313,7 @@
     "riskLevel": "workspace_state",
     "effectScope": "ephemeral_session",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "auxiliary",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"
@@ -342,6 +350,7 @@
     "riskLevel": "workspace_state",
     "effectScope": "ephemeral_session",
     "idempotencyClass": "safe_to_replay",
+    "validationProofApplicability": "auxiliary",
     "enabled": true,
     "approvalPolicy": "auto",
     "status": "active"

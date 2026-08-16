@@ -32,7 +32,8 @@ Last Verified: 2026-08-16
 - 本 block 只访问 MCPServer 与 MCPCapability repository，不执行 MCP tool/resource/prompt 调用。
 - Capability 必须绑定存在的 Server，并保持 ID、kind、schema、risk 和 provenance 一致。
 - 可执行 tool capability 的 `effectScope` 与 `idempotencyClass` 是本 block owner 明确维护的运行时元数据；缺失值在 activation 中只能密封为 `unknown`。`riskLevel`、tool 名称（包括初始化名称）不得被用来推断 effect 或 replay 安全性。
-- schema、stage hints、effect 和 replay class 的持久化定义归本 owner；但 `ready | prerequisite_required | unavailable`
+- schema、stage hints、effect、replay class 和 `direct | auxiliary | not_declared` validation proof applicability 的持久化定义归本 owner；
+  proof applicability 不得从 tool 名称、描述、category、risk 或 DoD 推断。但 `ready | prerequisite_required | unavailable`
   validation readiness 由执行该调用的 `blocks/mcp` 基于同一次 detached registry snapshot 编译。Registry 不执行 probe、
   不生成 input binding、不修改 Runtime aggregate，也不选择 provider-visible recipe。
 - secret 和 credential 只能使用安全引用，不得进入事件、投影或日志。

@@ -35,8 +35,16 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	// disposition disagrees with persisted facts; SM-2 establishes canonical
 	// coverage from owner receipts below.
 	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs)
+	missingOwnerFacts := runtimecontract.RuntimeMissingOwnerFactRequirements(
+		aggregate.Facts.Focus.RequiredOwnerFacts,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+	)
+	ownerFactOnlyGap := len(missingOwnerFacts) != 0 && canonicalAssessmentProofCompleteWithoutOwnerFacts(aggregate)
 	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID)
-	canonicalGap := canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus)
+	canonicalGap := canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus, nil)
+	if ownerFactOnlyGap {
+		canonicalGap = canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus, missingOwnerFacts)
+	}
 	canonicalDisposition := runtimecontract.AssessmentDispositionSatisfied
 	if canonicalGap != nil {
 		canonicalDisposition = runtimecontract.AssessmentDispositionRepairableGap
@@ -64,7 +72,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		fact.Gap = &gap
 	}
 	aggregate.Facts.Assessments = append(aggregate.Facts.Assessments, fact)
-	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap {
+	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && !ownerFactOnlyGap {
 		priorGap := aggregate.Facts.Repair.ActiveGap
 		// The producer's gap stays intact in AssessmentFact for audit. SM-2's
 		// ledger receives only an owner-derived coverage/evidence classification:
@@ -113,17 +121,26 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
 	previousFocusID := aggregate.Facts.Focus.ID
-	advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
-	if advanceErr != nil {
-		return RuntimeAggregate{}, advanceErr
-	}
-	aggregate.Facts = advanced
-	if aggregate.Facts.Focus.ID != previousFocusID {
-		// Reaching an unbound placeholder is a local SM-2 transition, not a
-		// continuation chosen by the assessment. Retire only the just-sealed
-		// batch working state so SM-4 can request the next scoped proof batch.
-		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+	replanned := false
+	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && ownerFactOnlyGap {
+		replanned, err = replanRuntimeCWIForUnmetOwnerFacts(&aggregate, fact.ID)
+		if err != nil {
 			return RuntimeAggregate{}, err
+		}
+	}
+	if !replanned {
+		advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
+		if advanceErr != nil {
+			return RuntimeAggregate{}, advanceErr
+		}
+		aggregate.Facts = advanced
+		if aggregate.Facts.Focus.ID != previousFocusID {
+			// Reaching an unbound placeholder is a local SM-2 transition, not a
+			// continuation chosen by the assessment. Retire only the just-sealed
+			// batch working state so SM-4 can request the next scoped proof batch.
+			if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+				return RuntimeAggregate{}, err
+			}
 		}
 	}
 	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
@@ -220,6 +237,22 @@ func applyCanonicalAssessmentCoverage(aggregate RuntimeAggregate, assessmentID s
 }
 
 func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) ([]string, bool) {
+	refs, satisfied := canonicalAssessmentEvidenceWithoutOwnerFactsForCoverage(aggregate, coverageID)
+	if !satisfied {
+		return refs, false
+	}
+	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(aggregate.Facts.Focus.RequiredOwnerFacts, aggregate.Facts.Resources.OperationAdmissibilities)) != 0 {
+		return refs, false
+	}
+	return refs, true
+}
+
+// canonicalAssessmentEvidenceWithoutOwnerFactsForCoverage evaluates the
+// sealed proof transaction independently from profile-declared owner
+// postconditions. Keeping these predicates separate lets SM-2 distinguish a
+// genuine catalog postcondition gap from an ordinary missing/weak proof: only
+// the former may retire the semantic generation and reopen the CWI.
+func canonicalAssessmentEvidenceWithoutOwnerFactsForCoverage(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) ([]string, bool) {
 	focus := aggregate.Facts.Focus.Normalized()
 	binding, bound := coverageEvidenceBindingForCoverage(focus, coverageID)
 	// Current-schema bootstrap and state validation require a binding for every
@@ -270,20 +303,38 @@ func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverage
 	return refs, true
 }
 
+func canonicalAssessmentProofCompleteWithoutOwnerFacts(aggregate RuntimeAggregate) bool {
+	focus := aggregate.Facts.Focus.Normalized()
+	if len(focus.CoverageWorkItemIDs) == 0 {
+		return false
+	}
+	for _, coverageID := range focus.CoverageWorkItemIDs {
+		if _, satisfied := canonicalAssessmentEvidenceWithoutOwnerFactsForCoverage(aggregate, coverageID); !satisfied {
+			return false
+		}
+	}
+	return true
+}
+
 func coverageEvidenceBindingForCoverage(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageEvidenceBinding, bool) {
 	return proof.CoverageBindingForCoverage(focus, coverageID)
 }
 
-func canonicalAssessmentCoverageGap(coverage []runtimecontract.RuntimeCoverageItemFact, focus runtimecontract.CoverageFocus) *runtimecontract.RuntimeAssessmentGap {
+func canonicalAssessmentCoverageGap(coverage []runtimecontract.RuntimeCoverageItemFact, focus runtimecontract.CoverageFocus, missingOwnerFacts []runtimecontract.RuntimeOwnerFactRequirement) *runtimecontract.RuntimeAssessmentGap {
 	open := openCoverageIDs(coverage, focus.CoverageWorkItemIDs)
 	if len(open) == 0 {
 		return nil
 	}
-	return &runtimecontract.RuntimeAssessmentGap{
+	gap := &runtimecontract.RuntimeAssessmentGap{
 		CoverageWorkItemIDs: open,
 		FailureClass:        runtimecontract.FailureClassCoverageAssessmentIncomplete,
 		FailureCode:         "assessment_coverage_open",
 	}
+	if len(missingOwnerFacts) != 0 {
+		gap.FailureCode = "assessment_owner_fact_open"
+		gap.Reason = "required capability-owner fact is not present in the current catalog"
+	}
+	return gap
 }
 
 func openCoverageIDs(coverage []runtimecontract.RuntimeCoverageItemFact, ids []common.CoverageWorkItemID) []common.CoverageWorkItemID {

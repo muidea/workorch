@@ -526,7 +526,7 @@ func shellReadyValidationSurfaces(recipes []runtimecontract.RuntimeValidationRec
 		ret = append(ret, runtimecontract.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: schemaHash, InputBindingRef: inputBindingRef,
-			CheckRefs: []string{recipe.ID}, EffectScope: runtimecontract.RuntimeEffectNone,
+			CheckRefs: []string{recipe.ID}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectNone,
 			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 		})
 	}

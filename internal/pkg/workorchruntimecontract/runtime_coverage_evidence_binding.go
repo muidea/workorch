@@ -349,6 +349,9 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 // before any owner receipt, Run, or provider request can exist.
 func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
 	focus = focus.Normalized()
+	if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
+		return fmt.Errorf("coverage focus %q owner facts: %w", focus.ID, err)
+	}
 	if !RuntimeFocusRequiresIndependentEvidenceBinding(focus) {
 		return nil
 	}
@@ -369,7 +372,7 @@ func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
 func RuntimeFocusRequiresIndependentEvidenceBinding(focus CoverageFocus) bool {
 	focus = focus.Normalized()
 	return containsEvidenceKind(focus.RequiredEvidenceKinds, EvidenceKindValidation) ||
-		focus.RequireExecutableBehaviorEvidence || len(focus.MetricConstraints) != 0 || len(focus.ArtifactRefs) != 0
+		focus.RequireExecutableBehaviorEvidence || len(focus.RequiredOwnerFacts) != 0 || len(focus.MetricConstraints) != 0 || len(focus.ArtifactRefs) != 0
 }
 
 func containsEvidenceKind(values []string, wanted string) bool {

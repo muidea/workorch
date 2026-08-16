@@ -119,7 +119,7 @@ func runtimeSemanticOwnerCatalogsForProvider(values []runtimecontract.RuntimeOpe
 		if len(catalog.ValidationSurfaces) != 0 {
 			// Fail closed at the final rendering boundary as well as catalog
 			// validation: a non-ready identity must never become a model hint.
-			readyRecipes = runtimecontract.RuntimeReadyValidationRecipeRefs(catalog.ValidationSurfaces)
+			readyRecipes = runtimecontract.RuntimeSelectableValidationRecipeRefs(catalog.ValidationSurfaces)
 		}
 		ret = append(ret, runtimeSemanticOwnerCatalogProjection{
 			PrerequisiteID: catalog.PrerequisiteID, SnapshotID: catalog.SnapshotID, OwnerModuleID: catalog.OwnerModuleID,

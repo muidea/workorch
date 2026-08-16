@@ -79,6 +79,10 @@ request 应按 cacheability 从高到低组织：
   generation 的 operation/target/binding 只能进入 volatile lineage，不能回写 C2 declaration。manifest 必须包含 provider request 前已获取的 owner
   admissibility snapshot/revision 与 bounded target/selector/constraint/recipe vocabulary，C4 attempt 0/1 与 provider-safe rejection，C5
   acceptance slice refs。C4 不得渲染 `OriginalMessage`、raw provider body 或 details content。
+- profile-declared `RuntimeOwnerFactRequirement` 是 immutable execution/DefinitionFocus declaration，进入 C2 及稳定
+  execution-contract hash；它只描述 owner、fact kind 和 operation kind，不携带 current readiness、recipe identity 或
+  input binding。是否满足该 postcondition 只能来自 C3 current owner catalog/semantic manifest。owner catalog snapshot
+  变化必须创建新 manifest/logical request；不得把 assessment claim、旧 catalog 或 C4 diagnostic 回写 C2 来保持假稳定。
 - C0 只保存“operation kind、variant、target policy 必须来自同一 owner fact；existing target 不得使用
   create-only/prospective fact”这一 owner-neutral 规则；具体 owner、kind、variant、target set 与 allowed policy 仍只在
   C3 sealed manifest/schema。attempt-1 的 C4 只能回显 evaluator 从该 manifest 得到的 typed alternative，不能从

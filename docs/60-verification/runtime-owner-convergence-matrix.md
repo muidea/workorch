@@ -32,6 +32,9 @@ Last Verified: 2026-08-16
 
 - Definition declaration、presentation slice、eligible closure、semantic order 与 generation binding 必须分离。
 - unbound focus 只能从 exact eligible closure 选择；settled CWI 只保留 audit lineage，重新执行必须先有 typed reopen。
+- current-generation 已绑定 CWI 在较早 effect-fenced focus 未完成时可以保留在 active/remaining queue，但必须精确匹配
+  semantic manifest、focus binding、current binding ref 和 settled prerequisite；它不再进入 planning projector，duplicate/
+  restart 必须零 CAS。stale manifest/binding、completed row 或 prerequisite reopen 必须拒绝。
 - dependency settlement 改变 eligible closure 时，旧 semantic generation 必须在同一 Owner CAS 中退休。
 - binding、manifest、candidate target、operation kind/variant、owner catalog revision 与 receipt proof 必须逐字段匹配。
 - raw candidate CWI、assessment claim、文件存在、Git revision、exit 0 或非空 `PassedChecks` 都不能产生 credit。
@@ -45,11 +48,15 @@ Last Verified: 2026-08-16
 - workspace-sensitive recipe catalog 必须绑定 File manifest/observation 的 exact tree revision；Shell 只发布当前适用
   recipe，空 recipe set 不得向 semantic provider 暴露 `validation/managed_session`。File tree change 只退休依赖相交
   catalog，duplicate re-drive/invalidation 不增加 refresh budget。
-- dynamic owner 必须分离 callable capability 与 validation surface readiness；只有已有 owner-sealed input binding、
-  non-durable 且 safe-to-replay 的 `ready` surface 可进入 provider recipe enum/C3。required-input
+- dynamic owner 必须分离 callable capability、validation surface readiness 与 proof applicability；只有已有 owner-sealed
+  input binding、non-durable、safe-to-replay 且 owner 显式声明 `direct` 的 `ready` surface 可进入 provider recipe enum/C3。
+  technically ready 的 `auxiliary`/`not_declared` surface 必须只保留 audit，不能关闭 CWI。required-input
   surface 必须保留 `prerequisite_required` audit fact；catalog 判定不得触发 endpoint/receipt，且该 surface identity
   必须从 provider request、schema、prompt 和 correction allowed values 中消失；readiness/schema/binding 变化必须改变
-  catalog snapshot identity。
+  catalog snapshot identity，proof applicability 变化也必须改变该 identity。
+- profile-declared owner-fact postcondition 必须保留单 Owner 分工：Workorchd 只编译 immutable declaration，capability
+  owner 只发布 current typed catalog，Orchestrator SM-2 只消费事实。assessment claim、successful operation、旧 catalog
+  或历史 recipe 都不得满足 postcondition。
 - capability execute command/result 必须来自接收 Owner 的 `pkg/events`；receipt 只返回 factual outcome/effect/evidence。
 
 ### Idempotency, Restart and Budgets
@@ -58,6 +65,9 @@ Last Verified: 2026-08-16
 - stale scope/definition/authority/dispatch/fence/result 只能进入 typed diagnostic 或明确拒绝。
 - provider recovery、candidate attempt、repair、prerequisite refresh、operation recovery、CAS reload 和 delivery retry
   预算互不借用。
+- owner-fact assessment gap 只有在其余 sealed proof 全部成立时才能重开 current bound CWI 并退休 semantic generation；
+  ordinary proof gap 必须保持原 repair 主线。reopen/CAS/re-drive 在 duplicate/restart 下幂等，同 CWI 次数受
+  `MaxRepairAttemptsPerFocus` 限制，耗尽 deterministic fail-closed。
 - crash 点覆盖 request seal 前后、candidate seal 前后、owner effect 返回前后、evidence CAS 前后和每段 terminal
   delivery；exact receipt replay 不重放 side effect。
 - non-current development data 的 Resume/Restart 分别返回 `fresh_activation_required` / `data_reset_required`，且零

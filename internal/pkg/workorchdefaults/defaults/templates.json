@@ -622,7 +622,7 @@
               "id": "validation_preparation",
               "required": true,
               "evidenceRole": "supplemental_evidence",
-              "description": "Owner-grounded validation readiness established by an existing executable recipe or one bounded workspace preparation change"
+              "description": "Current owner-grounded validation readiness, either already present or established after one bounded workspace preparation change"
             },
             {
               "id": "validation_report",
@@ -949,13 +949,20 @@
                 "patch/apply",
                 "validation/managed_session"
               ],
+              "requiredOwnerFacts": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session"
+                }
+              ],
               "rejectedStepKinds": [
                 "file/read",
                 "file/list",
                 "mcp/resource_read",
                 "mcp/prompt_get"
               ],
-              "description": "Validation readiness may be proved by an owner-grounded executable recipe already applicable to the workspace, or by one bounded File-owned preparation change selected through the declared workspace scope."
+              "description": "Validation readiness may use an owner-grounded executable recipe already applicable to the workspace, or one bounded File-owned preparation change selected through the declared workspace scope, but closes only when the current Shell catalog publishes a selectable managed-validation surface."
             },
             {
               "id": "validation_report",

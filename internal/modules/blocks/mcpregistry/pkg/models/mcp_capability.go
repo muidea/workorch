@@ -9,7 +9,20 @@ const (
 	CapabilityKindTool     = "tool"
 	CapabilityKindResource = "resource"
 	CapabilityKindPrompt   = "prompt"
+
+	ValidationProofApplicabilityDirect      = "direct"
+	ValidationProofApplicabilityAuxiliary   = "auxiliary"
+	ValidationProofApplicabilityNotDeclared = "not_declared"
 )
+
+func ValidValidationProofApplicability(value string) bool {
+	switch value {
+	case ValidationProofApplicabilityDirect, ValidationProofApplicabilityAuxiliary, ValidationProofApplicabilityNotDeclared:
+		return true
+	default:
+		return false
+	}
+}
 
 type Capability struct {
 	ID            common.MCPCapabilityID `json:"id"`
@@ -28,13 +41,16 @@ type Capability struct {
 	// EffectScope and IdempotencyClass are capability-owner declarations used when
 	// activation seals a concrete mcp/tool_call. They are not inferred from the
 	// advisory RiskLevel or tool name by Runtime.
-	EffectScope      string                       `json:"effectScope,omitempty"`
-	IdempotencyClass string                       `json:"idempotencyClass,omitempty"`
-	Schema           workorcheventpayload.Payload `json:"schema,omitempty"`
-	URI              string                       `json:"uri,omitempty"`
-	Enabled          bool                         `json:"enabled"`
-	ApprovalPolicy   string                       `json:"approvalPolicy,omitempty"`
-	Status           string                       `json:"status,omitempty"`
+	EffectScope      string `json:"effectScope,omitempty"`
+	IdempotencyClass string `json:"idempotencyClass,omitempty"`
+	// ValidationProofApplicability is an explicit owner declaration. Runtime
+	// never derives direct-proof authority from Name, Category, tags or prose.
+	ValidationProofApplicability string                       `json:"validationProofApplicability,omitempty"`
+	Schema                       workorcheventpayload.Payload `json:"schema,omitempty"`
+	URI                          string                       `json:"uri,omitempty"`
+	Enabled                      bool                         `json:"enabled"`
+	ApprovalPolicy               string                       `json:"approvalPolicy,omitempty"`
+	Status                       string                       `json:"status,omitempty"`
 }
 
 // CloneCapability returns a detached owner value suitable for crossing a

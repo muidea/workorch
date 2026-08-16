@@ -122,9 +122,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   immutable binding 交给 Shell owner；Shell catalog 只发布对该 manifest 当前适用的 recipe，并依赖 exact File
   workspace-tree revision。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
   Orchestrator 不检查文件名、不判断 recipe 适用性。MCP 等动态 owner 同时发布 callable capability 与 typed
-  `RuntimeValidationSurface`；只有带 owner-sealed input binding、non-durable effect 和
-  safe-to-replay class 的 `ready` surface 可进入 `ValidationRecipeRefs`。`prerequisite_required`/`unavailable` 只保留在
-  aggregate/audit，不进入 provider C3/schema/correction，Orchestrator 不解析 schema 或合成输入。SM-3 只请求/校验逐
+  `RuntimeValidationSurface`；只有带 owner-sealed input binding、non-durable effect、safe-to-replay class，并由 owner
+  显式声明为 `direct` 的 `ready` surface 可进入 `ValidationRecipeRefs`。`auxiliary`/`not_declared`、
+  `prerequisite_required`/`unavailable` 只保留在 aggregate/audit，不进入 provider C3/schema/correction，Orchestrator
+  不解析 schema、合成输入或根据 tool 名称/描述推断 direct proof。SM-3 只请求/校验逐
   CWI 的无副作用 proposal；SM-2 通过唯一 typed
   `runtime-semantic/probe-proof-feasibility` command 按 canonical owner 投递完整 batch，File/Shell/MCP/Git/Web/SSH
   只返回绑定 manifest/seed/proposal/catalog revision 的 factual feasibility，
@@ -240,6 +241,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Orchestrator SM-4 仅持久化并调度 `current_run` / `workspace_full` request，SM-2 internal event 才能提交完整 owner
   observation batch、retain/reopen/prerequisite 结果和 reopened lineage。reconciliation 不新增状态机，也不向其他
   owner 发送 target-state command。
+- accepted semantic order 在 effect-fenced 旧 current focus 尚未完成时，可以继续保留位于 remaining queue、已被同一
+  semantic manifest 精确绑定的 CWI；该例外必须同时匹配 current binding ref、active/remaining focus binding，且所有声明
+  prerequisite 仍为 settled+satisfied。它只维持当前代 executable lineage，不把 bound CWI 重新变成 planning eligible；
+  duplicate/restart projection 必须过滤该 row 并保持零 CAS。stale manifest、binding 漂移、completed row 或 prerequisite
+  重开仍按 stale authority 拒绝。
 - request generation/history、batch hash、canonical observation identity 和 workspace/run scope 是幂等 identity；
   duplicate/stale/CAS restart 不重放 operation、不覆盖旧 evidence。batch 只保存每个 binding-owner 的唯一 canonical
   observation；lineage ref 按需由 observation 纯派生，不并行持久化 synthetic owner receipt ref。operation execution
@@ -280,6 +286,15 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   observation；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才能给对应 CWI credit。非空
   `PassedChecks`、claim signal、assessment 文本、Goal/DoD、summary 与 operation/check name 的自由文本相似度
   都不能作为覆盖裁决；profile 封存 recipe 只约束候选选择该命令时的必要参数。
+- profile-declared `RuntimeOwnerFactRequirement` 是 immutable focus postcondition，不是 capability target state。
+  Workorchd 只编译声明，Shell/MCP 等 owner 只通过 current typed admissibility catalog 发布事实；SM-2 assessment gate
+  在 sealed binding 的其余 proof 全部成立后，才检查指定 owner/operation 是否存在匹配的 `ready + direct` selectable
+  validation surface。assessment claim、成功 operation、旧 catalog 或历史 recipe 均不能替代该 current owner fact。
+- owner fact 是唯一缺口时，assessment commit 在同一 Orchestrator CAS 中提交 dispatch/audit、把 current bound CWI
+  转为 `reopened`、清除 current binding、更新 reconciliation，并以 `assessment_owner_fact_postcondition_unmet` lineage
+  退休当前 semantic generation；SM-4 只从该 aggregate 幂等 re-drive。若 sealed proof 本身仍缺失，则保持普通
+  evidence/repair 主线，不得误触发 semantic replan。同 CWI owner-fact replan 由 `MaxRepairAttemptsPerFocus` 有界，耗尽
+  后 deterministic `owner_fact_convergence_exhausted`；duplicate/restart 不产生第二次 reopen/CAS/request/effect。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - drive failure 经 `classifyRuntimeDriveFailure` 分类：只有携带 expected/observed revision 的 `RuntimeCASConflictError` 才进入 CAS reload；owner-transient/projection 不终态化业务 Run，语义 conflict 不得消耗 CAS budget。
@@ -359,7 +374,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   Decision/Approval。
 - catalog acquisition 阶段的 validation-surface `prerequisite_required` 是 capability owner 的 readiness fact，不是上述
   semantic-feasibility transition：它不打开 request、不调 provider/endpoint、不增加 attempt/revision budget，只从
-  provider-selectable recipe set 中移除该 identity。若存在 ready alternative，后续 planning 继续使用同一 canonical
+  provider-selectable recipe set 中移除该 identity。技术上 `ready` 但声明为 `auxiliary`/`not_declared` 的 surface 同样只
+  保留 audit，不能进入 provider 或直接关闭 CWI。若存在 `ready + direct` alternative，后续 planning 继续使用同一 canonical
   catalog；没有合法 proof alternative 时才由既有 SM-2/SM-3 bounded fail-closed 规则终结。未来若自动获取输入，必须
   先由对应 owner 新增 concrete typed acquisition command/result，不能由 Orchestrator 或 LLM 猜参数。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。Result 强制绑定 workspace/run/resolution scope，并保留正交的 `committed | stale_diagnostic | duplicate` CAS 提交事实；它不携带自由文本 diagnostic/reason/failure，也不得由 convergence state 猜测提交事实。

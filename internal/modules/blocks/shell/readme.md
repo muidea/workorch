@@ -18,11 +18,15 @@ Last Verified: 2026-08-16
   均使用 Shell owner 定义的 concrete typed command/result。
 - 对 profile 明确声明的 managed-validation recipe，SM-2 只通过 typed request 转交 File owner 已持久化的
   `WorkspaceManifest + prerequisite observation`。Shell owner 在自己的 adapter 内判断 recipe 对该 manifest 是否当前
-  可执行，并且只在 admissibility catalog 中发布确认后的 recipe；例如 `go test` 在没有非排除 `*_test.go` 时不会被
+  可执行，并且只把确认后且可作为直接证明的 recipe 以 `ready + direct` surface 发布到 provider-selectable catalog；
+  例如 `go test` 在没有非排除 `*_test.go` 时不会被
   宣告为当前可用。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
+- Shell 发布的 `ready + direct` validation surface 只是当前 Owner fact；它不关闭 profile 的
+  `selectable_validation_surface` postcondition、不重开 CWI，也不选择 semantic successor。Orchestrator SM-2 只在
+  assessment 内消费该 typed catalog，缺失时的 bounded CWI replan 仍完全属于 Orchestrator aggregate。
 - stdout/stderr 不直接跨组件传递，只输出有界 typed evidence 摘要与引用。
 - 对 state-changing `shell/command`，本 owner 在执行前后以有界 workspace regular-file snapshot 计算真实 changed refs；`.git`、symlink 与不可安全内容寻址的对象不作为交付物 effect。所有真实 changed ref 必须是 sealed `TargetRefs` 的子集，否则返回 `effect_mismatch/undeclared_workspace_effect` rejected receipt；不能通过同时 touch 一个已声明目标掩盖额外写入。
 - accepted state-changing receipt 的 `TargetRefs` 与 `ResourceChanges` 来自 owner observation，而非直接回显候选输入；无可观察 workspace delta 时返回 no-progress，而不是 durable evidence。

@@ -1087,6 +1087,16 @@ func retireFocusScopedPrerequisites(facts *runtimecontract.RuntimeFacts, focusID
 func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, assessment runtimecontract.RuntimeAssessmentFact, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
 	policy := facts.ConvergencePolicy.Normalized()
 	ledger := facts.Repair.Normalized()
+	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities)) != 0 {
+		if runtimeOwnerFactReplanBudgetExhausted(facts) {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "owner_fact_convergence_exhausted", "required capability-owner fact remained unavailable after the bounded semantic replan budget"), nil
+		}
+		// Production assessment commit normally reopens the CWI and retires its
+		// semantic generation in the same CAS before reaching this reducer. This
+		// fallback keeps direct reducer fixtures fail-closed and chooses only the
+		// durable branch already declared by the current focus.
+		return stateChangeDecision(base, facts)
+	}
 	if ledger.Exhausted || ledger.RepairAttempts >= policy.MaxRepairAttemptsPerFocus {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
 	}

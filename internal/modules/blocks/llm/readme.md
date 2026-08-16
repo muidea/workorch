@@ -43,9 +43,12 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     provider ceiling 或 sealed-ceiling revision 校验。application 通过 typed active-configuration query 比较
     persisted revision，未匹配时投影 `restartRequired` 并拒绝 catalog refresh。
 12. semantic C3 只渲染 owner catalog 的可选择 vocabulary：snapshot/revision、operation/variant、target/selector/
-    constraint 和 ready validation recipe identity。non-ready validation surface、input schema/binding/prerequisite、完整
-    MCP capability effect metadata 与 Shell command/args 都不得进入 provider context；最终 renderer 必须再次按 readiness
-    取交集，不能把 audit fact 变成 model hint。
+    constraint 和 `ready + direct` validation recipe identity。non-ready 或 auxiliary/not-declared validation surface、
+    input schema/binding/prerequisite、完整 MCP capability effect metadata 与 Shell command/args 都不得进入 provider context；
+    最终 renderer 必须再次按 readiness 与 proof applicability 取交集，不能把 audit fact 变成 model hint。
+13. profile `RequiredOwnerFacts` 作为 immutable declaration 进入 C2 和 stable prefix；它不是 current availability。
+    current selectable identity 只能来自同 owner 的 C3 catalog。semantic instruction 明确禁止模型发明或宣称 owner fact；
+    assessment credit/replan 仍只属于 Orchestrator SM-2。
 
 ## EventHub 合同
 

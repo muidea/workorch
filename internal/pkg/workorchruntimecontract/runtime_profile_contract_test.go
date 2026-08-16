@@ -82,6 +82,45 @@ func TestValidateRuntimeProfileContractsRequiresCapabilityStateOwnerToMatchAccep
 	}
 }
 
+func TestRuntimeProfileOwnerFactRequirementIsNormalizedBoundedAndCompared(t *testing.T) {
+	requirement := RuntimeOwnerFactRequirement{
+		OwnerModuleID: " blocks/shell ", FactKind: RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: " validation/managed_session ",
+	}
+	valid := RuntimeProfileContract{
+		ID: "software-dev",
+		EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
+			ID: "validation_preparation", Scope: "deliverable",
+			AcceptedStepKinds:  []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession},
+			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement, requirement},
+		}},
+	}
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {
+		t.Fatalf("valid profile owner-fact requirement rejected: %v", err)
+	}
+	normalized := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{valid})
+	got := normalized[0].EvidenceRequirements[0].RequiredOwnerFacts
+	if len(got) != 1 || got[0] != (RuntimeOwnerFactRequirement{
+		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+	}) {
+		t.Fatalf("profile owner-fact normalization = %+v", got)
+	}
+
+	changed := NormalizeRuntimeProfileContracts([]RuntimeProfileContract{normalized[0]})
+	changed[0].EvidenceRequirements[0].RequiredOwnerFacts = nil
+	if SameRuntimeProfileContracts(normalized, changed) {
+		t.Fatal("profile owner-fact drift was not detected")
+	}
+
+	invalid := valid
+	invalid.EvidenceRequirements = append([]RuntimeProfileEvidenceRequirement(nil), valid.EvidenceRequirements...)
+	invalid.EvidenceRequirements[0].AcceptedStepKinds = []string{StepKindFileWrite}
+	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{invalid}); err == nil {
+		t.Fatal("profile owner-fact operation outside accepted kinds was accepted")
+	}
+}
+
 func TestRuntimeProfileTargetGroundingIsNormalizedAndRequiredWhenDeclared(t *testing.T) {
 	valid := RuntimeProfileContract{ID: "profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 		ID: "source", Scope: "deliverable", RequireDirectEvidence: true,

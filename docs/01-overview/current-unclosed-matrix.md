@@ -33,8 +33,13 @@ Last Verified: 2026-08-16
 - single CandidateEvaluator、attempt 0/1、owner feasibility orthogonality；
 - File create-only write 与 revision-bound existing-target replacement；
 - File manifest-bound Shell recipe applicability、空 recipe semantic filtering 与 exact tree-revision invalidation；
-- callable capability 与 validation surface readiness 分离；required-input MCP recipe 保留 typed prerequisite audit、零 endpoint
-  side effect，且不进入 provider schema/C3/correction，ready/schema/binding 变化进入 catalog snapshot identity；
+- callable capability、validation surface readiness 与 proof applicability 分离；required-input MCP recipe 保留 typed
+  prerequisite audit、零 endpoint side effect，ready auxiliary surface 也不得关闭 CWI；只有 `ready + direct` 进入 provider
+  schema/C3/correction，readiness/applicability/schema/binding 变化进入 catalog snapshot identity；
+- profile owner-fact postcondition 只由 current capability catalog 满足；Workorchd 只编译、capability owner 只发布事实、
+  Orchestrator SM-2 只在其余 proof 完整时判定/有界重开，assessment claim 不得越权关闭；
+- current-generation bound CWI 可保留在 effect-fenced focus queue，但不得重新进入 planning；duplicate/restart 零 CAS，
+  stale manifest/binding/prerequisite 继续 fail-closed；
 - Result closeout 仅保留 current unsatisfied canonical gap，当前 `Facts.Failure` 优先于历史 claimed gap；
 - provider ceiling / ExpectedDocument equality、whole-document recovery、C0～C5 stable prefix；
 - duplicate/stale/restart/partial-CAS/response-loss/budget/guard；

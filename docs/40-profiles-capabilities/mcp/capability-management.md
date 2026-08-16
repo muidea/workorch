@@ -33,9 +33,13 @@ An `MCPCapability` provides bounded metadata such as:
 - description/category/tags/stage hints;
 - input/output summary and optional URI/schema metadata;
 - risk level, approval policy, enabled/status;
-- Runtime operation kind, effect scope and idempotency class.
+- Runtime operation kind, effect scope, idempotency class and validation proof applicability.
 
-Effect scope and idempotency are explicit owner metadata. Runtime must not infer them from tool name or risk label.
+Effect scope, idempotency and `direct | auxiliary | not_declared` proof applicability are explicit Registry-owner metadata.
+Runtime must not infer them from tool name, description, category, risk label or DoD text. MCP execution independently compiles
+technical `ready | prerequisite_required | unavailable` from the detached registry snapshot and sealed input facts; only
+`ready + direct` may enter provider-visible validation recipes. A ready auxiliary tool such as the default `lsp_status` remains
+callable/auditable but cannot directly close CWI coverage.
 
 The management API exposes server/capability list/create/read/update plus server tool/resource/prompt discovery. Exact routes
 are listed in [Service API](../../50-product-interface/service-api.md).

@@ -179,6 +179,14 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 			for _, state := range runtimeMapSlice(item["capabilityStateRequirements"]) {
 				stateRequirements = append(stateRequirements, runtimecontract.RuntimeProfileCapabilityStateRequirement{OwnerModuleID: runtimeString(state["ownerModuleId"]), CapabilityStateKind: runtimeString(state["capabilityStateKind"]), SubjectRef: runtimeString(state["subjectRef"])})
 			}
+			ownerFacts := make([]runtimecontract.RuntimeOwnerFactRequirement, 0)
+			for _, ownerFact := range runtimeMapSlice(item["requiredOwnerFacts"]) {
+				ownerFacts = append(ownerFacts, runtimecontract.RuntimeOwnerFactRequirement{
+					OwnerModuleID: runtimeString(ownerFact["ownerModuleId"]),
+					FactKind:      runtimecontract.RuntimeOwnerFactKind(runtimeString(ownerFact["factKind"])),
+					OperationKind: runtimeString(ownerFact["operationKind"]),
+				})
+			}
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]), EvidenceRole: runtimeString(item["evidenceRole"]),
 				TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
@@ -192,6 +200,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 				RequiredCheckRefs:           runtimeStrings(item["requiredCheckRefs"]),
 				MetricConstraints:           runtimeStrings(item["metricConstraints"]),
 				ArtifactRefs:                runtimeStrings(item["artifactRefs"]),
+				RequiredOwnerFacts:          ownerFacts,
 				CapabilityStateRequirements: stateRequirements,
 				RejectedStepKinds:           runtimeStrings(item["rejectedStepKinds"]), Description: runtimeString(item["description"]),
 			})

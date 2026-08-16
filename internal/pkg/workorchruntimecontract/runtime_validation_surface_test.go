@@ -4,13 +4,14 @@ import "testing"
 
 func TestRuntimeValidationSurfaceReadinessContract(t *testing.T) {
 	base := RuntimeValidationSurface{
-		ID:               "mcp/tool_call/mcp-lsp-bridge/lsp_status",
-		OwnerModuleID:    RuntimeModuleMCP,
-		OperationKind:    StepKindMCPToolCall,
-		InputSchemaHash:  "schema-v1",
-		CheckRefs:        []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"},
-		EffectScope:      RuntimeEffectNone,
-		IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+		ID:                 "mcp/tool_call/mcp-lsp-bridge/lsp_status",
+		OwnerModuleID:      RuntimeModuleMCP,
+		OperationKind:      StepKindMCPToolCall,
+		InputSchemaHash:    "schema-v1",
+		CheckRefs:          []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"},
+		ProofApplicability: RuntimeValidationProofDirect,
+		EffectScope:        RuntimeEffectNone,
+		IdempotencyClass:   RuntimeOperationIdempotencySafeToReplay,
 	}
 	tests := []struct {
 		name    string
@@ -44,6 +45,11 @@ func TestRuntimeValidationSurfaceReadinessContract(t *testing.T) {
 			value.ReadinessReason = "invalid_input_schema"
 			value.PrerequisiteRef = "unsupported"
 		}, wantErr: true},
+		{name: "unknown proof applicability", mutate: func(value *RuntimeValidationSurface) {
+			value.Readiness = RuntimeValidationSurfaceReady
+			value.InputBindingRef = "mcp-validation-input/empty/status/schema-v1"
+			value.ProofApplicability = "claimed_by_provider"
+		}, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -64,13 +70,13 @@ func TestRuntimeOperationAdmissibilityExposesOnlyReadyValidationSurfaces(t *test
 	ready := RuntimeValidationSurface{
 		ID: "mcp/tool_call/mcp-lsp-bridge/lsp_status", OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
 		Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "status-schema-v1", InputBindingRef: "empty-status-input",
-		CheckRefs: []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+		CheckRefs: []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}, ProofApplicability: RuntimeValidationProofDirect, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 	}
 	requiresInput := RuntimeValidationSurface{
 		ID: "mcp/tool_call/mcp-lsp-bridge/lsp_definition", OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
 		Readiness: RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
 		InputSchemaHash: "definition-schema-v1", PrerequisiteRef: "definition-input-v1",
-		CheckRefs: []string{"mcp/tool_call/mcp-lsp-bridge/lsp_definition"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+		CheckRefs: []string{"mcp/tool_call/mcp-lsp-bridge/lsp_definition"}, ProofApplicability: RuntimeValidationProofDirect, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 	}
 	inventory := RuntimeOperationAdmissibility{
 		PrerequisiteID: "mcp-catalog", OwnerModuleID: RuntimeModuleMCP,
@@ -84,6 +90,25 @@ func TestRuntimeOperationAdmissibilityExposesOnlyReadyValidationSurfaces(t *test
 	}
 	if got := RuntimeReadyValidationRecipeRefs(inventory.ValidationSurfaces); len(got) != 1 || got[0] != ready.ID {
 		t.Fatalf("ready recipe refs = %v, want only %q", got, ready.ID)
+	}
+	if got := RuntimeSelectableValidationRecipeRefs(inventory.ValidationSurfaces); len(got) != 1 || got[0] != ready.ID {
+		t.Fatalf("selectable recipe refs = %v, want only %q", got, ready.ID)
+	}
+	auxiliary := ready
+	auxiliary.ProofApplicability = RuntimeValidationProofAuxiliary
+	if got := RuntimeSelectableValidationRecipeRefs([]RuntimeValidationSurface{auxiliary}); len(got) != 0 {
+		t.Fatalf("auxiliary ready surface became selectable: %v", got)
+	}
+	changedApplicability := inventory
+	changedApplicability.ValidationSurfaces = append([]RuntimeValidationSurface(nil), inventory.ValidationSurfaces...)
+	changedApplicability.ValidationSurfaces[1].ProofApplicability = RuntimeValidationProofAuxiliary
+	if StableRuntimeOperationAdmissibilitySnapshotID(changedApplicability) == inventory.SnapshotID {
+		t.Fatal("admissibility snapshot identity ignored validation proof applicability")
+	}
+	changedApplicability.ValidationRecipeRefs = nil
+	changedApplicability.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(changedApplicability)
+	if err := changedApplicability.Validate(); err != nil {
+		t.Fatalf("ready auxiliary surface should remain audit-valid: %v", err)
 	}
 
 	leaked := inventory

@@ -203,7 +203,8 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			}, capability: &mcpmodel.Capability{
 				ID: "mcp-semantic-probe:tool:lsp_status", ServerID: "mcp-semantic-probe", Kind: mcpmodel.CapabilityKindTool,
 				Name: "lsp_status", EffectScope: string(tc.effect), IdempotencyClass: string(tc.idempotency), Enabled: true,
-				Schema: tc.schema,
+				ValidationProofApplicability: string(runtimecontract.RuntimeValidationProofDirect),
+				Schema:                       tc.schema,
 			}}
 			adapter := NewRuntimeAdapter(getter)
 			snapshot, snapshotErr := adapter.runtimeOperationAdmissibilitySnapshot(ctx)
@@ -313,7 +314,8 @@ func TestMCPOwnerRejectsLegacyRequiredInputSemanticRecipeWithoutEndpointOrReceip
 		ID: "mcp-semantic-probe:tool:lsp_definition", ServerID: "mcp-semantic-probe", Kind: mcpmodel.CapabilityKindTool,
 		Name: "lsp_definition", EffectScope: string(runtimecontract.RuntimeEffectNone),
 		IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay), Enabled: true,
-		Schema: mcpBehaviorProbeSchema(t, []string{"path", "line", "col"}),
+		ValidationProofApplicability: string(runtimecontract.RuntimeValidationProofDirect),
+		Schema:                       mcpBehaviorProbeSchema(t, []string{"path", "line", "col"}),
 	}}
 	adapter := NewRuntimeAdapter(getter)
 	snapshot, err := adapter.runtimeOperationAdmissibilitySnapshot(ctx)

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionIntent, WorkspaceExecutionIntentRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -267,6 +267,22 @@ export function isFailedRunState(state?: string) {
 
 export function isTerminalRunState(state?: string) {
   return isCompletedRunState(state) || isFailedRunState(state);
+}
+
+// The Web adapter chooses only the user's lifecycle intent. Run owner remains
+// authoritative for admission and returns a typed non-resumable outcome when
+// the projection is stale. A missing/terminal/incompatible current Run always
+// requires a fresh activation instead of a Resume patch or implicit retry.
+export function workspaceExecutionPrimaryIntent(snapshot?: WorkspaceSnapshot): WorkspaceExecutionIntent {
+  const activeRunID = snapshot?.workspace.activeRunId;
+  if (!activeRunID) {
+    return 'restart';
+  }
+  const activeRun = snapshot?.runs?.find((item) => item.id === activeRunID);
+  if (isTerminalRunState(activeRun?.state) || activeRun?.runtimeActivation?.disposition === 'fresh_activation_required') {
+    return 'restart';
+  }
+  return 'resume';
 }
 
 export function activeOrLatestRun(snapshot?: WorkspaceSnapshot) {
@@ -3128,26 +3144,17 @@ export function readyDoDs(dods: DoD[]) {
   return dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
 }
 
-export function workspaceBoardActivationRequest(item: WorkspaceBoardItem, configuration?: ServiceConfiguration): WorkspaceExecutionActivationRequest | undefined {
-  const llmTarget = activationReadyChatTarget(configuration);
-  if (!llmTarget) {
-    return undefined;
-  }
-  const projectedRun = workspaceProjectionRun(item.snapshot);
-  if (projectedRun && isTerminalRunState(projectedRun.state) && projectedRun.goalId && projectedRun.doDId) {
-    return { intent: 'restart', goalId: projectedRun.goalId, doDId: projectedRun.doDId, llmTarget };
-  }
-
+export function workspaceBoardActivationRequest(item: WorkspaceBoardItem): WorkspaceExecutionIntentRequest | undefined {
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
-  if (goals.length === 1 && availableDoDs.length === 1) {
-    return { intent: item.snapshot.workspace.activeRunId ? 'resume' : 'restart', goalId: goals[0].id, doDId: availableDoDs[0].id, llmTarget };
+  if (goals.length > 0 && availableDoDs.length > 0) {
+    return { intent: workspaceExecutionPrimaryIntent(item.snapshot) };
   }
 
   return undefined;
 }
 
-export function workspaceBoardActivationHint(item: WorkspaceBoardItem, configuration?: ServiceConfiguration) {
+export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
   if (goals.length === 0) {
@@ -3156,11 +3163,5 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem, configura
   if (availableDoDs.length === 0) {
     return `当前工作空间尚无可用验收标准，请进入工作空间补齐${modelLabels.dod}后再提交执行`;
   }
-  if (goals.length > 1 || availableDoDs.length > 1) {
-    return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再提交执行`;
-  }
-  if (!activationReadyChatTarget(configuration)) {
-    return '当前没有可用的对话模型，请先在系统配置中完成模型设置';
-  }
-  return '当前工作空间无法确定执行上下文，请进入工作空间核对后再提交执行';
+  return '当前工作空间无法形成有效执行定义，请进入工作空间核对后再提交执行';
 }

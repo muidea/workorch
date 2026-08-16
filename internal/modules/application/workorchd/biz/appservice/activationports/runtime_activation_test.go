@@ -67,7 +67,9 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 						"id": "version_control_snapshot", "scope": "deliverable", "evidenceRole": "supplemental_evidence",
 						"targetRole": "repository", "targetRefs": []any{".git"}, "targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/unique_workspace_entry", "targetSelectorOwnerRef": "profile-owner", "targetSelectorSubjectRef": "profile-subject", "prospectiveTargetRef": "initial-deliverable.txt", "requireTargetGrounding": true,
 						"requireDirectEvidence": true, "requireClaimEvidence": true, "requireExecutableBehaviorEvidence": true, "requireCoverageTargets": true,
-						"acceptedStepKinds": []any{"git/write"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}}, "rejectedStepKinds": []any{"shell/read"},
+						"acceptedStepKinds": []any{"git/write", "validation/managed_session"}, "acceptedOperationVariants": []any{map[string]any{"kind": "git/write", "variantId": "commit"}},
+						"requiredOwnerFacts": []any{map[string]any{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}},
+						"rejectedStepKinds":  []any{"shell/read"},
 					}},
 				},
 			},
@@ -118,8 +120,9 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		len(profile.EvidenceRequirements[0].TargetRefs) != 1 || profile.EvidenceRequirements[0].TargetRefs[0] != ".git" ||
 		len(profile.EvidenceRequirements[0].TargetDiscoverySources) != 1 || profile.EvidenceRequirements[0].TargetDiscoverySources[0] != "workspace_manifest" || profile.EvidenceRequirements[0].TargetSelectorRef != "file/unique_workspace_entry" || profile.EvidenceRequirements[0].TargetSelectorOwnerRef != "profile-owner" || profile.EvidenceRequirements[0].TargetSelectorSubjectRef != "profile-subject" || profile.EvidenceRequirements[0].ProspectiveTargetRef != "initial-deliverable.txt" || !profile.EvidenceRequirements[0].RequireTargetGrounding || !profile.EvidenceRequirements[0].RequireDirectEvidence ||
 		!profile.EvidenceRequirements[0].RequireClaimEvidence || !profile.EvidenceRequirements[0].RequireExecutableBehaviorEvidence || !profile.EvidenceRequirements[0].RequireCoverageTargets ||
-		len(profile.EvidenceRequirements[0].AcceptedStepKinds) != 1 || profile.EvidenceRequirements[0].AcceptedStepKinds[0] != "git/write" ||
+		len(profile.EvidenceRequirements[0].AcceptedStepKinds) != 2 || profile.EvidenceRequirements[0].AcceptedStepKinds[0] != "git/write" || profile.EvidenceRequirements[0].AcceptedStepKinds[1] != "validation/managed_session" ||
 		len(profile.EvidenceRequirements[0].AcceptedOperationVariants) != 1 || profile.EvidenceRequirements[0].AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) ||
+		len(profile.EvidenceRequirements[0].RequiredOwnerFacts) != 1 || profile.EvidenceRequirements[0].RequiredOwnerFacts[0] != (runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession}) ||
 		len(profile.EvidenceRequirements[0].RejectedStepKinds) != 1 || profile.EvidenceRequirements[0].RejectedStepKinds[0] != "shell/read" ||
 		len(profile.CoverageDependencies) != 1 || profile.CoverageDependencies[0].ID != "source-refreshes-validation" || profile.CoverageDependencies[0].SourceRequirementID != "source" || profile.CoverageDependencies[0].DependentRequirementID != "version_control_snapshot" ||
 		len(profile.CoverageDependencies[0].TriggerEvidenceKinds) != 1 || profile.CoverageDependencies[0].TriggerEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||

@@ -39,7 +39,7 @@ func ensureBuiltinMCPDefaults(ctx context.Context, servers repository.MCPServerR
 		if err != nil {
 			return err
 		}
-		value := &mcpmodel.Capability{ID: common.MCPCapabilityID(item.ID), ServerID: common.MCPServerID(item.ServerID), Kind: item.Kind, Name: item.Name, DisplayName: item.DisplayName, Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint, InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...), RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass, Schema: schema, URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status}
+		value := &mcpmodel.Capability{ID: common.MCPCapabilityID(item.ID), ServerID: common.MCPServerID(item.ServerID), Kind: item.Kind, Name: item.Name, DisplayName: item.DisplayName, Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint, InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...), RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass, ValidationProofApplicability: item.ValidationProofApplicability, Schema: schema, URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status}
 		if err := capabilities.Update(ctx, value); err != nil {
 			if !errors.Is(err, common.ErrNotFound) {
 				return err

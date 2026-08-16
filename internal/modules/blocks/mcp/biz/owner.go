@@ -426,10 +426,10 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_validation_input_binding_required", "MCP semantic validation recipe has no ready owner-sealed input binding", "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
 		return
 	}
-	if !surfaceFound || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady || surface.InputBindingRef == "" ||
+	if !surfaceFound || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady || surface.ProofApplicability != runtimecontract.RuntimeValidationProofDirect || surface.InputBindingRef == "" ||
 		!containsMCPAdmissibleServer(recipeRefs, command.Proposal.ValidationRecipeID) {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the ready owner catalog", "", revision, nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the ready direct-proof owner catalog", "", revision, nil))
 		return
 	}
 	// A semantic behavior probe is intentionally narrower than an operation

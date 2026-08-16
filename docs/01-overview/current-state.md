@@ -59,9 +59,19 @@ Application builds typed RuntimeBootstrap
   revision/baseHash 的 `file/edit` 或 `patch/apply` replacement。
 - workspace-sensitive validation catalog 由 SM-2 先绑定 File manifest revision，再由 Shell owner 过滤当前适用 recipe；
   空 recipe set 不向 semantic provider 暴露 `validation/managed_session`，后续 File tree effect 会精确退休该 catalog。
-- dynamic capability catalog 区分 callable operation 与 validation readiness；MCP required-input tool 仍可被合法 operation
-  调用，但在 owner 尚无 sealed input binding 时只记录 `prerequisite_required` surface，不进入 semantic provider 的
-  recipe enum/C3。LLM projection 不暴露 non-ready identity、owner-private binding/schema/effect 或 executable recipe 内容。
+- dynamic capability catalog 区分 callable operation、validation readiness 与 proof applicability；MCP required-input tool
+  仍可被合法 operation 调用，但在 owner 尚无 sealed input binding 时只记录 `prerequisite_required` surface。技术上 ready
+  的 auxiliary/not-declared surface 也只保留审计；只有 `ready + direct` 进入 semantic provider 的 recipe enum/C3。LLM
+  projection 不暴露 non-selectable identity、owner-private binding/schema/effect 或 executable recipe 内容。
+- profile 可以声明 owner-neutral postcondition，例如 `validation_preparation` 要求 Shell 当前 catalog 存在 selectable
+  managed-validation surface。Workorchd 只编译该声明，Shell 只发布 typed catalog，Orchestrator SM-2 只在 sealed proof
+  其余条件均成立后检查 `ready + direct` current fact；assessment claim 或一次成功 File patch 不能替代该事实。
+- owner fact 是唯一缺口时，SM-2 在 assessment commit 的同一 CAS 中重开 current CWI、退休 current binding/semantic
+  generation，并由 SM-4 幂等 re-drive；次数由 focus repair budget 有界。普通 proof gap 不走该分支，耗尽后以
+  `owner_fact_convergence_exhausted` fail-closed。
+- current semantic generation 已精确绑定且仍位于 active/remaining focus queue 的 CWI 保持 executable lineage；它不重新
+  获得 planning eligibility。duplicate/restart projection 过滤已绑定 row 并零 CAS，stale generation/binding 或 prerequisite
+  drift 继续拒绝。
 - terminal closeout 只汇总当前 unsatisfied CWI 的 canonical gap，top failure 以当前 `Facts.Failure` 为先；已满足 CWI 的
   producer claimed gap 只属于 assessment audit。
 - raw candidate CWI、assessment claim、文件存在、Git revision、exit 0 和非空 `PassedChecks` 都不是 credit authority。

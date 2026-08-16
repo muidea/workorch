@@ -51,6 +51,10 @@ func TestCompileRuntimeSemanticBindingsDoesNotPromoteTargetToArtifact(t *testing
 
 func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValidationProof(t *testing.T) {
 	manifest, document, facts, source := semanticIndependentProofSetFixture(t)
+	source.RequiredOwnerFacts = []RuntimeOwnerFactRequirement{{
+		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+	}}
 	source.MetricConstraints = []string{"metric/latency"}
 	source.ArtifactRefs = []string{"workorch://artifact/validation-report"}
 	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, facts, []CoverageFocus{source})
@@ -68,6 +72,9 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 	}
 	if !sameStrings(focuses[0].MetricConstraints, source.MetricConstraints) || !sameStrings(focuses[0].ArtifactRefs, source.ArtifactRefs) {
 		t.Fatalf("compiled focus lost source requirements: %+v", focuses[0])
+	}
+	if !sameRuntimeOwnerFactRequirements(focuses[0].RequiredOwnerFacts, source.RequiredOwnerFacts) {
+		t.Fatalf("compiled focus lost source owner-fact postconditions: %+v", focuses[0])
 	}
 }
 

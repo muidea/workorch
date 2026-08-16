@@ -70,7 +70,11 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 		ID:                      "software-dev",
 		AcceptanceDimensions:    []RuntimeAcceptanceDimension{{ID: "runtime_entrypoint", Required: true}},
 		DeliverableExpectations: []RuntimeDeliverableExpectation{{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"}},
-		EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}}},
+		EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
+			ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write", RuntimeBlockKindManagedValidationSession},
+			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}},
+			RequiredOwnerFacts:        []RuntimeOwnerFactRequirement{{OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface, OperationKind: RuntimeBlockKindManagedValidationSession}},
+		}},
 	}}}
 	changed := base
 	changed.ProfileContracts = append([]RuntimeProfileContract(nil), base.ProfileContracts...)
@@ -80,6 +84,11 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 	changedHash := StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changed)
 	if baseHash == changedHash {
 		t.Fatalf("candidate prefix did not change with profile contract: %s", baseHash)
+	}
+	withoutOwnerFact := base.Normalized()
+	withoutOwnerFact.ProfileContracts[0].EvidenceRequirements[0].RequiredOwnerFacts = nil
+	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, withoutOwnerFact) {
+		t.Fatal("candidate prefix did not change with profile owner-fact declaration")
 	}
 }
 

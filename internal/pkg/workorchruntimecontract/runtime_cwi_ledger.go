@@ -83,7 +83,9 @@ func RuntimeCWIBindingRefForCoverageBinding(binding CoverageEvidenceBinding, sem
 }
 
 // RuntimeCWIReopenLineage records an explicit SM-2 reopening cause while the
-// old receipt/evidence remains immutable audit history on the coverage row.
+// old binding, receipt, evidence and assessment remain immutable audit
+// history. Reopening may invalidate settled credit or retire a bound generation
+// that reached assessment without satisfying a declared owner postcondition.
 type RuntimeCWIReopenLineage struct {
 	PreviousBindingRef RuntimeCWIBindingRef
 	TriggerRef         string

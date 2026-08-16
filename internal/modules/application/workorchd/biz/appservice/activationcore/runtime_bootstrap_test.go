@@ -529,7 +529,10 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 				{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence", Description: "snapshot exists"},
 			},
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
-				{ID: "runtime_entrypoint", Scope: "acceptanceDimension", AcceptedStepKinds: []string{"shell/command"}},
+				{ID: "runtime_entrypoint", Scope: "acceptanceDimension", AcceptedStepKinds: []string{"shell/command", runtimecontract.RuntimeBlockKindManagedValidationSession}, RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{{
+					OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+					OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+				}}},
 				{ID: "source_change", Scope: "deliverable", EvidenceRole: "primary_state_change", AcceptedStepKinds: []string{"patch/apply"}},
 				{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}},
 			},
@@ -559,6 +562,7 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 	}
 	entrypoint, sourceChange, coverageMap, snapshot := compiled.Focuses[1], compiled.Focuses[2], compiled.Focuses[3], compiled.Focuses[4]
 	if entrypoint.AssessmentScope != "acceptanceDimension" || len(entrypoint.RequiredEvidenceKinds) != 1 || entrypoint.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
+		len(entrypoint.RequiredOwnerFacts) != 1 || entrypoint.RequiredOwnerFacts[0] != (runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession}) ||
 		sourceChange.EvidenceRole != "primary_state_change" || sourceChange.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 		len(coverageMap.RequiredEvidenceKinds) != 1 || coverageMap.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation || !coverageMap.RequireAssessment ||
 		len(snapshot.AcceptedOperationVariants) != 1 || snapshot.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) || snapshot.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {

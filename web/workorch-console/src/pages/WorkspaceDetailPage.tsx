@@ -3,7 +3,7 @@ import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatBu
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
-import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, GoalDoDQualityCheck, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
+import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, GoalDoDQualityCheck, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
 import { workorchApi } from '../api';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
@@ -30,7 +30,7 @@ const {
   runtimeCapabilityTable, runtimeCheckpointPageLimit, runtimeDetailActions,
   runtimeEventPageLimit, runtimePatchPageLimit, runtimeRawRefActions, runtimeResultPageLimit,
   runtimeStepPageLimit, runtimeTarget, runtimeToolCallPageLimit, runtimeValidationPageLimit,
-  runCommandDescriptions, setupDoDItems, skillDisplayLabel, soulBindingStageLabel, splitLines, stageBindings,
+  runCommandDescriptions, setupDoDItems, soulBindingStageLabel, splitLines, stageBindings,
   projectionStatusDescriptions, projectionStatusSummary, runHeartbeatDescriptions, runtimeExecutionDescriptions,
   convergenceStatusDescriptions,
   stateLabel, stateTag, taskPlanCard, taskProgressCard, timelineLabel,
@@ -64,7 +64,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [workspaceTemplates] = useState<WorkspaceTemplate[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
-  const [mcpCapabilities, setMCPCapabilities] = useState<MCPCapability[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
   const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | undefined>(undefined);
@@ -216,7 +215,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const activationLLMTargetOptions = helpers.chatTargetOptions(configuration);
-	const selectedOption = activationLLMTargetOptions.find((item) => item.value === activationSelectedTargetKey);
+  const selectedOption = activationLLMTargetOptions.find((item) => item.value === activationSelectedTargetKey);
   const activationReadyTarget = helpers.activationReadyChatTarget(configuration);
   const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
   const defaultChatProviderId = configuration?.llm.defaultChat?.providerId || 'ai-proxy';
@@ -265,7 +264,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setSoulBindings(undefined);
     setSkills([]);
     setMCPServers([]);
-    setMCPCapabilities([]);
     setMemoryItems([]);
     setRunSnapshot(undefined);
     setRunObservability(undefined);
@@ -743,13 +741,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
     const requestSeq = ++workspaceContextRequestSeq.current;
-    const [nextSnapshotProjection, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMCPCapabilities, nextMemoryItems, nextConfiguration] = await Promise.all([
+    const [nextSnapshotProjection, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
       workorchApi.readWorkspaceSnapshotProjection(targetWorkspaceId),
       workorchApi.listSouls(),
       workorchApi.readWorkspaceSoulBindings(targetWorkspaceId),
       workorchApi.listSkills(targetWorkspaceId),
       workorchApi.listMCPServers(),
-      workorchApi.listMCPCapabilities({ enabled: true }),
       workorchApi.listMemory(targetWorkspaceId),
       workorchApi.readConfiguration()
     ]);
@@ -770,7 +767,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     });
     setSkills(nextSkills);
     setMCPServers(nextMCPServers);
-    setMCPCapabilities(nextMCPCapabilities);
     setMemoryItems(nextMemoryItems);
     setConfiguration(nextConfiguration);
     const keepRunProcessView = runSnapshot
@@ -1061,61 +1057,55 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
   };
 
-  const resumeWorkspaceExecution = (request: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => {
+  const submitWorkspaceExecution = (request: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => {
     if (!workspaceId) {
       return;
     }
-    const commandIntent = request.intent ?? activationIntent;
-    const selectedCapabilityServerIds = (request.capabilityIds ?? [])
-      .map((capabilityId) => mcpCapabilities.find((item) => item.id === capabilityId)?.serverId)
-      .filter((value): value is string => Boolean(value));
-    const selectedModelId = request.llmTarget?.modelId?.trim() || activationReadyTarget?.modelId;
-    const normalizedLLMTarget = selectedModelId
-      ? {
-          providerId: request.llmTarget?.providerId?.trim() || activationReadyTarget?.providerId || 'ai-proxy',
-          modelId: selectedModelId
-        }
-      : undefined;
-	const reasoningEffort = request.reasoningEffort?.trim() || undefined;
-    if (!normalizedLLMTarget) {
-      message.error('当前没有 ready 的对话模型，请先完成模型配置');
-      return;
-    }
-    const { llmTargetKey: _llmTargetKey, ...activationRequest } = request;
-    const requestWithCapabilityServers: WorkspaceExecutionActivationRequest = {
-      ...activationRequest,
-      intent: commandIntent,
-      // A fresh activation is deliberately workspace-scoped. Do not let a
-      // stale form value turn it into a run-targeted replacement command.
-      ...(commandIntent === 'restart' ? { runId: undefined } : {}),
-      llmTarget: normalizedLLMTarget,
-      mcpServerIds: Array.from(new Set([...(request.mcpServerIds ?? []), ...selectedCapabilityServerIds]))
-    };
+    const commandIntent = request.intent || activationIntent;
     const targetWorkspaceId = workspaceId;
-    setActivationLoading(true);
-    setActivationOpen(false);
-    setActivationTracking(true);
-    activationForm.resetFields();
-    message.info(commandIntent === 'restart' ? '已提交创建新的执行，正在后台跟踪' : '工作空间执行已提交，已转入后台跟踪');
-    // Model and Soul are workspace-owned configuration.  Persist the selected
-    // values before sending the intent; the activation endpoint intentionally
-    // ignores form-only context fields and accepts no lifecycle target.
-	const expectedRevision = snapshot?.workspace.revision ?? 0;
-    void workorchApi.updateWorkspaceLLMSelection(targetWorkspaceId, { target: normalizedLLMTarget, reasoningEffort }, expectedRevision)
-      .then(async () => {
-        if (requestWithCapabilityServers.soulId || requestWithCapabilityServers.soulBindings) {
+    let prepareOwnerState: Promise<unknown> = Promise.resolve();
+    if (commandIntent === 'restart') {
+      const selectedModelId = request.llmTarget?.modelId?.trim() || activationReadyTarget?.modelId;
+      const normalizedLLMTarget = selectedModelId
+        ? {
+            providerId: request.llmTarget?.providerId?.trim() || activationReadyTarget?.providerId || 'ai-proxy',
+            modelId: selectedModelId
+          }
+        : undefined;
+      if (!normalizedLLMTarget) {
+        message.error('当前没有 ready 的对话模型，请先完成模型配置');
+        return;
+      }
+      const reasoningEffort = request.reasoningEffort?.trim() || undefined;
+      const expectedRevision = snapshot?.workspace.revision ?? 0;
+      // Fresh activation configuration is persisted through Workspace-owner
+      // APIs before the immutable restart intent. Resume deliberately skips
+      // this branch and can never patch model or Soul state.
+      prepareOwnerState = workorchApi.updateWorkspaceLLMSelection(
+        targetWorkspaceId,
+        { target: normalizedLLMTarget, reasoningEffort },
+        expectedRevision
+      ).then(async () => {
+        if (request.soulId || request.soulBindings) {
           const nextBindings: WorkspaceSoulBindings = {
-            defaultSoulId: requestWithCapabilityServers.soulId || soulBindings?.defaultSoulId,
+            defaultSoulId: request.soulId || soulBindings?.defaultSoulId,
             bindings: {
               ...(soulBindings?.bindings ?? {}),
-              ...(requestWithCapabilityServers.soulBindings ?? {})
+              ...(request.soulBindings ?? {})
             }
           };
           const updated = await workorchApi.updateWorkspaceSoulBindings(targetWorkspaceId, nextBindings);
           setSoulBindings(updated);
         }
-      })
-      .then(() => workorchApi.resumeWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers))
+      });
+    }
+    setActivationLoading(true);
+    setActivationOpen(false);
+    setActivationTracking(true);
+    activationForm.resetFields();
+    message.info(commandIntent === 'restart' ? '正在保存 fresh activation 配置并提交新执行' : '正在提交当前 Run 的恢复意图');
+    void prepareOwnerState
+      .then(() => workorchApi.submitWorkspaceExecution(targetWorkspaceId, { intent: commandIntent, priority: request.priority }))
       .then(async () => {
         setWorkspaceProjection(undefined);
         setRunSnapshot(undefined);
@@ -1146,7 +1136,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         setRunArtifactHasMore(false);
         setContextBundle(undefined);
         await loadWorkspaceContext(targetWorkspaceId);
-        message.success(commandIntent === 'restart' ? '新的工作空间执行已完成一次状态刷新' : '工作空间执行已完成一次状态刷新');
+        message.success(commandIntent === 'restart' ? '新执行意图已进入 Owner admission' : '恢复意图已进入 Owner admission');
       })
       .catch((error: unknown) => {
         message.error(errorMessage(error));
@@ -1158,26 +1148,29 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   };
 
   const requestWorkspaceActivation = (intent: 'resume' | 'restart' = 'resume') => {
-    const target = activationReadyTarget;
-	const defaultSelection = snapshot?.workspace.defaultLLMSelection;
     setActivationIntent(intent);
-    activationForm.setFieldsValue({
-      goalId: goals[0]?.id,
-      doDId: readyDoDs[0]?.id,
-      llmTarget: target,
-	  reasoningEffort: defaultSelection?.target.providerId === target?.providerId && defaultSelection?.target.modelId === target?.modelId
-		? defaultSelection?.reasoningEffort
-		: undefined,
-      llmTargetKey: helpers.providerModelTargetKey(target?.providerId, target?.modelId),
-      soulId: undefined,
-      soulBindings: {},
-      skillIds: [],
-      mcpServerIds: [],
-      capabilityIds: [],
-      memoryIds: [],
-      intent,
-      priority: 0
-    });
+    activationForm.resetFields();
+    if (intent === 'restart') {
+      const defaultSelection = snapshot?.workspace.defaultLLMSelection;
+      const readyDefault = activationLLMTargetOptions.find(
+        (item) => item.providerId === defaultSelection?.target.providerId && item.modelId === defaultSelection?.target.modelId
+      );
+      const target = readyDefault ? defaultSelection?.target : activationReadyTarget;
+      const reasoningEffort = readyDefault && defaultSelection?.reasoningEffort && (readyDefault.reasoningEfforts ?? []).includes(defaultSelection.reasoningEffort)
+        ? defaultSelection.reasoningEffort
+        : undefined;
+      activationForm.setFieldsValue({
+        llmTarget: target,
+        reasoningEffort,
+        llmTargetKey: helpers.providerModelTargetKey(target?.providerId, target?.modelId),
+        soulId: soulBindings?.defaultSoulId,
+        soulBindings: { ...(soulBindings?.bindings ?? {}) },
+        intent,
+        priority: 0
+      });
+    } else {
+      activationForm.setFieldsValue({ intent, priority: 0 });
+    }
     setActivationOpen(true);
   };
 
@@ -1247,6 +1240,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const activeRun = snapshot?.workspace.activeRunId
     ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId)
     : undefined;
+  const primaryExecutionIntent = helpers.workspaceExecutionPrimaryIntent(snapshot);
   const activeRunRequiresFreshActivation = activeRun?.runtimeActivation?.disposition === 'fresh_activation_required';
   const activeRunSchemaTransition = activeRunRequiresFreshActivation && activeRun.runtimeActivation?.reason === 'schema_unsupported'
     ? `Runtime schema v${activeRun.runtimeActivation?.actualSchemaVersion} → v${activeRun.runtimeActivation?.supportedSchemaVersion}`
@@ -1307,13 +1301,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           </div>
           <div className="workspace-header-actions-main">
-            {activeRunRequiresFreshActivation ? (
-              <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation('restart')}>
-                创建新执行{activeRunSchemaTransition ? `（${activeRunSchemaTransition}）` : ''}
-              </Button>
-            ) : (
-              <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation('resume')}>提交执行</Button>
-            )}
+            <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation(primaryExecutionIntent)}>
+              {primaryExecutionIntent === 'restart'
+                ? `创建新执行${activeRunSchemaTransition ? `（${activeRunSchemaTransition}）` : ''}`
+                : '恢复当前执行'}
+            </Button>
+            {primaryExecutionIntent === 'resume' ? (
+              <Button disabled={!workspaceId} onClick={() => requestWorkspaceActivation('restart')}>创建新执行</Button>
+            ) : null}
             <Dropdown
               menu={{
                 items: [
@@ -2421,10 +2416,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               ]}
             />
           </Form.Item>
-          <Form.Item name="templateId" label="工作空间模板（Workspace Template）">
+          <Form.Item name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true, message: '请选择工作空间模板' }]}>
             <Select
-              allowClear
-              placeholder="可选。选择后自动带入目标、验收标准和执行人格绑定"
+              placeholder="选择模板并带入目标、验收标准和执行人格绑定"
               onChange={applyWorkspaceTemplate}
               options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))}
             />
@@ -2435,8 +2429,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} placeholder="描述工作空间目标、范围或当前交付预期" />
           </Form.Item>
-          <Form.Item name="deliverableDirectory" label="工作目录">
-            <Input placeholder="留空时自动使用 .workorch-workspaces/工作空间 ID" />
+          <Form.Item name="deliverableDirectory" label="工作目录" rules={[{ required: true, message: '请输入工作目录' }]}>
+            <Input placeholder="输入 Workspace 的交付目录" />
           </Form.Item>
         </Form>
         <div style={{ display: setupStep === workspaceSetupSmartDraftStep ? 'block' : 'none' }}>
@@ -2818,133 +2812,97 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         )}
       </Modal>
       <Modal
-        title={activationIntent === 'restart' ? '创建新的工作空间执行' : '提交工作空间执行'}
+        title={activationIntent === 'restart' ? '创建新的工作空间执行' : '恢复当前工作空间执行'}
         open={activationOpen}
         confirmLoading={activationLoading}
         onCancel={() => setActivationOpen(false)}
         onOk={() => activationForm.submit()}
-        okText={activationIntent === 'restart' ? '创建新的后台执行' : '提交后台执行'}
-        okButtonProps={{ disabled: !activationLLMReady || readyDoDs.length === 0 }}
+        okText={activationIntent === 'restart' ? '创建新的后台执行' : '恢复当前执行'}
+        okButtonProps={{ disabled: goals.length === 0 || readyDoDs.length === 0 || (activationIntent === 'restart' && !activationLLMReady) }}
       >
         <Form
           form={activationForm}
           layout="vertical"
-          onFinish={(values: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => void resumeWorkspaceExecution(values)}
+          onFinish={(values: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => void submitWorkspaceExecution(values)}
         >
           <Form.Item name="intent" hidden>
             <Input />
           </Form.Item>
-          {activationIntent === 'restart' ? (
-            <Typography.Text type="warning">
-              该操作会为当前工作空间创建一个新的 Runtime 执行；不会继续或迁移旧运行的持久化状态。
-            </Typography.Text>
-          ) : null}
-          <Form.Item name="goalId" label="目标" rules={[{ required: true }]}>
-            <Select options={goals.map((item) => ({ value: item.id, label: `${item.text} (${item.id})` }))} />
-          </Form.Item>
-          <Form.Item name="doDId" label="验收标准" rules={[{ required: true }]}>
-            <Select options={readyDoDs.map((item) => ({ value: item.id, label: `${item.items.join(' / ')} (${item.id})` }))} />
-          </Form.Item>
-          <Form.Item
-            name="llmTargetKey"
-            label="LLM 模型"
-            rules={[{ required: true, message: '请选择可用的对话模型' }]}
-            extra={
-              !activationLLMReady
-                ? '当前没有可用的对话模型，请先在系统配置中完成模型设置'
-                : defaultChatModelId
-                  ? `系统默认：${defaultChatModelId}${defaultChatReady ? '' : `（当前不可用，已自动选择 ${activationReadyTarget?.modelId}）`}`
-                  : `已自动选择模型：${activationReadyTarget?.modelId}`
-            }
-          >
-            <Select
-              showSearch
-              placeholder="选择可用对话模型"
-              options={activationLLMTargetOptions.map((item) => ({
-                value: item.value,
-                label: item.label
-              }))}
-              onChange={(value?: string) => {
-                const selected = activationLLMTargetOptions.find((item) => item.value === value);
-                activationForm.setFieldsValue({
-                  llmTarget: {
-                    providerId: selected?.providerId || 'ai-proxy',
-                    modelId: selected?.modelId
-				  },
-				  reasoningEffort: undefined
-                });
-              }}
-            />
-          </Form.Item>
-          <Form.Item name={['llmTarget', 'providerId']} hidden initialValue="ai-proxy">
-            <Input />
-          </Form.Item>
-          <Form.Item name={['llmTarget', 'modelId']} hidden>
-            <Input />
-          </Form.Item>
-		  <Form.Item name="reasoningEffort" label="推理强度" extra={selectedOption?.defaultReasoningEffort ? `模型默认：${selectedOption.defaultReasoningEffort}` : '留空时使用模型默认策略'}>
-			<Select
-			  allowClear
-			  placeholder="模型默认"
-			  disabled={!selectedOption?.reasoningSupported || !selectedOption?.reasoningValid}
-			  options={(selectedOption?.reasoningEfforts ?? []).map((effort) => ({ value: effort, label: effort }))}
-			/>
-		  </Form.Item>
-          <Form.Item name="soulId" label="本次默认执行人格（Soul）">
-            <Select allowClear placeholder="继承工作空间默认和阶段执行人格配置" options={soulOptions} />
-          </Form.Item>
-          <Typography.Text type="secondary">本次执行阶段执行人格覆盖</Typography.Text>
-          <div className="soul-binding-grid soul-binding-grid-compact">
-            {soulBindingStages.map((stage) => (
-              <Form.Item key={stage} name={['soulBindings', stage]} label={soulBindingStageLabel(stage)}>
-                <Select allowClear placeholder="继承工作空间配置" options={soulOptions} />
+          {activationIntent === 'resume' ? (
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Typography.Text type="secondary">
+                Resume 只继续当前 Run 已封存的定义、模型和执行上下文；不会读取或改写 Workspace 的下次运行偏好。
+              </Typography.Text>
+              <Descriptions
+                size="small"
+                column={1}
+                items={[
+                  { key: 'run', label: '当前 Run', children: activeRun?.id || '-' },
+                  { key: 'sealedSelection', label: '当前 Run 封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMSelection) },
+                  { key: 'nextSelection', label: '下次 fresh activation 偏好', children: providerModelTargetLabel(snapshot?.workspace.defaultLLMSelection) }
+                ]}
+              />
+            </Space>
+          ) : (
+            <>
+              <Typography.Text type="warning">
+                该操作会从 Workspace 当前定义与配置创建 fresh activation；不会继续或迁移旧 Run 的持久化状态。
+              </Typography.Text>
+              <Form.Item
+                name="llmTargetKey"
+                label="下次 fresh activation 模型"
+                rules={[{ required: true, message: '请选择可用的对话模型' }]}
+                extra={
+                  !activationLLMReady
+                    ? '当前没有可用的对话模型，请先在系统配置中完成模型设置'
+                    : defaultChatModelId
+                      ? `系统默认：${defaultChatModelId}${defaultChatReady ? '' : `（当前不可用，已自动选择 ${activationReadyTarget?.modelId}）`}`
+                      : `已自动选择模型：${activationReadyTarget?.modelId}`
+                }
+              >
+                <Select
+                  showSearch
+                  placeholder="选择可用对话模型"
+                  options={activationLLMTargetOptions.map((item) => ({ value: item.value, label: item.label }))}
+                  onChange={(value?: string) => {
+                    const selected = activationLLMTargetOptions.find((item) => item.value === value);
+                    activationForm.setFieldsValue({
+                      llmTarget: {
+                        providerId: selected?.providerId || 'ai-proxy',
+                        modelId: selected?.modelId
+                      },
+                      reasoningEffort: undefined
+                    });
+                  }}
+                />
               </Form.Item>
-            ))}
-          </div>
-          <Form.Item name="skillIds" label="可用技能（Skill）">
-            <Select
-              mode="multiple"
-              allowClear
-              options={skills.map((item) => ({
-                value: item.id,
-                label: skillDisplayLabel(item)
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="mcpServerIds" label="MCP 服务">
-            <Select
-              mode="multiple"
-              allowClear
-              options={mcpServers.map((item) => ({
-                value: item.id,
-                label: `${item.name || item.id} / ${item.transport}${item.enabled ? '' : ' / 已禁用'}`
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="capabilityIds" label="MCP 能力（Tool / Resource / Prompt）">
-            <Select
-              mode="multiple"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="可按业务能力细粒度限制本次执行可用范围"
-              options={mcpCapabilities.map((item) => ({
-                value: item.id,
-                label: `${item.displayName || item.name} / ${item.kind} / ${item.name}`
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="memoryIds" label="记忆（Memory）">
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="留空时由 workorch 自动召回工作空间记忆"
-              options={memoryItems.map((item) => ({
-                value: item.id,
-                label: `${item.memoryType}: ${item.summary}${item.vectorReady ? ` / vector:${item.vectorDimension ?? 0}` : ''}`
-              }))}
-            />
-          </Form.Item>
+              <Form.Item name={['llmTarget', 'providerId']} hidden initialValue="ai-proxy">
+                <Input />
+              </Form.Item>
+              <Form.Item name={['llmTarget', 'modelId']} hidden>
+                <Input />
+              </Form.Item>
+              <Form.Item name="reasoningEffort" label="推理强度" extra={selectedOption?.defaultReasoningEffort ? `模型默认：${selectedOption.defaultReasoningEffort}` : '留空时使用模型默认策略'}>
+                <Select
+                  allowClear
+                  placeholder="模型默认"
+                  disabled={!selectedOption?.reasoningSupported || !selectedOption?.reasoningValid}
+                  options={(selectedOption?.reasoningEfforts ?? []).map((effort) => ({ value: effort, label: effort }))}
+                />
+              </Form.Item>
+              <Form.Item name="soulId" label="下次 fresh activation 默认执行人格（Soul）">
+                <Select allowClear placeholder="继承工作空间默认执行人格" options={soulOptions} />
+              </Form.Item>
+              <Typography.Text type="secondary">下次 fresh activation 阶段执行人格</Typography.Text>
+              <div className="soul-binding-grid soul-binding-grid-compact">
+                {soulBindingStages.map((stage) => (
+                  <Form.Item key={stage} name={['soulBindings', stage]} label={soulBindingStageLabel(stage)}>
+                    <Select allowClear placeholder="继承工作空间配置" options={soulOptions} />
+                  </Form.Item>
+                ))}
+              </div>
+            </>
+          )}
           <Form.Item name="priority" label="运行队列优先级">
             <InputNumber style={{ width: '100%' }} placeholder="0 = 队列默认优先级" />
           </Form.Item>

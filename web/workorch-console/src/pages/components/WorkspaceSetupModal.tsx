@@ -301,12 +301,12 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: WorkspaceSetup
         <Form.Item name="setupMode" label="配置方式">
           <Select options={[{ value: 'manual', label: '手动填写 Goal / DoD' }, { value: 'smart', label: '智能生成 Goal / DoD' }]} />
         </Form.Item>
-        <Form.Item name="templateId" label="工作空间模板（Workspace Template）">
-          <Select allowClear placeholder="可选。选择后自动带入目标、验收标准和执行人格绑定" onChange={applyTemplate} options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
+        <Form.Item name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true, message: '请选择工作空间模板' }]}>
+          <Select placeholder="选择模板并带入目标、验收标准和执行人格绑定" onChange={applyTemplate} options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
         </Form.Item>
         <Form.Item name="title" label="标题" rules={[{ required: true }]}><Input placeholder="本地 workorch 工作空间" /></Form.Item>
         <Form.Item name="description" label="描述"><Input.TextArea rows={3} placeholder="描述工作空间目标、范围或当前交付预期" /></Form.Item>
-        <Form.Item name="deliverableDirectory" label="工作目录"><Input placeholder="留空时自动使用 .workorch-workspaces/工作空间 ID" /></Form.Item>
+        <Form.Item name="deliverableDirectory" label="工作目录" rules={[{ required: true, message: '请输入工作目录' }]}><Input placeholder="输入 Workspace 的交付目录" /></Form.Item>
       </Form>
       <div style={{ display: setupStep === workspaceSetupSmartDraftStep ? 'block' : 'none' }}>
         <ProCard title="智能草拟 Goal / DoD" className="workorch-section workspace-draft-card" extra={<Space size="small"><Tag color={workspaceSetupDraftStateColor(draftSession?.state)}>{workspaceSetupDraftStateLabel(draftSession?.state)}</Tag>{draftApplied ? <Tag color="green">已应用</Tag> : null}</Space>}>

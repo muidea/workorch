@@ -139,25 +139,26 @@ func (s *MCPServer) Model() (*mcpmodel.Server, error) {
 // CreateCapabilityCommand carries caller-owned capability configuration only.
 // The registry owner derives lifecycle state; callers submit configuration only.
 type CreateCapabilityCommand struct {
-	CapabilityID     common.MCPCapabilityID
-	ServerID         common.MCPServerID
-	Kind             string
-	Name             string
-	DisplayName      string
-	Description      string
-	Category         string
-	Tags             []string
-	UsageHint        string
-	InputSummary     string
-	OutputSummary    string
-	StageHints       []string
-	RiskLevel        string
-	EffectScope      string
-	IdempotencyClass string
-	Schema           workorcheventpayload.Payload
-	URI              string
-	Enabled          bool
-	ApprovalPolicy   string
+	CapabilityID                 common.MCPCapabilityID
+	ServerID                     common.MCPServerID
+	Kind                         string
+	Name                         string
+	DisplayName                  string
+	Description                  string
+	Category                     string
+	Tags                         []string
+	UsageHint                    string
+	InputSummary                 string
+	OutputSummary                string
+	StageHints                   []string
+	RiskLevel                    string
+	EffectScope                  string
+	IdempotencyClass             string
+	ValidationProofApplicability string
+	Schema                       workorcheventpayload.Payload
+	URI                          string
+	Enabled                      bool
+	ApprovalPolicy               string
 }
 
 type UpdateCapabilityCommand CreateCapabilityCommand

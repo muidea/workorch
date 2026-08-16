@@ -148,27 +148,35 @@ func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpevents.Creat
 	if displayName == "" {
 		displayName = strings.TrimSpace(cmd.Name)
 	}
+	proofApplicability := strings.TrimSpace(cmd.ValidationProofApplicability)
+	if proofApplicability == "" {
+		proofApplicability = mcpmodel.ValidationProofApplicabilityNotDeclared
+	}
+	if !mcpmodel.ValidValidationProofApplicability(proofApplicability) {
+		return nil, common.ErrInvalidArgument
+	}
 	return &mcpmodel.Capability{
-		ID:               id,
-		ServerID:         cmd.ServerID,
-		Kind:             strings.TrimSpace(cmd.Kind),
-		Name:             strings.TrimSpace(cmd.Name),
-		DisplayName:      displayName,
-		Description:      strings.TrimSpace(cmd.Description),
-		Category:         strings.TrimSpace(cmd.Category),
-		Tags:             compactStrings(cmd.Tags),
-		UsageHint:        strings.TrimSpace(cmd.UsageHint),
-		InputSummary:     strings.TrimSpace(cmd.InputSummary),
-		OutputSummary:    strings.TrimSpace(cmd.OutputSummary),
-		StageHints:       compactStrings(cmd.StageHints),
-		RiskLevel:        strings.TrimSpace(cmd.RiskLevel),
-		EffectScope:      strings.TrimSpace(cmd.EffectScope),
-		IdempotencyClass: strings.TrimSpace(cmd.IdempotencyClass),
-		Schema:           cmd.Schema.Clone(),
-		URI:              strings.TrimSpace(cmd.URI),
-		Enabled:          cmd.Enabled,
-		ApprovalPolicy:   strings.TrimSpace(cmd.ApprovalPolicy),
-		Status:           strings.TrimSpace(status),
+		ID:                           id,
+		ServerID:                     cmd.ServerID,
+		Kind:                         strings.TrimSpace(cmd.Kind),
+		Name:                         strings.TrimSpace(cmd.Name),
+		DisplayName:                  displayName,
+		Description:                  strings.TrimSpace(cmd.Description),
+		Category:                     strings.TrimSpace(cmd.Category),
+		Tags:                         compactStrings(cmd.Tags),
+		UsageHint:                    strings.TrimSpace(cmd.UsageHint),
+		InputSummary:                 strings.TrimSpace(cmd.InputSummary),
+		OutputSummary:                strings.TrimSpace(cmd.OutputSummary),
+		StageHints:                   compactStrings(cmd.StageHints),
+		RiskLevel:                    strings.TrimSpace(cmd.RiskLevel),
+		EffectScope:                  strings.TrimSpace(cmd.EffectScope),
+		IdempotencyClass:             strings.TrimSpace(cmd.IdempotencyClass),
+		ValidationProofApplicability: proofApplicability,
+		Schema:                       cmd.Schema.Clone(),
+		URI:                          strings.TrimSpace(cmd.URI),
+		Enabled:                      cmd.Enabled,
+		ApprovalPolicy:               strings.TrimSpace(cmd.ApprovalPolicy),
+		Status:                       strings.TrimSpace(status),
 	}, nil
 }
 
@@ -218,18 +226,19 @@ func defaultCapabilities(server *mcpmodel.Server) []*mcpmodel.Capability {
 func defaultCapability(server *mcpmodel.Server, kind string, name string, uri string) *mcpmodel.Capability {
 	displayName := defaultCapabilityDisplayName(kind, name)
 	ret := &mcpmodel.Capability{
-		ID:               DefaultCapabilityID(server.ID, kind, name),
-		ServerID:         server.ID,
-		Kind:             kind,
-		Name:             name,
-		DisplayName:      displayName,
-		URI:              uri,
-		Enabled:          server.Enabled,
-		ApprovalPolicy:   server.DefaultApprovalPolicy,
-		Status:           "draft",
-		RiskLevel:        "read_only",
-		EffectScope:      "unknown",
-		IdempotencyClass: "unknown",
+		ID:                           DefaultCapabilityID(server.ID, kind, name),
+		ServerID:                     server.ID,
+		Kind:                         kind,
+		Name:                         name,
+		DisplayName:                  displayName,
+		URI:                          uri,
+		Enabled:                      server.Enabled,
+		ApprovalPolicy:               server.DefaultApprovalPolicy,
+		Status:                       "draft",
+		RiskLevel:                    "read_only",
+		EffectScope:                  "unknown",
+		IdempotencyClass:             "unknown",
+		ValidationProofApplicability: mcpmodel.ValidationProofApplicabilityNotDeclared,
 	}
 	return ret
 }

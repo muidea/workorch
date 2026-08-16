@@ -1695,6 +1695,14 @@ func parseWorkspaceCreateArgs(value string) (workorchmanagementcontract.Workspac
 	if req.Title == "" {
 		return req, fmt.Errorf("workspace create requires a title")
 	}
+	req.TemplateID = strings.TrimSpace(req.TemplateID)
+	if req.TemplateID == "" {
+		return req, fmt.Errorf("workspace create requires --template <template-id>")
+	}
+	req.DeliverableDirectory = strings.TrimSpace(req.DeliverableDirectory)
+	if req.DeliverableDirectory == "" {
+		return req, fmt.Errorf("workspace create requires --dir <path>")
+	}
 	if req.Description == "" {
 		req.Description = req.Title
 	}
@@ -2526,7 +2534,7 @@ func (m *AppModel) syncMainViewportToCurrentContent() {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template <template-id> --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run resume    Resume active run\n  /run restart   Create a fresh activation\n  /exit          Quit"
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --template <template-id> --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run resume    Resume active run\n  /run restart   Create a fresh activation\n  /exit          Quit"
 	}
 	switch m.progress {
 	case progressSubmitting:

@@ -68,7 +68,7 @@ func TestMapRuntimeAuditPreservesValidationSurfaceReadinessWithoutExecutableInpu
 			ID: recipeID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
 			Readiness: runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
 			InputSchemaHash: "definition-schema", PrerequisiteRef: "mcp-validation-input/definition",
-			CheckRefs: []string{recipeID}, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			CheckRefs: []string{recipeID}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 		}},
 		ObservedRevision: "mcp-revision-v1",
 	}
@@ -86,6 +86,7 @@ func TestMapRuntimeAuditPreservesValidationSurfaceReadinessWithoutExecutableInpu
 	surface := audit.Grounding.OperationAdmissibilities[0].ValidationSurfaces[0]
 	if surface.ID != recipeID || surface.Readiness != string(runtimecontract.RuntimeValidationSurfacePrerequisiteRequired) ||
 		surface.ReadinessReason != "input_binding_required" || surface.PrerequisiteRef == "" || surface.InputBindingRef != "" ||
+		surface.ProofApplicability != string(runtimecontract.RuntimeValidationProofDirect) ||
 		surface.EffectScope != string(runtimecontract.RuntimeEffectNone) || surface.IdempotencyClass != string(runtimecontract.RuntimeOperationIdempotencySafeToReplay) {
 		t.Fatalf("validation readiness audit = %+v", surface)
 	}

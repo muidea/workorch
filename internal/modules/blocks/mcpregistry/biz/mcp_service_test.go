@@ -153,23 +153,32 @@ func TestServiceCreateAndFilterCapability(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create server: %v", err)
 	}
+	if _, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
+		ServerID:                     common.MCPServerID("mcp-capability"),
+		Kind:                         "tool",
+		Name:                         "invalid-proof-applicability",
+		ValidationProofApplicability: "inferred_from_name",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create capability with invalid proof applicability err = %v, want invalid argument", err)
+	}
 	created, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
-		ServerID:         common.MCPServerID("mcp-capability"),
-		Kind:             "resource",
-		Name:             "workspace://acceptance",
-		DisplayName:      "工作空间验收资料",
-		Category:         "验收",
-		StageHints:       []string{"validation", "acceptance"},
-		RiskLevel:        "read_only",
-		EffectScope:      "none",
-		IdempotencyClass: "safe_to_replay",
-		Enabled:          true,
-		OutputSummary:    "返回 DoD、Result、Artifact 和证据引用。",
+		ServerID:                     common.MCPServerID("mcp-capability"),
+		Kind:                         "resource",
+		Name:                         "workspace://acceptance",
+		DisplayName:                  "工作空间验收资料",
+		Category:                     "验收",
+		StageHints:                   []string{"validation", "acceptance"},
+		RiskLevel:                    "read_only",
+		EffectScope:                  "none",
+		IdempotencyClass:             "safe_to_replay",
+		ValidationProofApplicability: "auxiliary",
+		Enabled:                      true,
+		OutputSummary:                "返回 DoD、Result、Artifact 和证据引用。",
 	})
 	if err != nil {
 		t.Fatalf("create capability: %v", err)
 	}
-	if created.ID == "" || created.URI != "" || created.EffectScope != "none" || created.IdempotencyClass != "safe_to_replay" {
+	if created.ID == "" || created.URI != "" || created.EffectScope != "none" || created.IdempotencyClass != "safe_to_replay" || created.ValidationProofApplicability != "auxiliary" {
 		t.Fatalf("created capability = %+v, want generated id, explicit runtime metadata, and uri only when provided", created)
 	}
 	if created.Status != "draft" {
@@ -178,7 +187,7 @@ func TestServiceCreateAndFilterCapability(t *testing.T) {
 	update := mcpservice.UpdateCapabilityCommand(mcpservice.CreateCapabilityCommand{
 		CapabilityID: created.ID, ServerID: created.ServerID, Kind: created.Kind, Name: created.Name,
 		DisplayName: created.DisplayName, Category: created.Category, StageHints: created.StageHints,
-		RiskLevel: created.RiskLevel, EffectScope: created.EffectScope, IdempotencyClass: created.IdempotencyClass,
+		RiskLevel: created.RiskLevel, EffectScope: created.EffectScope, IdempotencyClass: created.IdempotencyClass, ValidationProofApplicability: created.ValidationProofApplicability,
 		Enabled: created.Enabled, OutputSummary: created.OutputSummary,
 	})
 	updated, err := service.UpdateCapability(ctx, update)

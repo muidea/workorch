@@ -62,7 +62,6 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 		return string(orderedServers[i].ID) < string(orderedServers[j].ID)
 	})
 	ids := make([]string, 0, len(orderedServers))
-	recipeRefs := make([]string, 0)
 	persisted := make([]mcpmodel.Server, 0, len(orderedServers))
 	serverAllowedTools := make(map[string]map[string]struct{}, len(orderedServers))
 	for _, server := range orderedServers {
@@ -144,14 +143,12 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 	for _, capability := range persistedCapabilities {
 		surface := runtimeMCPValidationSurface(capability)
 		surfaces = append(surfaces, surface)
-		if surface.Readiness == runtimecontract.RuntimeValidationSurfaceReady {
-			recipeRefs = append(recipeRefs, surface.ID)
-		}
 	}
-	sort.Strings(recipeRefs)
+	surfaces = runtimecontract.NormalizeRuntimeValidationSurfaces(surfaces)
+	recipeRefs := runtimecontract.RuntimeSelectableValidationRecipeRefs(surfaces)
 	return runtimeMCPAdmissibilitySnapshot{
 		ServerIDs: append([]string(nil), ids...), ValidationRecipes: recipeRefs,
-		ValidationSurfaces: runtimecontract.NormalizeRuntimeValidationSurfaces(surfaces),
+		ValidationSurfaces: surfaces,
 		Capabilities:       mcpmodel.CloneCapabilities(persistedCapabilities),
 		Revision:           "mcp-admissibility-" + hex.EncodeToString(sum[:])[:20],
 	}, nil
@@ -176,7 +173,11 @@ func runtimeMCPValidationSurface(capability *mcpmodel.Capability) runtimecontrac
 	}
 	surface := runtimecontract.RuntimeValidationSurface{
 		ID: recipeID, OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindMCPToolCall,
-		InputSchemaHash: schemaHash, CheckRefs: []string{recipeID}, EffectScope: effect, IdempotencyClass: idempotency,
+		InputSchemaHash: schemaHash, CheckRefs: []string{recipeID}, ProofApplicability: runtimecontract.RuntimeValidationProofNotDeclared,
+		EffectScope: effect, IdempotencyClass: idempotency,
+	}
+	if capability != nil {
+		surface.ProofApplicability = runtimecontract.RuntimeValidationProofApplicability(capability.ValidationProofApplicability)
 	}
 	switch {
 	case !runtimecontract.RuntimeEffectIsNonDurable(effect):

@@ -430,41 +430,25 @@ export type WorkspaceOutcome = {
   artifactRefs?: string[];
 };
 
+export type WorkspaceExecutionIntent = 'resume' | 'restart';
+
+export type WorkspaceExecutionIntentRequest = {
+  intent?: WorkspaceExecutionIntent;
+  requestId?: string;
+  reason?: string;
+  source?: string;
+  priority?: number;
+};
+
+// Form-only configuration for an explicit fresh activation. Model and Soul
+// values are persisted through their Workspace-owner APIs before the immutable
+// restart intent is submitted. Resume never consumes these fields.
 export type WorkspaceExecutionActivationRequest = {
-  runId?: string;
-  goalId?: string;
-  doDId?: string;
+  intent: WorkspaceExecutionIntent;
   llmTarget?: ProviderModelTarget;
   reasoningEffort?: string;
   soulId?: string;
   soulBindings?: Record<string, string>;
-  skillIds?: string[];
-  mcpServerIds?: string[];
-  capabilityIds?: string[];
-  memoryIds?: string[];
-  dialogLanguage?: string;
-  priority?: number;
-  // Resume is a strict continuation. Restart is an explicit, workspace-scoped
-  // fresh activation; it never targets the incompatible prior Run. Replan
-  // remains a Decision resolution intent and is not a workspace command.
-  intent?: 'resume' | 'restart';
-  requestId?: string;
-  reason?: string;
-  source?: string;
-  definitionRevision?: string;
-  decisionId?: string;
-};
-
-// The HTTP execution-activation ingress is intentionally smaller than the
-// activation form above.  Goal/DoD, model, Soul, skill, MCP and memory
-// selection are owner state and must be persisted through their owner APIs or
-// workspace template; only this immutable workspace intent crosses the
-// activation boundary.
-export type WorkspaceExecutionIntentRequest = {
-  intent?: 'resume' | 'restart';
-  requestId?: string;
-  reason?: string;
-  source?: string;
   priority?: number;
 };
 

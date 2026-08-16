@@ -34,6 +34,7 @@ func TestCLIMCPMappingPreservesFullContractAndDetachesCollections(t *testing.T) 
 	capability := workorchmanagementcontract.MCPCapability{
 		ID: "cap-a", ServerID: "mcp-a", Kind: "tool", Name: "tool-a", DisplayName: "Tool A",
 		Tags: []string{"safe"}, Schema: map[string]any{"type": "object", "required": []any{"input"}},
+		EffectScope: "none", IdempotencyClass: "safe_to_replay", ValidationProofApplicability: "direct",
 		Enabled: true, ApprovalPolicy: "required", Status: "ready",
 	}
 	capDTO, err := MCPCapabilityDTO(capability)

@@ -265,7 +265,8 @@ func runtimeAuditOperationAdmissibilities(values []runtimecontract.RuntimeOperat
 				Readiness: string(surface.Readiness), ReadinessReason: surface.ReadinessReason,
 				InputSchemaHash: surface.InputSchemaHash, InputBindingRef: surface.InputBindingRef,
 				PrerequisiteRef: surface.PrerequisiteRef, CheckRefs: append([]string(nil), surface.CheckRefs...),
-				EffectScope: string(surface.EffectScope), IdempotencyClass: string(surface.IdempotencyClass),
+				ProofApplicability: string(surface.ProofApplicability),
+				EffectScope:        string(surface.EffectScope), IdempotencyClass: string(surface.IdempotencyClass),
 			})
 		}
 		ret = append(ret, projectioncontract.RuntimeAuditOperationAdmissibility{

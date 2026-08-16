@@ -289,12 +289,12 @@ func TestRuntimeSemanticPlanDoesNotExposeMCPEffectToProvider(t *testing.T) {
 			ID: RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition"), OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
 			Readiness: RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
 			InputSchemaHash: "lsp-definition-schema", PrerequisiteRef: "lsp-definition-input",
-			CheckRefs: []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition")}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+			CheckRefs: []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition")}, ProofApplicability: RuntimeValidationProofDirect, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 		},
 		{
 			ID: RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status"), OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
 			Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "lsp-status-schema", InputBindingRef: "lsp-status-empty-input",
-			CheckRefs: []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+			CheckRefs: []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")}, ProofApplicability: RuntimeValidationProofDirect, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 		},
 	}
 	mcpCatalog.MCPCapabilities = []RuntimeMCPCapabilityContext{{

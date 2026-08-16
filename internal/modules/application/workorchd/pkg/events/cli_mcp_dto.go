@@ -27,24 +27,25 @@ type CLIMCPServerMutation struct {
 type CLIMCPServer CLIMCPServerMutation
 
 type CLIMCPCapability struct {
-	ID               string
-	ServerID         string
-	Kind             string
-	Name             string
-	DisplayName      string
-	Description      string
-	Category         string
-	Tags             []string
-	UsageHint        string
-	InputSummary     string
-	OutputSummary    string
-	StageHints       []string
-	RiskLevel        string
-	EffectScope      string
-	IdempotencyClass string
-	Schema           workorcheventpayload.Payload
-	URI              string
-	Enabled          bool
-	ApprovalPolicy   string
-	Status           string
+	ID                           string
+	ServerID                     string
+	Kind                         string
+	Name                         string
+	DisplayName                  string
+	Description                  string
+	Category                     string
+	Tags                         []string
+	UsageHint                    string
+	InputSummary                 string
+	OutputSummary                string
+	StageHints                   []string
+	RiskLevel                    string
+	EffectScope                  string
+	IdempotencyClass             string
+	ValidationProofApplicability string
+	Schema                       workorcheventpayload.Payload
+	URI                          string
+	Enabled                      bool
+	ApprovalPolicy               string
+	Status                       string
 }

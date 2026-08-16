@@ -303,6 +303,7 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item Runt
 	}
 	if source != nil {
 		declaration := source.Normalized()
+		focus.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), declaration.RequiredOwnerFacts...)
 		focus.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
 		focus.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
 	}
