@@ -61,6 +61,32 @@ func TestRuntimeAdapterPreflightValidationRecipesFiltersUnavailableCommandsWitho
 	}
 }
 
+func TestRuntimeAdapterPreflightValidationRecipesFiltersWorkspaceInapplicableGoTest(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	workspace := t.TempDir()
+	recipe := runtimemodel.RuntimeValidationRecipe{ID: "go-tests", Command: "go", Args: []string{"test", "-v", "./..."}}
+	withoutTests, err := NewRuntimeAdapter().PreflightRuntimeValidationRecipesForManifest(workspace, []runtimemodel.RuntimeValidationRecipe{recipe}, runtimemodel.WorkspaceManifest{
+		Revision: "tree-without-tests", TargetRefs: []string{"main.go"},
+	})
+	if err != nil {
+		t.Fatalf("preflight without tests: %v", err)
+	}
+	if len(withoutTests) != 0 {
+		t.Fatalf("workspace-inapplicable recipe was published: %+v", withoutTests)
+	}
+	withTests, err := NewRuntimeAdapter().PreflightRuntimeValidationRecipesForManifest(workspace, []runtimemodel.RuntimeValidationRecipe{recipe}, runtimemodel.WorkspaceManifest{
+		Revision: "tree-with-tests", TargetRefs: []string{"main.go", "main_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("preflight with tests: %v", err)
+	}
+	if len(withTests) != 1 || withTests[0].ID != recipe.ID {
+		t.Fatalf("workspace-applicable recipe was omitted: %+v", withTests)
+	}
+}
+
 func TestRuntimeAdapterProbeRejectsMissingGoTestTargetWithoutStartingProcess(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "marker"), []byte("unchanged\n"), 0o644); err != nil {

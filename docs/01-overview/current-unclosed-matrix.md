@@ -15,7 +15,7 @@ Last Verified: 2026-08-16
 
 | ID | 状态 | 范围 | Exit |
 | --- | --- | --- | --- |
-| RUNTIME-LIVE | open / deployed-only | fresh development data、真实 provider、Runtime persisted chain | semantic seal、CandidateAttempt、SealedDispatch、owner receipt、binding-matched evidence、existing-target revision-bound replacement、后续 eligible CWI、sealed terminal 与 `Result -> Workspace -> Run` delivery 全部成立 |
+| RUNTIME-LIVE | open / deployed-only | fresh development data、真实 provider、Runtime persisted chain | semantic seal、CandidateAttempt、SealedDispatch、owner receipt、binding-matched evidence、existing-target revision-bound replacement、manifest-bound recipe applicability、后续 eligible CWI、authoritative closeout、sealed terminal 与 `Result -> Workspace -> Run` delivery 全部成立 |
 | WRE-LIVE | open / deployed-only | Workspace model/reasoning selection | Web/TUI、Resume sealed selection、Restart fresh selection、active configuration restartRequired、双 Workspace 隔离全部成立 |
 
 实施文档：
@@ -32,6 +32,8 @@ Last Verified: 2026-08-16
 - Definition declaration/generation、eligible CWI closure、semantic order/batch/seal identity；
 - single CandidateEvaluator、attempt 0/1、owner feasibility orthogonality；
 - File create-only write 与 revision-bound existing-target replacement；
+- File manifest-bound Shell recipe applicability、空 recipe semantic filtering 与 exact tree-revision invalidation；
+- Result closeout 仅保留 current unsatisfied canonical gap，当前 `Facts.Failure` 优先于历史 claimed gap；
 - provider ceiling / ExpectedDocument equality、whole-document recovery、C0～C5 stable prefix；
 - duplicate/stale/restart/partial-CAS/response-loss/budget/guard；
 - Result/Workspace/Run terminal delivery order和 projection non-authority。

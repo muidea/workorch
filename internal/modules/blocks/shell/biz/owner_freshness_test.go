@@ -236,6 +236,7 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 			{ID: "confirmed", Command: "sh", Args: []string{"-c", "true"}},
 			{ID: "unavailable", Command: "workorch-command-that-does-not-exist", Args: []string{"check"}},
 		},
+		WorkspaceManifestBinding: shellTestWorkspaceManifestBinding("tree-shell", []string{"validation.txt"}),
 	}
 	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 	if result == nil {
@@ -260,6 +261,29 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	}
 	if response.Acquisition.Observation.ContentHash != response.Acquisition.Admissibility.SnapshotID {
 		t.Fatalf("owner observation does not bind recipe inventory: %+v", response)
+	}
+	foundWorkspaceTree := false
+	for _, dependency := range response.Acquisition.Observation.Dependencies {
+		if dependency.Domain == runtimecontract.RuntimeResourceWorkspaceTree && dependency.OwnerModuleID == runtimecontract.RuntimeModuleFile && dependency.Revision == "tree-shell" {
+			foundWorkspaceTree = true
+		}
+	}
+	if !foundWorkspaceTree {
+		t.Fatalf("owner observation omitted File workspace-tree dependency: %+v", response.Acquisition.Observation)
+	}
+}
+
+func shellTestWorkspaceManifestBinding(revision string, targetRefs []string) runtimecontract.RuntimeWorkspaceManifestBinding {
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: "manifest-shell", Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		ContentHash: revision, Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: revision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return runtimecontract.RuntimeWorkspaceManifestBinding{
+		Manifest: runtimecontract.WorkspaceManifest{Revision: revision, TargetRefs: append([]string(nil), targetRefs...)}, Observation: observation,
 	}
 }
 

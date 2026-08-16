@@ -26,6 +26,7 @@ type PrerequisiteResult struct {
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
 	normalizedRequirements := normalizeRuntimeRequirements(requirements)
+	normalizedRequirements = runtimeRequirementsWithShellValidationManifest(facts, normalizedRequirements)
 	pending := make([]runtimecontract.RuntimePrerequisite, 0, len(normalizedRequirements))
 	reacquiring := make(map[string]struct{})
 	for _, requirement := range normalizedRequirements {
@@ -90,6 +91,43 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 	}
 	facts.Prerequisites.Pending = pending
 	return facts.Normalized()
+}
+
+// runtimeRequirementsWithShellValidationManifest seals the resource
+// dependency implied by a declared managed-validation recipe.  The rule is
+// owner-neutral orchestration: File still owns the manifest and Shell still
+// decides recipe applicability.  SM-2 only ensures the immutable File fact is
+// acquired before asking Shell for a workspace-sensitive catalog.
+func runtimeRequirementsWithShellValidationManifest(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) []runtimecontract.RuntimeRequirement {
+	if len(runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(facts.Activation.EvidencePolicies)) == 0 {
+		return requirements
+	}
+	requiresManifest := false
+	for _, requirement := range requirements {
+		if requirement.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility &&
+			requirement.OwnerModuleID == runtimecontract.RuntimeModuleShell &&
+			runtimeRequirementKindsContain(requirement.RequiredCapabilities, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			requiresManifest = true
+			break
+		}
+	}
+	if !requiresManifest {
+		return requirements
+	}
+	return normalizeRuntimeRequirements(append(append([]runtimecontract.RuntimeRequirement(nil), requirements...), runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		Reason: "Shell managed-validation admissibility requires File workspace manifest",
+	}))
+}
+
+func runtimeRequirementKindsContain(values []string, wanted string) bool {
+	wanted = runtimecontract.CanonicalRuntimeBlockKind(wanted)
+	for _, value := range values {
+		if runtimecontract.CanonicalRuntimeBlockKind(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // runtimeTargetGroundingRequirements translates a sealed focus declaration

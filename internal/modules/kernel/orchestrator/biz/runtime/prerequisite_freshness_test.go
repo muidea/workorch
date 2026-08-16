@@ -1434,6 +1434,44 @@ func TestGitAdmissibilityReadOnlyStaleRetiresOnlyGitInventory(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTreeChangeInvalidatesManifestBoundShellValidationCatalog(t *testing.T) {
+	shellPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "operation_admissibility:shell-managed", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	shellInventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: shellPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds:    []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "go-test", Command: "go", Args: []string{"test", "./..."}}},
+		ObservedRevision:  "shell-policy-v1",
+	}
+	shellInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellInventory)
+	shellObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: shellPrerequisite.ID, Kind: shellPrerequisite.Kind, OwnerModuleID: shellPrerequisite.OwnerModuleID, ContentHash: shellInventory.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{
+			{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", Revision: "shell-policy-v1"},
+			{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"},
+		},
+	}
+	shellObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(shellObservation)
+	facts := runtimecontract.RuntimeFacts{
+		Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{shellPrerequisite}},
+		Resources: runtimecontract.RuntimeResourceFacts{
+			OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{shellInventory},
+			PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{shellObservation},
+		},
+	}
+	updated, prerequisiteIDs, observationIDs, _, err := invalidatePrerequisiteObservationsForChanges(facts, []runtimecontract.RuntimeResourceChange{{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
+	}})
+	if err != nil || len(prerequisiteIDs) != 1 || prerequisiteIDs[0] != shellPrerequisite.ID || len(observationIDs) != 1 || observationIDs[0] != shellObservation.ObservationID ||
+		len(updated.Prerequisites.Satisfied) != 0 || len(updated.Prerequisites.Pending) != 1 || updated.Prerequisites.Pending[0].ID != shellPrerequisite.ID ||
+		len(updated.Resources.OperationAdmissibilities) != 0 || len(updated.Resources.PrerequisiteObservations) != 0 {
+		t.Fatalf("manifest-bound Shell catalog survived File tree revision change: facts=%+v prerequisites=%v observations=%v err=%v", updated, prerequisiteIDs, observationIDs, err)
+	}
+}
+
 func TestFileTargetChangeDoesNotInvalidateGitAdmissibilityObservation(t *testing.T) {
 	fileInventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:file", OwnerModuleID: runtimecontract.RuntimeModuleFile,

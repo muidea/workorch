@@ -81,6 +81,8 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 		semanticTestOwnerCatalog("file-catalog", RuntimeModuleFile, []string{StepKindFileWrite}),
 		semanticTestOwnerCatalog("shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession}),
 	}
+	catalogs[1].ValidationRecipes = []RuntimeValidationRecipe{{ID: "recipe/current-validation", Command: "go", Args: []string{"test", "./..."}}}
+	catalogs[1].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalogs[1])
 	catalogs[0].SelectorRefs = []string{"file/workspace-relative-create"}
 	catalogs[0].ConstraintRefs = []string{"workspace-relative-path"}
 	catalogs[0].OperationVariants = []RuntimeOperationAdmissibilityVariant{{
@@ -106,6 +108,19 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 	}
 	if !containsSemanticTargetPolicy(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyProspectiveOwnerTarget) {
 		t.Fatalf("file/write did not expose prospective owner target: %v", manifest.AllowedTargetPolicies)
+	}
+	withoutApplicableRecipe := append([]RuntimeOperationAdmissibility(nil), catalogs...)
+	withoutApplicableRecipe[1].ValidationRecipeRefs = nil
+	withoutApplicableRecipe[1].ValidationRecipes = nil
+	withoutApplicableRecipe[1].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(withoutApplicableRecipe[1])
+	manifest, err = CompileRuntimeSemanticPlanManifest("ws-1", "run-1", definition, seed, activation.ExecutionContract, withoutApplicableRecipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.AllowedOperationKinds) != 1 || manifest.AllowedOperationKinds[0] != StepKindFileWrite ||
+		len(manifest.AllowedOwnerModuleIDs) != 1 || manifest.AllowedOwnerModuleIDs[0] != RuntimeModuleFile ||
+		len(manifest.OwnerCatalogs) != 1 || manifest.OwnerCatalogs[0].OwnerModuleID != RuntimeModuleFile {
+		t.Fatalf("recipe-less managed validation remained provider-selectable: %+v", manifest)
 	}
 
 	withoutCreate := definition

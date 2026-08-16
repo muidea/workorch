@@ -44,10 +44,31 @@ fresh activation
 3. 当已存在目标被重新打开时，semantic/operations candidate 使用 owner catalog 中合法的 revision-bound
    `file/edit` 或 `patch/apply` replacement，不再选择 create-only `file/write`；
 4. replacement 成功后继续推进至少一个后续 eligible CWI，不能把“正确 fail-closed”当成持续收敛；
+   validation-preparation 遇到无当前适用 recipe 时必须选择 profile 允许且 owner-confirmed 的 File preparation，不能先向
+   provider 暴露不可行 recipe、任意 shell command 或重复相同 semantic shape；
 5. duplicate/stale/restart/recovery 不产生第二次 provider session、dispatch、durable effect、evidence credit 或
    terminal delivery；
 6. revision 与 progress signature 有界推进，不出现无事实变化的 authority、candidate 或 drive 循环；
 7. terminal delivery 严格按 `Result -> Workspace -> Run` 完成，投影/SSE 只展示已持久化事实。
+
+## 最新反例后的 code closure
+
+已部署构建 `58b20ec8` 的最新核对已经证明 existing-target replacement、owner receipt/evidence、CWI 026～028 推进和三段 terminal
+delivery 顺序成立；最早未收敛点是后续 validation-preparation CWI：静态 catalog 宣告了对当前 workspace 无实际测试
+输入的 `go test` recipe，semantic feasibility 随后才返回 `validation_recipe_unavailable`。同一失败结果还暴露了
+terminal closeout 把已满足 CWI 的 producer claimed gap 排在当前失败之前。
+
+当前 workspace 已完成对应 code/automated closure：
+
+- SM-2 先取得 File manifest/observation，再以强类型 immutable binding 请求 Shell admissibility；
+- Shell 只发布对该 manifest 当前适用的 recipe，并把 exact File tree revision 写入 freshness dependency；
+- semantic-plan manifest 在 recipe set 为空时移除 `validation/managed_session`，`validation_preparation` 的 fallback 只保留
+  File-owned `file/write` / `patch/apply`，不允许任意 `shell/command`；
+- SM-4 Result closeout 只保留当前 unsatisfied CWI 的 canonical gap，并以当前 `Facts.Failure` 为 top failure；
+- contract、owner preflight、SM-2 prerequisite ordering/idempotency、resource-change stale intersection 与 terminal
+  projection 均有定向回归。
+
+这些修改仍需部署后使用 fresh data 重新证明后续 CWI 和完整 live terminal；本节不关闭 SO-MC-LIVE。
 
 ## 执行前提
 

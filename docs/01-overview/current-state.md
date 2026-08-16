@@ -57,6 +57,10 @@ Application builds typed RuntimeBootstrap
 - Candidate document 只进入一个 evaluator；complete rejection 只有 attempt 0 和可证明的同合同 attempt 1。
 - `file/write` 是 create-only、`prospective_owner_target`。已有目标必须使用 owner catalog 中合法且绑定当前
   revision/baseHash 的 `file/edit` 或 `patch/apply` replacement。
+- workspace-sensitive validation catalog 由 SM-2 先绑定 File manifest revision，再由 Shell owner 过滤当前适用 recipe；
+  空 recipe set 不向 semantic provider 暴露 `validation/managed_session`，后续 File tree effect 会精确退休该 catalog。
+- terminal closeout 只汇总当前 unsatisfied CWI 的 canonical gap，top failure 以当前 `Facts.Failure` 为先；已满足 CWI 的
+  producer claimed gap 只属于 assessment audit。
 - raw candidate CWI、assessment claim、文件存在、Git revision、exit 0 和非空 `PassedChecks` 都不是 credit authority。
 
 ## Restart And Development Baseline

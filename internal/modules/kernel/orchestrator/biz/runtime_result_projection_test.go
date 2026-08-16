@@ -1479,6 +1479,57 @@ func TestRuntimeResultProjectionBuildsStructuredRejectedCloseout(t *testing.T) {
 	}
 }
 
+func TestRuntimeResultProjectionExcludesSettledClaimedGapFromTerminalFailure(t *testing.T) {
+	aggregate := runtime.RuntimeAggregate{
+		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		Facts: runtimecontract.RuntimeFacts{
+			Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
+			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1",
+			Focus: runtimecontract.CoverageFocus{ID: "focus-cwi-029", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-029"}},
+			Coverage: []runtimecontract.RuntimeCoverageItemFact{
+				{ID: "cwi-026", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"ev-cwi-026"}},
+				{ID: "cwi-029", State: runtimecontract.RuntimeCoverageItemStateUnsatisfied},
+			},
+			Assessments: []runtimecontract.RuntimeAssessmentFact{{
+				ID: "assessment-cwi-026", FocusID: "focus-cwi-026", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-026"},
+				ClaimedDisposition: runtimecontract.AssessmentDispositionRepairableGap,
+				Disposition:        runtimecontract.AssessmentDispositionSatisfied,
+				Gap: &runtimecontract.RuntimeAssessmentGap{
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-026"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+					TargetRefs: []string{"mcp-lsp-bridge/server.go"}, Reason: "historical claimed gap", FailureCode: "historical_implementation_gap", FailureSignature: "cwi-026-gap",
+				},
+			}},
+			Failure: &runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassCandidateInfeasible, Code: "validation_recipe_unavailable", Signature: "cwi-029-validation-recipe-unavailable", Message: "no current validation recipe",
+			},
+		},
+		Decision: runtimecontract.RuntimeDecision{
+			State: runtimecontract.ConvergenceStateFailed, AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-93"},
+			Terminal: &runtimecontract.RuntimeTerminalDecision{Code: "semantic_contract_failed", Summary: "semantic feasibility exhausted"},
+		},
+	}
+	closeout := runtimeResultMaterialFromAggregate(aggregate).RuntimeCloseout
+	if closeout == nil || closeout.FailureClass != runtimecontract.FailureClassCandidateInfeasible || closeout.FailureCode != "validation_recipe_unavailable" || closeout.FailureSignature != "cwi-029-validation-recipe-unavailable" {
+		t.Fatalf("terminal failure did not use current authority: %+v", closeout)
+	}
+	if len(closeout.Gaps) != 0 || len(closeout.MissingEvidenceKinds) != 0 || containsRuntimeResultString(closeout.TargetRefs, "mcp-lsp-bridge/server.go") {
+		t.Fatalf("settled claimed gap leaked into terminal closeout: %+v", closeout)
+	}
+	if len(closeout.SatisfiedCoverageWorkItemIDs) != 1 || closeout.SatisfiedCoverageWorkItemIDs[0] != "cwi-026" ||
+		len(closeout.UnsatisfiedCoverageWorkItemIDs) != 1 || closeout.UnsatisfiedCoverageWorkItemIDs[0] != "cwi-029" {
+		t.Fatalf("terminal coverage = satisfied %v unsatisfied %v", closeout.SatisfiedCoverageWorkItemIDs, closeout.UnsatisfiedCoverageWorkItemIDs)
+	}
+}
+
+func containsRuntimeResultString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeResultProjectionPackagesLedgerEvidenceBeforeAssessment(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
 		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},

@@ -34,10 +34,11 @@ func TestRuntimeSemanticPrerequisitePathPublishesFileCatalogBeforeShellValidatio
 	pending := []runtimecontract.RuntimePrerequisite{
 		{ID: "shell-admissibility", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell},
 		{ID: "file-admissibility", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile},
+		{ID: "file-manifest", Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile},
 	}
 	ordered := runtimeOrderedPrerequisites(pending)
-	if len(ordered) != 2 || ordered[0].OwnerModuleID != runtimecontract.RuntimeModuleFile || ordered[1].OwnerModuleID != runtimecontract.RuntimeModuleShell {
-		t.Fatalf("semantic prerequisite order = %+v, want File catalog before Shell validation inventory", ordered)
+	if len(ordered) != 3 || ordered[0].Kind != runtimecontract.PrerequisiteKindManifest || ordered[1].OwnerModuleID != runtimecontract.RuntimeModuleFile || ordered[2].OwnerModuleID != runtimecontract.RuntimeModuleShell {
+		t.Fatalf("semantic prerequisite order = %+v, want File manifest/catalog before Shell validation inventory", ordered)
 	}
 }
 

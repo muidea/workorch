@@ -303,6 +303,36 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		}
 		sealedCatalogs = append(sealedCatalogs, catalog)
 	}
+	// Owner catalogs retain every activation-sealed kind so their immutable
+	// snapshot identity can be replayed and probed.  The provider-visible
+	// vocabulary is narrower: an operation that structurally requires a
+	// currently applicable owner fact must not be offered when that fact is
+	// absent.  In particular, a managed-validation session without a confirmed
+	// recipe is not a speculative action for semantic planning.
+	selectableKinds := make([]string, 0, len(kinds))
+	selectableOwnerSet := make(map[string]struct{}, len(owners))
+	for _, kind := range kinds {
+		descriptor, _ := RuntimeOperationDescriptorForKind(kind)
+		catalog := catalogByOwner[descriptor.OwnerModuleID]
+		if !runtimeSemanticOperationCurrentlySelectable(kind, catalog) {
+			continue
+		}
+		selectableKinds = append(selectableKinds, kind)
+		selectableOwnerSet[descriptor.OwnerModuleID] = struct{}{}
+	}
+	if len(selectableKinds) == 0 {
+		return RuntimeSemanticPlanManifest{}, fmt.Errorf("runtime semantic manifest has no currently selectable owner operation")
+	}
+	selectableOwners := make([]string, 0, len(selectableOwnerSet))
+	selectableCatalogs := make([]RuntimeOperationAdmissibility, 0, len(selectableOwnerSet))
+	for _, owner := range owners {
+		if _, selectable := selectableOwnerSet[owner]; !selectable {
+			continue
+		}
+		selectableOwners = append(selectableOwners, owner)
+		selectableCatalogs = append(selectableCatalogs, catalogByOwner[owner])
+	}
+	owners, kinds, sealedCatalogs = selectableOwners, selectableKinds, selectableCatalogs
 	// Prospective target authority is an owner fact, not a technical descriptor
 	// property. Compute the global policy vocabulary only after every owner
 	// catalog has been sealed, and retain the narrower kind/variant facts in the
@@ -362,6 +392,15 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	return manifest, nil
+}
+
+func runtimeSemanticOperationCurrentlySelectable(kind string, catalog RuntimeOperationAdmissibility) bool {
+	kind = CanonicalRuntimeBlockKind(kind)
+	catalog = catalog.Normalized()
+	if kind == RuntimeBlockKindManagedValidationSession {
+		return len(catalog.ValidationRecipes) != 0
+	}
+	return true
 }
 
 func runtimeSemanticCatalogVariantIDs(catalog RuntimeOperationAdmissibility, kind string) []string {

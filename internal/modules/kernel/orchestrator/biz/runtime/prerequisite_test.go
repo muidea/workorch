@@ -568,6 +568,43 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 	}
 }
 
+func TestPreflightRuntimeFactsDerivesFileManifestForShellManagedValidation(t *testing.T) {
+	facts := validationFacts()
+	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{
+		ID: "go-test", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go",
+		RecipeDeclared: true, RecipeArgs: []string{"test", "./..."}, RecipeTimeoutMillis: 30000,
+	}}
+	requirements := []runtimecontract.RuntimeRequirement{{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}}
+	prepared := PreflightRuntimeFacts(facts, requirements)
+	if len(prepared.Prerequisites.Pending) != 2 || !runtimePrerequisitesContainKindOwner(prepared.Prerequisites.Pending, runtimecontract.PrerequisiteKindManifest, runtimecontract.RuntimeModuleFile) ||
+		!runtimePrerequisitesContainKindOwner(prepared.Prerequisites.Pending, runtimecontract.PrerequisiteKindOperationAdmissibility, runtimecontract.RuntimeModuleShell) {
+		t.Fatalf("Shell validation prerequisite dependency = %+v", prepared.Prerequisites.Pending)
+	}
+	idempotent := PreflightRuntimeFacts(prepared, requirements)
+	if len(idempotent.Prerequisites.Pending) != 2 {
+		t.Fatalf("derived manifest prerequisite duplicated on re-drive: %+v", idempotent.Prerequisites.Pending)
+	}
+
+	withoutRecipe := facts
+	withoutRecipe.Activation.EvidencePolicies = nil
+	plain := PreflightRuntimeFacts(withoutRecipe, requirements)
+	if len(plain.Prerequisites.Pending) != 1 || plain.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
+		t.Fatalf("recipe-independent Shell catalog acquired unrelated File manifest: %+v", plain.Prerequisites.Pending)
+	}
+}
+
+func runtimePrerequisitesContainKindOwner(values []runtimecontract.RuntimePrerequisite, kind runtimecontract.PrerequisiteKind, owner string) bool {
+	for _, value := range values {
+		if value.Kind == kind && value.OwnerModuleID == owner {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},

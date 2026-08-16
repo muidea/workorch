@@ -267,9 +267,12 @@ func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, accepted bool, ev
 	// Assessment facts remain audit evidence and gap lineage, never a replacement
 	// for item state.
 	accumulator.collectCoverage(aggregate.Facts.Coverage)
-	accumulator.collectAssessments(&closeout, aggregate.Facts.Assessments, accepted)
 	// Open coverage items without satisfied assessment remain unsatisfied on reject/complete residual.
 	accumulator.collectOpenCoverage(aggregate.Facts.Focus, aggregate.Facts.RemainingFocuses)
+	accumulator.collectAssessments(aggregate.Facts.Assessments, accepted)
+	if !accepted {
+		accumulator.collectActiveGap(aggregate.Facts.Repair.ActiveGap)
+	}
 	accumulator.apply(&closeout)
 	if !accepted {
 		accumulator.applyTerminalFailure(&closeout, aggregate)
@@ -308,11 +311,20 @@ func (a *runtimeCloseoutAccumulator) collectCoverage(items []runtimecontract.Run
 	}
 }
 
-func (a *runtimeCloseoutAccumulator) collectAssessments(closeout *runtimecontract.RuntimeResultCloseout, facts []runtimecontract.RuntimeAssessmentFact, accepted bool) {
+func (a *runtimeCloseoutAccumulator) collectAssessments(facts []runtimecontract.RuntimeAssessmentFact, accepted bool) {
 	for _, fact := range facts {
+		current := a.coverageCurrentlyUnsatisfied(fact.CoverageWorkItemIDs)
+		if !current && fact.Gap != nil {
+			current = a.coverageCurrentlyUnsatisfied(fact.Gap.CoverageWorkItemIDs)
+		}
+		if !current {
+			continue
+		}
 		a.collectAssessmentDisposition(fact.Disposition, accepted)
-		if fact.Gap != nil {
-			a.collectAssessmentGap(closeout, fact.Gap.Normalized())
+		if fact.Gap != nil && runtimeAssessmentDispositionCarriesGap(fact.Disposition) {
+			if gap, current := a.currentGap(fact.Gap.Normalized()); current {
+				a.collectAssessmentGap(gap)
+			}
 		}
 	}
 }
@@ -329,7 +341,7 @@ func (a *runtimeCloseoutAccumulator) collectAssessmentDisposition(disposition ru
 	}
 }
 
-func (a *runtimeCloseoutAccumulator) collectAssessmentGap(closeout *runtimecontract.RuntimeResultCloseout, gap runtimecontract.RuntimeAssessmentGap) {
+func (a *runtimeCloseoutAccumulator) collectAssessmentGap(gap runtimecontract.RuntimeAssessmentGap) {
 	a.gaps = append(a.gaps, gap)
 	for _, kind := range gap.MissingEvidenceKinds {
 		a.missing[kind] = struct{}{}
@@ -337,8 +349,53 @@ func (a *runtimeCloseoutAccumulator) collectAssessmentGap(closeout *runtimecontr
 	for _, ref := range gap.TargetRefs {
 		a.targets[ref] = struct{}{}
 	}
-	if closeout.FailureClass == "" {
-		closeout.FailureClass, closeout.FailureCode, closeout.FailureSignature = gap.FailureClass, gap.FailureCode, gap.FailureSignature
+}
+
+func (a *runtimeCloseoutAccumulator) collectActiveGap(gap *runtimecontract.RuntimeAssessmentGap) {
+	if gap == nil || len(a.gaps) != 0 {
+		return
+	}
+	if current, ok := a.currentGap(gap.Normalized()); ok {
+		a.collectAssessmentGap(current)
+	}
+}
+
+func (a *runtimeCloseoutAccumulator) currentGap(gap runtimecontract.RuntimeAssessmentGap) (runtimecontract.RuntimeAssessmentGap, bool) {
+	ids := make([]common.CoverageWorkItemID, 0, len(gap.CoverageWorkItemIDs))
+	for _, id := range gap.CoverageWorkItemIDs {
+		if a.coverageItemCurrentlyUnsatisfied(id) {
+			ids = append(ids, id)
+		}
+	}
+	gap.CoverageWorkItemIDs = ids
+	return gap.Normalized(), len(ids) != 0
+}
+
+func (a *runtimeCloseoutAccumulator) coverageCurrentlyUnsatisfied(ids []common.CoverageWorkItemID) bool {
+	for _, id := range ids {
+		if a.coverageItemCurrentlyUnsatisfied(id) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *runtimeCloseoutAccumulator) coverageItemCurrentlyUnsatisfied(id common.CoverageWorkItemID) bool {
+	if _, satisfied := a.satisfied[id]; satisfied {
+		return false
+	}
+	_, unsatisfied := a.unsatisfied[id]
+	return unsatisfied
+}
+
+func runtimeAssessmentDispositionCarriesGap(disposition runtimecontract.AssessmentDisposition) bool {
+	switch disposition.Normalized() {
+	case runtimecontract.AssessmentDispositionRepairableGap,
+		runtimecontract.AssessmentDispositionGovernanceRequired,
+		runtimecontract.AssessmentDispositionTerminalRejection:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -372,6 +429,12 @@ func (a *runtimeCloseoutAccumulator) apply(closeout *runtimecontract.RuntimeResu
 func (a *runtimeCloseoutAccumulator) applyTerminalFailure(closeout *runtimecontract.RuntimeResultCloseout, aggregate runtime.RuntimeAggregate) {
 	if aggregate.Facts.Failure != nil {
 		a.applyFailureFact(closeout, aggregate.Facts.Failure)
+	} else if aggregate.Facts.Repair.ActiveGap != nil {
+		if gap, current := a.currentGap(aggregate.Facts.Repair.ActiveGap.Normalized()); current {
+			a.applyGapFailure(closeout, gap)
+		}
+	} else if len(closeout.Gaps) != 0 {
+		a.applyGapFailure(closeout, closeout.Gaps[0])
 	}
 	if closeout.FailureCode == "" && aggregate.Decision.Terminal != nil {
 		closeout.FailureCode = strings.TrimSpace(aggregate.Decision.Terminal.Code)
@@ -379,25 +442,35 @@ func (a *runtimeCloseoutAccumulator) applyTerminalFailure(closeout *runtimecontr
 	if closeout.FailureSignature == "" && aggregate.Facts.Repair.LastCycleID != "" {
 		closeout.FailureSignature = aggregate.Facts.Repair.LastCycleID
 	}
-	if aggregate.Facts.Repair.ActiveGap != nil && len(closeout.Gaps) == 0 {
-		closeout.Gaps = []runtimecontract.RuntimeAssessmentGap{aggregate.Facts.Repair.ActiveGap.Normalized()}
-	}
 }
 
 func (a *runtimeCloseoutAccumulator) applyFailureFact(closeout *runtimecontract.RuntimeResultCloseout, failure *runtimecontract.FailureFact) {
-	if closeout.FailureClass == "" {
+	if failure.Class != "" {
 		closeout.FailureClass = failure.Class
 	}
-	if closeout.FailureCode == "" {
+	if strings.TrimSpace(failure.Code) != "" {
 		closeout.FailureCode = strings.TrimSpace(failure.Code)
 	}
-	if closeout.FailureSignature == "" {
+	if strings.TrimSpace(failure.Signature) != "" {
 		closeout.FailureSignature = strings.TrimSpace(failure.Signature)
 	}
 	for _, ref := range failure.TargetRefs {
 		a.targets[ref] = struct{}{}
 	}
 	closeout.TargetRefs = stringsFromSet(a.targets)
+}
+
+func (a *runtimeCloseoutAccumulator) applyGapFailure(closeout *runtimecontract.RuntimeResultCloseout, gap runtimecontract.RuntimeAssessmentGap) {
+	gap = gap.Normalized()
+	if closeout.FailureClass == "" {
+		closeout.FailureClass = gap.FailureClass
+	}
+	if closeout.FailureCode == "" {
+		closeout.FailureCode = gap.FailureCode
+	}
+	if closeout.FailureSignature == "" {
+		closeout.FailureSignature = gap.FailureSignature
+	}
 }
 
 func runtimeOperationCloseouts(aggregate runtime.RuntimeAggregate) []runtimecontract.RuntimeOperationCloseout {

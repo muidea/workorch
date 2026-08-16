@@ -20,8 +20,58 @@ type RuntimeOperationAdmissibilityRequest struct {
 	RequiredKinds                 []string
 	RequiredTargetRefs            []string
 	ValidationRecipes             []RuntimeValidationRecipe
-	CapabilityStateBinding        string
-	MaxItems                      int
+	// WorkspaceManifestBinding is the current File-owner fact used by a
+	// capability owner whose admissibility depends on workspace contents.  It
+	// is immutable request context, not a second workspace observation: the
+	// receiver must copy its exact workspace-tree revision into the returned
+	// freshness dependencies instead of inventing another File revision.
+	WorkspaceManifestBinding RuntimeWorkspaceManifestBinding
+	CapabilityStateBinding   string
+	MaxItems                 int
+}
+
+// RuntimeWorkspaceManifestBinding couples the current File-owner manifest to
+// its persisted prerequisite observation.  The DTO is owner-neutral and pure;
+// it grants no operation authority and performs no filesystem acquisition.
+type RuntimeWorkspaceManifestBinding struct {
+	Manifest    WorkspaceManifest
+	Observation RuntimePrerequisiteObservation
+}
+
+func (b RuntimeWorkspaceManifestBinding) Empty() bool {
+	return strings.TrimSpace(b.Manifest.Revision) == "" && strings.TrimSpace(b.Observation.ObservationID) == ""
+}
+
+func (b RuntimeWorkspaceManifestBinding) Normalized() RuntimeWorkspaceManifestBinding {
+	b.Manifest.Revision = strings.TrimSpace(b.Manifest.Revision)
+	b.Manifest.TargetRefs = normalizeStrings(b.Manifest.TargetRefs)
+	b.Observation = b.Observation.Normalized()
+	return b
+}
+
+func (b RuntimeWorkspaceManifestBinding) Clone() RuntimeWorkspaceManifestBinding {
+	b = b.Normalized()
+	b.Manifest.TargetRefs = append([]string(nil), b.Manifest.TargetRefs...)
+	b.Observation.Dependencies = append([]RuntimeFreshnessDependency(nil), b.Observation.Dependencies...)
+	return b
+}
+
+func (b RuntimeWorkspaceManifestBinding) Validate() error {
+	b = b.Normalized()
+	if b.Manifest.Revision == "" || b.Observation.PrerequisiteID == "" || b.Observation.ObservationID == "" {
+		return fmt.Errorf("runtime workspace manifest binding requires manifest and observation identity")
+	}
+	if b.Observation.Kind != PrerequisiteKindManifest || b.Observation.OwnerModuleID != RuntimeModuleFile ||
+		b.Observation.ContentHash != b.Manifest.Revision {
+		return fmt.Errorf("runtime workspace manifest binding does not match File-owner observation")
+	}
+	if err := b.Observation.Validate(); err != nil {
+		return err
+	}
+	if !runtimeObservationDependsOnWorkspaceTreeRevision(b.Observation, b.Manifest.Revision) {
+		return fmt.Errorf("runtime workspace manifest binding has no matching File workspace-tree dependency")
+	}
+	return nil
 }
 
 type RuntimeOperationAdmissibilityAcquisition struct {
@@ -50,7 +100,47 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 		observation.OwnerModuleID != inventory.OwnerModuleID {
 		return fmt.Errorf("runtime operation admissibility acquisition observation does not match inventory")
 	}
-	return observation.Validate()
+	if err := observation.Validate(); err != nil {
+		return err
+	}
+	binding := request.WorkspaceManifestBinding.Normalized()
+	if !binding.Empty() && !runtimeObservationDependsOnWorkspaceTreeRevision(observation, binding.Manifest.Revision) {
+		return fmt.Errorf("runtime operation admissibility acquisition omitted workspace manifest freshness")
+	}
+	declarations := NormalizeRuntimeValidationRecipes(request.ValidationRecipes)
+	for _, recipe := range inventory.ValidationRecipes {
+		declared, found := RuntimeValidationRecipeForID(declarations, recipe.ID)
+		if !found || !sameRuntimeValidationRecipe(declared, recipe) {
+			return fmt.Errorf("runtime operation admissibility acquisition published undeclared validation recipe %q", recipe.ID)
+		}
+	}
+	if inventory.OwnerModuleID == RuntimeModuleShell && runtimeOperationAdmissibilityKindsContain(inventory.OperationKinds, RuntimeBlockKindManagedValidationSession) {
+		for _, recipeRef := range inventory.ValidationRecipeRefs {
+			declared, declaredFound := RuntimeValidationRecipeForID(declarations, recipeRef)
+			confirmed, confirmedFound := RuntimeValidationRecipeForID(inventory.ValidationRecipes, recipeRef)
+			if !declaredFound || !confirmedFound || !sameRuntimeValidationRecipe(declared, confirmed) {
+				return fmt.Errorf("runtime Shell admissibility published unconfirmed validation recipe ref %q", recipeRef)
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeObservationDependsOnWorkspaceTreeRevision(observation RuntimePrerequisiteObservation, revision string) bool {
+	revision = strings.TrimSpace(revision)
+	for _, dependency := range observation.Normalized().Dependencies {
+		if dependency.Domain == RuntimeResourceWorkspaceTree && dependency.OwnerModuleID == RuntimeModuleFile &&
+			dependency.SubjectRef == "workspace_deliverable" && dependency.Revision == revision {
+			return true
+		}
+	}
+	return false
+}
+
+func sameRuntimeValidationRecipe(left, right RuntimeValidationRecipe) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	return left.ID == right.ID && left.Command == right.Command && left.TimeoutMillis == right.TimeoutMillis && sameStrings(left.Args, right.Args)
 }
 
 // RuntimeOperationFeasibilityRequest is the owner-neutral value from which
@@ -351,11 +441,20 @@ func ValidateRuntimeOperationAdmissibilityRequest(request RuntimeOperationAdmiss
 			return fmt.Errorf("runtime operation kind %q does not belong to owner %q", kind, ownerModuleID)
 		}
 	}
+	binding := request.WorkspaceManifestBinding.Normalized()
+	if !binding.Empty() {
+		if err := binding.Validate(); err != nil {
+			return err
+		}
+	}
 	if len(request.ValidationRecipes) == 0 {
 		return nil
 	}
 	if ownerModuleID != RuntimeModuleShell || !runtimeOperationAdmissibilityKindsContain(request.RequiredKinds, RuntimeBlockKindManagedValidationSession) {
 		return fmt.Errorf("runtime validation recipes require Shell managed-validation admissibility")
+	}
+	if binding.Empty() {
+		return fmt.Errorf("runtime Shell validation recipes require a File-owner workspace manifest binding")
 	}
 	seen := make(map[string]struct{}, len(request.ValidationRecipes))
 	for _, recipe := range request.ValidationRecipes {

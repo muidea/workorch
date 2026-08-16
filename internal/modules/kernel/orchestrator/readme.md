@@ -118,7 +118,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - SM-2 先从 persisted Definition seed、template/profile policy 与 provider request 前通过 typed prerequisite
   获取的 owner capability/admissibility catalog 编译唯一 semantic-plan manifest；manifest/hash/schema/evaluator
   同时封存 owner snapshot/revision、operation kind、target/selector/constraint 与 recipe vocabulary，禁止 LLM 猜测
-  未观察的合同值。SM-3 只请求/校验逐 CWI 的无副作用 proposal；SM-2 通过唯一 typed
+  未观察的合同值。声明了 managed-validation recipe 时，SM-2 必须先取得 File owner 的 manifest/observation，再把
+  immutable binding 交给 Shell owner；Shell catalog 只发布对该 manifest 当前适用的 recipe，并依赖 exact File
+  workspace-tree revision。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
+  Orchestrator 不检查文件名、不判断 recipe 适用性。SM-3 只请求/校验逐 CWI 的无副作用 proposal；SM-2 通过唯一 typed
   `runtime-semantic/probe-proof-feasibility` command 按 canonical owner 投递完整 batch，File/Shell/MCP/Git/Web/SSH
   只返回绑定 manifest/seed/proposal/catalog revision 的 factual feasibility，
   只有 SM-2 private internal event 能封存 `CoverageEvidenceBinding` 与 reconciliation binding set。semantic-plan
@@ -323,7 +326,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   密封 terminal 与 result payload，并创建 terminal delivery fact；Result owner 自行持久化 accepted/rejected outcome，
   Workspace owner 自行释放 active run，Run owner 自行进入 terminal。Result block 不参与 acceptance 裁决。Result、Workspace、
   Run 三段 SM-4 delivery 只携带同一 sealed `TerminalOutcome`；禁止另传 `FailureReason` 覆盖 code/summary，Run owner 仅在
-  private reducer 中从 outcome 派生自身持久化展示原因。
+  private reducer 中从 outcome 派生自身持久化展示原因。terminal closeout 只投影仍未满足 CWI 的 canonical
+  assessment gap；已满足 CWI 的 producer claimed gap 仅留在 assessment audit，不得成为 MissingEvidence/TargetRefs
+  或 top failure。失败摘要优先使用当前 `Facts.Failure`，其次为 current active/formal gap，最后才使用 terminal
+  code/recovery lineage。
 - CoverageFocus 可携带 evidence role、accepted/rejected step kinds 与 accepted operations；reducer 只在 owner 已确认的 capability kinds 中做中立交集/排除，并把结果封入 `RequiredOutputContract`。若声明 accepted operations，candidate 至少包含一个匹配的具体 operation 参数，不能用同 step kind 的其他动作替代。
 - provider request session（logical request ID、expected-document identity、physical-call recovery generation、transport
   outcome）先于 candidate attempt 随 aggregate 持久化；未形成单次完整 candidate document 时不得创建/失败 attempt。

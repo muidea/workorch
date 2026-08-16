@@ -67,9 +67,20 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 }
 
 func (a *RuntimeAdapter) runtimeAdmissibilityObservation(workspaceDirectory, prerequisiteID string, inventory runtimemodel.RuntimeOperationAdmissibility, targetRefs []string) runtimemodel.RuntimePrerequisiteObservation {
+	return a.runtimeAdmissibilityObservationWithManifest(workspaceDirectory, prerequisiteID, inventory, targetRefs, runtimemodel.RuntimeWorkspaceManifestBinding{})
+}
+
+func (a *RuntimeAdapter) runtimeAdmissibilityObservationWithManifest(workspaceDirectory, prerequisiteID string, inventory runtimemodel.RuntimeOperationAdmissibility, targetRefs []string, binding runtimemodel.RuntimeWorkspaceManifestBinding) runtimemodel.RuntimePrerequisiteObservation {
 	dependencies := []runtimemodel.RuntimeFreshnessDependency{{
 		Domain: runtimemodel.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimemodel.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", Revision: inventory.ObservedRevision,
 	}}
+	binding = binding.Normalized()
+	if !binding.Empty() {
+		dependencies = append(dependencies, runtimemodel.RuntimeFreshnessDependency{
+			Domain: runtimemodel.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimemodel.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: binding.Manifest.Revision,
+		})
+	}
 	for _, targetRef := range targetRefs {
 		revision, ok := shellWorkspaceTargetRevision(workspaceDirectory, targetRef)
 		if !ok {

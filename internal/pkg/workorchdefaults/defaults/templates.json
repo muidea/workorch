@@ -947,8 +947,7 @@
               "acceptedStepKinds": [
                 "file/write",
                 "patch/apply",
-                "validation/managed_session",
-                "shell/command"
+                "validation/managed_session"
               ],
               "rejectedStepKinds": [
                 "file/read",

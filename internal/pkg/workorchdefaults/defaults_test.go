@@ -772,6 +772,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		"quantitative_behavior":      false,
 	}
 	sourceChangeEvidenceFound := false
+	validationPreparationEvidenceFound := false
 	versionControlEvidenceFound := false
 	directValidationTargetContracts := map[string]bool{
 		"dodItem":      false,
@@ -871,6 +872,18 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			versionControlEvidenceFound = true
 			continue
 		}
+		if id == "validation_preparation" {
+			accepted, ok := item["acceptedStepKinds"].([]any)
+			if !ok {
+				t.Fatalf("validation_preparation acceptedStepKinds = %+v, want list", item["acceptedStepKinds"])
+			}
+			assertStringListContains(t, accepted, "file/write")
+			assertStringListContains(t, accepted, "patch/apply")
+			assertStringListContains(t, accepted, "validation/managed_session")
+			assertStringListNotContains(t, accepted, "shell/command")
+			validationPreparationEvidenceFound = true
+			continue
+		}
 		if id == "*" {
 			scope, _ := item["scope"].(string)
 			if _, expected := directValidationTargetContracts[scope]; expected {
@@ -945,6 +958,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	if !sourceChangeEvidenceFound {
 		t.Fatalf("software-dev evidenceRequirements missing source_change in %+v", requirements)
+	}
+	if !validationPreparationEvidenceFound {
+		t.Fatalf("software-dev evidenceRequirements missing validation_preparation in %+v", requirements)
 	}
 	for scope, found := range directValidationTargetContracts {
 		if !found {

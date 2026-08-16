@@ -55,6 +55,101 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipes(workspaceDirectory st
 	return runtimemodel.NormalizeRuntimeValidationRecipes(confirmed), nil
 }
 
+// PreflightRuntimeValidationRecipesForManifest narrows the static Shell
+// execution envelope to recipes that are applicable to the current File-owner
+// workspace manifest.  It never starts a process or acquires another owner's
+// resource.  The caller must bind the same manifest revision into the returned
+// admissibility observation so a later File effect retires this selection.
+func (a *RuntimeAdapter) PreflightRuntimeValidationRecipesForManifest(workspaceDirectory string, recipes []runtimemodel.RuntimeValidationRecipe, manifest runtimemodel.WorkspaceManifest) ([]runtimemodel.RuntimeValidationRecipe, error) {
+	manifest.Revision = strings.TrimSpace(manifest.Revision)
+	manifest.TargetRefs = normalizeShellStrings(manifest.TargetRefs)
+	if manifest.Revision == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	confirmed, err := a.PreflightRuntimeValidationRecipes(workspaceDirectory, recipes)
+	if err != nil {
+		return nil, err
+	}
+	applicable := make([]runtimemodel.RuntimeValidationRecipe, 0, len(confirmed))
+	for _, recipe := range confirmed {
+		if runtimeValidationRecipeApplicableToManifest(recipe, manifest.TargetRefs) {
+			applicable = append(applicable, recipe)
+		}
+	}
+	return runtimemodel.NormalizeRuntimeValidationRecipes(applicable), nil
+}
+
+func runtimeValidationRecipeApplicableToManifest(recipe runtimemodel.RuntimeValidationRecipe, targetRefs []string) bool {
+	command, args, err := shellCommandSpec(recipe.Command, recipe.Args)
+	if err != nil {
+		return false
+	}
+	command, args, _ = normalizeShellExecutionCommand(command, args)
+	if filepath.Base(strings.TrimSpace(command)) != "go" || len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
+		return true
+	}
+	testRefs := make([]string, 0)
+	allRefs := normalizeShellStrings(targetRefs)
+	for _, ref := range allRefs {
+		clean := filepath.ToSlash(filepath.Clean(ref))
+		if clean == "." || shellManifestPathExcluded(clean) || !strings.HasSuffix(pathBase(clean), "_test.go") {
+			continue
+		}
+		testRefs = append(testRefs, clean)
+	}
+	if len(testRefs) == 0 {
+		return false
+	}
+	for idx := 1; idx < len(args); idx++ {
+		arg := strings.TrimSpace(args[idx])
+		if arg == "-run" || arg == "--run" {
+			idx++
+			continue
+		}
+		if arg == "" || strings.HasPrefix(arg, "-") || (arg != "." && !strings.HasPrefix(arg, "./")) {
+			continue
+		}
+		root := strings.TrimPrefix(arg, "./")
+		if wildcard := strings.Index(root, "..."); wildcard >= 0 {
+			root = strings.TrimSuffix(root[:wildcard], "/")
+		}
+		root = strings.Trim(strings.TrimSpace(root), "/")
+		if root == "" || root == "." {
+			continue
+		}
+		prefix := root + "/"
+		found := false
+		for _, ref := range allRefs {
+			clean := filepath.ToSlash(filepath.Clean(ref))
+			if strings.HasPrefix(clean, prefix) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func shellManifestPathExcluded(ref string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(ref), "/") {
+		switch part {
+		case ".git", "vendor", "node_modules", ".workorch-data":
+			return true
+		}
+	}
+	return false
+}
+
+func pathBase(ref string) string {
+	if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+		return ref[idx+1:]
+	}
+	return ref
+}
+
 // PreflightRuntimeSemanticValidationRecipe performs the owner-local checks
 // required before semantic feasibility may be reported as feasible. The
 // target refs are part of the sealed proposal identity and must be passed to

@@ -162,7 +162,11 @@ SM-3 使用同一 request-session、complete-document evaluator 与 attempt-0/1 
 recipe/check 与适用 metric/artifact；不能携带 Runtime action、coverage state、credit、terminal、retry、ticket 或
 owner result。semantic provider request 前，SM-2/SM-4 必须已通过 typed prerequisite 获取并持久化 canonical owner
 admissibility catalog；manifest/hash/schema/evaluator 只暴露该 snapshot/revision 中的 operation、target、selector、
-constraint 与 recipe vocabulary。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
+constraint 与当前适用的 recipe vocabulary。声明了 workspace-sensitive validation recipe 时，SM-2 必须先取得 File
+owner 的 manifest 及其 exact freshness observation，再通过 concrete typed request 交给 recipe capability owner；后者只
+返回对该 manifest 当前适用的 recipe，并在自己的 catalog observation 中复制 exact File workspace-tree revision。
+Orchestrator 不解释 manifest path 或 recipe。没有 confirmed recipe 的 `validation/managed_session` 不得进入
+provider-visible allowed operation set。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
 
 同一 proposal 的 operation kind、concrete variant 与 target policy 必须来自同一条 owner catalog fact；catalog
 已列出的现有目标不得使用仅允许 prospective target 的 create-only fact。若相同 evidence kind 与 target policy
@@ -392,6 +396,9 @@ load facts
   prerequisite request 时不退休 catalog、不增加该 budget，而是由 SM-2 形成保留原始诊断的 typed terminal。两者都
   不得复用 candidate attempt 0/1；若未来接入 typed prerequisite acquisition，必须使用 owner-defined command/result
   和独立代际，不能把它重解释为 stale。
+- File workspace-tree revision 变化必须退休所有显式依赖该 exact revision 的 workspace-sensitive owner catalog，
+  包括经过 manifest preflight 的 Shell validation catalog；没有该依赖的普通 Shell policy/target catalog 不得按 owner
+  名称或 workspace 范围被扩大退休。重复 resource change/invalidation 必须幂等，且内生 owner receipt 不消耗 stale budget。
 - evidence 必须同时通过 current-run、focus、sealed `CoverageEvidenceBinding`、quality、effect、receipt 和适用的
   recipe/check/metric/artifact 门禁。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
   逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、
@@ -412,6 +419,10 @@ load facts
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
   选择该命令时的必要参数；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才可满足该 binding，
   不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
+- terminal `RuntimeResultCloseout` 以 canonical coverage ledger 为 closure authority。只有 canonical non-satisfied
+  assessment/active gap 与当前 unsatisfied CWI 的交集可进入结构化 gap；producer 的 claimed disposition 或已满足 CWI
+  的历史 gap 只能保留为 audit。top failure 依次使用 current `Facts.Failure`、current active/formal gap、terminal
+  code/recovery lineage，Result owner 不得重新排序或重判。
 - state-changing operation 的 owner no-op 不能形成 durable state-change evidence。SM-2 必须持久化 exact
   no-progress operation shape；若 focus 具备可观测 validation 且要求 assessment，只能走一次
   `validation -> assessment` 来确认已有状态。没有该语义验证路径时必须形成 typed provenance terminal，禁止修改

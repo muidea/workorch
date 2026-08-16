@@ -486,8 +486,10 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		return
 	}
 	inventory.TargetRefs = normalizeShellStrings(command.RequiredTargetRefs)
-	if runtimeShellManagedValidationRequested(command.RequiredKinds) {
-		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, command.ValidationRecipes)
+	if runtimeShellManagedValidationRequested(command.RequiredKinds) && len(command.ValidationRecipes) != 0 {
+		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipesForManifest(
+			command.WorkspaceDeliverableDirectory, command.ValidationRecipes, command.WorkspaceManifestBinding.Manifest,
+		)
 		if preflightErr != nil {
 			setCapabilityError(result, preflightErr)
 			return
@@ -500,7 +502,9 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	observation := m.runtimeAdapter.runtimeAdmissibilityObservation(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs)
+	observation := m.runtimeAdapter.runtimeAdmissibilityObservationWithManifest(
+		command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs, command.WorkspaceManifestBinding,
+	)
 	result.Set(shellevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
 }
 

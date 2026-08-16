@@ -204,15 +204,23 @@ func (m *Biz) resolveRuntimePrerequisite(
 			return runtime.PrerequisiteResult{}, bindingErr
 		}
 		validationRecipes := []runtimecontract.RuntimeValidationRecipe(nil)
+		manifestBinding := runtimecontract.RuntimeWorkspaceManifestBinding{}
 		if prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleShell && runtimeRequiredKindsContain(prerequisite.RequiredCapabilities, runtimecontract.RuntimeBlockKindManagedValidationSession) {
 			validationRecipes = runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies)
+			if len(validationRecipes) != 0 {
+				var manifestErr error
+				manifestBinding, manifestErr = runtimeWorkspaceManifestBinding(aggregate.Facts)
+				if manifestErr != nil {
+					return runtime.PrerequisiteResult{}, manifestErr
+				}
+			}
 		}
 		result, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, m.EventHub(), runtimecontract.RuntimeOperationAdmissibilityRequest{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
 			RequiredTargetRefs: runtimeOperationAdmissibilityTargetRefs(aggregate, prerequisite.OwnerModuleID), CapabilityStateBinding: binding,
-			ValidationRecipes: validationRecipes,
+			ValidationRecipes: validationRecipes, WorkspaceManifestBinding: manifestBinding,
 			// Operation admissibility is another owner-grounded SM-2 inventory.
 			// In particular, it must include a file created by a prior accepted
 			// operation so the next sealed validation can read it. Candidate
@@ -238,6 +246,33 @@ func (m *Biz) resolveRuntimePrerequisite(
 	default:
 		return runtime.PrerequisiteResult{}, fmt.Errorf("unsupported runtime prerequisite kind %q", prerequisite.Kind)
 	}
+}
+
+// runtimeWorkspaceManifestBinding returns only the active File-owner manifest
+// fact and its matching persisted observation.  Orchestrator copies this value
+// into a capability-owner request; it does not inspect paths or decide recipe
+// applicability.
+func runtimeWorkspaceManifestBinding(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeWorkspaceManifestBinding, error) {
+	facts = facts.Normalized()
+	if facts.Resources.Manifest == nil || strings.TrimSpace(facts.Resources.Manifest.Revision) == "" {
+		return runtimecontract.RuntimeWorkspaceManifestBinding{}, fmt.Errorf("runtime Shell validation admissibility requires a committed File workspace manifest")
+	}
+	for _, observation := range facts.Resources.PrerequisiteObservations {
+		if observation.Kind != runtimecontract.PrerequisiteKindManifest || observation.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+			observation.ContentHash != facts.Resources.Manifest.Revision {
+			continue
+		}
+		binding := runtimecontract.RuntimeWorkspaceManifestBinding{
+			Manifest: runtimecontract.WorkspaceManifest{
+				Revision: facts.Resources.Manifest.Revision, TargetRefs: append([]string(nil), facts.Resources.Manifest.TargetRefs...),
+			},
+			Observation: observation,
+		}.Clone()
+		if err := binding.Validate(); err == nil {
+			return binding, nil
+		}
+	}
+	return runtimecontract.RuntimeWorkspaceManifestBinding{}, fmt.Errorf("runtime Shell validation admissibility has no current File workspace manifest observation")
 }
 
 // runtimeOperationAdmissibilityTargetRefs supplies the Shell owner with the
