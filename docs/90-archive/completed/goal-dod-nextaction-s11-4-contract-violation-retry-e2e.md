@@ -8,8 +8,8 @@ Roadmap: [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-ite
 
 Related:
 
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
-- [Contract Violation Recovery Loop Design](../../30-module-architecture/contract-violation-recovery-loop-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Contract Violation Recovery Loop Design](../superseded/contract-violation-recovery-loop-design.md)
 - [S7.4 Contract Retry Inherits Stage Contract](./goal-dod-nextaction-s7-4-contract-retry-inherits-stage-contract.md)
 - [S7.5 Contract Retry Budget And Signature Escalation](./goal-dod-nextaction-s7-5-contract-retry-budget-signature-escalation.md)
 - [S7.6 Contract Violation Recovery Projection](./goal-dod-nextaction-s7-6-contract-violation-recovery-projection.md)

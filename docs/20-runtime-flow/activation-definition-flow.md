@@ -4,159 +4,126 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-27
+Last Verified: 2026-08-16
 
 ## Purpose
 
-本文件定义从正式 Workspace / Goal / DoD 到 **typed Runtime activation**，再到
-`InitializeRuntimeFromRun` 生成 initial facts 的链路。
+本文描述 formal Workspace/Goal/DoD 如何形成 typed `RuntimeBootstrap`，以及 Run owner/Orchestrator 如何初始化并首次
+drive。它绑定 SM-1、SM-2 与 SM-4，但不另立状态迁移。
 
-生产主线不创建 禁止的 首个 `llm/workspace_execution` Step、不组装 禁止的 execution-context map，
-也不以 graph dispatch 作为 activation 输出。
-
-## State Machine Binding
-
-本 flow 绑定核心规约中的：
-
-- SM-1：新 Run 的 pending/active admission 与 predecessor lineage；
-- SM-2：typed Definition seed、semantic contract planning 与 focus/requirement 初始事实；
-- SM-4：Initialize 幂等与首次 drive。
-
-本文件不重新定义状态迁移；完整合法/禁止迁移以 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约) 为准。
-
-## Flow
+## Entry Flow
 
 ```text
-Workspace / Goal / DoD / Soul / Skill / MCP / Memory selection
-  -> application activation (resolve definition + activation context)
-  -> seal RuntimeBootstrap
-       Definition: RuntimeDefinitionContext
-       Activation: RuntimeActivationContext
-       DefinitionSeed: stable CWI identities + presentation slices + profile/capability policy refs
-  -> Run creation (persist typed bootstrap on Run owner)
-  -> Run owner accepts activation intent and internally transitions pending -> active
-  -> RunStateChanged fact -> Orchestrator DriveRuntime
-  -> InitializeRuntimeFromRun
-       load persisted typed bootstrap only
-       InitialFacts (semantic_contract_required)
-       preflight / reducer
-  -> first drive transition
-       semantic-plan document -> owner feasibility -> SM-2 binding/focus seal
-       -> operation prerequisite or candidate
+user submits workspace execution intent
+  -> workorchd reads canonical Workspace / effective Goal / effective DoD
+  -> reads and validates referenced Soul / Skill / MCP / Memory + provider selection
+  -> compiles typed RuntimeBootstrap for a fresh activation when required
+  -> Workspace owner validates definition/scope and forwards typed immutable intent
+  -> Run owner chooses owner-local SM-1 path
+       no current Run/fresh start -> create + seal bootstrap + activate
+       resume                 -> resume same eligible Run; ignore fresh replacement path
+       restart                -> persist predecessor ReplacementIntent
+  -> RunStateChanged / inventory fact
+  -> Orchestrator InitializeRuntimeFromRun + DriveRuntime
 ```
 
-## Main Stages
+The public request does not choose the target Run or inject activation context. Workspace and Run owners resolve the current
+lineage under their own state.
 
-### 1. Definition Resolution
+## Definition Resolution
 
-activation 前必须明确并可校验：
+A fresh bootstrap requires:
 
-- 当前 Workspace
-- 当前有效 Goal / DoD 与 `definitionRevision`
-- 当前 Soul / Skill / MCP / Memory 选择（进入 `RuntimeActivationContext`）
-- deliverable / internal directory 边界（供 prerequisite / target snapshot 使用）
+- one Workspace and its deliverable/internal directory boundary;
+- cumulative effective Goal and DoD with stable definition revision/lineage;
+- Workspace canonical provider selection and referenced Soul/Skill/MCP/Memory resources;
+- template/profile/capability/evidence policy declarations;
+- bounded convergence/recovery policy.
 
-Goal / DoD 缺失、无效或不完整时，activation 不得进入 Run 创建。
+Missing or cross-scoped definitions fail before Run creation. Definition identity/revision is sealed with the Run and must
+remain equal across bootstrap, facts, authority transaction and candidate. A caller cannot rebuild it from a projection or
+map during Resume.
 
-`RuntimeDefinitionContext` 在 Run owner 中封存；后续 candidate request 与重启恢复
-**只能读取**该持久化定义快照，不能由调用方临时重建。
+## Typed RuntimeBootstrap
 
-definition 漂移（revision、Goal/DoD identity、正文、capability contract 任一变化）
-在后续 commit 时必须返回 conflict。
+`RuntimeBootstrap` contains typed Definition, Activation, Definition seed, initial focus/slice/coverage/requirement inputs and
+bounded convergence/recovery policy. Important boundaries are:
 
-### 2. Typed RuntimeBootstrap
+- `RuntimeDefinitionContext`: immutable formal definition identity and change impact;
+- `RuntimeActivationContext`: sealed provider selection, dialog language, frozen Soul/Skill/MCP/Memory content, evidence
+  policy, execution contract and bounded continuation history;
+- `RuntimeDefinitionSeed`: semantic-planning input and stable declaration identities; it carries no owner feasibility or
+  `CoverageEvidenceBinding` authority;
+- initial coverage/focus data: activation baseline only; later semantic plan/feasibility/reconciliation may seal or reopen the
+  generation-specific binding queue only through SM-2 private internal events.
 
-activation 的正式产物是 **typed `RuntimeBootstrap`**，而不是 禁止的 execution context map。
+The bootstrap must pass `Validate()` before persistence. It cannot contain credentials/provider client, live repository,
+EventHub, HTTP DTO, `map[string]any` authority bridge or execution-context patch.
 
-```text
-RuntimeBootstrap
-  Definition      RuntimeDefinitionContext
-  Activation      RuntimeActivationContext
-  DefinitionSeed stable CWI identities + presentation slices + template/profile/capability policy refs
-```
+## Semantic Plan And Binding Seal
 
-约束：
+For a fresh definition generation:
 
-- bootstrap 必须 `Validate()` 通过后才能落库
-- Definition seed 必须有稳定 CWI identity、正式 Goal/DoD lineage 和可验证 template/profile/capability policy refs；
-  activation 不接收预制 `CoverageEvidenceBinding`
-- `RuntimeActivationContext` 保存 provider-facing 稳定内容快照（Soul/Skill/MCP/Memory、
-  evidence policies、execution contract、continuation 摘要）以及当次封存的 `providerId/modelId` identity；
-  base URL、credential、provider client、failover/runtime transport 状态不得进入可恢复业务状态
-- 不使用 map / JSON bridge 表达组件合同
+1. SM-2 records `semantic_contract_required` from the sealed bootstrap;
+2. SM-3 requests at most the bounded semantic-plan document from LLM owner;
+3. capability owners return current typed feasibility/target observations;
+4. Orchestrator private internal event validates and seals `CoverageEvidenceBinding` plus reconciliation contract;
+5. only then may the candidate/sealed-dispatch path begin.
 
-#### Activation Vs Workspace Setup
+LLM proposes; capability owners report feasibility; neither may change CWI/focus state. Application cannot pre-seal proof
+bindings in the bootstrap.
 
-| 入口 | 职责 |
-| --- | --- |
-| workspace setup / draft | 创建前澄清、模板建议、Soul 预选、Goal/DoD 草案；**不创建 Run** |
-| execution activation | 基于已确认并已落库的正式定义，封存 Definition seed `RuntimeBootstrap` 并创建 Runtime Run |
+## InitializeRuntimeFromRun
 
-template / draft / Soul guidance 只能影响 activation 输入基线，不能替代正式定义。
+`InitializeRuntimeFromRun` is idempotent:
 
-### 3. InitializeRuntimeFromRun（幂等）
+- no Runtime record: validate sealed bootstrap and create initial aggregate/facts;
+- existing current-baseline record: load it without duplicating reducer transition, candidate attempt or evidence;
+- missing/invalid bootstrap: fail closed through typed terminal handling;
+- non-current aggregate: return typed fresh-activation disposition without provider/capability work.
 
-`InitializeRuntimeFromRun` 只做：
+Initialize does not call LLM, execute a capability, infer action from Step/checkpoint, or rebuild definition from display data.
 
-1. 读取 Run owner 已持久化的 typed bootstrap / aggregate
-2. 若尚无 Runtime state：由 bootstrap 生成 `InitialFacts{semantic_contract_required}`，执行 preflight 与首轮 reducer
-3. 若已有 aggregate：只加载，**不得**因重复 Start/Resume 再次执行 reducer 或增加 attempt
+## Resume
 
-禁止：
+Resume carries only workspace/run scope inside the owner contract. Run owner validates SM-1 eligibility and resolved blocker,
+then publishes an immutable state fact. Orchestrator loads the same aggregate and re-drives it.
 
-- 解析 禁止的 execution context map 重建定义或 focus
-- 在 Initialize 中直接请求 LLM 或执行 operation
-- 以 `RuntimeBootstrap == nil` 选择第二执行路径；缺少 typed bootstrap 必须失败并投影 typed terminal
+Resume does not:
 
-### 4. Start / Resume Entry
+- recompile or replace bootstrap;
+- re-read Workspace provider/Soul/capability selection;
+- change Goal/DoD revision;
+- add a candidate attempt because of restart;
+- accept `ExecutionContextPatch` or any target lifecycle state.
 
-| 入口 | 行为 |
-| --- | --- |
-| Start | Application 向 Run owner 提交 activation intent；Run owner内部 `pending -> active` 后发布 `RunStateChanged`，再触发唯一 `DriveRuntime` |
-| Resume | 只携带 workspace/run scope；Run owner校验已解决 blocker 后内部恢复并发布事实；Orchestrator 消费事实进入同一 drive |
+## Restart And Successor
 
-约束：
+Restart is a fresh activation request but not immediate application-created Run creation:
 
-- application **不再**拥有 Start/Resume continuation queue
-- Orchestrator service **不**暴露 execution-context-patch resume facade、`StartRun`、
-  `DispatchNextStep`、`ResumeRun`、SM-1 lifecycle facade 或自动 replan lifecycle
-- `ResumeRunCommand` **不得**重新注入 loaded Run、`ExecutionContextPatch` 或其他 禁止的 continuation payload
-- 上下文变化只能通过**新的** Runtime activation/bootstrap 表达（新 Run）
+1. workorchd compiles fresh bootstrap from current Workspace state;
+2. Workspace owner validates and forwards the restart intent;
+3. Run owner CAS-persists immutable `ReplacementIntent` on the current predecessor;
+4. predecessor converges to sealed superseded terminal and completes `Result -> Workspace -> Run` delivery;
+5. Run-private reducer creates, links and activates one successor using the sealed fresh bootstrap;
+6. successor independently initializes and drives.
 
-### 5. Successor / Continuation Semantics
+Application, Workspace, Orchestrator and projection cannot create/link the successor. Duplicate request/delivery must resolve
+to the same lineage. A non-current predecessor returns `data_reset_required` and creates none.
 
-Runtime **不自动创建** 禁止的 replan successor。
+## Invariants
 
-当需要重新定义目标或执行基准时：
+- all formal definitions originate from Workspace owner state;
+- Run owner alone chooses SM-1 create/resume/replacement transitions;
+- Orchestrator alone mutates SM-2/SM-3/SM-4 aggregate semantics;
+- fresh activation and Resume cannot be confused by a shared context patch;
+- no provider/capability call occurs before a valid current-baseline aggregate and sealed prerequisite/candidate contract;
+- repeated notification, initialization and drive are idempotent.
 
-- 必须通过新的 typed activation/bootstrap 创建**独立** Runtime Run
-- 旧 Run 的 supersede / lineage 只作为历史引用
-- 新 Run **不得**机械复制旧 active focus、stale target snapshot 或已失效 failure surface
+## Related Documents
 
-若 activation 携带 `RuntimeContinuationContext`，它只表达仍有效的 contract / lineage 摘要，
-不表达 禁止的 patch resume 或 graph continuation。
-
-## Key Flow Guarantees
-
-- activation 围绕正式 Goal / DoD 与 typed bootstrap 工作
-- activation 生成的是 Runtime Run + 封存 definition/activation/Definition seed，而不是最终 focus/binding 或业务结果
-- semantic plan 由后续 Drive 请求；LLM 只提 proposal，owner 只给 feasibility，只有 SM-2 seal binding/focus
-- Initialize 幂等：重启与重复 Drive 只加载 aggregate
-- definition revision 在 facts、authority transaction、candidate 之间必须一致
-- 生产入口缺少 typed bootstrap 必须失败，禁止第二执行路径
-
-## Output
-
-activation 的正式输出是：
-
-- 新的 Runtime Run（含持久化 `RuntimeBootstrap`）
-- 经 Initialize 得到的 initial `RuntimeFacts` / `RuntimeStateRecord`
-- 进入 `DriveRuntime` 的前提（首个 reducer decision）
-
-## Source Documents
-
-- [overview.md](overview.md)
-- [planning-execution-flow.md](planning-execution-flow.md)
-- `../00-core/runtime-stage-contract.md`
-- `../../internal/modules/kernel/orchestrator/readme.md`
-- `../../internal/pkg/workorchruntimecontract`（`runtime_bootstrap.go`、`runtime_activation.go`、`runtime_definition.go`）
+- [Runtime Flow Overview](overview.md)
+- [Planning And Execution](planning-execution-flow.md)
+- [Repair And Replan](repair-replan-flow.md)
+- [Runtime Stage Contract](../00-core/runtime-stage-contract.md)
+- [Orchestrator README](../../internal/modules/kernel/orchestrator/readme.md)

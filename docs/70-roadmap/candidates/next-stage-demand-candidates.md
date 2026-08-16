@@ -1,136 +1,60 @@
-# workorch Next Stage Demand Candidates
+# WorkOrch Next-Stage Demand Candidates
 
-## Purpose
+Status: active
 
-This document keeps future demand candidates separate from completed MVP,
-runtime expansion scope, and completed P1 delivery scope. Items here are not
-active defects or remaining MVP work. Before implementation, each item must be
-promoted into a formal delivery plan with target behavior, acceptance criteria,
-API/Web impact, and verification commands.
+Type: roadmap-candidates
 
-## Current Promoted Requirement
+Last Verified: 2026-08-16
 
-- `Formal Business Result And Artifact Model`
-- `Persistent Workorch Event Stream`
+## Promotion Rule
 
-Active delivery plan:
+Every candidate must preserve single-owner transitions and typed EventHub boundaries. It cannot be implemented by adding a
+shared target-state API, generic Runtime adapter registry, projection-driven recovery or a fifth Runtime state machine.
 
-- `../../90-archive/completed/result-event-development-plan.md`
+## C2 Distributed Scheduling And Worker Fleets
 
-## Completed P1 Delivery
+Possible direction: durable distributed admission, remote workers, leases, heartbeats and bounded retry.
 
-- `C1 Global Long-Lived Runtime Module Registration`
-- `C5 Vector Memory Search`
-- `C6 LLM Provider Streaming And Non-Chat APIs`
+Before promotion define:
 
-## Candidate List
+- whether scheduling/lease state has a new sole owner or remains Run-owner state;
+- worker command/result identities and duplicate/late completion semantics;
+- loss, timeout, cancellation and process/network partition behavior;
+- observability and load/capacity gates.
 
-### C8. Formal Business Result And Artifact Model
+## C3 Multi-Tenant Authorization And Quota
 
-Status: promoted
+Possible direction: tenant/project/user identity, resource visibility, authorization and execution/provider quota.
 
-Target direction:
+Before promotion define identity propagation, owner-local authorization checks, repository partitioning, audit redaction, quota
+owner and failure semantics. UI/API filtering cannot substitute for storage and command authorization.
 
-- Promote final Workspace / Run outcome from `dodAssessment.summary` into a
-  first-class business Result.
-- Attach generated deliverables, file outputs, external references, and
-  evidence-backed outputs as formal Artifacts.
-- Keep ToolCall, Patch, ValidationResult, RuntimeCheckpoint, Memory, and events
-  as evidence/context rather than final business outcome.
+## C4 External Capability Distribution
 
-Acceptance:
+Possible direction: governed discovery, installation and enablement of external capability-owner packages.
 
-- Tracked in `../../90-archive/completed/result-event-development-plan.md`.
+Before promotion define publisher identity, artifact integrity, trust/approval policy, owner registration lifecycle, typed
+operation catalog compatibility and uninstall/restart behavior. External capability code must still own concrete operations and
+must not register a generic next-action/authority callback.
 
-### C9. Persistent Workorch Event Stream
+## C7 Collaboration And Sub-Agent Work
 
-Status: promoted
+Possible direction: multiple operators, shared knowledge assets and delegated/sub-agent execution.
 
-Target direction:
+Before promotion define collaboration objects and sole owners, delegation scope, identity/audit, conflict handling, governance
+responsibility and how delegated evidence binds back to one Run authority without introducing peer reducers.
 
-- Persist formal Workorch business events emitted through the existing EventHub
-  boundary.
-- Support audit/replay queries by workspace, run, topic, subject, and cursor.
-- Allow observability and Workspace detail to use persisted event timeline data
-  without synthesizing missing events from repository state.
+## C10 Advanced LLM Budget And Provider Policy
 
-Acceptance:
+Possible direction: provider failover policy, provider-native/tokenizer precision and differentiated context-too-large handling.
 
-- Tracked in `../../90-archive/completed/result-event-development-plan.md`.
+Before promotion prove:
 
-### C2. Distributed Scheduling And External Worker Fleets
+- failover cannot mutate a Run-sealed provider/model/ceiling without an explicit owner transaction;
+- C0/C1/C2 stable prefix remains provider-neutral;
+- native usage and estimates retain provenance;
+- errors map to typed facts without provider-text control flow;
+- no map-based authority rebuild or hidden retry owner appears.
 
-Target direction:
-
-- Move beyond local priority-aware run scheduling toward remote workers,
-  distributed queues, worker heartbeats, and retry policy.
-
-Acceptance to define before development:
-
-- Worker ownership model and Run state transition contract.
-- Failure, timeout, retry, and cancellation semantics.
-- Metrics and observability for queued, assigned, running, and terminal work.
-
-### C3. Multi-Tenant Authorization And Quota
-
-Target direction:
-
-- Add tenant/project/user boundaries, authorization checks, and execution quota.
-
-Acceptance to define before development:
-
-- Request identity model.
-- Resource ownership and visibility rules.
-- Quota enforcement for Run scheduling and runtime tool usage.
-
-### C4. External Runtime Marketplace
-
-Target direction:
-
-- Manage external runtime/tool adapters as governed installable capabilities.
-- Keep adapter execution behind the existing runtime adapter contract and
-  Decision/Approval gates.
-
-Acceptance to define before development:
-
-- Adapter metadata, trust policy, and enablement workflow.
-- Runtime capability publication to LLM planning context.
-- Safe failure behavior for missing, disabled, or rejected adapters.
-
-### C7. Product Collaboration Surface
-
-Target direction:
-
-- Expand beyond single-operator local control into enterprise collaboration,
-  knowledge assets, templates, and Sub-Agent orchestration.
-
-Acceptance to define before development:
-
-- Formal business models and ownership boundaries.
-- Web control-plane workflow.
-- Interaction with Workspace, Run, Decision, Approval, and Memory models.
-
-### C10. LLM Context Budget Advanced Follow-ups
-
-Status: deferred-candidate
-
-Source: 2026-07-16 docs cleanup demoted
-`90-archive/completed/llm-context-budget-todo.md` out of active. Baseline
-bytes budget / timeout retry / CTX-01/CTX-02 already closed in code.
-
-Target direction:
-
-- Provider failover advanced policy (beyond single-target sealed ceiling).
-- Real tokenizer / provider-native token usage precision across models.
-- Broader multi-entry governance semantic normalization for context budget.
-- Differentiated governance for `context-too-large` (vs generic failure).
-
-Acceptance to define before development:
-
-- Must not reopen sealed Runtime provider/model ceiling authority.
-- Keep provider-neutral C0–C5 cache plan; no map-based authority rebuild.
-- Promote only with formal plan + verifier coverage before re-entering active.
-
-Historical process note:
-
-- `../../90-archive/completed/llm-context-budget-todo.md`
+Historical context-budget work is archived at
+[llm-context-budget-todo.md](../../90-archive/completed/llm-context-budget-todo.md).

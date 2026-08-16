@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-08-13
+Last Verified: 2026-08-16
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -16,8 +16,8 @@ Last Updated: 2026-08-13
 2. [Runtime request/cache contract](runtime-request-cache-note.md)；
 3. `internal/modules/kernel/orchestrator/readme.md` 与
    `internal/pkg/workorchruntimecontract`；
-4. [当前 Runtime 收口计划](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
-   只定义未关实施项，不得覆盖本文状态机合同。
+4. [当前 Runtime live 计划](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)
+   只定义未关部署验收，不得覆盖本文状态机合同。
 
 已归档计划、历史 live 记录与过程日志只能帮助定位回归夹具，不能成为新的运行时约束。
 
@@ -140,7 +140,7 @@ typed RuntimeBootstrap
    不指定 Run、Workspace 或 Result 的目标状态。用户明确 restart 时，Run owner 先在 predecessor 上持久化 immutable
    replacement intent；SM-4 再按 `Result -> Workspace -> Run` 投递 administrative terminal fact。Workspace 仅在
    `ActiveRunID` 精确匹配时通过内部事件释放 slot；Run owner 只有收到该顺序的最终 Run delivery 后，才能通过内部事件
-   幂等创建并激活 current-schema successor。Application、Workspace 和 Orchestrator 均不得提前创建 successor。
+   幂等创建并激活 current-baseline successor。Application、Workspace 和 Orchestrator 均不得提前创建 successor。
 2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime aggregate；其中 aggregate 是
    Orchestrator 的不透明持久化负载。其语义 CAS 只比较 `RuntimeState.StateRevision`，不得以完整 Run 模型
    revision（SM-1/lifecycle 或其他 Run 字段）阻断 SM-2/SM-3/SM-4 的保存。

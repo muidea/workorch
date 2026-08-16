@@ -9,8 +9,8 @@ Roadmap: [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-ite
 Related:
 
 - [S9.4 Watchdog External Timeout Scope](./goal-dod-nextaction-s9-4-watchdog-external-timeout-scope.md)
-- [EventHub Driven Workorchd State Loop Design](../../30-module-architecture/eventhub-driven-workorchd-state-loop-design.md)
-- [Runtime Execution Event Queue State Loop Design](../../30-module-architecture/runtime-execution-event-queue-state-loop-design.md)
+- [EventHub Driven Workorchd State Loop Design](../superseded/eventhub-driven-workorchd-state-loop-design.md)
+- [Runtime Execution Event Queue State Loop Design](../superseded/runtime-execution-event-queue-state-loop-design.md)
 
 ## Contract Audit
 

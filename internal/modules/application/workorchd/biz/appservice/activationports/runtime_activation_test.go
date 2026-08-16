@@ -75,7 +75,6 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 				"schemaVersion": "workorch.template_stage_policy",
 				"stages": []any{map[string]any{
 					"id": "execution", "soulBinding": "execution",
-					"entry":           map[string]any{"nextAction": "state_change", "requiresDefinitionRevision": true, "requiresGapBaseline": true},
 					"requiredOutputs": []any{map[string]any{"kind": "state_change", "evidenceKinds": []any{"state_change"}}},
 					"completion":      map[string]any{"policy": "required_outputs_accepted"},
 					"governance":      map[string]any{"decisionMode": "when_required", "approvalMode": "when_required"},
@@ -129,8 +128,7 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 	}
 	stagePolicy := activation.ExecutionContract.TemplateStagePolicy
 	if stagePolicy == nil || stagePolicy.SchemaVersion != "workorch.template_stage_policy" || len(stagePolicy.Stages) != 1 ||
-		stagePolicy.Stages[0].ID != "execution" || stagePolicy.Stages[0].SoulBinding != "execution" || stagePolicy.Stages[0].Entry.NextAction != "state_change" ||
-		!stagePolicy.Stages[0].Entry.RequiresDefinitionRevision || !stagePolicy.Stages[0].Entry.RequiresGapBaseline || len(stagePolicy.Stages[0].RequiredOutputs) != 1 ||
+		stagePolicy.Stages[0].ID != "execution" || stagePolicy.Stages[0].SoulBinding != "execution" || len(stagePolicy.Stages[0].RequiredOutputs) != 1 ||
 		stagePolicy.Stages[0].RequiredOutputs[0].Kind != "state_change" || stagePolicy.Stages[0].Completion.Policy != "required_outputs_accepted" ||
 		stagePolicy.Stages[0].Governance.DecisionMode != "when_required" || len(stagePolicy.Stages[0].PolicyRefs.EvidencePolicies) != 1 ||
 		len(stagePolicy.Stages[0].PolicyRefs.CapabilityUsagePolicies) != 1 {

@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-08-04
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -16,6 +16,14 @@ Last Updated: 2026-08-04
 - 仅过渡或被新结构完全替代 → 可再迁 `superseded/`
 - 当前事实 / API / 验收 **不得** 回写本目录
 - 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准
+
+## 2026-08-16 Single-Owner Documentation Refresh
+
+| 文件 | 一行结论 |
+| --- | --- |
+| [runtime-single-owner-code-closure-runbook.md](runtime-single-owner-code-closure-runbook.md) | Orchestrator/Workorchd 单 Owner 代码收口的历史执行记录 |
+| [runtime-cwi-reconciliation-single-owner-closure-plan.md](runtime-cwi-reconciliation-single-owner-closure-plan.md) | CWI reconciliation 单 Owner 收口的完成计划 |
+| [runtime-contract-drift-closure-plan.md](runtime-contract-drift-closure-plan.md) | active defaults/verifiers/API/container 与当前 Runtime-only 合同完成对齐并加防回流门禁 |
 
 ## 2026-08-04 Component Event Contract Closure
 

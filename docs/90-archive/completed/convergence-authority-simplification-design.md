@@ -10,9 +10,9 @@ Closed At: 2026-06-26
 
 Related:
 
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
-- `../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md`
-- `../../30-module-architecture/eventhub-driven-workorchd-state-loop-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/mvvp-workspace-viewmodel-architecture.md`
+- `../superseded/eventhub-driven-workorchd-state-loop-design.md`
 - `../../60-verification/convergence-authority-dispatch-live-verification.md`
 - `convergence-authority-dispatch-closure-checklist.md`
 - `runtime-convergence-authority-final-fix-scope.md`

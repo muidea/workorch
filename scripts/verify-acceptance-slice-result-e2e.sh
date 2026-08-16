@@ -5,13 +5,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/lib/go-test-must-run.sh"
 
-go test ./internal/modules/kernel/orchestrator/biz \
-  -run 'TestResultSubsystemRecordsAcceptedSliceResultWithoutFinalCompletion|TestEnsureRunCoverageWorkItemsBuildsAcceptanceSlicesFromGenericPolicy' \
+run_go_test ./internal/modules/kernel/orchestrator/biz/runtime \
+  -run '^(TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts|TestDispatchCommitAdvancesToNextCoverageFocusDeterministically)$' \
   -count=1
 
-go test ./internal/pkg/workorchdefaults \
-  -run 'TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk' \
+run_go_test ./internal/modules/kernel/orchestrator/biz \
+  -run '^TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain$' \
   -count=1
 
-echo "acceptance slice result and final closure verification passed"
+run_go_test ./internal/pkg/workorchdefaults \
+  -run '^TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk$' \
+  -count=1
+
+echo "coverage focus settlement and terminal Result delivery verification passed"

@@ -1,10 +1,15 @@
 # WorkOrch 22 个组件功能与复杂度盘点
 
-Status: active architecture inventory; listed code/automated closure complete
+Status: archived
 
 Type: component-function-complexity-inventory
 
 Last Updated: 2026-08-16
+
+Archived: 2026-08-16
+
+本文件保留 22 个运行单元复杂度收口的历史快照和 benchmark。当前组件职责以各组件 README 与
+`docs/30-module-architecture` 为准；本快照中的文件数、LOC、CC 和阶段编号不构成持续实现合同。
 
 Snapshot: `c1b90039`
 

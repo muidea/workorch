@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -18,8 +18,8 @@ Run 只提供 opaque 物理持久化/CAS；Result 只持久化 sealed outcome，
 
 | 组件 | Runtime 边界 |
 | --- | --- |
-| `blocks/workspace` | 拥有 Workspace / Goal / DoD / Template definition 聚合与 revision；不启动 Run、不判定 Result、不执行治理恢复 |
-| `blocks/run` | 拥有 Run lifecycle；为 Orchestrator-owned `RuntimeStateRecord` 提供 opaque record query、expected-revision CAS 和 inventory，不解释 facts/authority/dispatch/candidate/governance/delivery ledger |
+| `blocks/workspace` | 拥有 Workspace / Goal / DoD / Template definition、canonical selection、execution-intent admission 与 active-run release；只向 Run owner转交 typed intent，不选择 Run lifecycle target |
+| `blocks/run` | 拥有 SM-1 Run lifecycle/lineage/ReplacementIntent；为 Orchestrator-owned `RuntimeStateRecord` 提供 opaque record query、expected-revision CAS 和 inventory，不解释 facts/authority/dispatch/candidate/governance/delivery ledger |
 | `blocks/result` | 消费 sealed `TerminalOutcome`，持久化 Result / Artifact 正式 outcome，并只由自身 reducer 迁移 Result lifecycle；**不判断** evidence quality、DoD coverage 或 accepted/rejected 策略 |
 | `blocks/eventstream` | EventHub 订阅 → 有界 EventRecord；投影/审计只读，不是业务 owner 修复、Runtime replay 或状态重建入口 |
 
@@ -49,14 +49,15 @@ Decision blockers do not change workspace owner state. They are exposed through
 run/ticket/projection fields owned by `blocks/run`, `blocks/decision` and
 workorchd read model projection.
 
-`blocks/run` 与 `kernel/orchestrator` 经 EventHub 读取 workspace definition；Workspace 不反向写 Run/Result。
+workorchd、`blocks/run` 与 `kernel/orchestrator` 经 EventHub 读取或引用 workspace definition；Workspace 只发布/转交
+immutable execution/release facts，不直接写 Run/Result repository 或选择其状态。
 
 ### `blocks/run`
 
 职责：
 
 - Run / Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint persistence
-- Run state machine primitives
+- SM-1 Run state machine、lineage、terminal-delivery acknowledgement 与 restart `ReplacementIntent`
 - typed `RuntimeBootstrap` 是 Run 创建时的 immutable Definition seed；`RuntimeStateRecord` 作为 opaque payload 只做
   presence/revision/scope query 与 expected-revision CAS，内部 invariant 归 Orchestrator
 
@@ -94,6 +95,10 @@ gate 直接 Block/Fail/Validate/Complete active Run。
 - run evidence：`ToolCall` / `Patch` / `ValidationResult` / `RuntimeCheckpoint` — 只表达运行证据，不直接表达 accepted business outcome
 - run-scoped coverage / focus：随 opaque RuntimeStateRecord 持久化；Run owner 不读取、重排或校验其语义
 - run-scoped continuation：`ArtifactContinuation` 等 internal state 持有（若仍使用）
+
+Current-baseline Restart 先把 immutable `ReplacementIntent` CAS 持久化在 predecessor；只有 sealed superseded terminal
+依次被 Result、Workspace、Run owner确认后，Run-private reducer 才创建并激活一个 successor。Application、Workspace、
+Orchestrator 和 projection 都不能提前创建或链接它。非当前 baseline 返回 `data_reset_required`。
 
 ### `blocks/result` stateful block
 
@@ -142,7 +147,7 @@ gate 直接 Block/Fail/Validate/Complete active Run。
 
 这些模块主要参与：
 
-- activation -> workspace definition 读取 + Run 创建（可携带 `RuntimeBootstrap`）
+- activation -> workorchd 编译 bootstrap，Workspace owner准入 intent，Run owner创建/恢复/记录 replacement
 - execution -> Orchestrator drive；Run owner CAS 持久化 Runtime aggregate；过程证据投影
 - acceptance -> Orchestrator 密封 terminal；Result/Workspace/Run 各自 owner-local delivery
 - observability -> EventRecord persistence and replay（只读投影）

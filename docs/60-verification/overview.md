@@ -4,7 +4,7 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -31,8 +31,8 @@ Last Updated: 2026-07-29
 | Assessment / Result | Orchestrator 裁决；Result owner 只持久化 outcome；不裁决 |
 | Governance wait | canonical `need_governance` → ticket → immutable wait fact → Run owner-local blocked；resolution commit 回 reducer/fact；application **不因** resolve 再 Resume |
 | Repair | 同 focus 再收敛；预算耗尽形成 typed terminal/no-progress fact，不能自行升治理；非自动 replan |
-| Replan semantic | 仅新 activation / 新 Runtime Run；无自动 successor lifecycle |
-| Resume / 重启 | 只 load aggregate 幂等再 drive；无 ExecutionContextPatch；不重放 禁止的 checkpoint 驱动 |
+| Replacement semantic | 仅显式 Workspace Restart + Run-owned `ReplacementIntent`；terminal delivery 后创建唯一 successor，无 Orchestrator/application 自动 successor |
+| Resume / 进程重启 | 只 load aggregate 幂等再 drive；无 ExecutionContextPatch；不重放 禁止的 checkpoint 驱动 |
 | Candidate context / cache | `RuntimeCandidateContext` + C0–C5；P0–P4 integrity |
 | 中立性 | core 无 software-dev / profile ID 硬编码；profile 字段仅作 activation / C2 输入 |
 
@@ -43,6 +43,7 @@ Last Updated: 2026-07-29
 | [service-acceptance.md](service-acceptance.md) | 服务级验收入口与门禁指针 |
 | [core-runtime-verifier.md](core-runtime-verifier.md) | core runtime verifier 说明 |
 | [profile-software-dev-verifier.md](profile-software-dev-verifier.md) | software-dev profile verifier |
+| [runtime-owner-convergence-matrix.md](runtime-owner-convergence-matrix.md) | owner/SM/restart/file replacement/live closure 稳定断言矩阵 |
 | [loadtest-baseline.md](loadtest-baseline.md) | 压测 baseline |
 | [tui/tui-agent-acceptance.md](tui/tui-agent-acceptance.md) | TUI agent 验收入口 |
 
@@ -71,7 +72,10 @@ make verify-runtime-profile-software-dev
 # 以及 scripts/ 下 e2e：verify-software-dev-goal-dod-e2e.sh 等
 ```
 
-具体脚本与断言矩阵以 `core-runtime-verifier.md` / `service-acceptance.md` 与 Makefile help 为准。新增验收不得引入 禁止的 StagePacket/NextAction 通过条件。
+具体断言以 `core-runtime-verifier.md` / `service-acceptance.md`、Make target 定义和当前 owner 合同为准。
+software-dev、governance、restart 与 container wrapper 已对齐当前合同；部分文件名为历史兼容入口，但内部只执行
+typed Runtime/Owner 断言。focused verifier 使用 fail-closed helper，零测试命中不再被视为通过。新增验收不得引入
+被删除 authority 的通过条件。
 
 ## What Was Archived
 

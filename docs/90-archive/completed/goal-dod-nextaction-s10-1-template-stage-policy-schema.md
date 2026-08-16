@@ -8,8 +8,8 @@ Roadmap: [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-ite
 
 Related:
 
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
-- [EventHub Driven Workorchd State Loop Design](../../30-module-architecture/eventhub-driven-workorchd-state-loop-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
+- [EventHub Driven Workorchd State Loop Design](../superseded/eventhub-driven-workorchd-state-loop-design.md)
 - [S10 Template/Profile/Soul Strategy](./goal-dod-nextaction-iterative-delivery-plan.md#p10-slices-templateprofilesoul-strategy)
 
 ## Contract Audit

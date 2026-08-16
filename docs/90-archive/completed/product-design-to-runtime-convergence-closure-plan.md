@@ -12,7 +12,7 @@ Related:
 - `../../05-product/product-architecture.md`
 - `../../05-product/business-model-flow-contracts.md`
 - `../../00-core/runtime-stage-contract.md`
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `convergence-authority-simplification-design.md`
 
 ## Purpose

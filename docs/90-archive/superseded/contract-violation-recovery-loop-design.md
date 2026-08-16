@@ -13,7 +13,7 @@ Related:
 - [Runtime Execution Event Queue State Loop Design](runtime-execution-event-queue-state-loop-design.md)
 - [LLM Cache Improvement Design](llm-cache-improvement-design.md)
 - [MVVP Workspace ViewModel Architecture](mvvp-workspace-viewmodel-architecture.md)
-- [Kernel Orchestrator Governance](kernel-orchestrator-governance.md)
+- [Kernel Orchestrator Governance](../../30-module-architecture/kernel-orchestrator-governance.md)
 
 ## Purpose
 

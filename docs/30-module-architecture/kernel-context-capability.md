@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -14,7 +14,7 @@ Last Updated: 2026-07-14
 
 | 模块 | Runtime 边界 |
 | --- | --- |
-| `blocks/soul` / `blocks/skill` / `blocks/mcp-registry` | 提供 capability allowlist、metadata、selection contract；经 EventHub 被 activation / Orchestrator 读取；不执行 side effect，不拥有 Run aggregate |
+| `blocks/soul` / `blocks/skill` / `blocks/mcpregistry` | 提供 capability allowlist、metadata、selection contract；workorchd 经 EventHub 读取并封存进 fresh activation，Orchestrator 只消费 sealed snapshot；不执行 side effect，不拥有 Run aggregate |
 | `blocks/memory` | MemoryItem / MemoryRecallTrace 的正式 owner；**经 EventHub** 供 Orchestrator / Governance / workorchd 查询与写入；不直接写 Run/Result，不裁决 acceptance |
 | LLM-facing 上下文 | Orchestrator 组织有界 `RuntimeCandidateContext` / `PromptContext`；本层 owner 不重建 禁止的 execution-context map |
 

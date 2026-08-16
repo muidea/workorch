@@ -9,7 +9,7 @@ Owner: workorchd appservice
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [MVVP Workspace ViewModel Architecture](../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md)
+- [MVVP Workspace ViewModel Architecture](../superseded/mvvp-workspace-viewmodel-architecture.md)
 - [S7.4 Contract Retry Inherits Stage Contract](./goal-dod-nextaction-s7-4-contract-retry-inherits-stage-contract.md)
 - [S7.5 Contract Retry Budget And Signature Escalation](./goal-dod-nextaction-s7-5-contract-retry-budget-signature-escalation.md)
 

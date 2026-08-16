@@ -4,7 +4,7 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -112,6 +112,11 @@ budget/guard 以及适用的跨状态机合同测试。
 - Run inventory 只返回 SM-1 state + opaque record presence/revision/ref；Orchestrator load 后 owner-local 分类
   `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending` 并自动恢复；
 - 不出现 `active + nonterminal + no scheduled drive`，也不使用人工 Resume 作为恢复机制。
+- current-baseline Restart 必须先 CAS predecessor `ReplacementIntent`，再完成 Result→Workspace→Run terminal delivery，
+  最后由 Run-private reducer 幂等创建/激活唯一 successor；其他组件不能提前创建或链接；
+- non-current predecessor 返回 `data_reset_required`，不写 replacement intent、不调用 provider/capability；
+- 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
+  `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
 
 ## Verification Entry
 
@@ -170,7 +175,8 @@ core verifier 不应验证：
 
 - [runtime-stage-contract.md](../00-core/runtime-stage-contract.md)
 - [runtime-request-cache-note.md](../00-core/runtime-request-cache-note.md)
-- [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
+- [runtime-owner-convergence-matrix.md](runtime-owner-convergence-matrix.md)
+- [archived runtime-cwi-reconciliation-single-owner-closure-plan.md](../90-archive/completed/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 - `internal/modules/kernel/orchestrator/readme.md`
 - [service-acceptance.md](service-acceptance.md)
 - [profile-software-dev-verifier.md](profile-software-dev-verifier.md)

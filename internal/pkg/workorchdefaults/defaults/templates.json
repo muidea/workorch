@@ -25,11 +25,6 @@
           {
             "id": "planning",
             "soulBinding": "planning",
-            "entry": {
-              "nextAction": "assess_gap",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "gap_baseline",
@@ -53,11 +48,6 @@
           {
             "id": "execution",
             "soulBinding": "execution",
-            "entry": {
-              "nextAction": "state_change",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "state_change",
@@ -81,11 +71,6 @@
           {
             "id": "validation",
             "soulBinding": "validation",
-            "entry": {
-              "nextAction": "validate",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "validation",
@@ -209,11 +194,6 @@
           {
             "id": "planning",
             "soulBinding": "planning",
-            "entry": {
-              "nextAction": "assess_gap",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "gap_baseline",
@@ -239,11 +219,6 @@
           {
             "id": "execution",
             "soulBinding": "execution",
-            "entry": {
-              "nextAction": "state_change",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "state_change",
@@ -269,11 +244,6 @@
           {
             "id": "repair",
             "soulBinding": "execution",
-            "entry": {
-              "nextAction": "repair",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "state_change",
@@ -301,11 +271,6 @@
           {
             "id": "validation",
             "soulBinding": "validation",
-            "entry": {
-              "nextAction": "validate",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "validation",
@@ -333,11 +298,6 @@
           {
             "id": "artifact",
             "soulBinding": "artifact",
-            "entry": {
-              "nextAction": "produce_artifact",
-              "requiresDefinitionRevision": true,
-              "requiresGapBaseline": true
-            },
             "requiredOutputs": [
               {
                 "kind": "artifact",
@@ -537,7 +497,7 @@
             "available_capabilities"
           ],
           "allowedExecutionModes": [
-            "llm_graph",
+            "runtime_operations",
             "managed_harness",
             "deferred",
             "decision"
@@ -786,20 +746,6 @@
                 "state_change"
               ]
             }
-          ],
-          "stateChangingRepairGuidance": [
-            "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.",
-            "When the sealed File target selection has disposition create, use file/write for that exact prospective target; patch/apply is only feasible after the target exists and must not replace the first durable create.",
-            "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.",
-            "Read-only file/read, file/list, shell validation, LSP, or MCP inspection nodes may prepare context, but they cannot by themselves satisfy a state-changing repair contract.",
-            "A state-changing shell/command must declare only workspace-relative targets that the command itself will actually modify. Build, test, listing, dependency, and toolchain probes are validation, not durable state changes; when project skeleton, module description, configuration, or implementation files are absent, create or patch those concrete paths before shell verification.",
-            "When targetSnapshots, failureTargetRepairContext, or repairTargetSet already identify existing implementation or entrypoint files for an unresolved Goal/DoD/source_change gap, patch those targets first; do not spend the primary state-changing turn on placeholder tests, go.sum, coverage_map, report-only files, or other supplemental evidence resources unless the current diagnostics explicitly target them.",
-            "Supplemental deliverables such as validation_report, coverage_map, user_deliverable, and version_control_snapshot must not replace the primary source_change state-changing output when source_change remains unresolved.",
-            "Service, proxy, streaming, or long-running entrypoint validation should prefer validation/managed_session when repairActionPackage.requiredOutput.acceptedKinds includes it; otherwise use bounded foreground commands, project test harnesses, local fake/stub servers, temporary ports, or equivalent MCP/tool evidence. Do not use nohup, setsid, background '&' launches, process termination commands, or approval requests for process termination as validation strategy.",
-            "Validation graphs must not fail solely because test discovery, listing, or name-filter output does not match a speculative pattern. Execute the smallest bounded real validation command for the target scope, or return explicit inconclusive/skipped validation evidence with the reason and impact.",
-            "When repairActionPackage.shapeContractEvidenceRequired is present, the next graph must first acquire bounded evidence for the actual API, dependency, schema, constructor, method, field, or capability contract shape via file/read, shell/command, mcp/tool_call, or git/read; do not guess SDK or dependency shapes from diagnostics alone.",
-            "If version_control_snapshot is unresolved after meaningful workspace output changes, create git/write add and git/write commit evidence; shell/command git invocations are only supporting diagnostics and must not be cited as the satisfied snapshot evidence.",
-            "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists."
           ],
           "validationEnvironmentPolicy": {
             "schemaVersion": "workorch.software_dev.validation_environment",

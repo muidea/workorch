@@ -1,5 +1,11 @@
 # MCP Registry Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `blocks/mcpregistry` 管理 MCPServer 与 MCPCapability registry 聚合，负责 server/capability 的创建、查询、列表、更新和结构化能力元数据。

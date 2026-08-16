@@ -8,15 +8,15 @@ Last Updated: 2026-06-25
 
 Design Source:
 
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
 
 Related:
 
-- [Run Resume And Gap Confirmation Design](../../30-module-architecture/run-resume-gap-confirmation-design.md)
-- [Contract Violation Recovery Loop Design](../../30-module-architecture/contract-violation-recovery-loop-design.md)
-- [EventHub Driven Workorchd State Loop Design](../../30-module-architecture/eventhub-driven-workorchd-state-loop-design.md)
-- [MVVP Workspace ViewModel Architecture](../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md)
-- [LLM Cache Improvement Design](../../30-module-architecture/llm-cache-improvement-design.md)
+- [Run Resume And Gap Confirmation Design](../superseded/run-resume-gap-confirmation-design.md)
+- [Contract Violation Recovery Loop Design](../superseded/contract-violation-recovery-loop-design.md)
+- [EventHub Driven Workorchd State Loop Design](../superseded/eventhub-driven-workorchd-state-loop-design.md)
+- [MVVP Workspace ViewModel Architecture](../superseded/mvvp-workspace-viewmodel-architecture.md)
+- [LLM Cache Improvement Design](../superseded/llm-cache-improvement-design.md)
 - [S0.1 Command Chain Audit](./goal-dod-nextaction-s0-1-command-chain-audit.md)
 - [S0.2 Goal/DoD Run Coverage Field Audit](./goal-dod-nextaction-s0-2-goal-dod-run-coverage-field-audit.md)
 - [S0.3 Evidence/Result/Artifact/Memory Write Path Audit](./goal-dod-nextaction-s0-3-evidence-result-artifact-memory-write-path-audit.md)

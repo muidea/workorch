@@ -4,7 +4,7 @@ Status: active
 
 Type: domain-model
 
-Last Updated: 2026-07-14
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -204,8 +204,10 @@ Memory 经 EventHub 由 `blocks/memory` owner 管理；Orchestrator / Governance
 
 - Skill / Soul / MCP / Capability 的选择结果应可追溯
 - Memory 只应沉淀可复用的高价值输入/输出，不应退化为事件日志摘要
-- Memory recall 必须是正式过程证据，而不是仅靠前端解析 raw executionContext 或 禁止的 map
-- provider retry / repair / replan 应能继承必要的上下文资产，但不能把无边界旧 Memory 默认重新注入
+- Memory recall 必须形成 typed recall trace / bounded context projection，不能依赖前端解析已删除的
+  `executionContext` map
+- 同一 activation 内的 provider retry / repair 应复用已封存的必要上下文资产；显式 restart 必须重新按当前
+  Workspace 定义封存，不能把无边界旧 Memory 默认注入
 - `MemoryRecallTrace` 记录的是 recall 进入运行态的事实，不表达业务结果正确性
 - recovery 继承已有 recall 时也应有可追踪 trace，而不是静默复用旧上下文
 - 当前 run 的高价值 Memory 应优先于 superseded / failed run 的低价值 `run_summary`

@@ -36,7 +36,7 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 				EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}}},
 			}},
 			TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaCurrent, Stages: []RuntimeTemplateStage{{
-				ID: "execution", SoulBinding: "execution", Entry: RuntimeTemplateStageEntry{NextAction: "state_change", RequiresDefinitionRevision: true},
+				ID: "execution", SoulBinding: "execution",
 				RequiredOutputs: []RuntimeTemplateStageRequiredOutput{{Kind: "state_change", EvidenceKinds: []string{"state_change"}}},
 			}}},
 		},
@@ -68,7 +68,7 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 		t.Fatal("profile contract drift was not detected")
 	}
 	cloned = activation.Clone()
-	cloned.ExecutionContract.TemplateStagePolicy.Stages[0].Entry.NextAction = "validate"
+	cloned.ExecutionContract.TemplateStagePolicy.Stages[0].RequiredOutputs[0].Kind = "validation"
 	if SameRuntimeActivationContext(activation, cloned) {
 		t.Fatal("template stage policy drift was not detected")
 	}

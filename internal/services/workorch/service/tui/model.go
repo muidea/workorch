@@ -1443,15 +1443,8 @@ func renderConfigResult(cfg *backend.ServiceConfig) string {
 	b.WriteString(fmt.Sprintf("- Repository: %s %s\n", nonEmpty(cfg.Backend, "-"), nonEmpty(cfg.DataDir, "-")))
 	b.WriteString(fmt.Sprintf("- Default LLM provider: %s\n", nonEmpty(cfg.DefaultChat.ProviderID, "-")))
 	b.WriteString(fmt.Sprintf("- Max concurrent runs: %d\n", cfg.MaxConcurrentRuns))
-	b.WriteString("\nLLM Output Budget\n")
-	b.WriteString(fmt.Sprintf("- maxPatchContentBytes: %d\n", output.MaxPatchContentBytes))
-	b.WriteString(fmt.Sprintf("- maxGraphBytes: %d\n", output.MaxGraphBytes))
-	b.WriteString(fmt.Sprintf("- maxGraphFileWrites: %d\n", output.MaxGraphFileWrites))
-	b.WriteString(fmt.Sprintf("- schemaInvalidLargePreviewThreshold: %d\n", output.SchemaInvalidLargePreviewThreshold))
-	b.WriteString(fmt.Sprintf("- maxArtifactChunkBytes: %d\n", output.MaxArtifactChunkBytes))
+	b.WriteString("\nCandidate Document Recovery\n")
 	b.WriteString(fmt.Sprintf("- maxDocumentRecoveryAttempts: %d\n", output.MaxDocumentRecoveryAttempts))
-	b.WriteString(fmt.Sprintf("- maxArtifactPlanAttempts: %d\n", output.MaxArtifactPlanAttempts))
-	b.WriteString(fmt.Sprintf("- maxArtifactReplanAttempts: %d\n", output.MaxArtifactReplanAttempts))
 	return strings.TrimRight(b.String(), "\n")
 }
 

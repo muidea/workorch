@@ -9,8 +9,8 @@ Owner: core
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
-- [Contract Violation Recovery Loop Design](../../30-module-architecture/contract-violation-recovery-loop-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Contract Violation Recovery Loop Design](../superseded/contract-violation-recovery-loop-design.md)
 
 ## Contract Audit
 

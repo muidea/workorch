@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -17,7 +17,7 @@ execution 与 evidence commit 的主执行链路。
 candidate → seal → ExecuteRuntimeOperation → evidence → reducer
 ```
 
-**不是** 禁止的 的 `llm → executionGraph → checkpoint`。
+**不是**已删除的 `llm → executionGraph → checkpoint` 路径。
 
 ## State Machine Binding
 
@@ -132,7 +132,24 @@ LLM dispatch 前必须先完成 preflight：
 
 缺失资源只能进入 canonical `need_prerequisite`，不得混入 LLM state-changing requiredOutput。
 
-### 6. What Is Not On This Path
+### 6. Owner Admissibility Must Drive Correction
+
+Candidate context and any bounded correction must use the latest capability-owner observation/catalog, including target
+existence and revision. A complete candidate rejected by owner semantic contract is persisted with its stable factual
+category and safe diagnostic before the one allowed correction.
+
+For example:
+
+- `file/write` is create-only and may target only an absent/prospective owner target;
+- when the target already exists, correction must choose an admitted revision-bound replacement such as `file/edit` or
+  `patch/apply`;
+- retrying the equivalent create-only operation is not progress and must be rejected before side effect;
+- stale catalog/target revision cannot be hidden by changing prose or operation identity.
+
+LLM proposes the replacement, File owner checks current feasibility/admissibility, SM-3 seals it, and SM-2 alone decides the
+post-receipt convergence state. No component may patch CWI/focus state to force closure.
+
+### 7. What Is Not On This Path
 
 以下内容已从生产主线移除，不得作为 planning/execution 正式路径：
 
@@ -162,7 +179,7 @@ LLM dispatch 前必须先完成 preflight：
 - governance request / resolution records
 - diagnostic lineage（stale / duplicate）
 
-这些是后续 assessment / Result projection 的输入，不是最终业务结果本体。
+这些是后续 assessment、formal Result payload 与派生 projection 的输入，不是最终业务结果本体。
 
 ## Source Documents
 

@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-25
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -17,6 +17,14 @@ Last Updated: 2026-07-25
 - 当前稳定 product / runtime 设计定义
 
 ## Current Records
+
+### 2026-08-16 文档/组件刷新迁入
+
+- [runtime-22-component-function-complexity-inventory-2026-08-16.md](runtime-22-component-function-complexity-inventory-2026-08-16.md)
+- [runtime-single-owner-model-capability-output-code-closure-record-2026-08-16.md](runtime-single-owner-model-capability-output-code-closure-record-2026-08-16.md)
+- [workspace-reasoning-effort-code-closure-record-2026-08-16.md](workspace-reasoning-effort-code-closure-record-2026-08-16.md)
+- [web-console-bundle-ui-optimization-record-2026-08-16.md](web-console-bundle-ui-optimization-record-2026-08-16.md)
+- [runtime-contract-drift-code-closure-record-2026-08-16.md](runtime-contract-drift-code-closure-record-2026-08-16.md)
 
 ### 交付与性能
 
@@ -36,7 +44,7 @@ Last Updated: 2026-07-25
 
 ### 2026-07-25 迁入：已完成 framework 整改过程
 
-- [go-multi-module-22-component-boundary-remediation-2026-07-25.md](go-multi-module-22-component-boundary-remediation-2026-07-25.md)：22 组件 framework boundary 迁移过程与已完成证据；当前可执行的组件合同仅见 `70-roadmap/active/component-contract-and-regression-closure-matrix.md`。
+- [go-multi-module-22-component-boundary-remediation-2026-07-25.md](go-multi-module-22-component-boundary-remediation-2026-07-25.md)：22 组件 framework boundary 迁移过程与已完成证据；当前组件定义见 [Component Documentation Alignment](../../01-overview/component-documentation-alignment.md)，回归要求见 [Runtime Owner Convergence Matrix](../../60-verification/runtime-owner-convergence-matrix.md)。
 
 ### 2026-07-14 迁入：文档迁移 / 对齐 audit（历史过程，非当前入口）
 

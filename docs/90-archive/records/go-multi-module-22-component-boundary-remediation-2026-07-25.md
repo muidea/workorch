@@ -7,7 +7,7 @@ Type: historical remediation record
 Archived: 2026-07-25
 
 Superseded as an active execution plan by
-[22-component contract and regression closure matrix](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md).
+[22-component contract and regression closure matrix](../completed/component-contract-and-regression-closure-matrix.md).
 This record preserves the completed framework migration evidence and rationale only. It must not be used to
 derive Runtime state transitions, implementation order, or new code tasks.
 
@@ -87,7 +87,7 @@ SoT，Orchestrator 实现仍以
 交付和内部合同收口，不创建第二份 Runtime 状态语义。
 
 当前的 22 组件工作仅遵循
-[component-contract-and-regression-closure-matrix.md](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md)。
+[component-contract-and-regression-closure-matrix.md](../completed/component-contract-and-regression-closure-matrix.md)。
 该矩阵逐项定义状态权威、入站/出站 typed EventHub 合同、禁止边界、组件级回归和
 跨组件/部署完成条件；本文件只保留整改背景、全局设计和当时的验收证据。
 
@@ -896,7 +896,7 @@ owner snapshot/observability，验证三类 fixture 自动到达 terminal 或 go
 9. 22 个组件 direct tests、race tests、全量 tests、vet、boundary、build 通过。
 10. file-backed crash/restart matrix 与 fresh deployed positive acceptance 通过。
 11. `current-state`、module readme、active matrix 和 verification 文档与最终实现一致。
-12. [组件合同与独立回归矩阵](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md)中每个
+12. [组件合同与独立回归矩阵](../completed/component-contract-and-regression-closure-matrix.md)中每个
     组件均达到 `C`；任何 deployed `D` 项不得以本地全仓测试或人工 Resume 替代。
 
 ## Historical Closeout Instructions

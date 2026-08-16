@@ -1,13 +1,19 @@
 # Repository Provider Initiator
 
+Status: active
+
+Type: initiator-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
-`internal/initiators/workorchruntime` 注册为 `workorch/repositories`，负责根据运行配置创建 memory 或 file repository，并按组件职责提供 repository 分组。它只承担 repository 基础设施的创建、暴露和生命周期清理，不管理业务状态或业务策略。
+`internal/initiators/workorchruntime` 注册为 `workorch/repositories`，负责根据运行配置创建 memory 或 file repository，并按组件职责提供 repository 分组。它只承担 repository 基础设施的创建、暴露和生命周期清理，不管理业务状态、Runtime 策略或跨 owner 流程。
 
 ## 组件交互及合同
 
 - 应用入口通过 side-effect import 显式启用本 initiator。
-- 各状态 owner 通过 `internal/pkg/workorchdeps` 获取自己的 repository 分组；Workspace、Run、Result、Decision、Approval、Memory、MCP Registry、Skill、Soul、Governance、Eventstream 和 Orchestrator 不能取得其他 owner 的 repository。
+- 各状态 owner 通过 `internal/pkg/workorchdeps` 获取自己的 repository 分组；Workspace、Run、Result、Decision、Approval、Memory、MCP Registry、Skill、Soul、Governance、Eventstream 和 Orchestrator 只能取得各自分组。
 - `Setup` 必须完成配置读取和全部 repository 创建；配置非法、backend 不支持或 repository 创建失败时必须 fail-fast。
 - `RepositoryProvider` 只返回按职责划分的 repository 接口，不暴露内部 `repositorySet`。
 - `Run` 不创建业务状态；`Teardown` 只释放 provider 引用。

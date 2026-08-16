@@ -8,7 +8,7 @@ Roadmap: [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-ite
 
 Related:
 
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
 - [S8.5 SSE Reconnect And Last Event ID](./goal-dod-nextaction-s8-5-sse-reconnect-last-event-id.md)
 - [S9.6 Service Restart Running Recoverable](./goal-dod-nextaction-s9-6-service-restart-running-recoverable.md)
 - [S10.6 Non-Software Template Isolation](./goal-dod-nextaction-s10-6-non-software-template-isolation.md)

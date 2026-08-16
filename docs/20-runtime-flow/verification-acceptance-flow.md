@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -14,7 +14,7 @@ Last Updated: 2026-07-29
 核心原则：
 
 - **Result 不裁决**：acceptance 判定在 Orchestrator reducer + assessment ledger
-- Result owner 只持久化正式 outcome projection
+- Result owner 只持久化已经裁决的 formal outcome
 - 不存在 禁止的 completion gate / graph follow-up / `dodAssessment` 自由 JSON 作为主链权威
 
 ## State Machine Binding
@@ -101,9 +101,9 @@ need_validation
 - 不得用 summary、历史 memory 或自造 ref 关闭 coverage
 
 assessment fact 可携带 scope（如 goalCoverage / acceptanceDimension / deliverable）与
-requirement text，供后续 Result projection 组装 coverage 视图。
+requirement text，供后续 formal Result payload 与派生 projection 组装 coverage 视图。
 
-### 3. Result Projection（不裁决）
+### 3. Formal Result And Projection（不裁决）
 
 最后一个 work item 关闭并通过 Run-level completion gate后，或 bounded terminal 决策已经形成：
 
@@ -188,5 +188,4 @@ state revision 可建立该只读 high-watermark。跨 scope 或跨 revision 内
 - [evidence-result-flow.md](evidence-result-flow.md)
 - `../00-core/runtime-stage-contract.md`
 - `../../internal/modules/kernel/orchestrator/readme.md`
-- `../../internal/modules/kernel/orchestrator/readme.md` 与
-  `../../internal/modules/blocks/result/readme.md`
+- `../../internal/modules/blocks/result/readme.md`

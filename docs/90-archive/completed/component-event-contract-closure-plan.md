@@ -11,7 +11,7 @@ Last Updated: 2026-08-04
 本计划是 22 个 framework 运行单元的 EventHub 合同收口唯一实施队列。它不定义 Runtime 状态迁移，
 不替代 [`runtime-stage-contract.md`](../../00-core/runtime-stage-contract.md)，也不修改 SM-1～SM-4 的 owner。
 Runtime semantic/CWI 正向收敛继续由
-[`runtime-cwi-reconciliation-single-owner-closure-plan.md`](../../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
+[`runtime-cwi-reconciliation-single-owner-closure-plan.md`](../completed/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 跟踪；本计划只关闭运行单元之间的通信合同与使用边界。
 
 目标是让每项生产合同同时满足：

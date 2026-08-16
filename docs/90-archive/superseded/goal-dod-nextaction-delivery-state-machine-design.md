@@ -15,14 +15,14 @@ Related:
 - [MVVP Workspace ViewModel Architecture](mvvp-workspace-viewmodel-architecture.md)
 - [LLM Cache Improvement Design](llm-cache-improvement-design.md)
 - [Projection First ReadModel IO Closure Design](projection-first-readmodel-io-closure-design.md)
-- [Runtime Contract Retry Convergence Closure Plan](../70-roadmap/active/runtime-contract-retry-convergence-closure-plan.md)
-- [Runtime Coverage Convergence State Machine Closure Plan](../70-roadmap/active/runtime-coverage-convergence-state-machine-closure-plan.md)
-- [Workspace Goal Convergence Acceleration Design](../70-roadmap/active/workspace-goal-convergence-acceleration-design.md)
-- [Convergence Authority Simplification Design](../70-roadmap/active/convergence-authority-simplification-design.md)
-- [Convergence Authority Dispatch Closure Checklist](../70-roadmap/active/convergence-authority-dispatch-closure-checklist.md)
-- [Convergence Authority Dispatch Live Verification](../60-verification/convergence-authority-dispatch-live-verification.md)
-- [Runtime Validation NextAction Convergence Improvement Plan](../70-roadmap/active/runtime-validation-nextaction-convergence-improvement-plan.md)
-- [Runtime RequiredOutput Authority And Target Snapshot Closure Plan](../70-roadmap/active/runtime-required-output-authority-and-target-snapshot-closure-plan.md)
+- [Runtime Contract Retry Convergence Closure Plan](../completed/runtime-contract-retry-convergence-closure-plan.md)
+- [Runtime Coverage Convergence State Machine Closure Plan](../completed/runtime-coverage-convergence-state-machine-closure-plan.md)
+- [Workspace Goal Convergence Acceleration Design](../completed/workspace-goal-convergence-acceleration-design.md)
+- [Convergence Authority Simplification Design](../completed/convergence-authority-simplification-design.md)
+- [Convergence Authority Dispatch Closure Checklist](../completed/convergence-authority-dispatch-closure-checklist.md)
+- [Convergence Authority Dispatch Live Verification](../records/convergence-authority-dispatch-live-verification.md)
+- [Runtime Validation NextAction Convergence Improvement Plan](../completed/runtime-validation-nextaction-convergence-improvement-plan.md)
+- [Runtime RequiredOutput Authority And Target Snapshot Closure Plan](../completed/runtime-required-output-authority-and-target-snapshot-closure-plan.md)
 
 ## Purpose
 

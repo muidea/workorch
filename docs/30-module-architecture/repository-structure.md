@@ -4,162 +4,96 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
-## Purpose
+## Baseline
 
-本文件说明当前仓库的稳定目录组织与模块形状，对齐 Runtime 生产主链与 `internal/` 树。
+WorkOrch 是单 `go.mod` 仓库。这里的 “Module/Block” 是 framework 运行单元分类，不是多个 Go module。
 
-## Repository Shape
-
-单 `go.mod` 代码库。
+当前 22-unit baseline：1 Initiator、4 Modules、17 Blocks。
 
 ```text
-application/workorch/          # thin main
+application/workorch/                    binary entry
 internal/
-  initiators/workorchruntime/  # repository provider 装配
+  initiators/workorchruntime/            repository provider/factory (1 Initiator)
   modules/
-    application/workorchd/     # appservice / server / bootstrap / projection
-    kernel/
-      orchestrator/            # Runtime convergence authority
-      governance/              # auto-governance coordination
-      system/                  # defaults ensure
+    application/workorchd/               HTTP/SSE/bootstrap/projection (1 Module)
+    kernel/{orchestrator,governance,system}/                 (3 Modules)
     blocks/
-      workspace/ run/ result/ decision/ approval/ memory/
-      soul/ skill/ mcpregistry/ eventstream/
-      llm/ file/ git/ shell/ mcp/ web/ ssh/
-      pkg/                     # blocks 共享辅助（若有）
-  pkg/
-    workorchruntimecontract/   # Runtime 中立 contract
-    workorchrepo/ workorchport/
-    workorchconfig/ workorchdefaults/ workorchmanagedconfig/
-    workorchruntimepolicy/ workorchclient/ workorchdeps/
-    repository/                # memory / file backends
-    eventcontract/ events/ eventvalue/ runtimeevent/
-    common/ dialoglanguage/ doditems/ runtimepath/
-  services/workorch/           # CLI / TUI / agent session backends
-web/workorch-console/          # Web Console
-docs/                          # 设计与模块文档
+      {workspace,run,result,decision,approval,memory}/
+      {skill,soul,mcpregistry,eventstream}/
+      {llm,file,git,shell,ssh,web,mcp}/                       (17 Blocks)
+    base/                              shared Base Biz; not a framework unit
+  pkg/                                 shared values/contracts/infrastructure
+  services/workorch/                   process CLI/TUI/session; not a framework unit
+web/workorch-console/                  React console source
+web/consoleassets/                     generated embedded assets
+docs/                                  current documentation and archive
+config/                                runtime configuration
+scripts/                               verification and operational helpers
 ```
 
-### Top-Level Intent
+## Unit Roles
 
-| 路径 | 意图 |
+| Kind | Allowed role |
 | --- | --- |
-| `application/workorch` | 进程入口 |
-| `internal/initiators` | framework / repository initiator |
-| `internal/modules/application` | appservice、server、bootstrap、observed/presenter |
-| `internal/modules/kernel` | Orchestrator/Governance/System 多 owner 协调 Modules |
-| `internal/modules/blocks` | stateful owners + capability execution |
-| `internal/pkg` | 全局共享 contract 与基础设施 |
-| `internal/services` | CLI/TUI 等人机入口服务 |
-| `web/workorch-console` | 前端 |
+| Initiator | 创建 repository provider/factory；不导出 EventHub、Runtime policy 或 bootstrap |
+| Module | 多 owner 协调、application composition 或 startup coordination |
+| Stateful Block | 单一资源 owner，内部拥有 model/repository/lifecycle |
+| Capability Block | 执行 concrete typed operation，并返回事实结果 |
+| Base Biz | 同 owner 内复用生命周期辅助，不是跨 owner facade |
+| Process service | CLI/TUI/local-remote backend 和 agent session orchestration |
 
-## Framework Unit Shape
-
-Module/Block 最小形状：
+## Typical Unit Shape
 
 ```text
 module.go
 plugin.go
 biz/
-service/          # 仅按需的 HTTP/CLI/session/protocol adapter
-pkg/common/
-pkg/models/       # 按需
-pkg/events/       # EventHub 具体 command/data/result
-pkg/contracts/    # 按需
-readme.md
+service/        optional protocol adapter
+pkg/
+  events/       owner-defined concrete EventHub command/result
+  models/       owner-local model
+  common/       owner-local constants
+readme.md       component interaction and implementation contract
 ```
 
-含义：
+不是每个 unit 都必须有每个可选目录。owner unit 不导出供 sibling 直接调用的 service/repository facade。
 
-- `plugin.go`：向 magicCommon/pluginmodule 注册
-- `module.go`：生命周期入口
-- `biz/`：业务实现
-- `service/`：仅用于 HTTP/CLI/session/protocol adapter；owner unit 不导出 direct
-  service facade，生产跨组件只能使用 typed EventHub command/result。
-- `pkg/events`：跨组件唯一交互合同
-- `pkg/common` / `pkg/models`：常量与本地模型
+## Stable Shared Packages
 
-## Kernel / Orchestrator Layout
-
-`kernel/` 只包含多 owner 协调 Module：`orchestrator`、`governance`、`system`。
-`blocks/run` 与 `blocks/eventstream` 是单资源 Block owner；其目录、module ID、
-EventHub source/destination 与 import path 均使用 `blocks/*`。
-
-```text
-internal/modules/kernel/orchestrator/
-  biz/runtime/          # controller, reducer, prerequisite, dispatch, executor, governance
-  pkg/events/             # Drive / Operation / Candidate / Governance 合同
-  pkg/contracts/
-  runtime_*.go         # drive, state repository, operation executor, result projection
-  readme.md
-```
-
-```text
-internal/modules/blocks/run/
-  biz/ pkg/events/ pkg/models/ pkg/contracts/
-  # RuntimeBootstrap + RuntimeStateRecord 随 Run 持久化与 CAS
-```
-
-## Blocks Layout
-
-```text
-internal/modules/blocks/
-  # Stateful owners
-  workspace/ run/ result/ decision/ approval/ memory/
-  soul/ skill/ mcpregistry/ eventstream/
-  # Capability execution
-  llm/          # 含 biz/runtime candidate 边界
-  file/ git/ shell/ mcp/ web/ ssh/
-```
-
-Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry”的生产路径；Orchestrator 通过 typed operation/candidate EventHub 命令调用。
-
-## Shared Package Highlights
-
-| 包 | 职责 |
+| Package group | Role |
 | --- | --- |
-| `workorchruntimecontract` | `RuntimeBootstrap`、`RuntimeStateRecord`、`RuntimeFacts`、candidate、dispatch、governance、evidence、profile/execution contract |
-| `workorchrepo` / `repository` | repository 接口与 memory/file 实现 |
-| `workorchport` | 进程/协议调用端稳定 port；业务 owner Topic/DTO 只定义在对应组件 `pkg/events`/`pkg/models` |
-| `workorchconfig` / `workorchdefaults` / `workorchmanagedconfig` | 配置与默认 Soul/Template 等 |
-| `eventcontract` / `runtimeevent` | 事件合同与运行时事件定义 |
-| `workorchclient` | 客户端访问 |
+| `workorchruntimecontract` | neutral Runtime bootstrap/state/candidate/dispatch/evidence/governance contracts |
+| `workorchprojectioncontract`, `workorchresultcontract` | read/output value contracts |
+| `workorchmanagementcontract`, `workorchquerycontract`, `workorchport`, `workorchclient` | protocol/client boundaries |
+| `eventcontract`, `runtimeevent`, `workorcheventpayload`, `workorcheventrecordcontract` | typed event infrastructure/value contracts |
+| `workorchconfig`, `workorchdefaults`, `workorchmanagedconfig`, `workorchruntimepolicy` | configuration/default/policy assembly |
+| `repository`, `workorchrepo` | memory/file repository interfaces and implementations |
+| `common`, `runtimepath`, `dialoglanguage`, `doditems`, `soulbinding` | shared value helpers |
 
-## Application Shape
+Shared packages不能成为隐藏的状态 owner、service locator 或 map-based authority bridge。
 
-- `main.go` 尽量薄：解析参数 + lifecycle
-- bootstrap：application-owned infrastructure only（无 owner repository export）
-- appservice：activation、向 Run owner 提交 Start/Resume intent、read-model
-- observed / presenter：与 HTTP 渲染分离
+## Dependency Direction
 
-## Current Mapping Direction
+```text
+entry/process -> application composition -> typed EventHub contracts -> owner units
+owner unit -> its own model/repository
+orchestrator -> typed capability/governance commands -> corresponding owners
+owners -> immutable facts/events -> projection/audit consumers
+```
 
-| 关注点 | 落点 |
-| --- | --- |
-| thin main | `application/workorch/main.go` |
-| application wiring | `internal/modules/application/workorchd/biz/bootstrap` |
-| appservice composition | `internal/modules/application/workorchd/biz/appservice` |
-| Runtime drive | `internal/modules/kernel/orchestrator/biz/runtime` + `runtime_drive.go` |
-| Runtime contract | `internal/pkg/workorchruntimecontract` |
-| Orchestrator RuntimeStateRecord opaque physical CAS | `internal/modules/blocks/run` |
-| TUI / CLI | `internal/services/workorch/service/{tui,cli}` |
-| workspace projection | `internal/modules/application/workorchd` observed / appservice |
+同 owner 内部允许直接组合 Biz/Repo。跨 owner 只允许 EventHub + concrete typed command/result；禁止 sibling repository、
+direct service、generic envelope/reflect bridge 和 callback alias。
 
-## Explicit Non-Structure（禁止的 已移除主链）
+## Generated And Runtime Data
 
-- 无生产路径依赖 `DispatchNextStep` / RuntimeAdapter registry 目录
-- 无 application continuation queue 状态目录作为主链
-- 无 `ExecutionContext` map 作为 activation/resume payload
-- 无历史主链 data-rewrite command；生产入口只构造 Runtime bootstrap 并提交 owner intent
+- `web/consoleassets` 由 console build 生成并嵌入二进制。
+- `.workorch-data`、`.workorch-workspaces`、`bin` 和 `node_modules` 不提交。
+- archive 文档不约束当前目录结构；当前事实以本文件、组件 `readme.md` 和源码为准。
 
-## Source Documents
+## References
 
-- `architecture-overview.md`
-- `kernel-orchestrator-governance.md`
-- `application-workorchd.md`
-- `blocks-runtime-adapters.md`
-- `internal/modules/kernel/orchestrator/readme.md`
-- `internal/modules/blocks/run/readme.md`
-- `internal/modules/application/workorchd/readme.md`
+- [Architecture overview](architecture-overview.md)
+- [Component alignment](../01-overview/component-documentation-alignment.md)
+- [Runtime contract](../00-core/runtime-stage-contract.md)

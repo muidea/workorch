@@ -1,19 +1,21 @@
 # 运行时编排组件
 
+Status: active
+
+Type: kernel-module-implementation-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `kernel/orchestrator` 是 Runtime convergence authority，负责 typed facts、authority transaction、prerequisite、candidate、sealed dispatch、operation evidence、governance wait、sealed terminal 与 SM-4 delivery acknowledgement。它组合多个 owner 和技术 block 完成同一 Run 的确定性收敛闭环，**但不拥有 Run、Workspace 或 Result lifecycle**。
-
-`RUNTIME-SMO` 收口期间，本文件把 owner-local lifecycle 作为实现目标合同：现有任何由
-Orchestrator 直接准入、blocked/terminal 投影或写入外部 owner state 的路径均为待删除违例，不能被视为
-可接受生产路径。
 
 SM-2 只以 `ConvergenceState` 作为 canonical decision；action/output kind 是纯派生字段，不进入 aggregate、
 authority transaction、terminal delivery 或 Run notification 的最终合同。所有外部 feedback 必须同时携带
 stable factual category 与完整、安全 original diagnostic；Orchestrator 只读取前者选择 internal transition，
 不得解析原 message/code。
 
-## Provider inference selection / ceiling（2026-08-08）
+## Provider inference selection / ceiling
 
 - activation 持久化 Run owner封存的 `RuntimeActivationContext.ProviderSelection`
 - provider ceiling prerequisite 请求与封存完整 `ProviderCeiling{Selection, token/byte ceilings, revisions}`
@@ -45,15 +47,16 @@ admission、feasibility merge 与 seal 只读前者的 immutable declaration；r
 reopen 与 reseal 只修改后者，并继续经过 Orchestrator private internal event、controller 与 transition coordinator 的单次 CAS。
 capability owner 只报告资源事实和当前 admissibility，不能请求 CWI/focus 状态。
 
-非当前 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；显式
-Restart 由 Run owner 返回 `data_reset_required`，不创建 replacement intent，也不要求 Orchestrator 加载旧 aggregate。
-清理开发数据后才能从当前 baseline 创建新 Run。
+非当前 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；
+针对该不兼容 predecessor 的显式 Restart 由 Run owner 返回 `data_reset_required`，不创建 replacement intent，也不要求
+Orchestrator 加载旧 aggregate。current-baseline Restart 的 predecessor/replacement/successor 则完全由 Run owner 的
+`ReplacementIntent` 与 owner-private reducer 管理，Orchestrator 只处理已封存的 administrative terminal delivery。
 
 当前 baseline 为每个 authority 封存不含 request/lease/CAS bookkeeping 的 `AuthorityInputID`。相同 Definition、focus/binding、
 evidence、capability/catalog、freshness 与 owner observation lineage 不能创建第二个 AuthoritySnapshot；精确 owner binding
 contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件退休，无法唯一绑定则 typed fail closed。
 
-## Runtime 四状态机实现约束（2026-07-16）
+## Runtime 四状态机实现约束
 
 完整规范以 `docs/00-core/runtime-stage-contract.md` 的“Runtime 四状态机固化规约”为唯一权威。本模块按以下四个状态机落实现有职责，不定义第二份状态语义：
 
@@ -107,14 +110,10 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 - 任何修改 reducer/controller/drive/operation projection 前，必须说明影响的 SM 编号并补合法/禁止迁移、幂等、restart、stale/duplicate、budget/guard 测试。
 - 本模块不得恢复 禁止的 mainline、application continuation queue、通用 RuntimeAdapter registry、projection authority 或自动 successor。
 
-## Candidate 合同归一目标
+## Candidate 合同
 
-完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。RUNTIME-SMO-R2 的 C0–C12
-只保留 owner/recovery/recipe、immutable binding 与 receipt matching 的回归记录。C12 已关闭 raw-credit
-越权，但不覆盖 profile semantic proof 的粒度，也不定义 `/run resume`/`/run restart` 的 reconciliation scope；
- 这两项 current-schema 缺口仅由
-[`R3 CWI reconciliation active plan`](../../../../docs/70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
-定义实施顺序。不得将 archive record、旧 VPC R5 N1～N8 或 R4/P0～P6/A-4 当作第二设计权威。
+完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。历史收口编号、旧 schema 记录和
+deployed run ID 只属于 archive regression evidence，不定义当前候选、reconciliation 或 restart 语义。
 
 - SM-2 先从 persisted Definition seed、template/profile policy 与 provider request 前通过 typed prerequisite
   获取的 owner capability/admissibility catalog 编译唯一 semantic-plan manifest；manifest/hash/schema/evaluator
@@ -215,7 +214,7 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 - `internal/pkg/workorchruntimecontract` 只实现 DTO、enum、normalize/validate/clone/hash、纯 manifest
   compiler 与 evaluator helper；不持有 Hub、不执行 I/O/CAS、不选择 retry/terminal/Runtime action。
 
-## CWI semantic planning / reconciliation owner contract（R3）
+## CWI semantic planning / reconciliation owner contract
 
 - Activation 必须封存 Definition seed；fresh restart 缺 workspace-specific exact proof 时进入 persisted
   `semantic_contract_required`，不得由 application 终止或要求普通用户补 `contextHints/evidencePolicies` JSON。
@@ -244,7 +243,7 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 
 
 
-## Effect / Receipt / Repair Directive 基线（2026-07-17）
+## Effect / Receipt / Repair Directive
 
 - `RuntimeEffectScope` 是 operation 的中立 effect 合同；`ResolveExpectedEffectScope` 由 descriptor + shell `stateChanging` + sealed MCP risk/EffectScope 解析 concrete scope。
 - seal 前 `ValidateCandidateEffectCompatibility` 强制：canonical `need_state_change` 至少一个 durable effect；`need_validation` 不得含 durable/unknown；`stateChanging=false` shell 与 read-only/session MCP 不能关闭 durable state-change。
@@ -360,7 +359,7 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
   再发布 Result -> Workspace -> Run 的有界 delivery fact 序列，并仅在 SM-4 记录 acknowledgement；ack 只能取自
   该三个 owner 的同步 typed response 后转入 Orchestrator private internal event，绝不开放独立 EventHub ack command；
   任一 delivery 失败进入延迟重试，不得改写 reducer terminal 或越权写 owner state。
-- Start/Resume 由 Application 向 Run owner 提交 scoped intent；Run owner 内部迁移并发布 `RunStateChanged` 后，
+- Start/Resume 由 Application 经 Workspace owner ingress 提交 scoped intent；Run owner 内部迁移并发布 `RunStateChanged` 后，
   Orchestrator 才后台执行唯一 Runtime drive。application 不再拥有 Start/Resume continuation queue，Orchestrator
   service 不暴露 execution-context-patch resume facade。Workspace 与 Run owner 的同步 intent Result 只携带 typed
   `RuntimeExecutionIntentOutcome + RuntimeExecutionIntentReason`；不得用自由文本 `Disposition + Diagnostic` 形成第二套
@@ -406,7 +405,9 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 - Orchestrator service facade 不暴露 `DispatchNextStep`；Runtime operation 只能由 persisted drive/reducer 主链调度，外部 module 不得直接推进 Step 投影。
 - Orchestrator service facade 不暴露 Start/Resume；这两个生产 EventHub handler 属于 Run owner，Run state notification
   才触发 Orchestrator internal drive，禁止外部组件通过 service lifecycle 重新进入 禁止的 主链。
-- Runtime 不自动创建 禁止的 replan successor；重新定义目标或执行基准时必须通过新的 typed activation/bootstrap 创建独立 Runtime Run。
+- Runtime/Orchestrator 不自动创建 replan successor；current-baseline restart 的 replacement intent、terminal delivery
+  后 successor materialization 与 lineage 都由 Run owner 管理。重新定义目标或执行基准必须使用新的 typed
+  activation/bootstrap，不能由 Orchestrator 从旧 aggregate 派生。
 - 不记录或恢复 `runtime_step_result_available`、watchdog recovery policy 等旧 checkpoint；历史 checkpoint 仅作为只读审计数据。
 - Run/Workspace 状态通知不再隐式写入 禁止的 runtime checkpoint；状态事件与 Runtime aggregate 各自保持单一职责。
 - HTTP runtime 配置更新不得向 Orchestrator 推送进程内 repair policy 副本，避免 canonical config 与 禁止的 policy cache 形成双权威。

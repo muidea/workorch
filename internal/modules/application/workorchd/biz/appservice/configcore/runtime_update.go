@@ -84,13 +84,6 @@ func applyRuntimeLLMOutputUpdate(current workorchconfig.LLMOutputRuntimeConfig, 
 			*target = *value
 		}
 	}
-	applyInt(&current.MaxPatchContentBytes, update.MaxPatchContentBytes)
-	applyInt(&current.MaxGraphBytes, update.MaxGraphBytes)
-	applyInt(&current.MaxGraphFileWrites, update.MaxGraphFileWrites)
-	applyInt(&current.SchemaInvalidLargePreviewThreshold, update.SchemaInvalidLargePreviewThreshold)
-	applyInt(&current.MaxArtifactChunkBytes, update.MaxArtifactChunkBytes)
 	applyInt(&current.MaxDocumentRecoveryAttempts, update.MaxDocumentRecoveryAttempts)
-	applyInt(&current.MaxArtifactPlanAttempts, update.MaxArtifactPlanAttempts)
-	applyInt(&current.MaxArtifactReplanAttempts, update.MaxArtifactReplanAttempts)
 	return current
 }

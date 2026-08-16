@@ -302,227 +302,78 @@ func TestEmbeddedNonSoftwareTemplatesDoNotDeclareSoftwareDevStrategy(t *testing.
 	}
 }
 
-func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuidance(t *testing.T) {
+func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	souls, err := loadEmbeddedSouls()
 	if err != nil {
 		t.Fatalf("loadEmbeddedSouls: %v", err)
 	}
 
 	planning := findEmbeddedSoulByID(souls, "soul-software-dev-planning")
-	if planning == nil {
-		t.Fatal("soul-software-dev-planning missing")
-	}
-	assertSoulContains(t, planning.SoulMD, "技术栈")
-	assertSoulContains(t, planning.SoulMD, "PRD")
-	assertSoulContains(t, planning.SoulMD, "受影响文件")
-	assertSoulContains(t, planning.SoulMD, "DoD 条目")
-	assertSoulContains(t, planning.SoulMD, "DoD-to-test")
-	assertSoulContains(t, planning.SoulMD, "主路径")
-	assertSoulContains(t, planning.SoulMD, "新增 Goal")
-	assertSoulContains(t, planning.SoulMD, "gap analysis")
-	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
-	assertSoulContains(t, planning.SoulMD, "新项目初始化场景")
-	assertSoulContains(t, planning.SoulMD, "包/module/import")
-	assertSoulContains(t, planning.SoulMD, "functional_behavior")
-	assertSoulContains(t, planning.SoulMD, "external_contract")
-	assertSoulContains(t, planning.SoulMD, "runtime_entrypoint")
-	assertSoulContains(t, planning.SoulMD, "persistence_or_side_effect")
-	assertSoulContains(t, planning.SoulMD, "target/interface contract matrix")
-	assertSoulContains(t, planning.SoulMD, "输入契约")
-	assertSoulContains(t, planning.SoulMD, "输出契约")
-	assertSoulContains(t, planning.SoulMD, "file/read")
-	assertSoulContains(t, planning.SoulMD, "rejectedResultContinuation")
-	assertSoulContains(t, planning.SoulMD, "missingGoalCoverage")
-	assertSoulContains(t, planning.SoulMD, "processEvidenceTimeline")
-	assertSoulContains(t, planning.SoulMD, "currentProgressDigest")
-	assertSoulContains(t, planning.SoulMD, "已有输出")
-	assertSoulContains(t, planning.SoulMD, "当前缺口")
-	assertSoulContains(t, planning.SoulMD, "completion follow-up")
-	assertSoulContains(t, planning.SoulMD, "可执行 repair graph")
-	assertSoulContains(t, planning.SoulMD, "coverageTargets")
-	assertSoulContains(t, planning.SoulMD, "repairActionPackage.targetSnapshots")
-	assertSoulContains(t, planning.SoulMD, "placeholder 测试")
-	assertSoulContains(t, planning.SoulMD, "git/write add")
-	assertSoulContains(t, planning.SoulMD, "version_control_snapshot 引用了 shell/command")
-	assertSoulContains(t, planning.SoulMD, "zeroWork 评估")
-	assertSoulContains(t, planning.SoulMD, "runtimeCapabilities.blockKinds 未声明 git/write")
-	assertSoulContains(t, planning.SoulMD, "runtime capability contract 缺失核心 git/write 能力")
-	assertSoulContains(t, planning.SoulMD, "bounded implementation slice")
-	assertSoulContains(t, planning.SoulMD, "单文件职责")
-	assertSoulContains(t, planning.SoulMD, "catch-all helper")
-	assertSoulContains(t, planning.SoulMD, "mega file")
-	assertSoulNotContains(t, planning.SoulMD, "runtime.git.writeEnabled")
-	assertSoulNotContains(t, planning.SoulMD, "provider/protocol matrix")
-	assertSoulNotContains(t, planning.SoulMD, "多供应商")
-	assertSoulNotContains(t, planning.SoulMD, "多模型")
-	assertSoulNotContains(t, planning.SoulMD, "Token")
-
 	execution := findEmbeddedSoulByID(souls, "soul-software-dev-execution")
-	if execution == nil {
-		t.Fatal("soul-software-dev-execution missing")
+	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
+	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
+	decision := findEmbeddedSoulByID(souls, "soul-software-dev-decision")
+	for id, soul := range map[string]*embeddedSoul{
+		"planning": planning, "execution": execution, "validation": validation,
+		"artifact": artifact, "decision": decision,
+	} {
+		if soul == nil {
+			t.Fatalf("software-dev %s soul missing", id)
+		}
 	}
+
+	assertSoulContains(t, planning.SoulMD, "semantic_plan")
+	assertSoulContains(t, planning.SoulMD, "DefinitionFocuses")
+	assertSoulContains(t, planning.SoulMD, "每个 required CWI")
+	assertSoulContains(t, planning.SoulMD, "revision-bound replacement")
+	assertSoulContains(t, planning.SoulMD, "file/write")
+	assertSoulContains(t, planning.SoulMD, "bounded implementation slice")
+	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
+	assertSoulContains(t, planning.SoulMD, "package/module/import")
+	assertSoulContains(t, planning.SoulMD, "真实交付入口")
+
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/read")
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/write")
-	assertSoulContains(t, execution.SoulMD, "git/write init")
-	assertSoulContains(t, execution.SoulMD, "targetRefs 只能列出该命令实际会修改")
-	assertSoulContains(t, execution.SoulMD, "先用 file_write/unified_diff 在具体路径落盘")
-	assertSoulContains(t, execution.SoulMD, "最小代码或配置变更")
-	assertSoulContains(t, execution.SoulMD, "workspace 为空且 Goal/DoD 未要求既有源码")
-	assertSoulContains(t, execution.SoulMD, "每轮修改后先执行最小相关验证")
-	assertSoulContains(t, execution.SoulMD, "失败命令")
-	assertSoulContains(t, execution.SoulMD, "DoD 不满足")
-	assertSoulContains(t, execution.SoulMD, "rootCause")
-	assertSoulContains(t, execution.SoulMD, "错误路径")
-	assertSoulContains(t, execution.SoulMD, "新增 Goal 处理")
-	assertSoulContains(t, execution.SoulMD, "重复运行已有测试")
-	assertSoulContains(t, execution.SoulMD, "不能替代实现")
-	assertSoulContains(t, execution.SoulMD, "补丁质量要求")
-	assertSoulContains(t, execution.SoulMD, "完整、可直接应用")
-	assertSoulContains(t, execution.SoulMD, "占位函数体")
-	assertSoulContains(t, execution.SoulMD, "当前文件快照")
-	assertSoulContains(t, execution.SoulMD, "包/module/import")
-	assertSoulContains(t, execution.SoulMD, "Goal / DoD、现有代码和验收证据")
-	assertSoulContains(t, execution.SoulMD, "交付入口")
-	assertSoulContains(t, execution.SoulMD, "多外部系统、多接口契约")
-	assertSoulContains(t, execution.SoulMD, "file/read")
-	assertSoulContains(t, execution.SoulMD, "git/read")
-	assertSoulContains(t, execution.SoulMD, "git/write")
-	assertSoulContains(t, execution.SoulMD, "版本控制快照")
-	assertSoulContains(t, execution.SoulMD, "git/write commit")
-	assertSoulContains(t, execution.SoulMD, "编译与接口形状修复")
-	assertSoulContains(t, execution.SoulMD, "undefined")
-	assertSoulContains(t, execution.SoulMD, "unknown field")
-	assertSoulContains(t, execution.SoulMD, "当前项目已经存在的类型")
-	assertSoulContains(t, execution.SoulMD, "failureTargetRepairContext")
-	assertSoulContains(t, execution.SoulMD, "repairActionPackage.currentFailure")
-	assertSoulContains(t, execution.SoulMD, "failedPatchDigest")
-	assertSoulContains(t, execution.SoulMD, "patch_current_snapshot_only")
-	assertSoulContains(t, execution.SoulMD, "exact_replacement_against_current_snapshot")
-	assertSoulContains(t, execution.SoulMD, "baseHash mismatch")
-	assertSoulContains(t, execution.SoulMD, "invalid_unified_diff")
-	assertSoulContains(t, execution.SoulMD, "file_write cannot replace existing target")
-	assertSoulContains(t, execution.SoulMD, "currentTargetAlreadySatisfiesFailedPatch")
-	assertSoulContains(t, execution.SoulMD, "同一个 executionGraph")
-	assertSoulContains(t, execution.SoulMD, "strategyReassessment.required=true")
-	assertSoulContains(t, execution.SoulMD, "failedSurface、rootCauseTarget、repairTargetDecision")
-	assertSoulContains(t, execution.SoulMD, "oldText/newText 必须是实质变化")
-	assertSoulContains(t, execution.SoulMD, "LSP 使用约束")
-	assertSoulContains(t, execution.SoulMD, "首次使用 LSP 前必须先执行 lsp_initialize")
-	assertSoulContains(t, execution.SoulMD, "lsp_sync")
-	assertSoulContains(t, execution.SoulMD, "lsp_diagnostics")
-	assertSoulContains(t, execution.SoulMD, "不能替代对真实生产入口")
-	assertSoulContains(t, execution.SoulMD, "真实交付入口")
-	assertSoulContains(t, execution.SoulMD, "测试文件内临时实现")
-	assertSoulContains(t, execution.SoulMD, "不得绕过生产实现")
-	assertSoulContains(t, execution.SoulMD, "processEvidenceTimeline")
-	assertSoulContains(t, execution.SoulMD, "currentProgressDigest")
-	assertSoulContains(t, execution.SoulMD, "沿用当前项目已有架构")
-	assertSoulContains(t, execution.SoulMD, "保护当前 workspace 已有有效内容")
-	assertSoulContains(t, execution.SoulMD, "不能长期只调整测试")
-	assertSoulContains(t, execution.SoulMD, "missing type")
-	assertSoulContains(t, execution.SoulMD, "首要编译阻塞")
-	assertSoulContains(t, execution.SoulMD, "bounded repair graph")
-	assertSoulContains(t, execution.SoulMD, "failed dodAssessment")
-	assertSoulContains(t, execution.SoulMD, "mustDeclareCoverageTargets")
-	assertSoulContains(t, execution.SoulMD, "repairActionPackage.coverageTargetSet")
-	assertSoulContains(t, execution.SoulMD, "补充证据")
-	assertSoulContains(t, execution.SoulMD, "生产实现、入口或配置目标")
-	assertSoulContains(t, execution.SoulMD, "placeholder 测试")
-	assertSoulContains(t, execution.SoulMD, "version_control_snapshot 证据类型不符")
-	assertSoulContains(t, execution.SoulMD, "必须直接生成 git/write add 和 git/write commit")
-	assertSoulContains(t, execution.SoulMD, "非 git/write commit 证据")
-	assertSoulContains(t, execution.SoulMD, "context.scope=runtime_capability_contract")
-	assertSoulContains(t, execution.SoulMD, "context.requiresExternalEvidence=false")
-	assertSoulContains(t, execution.SoulMD, "runtime capability contract 缺陷")
-	assertSoulContains(t, execution.SoulMD, "bounded implementation slice")
-	assertSoulContains(t, execution.SoulMD, "large generated file")
-	assertSoulContains(t, execution.SoulMD, "monolithic implementation")
-	assertSoulContains(t, execution.SoulMD, "catch-all utility")
-	assertSoulNotContains(t, execution.SoulMD, "缺失能力作为配置阻塞")
-	assertSoulNotContains(t, execution.SoulMD, "runtime.git.writeEnabled")
-	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
-	assertSoulNotContains(t, execution.SoulMD, "providers[]")
-	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
-	assertSoulNotContains(t, execution.SoulMD, "真实外部 provider")
-	assertSoulNotContains(t, execution.SoulMD, "provider 行为")
+	assertSoulContains(t, execution.SoulMD, "operations")
+	assertSoulContains(t, execution.SoulMD, "sealed manifest")
+	assertSoulContains(t, execution.SoulMD, "bindingRefs")
+	assertSoulContains(t, execution.SoulMD, "patch/apply")
+	assertSoulContains(t, execution.SoulMD, "text_replace")
+	assertSoulContains(t, execution.SoulMD, "不得重复选择 create-only")
+	assertSoulContains(t, execution.SoulMD, "owner snapshot")
+	assertSoulContains(t, execution.SoulMD, "真实 root cause")
+	assertSoulContains(t, execution.SoulMD, "保护 workspace 中已有有效内容")
 
-	validation := findEmbeddedSoulByID(souls, "soul-software-dev-validation")
-	if validation == nil {
-		t.Fatal("soul-software-dev-validation missing")
-	}
-	assertSoulContains(t, validation.SoulMD, "satisfied/failed/skipped")
-	assertSoulContains(t, validation.SoulMD, "逐项")
-	assertSoulContains(t, validation.SoulMD, "effective DoD")
-	assertSoulContains(t, validation.SoulMD, "不得只选择")
-	assertSoulContains(t, validation.SoulMD, "evidenceRefs")
-	assertSoulContains(t, validation.SoulMD, "DoD-to-test")
-	assertSoulContains(t, validation.SoulMD, "关键分支")
-	assertSoulContains(t, validation.SoulMD, "Goal 叶子需求")
-	assertSoulContains(t, validation.SoulMD, "验收维度")
-	assertSoulContains(t, validation.SoulMD, "目标入口可用")
-	assertSoulContains(t, validation.SoulMD, "入口路径")
-	assertSoulContains(t, validation.SoulMD, "acceptanceDimensions")
-	assertSoulContains(t, validation.SoulMD, "deliverableCoverage")
-	assertSoulContains(t, validation.SoulMD, "placeholder 测试")
-	assertSoulContains(t, validation.SoulMD, "生产实现、入口或用户可观察行为")
-	assertSoulContains(t, validation.SoulMD, "large generated file")
-	assertSoulContains(t, validation.SoulMD, "bounded implementation slice")
-	assertSoulContains(t, validation.SoulMD, "目标文件、验证命令")
-	assertSoulContains(t, validation.SoulMD, "version_control_snapshot")
-	assertSoulContains(t, validation.SoulMD, "提交 hash")
-	assertSoulContains(t, validation.SoulMD, "claim-to-evidence consistency")
-	assertSoulContains(t, validation.SoulMD, "file/read")
-	assertSoulContains(t, validation.SoulMD, "persistence_or_side_effect")
-	assertSoulContains(t, validation.SoulMD, "直接 evidenceRefs")
-	assertSoulContains(t, validation.SoulMD, "runtime_entrypoint")
-	assertSoulContains(t, validation.SoulMD, "external_contract")
-	assertSoulContains(t, validation.SoulMD, "不能只引用 build/race/coverage_map")
-	assertSoulContains(t, validation.SoulMD, "用户可观察行为")
-	assertSoulContains(t, validation.SoulMD, "最终交付入口")
-	assertSoulContains(t, validation.SoulMD, "fake/mock/helper")
-	assertSoulContains(t, validation.SoulMD, "真实交付入口")
-	assertSoulContains(t, validation.SoulMD, "生产实现")
-	assertSoulContains(t, validation.SoulMD, "唯一被测对象")
-	assertSoulContains(t, validation.SoulMD, "rejectedResultContinuation")
-	assertSoulContains(t, validation.SoulMD, "missingDeliverableCoverage")
-	assertSoulContains(t, validation.SoulMD, "processEvidenceTimeline")
-	assertSoulContains(t, validation.SoulMD, "currentProgressDigest")
-	assertSoulContains(t, validation.SoulMD, "不要让旧失败覆盖后续成功证据")
-	assertSoulContains(t, validation.SoulMD, "bounded repair graph")
-	assertSoulContains(t, validation.SoulMD, "目标文件、目标测试和验证命令")
-	assertSoulContains(t, validation.SoulMD, "deliverableCoverage.source_change")
-	assertSoulContains(t, validation.SoulMD, "git/write commit")
-	assertSoulContains(t, validation.SoulMD, "coverageTargets 缺失")
-	assertSoulContains(t, validation.SoulMD, "version_control_snapshot 因引用 shell/command")
-	assertSoulContains(t, validation.SoulMD, "git/write add 和 git/write commit")
-	assertSoulContains(t, validation.SoulMD, "runtimeCapabilities.blockKinds 未声明 git/write")
-	assertSoulContains(t, validation.SoulMD, "runtime capability contract 缺失核心 git/write 能力")
-	assertSoulNotContains(t, validation.SoulMD, "runtime.git.writeEnabled")
-	assertSoulNotContains(t, validation.SoulMD, "多供应商")
-	assertSoulNotContains(t, validation.SoulMD, "多模型")
-	assertSoulNotContains(t, validation.SoulMD, "Token")
+	assertSoulContains(t, validation.SoulMD, "sealed binding")
+	assertSoulContains(t, validation.SoulMD, "capability-owner receipt")
+	assertSoulContains(t, validation.SoulMD, "每个 required CWI")
+	assertSoulContains(t, validation.SoulMD, "exact recipe/check")
+	assertSoulContains(t, validation.SoulMD, "version-control snapshot")
+	assertSoulContains(t, validation.SoulMD, "claim-to-evidence")
 
-	artifact := findEmbeddedSoulByID(souls, "soul-software-dev-artifact")
-	if artifact == nil {
-		t.Fatal("soul-software-dev-artifact missing")
-	}
 	assertSoulContains(t, artifact.SoulMD, "DoD 条目证据引用")
-	assertSoulContains(t, artifact.SoulMD, "变更文件")
-	assertSoulContains(t, artifact.SoulMD, "行为变化")
-	assertSoulContains(t, artifact.SoulMD, "coverage_map")
 	assertSoulContains(t, artifact.SoulMD, "version_control_snapshot")
-	assertSoulContains(t, artifact.SoulMD, "commit hash")
-	assertSoulContains(t, artifact.SoulMD, "Goal 覆盖项")
-	assertSoulContains(t, artifact.SoulMD, "构建产物")
-	assertSoulContains(t, artifact.SoulMD, "不要只写")
-
-	decision := findEmbeddedSoulByID(souls, "soul-software-dev-decision")
-	if decision == nil {
-		t.Fatal("soul-software-dev-decision missing")
-	}
 	assertSoulContains(t, decision.SoulMD, "不要因为 workspace 为空就直接请求源码")
-}
 
+	for _, soul := range souls {
+		for _, forbidden := range []string{
+			"executionGraph",
+			"nextStep",
+			"nextAction",
+			"executionContext",
+			"repairActionPackage",
+			"patchRequests",
+			"shellCommands",
+			"mcpToolCalls",
+			"memoryWrites",
+			"graph follow-up",
+			"repair graph",
+			"validation graph",
+		} {
+			assertSoulNotContains(t, soul.SoulMD, forbidden)
+		}
+	}
+}
 func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 	souls, err := BuiltinSoulDefaults()
 	if err != nil || len(souls) == 0 {
@@ -908,17 +759,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	if !ok || len(requirements) < 4 {
 		t.Fatalf("software-dev evidenceRequirements = %+v, want declared requirements", softwareDev["evidenceRequirements"])
 	}
-	guidance, ok := softwareDev["stateChangingRepairGuidance"].([]any)
-	if !ok || len(guidance) < 4 {
-		t.Fatalf("software-dev stateChangingRepairGuidance = %+v, want declared guidance", softwareDev["stateChangingRepairGuidance"])
+	if _, exists := softwareDev["stateChangingRepairGuidance"]; exists {
+		t.Fatal("software-dev profile retains removed untyped state-changing guidance")
 	}
-	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.")
-	assertStringListContains(t, guidance, "When the sealed File target selection has disposition create, use file/write for that exact prospective target; patch/apply is only feasible after the target exists and must not replace the first durable create.")
-	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.")
-	assertStringListContains(t, guidance, "A state-changing shell/command must declare only workspace-relative targets that the command itself will actually modify. Build, test, listing, dependency, and toolchain probes are validation, not durable state changes; when project skeleton, module description, configuration, or implementation files are absent, create or patch those concrete paths before shell verification.")
-	assertStringListContains(t, guidance, "When targetSnapshots, failureTargetRepairContext, or repairTargetSet already identify existing implementation or entrypoint files for an unresolved Goal/DoD/source_change gap, patch those targets first; do not spend the primary state-changing turn on placeholder tests, go.sum, coverage_map, report-only files, or other supplemental evidence resources unless the current diagnostics explicitly target them.")
-	assertStringListContains(t, guidance, "When repairActionPackage.shapeContractEvidenceRequired is present, the next graph must first acquire bounded evidence for the actual API, dependency, schema, constructor, method, field, or capability contract shape via file/read, shell/command, mcp/tool_call, or git/read; do not guess SDK or dependency shapes from diagnostics alone.")
-	assertStringListContains(t, guidance, "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists.")
 	requiredEvidence := map[string]bool{
 		"runtime_entrypoint":         false,
 		"external_contract":          false,
@@ -1246,7 +1089,7 @@ func assertSoftwareDevValidationPolicies(t *testing.T, hints map[string]any) {
 			t.Fatalf("validation policy = %+v, want discovery and scratch requirements", item)
 		}
 		assertStringListContains(t, item["appliesToEvidenceKinds"].([]any), "validation")
-		assertStringListContains(t, item["allowedExecutionModes"].([]any), "llm_graph")
+		assertStringListContains(t, item["allowedExecutionModes"].([]any), "runtime_operations")
 		assertStringListContains(t, item["allowedExecutionModes"].([]any), "managed_harness")
 		assertStringListContains(t, item["allowedValidationModes"].([]any), "controlled_substitute")
 		if got := testIntFromAny(item["maxValidationOnlyRetriesPerFocus"]); got != 2 {
@@ -1287,11 +1130,6 @@ func assertSoftwareDevTemplateStagePolicies(t *testing.T, hints map[string]any) 
 			t.Fatalf("software-dev templateStagePolicies missing stage %q in %+v", id, stages)
 		}
 	}
-	assertTemplateStageNextAction(t, byID["planning"], "assess_gap")
-	assertTemplateStageNextAction(t, byID["execution"], "state_change")
-	assertTemplateStageNextAction(t, byID["repair"], "repair")
-	assertTemplateStageNextAction(t, byID["validation"], "validate")
-	assertTemplateStageNextAction(t, byID["artifact"], "produce_artifact")
 	assertTemplateStageOutput(t, byID["planning"], "gap_baseline", "assessment")
 	assertTemplateStageOutput(t, byID["execution"], "state_change", "state_change")
 	assertTemplateStageOutput(t, byID["repair"], "state_change", "state_change")
@@ -1300,17 +1138,6 @@ func assertSoftwareDevTemplateStagePolicies(t *testing.T, hints map[string]any) 
 	assertTemplateStagePolicyRef(t, byID["repair"], "capabilityUsagePolicies", "software-dev-code-semantics-guidance")
 	assertTemplateStagePolicyRef(t, byID["repair"], "evidencePolicies", "software-dev-validation-evidence")
 	assertTemplateStagePolicyRef(t, byID["validation"], "evidencePolicies", "software-dev-validation-evidence")
-}
-
-func assertTemplateStageNextAction(t *testing.T, stage map[string]any, want string) {
-	t.Helper()
-	entry, ok := stage["entry"].(map[string]any)
-	if !ok {
-		t.Fatalf("stage entry = %+v, want map", stage["entry"])
-	}
-	if got := testStringFromAny(entry["nextAction"]); got != want {
-		t.Fatalf("stage %q nextAction = %q, want %q", testStringFromAny(stage["id"]), got, want)
-	}
 }
 
 func assertTemplateStageOutput(t *testing.T, stage map[string]any, wantKind string, wantEvidenceKind string) {
@@ -1378,12 +1205,8 @@ func assertTemplateStagePolicySchema(t *testing.T, templateID string, policy map
 				t.Fatalf("%s templateStagePolicies stage %q soulBinding = %q, want binding key", templateID, id, binding)
 			}
 		}
-		entry, ok := stage["entry"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s templateStagePolicies stage %q entry = %+v, want map", templateID, id, stage["entry"])
-		}
-		if strings.TrimSpace(testStringFromAny(entry["nextAction"])) == "" {
-			t.Fatalf("%s templateStagePolicies stage %q entry.nextAction is empty", templateID, id)
+		if _, exists := stage["entry"]; exists {
+			t.Fatalf("%s templateStagePolicies stage %q retains removed entry authority: %+v", templateID, id, stage["entry"])
 		}
 		outputs, ok := stage["requiredOutputs"].([]any)
 		if !ok || len(outputs) == 0 {

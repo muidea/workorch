@@ -1,14 +1,25 @@
 # Decision Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
-`blocks/decision` 管理 DecisionTicket 与 DecisionResolution 聚合，负责 ticket 的创建、查询、更新、解决、supersede 和 resolution 生命周期。
+`blocks/decision` 管理 DecisionTicket 与 DecisionResolution 聚合。当前跨 owner 合同提供 ticket/resolution 查询和
+删除、普通 ticket 的幂等解决，以及 Runtime governance ticket 的确定性创建与 resolution 提交；不暴露通用 ticket
+create/update/supersede state setter。
 
 ## 组件交互及合同
 
-- Ticket 与 Resolution command/query 由 `blocks/decision/pkg/events` 定义，并返回 `DecisionCommandResult`。
-- Ticket 状态变化发布 `TicketChangedData`；解决成功发布 `TicketResolvedData`。
-- `kernel/governance` 和 `application/workorchd` 通过 EventHub 创建、查询或解决 ticket。
+- Ticket 与 Resolution 的实际 command/query 由 `blocks/decision/pkg/events` 定义，并返回
+  `DecisionCommandResult`；Runtime governance open 使用同一 owner 定义的 concrete command/result。
+- Runtime governance ticket 创建发布 `TicketChangedData`，解决成功发布 `TicketResolvedData`；不存在通用
+  “任意 ticket 状态变化”通知。
+- `kernel/governance` 和 `application/workorchd` 通过 EventHub 查询或解决 ticket；Runtime governance ticket 只能由
+  Orchestrator 的 sealed request 经 Decision owner 创建。
 - `blocks/run` 与 `kernel/orchestrator` 使用 ticket scope 表达治理事实；Orchestrator 不恢复 Run，Run owner消费其 immutable wait/continuation fact 后在自身 reducer 中迁移 `blocked_on_decision`。
 - Decision 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordDecisionEvidenceCommand`；Orchestrator 幂等写入自己的 EvidenceRecord 后返回 `RecordDecisionEvidenceResult`。
 - Runtime governed dispatch 由 Orchestrator 通过其定义的 `OpenRuntimeGovernanceRequestCommand/Result` 投递；本 block 导入该 typed 合同并确保创建确定性 DecisionTicket，不接收跨组件 map context。
@@ -30,4 +41,5 @@
 - Resolution 与 ticket 使用同一 Decision owner 的可恢复两阶段写入；若 resolution 已持久化而 ticket 更新中断，只能由同一 private recovery event 修复 ticket，外部组件不得代写状态。
 - Decision 只表达治理选择，不直接修改 Run、Result 或 Orchestrator 收敛状态。
 - Runtime ticket 只拥有治理选择状态；authority snapshot、dispatch 与 ticket 的正式绑定由 Orchestrator 随 Run owner 状态持久化。
-- 普通 Decision 可以继续使用 application continuation；`runtime_governance` 只能走 typed ticket-resolution command，禁止同时触发通用 Resume。
+- 普通 Decision resolution 与 `runtime_governance` resolution 都不能由 Application 自动触发 Resume；后者只能走
+  typed ticket-resolution command 回到 Orchestrator，Run continuation 仍由 persisted governance fact 与 Run-private reducer 决定。

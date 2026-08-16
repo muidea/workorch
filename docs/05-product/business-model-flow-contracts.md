@@ -1,482 +1,88 @@
-# WorkOrch Business Model, Flow Contracts, And Module Interaction
+# WorkOrch Business Model And Flow Contracts
 
 Status: active
 
 Type: business-model-flow-contracts
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
-## 1. Purpose
+## Scope
 
-本文整理 WorkOrch 的业务模型、业务处理流程、流程间交互合同和功能模块交互。
+本文给出产品对象、owner 和跨组件流程的简明映射。字段以 [domain model](../10-domain-model/overview.md) 为准，
+状态转换以 [Runtime contract](../00-core/runtime-stage-contract.md) 为准。
 
-本文是产品/业务视角的汇总，不替代字段级、流程级、模块级权威文档：
+## Business Objects
 
-- runtime core / Runtime 主链：`../00-core/runtime-stage-contract.md`
-- 对象字段权威：`../10-domain-model/`
-- 流程权威：`../20-runtime-flow/`
-- 模块权威：`../30-module-architecture/`
-- API 权威：`../50-product-interface/service-api.md`
-
-**生产主线 = Runtime only。** 中立 stage 语义用于产品/profile/LLM 意图；正式推进以 Runtime facts / reducer / authority / candidate / sealed dispatch / evidence 为准。不得将 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor 表述为生产路径。
-
-## 2. Business Object Map
-
-### 2.1 Workspace Definition Objects
-
-| Object | Purpose | Owner | Key Relations |
-| --- | --- | --- | --- |
-| Workspace | 顶层业务容器，绑定交付目录、内部目录、当前 active run 和上下文 | blocks/workspace | has Goal, DoD, Run, Soul binding, Memory |
-| Goal | 当前要达成的目标正式定义 | blocks/workspace | belongs to Workspace, referenced by Run/Result/Coverage |
-| DoD | 完成定义和验收条目正式定义 | blocks/workspace | belongs to Workspace, referenced by Run/Result/Coverage |
-| DefinitionRevision | Goal/DoD 的有效版本边界 | blocks/workspace + activation/bootstrap | binds Run, CoverageFocus / coverage items, RuntimeBootstrap.Definition |
-
-合同：
-
-- activation 必须绑定 effective Goal + DoD + definitionRevision。
-- 新定义是 cumulative latest，除显式冲突外不能弱化旧约束。
-- superseded/historical definition 只能作为 lineage，不得继续作为 active definition。
-- 定义变更意图通过 **新** typed activation / 新 Runtime Run 表达，不自动 replan successor。
-
-### 2.2 Runtime Process Objects
-
-| Object | Purpose | Owner | Key Relations |
-| --- | --- | --- | --- |
-| Run | 一次围绕当前 definition 的正式执行实例 | blocks/run | owns SM-1 lifecycle；physically stores RuntimeBootstrap and opaque Orchestrator RuntimeStateRecord；has process evidence / Result relation |
-| RuntimeBootstrap | 创建时封存的 Definition + Activation + Focuses + Requirements | application 构造、blocks/run 持久化 binding、orchestrator 消费 | seals activation; not rebuilt from caller map |
-| RuntimeFacts | drive 权威事实面（focus 队列、evidence ledger、authority 相关状态） | orchestrator aggregate | inputs to reducer |
-| CoverageFocus | 有序 focus 队列元素；携带 coverage work items 与 evidence/assessment 要求 | orchestrator / bootstrap | advances after required evidence (and optional assessment) |
-| EvidenceLedger | accepted/rejected operation evidence 与 lineage | orchestrator aggregate | binds sealed dispatch / operation |
-| SealedDispatch | 执行前持久化的 dispatch 密封 | orchestrator | unique legal entry for operation evidence |
-| Step | 过程执行单元的 **非权威投影 / legacy 过程面** | blocks/run storage + projection | may reference operation/evidence; **not** Runtime scheduler authority |
-| ToolCall | 外部动作过程证据 | blocks/run | belongs to Run/operation projection, may support Result |
-| Patch | state-changing 变更证据 | blocks/run | belongs to Run/operation projection, may support Artifact/Result |
-| ValidationResult | 验证证据 | blocks/run | may support DoD assessment |
-| RuntimeCheckpoint | 可恢复 **诊断** 快照（非 Runtime 驱动源） | blocks/run | observability / audit |
-| CoverageWorkItem | coverage ledger item（可嵌于 CoverageFocus） | run/orchestrator ledger | references Goal/DoD/deliverable requirement and evidence |
-| ArtifactContinuation | incremental artifact 的内部 continuation | blocks/run/orchestrator | references operation/Artifact/targetRef |
-
-合同：
-
-- process evidence 不等于 accepted business outcome。
-- CoverageWorkItem / CoverageFocus 是 run-scoped ledger/focus，不是新的 Goal/DoD。
-- ArtifactContinuation 是 runtime internal state，不是 workspace deliverable。
-- Step 若仍出现在 API/storage，只作过程证据与观测投影，不得包装为 `NextAction` / graph dispatch 权威。
-- 恢复 = load 已持久化 Runtime aggregate；不重放 禁止的 progress/terminal checkpoint 驱动。
-
-### 2.3 Outcome Objects
-
-| Object | Purpose | Owner | Key Relations |
-| --- | --- | --- | --- |
-| Result | 正式业务结果 | blocks/result | references Workspace/Run/Goal/DoD/evidence/artifacts；承接 Orchestrator 裁决 |
-| Artifact | 结构化产物或证据产物 | blocks/result + storage/read-model | may bind runId, stepId/operation ref, resultId |
-| Outcome | workspace/run 级读模型 outcome | read-model projection | derived from Result/Run/evidence |
-| TaskProgress | 当前进展与缺口投影 | read-model projection | derived from active run, focus, coverage ledger |
-
-合同：
-
-- accepted Result 必须引用 current definition 和 accepted evidence。
-- Result 不裁决；Orchestrator 只裁决并密封 terminal payload，Result owner消费 immutable delivery fact 后写入。
-- Artifact 通过 logical URI/ref 暴露，不暴露本地绝对路径。
-- Outcome/TaskProgress 是投影，不反向覆盖 owner state。
-
-### 2.4 Governance Objects
-
-| Object | Purpose | Owner | Key Relations |
-| --- | --- | --- | --- |
-| Decision Ticket | runtime 无法自动推进时的结构化决策对象 | blocks/decision + governance | opened by canonical `need_governance`; binding in aggregate |
-| Resolution | 对 Decision Ticket 的处理结果 | blocks/decision | commit via governance resolution path → reducer；maps continue/replan-semantic/terminate intent |
-| Approval | 高风险或策略要求动作的审批对象 | blocks/approval/governance | references Workspace/Run/action |
-| AutoGovernance | 已封存 external dependency / policy gate 的治理建议 | kernel/governance | may create ticket/approval suggestion；duplicate failure 或 repair exhaustion 本身只能形成 typed terminal/no-progress fact，不得创建 ticket，也不得静默创建 successor Run |
-
-合同：
-
-- decision/approval 只能因真实治理缺口产生。
-- `need_governance` → ticket → Orchestrator persisted governance fact → Run owner-local blocked transition。
-- resolution commit 后 **application 不得** 再 Resume 才能驱动；继续走 runtime resolution commit / reducer。
-- resolution 只能补充治理结果，不能覆盖原 focus / requiredOutput / stage 语义合同。
-- approval 只表达允许/拒绝继续，不表达业务结果 accepted。
-- replan 意图 = 新 activation / 新 Run，不是同 Run 自动 successor。
-
-### 2.5 Context And Capability Objects
-
-| Object | Purpose | Owner | Key Relations |
-| --- | --- | --- | --- |
-| Soul | 阶段约束、能力边界、风险策略 | blocks/soul + profile data | selected into Activation；stage policy → C2/activation 输入 |
-| Skill | 可复用任务指导单元 | blocks/skill / skill-hub integration | selected into activation / candidate context |
-| MCPServer | 外部能力提供者 | blocks/mcp-registry | has capabilities |
-| MCPCapability | tool/resource/prompt 能力描述 | blocks/mcp-registry | selected by Soul/profile/activation |
-| Memory | 高价值可复用上下文 | blocks/memory | recalled into candidate context |
-| MemoryRecallTrace | recall 过程证据 | blocks/memory/run evidence | references selected/candidate/excluded memory |
-
-合同：
-
-- Soul/Skill/MCP/Memory 进入 run / candidate input 必须可追溯。
-- Memory 不是事件日志，不沉淀低价值 retry/diagnostic 流水。
-- capability / stage policy 是结构化数据，core 不解析业务语义，**不理解 profile ID**。
-- 上下文只经 typed bootstrap / activation 与 candidate context（C0–C5），不经 `ExecutionContextPatch`。
-
-### 2.6 Event And Projection Objects
-
-| Object | Purpose | Owner | Key Relations |
-| --- | --- | --- | --- |
-| EventRecord | 持久化正式事件 | blocks/eventstream | references workspace/run/subject |
-| EventEnvelope | runtime event hub 消息 | internal/pkg/events | command/result/notify carrier |
-| WorkspaceProjection | workspace list/detail ViewModel | workorchd read-model | derived from owner state + events |
-| RunSnapshot | run detail projection | workorchd read-model | derived from run/result/evidence/Runtime state/events |
-| RunObservability | timeline/evidence/checkpoint projection | workorchd read-model | derived from run evidence/events |
-
-合同：
-
-- EventRecord 用于审计、回放、观察，不是唯一 truth source。
-- Projection 是展示权威，不是业务 owner。
-- 大 payload 必须 summary/ref 化。
-- projection 中的 RecoveryPlan / nextAction 类字段若存在，仅为诊断展示，不驱动调度。
-
-## 3. State Model Contract
-
-### 3.1 Core States
-
-| State Family | Values / Direction | Owner |
+| Object | Sole owner | Role |
 | --- | --- | --- |
-| Stage semantic | exploration, planning, execution, verification, acceptance, repair, replan（语义意图，非生产状态机枚举） | stage / output policy + profile mapping |
-| RuntimeDecision.ConvergenceState | need_prerequisite, need_state_change, need_validation, need_assessment, need_governance, complete, failed（governed_wait 仅为派生投影） | orchestrator reducer；唯一 canonical decision |
-| RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | blocks/run |
-| WorkspaceState | active, blocked_on_approval, superseded | blocks/workspace owner; projection may derive prompt/progress from active run |
-| Focus / requiredOutput / evidence readiness | current focus queue + RequiredOutputContract + EvidenceLedger | orchestrator aggregate |
-| Completion | sealed terminal after last assessment / fail path；owner-local delivery | orchestrator terminal fact → Result → Workspace → Run |
-| StepState（过程/legacy 投影） | pending, executing, succeeded, failed, skipped, cancelled | run storage / observability |
-| ResultState | accepted/rejected/superseded-style outcome state | blocks/result |
+| Workspace | `blocks/workspace` | 顶层定义容器、目录、资源绑定、active Run 与终态 slot acknowledgement |
+| Goal / DoD | `blocks/workspace` | 当前正式目标、验收定义及 revision |
+| Run | `blocks/run` | SM-1、bootstrap binding、aggregate persistence、resume/restart transaction |
+| Runtime authority/focus/candidate/evidence | `kernel/orchestrator` | SM-2/3/4 canonical convergence |
+| Result | `blocks/result` | 已裁决终态结果、DoD assessment 和 evidence/artifact refs |
+| Decision / Approval | 对应 block | 治理 ticket/request lifecycle 与 resolution |
+| Memory / Skill / Soul / MCP registration | 对应 resource block | 可复用资源及其 owner projection |
+| Operation receipt | 对应 capability block | sealed operation 的事实输出 |
+| Event record | `blocks/eventstream` | 审计记录，不是 authority |
+| UI projection | `workorchd` | 可重建展示模型，不是正式对象 owner |
 
-### 3.2 State Bridge
+Step、tool call、patch、validation、checkpoint 和 artifact continuation 可以作为过程事实、审计或 projection 存在，
+但不构成第二套调度 authority。
 
-Allowed bridge:
+## Definition And Activation Contract
 
-```text
-Start / Resume intent
-  -> Run owner-local lifecycle transition -> RunStateChanged
-  -> InitializeRuntimeFromRun (typed bootstrap → facts / load aggregate)
-  -> DriveRuntime
-  -> RuntimeFacts → RuntimeDecision + AuthorityTransaction
-  -> RequiredOutput / candidate / SealedDispatch
-  -> operation evidence / assessment / governance commit
-  -> RunState / ResultState / Projection
-```
+1. Workspace owner 提供当前 Goal、DoD、template/profile、resource binding 和 revision。
+2. workorchd 从 typed owner reads 组装 `RuntimeBootstrap`；bootstrap 在 Run 创建时冻结。
+3. Run owner 接受 workspace-scoped execution intent，并发布 SM-1 内部状态事实。
+4. Orchestrator 只能从已持久化 aggregate 与 concrete facts drive。
 
-Forbidden bridge:
+调用方不得上传 authority map、raw target/recipe/check/metric/artifact graph，也不得指定 Run 的目标 lifecycle state。
 
-- stage semantic / outputMode 不得覆盖 reducer 权威决策。
-- LLM `completionState=completed` must not create accepted Result without evidence/DoD gates。
-- Web/TUI prompt state must not override backend projection。
-- `StagePacket` / `NextAction` / graph dispatch 不得作为正式推进桥。
-- Decision resolve 后 application 不得靠 Resume 伪装 continuation queue。
-- Runtime 生产路径只由 typed bootstrap/state identity 确定，不允许字符串路由开关。
-
-## 4. Main Business Flows
-
-### 4.1 Workspace Setup Flow
+## Operation Contract
 
 ```text
-User input
-  -> workspace setup draft or direct workspace create
-  -> template/Soul/Skill/MCP/default policy selection
-  -> Workspace created
-  -> Goal / DoD defined
-  -> directories created
-  -> projection updated
+Orchestrator candidate
+  -> capability feasibility result
+  -> Orchestrator sealed dispatch
+  -> capability owner execution
+  -> concrete receipt
+  -> Orchestrator evidence judgement
 ```
 
-Input contract:
+- capability owner定义自己的 concrete command/result schema。
+- create-only、revision fence、path scope、risk/approval 等约束由 capability owner 校验。
+- receipt 只陈述实际发生的结果；它不能返回 next action 或 authoritative acceptance。
+- duplicate/stale receipt 由 operation/dispatch/revision identity 幂等处理。
 
-- title/description/deliverableDirectory。
-- optional templateId/defaultSoulId/stage bindings/skills/MCP/memory。
+## Governance Contract
 
-Output contract:
+Orchestrator 在 canonical `need_governance` 时提交 typed request。Decision 或 Approval owner 创建、转换并持久化对象，
+再返回 typed resolution fact。Orchestrator内部 reducer 决定继续或终止；application 不代替任何 owner 改状态。
 
-- Workspace with deliverableDirectory/internalDirectory。
-- active Goal/DoD definitions if supplied。
-- projection revision update。
+## Result And Terminal Contract
 
-### 4.2 Activation / Start Flow
+1. Orchestrator密封 immutable terminal outcome。
+2. Result owner幂等写入 formal Result 并确认 delivery。
+3. Workspace owner确认同一 delivery，更新 active Run/terminal fence。
+4. Run owner最终确认 SM-1 terminal delivery。
+5. 若 predecessor 存在有效 `ReplacementIntent`，Run owner 才创建并关联 successor。
 
-```text
-User start / activation command
-  -> appservice validates workspace + Goal + DoD + bindings
-  -> seal typed RuntimeBootstrap (Definition + Activation + Focuses + Requirements)
-  -> EventHub / owner creates Run with bootstrap
-  -> Start intent: Run owner internal pending→active then RunStateChanged → DriveRuntime
-  -> initial CoverageFocus queue + RuntimeFacts
-  -> projection shows active execution or governed wait
-```
+任何 projection、SSE consumer 或 application callback 都不得提前释放 slot、创建 successor 或重建 authority。
 
-Input contract:
+## User Intent Contract
 
-- workspaceId。
-- goalId/doDId or effective latest definition。
-- Soul/Skill/MCP/Memory bindings（进入 Activation，非 patch）。
-- priority and operator input。
-
-Output contract:
-
-- Run with workspaceId/goalId/doDId/definitionRevision + sealed RuntimeBootstrap。
-- CoverageFocus / coverage baseline。
-- first reducer decision（非 StagePacket）。
-- lightweight projection / command accepted response。
-
-### 4.3 Planning / Execution Flow
-
-```text
-Run active / DriveRuntime
-  -> reducer(RuntimeFacts)
-  -> canonical need_prerequisite or need_state_change / need_validation / ...
-  -> BeginCandidateAttempt (attempt 0/1, same authority transaction)
-  -> RuntimeCandidateContext (C0–C5) + requiredOutput
-  -> LLM candidate output
-  -> Accept/Fail candidate; seal SealedDispatch
-  -> ExecuteRuntimeOperation (dependency graph of sealed operations, not 禁止的 graph dispatcher)
-  -> evidence commit → reducer
-```
-
-Contracts:
-
-- LLM candidate must match requiredOutput。
-- State-changing output must bind target refs / coverage targets when required。
-- Read-only path cannot satisfy state-change requirement。
-- Managed validation must use declared managed_session contract when required。
-- 无 `StagePacket` / `NextAction` 包装 candidate 或 evidence。
-
-### 4.4 Verification / Acceptance Flow
-
-```text
-State change evidence available
-  -> need_validation / validation evidence commit
-  -> coverage / focus accepts or rejects evidence
-  -> RequireAssessment focus → need_assessment
-  -> assessment ledger close
-  -> Result accepted/rejected projection or same-focus repair reconverge
-```
-
-Contracts:
-
-- validation evidence must be concrete, scoped and accepted。
-- claim-to-evidence alignment applies when profile requires it。
-- accepted Result requires current definition + accepted evidence refs。
-- failed assessment can be recoverable evidence gap rather than terminal failure。
-- Result owner does not adjudicate。
-
-### 4.5 Repair Flow
-
-```text
-Contract violation / failed validation / evidence gap
-  -> rejected diagnostic evidence recorded
-  -> same focus / same authority contract retry budget (attempt 0 + at most 1 same-contract retry where applicable)
-  -> candidate regenerates targeted correction under inherited requiredOutput / stage semantic
-  -> evidence gate repeats
-```
-
-Contracts:
-
-- rejected output cannot have state-changing side effect。
-- repair inherits focus, requiredOutput and stage semantic constraints。
-- repeated same failure 只能形成 typed no-progress/terminal fact；仅独立、已封存的 external dependency 可以进入 governance，budget exhaustion 本身不得创建 ticket。
-- repair 不是自动 replan successor。
-
-### 4.6 Replan Flow（语义 only）
-
-```text
-Decision resolution or product intent determines current plan/definition invalid
-  -> old run lineage captured
-  -> **new** typed activation / new RuntimeBootstrap
-  -> **independent** Runtime Run created
-  -> current effective Goal/DoD retained or explicitly redefined
-  -> new CoverageFocus baseline; carry-over only via explicit definition/activation rules
-  -> independent DriveRuntime
-```
-
-Contracts:
-
-- Runtime **不自动创建** replan successor Run。
-- replan cannot drop active Goal/DoD constraints without explicit new definition。
-- new run must carry lineage refs when product requires audit continuity。
-- old run terminal/superseded state must not remain activeRunId。
-- 无 `ExecutionContextPatch` 在旧 run 上伪装 replan。
-
-### 4.7 Decision / Approval Flow
-
-```text
-Runtime detects real governance need
-  -> need_governance → Decision Ticket (and/or Approval)
-  -> Orchestrator records governance wait fact; Run owner internally enters blocked_on_decision / blocked_on_approval
-  -> projection shows waiting/blocker state
-  -> user resolves or approves/rejects
-  -> CommitRuntimeGovernanceTicketResolution / resolution commit
-  -> reducer continues, fails (e.g. governance_rejected), or product starts new activation
-```
-
-Contracts:
-
-- ticket/approval must be scoped by workspaceId/runId。
-- TUI/Web submit resolution, not state mutation。
-- resolved governance must be reflected in owner state and projection。
-- application **不得** 因 resolve 再 Resume 驱动。
-
-### 4.8 Projection / Observation Flow
-
-```text
-Owner state or event changes
-  -> event persisted / projection update scheduled
-  -> workspace/run ViewModel rebuilt or patched
-  -> SSE/event stream notifies clients
-  -> Web/TUI display projection
-```
-
-Contracts:
-
-- main views consume projection store。
-- detail/raw views open bounded payload refs on demand。
-- projection health/revision must be visible。
-- UI 不得从 projection 反推 RuntimeDecision 并本地调度。
-
-## 5. Cross-Flow Interaction Contracts
-
-| From Flow | To Flow | Contract |
+| Intent | Meaning | Mutation owner |
 | --- | --- | --- |
-| Workspace setup | Activation | effective Goal/DoD/template/Soul/Skill/MCP/Memory bindings |
-| Activation | Drive | Run + RuntimeBootstrap + definitionRevision + CoverageFocus baseline |
-| Drive `need_state_change` | Verification | accepted state-changing evidence + target refs |
-| Verification | Acceptance | accepted validation evidence + coverage/focus update |
-| Acceptance | Result | assessment ledger + accepted evidence refs + artifact refs |
-| Any runtime gate | Repair | rejected diagnostic evidence + same-focus reconverge |
-| Repair | Drive | inherited focus/requiredOutput + narrowed candidate contract |
-| Governance | Continuation | resolution commit → reducer；or new activation for replan semantic |
-| Replan semantic | Activation | **new** Run + bootstrap + lineage + current definition |
-| Owner state | Projection | event/owner read + projection revision |
-| Projection | Web/TUI | ViewModel only, no business state reconstruction |
+| save definition/resource selection | 更新 Workspace 或资源 owner 数据 | 对应 owner |
+| `resume` | 继续当前 active/recoverable Run | Workspace 受理，Run 转换 SM-1 |
+| `restart` | 以当前 definition 建立新 lineage | Workspace 受理，Run 管理 replacement transaction |
+| resolve decision/approval | 提交治理 resolution | Decision/Approval owner |
+| query/observe | 读取 projection、SSE 或审计记录 | workorchd/Eventstream read side |
 
-## 6. Functional Module Interaction
+## Invariants
 
-### 6.1 Workspace / Run / Orchestrator
-
-```text
-workspace owner
-  -> defines Workspace/Goal/DoD
-run owner
-  -> creates Run, persists RuntimeStateRecord / process evidence
-orchestrator
-  -> Initialize + DriveRuntime
-  -> reducer / authority / candidate / sealed dispatch / evidence
-  -> projects Run / Result / governance bindings through owner services
-```
-
-Key contract:
-
-- Orchestrator may coordinate lifecycle but must not bypass owner object invariants。
-- 唯一同步推进合同：`DriveRuntimeCommand/Result`。
-
-### 6.2 Orchestrator / Blocks
-
-```text
-orchestrator
-  -> RequestRuntimeCandidate or ExecuteRuntimeOperation (sealed)
-blocks
-  -> normalized result / error / raw ref / operation evidence payload
-orchestrator
-  -> Accept/Fail candidate, evidence commit, reducer
-```
-
-Key contract:
-
-- Blocks execute side effects; orchestrator interprets business meaning and authority。
-- 无 禁止的 generic step graph dispatcher。
-
-### 6.3 Appservice / Kernel
-
-```text
-HTTP/TUI command
-  -> appservice validates request and scope
-  -> EventHub command (activation/start/resume/governance resolve) or owner service call
-  -> kernel owner / orchestrator updates formal state
-  -> appservice returns DTO/projection / command accepted
-```
-
-Key contract:
-
-- appservice composes use cases; kernel owns formal state。
-- Start/Resume 不注入 ExecutionContextPatch；Decision resolve 不触发 application Resume。
-
-### 6.4 Workorchd Projection / UI
-
-```text
-owner state + event records
-  -> observed/readmodelprojection
-  -> presenter/port DTO
-  -> Web/TUI/API
-```
-
-Key contract:
-
-- UI consumes DTO/projection and submits commands; it does not infer next action。
-
-### 6.5 Profile / Runtime Core
-
-```text
-template/Soul/profile/capability
-  -> structured policy fields (stage policy, evidence policy, capability allowlist)
-runtime core (Runtime)
-  -> neutral interpretation as activation / C2 / requiredOutput / evidence gate inputs
-  -> focus / sealed dispatch / evidence enforcement
-```
-
-Key contract:
-
-- profile owns strategy; runtime core owns deterministic enforcement。
-- kernel does not understand profile IDs。
-
-## 7. Data And Payload Contracts
-
-| Data Kind | Default Projection | Detail / Raw Access |
-| --- | --- | --- |
-| Workspace / Run summary | compact fields + projection metadata | snapshot/detail endpoint |
-| EventRecord | small payload or payloadSummary | payloadRef open endpoint |
-| LLM request/response | usage/audit summary | runtime payload raw ref |
-| Tool output | stdout/stderr preview + truncation flag | raw output ref |
-| Patch/diff | affected files + stats + summary | raw diff/content ref |
-| Artifact | logical URI + metadata | artifact content endpoint |
-| Memory | title/type/summary/source refs | memory detail |
-| Runtime state / focus / ledger summary | bounded diagnostic fields | snapshot/observability |
-
-Constraints:
-
-- default projection must be bounded。
-- raw ref must be logical and scoped。
-- truncated/partial content must not be treated as safe full file basis。
-
-## 8. Consistency Checklist
-
-Use this checklist when adding or changing product, flow, or module behavior:
-
-- Does the change identify the owner object?
-- Does every state-changing command carry workspace scope?
-- Does the flow preserve current Goal / DoD definition revision?
-- Does candidate context include requiredOutput, current gap, accepted/rejected evidence and target snapshots?
-- Does contract violation stay rejected until a valid retry succeeds?
-- Does accepted Result cite accepted evidence refs?
-- Does projection consume owner state rather than raw event guesses?
-- Does Web/TUI avoid duplicating runtime decision logic?
-- Does profile-specific behavior remain in template/Soul/profile/capability data?
-- Does large payload use summary/ref rather than default inline expansion?
-- Is production path Runtime only (no StagePacket/NextAction/graph dispatch/ExecutionContextPatch/auto replan successor)?
-- Does Start/Resume enter DriveRuntime without execution-context patch?
-- Does governance wait return without application auto-Resume?
-
-## 9. Known Boundary Decisions
-
-- Web Console is not “read-only only”; it is “projection display + controlled operation entry”。It may create/update workspace resources and submit governance/configuration operations through formal API, but it does not own business state.
-- Workspace owner state is intentionally small: `active`, `blocked_on_approval`, `superseded`。`ActiveRunID` 与 Workspace state
-  只由 Workspace owner 消费 immutable Run/terminal fact 后在本地 reducer 中更新。Decision blockers do not mutate
-  workspace owner state; they are expressed by `RunState=blocked_on_decision`, open decision ticket, `blockingTicketId`,
-  prompt mode and governance projection. Approval blockers use `WorkspaceState=blocked_on_approval` only when the owner has an active approval blocker.
-- `validation/managed_session` is a runtime block kind owned by orchestrator/shell-backed managed validation flow and must be declared through central runtime vocabulary.
-- `internal/pkg/events` may aggregate event contracts, but aggregation must stay contract-level and must not become business outcome logic.
-- Step / graph / RecoveryPlan.nextAction 等字段可保留在读模型诊断面，但不得重新声明为生产调度权威。
-- Production runtime is Runtime only; dual-layer stage semantic + Runtime implementation is the only product-facing runtime story.
+- 一个状态机只有一个 owner；跨组件只能提交意图或事实。
+- application、capability、projection 与 Eventstream 都不选择 Runtime 下一步。
+- Runtime core 保持领域中立；业务策略来自 profile/template/Soul/capability。
+- `file/write` 等具体能力语义不得由 Orchestrator 猜测；必须来自 capability catalog/feasibility。
+- recovery 是 aggregate re-drive，不是事件历史或 UI 状态回放。

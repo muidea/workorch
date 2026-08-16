@@ -4,8 +4,13 @@ WORKDIR /src
 
 COPY go.mod ./
 COPY go.sum ./
+
+ARG GOPROXY=https://proxy.golang.org,direct
+RUN GOPROXY="$GOPROXY" go mod download
+
 COPY application ./application
 COPY internal ./internal
+COPY web/consoleassets ./web/consoleassets
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/workorch ./application/workorch
 

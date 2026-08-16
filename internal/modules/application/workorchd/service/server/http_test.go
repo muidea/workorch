@@ -1375,7 +1375,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runtime/payloads"},
@@ -1427,6 +1426,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 func unsupportedMutatingAPINativeRouteSpecs() []routeSpec {
 	return []routeSpec{
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-restarts"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-contract"},

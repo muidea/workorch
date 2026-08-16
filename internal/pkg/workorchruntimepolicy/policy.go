@@ -51,29 +51,8 @@ func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
 
 func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRuntimePolicy {
 	defaults := workorchconfig.DefaultLLMOutputRuntimeConfig()
-	if policy.MaxPatchContentBytes <= 0 {
-		policy.MaxPatchContentBytes = defaults.MaxPatchContentBytes
-	}
-	if policy.MaxGraphBytes <= 0 {
-		policy.MaxGraphBytes = defaults.MaxGraphBytes
-	}
-	if policy.MaxGraphFileWrites <= 0 {
-		policy.MaxGraphFileWrites = defaults.MaxGraphFileWrites
-	}
-	if policy.SchemaInvalidLargePreviewThreshold <= 0 {
-		policy.SchemaInvalidLargePreviewThreshold = defaults.SchemaInvalidLargePreviewThreshold
-	}
-	if policy.MaxArtifactChunkBytes <= 0 {
-		policy.MaxArtifactChunkBytes = defaults.MaxArtifactChunkBytes
-	}
 	if policy.MaxDocumentRecoveryAttempts <= 0 {
 		policy.MaxDocumentRecoveryAttempts = defaults.MaxDocumentRecoveryAttempts
-	}
-	if policy.MaxArtifactPlanAttempts <= 0 {
-		policy.MaxArtifactPlanAttempts = defaults.MaxArtifactPlanAttempts
-	}
-	if policy.MaxArtifactReplanAttempts <= 0 {
-		policy.MaxArtifactReplanAttempts = defaults.MaxArtifactReplanAttempts
 	}
 	return policy
 }

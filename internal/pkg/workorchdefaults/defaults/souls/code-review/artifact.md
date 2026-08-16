@@ -11,5 +11,5 @@
 - 总体评估：pass / pass_with_suggestions / needs_improvement / fail
 
 ## 禁止
-- 代码审查模板是只读流程，不要通过 patch/apply 或 patchRequests 写入 workspace 文件
+- 代码审查模板是只读流程，不要提交任何 workspace state-changing operation
 - 不要写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件

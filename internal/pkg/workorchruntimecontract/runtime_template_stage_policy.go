@@ -16,17 +16,10 @@ type RuntimeTemplateStagePolicy struct {
 type RuntimeTemplateStage struct {
 	ID              string
 	SoulBinding     string
-	Entry           RuntimeTemplateStageEntry
 	RequiredOutputs []RuntimeTemplateStageRequiredOutput
 	Completion      RuntimeTemplateStageCompletion
 	Governance      RuntimeTemplateStageGovernance
 	PolicyRefs      RuntimeTemplateStagePolicyRefs
-}
-
-type RuntimeTemplateStageEntry struct {
-	NextAction                 string
-	RequiresDefinitionRevision bool
-	RequiresGapBaseline        bool
 }
 
 type RuntimeTemplateStageRequiredOutput struct {
@@ -54,7 +47,6 @@ func (p RuntimeTemplateStagePolicy) Normalized() RuntimeTemplateStagePolicy {
 	for _, stage := range p.Stages {
 		stage.ID = strings.TrimSpace(stage.ID)
 		stage.SoulBinding = strings.TrimSpace(stage.SoulBinding)
-		stage.Entry.NextAction = strings.TrimSpace(stage.Entry.NextAction)
 		stage.Completion.Policy = strings.TrimSpace(stage.Completion.Policy)
 		stage.Governance.DecisionMode = strings.TrimSpace(stage.Governance.DecisionMode)
 		stage.Governance.ApprovalMode = strings.TrimSpace(stage.Governance.ApprovalMode)
@@ -109,7 +101,7 @@ func SameRuntimeTemplateStagePolicy(left *RuntimeTemplateStagePolicy, right *Run
 	}
 	for idx := range l.Stages {
 		ls, rs := l.Stages[idx], r.Stages[idx]
-		if ls.ID != rs.ID || ls.SoulBinding != rs.SoulBinding || ls.Entry != rs.Entry || ls.Completion != rs.Completion || ls.Governance != rs.Governance ||
+		if ls.ID != rs.ID || ls.SoulBinding != rs.SoulBinding || ls.Completion != rs.Completion || ls.Governance != rs.Governance ||
 			len(ls.RequiredOutputs) != len(rs.RequiredOutputs) || !sameStrings(ls.PolicyRefs.EvidencePolicies, rs.PolicyRefs.EvidencePolicies) ||
 			!sameStrings(ls.PolicyRefs.CapabilityUsagePolicies, rs.PolicyRefs.CapabilityUsagePolicies) {
 			return false

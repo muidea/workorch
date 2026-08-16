@@ -8,7 +8,7 @@ Last Updated: 2026-06-28
 
 Related:
 
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `convergence-authority-simplification-design.md`
 - `runtime-live-convergence-gate-closure-plan.md`
 - `runtime-evidence-proof-strength-and-assessment-closure-plan.md`

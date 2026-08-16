@@ -145,11 +145,11 @@ func TestRuntimeCandidatePrefixChangesWithTemplateStagePolicy(t *testing.T) {
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 	}
 	base := RuntimeExecutionContract{TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaCurrent, Stages: []RuntimeTemplateStage{{
-		ID: "execution", Entry: RuntimeTemplateStageEntry{NextAction: "state_change"},
+		ID:              "execution",
 		RequiredOutputs: []RuntimeTemplateStageRequiredOutput{{Kind: "state_change", EvidenceKinds: []string{"state_change"}}},
 	}}}}
 	changed := base.Normalized()
-	changed.TemplateStagePolicy.Stages[0].Entry.NextAction = "validate"
+	changed.TemplateStagePolicy.Stages[0].RequiredOutputs[0].Kind = "validation"
 	if StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base) == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, changed) {
 		t.Fatal("candidate prefix did not change with template stage policy")
 	}

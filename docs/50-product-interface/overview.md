@@ -2,118 +2,46 @@
 
 Status: active
 
-Type: product-interface
+Type: product-interface-index
 
-Last Updated: 2026-07-27
+Last Verified: 2026-08-16
 
-## Purpose
+## Interfaces
 
-本目录用于承接 WorkOrch 的产品接口面，包括部署入口、HTTP API、TUI 和 Web Console。
+| Surface | Current role | Authority boundary |
+| --- | --- | --- |
+| Binary/TUI | default local interactive mode; optional remote backend | submits typed intent and consumes projection |
+| HTTP/Web | `--server` mode, REST/SSE and embedded console | validates protocol and composes use cases; no Runtime drive |
+| Client/agent ports | local or remote backend abstraction | no alternate lifecycle API |
+| Deployment/config | process, repository, provider and policy setup | config mutation does not mutate active owner snapshot silently |
 
-生产 runtime 主链为 **Runtime only**。产品接口只向 Run owner 提交 scoped activation / continuation intent，
-并展示 projection；不复制 Runtime reducer / authority、不指定任何 owner target state、不推断 next action，也不通过
-`ExecutionContextPatch` 或 禁止的 graph/next-action 路径推进。
+## Current Execution Surface
 
-## Reading Order
+Users do not create/start/resume a client-selected Run. The only execution mutation is workspace-scoped:
 
-1. [service-api.md](service-api.md)
-2. [deployment.md](deployment.md)
-3. `tui/`
-   - [requirements.md](tui/requirements.md)
-   - [interaction-contract.md](tui/interaction-contract.md)
-   - [display-refresh-consistency-design.md](tui/display-refresh-consistency-design.md)
-4. `web-console/`
-   - [overview.md](web-console/overview.md)
-   - [bundle-ui-optimization-record.md](web-console/bundle-ui-optimization-record.md)
+```http
+POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
+{"intent":"resume"}
+```
 
-## Product Surfaces
+or `{"intent":"restart"}`. Workspace and Run owners resolve the current Run and perform the owner-local transaction. Read-only
+Run endpoints remain available for status, snapshots and diagnostics.
 
-### Service API
+## Documents
 
-负责：
+- [Deployment](deployment.md)
+- [Service API](service-api.md)
+- TUI: [requirements](tui/requirements.md), [interaction](tui/interaction-contract.md),
+  [display consistency](tui/display-refresh-consistency-design.md)
+- [Web Console](web-console/overview.md)
 
-- HTTP resource families
-- JSON/read-model envelope
-- governance / registry / content open path
-- configuration write contract
-- execution activation / Start / Resume 的 command accepted 语义（进入 Runtime drive）
+Historical UI optimization measurements are archived under `docs/90-archive/records` and do not define current bundle limits.
 
-权威文档：
+## Shared Rules
 
-- `service-api.md`
-
-### Deployment
-
-负责：
-
-- container image
-- local/file backend startup
-- deployment-side configuration entry
-
-权威文档：
-
-- `deployment.md`
-
-### TUI
-
-负责：
-
-- 本地 agent-first 交互
-- result-first 主视图
-- workspace switching / decision / approval input
-- display refresh consistency
-
-权威文档：
-
-- `tui/requirements.md`
-- `tui/interaction-contract.md`
-- `tui/display-refresh-consistency-design.md`
-
-### Web Console
-
-负责：
-
-- 远程控制与观察面
-- board / workspace detail / governance / runtime control / configuration / service
-- 多 workspace 聚合、治理处理、配置管理
-
-权威文档：
-
-- `web-console/overview.md`
-- `web-console/bundle-ui-optimization-record.md`
-
-## Runtime-Facing Interface Stance
-
-- activation / create run：封存 typed bootstrap 输入，创建 Runtime Run。
-- Start：向 Run owner提交 activation intent；owner-local `pending→active` notification 后进入 `DriveRuntime`。
-- Resume：workspace/run scope 的 continuation intent；Run owner校验 blocker 并内部恢复后通知 drive；**无** execution-context patch。
-- Decision / Approval resolve：提交 resolution；**不得**要求 application 再 Resume 才能回到 drive。
-- replan 语义：新 activation / replacement run，不是同 Run 自动 successor。
-- UI 消费 projection；不得本地重建 RuntimeDecision。
-
-## Cross-Layer Boundary
-
-- core runtime contract / Runtime 属于 `00-core/`
-- domain object 定义属于 `10-domain-model/`
-- runtime flow 属于 `20-runtime-flow/`
-- module architecture 属于 `30-module-architecture/`
-- profile/capability 特化属于 `40-profiles-capabilities/`
-- acceptance / verifier / audit 属于 `60-verification/`
-
-产品接口层不应重新定义 runtime core 规则或业务对象边界，也不得把 禁止的 StagePacket/NextAction/graph dispatch 重新声明为 API 生产语义。
-
-## Current Status
-
-当前本层主设计已经形成稳定入口：
-
-- `service-api.md`
-  - 已承接 HTTP resource families、response family、raw/detail 打开边界和主要字段语义
-- `deployment.md`
-  - 已承接部署入口、配置分区与 deployment-vs-acceptance 边界
-- `tui/*`
-  - 已承接 result-first、workspace switch、decision/approval 交互与 display consistency
-- `web-console/*`
-  - 已承接 page-to-API mapping、raw-content 边界、低频交互与表单责任边界
-
-后续若继续补写，主要只应是字段级索引、示例补细和少量产品样例增强，
-而不是重新定义 runtime 或业务对象边界。
+- Web/TUI/client never submit target Run state, successor ID, next action or authority patch.
+- Decision/Approval resolution uses the corresponding owner API; the interface does not auto-Resume afterward.
+- command acknowledgement means accepted for processing; final state comes from owner projection/SSE.
+- local and remote TUI expose the same business semantics through different transports.
+- projection may be rebuilt or refreshed but cannot repair owner state.
+- raw internal paths, credentials, provider bodies and opaque aggregate content are not public authority fields.

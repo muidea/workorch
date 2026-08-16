@@ -1,13 +1,20 @@
 # System Module
 
+Status: active
+
+Type: kernel-module-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `kernel/system` 在应用启动阶段协调 Soul、WorkspaceTemplate 和 MCP Server/Capability 默认资源的幂等初始化。它不保存这些资源的正式状态，只负责跨 owner 的初始化顺序和失败收敛。
 
 ## 组件交互及合同
 
-- System 定义 `EnsureSoulDefaultsCommand`、`EnsureWorkspaceTemplateDefaultsCommand`、`EnsureMCPDefaultsCommand` 及对应 result。
-- `blocks/soul`、`blocks/workspace` 和 `blocks/mcpregistry` 分别订阅对应 command，并只访问自己的 repository 完成幂等 ensure。
+- `EnsureSoulDefaultsCommand`、`EnsureWorkspaceTemplateDefaultsCommand`、`EnsureMCPDefaultsCommand` 及对应 result
+  分别由 Soul、Workspace 和 MCP Registry owner 在自己的 `pkg/events` 中定义；System 只导入并发送这些合同。
+- `blocks/soul`、`blocks/workspace` 和 `blocks/mcpregistry` 分别订阅自己的 command，并只访问自己的 repository 完成幂等 ensure。
 - System 在 owner 订阅启动后发送同步 EventHub command；缺少 response、返回类型错误或 owner 失败都必须使启动失败。
 - System 只发送具体 typed ensure command；默认资源内容、模型校验、去重和持久化均由对应 owner 负责。
 - System Biz 只保留接受 `Dependencies` 的一个构造入口；Module 配置不得再经无校验 constructor forwarding。

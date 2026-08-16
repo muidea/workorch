@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-31
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -14,8 +14,8 @@ Last Updated: 2026-07-31
 
 - 一次 typed activation / bootstrap 如何形成 Run 与 initial facts
 - drive / reducer 如何在 prerequisite、candidate、sealed dispatch、operation evidence 之间推进
-- assessment ledger 与 Result projection 如何收口，而不由 Result 裁决
-- repair 如何在同一 focus 上重新收敛；replan 语义如何只能通过新 activation/run 表达
+- assessment ledger、formal Result 与派生 projection 如何依次收口，而不由 Result owner 裁决
+- repair 如何在同一 focus 上重新收敛；显式 Restart 如何通过 Run-owned replacement transaction 形成 fresh Run
 - candidate request 的 `RuntimeCandidateContext` 与 C0–C5 stable prefix 如何组装
 
 ## Production Mainline
@@ -47,15 +47,19 @@ Last Updated: 2026-07-31
 
 本目录仅按 flow 拆解四状态机，不重新定义 transition。完整状态、合法/禁止迁移、协调协议和变更门禁以 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约) 为准。
 
-### Activation reconciliation
+### Activation And Reconciliation
 
-Start、`/run resume` 和 `/run restart` 都先进入 Orchestrator 的 semantic contract/reconciliation 前置阶段。
-`resume` 复核当前 Run 的 sealed binding（`current_run`）；`restart` 创建只含 Definition seed 的 replacement Run，
-经 semantic-plan document、owner feasibility 与 SM-2 seal 后执行 workspace 全量 reconciliation（`workspace_full`）。
-两者都不能由 application 或 projection 直接修改 coverage。File、Shell、Git、MCP 等 owner
-只返回各自 workspace-scoped observation/receipt，SM-2 在一次 internal-event/CAS 中 retain 已有 credit 或记录
-`reopened` lineage；observation 不会新增 credit。新的 request generation 会保留历史 batch/receipt，duplicate/stale
-request 在 restart 后仍按 request identity 幂等处理。
+- Fresh Start：Run owner封存 application 编译的 Definition seed/activation，SM-2 在需要时通过有界 semantic-plan、
+  capability-owner feasibility 与 private internal event 密封 proof binding/reconciliation contract；
+- Resume：Run owner只恢复同一 current-baseline Run，Orchestrator加载原 aggregate 并幂等 re-drive，不重读或替换
+  bootstrap/provider/Soul/capability selection；
+- Restart：application 从 Workspace canonical state 编译 fresh bootstrap，Run owner先把 `ReplacementIntent` 持久化在
+  predecessor；只有 `Result -> Workspace -> Run` terminal delivery 完成后，Run-private reducer 才创建并激活 successor；
+- non-current predecessor：Run owner返回 `data_reset_required`，不创建 replacement intent 或 successor。
+
+Application/projection/capability owner 都不能直接修改 coverage。File、Shell、Git、MCP 等 owner只返回
+workspace/run/revision-scoped observation/receipt；SM-2 经唯一 internal-event/CAS retain credit、接纳新 evidence 或记录
+`reopened` lineage。Duplicate/stale request/receipt 在进程重启后仍按 persisted identity 幂等处理。
 
 ### Runtime Drive Loop
 
@@ -91,8 +95,8 @@ Drive 非等待、非终态的每次 transition 必须增加 persisted `stateRev
 
 1. [activation-definition-flow.md](activation-definition-flow.md) — bootstrap、definition/activation seal、Initialize 幂等
 2. [planning-execution-flow.md](planning-execution-flow.md) — candidate → seal → ExecuteRuntimeOperation → evidence
-3. [verification-acceptance-flow.md](verification-acceptance-flow.md) — need_validation、assessment ledger、Result projection
-4. [repair-replan-flow.md](repair-replan-flow.md) — same-focus reconverge vs new activation/run
+3. [verification-acceptance-flow.md](verification-acceptance-flow.md) — need_validation、assessment ledger、formal Result 与 projection
+4. [repair-replan-flow.md](repair-replan-flow.md) — same-focus reconverge vs explicit replacement activation
 5. [evidence-result-flow.md](evidence-result-flow.md) — commit invariants、stale→diagnostic、CAS aggregate
 6. [context-assembly-flow.md](context-assembly-flow.md) — `RuntimeCandidateContext` 与 C0–C5 stable prefix
 

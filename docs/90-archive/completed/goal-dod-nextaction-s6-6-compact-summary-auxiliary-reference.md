@@ -9,7 +9,7 @@ Owner: core
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
 - [S6.4 LLM Context Partition Boundary Tests](./goal-dod-nextaction-s6-4-llm-context-partition-boundary-tests.md)
 - [S6.5 Context Budget Critical Field Protection](./goal-dod-nextaction-s6-5-context-budget-critical-field-protection.md)
 

@@ -9,7 +9,7 @@ Roadmap: [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-ite
 Related:
 
 - [Workorchd EventHub / Watchdog Scope Closure Plan](./workorchd-eventhub-watchdog-scope-closure-plan.md)
-- [Runtime Execution Event Queue State Loop Design](../../30-module-architecture/runtime-execution-event-queue-state-loop-design.md)
+- [Runtime Execution Event Queue State Loop Design](../superseded/runtime-execution-event-queue-state-loop-design.md)
 
 ## Contract Audit
 

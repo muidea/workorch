@@ -8,7 +8,7 @@ Last Updated: 2026-06-27
 
 Related:
 
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `convergence-authority-simplification-design.md`
 - `goal-dod-nextaction-s3-2-state-change-evidence-write.md`
 - `goal-dod-nextaction-s4-3-accepted-evidence-coverage-update.md`

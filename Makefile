@@ -49,44 +49,44 @@ help:
 	@echo "  verify-workspace-template-soul-file - alias of verify-workspace-template-soul; e2e uses the deployed instance only"
 	@echo "  verify-llm      - verify deployed LLM-driven execution using a local mock provider"
 	@echo "  verify-llm-file - alias of verify-llm; e2e uses the deployed instance only"
-	@echo "  verify-runtime-profile-software-dev - verify software-dev profile mapping for a persisted workspace/run"
-	@echo "  verify-software-dev-code-agent - verify software-dev Code Agent closure contract"
-	@echo "  verify-software-dev-goal-dod-e2e - verify deployed software-dev Goal/DoD auto repair and repair-escalation loop"
-	@echo "  verify-software-requirement-orchestration - verify SRD-10~34 orchestration closure"
-	@echo "  verify-software-requirement-orchestration-deployed - verify SRD-10~34 closure with deployed e2e enabled"
-	@echo "  verify-skillhub      - verify deployed SkillHub global/workspace Skill auto-selection"
-	@echo "  verify-skillhub-file - alias of verify-skillhub; e2e uses the deployed instance only"
-	@echo "  verify-mcp-stdio      - verify deployed MCP stdio execution through LLM graph"
+	@echo "  verify-runtime-profile-software-dev - verify software-dev defaults, bootstrap and Runtime operations"
+	@echo "  verify-software-dev-code-agent - verify software-dev typed operations and revision-bound replacement"
+	@echo "  verify-software-dev-goal-dod-e2e - verify file-backed Goal/DoD Runtime convergence and restart"
+	@echo "  verify-software-requirement-orchestration - verify software-dev activation, convergence and read-model boundaries"
+	@echo "  verify-software-requirement-orchestration-deployed - compatibility alias of the current deterministic verifier"
+	@echo "  verify-skillhub      - verify SkillHub discovery, selection and typed Runtime bootstrap"
+	@echo "  verify-skillhub-file - alias of verify-skillhub"
+	@echo "  verify-mcp-stdio      - verify deployed MCP stdio execution through workspace Runtime activation"
 	@echo "  verify-mcp-stdio-file - alias of verify-mcp-stdio; e2e uses the deployed instance only"
 	@echo "  verify-auto-governance-ticket-approval - verify auto governance ticket/approval closure"
 	@echo "  verify-workspace-file-diff-patch - verify file/diff/patch capability closure"
 	@echo "  verify-workspace-web-search - verify Web Search contract tests"
-	@echo "  verify-workspace-web-search-e2e - verify deployed Web Search source traceability"
+	@echo "  verify-workspace-web-search-e2e - compatibility target for deterministic Web Owner/Runtime integration"
 	@echo "  verify-workspace-projection-switch - verify deployed workspace projection scope and switch refresh contract"
-	@echo "  verify-run-resume-gap-confirmation-e2e - verify deployed /run resume projection and gap baseline contract"
-	@echo "  verify-dual-workspace-resume-replan-e2e - verify two workspace-scoped restart/resume commands do not block each other"
-	@echo "  verify-approval-decision-resolution-e2e - verify deployed decision/approval resolution continuation"
+	@echo "  verify-run-resume-gap-confirmation-e2e - verify workspace activation and diagnostic gap compatibility"
+	@echo "  verify-dual-workspace-resume-replan-e2e - legacy name; verify two workspace restart/resume intents remain isolated"
+	@echo "  verify-approval-decision-resolution-e2e - verify owner resolution and Runtime continuation over typed events"
 	@echo "  observe-runtime-closure - collect deployed runtime projection, SSE, heartbeat, and optional LLM cache observations"
 	@echo "  verify-convergence-authority-dispatch-live - verify two-workspace convergence authority dispatch live observation"
 	@echo "  verify-authority-live-e2e-closure - verify deployed authority command/readback/projection/resource report"
 	@echo "  verify-runtime-idle-baseline - verify managed latest service idle CPU/IO and event IO pressure baseline"
 	@echo "  verify-cpu-io-observation-e2e - verify S11.7 managed CPU/IO idle observation baseline"
 	@echo "  verify-web-console-projection-visual - verify Web Console projection and heartbeat display contract"
-	@echo "  verify-tui-web-projection-e2e - verify service projection, Web display, and TUI projection rendering contracts"
-	@echo "  verify-contract-violation-recovery-e2e - verify deployed contract violation rejected diagnostic and bounded retry"
-	@echo "  verify-service-restart-recoverable-e2e - verify managed service restart resets stale running work to manual activation"
+	@echo "  verify-tui-web-projection-e2e - verify service projection, Web display, and TUI read-model rendering"
+	@echo "  verify-contract-violation-recovery-e2e - verify typed rejection, bounded correction and fail-closed retry"
+	@echo "  verify-service-restart-recoverable-e2e - verify file-backed aggregate recovery and idempotent re-drive"
 	@echo "  verify-e2e-template-contract - verify all e2e workspace creation requests declare templateId"
 	@echo "  verify-ci-mvp      - verify deployed service with CI-safe mock LLM/MCP checks"
 	@echo "  verify-ci-mvp-file - alias of verify-ci-mvp; e2e uses the deployed instance only"
 	@echo "  verify-mvp      - verify deployed service with local real LLM MVP checks"
 	@echo "  verify-mvp-file - alias of verify-mvp; e2e uses the deployed instance only"
-	@echo "  verify-real-llm - verify a running workorch --server against its configured real LLM provider"
+	@echo "  verify-real-llm - compatibility entry for the two-workspace real Runtime closure gate"
 	@echo "  verify-real-runtime-closure - verify fresh real-provider Runtime authority, audit, receipts and terminal projection"
-	@echo "  verify-real-mcp-stdio - verify a running workorch --server can execute MCP stdio through LLM graph"
-	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorch --server"
+	@echo "  verify-real-mcp-stdio - compatibility entry for the managed current-contract MCP stdio gate"
+	@echo "  verify-real-vector-memory - compatibility entry for Memory Owner recall/bootstrap verification"
 	@echo "  verify-real-weather - verify real LLM + MCP stdio current weather query for Zhejiang Hangzhou"
-	@echo "  verify-weather-ticket-approval - verify specified city weather governance with the configured real LLM"
-	@echo "  verify-weather-ticket-approval-mock - CI-only deterministic mock LLM weather governance check"
+	@echo "  verify-weather-ticket-approval - verify weather profile/MCP governance ownership contracts"
+	@echo "  verify-weather-ticket-approval-mock - compatibility alias of weather governance ownership verification"
 	@echo "  verify-real-mvp - verify a running workorch --server with real LLM, MCP stdio, and vector Memory checks"
 	@echo "  verify-deployed-full - verify deployed service with mock, SkillHub, and real LLM e2e checks"
 	@echo "  verify-e2e-full - verify all currently tracked deployed/local e2e closure scripts"
@@ -94,11 +94,11 @@ help:
 	@echo "  verify-managed-service-smoke - start/verify/stop a managed local workorch instance twice"
 	@echo "  loadtest-governed - run governed workspace concurrency load test with deterministic mock LLM"
 	@echo "  loadtest-governed-real - run governed workspace concurrency load test with configured real LLM"
-	@echo "  docker-build    - docker build local workorch image"
-	@echo "  docker-run      - run workorch --server container with in-memory repository"
+	@echo "  docker-build    - build the image with embedded Web console assets"
+	@echo "  docker-run      - run workorch --server with ephemeral container-local file data"
 	@echo "  docker-run-file - run workorch --server container with file-backed repository"
-	@echo "  docker-verify      - container image packaging verification; not a deployed-instance e2e target"
-	@echo "  docker-verify-file - container image packaging verification with file-backed container data"
+	@echo "  docker-verify      - verify image, console, activation API and ephemeral file data"
+	@echo "  docker-verify-file - additionally verify mounted file data across container replacement"
 	@echo "  cli-build  - build the workorch CLI binary into $(CLI_BUILD_OUT)"
 	@echo "  cli-test   - run CLI tests"
 	@echo "  cli-clean  - remove CLI build artifact"
@@ -240,8 +240,7 @@ verify-software-dev-goal-dod-e2e:
 verify-software-requirement-orchestration:
 	./scripts/verify-software-requirement-development-orchestration.sh
 
-verify-software-requirement-orchestration-deployed:
-	WORKORCH_SRD_VERIFY_DEPLOYED_E2E=1 ./scripts/verify-software-requirement-development-orchestration.sh
+verify-software-requirement-orchestration-deployed: verify-software-requirement-orchestration
 
 verify-skillhub:
 	WORKORCH_SKILLHUB_VERIFY_MOCK_ADDR=127.0.0.1:18191 ./scripts/verify-skillhub-workspace-execution.sh
@@ -298,7 +297,7 @@ verify-authority-live-e2e-closure:
 verify-runtime-idle-baseline:
 	WORKORCH_MANAGED_VERIFY_TARGET=observe-runtime-closure \
 	WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT=$${WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT:-2} \
-	WORKORCH_MANAGED_GO_TEST_PACKAGES="$${WORKORCH_MANAGED_GO_TEST_PACKAGES:-./internal/pkg/repository ./internal/pkg/repository/file ./internal/pkg/workorchrepo ./internal/modules/blocks/pkg/runtimeevent ./internal/modules/application/workorchd/service/server}" \
+	WORKORCH_MANAGED_GO_TEST_PACKAGES="$${WORKORCH_MANAGED_GO_TEST_PACKAGES:-./internal/pkg/repository ./internal/pkg/repository/file ./internal/pkg/workorchrepo ./internal/modules/blocks/eventstream/... ./internal/modules/application/workorchd/service/server}" \
 	WORKORCH_OBSERVE_DURATION_SECONDS=$${WORKORCH_OBSERVE_DURATION_SECONDS:-20} \
 	WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT=0 \
 	WORKORCH_OBSERVE_ENABLE_PPROF_CHECK=0 \
@@ -354,7 +353,7 @@ verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-runti
 
 verify-tui-web-projection-e2e: verify-workspace-projection-switch verify-web-console-projection-visual verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output
 
-verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e verify-tui-web-projection-e2e verify-cpu-io-observation-e2e verify-weather-ticket-approval-mock
+verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-requirement-orchestration verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e verify-tui-web-projection-e2e verify-cpu-io-observation-e2e verify-weather-ticket-approval-mock
 
 verify-managed-full:
 	./scripts/verify-workorch-managed-full.sh
@@ -371,7 +370,7 @@ loadtest-governed-real:
 	WORKORCH_LOAD_LLM_MODE=real ./scripts/loadtest-governed-workspace-concurrency.sh
 
 docker-build:
-	docker build -t workorch:local .
+	docker build --network="$${WORKORCH_DOCKER_BUILD_NETWORK:-default}" --build-arg GOPROXY="$${WORKORCH_DOCKER_GOPROXY:-$$(go env GOPROXY)}" -t workorch:local .
 
 docker-run:
 	docker run --rm -p 8080:8080 workorch:local
@@ -385,10 +384,10 @@ docker-run-file:
 		workorch:local
 
 docker-verify:
-	WORKORCH_VERIFY_PORT=18081 ./scripts/verify-workorch-container.sh
+	WORKORCH_VERIFY_PORT=18081 WORKORCH_VERIFY_STORAGE_MODE=ephemeral ./scripts/verify-workorch-container.sh
 
 docker-verify-file:
-	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorch-container.sh
+	WORKORCH_VERIFY_PORT=18083 WORKORCH_VERIFY_STORAGE_MODE=persistent ./scripts/verify-workorch-container.sh
 
 RELEASE_OUT ?= ./dist
 RELEASE_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")

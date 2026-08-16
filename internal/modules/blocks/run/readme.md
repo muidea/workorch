@@ -1,4 +1,10 @@
-# Run Block-class Owner
+# Run Stateful Block
+
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
 
 ## 组件类型
 
@@ -8,7 +14,8 @@ opaque `RuntimeStateRecord` 物理 CAS/查询合同；不解释 SM-2/3/4 语义�
 
 ## 功能说明
 
-`blocks/run` 管理 Run、Step、RuntimeCheckpoint 的正式状态，以及 Runtime aggregate 的 opaque 物理持久化、
+`blocks/run` 管理 Run lifecycle、Run-owned replacement intent，以及 Step、RuntimeCheckpoint 的持久化查询/清理，
+并提供 Runtime aggregate 的 opaque 物理持久化、
 expected-revision CAS 和查询合同。Runtime 的 reducer、invariant、candidate、dispatch、evidence、recovery 与
 terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
@@ -50,10 +57,11 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - Orchestrator 发现不支持的 persisted Runtime schema 时，只能发送带 scope、opaque state ref、actual/supported
   schema 和 safe original diagnostic 的 `RuntimeStateIncompatibleFact`。Run reducer 将它持久化为
   `fresh_activation_required`；该 Run 的 `ContinueRun` 返回 typed non-resumable disposition，既不发 continuation
-  fact，也不触发 drive。只有用户显式 fresh activation/restart 才可创建 current-schema Run。
+  fact，也不触发 drive。开发基线不兼容时必须清理旧数据，再由用户提交显式 fresh activation；
+  不能用对不兼容 predecessor 的 restart 做 schema 迁移。
 - governed blocker 必须携带对应 DecisionTicket 或 Approval 的 workspace/run scope。
 - Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、causation 与 opaque
-  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。schema v8 Runtime record 同时持久化 Orchestrator-authored
+  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。current development baseline 的 Runtime record 同时持久化 Orchestrator-authored
   opaque lifecycle fence；Run 仅比较 scope/schema/revision/ref/hash/bootstrap/fence，禁止解码 Decision、semantic、candidate、
   governance、evidence 或 drive 内容。若为 `fresh_activation_required`，通知额外携带
   Run-owned actual/supported schema identity，以便 Workspace 安全释放同一 Run 的 active slot；它仍不公开 aggregate
@@ -66,6 +74,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - 生产装配只接收 Run 自身 repository 与 EventHub，不得注入 WorkspaceReader、Orchestrator service、callback 或其他 owner repository。
 - `Stop`/`Teardown` 必须逆序、幂等地解除 recovery inventory 与常规 topic；recovery inventory 不得在 owner 停止后继续响应。
 - Run 不负责 coverage、evidence quality、Result acceptance 或 LLM 输出正确性判断。
+- current-baseline restart 由 Run owner 先在非终态 predecessor 上 CAS 持久化 immutable `ReplacementIntent`；只有
+  predecessor 的 `Result -> Workspace -> Run` terminal delivery 完成后，Run-private reducer 才幂等创建并激活
+  successor。非当前 development baseline 返回 `data_reset_required`，且不持久化 replacement intent。
 - 不允许形成 active Run 无合法 wait、无 scheduled drive 且 Runtime aggregate 非终态的悬挂状态；该恢复分类来自
   Orchestrator/Run 的 typed inventory，不从 Step/nextAction 推断。
 - Step 合同失败不得先记录 completed 再回滚为 failed。

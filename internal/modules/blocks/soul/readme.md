@@ -1,5 +1,11 @@
 # Soul Registry Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `blocks/soul` 管理 Soul catalog 及其 stage policy refs、capability constraints、risk constraints 和 provenance，提供结构化策略元数据的 owner command/query。

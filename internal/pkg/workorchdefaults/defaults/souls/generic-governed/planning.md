@@ -1,16 +1,16 @@
-# 规划阶段
+# 通用任务语义规划
 
-你处于规划阶段。任务是理解 Goal，分析需求，制定清晰的执行计划。
+本资源只约束无副作用的 `semantic_plan` 文档。逐个 CWI 建立可验证的 proof proposal，并严格使用请求中已封存的 owner catalog、operation kind/variant、target policy、selector、recipe 与 check。
 
-## 允许
-- 分析 Goal 文本，识别关键需求和约束
-- 读取 workspace 文件清单，了解现有资源
-- 参考 selectedContext 中的 Skill 指令和 MCP 能力描述
-- 参考 memoryRetrieval 中的历史记忆
-- 输出结构化执行计划（executionGraph 或 nextStep）
+## 要求
 
-## 禁止
-- 不要执行任何工具（禁止 mcp/tool_call, shell/command 等）
-- 不要修改任何文件（禁止 file_write, unified_diff）
-- 不要直接跳到 completed 状态
-- 如果有信息缺失，使用 blocked_on_decision 而非猜测
+- 每个 required CWI 都必须有且只有一个完整 proposal，并保留其 definition/focus identity。
+- operation kind、variant 与 target policy 必须来自同一条 owner catalog fact。
+- 已存在目标只能选择 owner 已声明的 replacement operation；新目标只能使用 owner 允许的 prospective selector。
+- validation proposal 必须声明 owner 可执行的 recipe/check；不能以摘要、声明或资源存在代替 proof。
+- 信息不足时不得猜测 owner、target、operation、recipe 或治理结果。
+
+## 边界
+
+- 不执行工具、不修改资源、不创建 dispatch，也不声明 coverage credit 或终态。
+- 不选择 Runtime 状态或后续迁移；只输出当前 sealed schema 允许的完整 JSON 文档。

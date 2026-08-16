@@ -209,8 +209,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # canonical convergence state. RuntimeAction was deliberately retired from the
 # production candidate contract; this fixture must not recreate it as a second
 # authority just to select a canned response.
-# Legacy thoughtSummary/completionState/dodAssessment/executionGraph are rejected
-# by DisallowUnknownFields and must never appear in provider output.
+# Retired V1 candidate keys are rejected by DisallowUnknownFields and must
+# never appear in provider output.
 
 run_scenarios = {}
 validation_done = set()
@@ -1356,27 +1356,6 @@ PY
   return 1
 }
 
-find_replan_successor_run() {
-  local predecessor_run_id="$1"
-  local output_file="$2"
-
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$output_file"
-  python3 - "$output_file" "$predecessor_run_id" <<'PY'
-import json
-import sys
-
-snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
-predecessor = sys.argv[2]
-for run in snapshot.get("runs") or []:
-    context = run.get("executionContext") or {}
-    replan = context.get("replanContinuation") or {}
-    if replan.get("predecessorRunId") == predecessor:
-        print(run.get("id", ""))
-        raise SystemExit(0)
-raise SystemExit(f"missing replan successor for predecessor {predecessor!r}")
-PY
-}
-
 assert_run_recovery_read_models() {
   local run_id="$1"
   local label="$2"
@@ -1413,7 +1392,7 @@ if run.get("workspaceId") != workspace_id:
 if run.get("state") != expected_state:
     errors.append(f"run state is {run.get('state')!r}, want {expected_state!r}")
 
-# Runtime: compressedContext lives on contextBundle (not run.executionContext).
+# Runtime: compressed context is a read-only contextBundle projection.
 bundle_compressed = bundle.get("compressedContext") or {}
 if bundle.get("runId") not in ("", None, run_id) and bundle.get("runId") != run_id:
     errors.append(f"context bundle run id mismatch: {bundle.get('runId')!r} want {run_id!r}")

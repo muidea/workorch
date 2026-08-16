@@ -1,5 +1,13 @@
 # workorch Process Service
 
+Status: active
+
+Type: process-service-contract
+
+Last Verified: 2026-08-16
+
+## 功能说明
+
 `internal/services/workorch` 是进程级生命周期 shell：选择 server、interactive TUI
 或 remote CLI mode，装配 framework application，并把端侧适配器连接到稳定 port。
 它不是 framework module，不拥有 owner 状态，也不向 application 导出 owner service。
@@ -13,3 +21,9 @@ error object 都不得进入 EventHub command/data/result。Shutdown 先取消 o
 TUI/CLI 只依赖 `internal/pkg/workorchport` 的稳定 contract；embedded backend 通过
 typed EventHub command/result，remote backend 通过 client，不直接调用 owner `biz`、
 `service` 或 repository。
+
+## 非职责
+
+- 不注册 framework Module/Block，不拥有任何正式聚合或 Runtime 状态机。
+- 不把 local wait channel、HTTP listener、repository、EventHub 或 Session 作为跨组件合同传递。
+- 不在端侧重建 authority、自动 Resume/Restart 或补偿 owner 状态。

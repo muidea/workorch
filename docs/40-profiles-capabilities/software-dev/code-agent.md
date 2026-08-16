@@ -4,122 +4,63 @@ Status: active
 
 Type: profile-capability
 
-Last Updated: 2026-05-30
+Last Verified: 2026-08-16
 
 ## Purpose
 
-本文件承接 `software-dev` profile 中已经稳定的 Code Agent 行为约束，只保留仍应指导当前架构和实现的 profile 规则。
+`software-dev` specializes neutral Runtime contracts for code delivery. It supplies template/Soul guidance, coverage roles,
+evidence requirements and allowed capability classes; it does not add a code-specific state machine to Orchestrator.
 
-## Stable Contract
+## Expected Behavior
 
-### Goal / DoD 驱动
+- inspect the current Workspace and relevant contract shape before editing;
+- make the smallest coherent production change tied to an active coverage work item;
+- use create-only file operations only for absent targets and revision-bound replacement for existing targets;
+- run bounded build/test/lint or direct entrypoint checks relevant to the DoD;
+- preserve user changes and avoid unrelated rewrites;
+- when meaningful output changed, use supported Git add/commit operations if a version-control snapshot is required;
+- report explicit evidence refs, skipped checks, residual risks and true blockers.
 
-- `software-dev` 任务始终围绕显式 `Goal` 和 `DoD` 收敛，不得引入并行的开发任务状态机。
-- agent 需要覆盖任务拆解、状态变更、验证、修复、验收和交付证据生成的完整闭环。
-- TUI 只负责 Goal/DoD 输入与结果呈现，不承载后端业务分叉。
+## Capability Mapping
 
-### Template And Run Boundary
+| Need | Typical capability | Constraint |
+| --- | --- | --- |
+| inspect files | `file/list`, `file/read` | observation only |
+| create file | `file/write` or `patch/apply:file_write` | target must be absent unless owner variant explicitly carries replacement fence |
+| modify file | `file/edit` or `patch/apply:text_replace|unified_diff` | current revision/base hash required by owner contract |
+| validate | `shell/command`, `validation/managed_session` | bounded, foreground, declared target/scope |
+| inspect/version | `git/read`, `git/write:init|add|commit` | no unsupported remote/destructive variants |
+| semantic assistance | selected LSP MCP tools | auxiliary; cannot replace build/test evidence |
 
-- `software-dev` 能力通过 workspace template 在 Workspace 创建期初始化，不在 Run activation 时重新绑定模板、SoulBindings、Skill 或 MCP。
-- Run activation 只允许在不改变 Workspace 持久化绑定的前提下刷新中立 `executionContract` 基线，用于继承最新 `profileContracts`、`deliverableExpectations` 和 `evidenceRequirements`。
-- 当前目录默认自动创建 Workspace 时应使用 `generic-governed`；需要软件开发能力时必须显式选择 `software-dev` template。
+Only operations present in the activation-sealed capability contract and current owner admissibility catalog are candidates.
 
-### Governance Boundary
+## Runtime Mapping
 
-- Ticket 只用于缺失信息或真实决策阻塞，不得替代可机械推进的 repair。
-- Approval 只用于高风险操作授权，不得退化成普通步骤确认机制。
-- 本地 TUI/CLI 必须继续通过 EventHub 与后端交互，不引入本机 HTTP client 分叉或定时轮询。
+The Definition seed is transformed into CWI/focus/binding through bounded semantic planning and owner feasibility. Orchestrator
+then uses normal `need_prerequisite`、`need_state_change`、`need_validation`、`need_assessment`、`need_governance` or terminal
+convergence. “Planning”, “execution” and “validation” in Souls are semantic roles only.
 
-### Delivery And Evidence
+Repair stays on the current focus when current definition and evidence permit another bounded candidate. Definition changes or
+a requested clean baseline use explicit Workspace restart; the code profile never creates a successor Run.
 
-- 最终 Result/Artifact 必须提供真实交付证据，包括变更摘要、diff 或可追溯 diff artifact、验证命令与结果、剩余风险和交付物索引。
-- Memory 只应沉淀项目约定、验证命令、历史决策和失败修复经验，不写入低价值过程噪音。
-- 自动修复循环必须基于失败证据推进，直到 DoD 满足、出现真实 blocker，或进入治理边界。
-- 当构建、测试或工具执行失败暴露依赖解析、锁文件、校验和、工具链或 registry/network prerequisite 问题时，`software-dev` template 通过 `contextHints.runtimeRepair.prerequisiteManifestTargetPatterns` 声明可作为根因候选的生态文件，例如 module manifest、lock、checksum、requirements、package metadata 和 build entry metadata。即使失败日志同时指向某个源文件，template 声明的 manifest 候选也必须作为 root-cause candidate 保留；当 pattern 已声明时，只应优先投递匹配 pattern 的当前资源，避免配置、测试或源码文件混入 prerequisite candidate 噪点。Core runtime 只消费这些 pattern 与当前 manifest，不在核心层理解具体语言或包管理器。
+## Evidence Quality
 
-## Capability And Module Mapping
+- source/config/test changes need matching owner state-change receipts;
+- validation must exercise the relevant production entrypoint, not only a test-local imitation;
+- successful command output without meaningful assertions can be inconclusive;
+- LSP diagnostics and file reads are supporting observations, not sufficient high-risk acceptance evidence;
+- a satisfied assessment must cite current-Run accepted evidence for every closed item.
 
-`software-dev` code-agent 的稳定能力面主要依赖：
+## Non-Goals
 
-- `file/*` / `patch/*`
-  - 代码和配置状态变更
-- `shell/command`
-  - build / test / lint / entrypoint verification
-- `git/*`
-  - 仓库状态观察、diff 摘要和提交闭环
-- `mcp/tool_call`
-  - 仅在 profile 明确允许时引入外部能力
-- `web/search` / `web/fetch`
-  - 仅在 profile 或 Goal 明确要求引用外部事实时启用
+- hard-coding Go/npm/test framework rules in Runtime core;
+- returning removed execution graph or next-action authority schemas;
+- using shell to bypass file/Git capability contracts;
+- creating a Decision merely because an automated retry/repair budget is exhausted.
 
-对应 block 适配层：
+## Verification
 
-- `blocks/file`
-- `blocks/shell`
-- `blocks/git`
-- `blocks/mcp`
-- `blocks/web`
-
-对应 kernel / application 约束层：
-
-- `blocks/soul`
-- `blocks/skill`
-- `blocks/mcp-registry`
-- `blocks/memory`
-- `application/workorchd`
-
-## Product / Read-Model Mapping
-
-code-agent 的典型观察面不应自建并行状态，而应复用：
-
-- `workspace snapshot`
-  - 当前 workspace outcome、runs、taskProgress
-- `run snapshot`
-  - 当前 run 的 results、artifacts、DoD closure、deliverable coverage
-- `run observability`
-  - execution / repair / governance 时间线
-- detail pages
-  - `patches`、`validation-results`、`artifacts`、`tool-calls`
-- TUI requirements
-  - Goal / DoD 输入、治理交互、result-first 输出
-
-## Verification Mapping
-
-code-agent profile 的稳定验证入口包括：
-
-- `verify-software-dev-code-agent.sh`
-- `verify-software-dev-goal-dod-e2e.sh`
-- `verify-software-requirement-development-orchestration.sh`
-- `verify-tui-agent.sh`
-
-这些验证共同回答：
-
-- 是否仍围绕 Goal / DoD 收敛
-- 是否继续通过 patch / validation / artifact / result 闭环交付
-- 是否保持治理边界和 EventHub/TUI 集成边界
-- 是否没有退化回本地轮询、自由 shell 分叉或并行状态机
-
-## Cross-Layer Mapping
-
-- profile coverage 细则：
-  `goal-coverage-and-dod.md`
-- block 分发：
-  `../../30-module-architecture/blocks-runtime-adapters.md`
-- 运行结果与证据：
-  `../../30-module-architecture/blocks-workspace-run-result.md`
-- TUI 产品约束：
-  `../../50-product-interface/tui/requirements.md`
-- profile verifier：
-  `../../60-verification/profile-software-dev-verifier.md`
-
-## Verification Focus
-
-- 主链路验证见 `../../60-verification/profile-software-dev-verifier.md`
-- TUI 侧产品与交互约束见 `../../50-product-interface/tui/requirements.md`
-- Goal / DoD 和 coverage 规则见 `goal-coverage-and-dod.md`
-
-## Source Documents
-
-- `../../90-archive/completed/software-dev-code-agent-closure-plan.md`
-- `goal-coverage-and-dod.md`
-- `lsp-bridge-integration.md`
+- current typed/core baseline: `go test ./internal/modules/kernel/orchestrator/... ./internal/modules/blocks/file/... -count=1`;
+- profile projection compatibility: `make verify-runtime-profile-software-dev`;
+- `make verify-software-dev-goal-dod-e2e` and `make verify-software-dev-code-agent` exercise current typed bootstrap,
+  File-owner admissibility and file-backed patch/restart behavior; their names do not restore a graph dispatcher.

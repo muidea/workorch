@@ -9,5 +9,4 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 	registerMCPWriteRoutes(router, state)
 	registerCatalogWriteRoutes(router, state)
 	registerWorkspaceWriteRoutes(router, state)
-	registerRunWriteRoutes(router, state)
 }

@@ -8,7 +8,7 @@ Last Updated: 2026-07-07
 
 Related:
 
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `convergence-authority-simplification-design.md`
 - `runtime-required-output-authority-and-target-snapshot-closure-plan.md`
 - `runtime-target-snapshot-authority-and-projection-closure-plan.md`

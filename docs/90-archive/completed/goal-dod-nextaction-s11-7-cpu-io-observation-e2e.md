@@ -8,8 +8,8 @@ Roadmap: [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-ite
 
 Related:
 
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
-- [Projection First ReadModel IO Closure Design](../../30-module-architecture/projection-first-readmodel-io-closure-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Projection First ReadModel IO Closure Design](../superseded/projection-first-readmodel-io-closure-design.md)
 - [Workorchd EventHub Watchdog Scope Closure Plan](./workorchd-eventhub-watchdog-scope-closure-plan.md)
 - [S9.1 Projection Readmodel First](./goal-dod-nextaction-s9-1-projection-readmodel-first.md)
 - [S9.2 History Recent Compact Refs](./goal-dod-nextaction-s9-2-history-recent-compact-refs.md)

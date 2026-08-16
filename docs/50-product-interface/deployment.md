@@ -4,126 +4,81 @@ Status: active
 
 Type: product-interface
 
-Last Updated: 2026-05-30
+Last Verified: 2026-08-16
 
-## Purpose
-
-本文件承接 WorkOrch 的部署与运行入口说明。
-
-## Scope
-
-- container image
-- local/file backend startup
-- configuration file entry
-- deployment prerequisites and startup mode selection
-
-## Responsibility Boundary
-
-本文件只回答：
-
-- 镜像如何构建
-- 服务如何启动
-- 配置如何挂载
-- memory/file backend 如何选择
-
-本文件不回答：
-
-- 当前服务行为是否已经被证明正确
-- 哪些 API / read-model / governance / raw-content 路径已经通过验收
-- 哪些 deployed script / fixture / container verification 证明了行为成立
-
-这些验证问题统一转入：
-
-- `../60-verification/service-acceptance.md`
-
-## Deployment Vs Acceptance Matrix
-
-| 主题 | `deployment.md` 负责 | `../60-verification/service-acceptance.md` 负责 |
-| --- | --- | --- |
-| container image | 如何构建、如何运行 | 镜像启动后哪些行为必须通过验证 |
-| local startup | `go run` / config-dir 入口 | 启动后 `healthz` / `readyz` / `metrics` / 最小业务链如何验收 |
-| file backend | 如何挂载 `application.toml` 与 data dir | file backend 重启、replay、raw/detail 打开如何验收 |
-| configuration surface | 配置分区和主要字段入口 | 配置加载后哪些行为与 API 读取已被证明 |
-| deployed instance | 如何连接现有配置和进程 | 哪些 `make verify-*` / script 证明现有实例行为成立 |
-
-## Deployment Entry
-
-### Container Image
-
-构建镜像：
+## Build And Run
 
 ```bash
-docker build -t workorch:local .
+make deps
+make build
+
+# local TUI (default mode)
+./bin/workorch -config-dir config
+
+# HTTP/Web service
+./bin/workorch --server -config-dir config
 ```
 
-或使用：
+`go run ./application/workorch ...` is equivalent for development. `--remote <base-url>` selects remote CLI/TUI mode.
+
+Configuration directory precedence is explicit `-config-dir`/`--config-dir`, then `WORKORCH_CONFIG_DIR`, then
+`$HOME/.workorch`. The directory contains `application.toml`. `CONFIG_PATH` is an internal framework/image environment value,
+not the documented CLI selection mechanism.
+
+## Supplied Configuration Sets
+
+| Directory/file | Purpose |
+| --- | --- |
+| `config/application.toml` | minimal local file-backed service defaults |
+| `config/file/application.toml` | extended development file-backed config, including ai-proxy/runtime/governance settings |
+| `config/container-file/application.toml` | container file-backed config rooted at `/var/lib/workorch` |
+
+Canonical LLM config is ai-proxy-only: `llm.aiProxy`, `llm.defaultChat`, optional `llm.defaultEmbedding`, and `llm.budget`.
+Secrets should be injected through a protected generated config or secret mount; public configuration responses are redacted.
+
+## Data Layout
+
+- repository `backend=file` stores internal state below configured `repository.dataDir`;
+- default generated deliverables use the sibling `.workorch-workspaces/<workspace-id>` tree, not the internal repository tree;
+- explicit Workspace deliverable directories remain user-owned locations;
+- `.workorch-data`, `.workorch-workspaces`, `bin` and `node_modules` are runtime/generated data and must not be committed.
+
+`make run-file` deliberately deletes `./.workorch-data` before starting with `config/file`; use it only for a clean local run.
+
+## Container Behavior
+
+The checked-in image entrypoint runs `workorch --server -config-dir /etc/workorch` and the bundled config selects the file
+backend at `/var/lib/workorch/.workorch-data`.
+
+- `make docker-run` uses that file backend inside an ephemeral container; data disappears with `--rm`.
+- `make docker-run-file` mounts host `./.workorch-data` at `/var/lib/workorch` for persistence.
+- the service runs as an unprivileged `workorch` user and exposes port 8080.
+
+The builder copies `web/consoleassets`, caches `go mod download`, and accepts `WORKORCH_DOCKER_GOPROXY` plus
+`WORKORCH_DOCKER_BUILD_NETWORK` overrides for constrained build networks. The container verifier uses Workspace/Goal/DoD plus
+`execution-activations`, asserts removed Run mutations return `404`, and verifies ephemeral and mounted file-backed modes.
+Both modes passed on 2026-08-16; see the
+[closure record](../90-archive/records/runtime-contract-drift-code-closure-record-2026-08-16.md).
+
+## Operational Checks
+
+- liveness: `GET /healthz`
+- readiness: `GET /readyz`
+- metrics: `GET /metrics`
+- console: `GET /console`
+
+The current service has no documented multi-tenant authentication boundary. Do not expose it to an untrusted network without
+an external access-control/reverse-proxy layer.
+
+## Verification
 
 ```bash
-make docker-build
+make fmt-check
+make vet
+make test
+make verify-boundary-contract
+make build
 ```
 
-### In-Memory Startup
-
-```bash
-docker run --rm -p 8080:8080 workorch:local
-```
-
-### File-Backed Startup
-
-```bash
-mkdir -p .workorch-runtime
-chmod 0777 .workorch-runtime
-docker run --rm \
-  -p 8080:8080 \
-  -v "$(pwd)/config/container-file/application.toml:/etc/workorch/application.toml:ro" \
-  -v "$(pwd)/.workorch-runtime:/var/lib/workorch" \
-  workorch:local
-```
-
-file backend 下：
-
-- internal runtime state 位于 `/var/lib/workorch/.workorch-data/internal/workspaces/<workspace-id>/`
-- 默认 deliverable root 位于 `/var/lib/workorch/.workorch-workspaces/<workspace-id>/`
-
-## Local Server Startup
-
-本地默认配置：
-
-```bash
-go run ./application/workorch --server -config-dir config
-```
-
-本地 file backend：
-
-```bash
-go run ./application/workorch --server -config-dir config/file
-```
-
-`CONFIG_PATH` 也可指向配置目录，遵循 magicCommon configuration 约定。
-
-## Configuration Surface
-
-主要配置分区：
-
-- `[server]`：监听地址、timeout、`maxConcurrentRuns`
-- `[repository]`：backend 与 `dataDir`
-- `[runtime]`：repair / retry / shell timeout 等 runtime 默认值
-- `[llm]`：default provider 与 provider 列表
-
-## Startup Decision Guide
-
-典型选择方向：
-
-- 只验证最小本地启动
-  - 用 `go run ./application/workorch --server -config-dir config`
-- 需要验证 file backend 持久化布局
-  - 用 `go run ./application/workorch --server -config-dir config/file`
-- 需要验证容器镜像和挂载行为
-  - 用 `docker run ...` 或 `make docker-build` 后的容器入口
-
-一旦进入“是否行为正确、是否通过验收”的问题，应切换到
-`../60-verification/service-acceptance.md`。
-
-## Source Documents
-
-- `deployment.md`
+Deployed acceptance targets require an already running service unless their script explicitly manages one. Real-provider tests
+also require matching ai-proxy credentials and should not be treated as CI-safe.

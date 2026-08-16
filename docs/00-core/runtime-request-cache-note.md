@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-08-13
+Last Verified: 2026-08-16
 
 ## Purpose
 

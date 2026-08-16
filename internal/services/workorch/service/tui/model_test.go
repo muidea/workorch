@@ -1381,7 +1381,7 @@ func TestModelSlashCompletionSuggestionsVisible(t *testing.T) {
 	}
 }
 
-func TestModelConfigCommandShowsLLMOutputBudget(t *testing.T) {
+func TestModelConfigCommandShowsCandidateDocumentRecovery(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.setInput("/config")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1391,8 +1391,8 @@ func TestModelConfigCommandShowsLLMOutputBudget(t *testing.T) {
 	msg := cmd()
 	next, _ = asModel(next).Update(msg)
 	m = asModel(next)
-	if !strings.Contains(m.result, "LLM Output Budget") || !strings.Contains(m.result, "maxGraphBytes: 32768") {
-		t.Fatalf("config result missing llm output budget:\n%s", m.result)
+	if !strings.Contains(m.result, "Candidate Document Recovery") || !strings.Contains(m.result, "maxDocumentRecoveryAttempts: 3") {
+		t.Fatalf("config result missing candidate document recovery limit:\n%s", m.result)
 	}
 }
 
@@ -5844,14 +5844,7 @@ func (f *fakeC) Get(ctx context.Context) (*backend.ServiceConfig, error) {
 		DefaultChat:       runtimecontract.ProviderModelTarget{ProviderID: "local"},
 		MaxConcurrentRuns: 1,
 		LLMOutput: workorchconfig.LLMOutputRuntimeConfig{
-			MaxPatchContentBytes:               12288,
-			MaxGraphBytes:                      32768,
-			MaxGraphFileWrites:                 3,
-			SchemaInvalidLargePreviewThreshold: 8192,
-			MaxArtifactChunkBytes:              8192,
-			MaxDocumentRecoveryAttempts:        3,
-			MaxArtifactPlanAttempts:            2,
-			MaxArtifactReplanAttempts:          2,
+			MaxDocumentRecoveryAttempts: 3,
 		},
 	}, nil
 }

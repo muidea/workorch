@@ -9,8 +9,8 @@ Owner: core
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
-- [Contract Violation Recovery Loop Design](../../30-module-architecture/contract-violation-recovery-loop-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Contract Violation Recovery Loop Design](../superseded/contract-violation-recovery-loop-design.md)
 - [S3.6 Rejected Evidence Output Guard](./goal-dod-nextaction-s3-6-rejected-evidence-output-guard.md)
 - [S7.2 Parse/Schema Gate Recoverable Diagnostic](./goal-dod-nextaction-s7-2-parse-schema-gate-recoverable-diagnostic.md)
 

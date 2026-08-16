@@ -69,14 +69,7 @@ type GitRuntimeConfig struct {
 }
 
 type LLMOutputRuntimeConfig struct {
-	MaxPatchContentBytes               int `json:"maxPatchContentBytes" toml:"maxPatchContentBytes"`
-	MaxGraphBytes                      int `json:"maxGraphBytes" toml:"maxGraphBytes"`
-	MaxGraphFileWrites                 int `json:"maxGraphFileWrites" toml:"maxGraphFileWrites"`
-	SchemaInvalidLargePreviewThreshold int `json:"schemaInvalidLargePreviewThreshold" toml:"schemaInvalidLargePreviewThreshold"`
-	MaxArtifactChunkBytes              int `json:"maxArtifactChunkBytes" toml:"maxArtifactChunkBytes"`
-	MaxDocumentRecoveryAttempts        int `json:"maxDocumentRecoveryAttempts" toml:"maxDocumentRecoveryAttempts"`
-	MaxArtifactPlanAttempts            int `json:"maxArtifactPlanAttempts" toml:"maxArtifactPlanAttempts"`
-	MaxArtifactReplanAttempts          int `json:"maxArtifactReplanAttempts" toml:"maxArtifactReplanAttempts"`
+	MaxDocumentRecoveryAttempts int `json:"maxDocumentRecoveryAttempts" toml:"maxDocumentRecoveryAttempts"`
 }
 
 // BuiltinAIProxyProviderID is the reserved WorkOrch provider identity for the
@@ -389,14 +382,7 @@ func writeConfigAtomically(configPath string, payload []byte) error {
 
 func DefaultLLMOutputRuntimeConfig() LLMOutputRuntimeConfig {
 	return LLMOutputRuntimeConfig{
-		MaxPatchContentBytes:               65536,
-		MaxGraphBytes:                      131072,
-		MaxGraphFileWrites:                 3,
-		SchemaInvalidLargePreviewThreshold: 32768,
-		MaxArtifactChunkBytes:              16384,
-		MaxDocumentRecoveryAttempts:        3,
-		MaxArtifactPlanAttempts:            2,
-		MaxArtifactReplanAttempts:          2,
+		MaxDocumentRecoveryAttempts: 3,
 	}
 }
 
@@ -407,14 +393,7 @@ func NormalizeLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) (LLMOutputRunti
 			*value = fallback
 		}
 	}
-	applyDefault(&cfg.MaxPatchContentBytes, defaults.MaxPatchContentBytes)
-	applyDefault(&cfg.MaxGraphBytes, defaults.MaxGraphBytes)
-	applyDefault(&cfg.MaxGraphFileWrites, defaults.MaxGraphFileWrites)
-	applyDefault(&cfg.SchemaInvalidLargePreviewThreshold, defaults.SchemaInvalidLargePreviewThreshold)
-	applyDefault(&cfg.MaxArtifactChunkBytes, defaults.MaxArtifactChunkBytes)
 	applyDefault(&cfg.MaxDocumentRecoveryAttempts, defaults.MaxDocumentRecoveryAttempts)
-	applyDefault(&cfg.MaxArtifactPlanAttempts, defaults.MaxArtifactPlanAttempts)
-	applyDefault(&cfg.MaxArtifactReplanAttempts, defaults.MaxArtifactReplanAttempts)
 	if err := validateLLMOutputRuntimeConfig(cfg); err != nil {
 		return LLMOutputRuntimeConfig{}, err
 	}
@@ -427,14 +406,7 @@ func LLMOutputRuntimeConfigValues(cfg LLMOutputRuntimeConfig) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"maxPatchContentBytes":               normalized.MaxPatchContentBytes,
-		"maxGraphBytes":                      normalized.MaxGraphBytes,
-		"maxGraphFileWrites":                 normalized.MaxGraphFileWrites,
-		"schemaInvalidLargePreviewThreshold": normalized.SchemaInvalidLargePreviewThreshold,
-		"maxArtifactChunkBytes":              normalized.MaxArtifactChunkBytes,
-		"maxDocumentRecoveryAttempts":        normalized.MaxDocumentRecoveryAttempts,
-		"maxArtifactPlanAttempts":            normalized.MaxArtifactPlanAttempts,
-		"maxArtifactReplanAttempts":          normalized.MaxArtifactReplanAttempts,
+		"maxDocumentRecoveryAttempts": normalized.MaxDocumentRecoveryAttempts,
 	}
 }
 
@@ -688,28 +660,8 @@ func applyRuntimeConfigDefaults(cfg *RuntimeConfig) {
 }
 
 func validateLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) error {
-	for _, item := range []struct {
-		name  string
-		value int
-	}{
-		{"maxPatchContentBytes", cfg.MaxPatchContentBytes},
-		{"maxGraphBytes", cfg.MaxGraphBytes},
-		{"maxGraphFileWrites", cfg.MaxGraphFileWrites},
-		{"schemaInvalidLargePreviewThreshold", cfg.SchemaInvalidLargePreviewThreshold},
-		{"maxArtifactChunkBytes", cfg.MaxArtifactChunkBytes},
-		{"maxDocumentRecoveryAttempts", cfg.MaxDocumentRecoveryAttempts},
-		{"maxArtifactPlanAttempts", cfg.MaxArtifactPlanAttempts},
-		{"maxArtifactReplanAttempts", cfg.MaxArtifactReplanAttempts},
-	} {
-		if item.value <= 0 {
-			return fmt.Errorf("%w: runtime.llmOutput.%s must be positive", common.ErrInvalidArgument, item.name)
-		}
-	}
-	if cfg.MaxPatchContentBytes > cfg.MaxGraphBytes {
-		return fmt.Errorf("%w: runtime.llmOutput.maxPatchContentBytes must not exceed maxGraphBytes", common.ErrInvalidArgument)
-	}
-	if cfg.SchemaInvalidLargePreviewThreshold > cfg.MaxGraphBytes {
-		return fmt.Errorf("%w: runtime.llmOutput.schemaInvalidLargePreviewThreshold must not exceed maxGraphBytes", common.ErrInvalidArgument)
+	if cfg.MaxDocumentRecoveryAttempts <= 0 {
+		return fmt.Errorf("%w: runtime.llmOutput.maxDocumentRecoveryAttempts must be positive", common.ErrInvalidArgument)
 	}
 	return nil
 }

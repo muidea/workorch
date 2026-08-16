@@ -8,7 +8,7 @@ Last Updated: 2026-06-26
 
 Related:
 
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `workorchd-state-loop-and-projection-closure-plan.md`
 - `convergence-authority-dispatch-closure-checklist.md`
 - `convergence-authority-single-source-closure-plan.md`

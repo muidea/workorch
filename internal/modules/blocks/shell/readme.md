@@ -1,13 +1,21 @@
 # Shell 能力组件
 
+Status: active
+
+Type: capability-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `blocks/shell` 在受控工作目录、超时和资源策略下执行本地 shell command，并返回 exit code、stdout/stderr 摘要、错误分类、耗时和 raw ref。
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Shell 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 禁止的 执行通知。
-- Runtime capability preflight 通过 Orchestrator 定义的 typed EventHub command 确认 `shell/command` 当前由本 block 提供。
+- `kernel/orchestrator` 通过 Shell owner 在 `blocks/shell/pkg/events` 定义的 `ExecuteOperationCommand/Result` 同步投递
+  Shell 操作；本组件直接订阅 EventHub，不启动通用 runtime executor 或第二套执行通知。
+- Runtime capability、operation-admissibility、operation-feasibility、semantic-proof feasibility 与 CWI reconciliation
+  均使用 Shell owner 定义的 concrete typed command/result。
 - stdout/stderr 不直接跨组件传递，只输出有界 typed evidence 摘要与引用。
 - 对 state-changing `shell/command`，本 owner 在执行前后以有界 workspace regular-file snapshot 计算真实 changed refs；`.git`、symlink 与不可安全内容寻址的对象不作为交付物 effect。所有真实 changed ref 必须是 sealed `TargetRefs` 的子集，否则返回 `effect_mismatch/undeclared_workspace_effect` rejected receipt；不能通过同时 touch 一个已声明目标掩盖额外写入。
 - accepted state-changing receipt 的 `TargetRefs` 与 `ResourceChanges` 来自 owner observation，而非直接回显候选输入；无可观察 workspace delta 时返回 no-progress，而不是 durable evidence。
@@ -17,23 +25,6 @@
 - Runtime evidence policy 使用 Orchestrator command 携带的具体 `RuntimeEvidencePolicy`，用于 zero-work marker、work-evidence marker、evidence quality、reason 和 tag 判定；本组件不从 operation parameter map 解析跨组件 policy。
 - Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入；只有本 block 返回独立 typed
   `GovernanceRequirement` 时才可进入治理，普通失败或 budget exhaustion 不能创建 ticket。
-
-## 当前内聚收口切片（2026-08-16）
-
-- `RuntimeAdapter` 仍是唯一 Shell capability adapter；原 1,977 行混合文件已按 catalog/admissibility、validation
-  preflight、feasibility、execution transaction、workspace effect observation、managed resource、runner/output bound、
-  policy 与 diagnostic 分为同 package 的 owner-private 文件。没有新增 Block、service facade、共享可变 executor、
-  registry、EventHub round trip 或 receipt owner。
-- `ExecuteOperation` 仍是唯一公开执行入口，并继续按 policy/evidence/timeout/validation preflight、before observation、
-  一次物理 process、after observation、typed diagnostic/receipt 的原顺序封口。AST 回归冻结其中恰好一处
-  `exec.CommandContext`、一处 `Start` 和一处 `Wait`；拆分没有增加 command retry、后台进程或第二 effect path。
-- state-changing effect、managed validation resource、bounded stdout/stderr 和 validation evidence 仍由同一 Shell
-  owner 的具体类型表达；policy/diagnostic helper 不修改 Runtime authority，也不把 process 结果直接判为 coverage。
-- C22-05 Shell 切片完成后，非测试 Go 为 26 个文件/3,600 LOC，测试为 13 个文件/2,680 LOC，package 保持 4；
-  最大生产文件从 `shell_runtime_adapter.go` 1,977 行降为 `owner.go` 598 行，至少 500 行生产文件从 2 个降为 1 个，
-  生产 `CC>30` 继续为 0。`BenchmarkRuntimeAdapterExecuteBoundedCommand` 的 20 次、3 轮样本为
-  `531,749～538,546 ns/op`、`78,664～79,141 B/op`、`147～149 allocs/op`，每次迭代恰好启动一个前台进程，
-  不执行 repository load/CAS 或 EventHub 调用。
 
 ## 相关约束
 

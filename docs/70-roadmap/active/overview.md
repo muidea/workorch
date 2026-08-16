@@ -2,66 +2,48 @@
 
 Status: active
 
-Type: roadmap
+Type: roadmap-index
 
-Last Updated: 2026-08-15
+Last Verified: 2026-08-16
 
 ## Purpose
 
-This document indexes only work that is currently open. Historical plans, dated live records, and prior code-closure
-claims are archived and cannot override a current persisted aggregate counterexample.
+本目录只保留真实未关工作。代码已完成、仅作为回归依据或包含 dated run/schema/benchmark 的文档必须进入
+`90-archive/` 或 `60-verification/`，不能继续与当前实施计划并列。
 
-## Runtime Status
+## Active Work
 
-| Topic | Current status |
-| --- | --- |
-| Production Runtime path | Runtime-only: typed activation, `DriveRuntime`, Orchestrator reducer, sealed dispatch, owner receipt, and terminal delivery. |
-| Owner boundaries | Active baseline: cross-owner I/O uses concrete EventHub contracts; Run, Workspace, Result, capability Blocks, projection, and UI do not own each other's state. |
-| CWI reconciliation | **Mandatory regression reference.** CWI-SO-13/14/16/18 matrices remain required; the development baseline separates immutable declaration from generation binding. |
-| Model-capability output and state ownership | **Code/automated-closed; deployed verification pending.** SO-MC-12..18 close the current-baseline owner envelopes, unified File feasibility/catalog, target-bound semantic replacement, exact binding retirement, pre-provider equivalent-authority fencing, opaque Run persistence and repository-wide gates. SO-MC-10 remains the fresh real-provider live proof. |
-| Orchestrator internal cohesion | **O0-O8 code/automated-closed; deployed verification remains open.** The private event union, one mutation/CAS kernel, five stateful private components, one pure CandidateEvaluator, stateless rule projections, owner-scoped transition files, independent SM-4 recovery-budget handoff and malformed recovery-envelope fence are covered by structure/restart tests and repository gates. Fresh SO-MC-10 live proof is still required; the 22 framework units remain unchanged. |
-| Workorchd internal cohesion | **WD0-WD8 code/automated-closed; deployed verification remains open.** The single Application Module has a typed-only production server boundary, one Biz-owned runtime/session component, one projection manager/store/lifecycle, six typed read-model facades with an exact eight-symbol package export whitelist, semantic projection filenames, and merged `definitionquality`/`content`/`setupdraft` packages. Server-local Session/cache authority/projection lifecycle and forwarding compatibility paths are removed; deployed HTTP/SSE/CLI regression remains without moving formal owner state into Application. |
-| Workspace reasoning effort | Code-closed, deployed verification pending. See [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md). |
-| 22-component EventHub structure | The cross-owner EventHub baseline remains completed; OIC/WIC are active internal-cohesion work and do not add a Runtime authority queue or framework unit. |
-
-## Mandatory Work
-
-| ID | Work | Required result | Plan |
+| ID | 状态 | 唯一目标 | Plan |
 | --- | --- | --- | --- |
-| CWI-SO | Mandatory Runtime admission regression matrix | Definition, presentation and execution order remain distinct; only an eligible CWI can become the unbound current focus; semantic order and seal use the same exact closure; settled CWI still require typed reopen. | [Runtime CWI regression plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| SO-MC | Runtime single-owner and model-capability output closure | SO-MC-12..18 code/automated closure is complete; after deploying the target-bound catalog fix, verify a fresh current-baseline real-provider candidate/dispatch/receipt/evidence terminal chain under SO-MC-10. | [SO-MC plan](runtime-single-owner-model-capability-output-closure-plan.md) |
-| OIC | Orchestrator internal cohesion closure | Complete O0-O8 without adding an Owner, state machine, aggregate, mutation entry or CAS boundary; prove existing-target semantic replan converges through typed owner facts and bounded candidate admission. | [single-owner code-closure runbook](runtime-single-owner-code-closure-runbook.md#4-orchestrator-内部功能内聚专项) |
-| WIC | Workorchd internal cohesion closure | Preserve the completed WD0-WD8 typed boundaries and exact read-model export whitelist; finish deployed HTTP/SSE/CLI regression without adding a Module/Block or application authority. | [single-owner code-closure runbook](runtime-single-owner-code-closure-runbook.md#5-workorchd-application-module-功能内聚专项) |
-| WRE | Workspace reasoning effort deployed verification | Web Start/Restart, TUI `/model reasoning`, Resume sealed selection, and workspace isolation verified against the deployed service. | [WRE plan](workspace-reasoning-effort-single-owner-closure-plan.md) |
-| OPT-1 | Optional file-patch deployed validation | One `patch apply + validation + DoD closeout` live proof. It does not block CWI-SO. | [archive record](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
+| RUNTIME-LIVE | deployed verification pending | 在 fresh development data 与真实 provider 上证明 semantic seal、candidate/dispatch、owner receipt/evidence、existing-target revision-bound replacement、后续 CWI 与 terminal delivery 持续收敛 | [Runtime Positive-Convergence Live Closure](runtime-single-owner-model-capability-output-closure-plan.md) |
+| WRE-LIVE | deployed verification pending | 证明 Workspace model/reasoning selection 在 Web/TUI、Resume/Restart、active configuration 和双 Workspace 间保持单 Owner | [Workspace Reasoning Effort Deployed Verification](workspace-reasoning-effort-single-owner-closure-plan.md) |
 
-The prior CWI automated matrix remains mandatory regression coverage, but its historical deployed-only queue is
-superseded by `SO-MC`. The next live proof must use a fresh current development baseline path after SO-MC-12..18 and data
-cleanup; a provider,
-capability owner, UI, projection or managed mock result cannot substitute for persisted Orchestrator-owned closure.
+## Stable Regression Contract
 
-## Active Documentation Rules
+[Runtime Owner Convergence Verification Matrix](../../60-verification/runtime-owner-convergence-matrix.md) 固化 CWI、
+candidate、single-owner、restart、budget、delivery 等已实现门禁。它是验证合同，不是新的 active 实施队列。
 
-1. Runtime authority is defined by `00-core`, the Orchestrator readme, and typed runtime contracts; active plans only
-   describe remaining implementation work.
-2. A current persisted aggregate or deployed counterexample overrides a prior local test or historical code-closed
-   statement.
-3. Completed, superseded, and process-only plans belong in `90-archive/`; they are searchable but not implementation
-   authority.
-4. Active documents must not retain a parallel Runtime state machine, global authority registry, V1 fallback, or dated
-   live-log narrative.
-5. The CWI chain remains `Definition CWI -> SM-2 sealed binding -> SM-3 sealed operation -> owner receipt -> SM-2
-   evidence/credit`; a raw candidate claim, provider summary, file existence, Git revision, or terminal result never
-   substitutes for it.
+## Recently Archived
+
+- [CWI single-owner closure](../../90-archive/completed/runtime-cwi-reconciliation-single-owner-closure-plan.md)
+- [Orchestrator/Workorchd single-owner code runbook](../../90-archive/completed/runtime-single-owner-code-closure-runbook.md)
+- [22-component complexity snapshot](../../90-archive/records/runtime-22-component-function-complexity-inventory-2026-08-16.md)
+- [SO-MC code closure record](../../90-archive/records/runtime-single-owner-model-capability-output-code-closure-record-2026-08-16.md)
+- [WRE code closure record](../../90-archive/records/workspace-reasoning-effort-code-closure-record-2026-08-16.md)
+- [Runtime contract drift closure](../../90-archive/completed/runtime-contract-drift-closure-plan.md)
+- [Runtime contract drift code closure record](../../90-archive/records/runtime-contract-drift-code-closure-record-2026-08-16.md)
+
+## Rules
+
+1. `00-core`、Orchestrator README 和 typed contracts 定义 Runtime authority；active plan 只描述未关验收。
+2. live 失败以最早 persisted counterexample 为准，但不能据此增加第二 Owner、第五状态机或字段级旁路。
+3. managed mock、局部制品、revision 增长或正确 fail-closed 不能替代完整正向 terminal chain。
+4. 完成的计划立即归档；历史 schema/version/run ID 不进入当前事实或组件 README。
 
 ## Navigation
 
-- [Current state](../../01-overview/current-state.md)
-- [Current unclosed matrix](../../01-overview/current-unclosed-matrix.md)
-- [Unfinished todo index](../../01-overview/unfinished-todo-index.md)
-- [Runtime CWI plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)
-- [Runtime single-owner and model-capability output plan](runtime-single-owner-model-capability-output-closure-plan.md)
-- [Runtime single-owner code-closure runbook](runtime-single-owner-code-closure-runbook.md)
-- [Runtime 22-component function and complexity inventory](runtime-22-component-function-complexity-inventory.md)
-- [Completed archive](../../90-archive/completed/overview.md)
-- [Superseded archive](../../90-archive/superseded/overview.md)
+- [Current State](../../01-overview/current-state.md)
+- [Current Unclosed Matrix](../../01-overview/current-unclosed-matrix.md)
+- [Documentation Map](../../README.md)
+- [Completed Archive](../../90-archive/completed/overview.md)
+- [Records Archive](../../90-archive/records/overview.md)

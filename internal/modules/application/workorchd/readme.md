@@ -1,5 +1,11 @@
 # workorchd Application Module
 
+Status: active
+
+Type: application-module-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `application/workorchd` 是服务端应用模块，负责把 HTTP/Web API、CLI facade、runtime session、execution admission、context registry、read model、projection 和 SSE 接入统一生命周期。它组合多个 owner 的能力形成应用用例，但不拥有 Workspace、Run、Result、Decision、Approval、Memory、MCP、Skill 或 Soul 的正式状态。
@@ -24,34 +30,13 @@
 - run-scoped Start/Resume scheduler command 直接发送 Run owner 定义的 typed activation / continuation intent；Resume 只携带
   workspace/run scope，不再通过 CLI、session 或 Run port 发送 execution context patch。application 不维护 run
   pending/started queue，也不执行 Run 状态机或 runtime drive。
-- workspace-scoped `resume`/`restart` 同步执行同一 activation 用例。`resume` 是严格 continuation：非终态且
-  Goal/DoD 与封存 provider/model 未漂移时保留原聚合，绝不隐式 replacement。`restart` 必须没有 RunID；普通 active
-  Run 仍走 Orchestrator sealed supersede，而 `fresh_activation_required` Run 由 application 仅转发已持久化的
-  Run fact 给 Workspace owner。Workspace 只释放精确匹配的 `ActiveRunID`，application 随后创建独立 current-schema
-  Run；它不终态化、迁移、读取或链接旧 aggregate。TUI 同时展示这两个显式入口。Resume 不注入 provider/model 或
-  definition patch。该编排不让 application 选择 SM-2 next action，也不绕过 SM-3 sealed dispatch。
+- workspace-scoped `resume`/`restart` 同步执行同一 activation 用例。`resume` 是严格 continuation：只携带
+  workspace/run scope，保留原聚合与 sealed provider selection。`restart` 必须没有 RunID，并携带按当前
+  Workspace definition 构造的 fresh bootstrap；Workspace owner 校验 definition/scope 后把 typed intent 交给 Run owner。
+  Run owner 对普通非终态 predecessor 持久化 `ReplacementIntent`，并在既有 `Result -> Workspace -> Run` terminal
+  delivery 完成后创建 successor；Application、Workspace 与 Orchestrator 均不提前创建或链接 successor。非当前
+  development baseline 的 predecessor 由 Run owner返回 `data_reset_required`，不创建 replacement intent。
 - WorkspaceTemplate 中的 capability / version-control 声明只作为定义与 activation 输入；application 不直接执行 Git、Shell、File 或其他 capability 副作用。
-
-### 当前内聚收口切片（2026-08-16）
-
-- `readmodelprojection` 仍只有一个 manager/store/revision 规则；微型 mapper 已机械归并为 140 个生产文件，workspace/run/context/evidence/activity/governance
-  六族已通过 typed facade 统一 application 调用；公开面精确限定为六个 facade factory 和两个 snapshot input，
-  其余 helper 全部 package-private。原文件名保留在 consolidated 文件注释中，33 个临时 `projection_family_NN.go`
-  已全部改为职责语义名，未改变 projection DTO 或 high-watermark 语义。
-- `definitionquality`、`content`、`setupdraft` 分别吸收原 `core/ports` 薄配对；这些包只提供 typed application
-  facts/reader/generator，不拥有正式状态机，也不创建新的 framework 运行单元。
-- `biz/workspaceCommandGateway` 是 send-only concrete Workspace intent gateway；它不选择 focus、重试、Resume 或
-  Runtime transition。`production_transport_boundary_test.go` 与 repository boundary gate 防止 server 重新传播
-  runtimecore/EventHub/root appservice、Session/cache authority 或 projection lifecycle。
-- `ApplicationPorts.Validate` 只按 Workspace、Definition、Run、Governance、Registry、Memory、Configuration 七组
-  named validator 顺序 fail-closed；Workspace HTTP 注册按 resource/projection/context/definition 与
-  create/inference/delete/execution/context/definition endpoint family 分段，route/method/DTO/status code 不变。
-- `workspaceviewcore.Store`、唯一 `sync.RWMutex` 与 revision/high-watermark authority 仍只在 `store.go` 声明；其
-  lifecycle/status、revision、mutation、query、metrics、clone 实现按语义分文件。`readmodelprojection` 的 workspace
-  diff/equality/convergence normalization 也按纯规则分段，未新增 projection state、I/O 或 export。
-- WD0-WD8 与 C22-04 已完成 code/automated closure；当前指标为 Workorchd 659 个生产文件/56,414 LOC、server 42 个
-  生产文件/8,230 LOC、readmodelprojection 142 个生产文件/17,187 LOC/8 个 exported declaration。deployed HTTP/SSE/CLI
-  regression 与 SO-MC-10 fresh-data live proof 仍是 active。
 
 ## 相关约束
 

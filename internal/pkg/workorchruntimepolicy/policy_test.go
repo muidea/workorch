@@ -9,14 +9,7 @@ import (
 
 func TestLLMOutputRuntimePolicySharesConfigShapeWithoutSharingSemantics(t *testing.T) {
 	cfg := workorchconfig.LLMOutputRuntimeConfig{
-		MaxPatchContentBytes:               101,
-		MaxGraphBytes:                      102,
-		MaxGraphFileWrites:                 103,
-		SchemaInvalidLargePreviewThreshold: 104,
-		MaxArtifactChunkBytes:              105,
-		MaxDocumentRecoveryAttempts:        107,
-		MaxArtifactPlanAttempts:            108,
-		MaxArtifactReplanAttempts:          109,
+		MaxDocumentRecoveryAttempts: 107,
 	}
 	policy := LLMOutputRuntimePolicy(cfg)
 	if got := workorchconfig.LLMOutputRuntimeConfig(policy); got != cfg {
@@ -28,14 +21,7 @@ func TestLLMOutputRuntimePolicySharesConfigShapeWithoutSharingSemantics(t *testi
 		t.Fatalf("zero policy normalization = %+v, want %+v", got, defaults)
 	}
 	negative := LLMOutputRuntimePolicy{
-		MaxPatchContentBytes:               -1,
-		MaxGraphBytes:                      -1,
-		MaxGraphFileWrites:                 -1,
-		SchemaInvalidLargePreviewThreshold: -1,
-		MaxArtifactChunkBytes:              -1,
-		MaxDocumentRecoveryAttempts:        -1,
-		MaxArtifactPlanAttempts:            -1,
-		MaxArtifactReplanAttempts:          -1,
+		MaxDocumentRecoveryAttempts: -1,
 	}
 	if got := workorchconfig.LLMOutputRuntimeConfig(NormalizeLLMOutputRuntimePolicy(negative)); got != defaults {
 		t.Fatalf("negative policy normalization = %+v, want %+v", got, defaults)

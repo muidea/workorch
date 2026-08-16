@@ -4,390 +4,142 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
-本文件说明 WorkOrch 的持久化布局、payload refs、read-model projection
-和 file backend / memory backend 的实现边界。
+本文说明 memory/file repository、workspace-scoped layout、Runtime aggregate persistence、raw content 和 derived read
+model 的当前边界。Storage is physical ownership; it does not transfer semantic state-machine ownership.
 
-## Runtime Boundary
+## Directory Boundary
 
-| 关注点 | 边界 |
+For a file-backed workspace:
+
+- internal owner data: `<repository.dataDir>/internal/workspaces/<workspaceId>`;
+- default deliverables: `<parent-of-dataDir>/.workorch-workspaces/<workspaceId>`;
+- an explicit `deliverableDirectory` may replace the default deliverable path;
+- workspace index records workspace identity, internal/deliverable paths, state and active Run identity.
+
+Capability side effects target the allowed deliverable/internal scope declared by Workspace policy. Repository metadata and
+Runtime raw content stay under the internal root. A path may never cross between them merely because both are on the same
+filesystem.
+
+## Owner Repository Groups
+
+The repository initiator creates one backend and exposes owner-scoped groups. Each owner receives only its repositories:
+
+- Workspace: Workspace, Goal, DoD, Template-related owner data;
+- Run: Run/Step/ToolCall/Patch/Validation/Checkpoint and opaque RuntimeStateRecord slot;
+- Result: Result/Artifact;
+- Decision/Approval/Memory/Soul/Skill/MCP Registry/Eventstream: their respective aggregates;
+- Orchestrator: EvidenceRecord, legacy coverage record/read surface and opaque candidate-request content carrier.
+
+No application or sibling owner receives the full private repository set. File and memory backends implement the same
+repository contracts and must detach mutable slices/maps/entities at their boundaries.
+
+## Runtime Aggregate Persistence
+
+`RuntimeStateRecord` is semantically owned by Orchestrator and physically stored by Run owner. Run owner validates only:
+
+- current schema envelope;
+- workspace/run scope;
+- expected revision/CAS monotonicity;
+- no missing/downgraded record.
+
+It does not decode authority/focus/candidate/evidence/governance/delivery content. Orchestrator validates the internal
+invariants before commit and after reload. Every update carries expected revision; stale or absent CAS fails without overwrite.
+
+Process recovery loads this record through the Run owner typed contract. Eventstream, Step, checkpoint and projection data
+cannot reconstruct it.
+
+## Itemized Evidence And Legacy Process Data
+
+Run-scoped item repositories include Step, ToolCall, Patch, ValidationResult, RuntimeCheckpoint, EvidenceRecord, Result and
+Artifact data. Their current role is audit, evidence/reference and product detail projection unless a current typed Runtime
+contract explicitly consumes them. They are not a second scheduler or transition log.
+
+`ArtifactContinuationRepository` remains in the storage/read surface, but the current Runtime production use is an opaque
+carrier for one logical candidate-request complete document. Request session, sequence, budget, candidate allocation and
+retry policy remain inside the Orchestrator aggregate. The carrier cannot choose retry/attempt/transition and its raw content
+does not enter the default projection.
+
+Historical incremental-artifact plan/chunk/apply state may still be readable for old records, but it is not an alternative
+production output state machine.
+
+## Eventstream
+
+Eventstream persists bounded append-only `EventRecord` data with scope/topic/subject/time metadata and optional payload ref.
+It supports query, SSE replay and projection rebuild input. It must not:
+
+- repair Workspace/Run/Result/Decision/Approval state;
+- infer Runtime next action or terminal state;
+- replay a side effect;
+- replace owner inventory or Runtime aggregate recovery.
+
+High-watermark/cursor identity is display/audit ordering, not a business revision.
+
+## Projection Architecture
+
+workorchd owns one projection manager/store. It combines immutable owner snapshots, EventRecords, Runtime drive observations
+and execution-admission observations into bounded Workspace/Run views.
+
+| Level | Content |
 | --- | --- |
-| Run owner 物理持久化 | Orchestrator-owned `RuntimeStateRecord` 经 Run repository opaque CAS；正式 Runtime 状态唯一来源，内部语义仍归 Orchestrator |
-| Projection / read model | 只读组装展示；**不**写 owner 状态，**不**推导 next action / StagePacket |
-| Eventstream 存储 | 审计 EventRecord；不是业务修复或 drive 入口 |
-| 历史遗留表/文件 | ToolCall/Patch/Checkpoint 等可能仍存在于存储面，仅供审计/查询；非 Runtime 调度权威 |
+| summary | identity, state, blocker/outcome/progress summary |
+| detail | bounded evidence lists, observability, context and governance correlation |
+| raw | explicitly opened validated payload/artifact content |
 
-## Main Responsibility
+Projection revisions only order derived view updates. Projection may be rebuilt or deleted; it cannot write owner repositories
+or make a stale view authoritative. Server transport receives read-only projection access; Biz-owned projection component is
+the only derived writer/lifecycle owner.
 
-该层负责：
+## Scope And Identity
 
-- repository persistence contract
-- file backend layout
-- itemized runtime evidence storage
-- append-only event storage
-- raw payload ref strategy
-- snapshot / observability / list projection inputs
+- workspace-scoped paths and queries validate WorkspaceID before resolving Run/resource ID;
+- identical Run/resource IDs in different workspaces must not resolve through an unscoped first match;
+- compatibility unscoped reads require a unique identity and return conflict/not-found otherwise;
+- Run child IDs remain traceable to run/scope but storage path fallback must not redefine object identity;
+- long path segments may use deterministic hash suffixes only as a filesystem representation.
 
-## Stable Design Points
+## Pagination And Caching
 
-### Workspace Internal Storage
+- paged child resources use owner/repository `limit` + cursor contracts;
+- list/detail views do not hydrate all raw payloads;
+- terminal Run snapshot/status caches are invalidated/warmed by typed owner notification, not Eventstream payload;
+- workspace list/detail and TUI/Web refresh use projection or bounded metadata queries, not whole-history scans;
+- cache miss may trigger a read/rebuild, never owner mutation.
 
-runtime state 应位于：
+## Raw Content Safety
 
-- `.workorch-data/internal/workspaces/<workspace-id>/`
+Large provider output, artifact content and event payload use bounded metadata plus a validated ref/URI. Opening raw content
+requires:
 
-相应的用户交付根目录应位于：
+- allowlisted storage root and ref scheme;
+- canonical path and traversal/symlink protection;
+- workspace/run/resource scope consistency;
+- bounded read and safe content headers;
+- no credential, prompt or unsafe provider diagnostic leak.
 
-- `.workorch-workspaces/<workspace-id>/`
+Missing/corrupt raw content may be diagnosed, but projection cannot manufacture replacement content or change owner state.
 
-runtime tool 执行应绑定后者，repository/read-model/payload refs 应绑定前者。
+## Delete And Purge
 
-### Itemized Run Storage
+Deleting a Workspace owner record and purging its managed internal/deliverable directories are distinct operations. Purge is
+explicit, path-validated and limited to the resolved workspace layout. Repository code must never use unresolved broad roots,
+environment variables or globs as destructive targets.
 
-run 级对象应按 itemized 文件组织，而不是单个大 JSON map 重写。
+## Verification
 
-典型 itemized 资源包括：
+- repository contract tests cover memory/file parity, scope isolation, clone safety and CAS;
+- workorchd server tests cover file-backed restart, pagination, SSE replay, raw refs and terminal cache behavior;
+- `make verify-boundary-contract` prevents production repository/service leakage;
+- [Service Acceptance](../60-verification/service-acceptance.md) defines deployed checks;
+- [Runtime Owner Convergence Matrix](../60-verification/runtime-owner-convergence-matrix.md) defines recovery/idempotency guards.
 
-- Runtime aggregate / `RuntimeStateRecord`（Run owner CAS 权威面；恢复主源）
-- step metadata / input / output（过程/观测面，非 Runtime 调度权威）
-- tool call metadata / arguments / output
-- validation metadata
-- result / artifact records
-- LLM call request / response / usage
-- artifact continuation metadata / plan / chunk / assembled payload
-- runtime checkpoint（诊断/观测；不得作为 禁止的 progress/terminal replay 驱动）
+## Related Documents
 
-### Artifact Continuation Persistence Boundary
-
-当 runtime 启用 `incrementalArtifact` 时，本层必须把 continuation 视为
-run-scoped internal state，而不是 workspace deliverable。
-
-至少需要持久化：
-
-- continuation metadata
-  - `artifactContinuationId`
-  - `runId`
-  - current state / phase
-  - `artifactId`
-  - `targetRef`
-  - `coverageTargets`
-  - selector / retry / hash metadata
-- accepted artifact plan
-- chunk metadata
-- chunk content
-- assembled metadata
-- assembled content
-
-稳定边界：
-
-- continuation 正文默认不进入 snapshot summary / list projection
-- plan/chunk/assembled content 不得写入 workspace deliverable 根
-- continuation content 不得默认作为 memory recall 或 event payload 正文
-- 只有 compact metadata、状态摘要、hash、bytes、evidence refs 和 raw/detail ref
-  可以进入 read model
-
-典型 internal layout 应保持 run-scoped、itemized、可重放；具体路径命名可演进，
-但必须满足：
-
-- reload 后 continuation 可恢复
-- chunk 顺序与 hash 可重建
-- applied / failed terminal state 可区分 open continuation
-
-### Raw Payload Strategy
-
-raw input/output、LLM request/response、event payload 大对象应通过 ref 暴露，
-而不是默认塞进主读模型。
-
-事件应优先采用 append-only JSONL metadata + optional payload ref 的模式。
-
-### Projection-Oriented Read Model
-
-read model 应以：
-
-- compact metadata
-- summary
-- evidence refs
-- paginated detail
-
-为主，而不是默认返回完整 raw payload。
-
-长期运行时，workspace list/detail、TUI prompt/status、Web board/detail 和 watchdog
-等高频读取必须以服务端 projection 或有界 metadata query 为主，不得通过全量扫描
-event history 或默认 hydrate payload 来临时重建视图。完整收口设计见
-`../90-archive/superseded/projection-first-readmodel-io-closure-design.md`。
-
-默认至少应区分：
-
-- summary
-- detail
-- raw
-
-summary / detail 使用 compact metadata、summary、evidence refs 和分页 detail；
-raw 仅通过显式 ref 打开。
-
-对 `incrementalArtifact` 的投影还必须补充：
-
-- workspace / run snapshot 只投影 active continuation summary
-- observability / detail 可以投影 plan/chunk/apply/validation 状态、sequence 进度、
-  bytes、hash 摘要和 failure reason
-- raw open path 只在显式 detail/raw 打开时暴露 plan/chunk/assembled content
-
-### Snapshot Projection Structure
-
-snapshot projection 当前至少应稳定分为三层：
-
-| Projection | 当前最小结构方向 |
-| --- | --- |
-| `WorkspaceSnapshot` | `workspace`、`outcome`、`runs`、`results`、`artifacts`、`taskProgress`、必要 governance/context 摘要 |
-| `RunSnapshot` | `run`、`outcome`、`taskProgress`、`results`、`artifacts`、`closureTraces`、必要 evidence summary |
-| `RunObservability` | `timeline`、`evidence`、`latestCheckpoint`、`llmUsageSummary`、`usedCapabilities`、closure 诊断 |
-
-约束：
-
-- snapshot 是聚合投影，不替代 run/result/goal/dod/event 本体
-- 同一对象在 snapshot 与 observability 中应复用同一 closure / taskProgress 选择规则
-- detail page 与 raw open path 不得因为 snapshot 已存在而被折叠掉
-
-Coverage / ledger 相关的读模型也必须分层：
-
-- formal definition
-  - Goal / DoD / deliverable expectation 的正式定义
-- run-scoped ledger
-  - `coverageWorkItems`、accepted/rejected evidence refs、revision lineage
-- projection
-  - `coverageWorkItemContext.summary` / `currentFocus` / `ledgerSummary`
-
-约束：
-
-- projection 只表达当前视图，不反向覆盖 run-scoped ledger
-- run-scoped ledger 不得写回 formal Goal / DoD
-- full ledger 默认通过 raw/payload ref 或 detail 打开，而不是强塞进 summary
-
-### Workspace-Scoped Run Identity In Read Models
-
-Run ID 是 workspace 内部运行序号，不再要求全局唯一。file backend、read model、
-API handler 和 UI 读取聚合视图时必须显式携带 workspace scope。
-
-稳定规则：
-
-- workspace snapshot、workspace context-bundle、workspace task-progress 等 workspace
-  级投影在内部读取 active/projection run 前，必须把 `workspaceId` 绑定到 runtime context。
-- run snapshot、run observability、run detail page 等 run 级投影应优先使用
-  `/workspaces/:workspaceId/runs/:runId/...` 形态，并在 repository 查询前绑定 workspace scope。
-- 当多个 workspace 中存在相同 run id（例如多个 `run-002`）时，workspace-scoped
-  projection 必须解析到当前 workspace 下的 run，不得返回 `409 Conflict`。
-- 未带 workspace scope 的全局 run 查询只能用于明确要求全局唯一或列表型入口；
-  若存在多个同名 run，返回 conflict 是合理的 repository 保护，不应泄漏到 workspace
-  scoped API。
-
-该规则保证 workspace 内自增 run id、Web/TUI 状态投影和 context-bundle 读取保持一致，
-避免由于 run id 重名导致前端 snapshot/context-bundle 无法读取。
-
-### Run-Scoped Coverage Ledger Persistence
-
-当 runtime 维护 `coverageWorkItems` / `coverageWorkItemContext` 时，本层至少应承接：
-
-- run-scoped 持久化
-- `definitionRevision` / source refs / accepted / rejected evidence refs
-- `historical` / `superseded` item 保留
-- `currentFocus` / omitted counts / compact ledger summary 的投影输入
-
-稳定持久化约束：
-
-- 同一 `definitionRevision + normalizedSourceKey` 只能保留唯一 active item 记录
-- `acceptedEvidenceByKind` / `rejectedEvidenceByKind` 必须按 evidence kind 分开持久化，
-  不得让单一 evidence ref 批量关闭不同 kind
-- revision 变化、source 移除或 successor rebuild 后，旧 item 必须进入
-  `historical` / `superseded` 视图，不能继续混入当前 focus
-- run-scoped ledger 与 projection 必须保留 `omittedCount`、summary、full-ledger ref
-  的一致投影语义，避免 Web/TUI/API/LLM-facing 看到不同 ledger 轮廓
-
-本层不负责：
-
-- 领域语义装配
-- profile-specific claim 判断
-- accepted / rejected 的最终业务裁决
-
-### Artifact Continuation Projection Direction
-
-当 run 存在 active `ArtifactContinuation` 时，read-model 至少应支持以下投影分层：
-
-| 投影层 | 最小内容 |
-| --- | --- |
-| workspace summary | 当前是否存在 active continuation、targetRef、state、sequence progress、failure summary |
-| run snapshot | continuation metadata、output mode、apply/validation 进度、evidence refs |
-| run observability | chunk timeline、hash/bytes、plan accepted/rejected、assemble/apply diagnostics |
-| raw/detail | plan 正文、chunk content、assembled content、full metadata |
-
-约束：
-
-- summary/snapshot 不得内嵌 chunk content 或 assembled body
-- observability 默认展示 compact metadata 与 refs，不直接暴露正文
-- raw/detail 打开必须继续走受控 ref / endpoint
-- continuation projection 不能替代正式 Result / Artifact / Validation projection
-
-## File Backend Rules
-
-- overwrite 写入必须使用原子写策略
-- append-only event 写入必须有 per-run append lock
-- segment rotation 必须原子完成
-- reader 不应观察到半写入 JSON
-
-## API And Read Model Direction
-
-- workspace snapshot 不应默认内嵌 raw `eventRecords`
-- run snapshot 默认返回 summary/detail projection
-- event list 必须有默认 `limit`
-- raw payload 通过 ref 或 detail endpoint 显式打开
-- workspace 级只投影 active run 的 coverage summary，不替代 run-scoped ledger
-- run snapshot / observability 可投影 `coverageWorkItems` / `coverageWorkItemContext`
-- currentFocus / omitted counts / full-ledger ref 应保持同一投影语义，避免 Web/TUI 与 LLM-facing projection 不一致
-
-### Detail Endpoint Support Mapping
-
-storage/read-model 层对 detail endpoint 的支撑关系至少应保持：
-
-| Detail Endpoint Family | 主要仓储/投影输入 |
-| --- | --- |
-| `steps` / `tool-calls` / `runtime-checkpoints` | itemized run evidence records（过程/观测；非 Runtime dispatch 权威） |
-| `results` / `artifacts` / `patches` / `validation-results` | result / artifact / patch / validation repositories |
-| `artifact-continuations` | continuation metadata / plan / chunk / assembled repositories |
-| `decisions` / `approvals` | governance repositories + resolution/approval state |
-| `events` | append-only event storage + page query |
-| `runtime/payloads` / `artifacts/content` | payload ref / artifact URI resolution + file backend content open |
-
-约束：
-
-- snapshot 不替代 detail page
-- detail page 不替代 raw open path
-- page/cursor/limit 应优先由 repository query contract 驱动，而不是由前端推断全量装载
-
-### Repository And Read-Open Contract
-
-本层至少需要承接以下 repository/read-open contract：
-
-- list/get/create/update 的 itemized persistence contract
-- page query contract
-  - `limit`
-  - `cursorAfterId`
-  - `hasMore` / `nextCursorAfterId`
-- raw open contract
-  - `payloadRef` -> raw payload
-  - `artifact URI` -> artifact content
-- replay / restart contract
-  - file backend 重启后可 load `RuntimeStateRecord` / Runtime aggregate 并幂等再 drive
-  - snapshot / observability / event replay 可重建展示与审计面
-  - **不得**把 禁止的 progress/terminal checkpoint replay 或 `ExecutionContextPatch` 作为恢复驱动
-
-path-safe readable naming 方向：
-
-- 面向用户或产品层的 ref / uri / targetRef 应优先使用稳定、可读、workspace-relative 命名
-- 本地绝对路径、临时内部路径和未受控文件名不应直接暴露到 API / UI
-
-### Path-Safe Readable Naming
-
-本层对 path-safe readable naming 的稳定职责至少包括：
-
-- Workspace / Run / Step / Artifact / payload 相关 ref 使用稳定、可读、相对 workspace 的逻辑命名
-- 用户或产品层可见的 URI / ref / targetRef 必须避免：
-  - 本地绝对路径
-  - `..`
-  - 未受控的临时文件名
-  - 仅内部实现可理解的随机目录结构
-
-典型方向：
-
-| 场景 | 当前命名方向 |
-| --- | --- |
-| workspace deliverable target | workspace-relative `targetRef` |
-| artifact 正文 | 受控 artifact URI |
-| raw payload 打开 | 受控 `payloadRef` |
-| detail page item identity | run-scoped readable id / cursor id |
-
-约束：
-
-- readable naming 只服务可追踪与产品可读性，不改变正式对象 identity
-- 内部磁盘目录可继续保持 itemized persistence 结构，但对外必须经由受控 naming / ref 映射
-- file backend 的内部 item path 必须复用同一 path-safe segment 规则：
-  - `internal/pkg/runtimepath` 负责 readable safe segment / path 归一化
-  - 每个 filesystem segment 默认限制为 160 字节
-  - 超长 segment 保留可读前缀并追加稳定 hash suffix
-  - 普通 item JSON 路径和 run-scoped sequence metadata 目录必须使用同一 bounded segment 规则
-
-### Raw Payload Ref Shape
-
-run-scoped raw payload ref 应继续使用同一可读层级规则，而不是暴露本地绝对路径。
-
-典型方向：
-
-```text
-workorch://workspaces/<workspace-id>/runs/<run-id>/llm-calls/<run-id>/repair-001/response.json
-workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-run-go-test/output.json
-```
-
-约束：
-
-- raw ref 是稳定逻辑定位，不是本地文件系统路径
-- 打开前必须继续校验：
-  - `workspace`
-  - `run`
-  - collection
-  - item path
-  - 文件名白名单
-- Step / ToolCall / Patch / Result / Artifact 等 run-scoped ID 可以复用可读 run 前缀，
-  但不应退化成随机 hash / base64 主路径
-
-### Segment Overflow Fallback
-
-当单段 filesystem path、payload、事件段、artifact blob 或列表页数据过大时，本层需要有稳定 fallback。
-
-当前至少应支持：
-
-- path segment overflow fallback：
-  - `runtimepath.SafePathWithMax` / `SafeSegmentsWithMax`
-  - `runtimepath.SequenceScopedPath`
-  - file repository `safeRepositoryItemPath`
-- append-only event / payload segment 轮转
-- 大对象降级为 ref-only / detail-only
-- page query 通过 `limit` / `cursorAfterId` 分段读取
-- snapshot / observability 只保留 compact summary，把 full body 留给 raw/detail 打开
-
-约束：
-
-- segment overflow 只影响磁盘落点或读取方式，不应改变对象本体 identity
-- fallback 后仍必须保留可追溯 ref / cursor / count / omitted reason
-- 不能因为 overflow 就把 raw body 静默塞回 summary projection
-- 超长 path segment 的 hash suffix 只能作为 persistence path fallback；repository 读写仍必须通过正式 ID / scope / metadata 做身份校验
-
-## Consistency Repair Boundary
-
-当 run-scoped ledger、read-model projection、result artifact 或 UI 展示不一致时：
-
-- Runtime 正式状态以 Orchestrator-owned、Run owner opaque 物理 CAS 的 `RuntimeStateRecord` 为准
-- run-scoped coverage / focus ledger 以该 record 内 Orchestrator 权威事实为准；Run owner 不解释其语义
-- projection 只重建 summary / detail / currentFocus 视图，**只读**
-- result artifact 或 UI 不得反向覆盖 ledger 或 Runtime authority
-- 不得用 event stream 扫描或 `StagePacket` / `NextAction` 推导修复业务状态
-- console / TUI / Web 应使用 pagination 和 lazy loading，而不是默认全量加载
-
-## Boundary
-
-该层不负责：
-
-- business outcome 语义裁决（Result 不判断；裁决在 Orchestrator）
-- provider request contract
-- Runtime drive / sealed dispatch / candidate attempt 推进
-- TUI/Web 产品展示策略
-
-## Source Documents
-
-- `../10-domain-model/workspace-goal-dod.md`
-- `../10-domain-model/event-observability.md`
-- `../10-domain-model/run-step-result-artifact.md`
-- `blocks-workspace-run-result.md`
-- `../90-archive/superseded/projection-first-readmodel-io-closure-design.md`
-- `../50-product-interface/service-api.md`
-- `../60-verification/service-acceptance.md`
+- [Workspace / Goal / DoD](../10-domain-model/workspace-goal-dod.md)
+- [Run / Step / Result / Artifact](../10-domain-model/run-step-result-artifact.md)
+- [Event / Observability](../10-domain-model/event-observability.md)
+- [Workspace / Run / Result Architecture](blocks-workspace-run-result.md)
+- [Service API](../50-product-interface/service-api.md)

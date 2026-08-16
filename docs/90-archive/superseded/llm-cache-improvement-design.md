@@ -8,9 +8,9 @@ Last Updated: 2026-06-11
 
 Related:
 
-- [00-core/runtime-request-cache-note.md](../00-core/runtime-request-cache-note.md)
-- [30-module-architecture/llm-provider-assembly.md](llm-provider-assembly.md)
-- [30-module-architecture/architecture-overview.md](architecture-overview.md)
+- [00-core/runtime-request-cache-note.md](../../00-core/runtime-request-cache-note.md)
+- [30-module-architecture/llm-provider-assembly.md](../../30-module-architecture/llm-provider-assembly.md)
+- [30-module-architecture/architecture-overview.md](../../30-module-architecture/architecture-overview.md)
 
 ## Purpose
 

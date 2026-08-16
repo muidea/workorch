@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -15,9 +15,9 @@ Last Updated: 2026-07-29
 | 语义 | Runtime 含义 |
 | --- | --- |
 | **repair** | **同一 Run、同一 focus** 上重新收敛：prerequisite 补齐、candidate attempt 1、operation evidence、governance continue |
-| **replan** | **不是**同 Run 内自动 successor；重新定义目标或执行基准时，只能通过**新的** typed activation/bootstrap 创建**独立** Runtime Run |
+| **replacement / historical replan wording** | **不是**同 Run 内自动 successor；需要 fresh baseline 时由显式 Workspace `restart` 提交 fresh bootstrap，并由 Run-owned replacement transaction 创建独立 Run |
 
-生产主线**不**存在 禁止的 自动 replan successor lifecycle、`ExecutionContextPatch` resume 或 graph 重放。
+生产主线**不**存在自动 replan successor lifecycle、`ExecutionContextPatch` resume 或 graph 重放。
 
 ## State Machine Binding
 
@@ -50,7 +50,7 @@ failure / missing prerequisite / complete candidate rejection / operation failur
             accepted governance evidence -> same reducer
             governance fail -> governance_rejected terminal
   -> if path cannot continue within Runtime invariants or repair budget exhausted:
-       structured Terminal Fail  (or product later creates a new activation/run)
+       structured Terminal Fail  (operator may later submit an explicit Workspace restart)
 ```
 
 ## Main Stages
@@ -105,24 +105,29 @@ governed dispatch：
 - 必须匹配已绑定 ticket；无绑定、同 dispatch 绑定不同 ticket、dependency 漂移 → conflict
 - `runtime_governance` resolution committed 后 Orchestrator 发布 immutable continuation/terminal fact；Run owner内部迁移后通知 drive；application resolved watcher **不得**再次发送 Resume 形成双驱动
 
-### 4. Replan Semantic = New Activation / Run Only
+### 4. Replacement Semantic = Explicit Workspace Restart
 
-Runtime **不自动创建** replan successor Run。
-
-当产品语义需要“重新规划”时：
+Runtime/Orchestrator **不自动创建** replan successor Run；HTTP/TUI 也不提供 `intent=replan`。
 
 ```text
-operator / application
-  -> new activation (new RuntimeBootstrap)
-  -> new Run
-  -> independent DriveRuntime
+operator
+  -> Workspace execution intent=restart + fresh RuntimeBootstrap
+  -> Workspace owner validates current definition/scope
+  -> Run owner persists predecessor ReplacementIntent
+  -> Orchestrator seals predecessor superseded terminal
+  -> Result owner ack -> Workspace owner releases active slot -> Run owner ack
+  -> Run-private reducer creates/links/activates one successor
+  -> successor independently enters DriveRuntime
 ```
 
 约束：
 
-- 旧 Run 可 terminal / supersede，只作 lineage
-- 新 Run 不得复制旧 active focus、stale snapshots、已失效 failure 作为默认真值
-- `Resume` 不能通过 patch / loaded Run 重写定义；定义变化 = 新 bootstrap
+- application、Workspace、Orchestrator 和 projection 都不能提前创建或链接 successor；
+- predecessor 的 active focus、stale snapshot、attempt/receipt/evidence 不复制为 successor authority；
+- fresh bootstrap 可以携带有界 definition-change/governance history，但其内容是显式 typed contract；
+- `Resume` 不能通过 patch 或 loaded Run 改写定义；
+- non-current predecessor 返回 `data_reset_required`，不持久化 replacement intent；
+- 相同 request/intent/terminal delivery 重放只能得到同一 successor。
 
 ### 5. Restart Recovery
 
@@ -147,7 +152,7 @@ dependency 才可进入 `need_governance`，
 
 - repair 继承当前 definition revision、focus 与 authority 约束
 - failure / diagnostic 分层：stale 只进 diagnostic lineage
-- replan = 新 activation/run，不是同 Run 自动 successor
+- fresh replacement = 显式 Workspace restart + Run-owned transaction，不是 Orchestrator/application 自动 successor
 - governance resolution 单次消费并回到同一 reducer
 - Start/Resume 生产入口只向 Run owner 发送 intent；缺少 bootstrap 通过 owner-local terminal delivery 收敛
 
@@ -157,7 +162,7 @@ repair / recovery 的正式输出可以是：
 
 - 同一 Run 上继续的 drive transition（prerequisite / candidate / evidence / governance wait）
 - typed terminal Fail（含 governance_rejected）
-- 由产品层发起的**新** Runtime Run（replan 语义）
+- 显式 Workspace restart 后由 Run-private reducer创建的独立 successor Run
 
 ## Source Documents
 

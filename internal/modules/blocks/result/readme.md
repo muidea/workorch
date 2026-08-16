@@ -1,5 +1,11 @@
 # Result Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `blocks/result` 管理 Result 与 Artifact 组成的 formal-outcome 聚合，负责结果状态、证据引用、artifact 元数据和 owner 查询。它不负责 evidence quality、DoD coverage 或 accepted 判定策略。

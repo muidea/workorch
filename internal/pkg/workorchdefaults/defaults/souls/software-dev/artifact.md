@@ -28,4 +28,4 @@
 - 如果存在未拆分的大文件、临时聚合模块、后续需要拆分的测试文件或职责边界风险，必须在残余风险中说明；不要把 monolithic output 描述为长期可维护交付
 
 ## 禁止
-- 不要通过 patch/apply 或 patchRequests 写入 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件
+- 不要通过 workspace 写操作创建 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件

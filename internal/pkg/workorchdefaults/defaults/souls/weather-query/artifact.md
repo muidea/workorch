@@ -6,5 +6,5 @@
 - 记录天气数据的时间戳和来源 API
 
 ## 禁止
-- 不要通过 patch/apply 或 patchRequests 写入 decision_record.md、approval_record.md、delivery_summary.md、result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等治理/报告文件
+- 不要通过 workspace 写操作创建 decision_record.md、approval_record.md、delivery_summary.md、result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等治理/报告文件
 - 查询结果应放入 DoD 验收评估，由 runtime 生成最终交付物（Artifact）

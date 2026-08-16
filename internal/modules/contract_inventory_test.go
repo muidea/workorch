@@ -10,20 +10,23 @@ import (
 
 func TestComponentContractMatrixCoversRegisteredComponents(t *testing.T) {
 	root := findRepoRoot(t)
-	// The active CWI reconciliation plan is the sole current component-boundary
-	// matrix. Archived plans document history only and must not constrain the
-	// current component shape.
-	planPath := filepath.Join(root, "docs", "70-roadmap", "active", "runtime-cwi-reconciliation-single-owner-closure-plan.md")
-	planBytes, err := os.ReadFile(planPath)
+	// The current component-alignment inventory documents the registered shape.
+	// Roadmap plans and archived closure records must not constrain it.
+	inventoryPath := filepath.Join(root, "docs", "01-overview", "component-documentation-alignment.md")
+	inventoryBytes, err := os.ReadFile(inventoryPath)
 	if err != nil {
-		t.Fatalf("read closure plan: %v", err)
+		t.Fatalf("read component inventory: %v", err)
 	}
-	plan := string(planBytes)
+	inventory := string(inventoryBytes)
 
 	registered := registeredComponentDirs(t, root)
 	for _, rel := range registered {
-		if !strings.Contains(plan, "`"+rel+"`") && !strings.Contains(plan, "| "+rel+" |") && !strings.Contains(plan, rel) {
-			t.Fatalf("closure plan does not cover registered component %s", rel)
+		readmeRel := rel + "/readme.md"
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(readmeRel))); err != nil {
+			t.Fatalf("registered component %s has no readable contract: %v", rel, err)
+		}
+		if !strings.Contains(inventory, readmeRel) {
+			t.Fatalf("component inventory does not cover registered component %s", rel)
 		}
 	}
 }

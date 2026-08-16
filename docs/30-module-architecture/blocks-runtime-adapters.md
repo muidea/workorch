@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-29
+Last Verified: 2026-08-16
 
 ## Purpose
 
@@ -19,6 +19,7 @@ Last Updated: 2026-07-29
 | 模块 | 正式状态 |
 | --- | --- |
 | `blocks/workspace` | Workspace / Goal / DoD / Template |
+| `blocks/run` | SM-1 Run lifecycle/lineage/ReplacementIntent；opaque RuntimeStateRecord CAS |
 | `blocks/result` | Result / Artifact（formal outcome） |
 | `blocks/decision` | DecisionTicket / Resolution |
 | `blocks/approval` | Approval |
@@ -26,6 +27,7 @@ Last Updated: 2026-07-29
 | `blocks/soul` | Soul catalog |
 | `blocks/skill` | Skill registry |
 | `blocks/mcpregistry` | MCPServer / MCPCapability |
+| `blocks/eventstream` | bounded EventRecord / high-watermark |
 
 ### Capability execution
 
@@ -43,7 +45,7 @@ Last Updated: 2026-07-29
 
 所有 block 的共同职责：
 
-- 订阅本模块或 Orchestrator 定义的 **具体** EventHub command
+- 订阅合同 owner 定义的 **具体** EventHub command；Runtime capability operation command/result 由接收 block 定义
 - 执行外部 side effect 或 provider interaction（capability）/ 持久化 owner 状态（stateful）
 - 返回 typed result、有界摘要、raw ref、具体 failure
 
@@ -58,7 +60,7 @@ block **不** 拥有：
 
 ```text
 Orchestrator sealed dispatch / prerequisite / candidate
-  → typed EventHub command（Orchestrator pkg/events 或 block pkg/events）
+  → contract owner 的 typed EventHub command
   → block 同步执行
   → typed result / evidence 摘要 / failure
   → Orchestrator 提交 evidence 并 reducer
@@ -67,7 +69,8 @@ Orchestrator sealed dispatch / prerequisite / candidate
 要点：
 
 - Orchestrator plugin **不** 创建 RuntimeAdapter registry、EventHub runtime adapter 或 Step kind registration matrix
-- Runtime operation 按 capability 使用独立的 concrete EventHub command/result 合同投递：`ExecuteFileList/Read/EditOperation`、`ExecutePatchPreview/ApplyOperation`、`ExecuteShellOperation`、`ExecuteGitOperation`、`ExecuteMCPOperation`、`ExecuteSSHOperation`、`ExecuteWebOperation`
+- Runtime operation 按 capability 使用接收 owner 自己定义的 concrete command/result：File 按 list/read/edit/write/
+  patch-preview/patch-apply 分 topic，Git/Shell/MCP/SSH/Web 使用各自 `ExecuteOperationCommand/Result`
 - LLM 通过 `RequestRuntimeCandidateCommand/Result` 返回绑定当前 authority transaction 的 typed candidate
 - File 另承担 `AcquireTargetSnapshot` 等 prerequisite 合同
 - capability block 内部可以为外部 provider 或本地执行器保留局部解析结构；不得把 `map[string]any` 作为跨模块 command/data/result，也不得重新进入 EventHub / RuntimeFacts / candidate / dispatch / evidence
@@ -79,7 +82,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 | Runtime candidate | `blocks/llm` | `StateChange` / `Validation` / `Assessment` / `Governance` candidate |
 | file / patch operations | `blocks/file` | 技术执行；approval / evidence quality 仍归 Orchestrator |
 | git operations | `blocks/git` | 有界 repo 读写 |
-| shell command | `blocks/shell` | exitCode + bounded stdout/stderr + evidence policy 质量结论 |
+| shell command | `blocks/shell` | exitCode + bounded stdout/stderr + factual failure/diagnostic；evidence quality 仍归 Orchestrator |
 | mcp tool/resource/prompt | `blocks/mcp` | 查询 mcpregistry 后调用；不注入 registry service |
 | web search/fetch | `blocks/web` | 候选发现与正文抓取 |
 | ssh command | `blocks/ssh` | 受限远端执行 |
@@ -88,6 +91,8 @@ Orchestrator sealed dispatch / prerequisite / candidate
 约束：
 
 - 映射只表达“谁执行”，不表达“业务上为什么执行”
+- `file/write` 是 create-only；目标已经存在时必须选择带 current target revision 的 `file/edit`、
+  `patch/apply` 或其他 owner-admitted replacement variant，重复 write 必须在副作用前拒绝
 - 是否允许某 operation 由 runtime contract、focus requiredOutput、Soul/Skill/policy、approval 共同决定
 - 无独立 `llm/assessment_only` step kind；assessment 是 canonical `need_assessment` / focus 模式
 - patch 技术执行在 file；Patch evidence、coverage、result gate 权威在 Orchestrator
@@ -130,11 +135,13 @@ Orchestrator sealed dispatch / prerequisite / candidate
 
 | Owner | 可写 | 不可做 |
 | --- | --- | --- |
-| workspace | definition / revision / template | 启动 Run、判定 Result |
+| workspace | definition/revision/template/selection、execution-intent admission、active-run release | 选择 Run target state、判定 Result |
+| run | SM-1 lifecycle/lineage/replacement、opaque Runtime CAS | 解释 authority、选择 action、裁决 evidence |
 | result | formal Result/Artifact | acceptance / coverage 裁决 |
 | decision | ticket / resolution | 直接改 Run 收敛状态；`runtime_governance` 不得并行通用 Resume |
 | approval | 授权状态 | 执行原副作用 |
 | memory / soul / skill / mcpregistry | 各自 registry 状态 | 调度 runtime 或写 Run/Result |
+| eventstream | bounded audit records | 修复 owner 状态或重建 Runtime authority |
 
 Orchestrator 与 application 一律经 EventHub 访问这些 owner。
 

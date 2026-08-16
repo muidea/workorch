@@ -160,9 +160,6 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 		for _, stage := range policy.Stages {
 			writeHashString(h, stage.ID)
 			writeHashString(h, stage.SoulBinding)
-			writeHashString(h, stage.Entry.NextAction)
-			writeHashString(h, fmt.Sprintf("%t", stage.Entry.RequiresDefinitionRevision))
-			writeHashString(h, fmt.Sprintf("%t", stage.Entry.RequiresGapBaseline))
 			writeHashString(h, fmt.Sprintf("%d", len(stage.RequiredOutputs)))
 			for _, output := range stage.RequiredOutputs {
 				writeHashString(h, output.Kind)

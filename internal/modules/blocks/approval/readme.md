@@ -1,14 +1,22 @@
 # Approval Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
-`blocks/approval` 管理 Approval 聚合，负责授权请求的创建、查询、更新、批准、拒绝、supersede 和生命周期通知。
+`blocks/approval` 管理 Approval 聚合。当前跨 owner 合同提供查询、列表、删除，以及已有 pending Approval 的
+幂等 approve/reject；Approval 创建不作为公开 EventHub command，调用方也不能提交目标状态或完整 entity。
 
 ## 组件交互及合同
 
-- Approval command/query 由 `blocks/approval/pkg/events` 定义，并返回 `ApprovalCommandResult`。
-- 创建、批准、拒绝、解决和 supersede 后由本 block 发布 `ApprovalChangedData`。
-- `kernel/governance`、`kernel/orchestrator` 和 `application/workorchd` 通过 EventHub 创建、查询或解决 Approval。
+- Approval 的实际 command/query 由 `blocks/approval/pkg/events` 定义，并返回 `ApprovalCommandResult`。
+- pending Approval 成功解决后由本 block在唯一 `TopicApprovalResolved` 发布 `ApprovalChangedData`；不存在公开的
+  create/update/supersede notification family。
+- `kernel/governance`、`kernel/orchestrator` 和 `application/workorchd` 通过 EventHub 查询或解决已有 Approval。
 - File、Git、MCP、Shell、SSH、Web 等高风险能力只能消费 Approval 的公开状态合同，不能访问 Approval service/repository。
 - Approval 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordApprovalEvidenceCommand`，并接收 `RecordApprovalEvidenceResult`。
 - approve/reject command 只提供不可变授权事实；目标状态、解决人、时间戳和 repository update 只允许经 Approval-private lifecycle event/reducer 完成。

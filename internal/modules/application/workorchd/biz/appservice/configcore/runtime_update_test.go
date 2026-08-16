@@ -12,11 +12,11 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 	useRuntimeUpdateTestConfig(t)
 
 	maxRuntimeRepairAttempts := 3
-	maxGraphBytes := 65536
+	maxDocumentRecoveryAttempts := 4
 	item, err := UpdateRuntimeConfiguration(UpdateRuntimeConfigurationCommand{
 		MaxRuntimeRepairAttempts: &maxRuntimeRepairAttempts,
 		LLMOutput: &UpdateRuntimeLLMOutputConfiguration{
-			MaxGraphBytes: &maxGraphBytes,
+			MaxDocumentRecoveryAttempts: &maxDocumentRecoveryAttempts,
 		},
 	})
 	if err != nil {
@@ -34,11 +34,8 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 	if item.Runtime.Git.DefaultTimeout != "35s" {
 		t.Fatalf("git runtime config = %+v, want preserved git runtime timeout", item.Runtime.Git)
 	}
-	if item.Runtime.LLMOutput.MaxGraphBytes != 65536 {
-		t.Fatalf("maxGraphBytes = %d, want 65536", item.Runtime.LLMOutput.MaxGraphBytes)
-	}
-	if item.Runtime.LLMOutput.MaxPatchContentBytes != 8192 {
-		t.Fatalf("maxPatchContentBytes = %d, want preserved 8192", item.Runtime.LLMOutput.MaxPatchContentBytes)
+	if item.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 {
+		t.Fatalf("maxDocumentRecoveryAttempts = %d, want 4", item.Runtime.LLMOutput.MaxDocumentRecoveryAttempts)
 	}
 
 	readBack, err := workorchconfig.Current()
@@ -46,10 +43,10 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 		t.Fatalf("read config: %v", err)
 	}
 	if readBack.Runtime.MaxRuntimeRepairAttempts != 3 ||
-		readBack.Runtime.LLMOutput.MaxGraphBytes != 65536 ||
+		readBack.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 ||
 		!workorchconfig.GitRuntimeWriteEnabled(readBack.Runtime.Git) ||
 		readBack.Runtime.Git.DefaultTimeout != "35s" {
-		t.Fatalf("persisted runtime config = %+v, want updated repair budget and graph bytes", readBack.Runtime)
+		t.Fatalf("persisted runtime config = %+v, want updated repair and document recovery budgets", readBack.Runtime)
 	}
 }
 
@@ -64,11 +61,11 @@ func TestUpdateRuntimeConfigurationRejectsInvalidValues(t *testing.T) {
 	if _, err := UpdateRuntimeConfiguration(UpdateRuntimeConfigurationCommand{ShellCommandTimeout: &invalidTimeout}); err == nil {
 		t.Fatal("UpdateRuntimeConfiguration accepted invalid shellCommandTimeout")
 	}
-	negativeGraphBytes := -1
+	negativeDocumentRecoveryAttempts := -1
 	if _, err := UpdateRuntimeConfiguration(UpdateRuntimeConfigurationCommand{
-		LLMOutput: &UpdateRuntimeLLMOutputConfiguration{MaxGraphBytes: &negativeGraphBytes},
+		LLMOutput: &UpdateRuntimeLLMOutputConfiguration{MaxDocumentRecoveryAttempts: &negativeDocumentRecoveryAttempts},
 	}); err == nil {
-		t.Fatal("UpdateRuntimeConfiguration accepted invalid llmOutput maxGraphBytes")
+		t.Fatal("UpdateRuntimeConfiguration accepted invalid llmOutput maxDocumentRecoveryAttempts")
 	}
 }
 
@@ -95,14 +92,7 @@ shellCommandTimeout = "45s"
 defaultTimeout = "35s"
 
 [runtime.llmOutput]
-maxPatchContentBytes = 8192
-maxGraphBytes = 32768
-maxGraphFileWrites = 3
-schemaInvalidLargePreviewThreshold = 4096
-maxArtifactChunkBytes = 4096
 maxDocumentRecoveryAttempts = 2
-maxArtifactPlanAttempts = 2
-maxArtifactReplanAttempts = 2
 
 [llm.aiProxy]
 baseURL = "http://127.0.0.1:8080"

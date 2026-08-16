@@ -1,13 +1,19 @@
 # Runtime 单 Owner 执行链路代码收口 Runbook
 
-Status: active implementation appendix
+Status: completed / archived
 
 Type: code-closure-runbook
 
 Last Updated: 2026-08-15
 
+Archived: 2026-08-16
+
+Orchestrator、Workorchd 与 22 个运行单元的 code/automated closure 已完成。当前组件边界以各组件 README 为准，
+剩余部署态正向闭环以
+[active live plan](../../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md) 为准。
+
 本文件是
-[Runtime single-owner and model-capability output closure plan](runtime-single-owner-model-capability-output-closure-plan.md)
+[Runtime single-owner and model-capability output closure plan](../../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)
 的逐项实施附录，不新增 Runtime 状态机、Owner 或生产主链。若本文与
 [`docs/00-core/runtime-stage-contract.md`](../../00-core/runtime-stage-contract.md) 或
 `internal/modules/kernel/orchestrator/readme.md` 冲突，以核心合约和实现 SoT 为准。
@@ -521,7 +527,7 @@ Workorchd 继续是一个 Application Module；本专项不创建新的 framewor
 ### 5.1 当前复杂度基线
 
 以 2026-08-14 的
-[22 单元功能与复杂度盘点](runtime-22-component-function-complexity-inventory.md)为历史基线（不把后续 working-tree
+[22 单元功能与复杂度盘点](../records/runtime-22-component-function-complexity-inventory-2026-08-16.md)为历史基线（不把后续 working-tree
 结构迁移误算为行为收益）：
 
 - 888 个生产 Go 文件、约 55,149 生产 LOC；132 个测试文件、约 38,919 测试 LOC；

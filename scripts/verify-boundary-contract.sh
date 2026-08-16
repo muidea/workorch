@@ -2330,4 +2330,171 @@ if [[ -n "$runtime_focus_writes" || -n "$runtime_queue_head_selection" ]]; then
 	exit 1
 fi
 
+# Runtime authority must not regain the pre-reducer command/snapshot surfaces.
+# Display-only projection names are intentionally checked separately below.
+forbidden_runtime_surface_matches="$(
+	find \
+		internal/pkg/workorchruntimecontract \
+		internal/modules/kernel/orchestrator \
+		internal/modules/application/workorchd/biz/appservice/activationports \
+		-type f -name '*.go' ! -name '*_test.go' -print0 |
+		xargs -0 -r grep -Hn -E -- 'type (StagePacket|NextAction|ExecutionContextPatch|ResumeRunCommand)\b|DispatchNextStep|NextActionForRun' || true
+)"
+if [[ -n "$forbidden_runtime_surface_matches" ]]; then
+	echo "boundary contract violation: a forbidden pre-reducer Runtime authority surface was reintroduced" >&2
+	echo "$forbidden_runtime_surface_matches" >&2
+	exit 1
+fi
+
+# Embedded templates and Souls are provider input. Historical graph/step
+# authority keys cannot be kept there as examples because they would be sent
+# to the model as live instructions.
+legacy_provider_contract_pattern='executionGraph|executionContext|thoughtSummary|completionState|graphFollowUp|previousStepOutput|mcpToolCalls|repairActionPackage|patchRequests|StagePacket|DispatchNextStep|ExecutionContextPatch'
+legacy_default_contract_matches="$(
+	grep -R -Hn -E \
+		--include='*.json' --include='*.md' \
+		-- "$legacy_provider_contract_pattern" internal/pkg/workorchdefaults/defaults || true
+)"
+if [[ -n "$legacy_default_contract_matches" ]]; then
+	echo "boundary contract violation: embedded provider defaults contain a retired Runtime contract key" >&2
+	echo "$legacy_default_contract_matches" >&2
+	exit 1
+fi
+
+legacy_script_contract_matches="$(
+	find scripts -maxdepth 1 -type f -name '*.sh' ! -name 'verify-boundary-contract.sh' -print0 |
+		xargs -0 -r grep -Hn -E -- "$legacy_provider_contract_pattern" || true
+)"
+if [[ -n "$legacy_script_contract_matches" ]]; then
+	echo "boundary contract violation: an active verifier still drives a retired provider contract" >&2
+	echo "$legacy_script_contract_matches" >&2
+	exit 1
+fi
+
+# GapNextAction remains a read-only compatibility projection. It must never
+# enter an owner aggregate, reducer, capability command, or provider request.
+gap_next_action_authority_matches="$(
+	grep -R -Hn -E --include='*.go' --exclude='*_test.go' -- '\bGapNextAction\b' \
+		internal/pkg/workorchruntimecontract \
+		internal/modules/kernel/orchestrator \
+		internal/modules/kernel/governance \
+		internal/modules/blocks/run \
+		internal/modules/blocks/llm || true
+)"
+if [[ -n "$gap_next_action_authority_matches" ]]; then
+	echo "boundary contract violation: display-only GapNextAction leaked into Runtime authority" >&2
+	echo "$gap_next_action_authority_matches" >&2
+	exit 1
+fi
+
+script_next_action_matches="$(
+	find scripts -maxdepth 1 -type f -name '*.sh' \
+		! -name 'verify-boundary-contract.sh' \
+		! -name 'verify-dual-workspace-resume-replan-e2e.sh' \
+		! -name 'verify-run-resume-gap-confirmation-e2e.sh' \
+		-print0 |
+		xargs -0 -r grep -Hn -E -- 'nextAction|NextAction' || true
+)"
+if [[ -n "$script_next_action_matches" ]]; then
+	echo "boundary contract violation: an active verifier treats a legacy nextAction projection as executable authority" >&2
+	echo "$script_next_action_matches" >&2
+	exit 1
+fi
+
+# Runtime creation has one application ingress. Run endpoints are read-only;
+# execution-activations is the only normal workspace execution write route.
+if grep -q -E -- 'http\.MethodPost|registerRunWriteRoutes|handleWorkspaceScopedRunPost' \
+	internal/modules/application/workorchd/service/server/http_run.go \
+	internal/modules/application/workorchd/service/server/http_write.go; then
+	echo "boundary contract violation: a direct Run write route was reintroduced" >&2
+	exit 1
+fi
+if ! grep -q -E -- 'execution-activations".*, http\.MethodPost' \
+	internal/modules/application/workorchd/service/server/http_workspace.go; then
+	echo "boundary contract violation: the typed workspace execution-activation ingress is missing" >&2
+	exit 1
+fi
+
+# These knobs belonged to removed graph/artifact-output paths. Keeping a
+# configuration field after its behavior disappears creates a false contract.
+legacy_llm_output_config_pattern='MaxPatchContentBytes|MaxGraphBytes|MaxGraphFileWrites|SchemaInvalidLargePreviewThreshold|MaxArtifactChunkBytes|MaxArtifactPlanAttempts|MaxArtifactReplanAttempts|maxPatchContentBytes|maxGraphBytes|maxGraphFileWrites|schemaInvalidLargePreviewThreshold|maxArtifactChunkBytes|maxArtifactPlanAttempts|maxArtifactReplanAttempts'
+legacy_llm_output_config_matches="$(
+	grep -R -Hn -E \
+		--include='*.go' --include='*.toml' --include='*.ts' --include='*.tsx' \
+		--exclude='*_test.go' -- "$legacy_llm_output_config_pattern" \
+		internal config web/workorch-console/src \
+		|| true
+)"
+if [[ -n "$legacy_llm_output_config_matches" ]]; then
+	echo "boundary contract violation: a retired graph/artifact LLM output setting was reintroduced" >&2
+	echo "$legacy_llm_output_config_matches" >&2
+	exit 1
+fi
+
+# Literal Go package paths in active scripts and Make targets must resolve.
+# This catches renamed component packages before a verifier silently skips the
+# intended ownership boundary.
+mapfile -t verification_go_packages < <(
+	grep -RhoE -- '\./(application|internal)/[A-Za-z0-9_./-]+' scripts Makefile |
+		sed 's#/\.\.\.$##' |
+		sort -u
+)
+for go_package in "${verification_go_packages[@]}"; do
+	package_path="${go_package#./}"
+	if [[ ! -d "$package_path" ]]; then
+		echo "boundary contract violation: active verifier references a missing Go package: $go_package" >&2
+		exit 1
+	fi
+done
+
+# Focused closure verifiers must reject an empty -run selection rather than
+# accepting Go's package-level '[no tests to run]' success.
+for focused_verifier in \
+	scripts/verify-acceptance-slice-result-e2e.sh \
+	scripts/verify-acceptance-slice-result-deployed-e2e.sh \
+	scripts/verify-workspace-file-diff-patch.sh \
+	scripts/verify-auto-governance-ticket-approval.sh \
+	scripts/verify-runtime-positive-convergence-file.sh; do
+	if ! grep -q -F 'scripts/lib/go-test-must-run.sh' "$focused_verifier" ||
+		! grep -q -F 'run_go_test ' "$focused_verifier"; then
+		echo "boundary contract violation: focused verifier does not fail closed on an empty test selection: $focused_verifier" >&2
+		exit 1
+	fi
+done
+
+# Every named test-selector prefix in the deterministic positive-convergence
+# verifier must still resolve to a current test. The runtime helper catches an
+# entirely empty -run group; this guard also catches a stale alternative that
+# would otherwise be hidden by another matching name in the same expression.
+current_runtime_test_names="$(
+	grep -RhoE --include='*_test.go' -- '^func Test[A-Za-z0-9_]+' internal |
+		sed 's/^func //' |
+		sort -u
+)"
+while IFS= read -r test_selector; do
+	if ! grep -q -E "^${test_selector}" <<<"$current_runtime_test_names"; then
+		echo "boundary contract violation: positive-convergence verifier references a stale test selector: $test_selector" >&2
+		exit 1
+	fi
+done < <(
+	grep -oE -- 'Test[A-Za-z0-9_]+' scripts/verify-runtime-positive-convergence-file.sh |
+		sort -u
+)
+
+# Governance/application resolution consumes and displays owner state. It may
+# not create a successor, resume a Run, or drive Runtime as a side effect.
+governance_continuation_matches="$(
+	find \
+		internal/modules/kernel/governance \
+		internal/modules/application/workorchd/biz/appservice/governancecore \
+		internal/modules/application/workorchd/biz/appservice/governanceports \
+		-type f -name '*.go' ! -name '*_test.go' -print0 |
+		xargs -0 -r grep -Hn -E -- 'DriveRuntime|ResumeRunCommand|CreateRunCommand|StartRunCommand|ActivateWorkspaceExecution' || true
+)"
+if [[ -n "$governance_continuation_matches" ]]; then
+	echo "boundary contract violation: governance resolution directly creates or continues Runtime work" >&2
+	echo "$governance_continuation_matches" >&2
+	exit 1
+fi
+
 echo "boundary contract verification passed"

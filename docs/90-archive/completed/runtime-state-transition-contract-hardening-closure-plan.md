@@ -8,7 +8,7 @@ Last Updated: 2026-07-07
 
 Related:
 
-- [Goal/DoD NextAction Delivery State Machine Design](../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md)
+- [Goal/DoD NextAction Delivery State Machine Design](../superseded/goal-dod-nextaction-delivery-state-machine-design.md)
 - [Convergence Authority Simplification Design](convergence-authority-simplification-design.md)
 - [Runtime Authority Derived Snapshot Hardening Closure Plan](runtime-authority-derived-snapshot-hardening-closure-plan.md)
 - [Runtime Validation Failure Diagnostic Repair Dispatch Closure Plan](runtime-validation-failure-diagnostic-repair-dispatch-closure-plan.md)

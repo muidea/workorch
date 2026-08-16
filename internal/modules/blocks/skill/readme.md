@@ -1,5 +1,11 @@
 # Skill Registry Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `blocks/skill` 管理 Skill registry，负责 Skill 的创建、查询、列表以及指令内容、metadata、binding 和 provenance 的正式状态。当前没有公开 update/delete command。

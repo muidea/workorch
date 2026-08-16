@@ -9,7 +9,7 @@ Owner: core
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [Contract Violation Recovery Loop Design](../../30-module-architecture/contract-violation-recovery-loop-design.md)
+- [Contract Violation Recovery Loop Design](../superseded/contract-violation-recovery-loop-design.md)
 - [S7.1 ContractViolation Diagnostic Model](./goal-dod-nextaction-s7-1-contract-violation-diagnostic-model.md)
 - [S7.4 Contract Retry Inherits Stage Contract](./goal-dod-nextaction-s7-4-contract-retry-inherits-stage-contract.md)
 

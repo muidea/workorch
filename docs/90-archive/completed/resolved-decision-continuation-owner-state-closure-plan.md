@@ -10,7 +10,7 @@ Latest Closure Update: 2026-06-27
 
 Related:
 
-- `../../30-module-architecture/goal-dod-nextaction-delivery-state-machine-design.md`
+- `../superseded/goal-dod-nextaction-delivery-state-machine-design.md`
 - `convergence-authority-simplification-design.md`
 - `convergence-authority-owner-state-continuation-closure-plan.md`
 - `workorchd-scheduler-continuation-diagnostics-plan.md`

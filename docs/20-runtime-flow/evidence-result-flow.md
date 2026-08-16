@@ -4,12 +4,12 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-27
+Last Verified: 2026-08-16
 
 ## Purpose
 
 本文件定义 Runtime 过程 evidence 如何提交、如何与 authority 对齐、如何进入
-assessment / Result projection，以及 aggregate 如何 CAS 持久化。
+assessment / formal Result，以及 aggregate 如何 CAS 持久化。
 
 ## State Machine Binding
 
@@ -134,7 +134,7 @@ flow 层只要求：**正式业务结果与过程 evidence 分层**，raw payloa
 - snapshot、dispatch、operation 三者一致才能提交 accepted evidence
 - stale / duplicate → diagnostic only
 - aggregate CAS + stateRevision 进展是 drive 安全阀
-- Result 是 projection，不是 judge
+- Result 是 owner 持久化的 formal outcome，不是 judge；由它派生的 UI outcome 才是 projection
 - 正式状态只以 typed `RuntimeStateRecord` 为准
 
 ## Source Documents

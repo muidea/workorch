@@ -6,7 +6,7 @@ Type: archived-closure-plan
 
 Archived: 2026-08-11
 
-Superseded by: [Runtime CWI Canonical Ledger Single-Owner Closure Plan](../../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
+Superseded by: [Runtime CWI Canonical Ledger Single-Owner Closure Plan](../completed/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 
 > This document is retained only as historical evidence for the pre-CWI-ledger approach. Its RSO status claims,
 > implementation queue, and completion criteria are no longer authoritative. Use the active CWI-SO plan for all

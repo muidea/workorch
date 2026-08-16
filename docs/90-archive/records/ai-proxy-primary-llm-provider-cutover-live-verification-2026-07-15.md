@@ -4,7 +4,7 @@
 
 结论：通过。
 
-验证脚本 [verify-ai-proxy-primary-llm-provider-live.sh](../../scripts/verify-ai-proxy-primary-llm-provider-live.sh)
+验证脚本 [verify-ai-proxy-primary-llm-provider-live.sh](../../../scripts/verify-ai-proxy-primary-llm-provider-live.sh)
 在同一轮中启动真实 ai-proxy（提交 `e40a632`）、真实 WorkOrch 服务和本地确定性上游。确定性上游只模拟
 模型响应；catalog、路由、operation enforcement 和 WorkOrch Runtime 主链均为真实进程。
 

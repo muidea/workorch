@@ -389,23 +389,22 @@ import sys
 snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
 observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
 run = snapshot["run"]
-routing = (run.get("executionContext") or {}).get("soulRouting") or {}
-bindings = routing.get("bindings") or {}
-execution_binding = bindings.get("execution") or {}
+workspace = snapshot.get("workspace") or {}
+bindings = workspace.get("soulBindings") or {}
 steps = snapshot.get("steps") or ([] if not snapshot.get("step") else [snapshot["step"]])
 tool_calls = snapshot.get("toolCalls") or []
 validations = snapshot.get("validationResults") or []
 checkpoints = snapshot.get("runtimeCheckpoints") or []
 results = snapshot.get("results") or []
 artifacts = snapshot.get("artifacts") or []
+dod_evidence = snapshot.get("doDEvidence") or []
+task_progress = snapshot.get("taskProgress") or {}
 errors = []
 
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
-if routing.get("status") != "resolved":
-    errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
-if execution_binding.get("soulId") != "soul-weather-query-execution":
-    errors.append(f"execution soul binding is {execution_binding!r}, want soul-weather-query-execution")
+if bindings.get("execution") != "soul-weather-query-execution":
+    errors.append(f"workspace execution Soul binding is {bindings.get('execution')!r}, want soul-weather-query-execution")
 
 mcp_steps = [item for item in steps if item.get("kind") == "mcp/tool_call"]
 if not mcp_steps:
@@ -432,18 +431,10 @@ else:
     if (structured.get("source") or {}).get("name") != "Open-Meteo":
         errors.append(f"unexpected weather source: {structured.get('source')}")
 
-assessment_steps = [item for item in steps if (item.get("output") or {}).get("stage") == "llm_dod_assessment"]
-if not assessment_steps:
-    errors.append("missing llm_dod_assessment follow-up step")
-else:
-    assessment = (assessment_steps[-1].get("output") or {}).get("dodAssessment") or {}
-    if assessment.get("satisfied") is not True:
-        errors.append(f"dodAssessment.satisfied is {assessment.get('satisfied')!r}, want true")
-    if not any(item.get("evidenceRefs") for item in assessment.get("items") or []):
-        errors.append(f"dodAssessment has no evidenceRefs: {assessment}")
-    summary = str(assessment.get("summary") or "")
-    if "杭州" not in summary or "气温" not in summary or "湿度" not in summary:
-        errors.append(f"dodAssessment.summary does not expose final weather result: {summary!r}")
+if not any(item.get("satisfied") is True and any(entry.get("evidenceStatus") == "linked" for entry in (item.get("items") or [])) for item in dod_evidence):
+    errors.append(f"missing linked Runtime DoD evidence: {dod_evidence}")
+if not any("mcp" in str(ref).lower() for ref in (task_progress.get("evidenceRefs") or [])):
+    errors.append(f"task progress missing committed MCP evidence: {task_progress.get('evidenceRefs')}")
 
 progress = observability.get("progress") or {}
 if progress.get("terminal") is not True:
@@ -524,13 +515,13 @@ workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  '{"text":"查询中国浙江杭州当前天气。必须使用已选择的 MCP Server '"$MCP_SERVER_ID"' 调用 weather.current 工具，工具参数使用 {\"country\":\"中国\",\"province\":\"浙江\",\"city\":\"杭州\",\"lookupName\":\"Hangzhou\"}。第一轮 LLM 必须返回 executionGraph 或 mcpToolCalls，且包含一个 mcp/tool_call 节点调用 weather.current；不要使用 shell/command，不要请求人工决策或审批。工具返回后，后续 LLM 步骤必须基于 previousStepOutput 总结当前天气，并返回 completionState completed 与 dodAssessment，evidenceRefs 使用 previousStepId，dodAssessment.summary 必须包含当前天气结果文本，包括天气现象、气温、湿度和风速。"}' \
+  '{"text":"查询中国浙江杭州当前天气。使用已选择的 MCP Server '"$MCP_SERVER_ID"' 的 weather.current 能力，参数为 {\"country\":\"中国\",\"province\":\"浙江\",\"city\":\"杭州\",\"lookupName\":\"Hangzhou\"}。最终交付必须依据 Owner 回执和已接纳证据总结天气现象、气温、湿度、风速及观测时间。"}' \
   "$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
-  '{"items":["通过 MCP weather.current 获取浙江杭州当前天气","天气结果包含温度、湿度、天气现象、风速和观测时间","Run snapshot 暴露 ToolCall、ValidationResult、RuntimeCheckpoint 和 DoD 评估证据"]}' \
+  '{"items":["通过 MCP weather.current 获取浙江杭州当前天气","天气结果包含温度、湿度、天气现象、风速和观测时间","Run snapshot 暴露 Owner 回执、已接纳证据、DoD assessment 和终态投递"]}' \
   "$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]

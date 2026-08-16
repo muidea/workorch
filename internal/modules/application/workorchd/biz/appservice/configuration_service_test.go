@@ -65,14 +65,7 @@ shellCommandTimeout = "90s"
 defaultTimeout = "45s"
 
 [runtime.llmOutput]
-maxPatchContentBytes = 4096
-maxGraphBytes = 16384
-maxGraphFileWrites = 2
-schemaInvalidLargePreviewThreshold = 8192
-maxArtifactChunkBytes = 4096
 maxDocumentRecoveryAttempts = 4
-maxArtifactPlanAttempts = 3
-maxArtifactReplanAttempts = 2
 ` + validLLMTOML() + `
 
 [webSearch]

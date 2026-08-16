@@ -9,7 +9,7 @@ Owner: workorchd appservice
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [MVVP Workspace ViewModel Architecture](../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md)
+- [MVVP Workspace ViewModel Architecture](../superseded/mvvp-workspace-viewmodel-architecture.md)
 - [S4.6 Coverage Summary Projection](./goal-dod-nextaction-s4-6-coverage-summary-projection.md)
 - [S7.6 Contract Violation Recovery Projection](./goal-dod-nextaction-s7-6-contract-violation-recovery-projection.md)
 

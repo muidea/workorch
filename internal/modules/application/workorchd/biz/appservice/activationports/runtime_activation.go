@@ -226,16 +226,11 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 	if policy := runtimeMap(input["templateStagePolicies"]); len(policy) > 0 {
 		stagePolicy := runtimecontract.RuntimeTemplateStagePolicy{SchemaVersion: runtimeString(policy["schemaVersion"])}
 		for _, item := range runtimeMapSlice(policy["stages"]) {
-			entry := runtimeMap(item["entry"])
 			completion := runtimeMap(item["completion"])
 			governance := runtimeMap(item["governance"])
 			policyRefs := runtimeMap(item["policyRefs"])
 			stage := runtimecontract.RuntimeTemplateStage{
 				ID: runtimeString(item["id"]), SoulBinding: runtimeString(item["soulBinding"]),
-				Entry: runtimecontract.RuntimeTemplateStageEntry{
-					NextAction: runtimeString(entry["nextAction"]), RequiresDefinitionRevision: runtimeBool(entry["requiresDefinitionRevision"]),
-					RequiresGapBaseline: runtimeBool(entry["requiresGapBaseline"]),
-				},
 				Completion: runtimecontract.RuntimeTemplateStageCompletion{Policy: runtimeString(completion["policy"])},
 				Governance: runtimecontract.RuntimeTemplateStageGovernance{
 					DecisionMode: runtimeString(governance["decisionMode"]), ApprovalMode: runtimeString(governance["approvalMode"]),

@@ -560,63 +560,6 @@ func assertWorkspaceAvailable(t *testing.T, endpoint string, workspaceID string,
 	}
 }
 
-func createRunInstance(t *testing.T, endpoint string, runID string, goalID string, dodID string) {
-	t.Helper()
-
-	goalID, dodID = defineGoalAndDoD(t, endpoint)
-	body := strings.NewReader(fmt.Sprintf(`{"runId":%q,"goalId":%q,"doDId":%q}`, runID, goalID, dodID))
-	resp, err := http.Post(endpoint, "application/json", body)
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create run status = %d, want 201", resp.StatusCode)
-	}
-	var payload workorchRunInstanceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode create run response: %v", err)
-	}
-	if payload.Run.ID != runID || payload.Run.State != string(common.RunStatePending) {
-		t.Fatalf("created run = %+v, want %s/pending", payload.Run, runID)
-	}
-}
-
-func defineGoalAndDoD(t *testing.T, runEndpoint string) (string, string) {
-	t.Helper()
-
-	workspaceEndpoint := strings.TrimSuffix(runEndpoint, "/runs")
-	if workspaceEndpoint == runEndpoint {
-		t.Fatalf("run endpoint %q does not end with /runs", runEndpoint)
-	}
-	goalResp, err := http.Post(workspaceEndpoint+"/goals", "application/json", strings.NewReader(`{"text":"main test goal"}`))
-	if err != nil {
-		t.Fatalf("define goal: %v", err)
-	}
-	defer goalResp.Body.Close()
-	if goalResp.StatusCode != http.StatusCreated {
-		t.Fatalf("define goal status = %d, want 201", goalResp.StatusCode)
-	}
-	var goalBody workorchGoalResponse
-	if err := json.NewDecoder(goalResp.Body).Decode(&goalBody); err != nil {
-		t.Fatalf("decode goal response: %v", err)
-	}
-
-	dodResp, err := http.Post(workspaceEndpoint+"/dods", "application/json", strings.NewReader(`{"items":["main test completed"]}`))
-	if err != nil {
-		t.Fatalf("define dod: %v", err)
-	}
-	defer dodResp.Body.Close()
-	if dodResp.StatusCode != http.StatusCreated {
-		t.Fatalf("define dod status = %d, want 201", dodResp.StatusCode)
-	}
-	var dodBody workorchDoDResponse
-	if err := json.NewDecoder(dodResp.Body).Decode(&dodBody); err != nil {
-		t.Fatalf("decode dod response: %v", err)
-	}
-	return goalBody.Goal.ID, dodBody.DoD.ID
-}
-
 func seedBlockedApprovalRunForProcess(t *testing.T, dataRoot string, workspaceID string, runID string) string {
 	t.Helper()
 
@@ -828,52 +771,6 @@ func waitForRunStatusMatching(t *testing.T, endpoint string, runID string, expec
 	}
 	t.Fatalf("run %s status = %+v, want %s", runID, last.Status, expectation)
 	return last
-}
-
-func startRunAndWaitForBlockedDecision(t *testing.T, baseURL string, workspaceID string, runID string) workorchRunStatusResponse {
-	t.Helper()
-
-	assertRunStartAvailable(t, baseURL+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/start", runID, string(common.RunStateActive))
-	status := waitForRunStatusAvailable(t, baseURL+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/status", runID, "blocked_on_decision")
-	if status.Status.BlockingTicketID == "" {
-		t.Fatalf("run %s blockingTicketId = %q, want non-empty", runID, status.Status.BlockingTicketID)
-	}
-	return status
-}
-
-func assertRunStartAvailable(t *testing.T, endpoint string, runID string, expectedState string) workorchRunInstanceResponse {
-	t.Helper()
-
-	resp, err := http.Post(endpoint, "application/json", nil)
-	if err != nil {
-		t.Fatalf("post run start: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("run start status = %d, want 202", resp.StatusCode)
-	}
-	return workorchRunInstanceResponse{}
-}
-
-func assertRunResumeAvailable(t *testing.T, endpoint string, runID string, expectedState string) workorchRunInstanceResponse {
-	t.Helper()
-
-	resp, err := http.Post(endpoint, "application/json", nil)
-	if err != nil {
-		t.Fatalf("post run resume: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("run resume status = %d, want 200", resp.StatusCode)
-	}
-	var body workorchRunInstanceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode run resume response: %v", err)
-	}
-	if body.Run.ID != runID || body.Run.State != expectedState {
-		t.Fatalf("run = %+v, want %s/%s", body.Run, runID, expectedState)
-	}
-	return body
 }
 
 func assertDecisionListAvailable(t *testing.T, endpoint string, ticketID string) {
@@ -1221,6 +1118,6 @@ func TestWorkorchServerModeReadyzReflectsConfiguration(t *testing.T) {
 }
 
 func Example_main() {
-	fmt.Println("workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/status, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/observability, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/start, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject")
-	// Output: workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/status, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/observability, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/start, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject
+	fmt.Println("workorch --server: activate with POST /api/v1/workorch/workspaces/{workspaceId}/execution-activations; inspect with workspace/run snapshot, status and observability endpoints")
+	// Output: workorch --server: activate with POST /api/v1/workorch/workspaces/{workspaceId}/execution-activations; inspect with workspace/run snapshot, status and observability endpoints
 }

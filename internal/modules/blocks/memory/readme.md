@@ -1,5 +1,11 @@
 # Memory Stateful Block
 
+Status: active
+
+Type: stateful-block-contract
+
+Last Verified: 2026-08-16
+
 ## 功能说明
 
 `blocks/memory` 管理 MemoryItem 与 MemoryRecallTrace 聚合，负责记忆的创建、查询、搜索、更新、删除以及 recall 选择轨迹的持久化和查询。

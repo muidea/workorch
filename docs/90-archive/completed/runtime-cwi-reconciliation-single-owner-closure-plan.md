@@ -1,16 +1,22 @@
 # Runtime CWI Reconciliation Single-Owner Closure Plan
 
-Status: regression-reference
+Status: completed / archived
 
 Type: implementation-closure-plan
 
 Last Updated: 2026-08-13
 
+Archived: 2026-08-16
+
+稳定回归要求已提炼到
+[Runtime owner convergence verification matrix](../../60-verification/runtime-owner-convergence-matrix.md)。本文只保留
+历史反例、阶段编号和代码收口过程，不再属于 active 实施队列。
+
 ## 1. Purpose And Authority
 
 This document preserves the complete Runtime CWI reconciliation and dispatch-admission regression matrix. The sole
 active implementation queue is now the
-[Runtime single-owner and model-capability output closure plan](runtime-single-owner-model-capability-output-closure-plan.md),
+[Runtime single-owner and model-capability output closure plan](../../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md),
 which incorporates these invariants and the latest deployed output-truncation counterexample. This file must not be
 used to continue the former schema-v5 deployed-only queue independently.
 

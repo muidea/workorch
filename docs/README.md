@@ -2,116 +2,97 @@
 
 Status: active
 
-Last Updated: 2026-08-15
+Type: documentation-index
+
+Last Verified: 2026-08-16
 
 ## Purpose
 
-本文件是当前 `docs/` 的正式阅读导航入口，按“核心合约 → 当前事实 → 产品设计 → 对象 → 运行链路 → 模块实现 → 特化能力 → 产品接口 → 验证 → roadmap/archive”顺序阅读。
+本文是 `docs/` 的唯一正式导航入口。当前文档按“核心合同 → 当前事实 → 产品/领域 → Runtime flow → 组件实现 →
+profile/capability → 产品接口 → 验证 → 未关工作”组织；历史设计、完成记录和 superseded 路径统一位于
+`90-archive/`，不得反向约束当前实现。
 
-**实现细节优先以模块 `readme.md` + `internal/pkg/workorchruntimecontract` 为准；中立规则以 `00-core` 为准。**
+## Authority Order
 
-## Recommended Reading Order
+1. [Runtime 核心合同](00-core/runtime-stage-contract.md)：四状态机、中立语义、Owner 与禁止迁移。
+2. [Runtime request/cache note](00-core/runtime-request-cache-note.md)：C0～C5、ProviderCeiling 和请求审计。
+3. `internal/modules/kernel/orchestrator/readme.md` 与 `internal/pkg/workorchruntimecontract`：Runtime 实现 SoT。
+4. 各 Initiator/Module/Block `readme.md`：组件职责、Owned state、concrete EventHub 合同和非职责。
+5. [Current State](01-overview/current-state.md)：当前仓库事实摘要。
+6. `20-runtime-flow/`、`30-module-architecture/` 和其它专题文档：解释当前合同，不新增权威。
+7. [Active Roadmap](70-roadmap/active/overview.md)：只包含真实未关工作。
+8. `90-archive/`：历史证据，不是当前合同。
 
-1. [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)（中立 stage 语义 + Runtime 映射）
-2. [01-overview/current-state.md](01-overview/current-state.md)（生产主链事实：V2 only）
-3. `internal/modules/kernel/orchestrator/readme.md`（实现 SoT）
-4. [20-runtime-flow/overview.md](20-runtime-flow/overview.md)
-5. [30-module-architecture/overview.md](30-module-architecture/overview.md)
-6. [05-product/overview.md](05-product/overview.md)
-7. [10-domain-model/overview.md](10-domain-model/overview.md)
-8. [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
-9. [50-product-interface/overview.md](50-product-interface/overview.md)
-10. [60-verification/overview.md](60-verification/overview.md)
-11. [70-roadmap/active/overview.md](70-roadmap/active/overview.md)（仅未关项）
-12. [90-archive/completed/overview.md](90-archive/completed/overview.md)（历史）
+代码与文档不一致时，先按以上权威顺序确认是否为实现缺陷或文档漂移；不得用较低层文档覆盖较高层合同。
 
-## Read By Task
+## Recommended Reading
 
-- Runtime 核心规则：
-  [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-- 当前 Runtime single-owner、model capability output、schema-v8 owner/convergence fence、declaration/generation 与完整文档恢复收口：
-  [runtime-single-owner-model-capability-output-closure-plan.md](70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)
-- 逐组件 Runtime 单 Owner 代码收口、Orchestrator/Workorchd 内部功能内聚拆分、`cwi-027` target grounding、测试与部署验收 Runbook：
-  [runtime-single-owner-code-closure-runbook.md](70-roadmap/active/runtime-single-owner-code-closure-runbook.md)
-- 当前 22 个运行单元的功能、体量、Owner 交互和复杂度分层盘点：
-  [runtime-22-component-function-complexity-inventory.md](70-roadmap/active/runtime-22-component-function-complexity-inventory.md)
-- Runtime CWI reconciliation、`/run resume`/`/run restart` scope 回归矩阵：
-  [runtime-cwi-reconciliation-single-owner-closure-plan.md](70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
-- Workspace reasoning effort、ai-proxy capability、Run seal、Web Start/Restart 与 TUI `/model` 收口：
-  [workspace-reasoning-effort-single-owner-closure-plan.md](70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)
-- 当前仓库事实 / 未关项：
-  [current-state.md](01-overview/current-state.md),
-  [current-unclosed-matrix.md](01-overview/current-unclosed-matrix.md),
-  [unfinished-todo-index.md](01-overview/unfinished-todo-index.md)
-- 上下文组织 / request cache：
-  [runtime-request-cache-note.md](00-core/runtime-request-cache-note.md),
-  [context-assembly-flow.md](20-runtime-flow/context-assembly-flow.md),
-  [llm-provider-assembly.md](30-module-architecture/llm-provider-assembly.md)
-- Goal / DoD / Result / Artifact：
-  [workspace-goal-dod.md](10-domain-model/workspace-goal-dod.md),
-  [run-step-result-artifact.md](10-domain-model/run-step-result-artifact.md),
-  [verification-acceptance-flow.md](20-runtime-flow/verification-acceptance-flow.md)
-- 修复 / 重规划 / 治理：
-  [repair-replan-flow.md](20-runtime-flow/repair-replan-flow.md),
-  [governance-decision-approval.md](10-domain-model/governance-decision-approval.md)
-- 模块职责与代码落点：
-  [architecture-overview.md](30-module-architecture/architecture-overview.md),
-  [kernel-orchestrator-governance.md](30-module-architecture/kernel-orchestrator-governance.md),
-  [repository-structure.md](30-module-architecture/repository-structure.md)
-- software-dev / workspace / MCP 特化：
-  [40-profiles-capabilities/overview.md](40-profiles-capabilities/overview.md)
-- HTTP / 部署 / TUI：
-  [50-product-interface/overview.md](50-product-interface/overview.md),
-  [service-api.md](50-product-interface/service-api.md),
-  [deployment.md](50-product-interface/deployment.md),
-  [tui/requirements.md](50-product-interface/tui/requirements.md)
-- 验收：
-  [60-verification/overview.md](60-verification/overview.md)
-
-## Read By Role
-
-- 架构 / 框架：`00-core`、`current-state`、`20-runtime-flow`、`30-module-architecture`、orchestrator readme
-- 业务建模：`05-product`、`10-domain-model`、`40-profiles-capabilities`
-- 产品 / API：`50-product-interface`
-- 验收 / 运维：`60-verification`、`deployment`
-- 规划 / 历史：`70-roadmap/active`（未关）、`90-archive`（历史）
+1. [Current State](01-overview/current-state.md)
+2. [Runtime 核心合同](00-core/runtime-stage-contract.md)
+3. `internal/modules/kernel/orchestrator/readme.md`
+4. [Runtime Flow Overview](20-runtime-flow/overview.md)
+5. [Module Architecture Overview](30-module-architecture/overview.md)
+6. [Component Documentation Alignment](01-overview/component-documentation-alignment.md)
+7. [Runtime Owner Convergence Matrix](60-verification/runtime-owner-convergence-matrix.md)
+8. [Active Roadmap](70-roadmap/active/overview.md)
 
 ## Directory Guide
 
-| 目录 | 内容 |
+| 目录 | 当前职责 |
 | --- | --- |
-| `00-core/` | 唯一核心 runtime 合约 + request/cache note |
-| `01-overview/` | 当前事实、未关矩阵、todo 索引 |
-| `05-product/` | PRD、产品架构、业务流程合同 |
-| `10-domain-model/` | 业务对象与不变量 |
-| `20-runtime-flow/` | activation / drive / evidence / repair 主链 |
-| `30-module-architecture/` | application / kernel / blocks / storage 边界 |
-| `40-profiles-capabilities/` | profile / capability 特化 |
-| `50-product-interface/` | API / 部署 / TUI / Web |
-| `60-verification/` | acceptance / audit / verifier |
-| `70-roadmap/active/` | **仅**真实未关计划 |
-| `90-archive/` | completed / superseded / records |
+| `00-core/` | 唯一 Runtime 核心合同与 request/cache 从属合同 |
+| `01-overview/` | 当前事实、组件文档对齐和真实未关项 |
+| `05-product/` | 产品定位、业务模型和产品架构 |
+| `10-domain-model/` | Workspace、Run、Result、治理、Memory 与 observability 对象不变量 |
+| `20-runtime-flow/` | activation、planning、execution、evidence、repair、acceptance 数据流 |
+| `30-module-architecture/` | 22 个 framework 运行单元、process service、storage/read model 边界 |
+| `40-profiles-capabilities/` | Template、Soul、Skill、MCP 与具体 capability/profile 语义 |
+| `50-product-interface/` | HTTP、Web、TUI、部署接口 |
+| `60-verification/` | 自动化、部署、竞态、负载与 Runtime owner 回归合同 |
+| `70-roadmap/active/` | 当前未关的代码/内容收口与 deployed/live 验收 |
+| `70-roadmap/candidates/` | 尚未晋级的需求候选，不是缺陷队列 |
+| `90-archive/completed/` | 已完成设计/实施计划 |
+| `90-archive/records/` | 审计、benchmark、live 和代码收口记录 |
+| `90-archive/superseded/` | 已被当前合同替代的设计 |
 
-## Core Entry
+## Read By Task
 
-- 唯一核心设计合约：[runtime-stage-contract.md](00-core/runtime-stage-contract.md)
-- Request/cache 从属：[runtime-request-cache-note.md](00-core/runtime-request-cache-note.md)
-- 实现 SoT：`internal/modules/kernel/orchestrator/readme.md`
+- Runtime 状态机与 Owner：
+  [runtime-stage-contract.md](00-core/runtime-stage-contract.md)、
+  [orchestrator README](../internal/modules/kernel/orchestrator/readme.md)。
+- LLM 请求、缓存与预算：
+  [runtime-request-cache-note.md](00-core/runtime-request-cache-note.md)、
+  [context-assembly-flow.md](20-runtime-flow/context-assembly-flow.md)、
+  [llm-provider-assembly.md](30-module-architecture/llm-provider-assembly.md)。
+- 组件边界：
+  [architecture-overview.md](30-module-architecture/architecture-overview.md)、
+  [repository-structure.md](30-module-architecture/repository-structure.md)、
+  [component-documentation-alignment.md](01-overview/component-documentation-alignment.md)。
+- Workspace/Run/Result：
+  [workspace-goal-dod.md](10-domain-model/workspace-goal-dod.md)、
+  [run-step-result-artifact.md](10-domain-model/run-step-result-artifact.md)、
+  [blocks-workspace-run-result.md](30-module-architecture/blocks-workspace-run-result.md)。
+- Capability：
+  [profiles-capabilities overview](40-profiles-capabilities/overview.md)、
+  [blocks-runtime-adapters.md](30-module-architecture/blocks-runtime-adapters.md)。
+- HTTP/TUI/Web/部署：
+  [product-interface overview](50-product-interface/overview.md)、
+  [service-api.md](50-product-interface/service-api.md)、
+  [deployment.md](50-product-interface/deployment.md)。
+- 验收：
+  [verification overview](60-verification/overview.md)、
+  [runtime-owner-convergence-matrix.md](60-verification/runtime-owner-convergence-matrix.md)、
+  [service-acceptance.md](60-verification/service-acceptance.md)。
+- 当前 live 工作：
+  [Runtime positive convergence](70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)、
+  [Workspace reasoning effort](70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)。
 
-若旧文档与核心合约冲突，以 `00-core/runtime-stage-contract.md` 为准。若设计文档与模块 readme/代码冲突，以代码与模块 readme 为准并回写设计文档。
+## Current Documentation Rules
 
-## Current Documentation Status（2026-07-29）
-
-- **生产代码路径 = Runtime only**（Start/Resume → `DriveRuntime`）。
-- 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
-- 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
-- **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **RUNTIME-SMO-R2 已完成验证、待随本次代码提交归档**：它关闭了 current-schema recovery 的 Run inventory 越权
-  分类、semantic conflict→CAS retry、retry lease、projection 伪运行状态与 assessment observation 越权选择 repair
-  action。历史 SMO/C7/C8 与 VPC 仅作回归反例来源；不得新增第二套状态迁移或以 TUI/Web 兼容分支绕过 `00-core`
-  与 Orchestrator implementation SoT。ARCH-1 的 workspace delete → late projection event deployed 验证仍已完成并归档；
-  OPS-1 所设想的 V1 maintenance apply 不存在且已被 V2-only production boundary 取代。
-- **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
-- 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
-
-详见：[01-overview/current-state.md](01-overview/current-state.md)、[70-roadmap/active/overview.md](70-roadmap/active/overview.md)。
+- 当前 Runtime aggregate 只支持一个 development baseline；活动文档不使用历史 schema 号定义兼容链。
+- 组件 README 不保留阶段编号、dated run、LOC/CC 快照、旧文件拆分过程或“待随提交归档”说明。
+- 已删除的 `StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、通用 RuntimeAdapter registry 和
+  自动 replan successor 只可作为明确的禁止项出现。
+- Capability execute/prerequisite/feasibility command/result 由接收 capability owner 的 `pkg/events` 定义；
+  Orchestrator 是调用方，不拥有通用 capability wire。
+- `active/` 只保留未关计划；已完成代码收口和 dated live 记录必须迁入 archive。

@@ -9,7 +9,7 @@ Last Updated: 2026-06-25
 Related:
 
 - [Goal/DoD NextAction Iterative Delivery Plan](./goal-dod-nextaction-iterative-delivery-plan.md)
-- [LLM Cache Improvement Design](../../30-module-architecture/llm-cache-improvement-design.md)
+- [LLM Cache Improvement Design](../superseded/llm-cache-improvement-design.md)
 - [S6.1 StagePacket Minimal Model](./goal-dod-nextaction-s6-1-stage-packet-minimal-model.md)
 - [S6.2 StagePacket Evidence Refs](./goal-dod-nextaction-s6-2-stage-packet-evidence-refs.md)
 - [S6.3 StagePacket Target Snapshot Integrity](./goal-dod-nextaction-s6-3-stage-packet-target-snapshot-integrity.md)

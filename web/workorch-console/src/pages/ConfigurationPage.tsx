@@ -291,18 +291,11 @@ export function ConfigurationPage() {
                     ]}
                   />
                 </ProCard>
-                <ProCard title="LLM 输出预算" colSpan="100%">
+                <ProCard title="候选文档恢复" colSpan="100%">
                   <Descriptions
-                    column={{ xs: 1, md: 2, xl: 3 }}
+                    column={1}
                     items={[
-                      { key: 'maxPatchContentBytes', label: '单个补丁内嵌字节', children: configNumberText(llmOutput?.maxPatchContentBytes) },
-                      { key: 'maxGraphBytes', label: '单次 Graph 字节', children: configNumberText(llmOutput?.maxGraphBytes) },
-                      { key: 'maxGraphFileWrites', label: 'Graph 写入节点数', children: configNumberText(llmOutput?.maxGraphFileWrites) },
-                      { key: 'schemaInvalidLargePreviewThreshold', label: '大预览降级阈值', children: configNumberText(llmOutput?.schemaInvalidLargePreviewThreshold) },
-                      { key: 'maxArtifactChunkBytes', label: 'Artifact Chunk 字节', children: configNumberText(llmOutput?.maxArtifactChunkBytes) },
-                      { key: 'maxDocumentRecoveryAttempts', label: '完整文档恢复次数', children: configNumberText(llmOutput?.maxDocumentRecoveryAttempts) },
-                      { key: 'maxArtifactPlanAttempts', label: 'Artifact Plan 尝试次数', children: configNumberText(llmOutput?.maxArtifactPlanAttempts) },
-                      { key: 'maxArtifactReplanAttempts', label: 'Artifact Replan 次数', children: configNumberText(llmOutput?.maxArtifactReplanAttempts) }
+                      { key: 'maxDocumentRecoveryAttempts', label: '候选完整文档恢复次数', children: configNumberText(llmOutput?.maxDocumentRecoveryAttempts) }
                     ]}
                   />
                 </ProCard>

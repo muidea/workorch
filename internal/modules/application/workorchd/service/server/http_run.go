@@ -56,9 +56,6 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		writeRuntimeRawContent(w, item)
 	})
-}
-
-func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "runs" {
@@ -83,9 +80,6 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.handleWorkspaceScopedRunGet(w, r)
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		state.handleWorkspaceScopedRunPost(w, r)
 	})
 }
 
@@ -294,16 +288,4 @@ func (s *serverState) writeRunTaskDecompositions(ctx context.Context, w http.Res
 		return
 	}
 	writeJSON(w, http.StatusOK, taskDecompositionsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskDecompositions: items})
-}
-
-func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *http.Request) {
-	_, _, _, ok := workspaceRunActionFromPath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	// Run-ID addressed lifecycle endpoints were removed. Runtime ingress is
-	// workspace-scoped at /execution-activations so Workspace and Run owners
-	// can select the current Run without a client-supplied target.
-	http.NotFound(w, r)
 }

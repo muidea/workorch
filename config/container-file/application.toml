@@ -31,14 +31,7 @@ shellCommandTimeout = "60s"
 defaultTimeout = "30s"
 
 [runtime.llmOutput]
-maxPatchContentBytes = 12288
-maxGraphBytes = 32768
-maxGraphFileWrites = 3
-schemaInvalidLargePreviewThreshold = 8192
-maxArtifactChunkBytes = 8192
 maxDocumentRecoveryAttempts = 3
-maxArtifactPlanAttempts = 2
-maxArtifactReplanAttempts = 2
 
 [llm.aiProxy]
 baseURL = "http://127.0.0.1:8080"

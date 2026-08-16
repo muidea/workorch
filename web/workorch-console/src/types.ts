@@ -37,14 +37,7 @@ export type RuntimeGitConfiguration = {
 };
 
 export type RuntimeLLMOutputConfiguration = {
-  maxPatchContentBytes?: number;
-  maxGraphBytes?: number;
-  maxGraphFileWrites?: number;
-  schemaInvalidLargePreviewThreshold?: number;
-  maxArtifactChunkBytes?: number;
   maxDocumentRecoveryAttempts?: number;
-  maxArtifactPlanAttempts?: number;
-  maxArtifactReplanAttempts?: number;
 };
 
 export type ProviderModelTarget = {

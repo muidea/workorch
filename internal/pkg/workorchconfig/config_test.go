@@ -39,14 +39,7 @@ shellCommandTimeout = "90s"
 defaultTimeout = "45s"
 
 [runtime.llmOutput]
-maxPatchContentBytes = 4096
-maxGraphBytes = 16384
-maxGraphFileWrites = 2
-schemaInvalidLargePreviewThreshold = 8192
-maxArtifactChunkBytes = 4096
 maxDocumentRecoveryAttempts = 4
-maxArtifactPlanAttempts = 3
-maxArtifactReplanAttempts = 2
 
 [llm.aiProxy]
 baseURL = "http://127.0.0.1:8080"
@@ -129,15 +122,8 @@ maxRepeatedSamePrompt = 1
 	if !GitRuntimeEnabled(cfg.Runtime.Git) || !GitRuntimeWriteEnabled(cfg.Runtime.Git) || cfg.Runtime.Git.DefaultTimeout != "45s" {
 		t.Fatalf("runtime git config = %+v, want configured git runtime settings", cfg.Runtime.Git)
 	}
-	if cfg.Runtime.LLMOutput.MaxPatchContentBytes != 4096 ||
-		cfg.Runtime.LLMOutput.MaxGraphBytes != 16384 ||
-		cfg.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
-		cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 8192 ||
-		cfg.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
-		cfg.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 ||
-		cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
-		cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
-		t.Fatalf("runtime llmOutput config = %+v, want configured thresholds", cfg.Runtime.LLMOutput)
+	if cfg.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 {
+		t.Fatalf("runtime llmOutput config = %+v, want configured document recovery limit", cfg.Runtime.LLMOutput)
 	}
 	if cfg.LLM.DefaultChat.ProviderID != BuiltinAIProxyProviderID || cfg.LLM.DefaultChat.ModelID != "gpt-4o" {
 		t.Fatalf("default chat = %+v, want ai-proxy/gpt-4o", cfg.LLM.DefaultChat)
@@ -201,14 +187,7 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 	cfg.Runtime.MaxProviderRetryAttempts = 14
 	cfg.Runtime.ShellCommandTimeout = "120s"
 	cfg.Runtime.LLMOutput = LLMOutputRuntimeConfig{
-		MaxPatchContentBytes:               8192,
-		MaxGraphBytes:                      24576,
-		MaxGraphFileWrites:                 2,
-		SchemaInvalidLargePreviewThreshold: 4096,
-		MaxArtifactChunkBytes:              4096,
-		MaxDocumentRecoveryAttempts:        4,
-		MaxArtifactPlanAttempts:            3,
-		MaxArtifactReplanAttempts:          2,
+		MaxDocumentRecoveryAttempts: 4,
 	}
 	cfg.LLM.DefaultChat = ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "gpt-4.1"}
 	cfg.LLM.DefaultEmbedding = &ProviderModelTargetConfig{ProviderID: BuiltinAIProxyProviderID, ModelID: "text-embedding-3-small"}
@@ -260,15 +239,8 @@ func TestSaveWritesApplicationConfigAndReloadsFrameworkConfig(t *testing.T) {
 	if next.Runtime.MaxRuntimeRepairAttempts != 15 || next.Runtime.MaxProviderRetryAttempts != 14 || next.Runtime.ShellCommandTimeout != "120s" {
 		t.Fatalf("next runtime config = %+v, want saved runtime settings", next.Runtime)
 	}
-	if next.Runtime.LLMOutput.MaxPatchContentBytes != 8192 ||
-		next.Runtime.LLMOutput.MaxGraphBytes != 24576 ||
-		next.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
-		next.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 4096 ||
-		next.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
-		next.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 ||
-		next.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
-		next.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
-		t.Fatalf("next runtime llmOutput config = %+v, want saved thresholds", next.Runtime.LLMOutput)
+	if next.Runtime.LLMOutput.MaxDocumentRecoveryAttempts != 4 {
+		t.Fatalf("next runtime llmOutput config = %+v, want saved document recovery limit", next.Runtime.LLMOutput)
 	}
 	if next.WebSearch.DefaultProvider != "search" ||
 		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {
@@ -317,8 +289,7 @@ providerID = "ai-proxy"
 modelID = "gpt-4o"
 
 [runtime.llmOutput]
-maxPatchContentBytes = 200000
-maxGraphBytes = 131072
+maxDocumentRecoveryAttempts = -1
 	`)
 	_ = Close()
 	t.Setenv(EnvConfigDir, configDir)
