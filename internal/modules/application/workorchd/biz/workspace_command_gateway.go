@@ -6,7 +6,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -41,7 +40,7 @@ func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchde
 		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
 	case "restart":
 		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
-		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, g.runtime.borrow(), string(workspaceID), appmodelcore.ActivateWorkspaceExecutionCommand{})
+		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, g.runtime.borrow(), string(workspaceID))
 		if err != nil {
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
 		}

@@ -14,7 +14,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type WorkspaceRuntimeActivationBuild struct {
+type workspaceRuntimeActivationBuild struct {
 	EffectiveGoal          *workspacemodel.Goal
 	EffectiveDoD           *workspacemodel.DoD
 	DefinitionRevision     string
@@ -22,36 +22,34 @@ type WorkspaceRuntimeActivationBuild struct {
 	RuntimeActivation      runtimecontract.RuntimeActivationContext
 }
 
-func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRuntimeActivationRequest) (WorkspaceRuntimeActivationBuild, error) {
+func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRuntimeActivationRequest) (workspaceRuntimeActivationBuild, error) {
 	workspace := request.Workspace
 	goal := request.Goal
 	dod := request.DoD
 	if request.Hub == nil || workspace == nil || goal == nil || dod == nil || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID {
-		return WorkspaceRuntimeActivationBuild{}, common.ErrInvalidArgument
+		return workspaceRuntimeActivationBuild{}, common.ErrInvalidArgument
 	}
 	definitions, err := WorkspaceExecutionDefinitionsContext(ctx, request.Hub, workspace.ID, goal, dod)
 	if err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 	effectiveGoal := definitions.EffectiveGoal
 	effectiveDoD := definitions.EffectiveDoD
 	definitionChangeImpact := definitions.DefinitionChangeImpact
-	command := request.Command
-	dialogLanguage := activationcore.DialogLanguage(command.DialogLanguage, request.DefaultDialogLanguage)
+	dialogLanguage := activationcore.DialogLanguage("", request.DefaultDialogLanguage)
 	executionContract := WorkspaceExecutionContract(ctx, request.Hub, workspace)
 	if err := applyConfiguredRuntimeRepairLimit(ctx, executionContract); err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
 	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 	defaultMCPServerIDs := activationcore.DefaultMCPServerIDsFromContextHints(toolHints.Effective)
 	defaultCapabilityIDs := activationcore.DefaultCapabilityIDsFromContextHints(toolHints.Effective)
-	memoryIDs := activationcore.NormalizeStringIDs(command.MemoryIDs)
-	bindings, err := loadWorkspaceRuntimeActivationBindings(ctx, request, effectiveGoal, effectiveDoD, memoryIDs)
+	bindings, err := loadWorkspaceRuntimeActivationBindings(ctx, request, effectiveGoal, effectiveDoD)
 	if err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 	defaultSoul := bindings.defaultSoul
 	memories := bindings.memories
@@ -63,44 +61,41 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 		WorkspaceID:     workspace.ID,
 		Goal:            effectiveGoal,
 		DoD:             effectiveDoD,
-		RequestedIDs:    command.SkillIDs,
 		Soul:            defaultSoul,
 		SkillHubCatalog: request.SkillHubCatalog,
 	})
 	if err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 	skills := skillResult.Skills
 	skillIDs := skillResult.IDs
 
 	mcpSelection, err := SelectedWorkspaceMCP(ctx, WorkspaceMCPSelectionRequest{
-		Hub:                    request.Hub,
-		Workspace:              workspace,
-		RequestedMCPServerIDs:  command.MCPServerIDs,
-		DefaultMCPServerIDs:    defaultMCPServerIDs,
-		RequestedCapabilityIDs: command.CapabilityIDs,
-		DefaultCapabilityIDs:   defaultCapabilityIDs,
-		Skills:                 skills,
+		Hub:                  request.Hub,
+		Workspace:            workspace,
+		DefaultMCPServerIDs:  defaultMCPServerIDs,
+		DefaultCapabilityIDs: defaultCapabilityIDs,
+		Skills:               skills,
 	})
 	if err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 
 	if err := ValidateSoulRoutingCapabilitySelection(ctx, request.Hub, soulRouting, skillIDs, mcpSelection.MCPServerIDs, mcpSelection.CapabilityIDs, activationcore.CapabilityCategories(mcpSelection.Capabilities), activationcore.RequiredToolKinds(skills)); err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 
-	continuation, err := mergeWorkspaceExecutionContinuations(ctx, workspace.ID, effectiveGoal.ID, effectiveDoD.ID, definitionChangeImpact, governanceHistory, request)
+	continuation, err := mergeWorkspaceExecutionContinuations(definitionChangeImpact, governanceHistory)
 	if err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 
 	providerSelection, err := resolveActivationProviderSelection(ctx, request.Hub, workspace.DefaultLLMSelection)
 	if err != nil {
-		return WorkspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, err
 	}
 
-	return WorkspaceRuntimeActivationBuild{
+	return workspaceRuntimeActivationBuild{
 		EffectiveGoal: effectiveGoal,
 		EffectiveDoD:  effectiveDoD,
 		DefinitionRevision: workspacecontracts.ExecutionDefinitionRevision(

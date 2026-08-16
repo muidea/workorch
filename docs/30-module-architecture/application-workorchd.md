@@ -67,6 +67,10 @@ receive the session pointer.
 `ManagedRuntime` provides bounded application observation of Eventstream records. It is not Orchestrator Runtime, does not
 expose owner actions/snapshots and cannot be used to rebuild authority.
 
+Restart bootstrap compilation accepts only Workspace identity plus process defaults. Goal/DoD, provider, Soul, Skill, MCP,
+Memory and capability selections are read from current owner state; the application exposes no rich per-run activation command
+or ID-based bootstrap entrypoint.
+
 ## Projection Boundary
 
 `biz/projection.Component` owns the only `workspaceviewcore.Manager`/Store lifecycle. It consumes:

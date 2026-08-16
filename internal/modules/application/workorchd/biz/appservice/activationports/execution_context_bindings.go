@@ -21,17 +21,14 @@ type workspaceRuntimeActivationBindings struct {
 	soulRouting       appmodelcore.SoulRouting
 }
 
-func loadWorkspaceRuntimeActivationBindings(ctx context.Context, request WorkspaceRuntimeActivationRequest, effectiveGoal *workspacemodel.Goal, effectiveDoD *workspacemodel.DoD, memoryIDs []string) (workspaceRuntimeActivationBindings, error) {
+func loadWorkspaceRuntimeActivationBindings(ctx context.Context, request workspaceRuntimeActivationRequest, effectiveGoal *workspacemodel.Goal, effectiveDoD *workspacemodel.DoD) (workspaceRuntimeActivationBindings, error) {
 	workspace := request.Workspace
-	command := request.Command
 	ret := workspaceRuntimeActivationBindings{}
 	err := readmodelcore.RunTasks(
 		func() error {
 			result, err := ResolveWorkspaceSoulRouting(ctx, WorkspaceSoulRoutingRequest{
 				Hub:                 request.Hub,
 				Workspace:           workspace,
-				RunDefaultSoulID:    command.SoulID,
-				RunSoulBindings:     command.SoulBindings,
 				SystemDefaultSoulID: common.SoulID(strings.TrimSpace(string(request.SystemDefaultSoulID))),
 			})
 			if err != nil {
@@ -47,7 +44,6 @@ func loadWorkspaceRuntimeActivationBindings(ctx context.Context, request Workspa
 				WorkspaceID: workspace.ID,
 				Hub:         request.Hub,
 
-				IDs:                            memoryIDs,
 				Goal:                           effectiveGoal,
 				DoD:                            effectiveDoD,
 				DefaultEmbeddingProviderLoader: request.DefaultEmbeddingProviderLoader,

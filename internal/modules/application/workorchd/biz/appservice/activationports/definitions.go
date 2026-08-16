@@ -22,7 +22,7 @@ type WorkspaceExecutionDefinitionContext struct {
 	DefinitionChangeImpact map[string]any
 }
 
-func SelectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, requestedGoalID common.GoalID, requestedDoDID common.DoDID) (*workspacemodel.Goal, *workspacemodel.DoD, error) {
+func selectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) (*workspacemodel.Goal, *workspacemodel.DoD, error) {
 	if hub == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}
@@ -35,14 +35,14 @@ func SelectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub
 			var err error
 			goal, err = activationcore.SelectWorkspaceExecutionGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 				return definitionports.ListGoalsByWorkspace(ctx, hub, workspaceID)
-			}, eventRecords, workspaceID, requestedGoalID)
+			}, eventRecords, workspaceID, "")
 			return err
 		},
 		func() error {
 			var err error
 			dod, err = activationcore.SelectWorkspaceExecutionDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 				return definitionports.ListDoDsByWorkspace(ctx, hub, workspaceID)
-			}, eventRecords, workspaceID, requestedDoDID)
+			}, eventRecords, workspaceID, "")
 			return err
 		},
 	)

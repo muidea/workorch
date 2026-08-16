@@ -137,10 +137,20 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 			t.Fatalf("Workspace execution modal retains ignored form field %q", forbidden)
 		}
 	}
+	for _, forbidden := range []string{
+		`title="创建工作空间"`, "workspaceSetupDraftSession", "submitWorkspaceSetup",
+	} {
+		if strings.Contains(detailData, forbidden) {
+			t.Fatalf("WorkspaceDetailPage retains duplicate workspace setup implementation %q", forbidden)
+		}
+	}
 
 	boardData := string(readWebConsoleFile(t, "src/pages/WorkspaceBoardPage.tsx"))
 	if strings.Contains(boardData, "updateWorkspaceLLMSelection") || strings.Contains(boardData, "activationReadyChatTarget") {
 		t.Fatal("Workspace board Resume/Restart must not mutate or derive Workspace selection")
+	}
+	if strings.Contains(boardData, ">恢复运行</Button>") || strings.Contains(boardData, "canStartRun") {
+		t.Fatal("Workspace board must use one neutral submit action until detail snapshot selects Resume or Restart")
 	}
 	helperData := string(readWebConsoleFile(t, "src/helpers.tsx"))
 	for _, want := range []string{

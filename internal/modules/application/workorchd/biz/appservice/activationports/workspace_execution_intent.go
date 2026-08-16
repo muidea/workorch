@@ -33,7 +33,7 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return nil, err
 	}
-	goal, dod, err := SelectWorkspaceExecutionDefinitions(ctx, request.Hub, workspace.ID, common.GoalID(request.Command.GoalID), common.DoDID(request.Command.DoDID))
+	goal, dod, err := selectWorkspaceExecutionDefinitions(ctx, request.Hub, workspace.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -58,14 +58,13 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 // owner snapshots to an activation context.  It deliberately has no Run or
 // Workspace lifecycle side effect; lifecycle admission belongs to the
 // Workspace and Run owners after the compiler returns its sealed bootstrap.
-func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceRuntimeActivationBuild, error) {
-	return BuildWorkspaceRuntimeActivation(ctx, WorkspaceRuntimeActivationRequest{
+func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (workspaceRuntimeActivationBuild, error) {
+	return buildWorkspaceRuntimeActivation(ctx, workspaceRuntimeActivationRequest{
 		Hub: request.Hub,
 
 		Workspace:                      workspace,
 		Goal:                           goal,
 		DoD:                            dod,
-		Command:                        request.Command,
 		SystemDefaultSoulID:            common.SoulID(strings.TrimSpace(string(request.SystemDefaultSoulID))),
 		DefaultDialogLanguage:          strings.TrimSpace(request.DefaultDialogLanguage),
 		DefaultEmbeddingProviderLoader: request.DefaultEmbeddingProviderLoader,

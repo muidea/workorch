@@ -26,20 +26,6 @@ type Workspace struct {
 	ViewModel            projectioncontract.WorkspaceViewModel       `json:"viewModel,omitempty"`
 }
 
-type ActivateWorkspaceExecutionCommand struct {
-	GoalID         string            `json:"goalId,omitempty"`
-	DoDID          string            `json:"doDId,omitempty"`
-	SoulID         string            `json:"soulId,omitempty"`
-	SoulBindings   map[string]string `json:"soulBindings,omitempty"`
-	SkillIDs       []string          `json:"skillIds,omitempty"`
-	MCPServerIDs   []string          `json:"mcpServerIds,omitempty"`
-	CapabilityIDs  []string          `json:"capabilityIds,omitempty"`
-	MemoryIDs      []string          `json:"memoryIds,omitempty"`
-	DialogLanguage string            `json:"dialogLanguage,omitempty"`
-	Priority       int               `json:"priority,omitempty"`
-	Restart        bool              `json:"restart,omitempty"`
-}
-
 type DeleteWorkspaceCommand struct {
 	Purge bool `json:"purge,omitempty"`
 }

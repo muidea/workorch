@@ -2414,6 +2414,18 @@ if ! grep -q -E -- 'execution-activations".*, http\.MethodPost' \
 	echo "boundary contract violation: the typed workspace execution-activation ingress is missing" >&2
 	exit 1
 fi
+rich_activation_command_matches="$(
+	grep -R -Hn -E \
+		--include='*.go' \
+		-- 'ActivateWorkspaceExecutionCommand|WorkspaceRuntimeActivation(Request|Build|ByIDRequest)|BuildWorkspaceRuntimeActivation|ReadWorkspaceRuntimeActivationInputs' \
+		internal \
+		|| true
+)"
+if [[ -n "$rich_activation_command_matches" ]]; then
+	echo "boundary contract violation: restart bootstrap exposes per-run activation overrides instead of compiling owner state" >&2
+	echo "$rich_activation_command_matches" >&2
+	exit 1
+fi
 
 # These knobs belonged to removed graph/artifact-output paths. Keeping a
 # configuration field after its behavior disappears creates a false contract.

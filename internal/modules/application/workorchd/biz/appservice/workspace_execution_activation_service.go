@@ -5,7 +5,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,7 +14,7 @@ import (
 // CompileWorkspaceExecutionRestartBootstrapWithSession is the intent-only
 // restart compiler. It compiles an immutable bootstrap and deliberately
 // performs no appmodelcore.Workspace/appmodelcore.Run lifecycle transition.
-func CompileWorkspaceExecutionRestartBootstrapWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, cmd appmodelcore.ActivateWorkspaceExecutionCommand) (ret *runtimecontract.RuntimeBootstrap, err error) {
+func CompileWorkspaceExecutionRestartBootstrapWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret *runtimecontract.RuntimeBootstrap, err error) {
 	if session == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -28,7 +27,6 @@ func CompileWorkspaceExecutionRestartBootstrapWithSession(ctx context.Context, s
 		return activationports.CompileWorkspaceExecutionRestartBootstrap(ctx, activationports.ActivateWorkspaceExecutionViewRequest{
 			Hub:                            hub,
 			WorkspaceID:                    workspaceID,
-			Command:                        cmd,
 			SystemDefaultSoulID:            defaults.systemDefaultSoulID,
 			DefaultDialogLanguage:          defaults.defaultDialogLanguage,
 			DefaultEmbeddingProviderLoader: defaults.defaultEmbeddingProviderLoader,

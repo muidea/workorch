@@ -6,38 +6,9 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
-
-func TestReadWorkspaceRuntimeActivationInputsReadsDefinitionsWithExplicitScope(t *testing.T) {
-	ctx := context.Background()
-	runtime := newOwnerRuntime()
-	defer runtime.Shutdown(ctx)
-	exports := testRuntimeExports(runtime)
-	workspaceID := common.WorkspaceID("ws-activation-input-scope")
-	goalID := common.GoalID("goal-activation-input-scope")
-	dodID := common.DoDID("dod-activation-input-scope")
-
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "scoped workspace", State: common.WorkspaceStateActive}); err != nil {
-		t.Fatal(err)
-	}
-	if err := exports.Repositories.Goals.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "scoped goal"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := exports.Repositories.DoDs.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"scoped dod"}, State: common.DoDStateReady}); err != nil {
-		t.Fatal(err)
-	}
-
-	inputs, err := ReadWorkspaceRuntimeActivationInputs(ctx, exports.Infrastructure.CommandHub, workspaceID, goalID, dodID)
-	if err != nil {
-		t.Fatalf("ReadWorkspaceRuntimeActivationInputs err = %v", err)
-	}
-	if inputs.Workspace.ID != workspaceID || inputs.Goal.WorkspaceID != workspaceID || inputs.DoD.WorkspaceID != workspaceID {
-		t.Fatalf("inputs = %+v, want workspace scoped inputs", inputs)
-	}
-}
 
 func TestWorkspaceGovernanceHistoryReadsRunAndResolutionWithWorkspaceScope(t *testing.T) {
 	ctx := context.Background()

@@ -263,7 +263,7 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
 	case "restart":
 		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
-		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, session.Borrow(), string(command.WorkspaceID), appmodelcore.ActivateWorkspaceExecutionCommand{})
+		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, session.Borrow(), string(command.WorkspaceID))
 		if err != nil {
 			p.state.projectRejectedSchedulerCommand(command, err)
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
@@ -2614,28 +2614,6 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				t.Fatalf("runID = %q, want run-native-read", runID)
 			}
 			return appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
-		}
-		state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.ActivateWorkspaceExecutionCommand) (readmodelcore.WorkspaceExecutionActivationState, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace activation event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" ||
-				cmd.GoalID != "goal-native" ||
-				cmd.DoDID != "dod-native" ||
-				cmd.SoulID != "soul-native" ||
-				cmd.SoulBindings["validation"] != "soul-native-validation" ||
-				cmd.DialogLanguage != "zh-CN" ||
-				cmd.Priority != 9 ||
-				!stringSliceEqual(cmd.SkillIDs, []string{"skill-native"}) ||
-				!stringSliceEqual(cmd.MCPServerIDs, []string{"mcp-native"}) ||
-				!stringSliceEqual(cmd.MemoryIDs, []string{"memory-native"}) {
-				t.Fatalf("workspace activation input = %+v for workspace %q, want full context selection", cmd, workspaceID)
-			}
-			return readmodelcore.WorkspaceExecutionActivationState{
-				Workspace: appmodelcore.Workspace{ID: workspaceID, ActiveRunID: "run-native-activation"},
-				Run:       appmodelcore.Run{ID: "run-native-activation", WorkspaceID: workspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID, State: "completed"},
-				Snapshot:  readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: workspaceID}},
-			}, nil
 		}
 		state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (projectioncontract.Decision, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
