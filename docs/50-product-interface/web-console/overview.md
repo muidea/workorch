@@ -42,7 +42,8 @@ projection 观察面，不是第二套业务实现或 Runtime owner。
 5. activation body 只发送 `intent`、`priority`、`requestId`、`reason`、`source`。
 
 activation form 不提供 Goal/DoD、Skill、MCP 或 Memory 的 per-run override；这些定义和策略只从 owner 当前状态编译。
-Workspace 创建使用共享的 `WorkspaceSetupModal`，正常流程要求 Template、Goal、DoD 与工作目录。
+Workspace 创建使用共享的 `WorkspaceSetupModal`，正常流程要求 Template、Goal 与 DoD。工作目录允许留空；创建时由
+application 生成 `.workorch-workspaces/<workspace-id>`，显式输入只作为目录覆盖。
 
 ### Workspace Detail
 

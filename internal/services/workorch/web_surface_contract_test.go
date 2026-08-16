@@ -165,18 +165,16 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	}
 }
 
-func TestWebWorkspaceSetupRequiresTemplateAndDirectory(t *testing.T) {
+func TestWebWorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory(t *testing.T) {
 	data := string(readWebConsoleFile(t, "src/pages/components/WorkspaceSetupModal.tsx"))
-	for _, want := range []string{
-		`name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true`,
-		`name="deliverableDirectory" label="工作目录" rules={[{ required: true`,
-	} {
-		if !strings.Contains(data, want) {
-			t.Fatalf("WorkspaceSetupModal missing required setup field %q", want)
-		}
+	if !strings.Contains(data, `name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true`) {
+		t.Fatal("WorkspaceSetupModal must require a template")
 	}
-	if strings.Contains(data, "可选。选择后自动带入") || strings.Contains(data, "留空时自动使用") {
-		t.Fatal("WorkspaceSetupModal still describes required template/directory as optional")
+	if strings.Contains(data, `name="deliverableDirectory" label="工作目录" rules={[{ required: true`) {
+		t.Fatal("WorkspaceSetupModal must not require an explicit workspace directory")
+	}
+	if !strings.Contains(data, "可选。留空时自动使用 .workorch-workspaces/工作空间 ID") {
+		t.Fatal("WorkspaceSetupModal must describe owner-generated default workspace directory")
 	}
 }
 

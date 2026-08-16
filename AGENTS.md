@@ -33,7 +33,8 @@ Module/Block shape: `module.go` / `plugin.go`, `biz/` (orchestrator has `biz/run
 - Fresh restart bootstrap seals only the Goal/DoD Definition seed and template/profile/capability policy refs. A bounded SM-3
   semantic-plan document may propose per-CWI proof; capability owners return feasibility; only an SM-2 private internal event may
   seal `CoverageEvidenceBinding` and the reconciliation contract before operation candidate/dispatch.
-- Normal TUI/Web workspace setup requires template, Goal, DoD and workspace directory; it must not require raw
+- Normal TUI/Web workspace setup requires template, Goal and DoD. It must produce a resolved workspace directory, but the
+  directory input is optional: blank input resolves to `.workorch-workspaces/<workspace-id>`. It must not require raw
   `contextHints`/`evidencePolicies`, target, recipe, check, metric or artifact JSON from the user.
 
 ### Documentation authority

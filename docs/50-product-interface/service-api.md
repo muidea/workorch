@@ -89,10 +89,10 @@ LLM saves do not mutate the running LLM owner's frozen active snapshot. A mismat
 | `POST` | `/workspaces/:workspaceId/goal-dod-quality-check` | assess supplied or referenced Goal/DoD without mutating them |
 | `POST` | `/workspaces/:workspaceId/execution-activations` | submit `resume` or `restart` intent |
 
-Workspace creation fields are `title`, optional `description`, `deliverableDirectory` and `templateId`; identity is
-owner-generated. The owner-neutral wire DTO remains usable by administrative clients, while normal TUI/Web setup requires a
-selected template and an explicit workspace directory, followed by Goal and DoD. Callers are not required to author raw
-context/evidence/target/recipe/check/artifact JSON.
+Workspace creation fields are `title`, optional `description`, optional `deliverableDirectory` and `templateId`; identity is
+owner-generated. Normal TUI/Web setup requires a selected template, Goal and DoD. When `deliverableDirectory` is omitted, the
+application resolves and creates `.workorch-workspaces/<workspace-id>` beside the repository data root; an explicit directory
+remains an override. Callers are not required to author raw context/evidence/target/recipe/check/artifact JSON.
 
 ### Run Read Model
 
