@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -252,6 +253,14 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	}
 	if len(response.Acquisition.Admissibility.ValidationRecipes) != 1 || response.Acquisition.Admissibility.ValidationRecipes[0].ID != "confirmed" {
 		t.Fatalf("owner-confirmed recipes = %+v", response.Acquisition.Admissibility.ValidationRecipes)
+	}
+	if len(response.Acquisition.Admissibility.ValidationSurfaces) != 1 {
+		t.Fatalf("owner-confirmed validation surfaces = %+v", response.Acquisition.Admissibility.ValidationSurfaces)
+	}
+	surface := response.Acquisition.Admissibility.ValidationSurfaces[0]
+	if surface.ID != "confirmed" || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
+		surface.InputBindingRef == "" || !strings.Contains(surface.InputBindingRef, "tree-shell") || surface.PrerequisiteRef != "" {
+		t.Fatalf("owner-confirmed validation surface = %+v", surface)
 	}
 	if len(response.Acquisition.Admissibility.TargetRefs) != 1 || response.Acquisition.Admissibility.TargetRefs[0] != "validation.txt" {
 		t.Fatalf("owner-confirmed targets = %+v", response.Acquisition.Admissibility.TargetRefs)

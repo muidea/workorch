@@ -284,6 +284,19 @@ func TestRuntimeSemanticPlanDoesNotExposeMCPEffectToProvider(t *testing.T) {
 	mcpCatalog := semanticTestOwnerCatalog("semantic-mcp-catalog", RuntimeModuleMCP, []string{StepKindMCPToolCall})
 	mcpCatalog.SelectorRefs = []string{"mcp-lsp-bridge"}
 	mcpCatalog.ValidationRecipeRefs = []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")}
+	mcpCatalog.ValidationSurfaces = []RuntimeValidationSurface{
+		{
+			ID: RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition"), OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
+			Readiness: RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
+			InputSchemaHash: "lsp-definition-schema", PrerequisiteRef: "lsp-definition-input",
+			CheckRefs: []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition")}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+		},
+		{
+			ID: RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status"), OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall,
+			Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "lsp-status-schema", InputBindingRef: "lsp-status-empty-input",
+			CheckRefs: []string{RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+		},
+	}
 	mcpCatalog.MCPCapabilities = []RuntimeMCPCapabilityContext{{
 		ID: "mcp-lsp-bridge:tool:lsp_status", ServerID: "mcp-lsp-bridge", Kind: "tool", OperationKind: StepKindMCPToolCall,
 		Name: "lsp_status", EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay), Enabled: true,
@@ -295,7 +308,7 @@ func TestRuntimeSemanticPlanDoesNotExposeMCPEffectToProvider(t *testing.T) {
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, mcpCatalog)
 	manifest = sealSemanticTestManifest(t, manifest)
 	schema, err := RuntimeSemanticPlanJSONSchema(manifest)
-	if err != nil || !strings.Contains(schema, `"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || strings.Contains(schema, `requiredEffectScopes`) || strings.Contains(schema, `requiredCheckRefs`) {
+	if err != nil || !strings.Contains(schema, `"mcp/tool_call/mcp-lsp-bridge/lsp_status"`) || strings.Contains(schema, `"mcp/tool_call/mcp-lsp-bridge/lsp_definition"`) || strings.Contains(schema, `requiredEffectScopes`) || strings.Contains(schema, `requiredCheckRefs`) {
 		t.Fatalf("MCP effect leaked into provider semantic schema: err=%v schema=%s", err, schema)
 	}
 	var schemaDocument map[string]any

@@ -1593,7 +1593,7 @@ func semanticFailureClassForFailureCode(code string, diagnostic runtimecontract.
 		"semantic_owner_feasibility_infeasible":
 		return runtimecontract.FailureClassCandidateInfeasible
 	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
-		"mcp_capability_catalog_unavailable", "web_catalog_unavailable", "git_repository_state_unavailable",
+		"mcp_capability_catalog_unavailable", "mcp_validation_input_binding_required", "web_catalog_unavailable", "git_repository_state_unavailable",
 		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing":
 		return runtimecontract.FailureClassCapabilityUnavailable
 	case "runtime_contract_defect", "semantic_context_integrity", "semantic_manifest_invalid", "semantic_request_context_invalid",
@@ -1661,7 +1661,7 @@ func semanticFailureClassForDiagnostic(diagnostic runtimecontract.RuntimeOrigina
 	// contract defect rather than being guessed from free text.
 	switch code {
 	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
-		"mcp_capability_catalog_unavailable", "web_catalog_unavailable", "git_repository_state_unavailable",
+		"mcp_capability_catalog_unavailable", "mcp_validation_input_binding_required", "web_catalog_unavailable", "git_repository_state_unavailable",
 		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing",
 		"semantic_owner_prerequisite_required", "semantic_owner_feasibility_stale":
 		return runtimecontract.FailureClassCapabilityUnavailable

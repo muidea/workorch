@@ -33,6 +33,8 @@ Last Verified: 2026-08-16
 - single CandidateEvaluator、attempt 0/1、owner feasibility orthogonality；
 - File create-only write 与 revision-bound existing-target replacement；
 - File manifest-bound Shell recipe applicability、空 recipe semantic filtering 与 exact tree-revision invalidation；
+- callable capability 与 validation surface readiness 分离；required-input MCP recipe 保留 typed prerequisite audit、零 endpoint
+  side effect，且不进入 provider schema/C3/correction，ready/schema/binding 变化进入 catalog snapshot identity；
 - Result closeout 仅保留 current unsatisfied canonical gap，当前 `Facts.Failure` 优先于历史 claimed gap；
 - provider ceiling / ExpectedDocument equality、whole-document recovery、C0～C5 stable prefix；
 - duplicate/stale/restart/partial-CAS/response-loss/budget/guard；

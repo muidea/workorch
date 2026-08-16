@@ -59,6 +59,38 @@ func TestMapRuntimeAuditPreservesFailureOriginalDiagnosticWithoutAction(t *testi
 	}
 }
 
+func TestMapRuntimeAuditPreservesValidationSurfaceReadinessWithoutExecutableInput(t *testing.T) {
+	recipeID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition")
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{"mcp-lsp-bridge"},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: recipeID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+			Readiness: runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
+			InputSchemaHash: "definition-schema", PrerequisiteRef: "mcp-validation-input/definition",
+			CheckRefs: []string{recipeID}, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+		ObservedRevision: "mcp-revision-v1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
+		Focus:     runtimecontract.CoverageFocus{ID: "focus-current"},
+		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}},
+	}}}
+
+	audit := mapRuntimeAudit(run)
+	if audit == nil || len(audit.Grounding.OperationAdmissibilities) != 1 || len(audit.Grounding.OperationAdmissibilities[0].ValidationSurfaces) != 1 {
+		t.Fatalf("validation readiness audit missing: %+v", audit)
+	}
+	surface := audit.Grounding.OperationAdmissibilities[0].ValidationSurfaces[0]
+	if surface.ID != recipeID || surface.Readiness != string(runtimecontract.RuntimeValidationSurfacePrerequisiteRequired) ||
+		surface.ReadinessReason != "input_binding_required" || surface.PrerequisiteRef == "" || surface.InputBindingRef != "" ||
+		surface.EffectScope != string(runtimecontract.RuntimeEffectNone) || surface.IdempotencyClass != string(runtimecontract.RuntimeOperationIdempotencySafeToReplay) {
+		t.Fatalf("validation readiness audit = %+v", surface)
+	}
+}
+
 func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *testing.T) {
 	binding := runtimecontract.CoverageEvidenceBinding{
 		ID: "binding/cwi-audit", CoverageWorkItemID: "cwi-audit", FocusID: "focus-current", DefinitionRevision: "definition-audit",

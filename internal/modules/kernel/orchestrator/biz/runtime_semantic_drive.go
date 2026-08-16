@@ -634,7 +634,7 @@ func semanticOwnerFeasibilityTerminalCode(fact runtimecontract.RuntimeSemanticPr
 		"semantic_owner_feasibility_infeasible", "mcp_recipe_invalid":
 		return code
 	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "mcp_catalog_unavailable",
-		"mcp_capability_catalog_unavailable", "web_catalog_unavailable", "git_repository_state_unavailable",
+		"mcp_capability_catalog_unavailable", "mcp_validation_input_binding_required", "web_catalog_unavailable", "git_repository_state_unavailable",
 		"shell_policy_unavailable", "workspace_manifest_unavailable", "semantic_owner_catalog_missing":
 		return code
 	default:

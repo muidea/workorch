@@ -168,6 +168,17 @@ owner 的 manifest 及其 exact freshness observation，再通过 concrete typed
 Orchestrator 不解释 manifest path 或 recipe。没有 confirmed recipe 的 `validation/managed_session` 不得进入
 provider-visible allowed operation set。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
 
+owner operation-admissibility catalog 必须把“可调用 operation”与“当前可作为验证证明的 surface”分开。每个
+`RuntimeValidationSurface` 由对应 capability owner 在一次一致 snapshot 中声明 `ready | prerequisite_required |
+unavailable`、input schema hash、owner-sealed input binding 或 prerequisite lineage、check refs、effect 与 replay class；
+只有已经具有完整 input binding、non-durable 且 safe-to-replay 的 `ready` surface
+才能进入 `ValidationRecipeRefs`。`prerequisite_required`/`unavailable` surface 仍随 aggregate 和 audit 持久化，但不得
+进入 provider schema、C3 ownerCatalog、correction allowed values 或 behavior probe。catalog 分类只读取 owner 本地/typed
+registry fact，不调用 provider/MCP endpoint、不创建 candidate/dispatch/receipt，也不触发状态转换；Orchestrator 不能
+根据 schema、tool 名称或 DoD 自行补 input binding。该 catalog disposition 不是 semantic-feasibility observation，
+不消耗 semantic attempt 或 prerequisite-refresh budget；若仍有合法 ready alternative，SM-3 只在该交集中规划，若无
+可满足 required proof 的 alternative，则沿既有 bounded semantic-contract fail-closed 主线处理。
+
 同一 proposal 的 operation kind、concrete variant 与 target policy 必须来自同一条 owner catalog fact；catalog
 已列出的现有目标不得使用仅允许 prospective target 的 create-only fact。若相同 evidence kind 与 target policy
 在同一 owner snapshot 中存在合法 replacement kind/variant，strict evaluator 与同-manifest correction 只能返回该
@@ -295,6 +306,11 @@ correction/focus request 变化不会制造重复 history，而资源回滚重�
 建立独立 generation。duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入
 `semantic_contract_failed`。
 
+catalog acquisition 已标记的 validation-surface `prerequisite_required` 不进入上述 feasibility transition：正常
+provider request 根本看不到该 identity，也不会为它创建 semantic attempt 或调用 endpoint。只有已经封存为 ready 的
+surface 在后续发生 catalog 漂移，或接收了不符合 current catalog 的旧/伪造 proposal 时，owner feasibility 才按上述
+规则 fail-closed；任何自动 input acquisition 仍必须先新增 owner-defined typed command/result。
+
 ### 单一 candidate evaluator
 
 完整 candidate document 只允许进入一个纯 `CandidateEvaluator`。它的输入是 persisted manifest、decoded
@@ -388,6 +404,10 @@ load facts
 - `RequiredOutputContract` 必须是 current focus、owner-confirmed capability、evidence policy 和
   side-effect compatibility 的中立交集。operation 可行动性不足必须在 operation provider 前确定失败；semantic-plan
   LLM 只能在封存 catalog/selector/recipe family 内提出 proposal，不能自由猜测 owner capability。
+- validation catalog 必须同时保留 callable capability 与 ready/non-ready surface audit fact，但 provider projection 和
+  request-specific schema 只能包含 ready `ValidationRecipeRefs`；rendering boundary 必须再次按 readiness fail-closed，
+  不能把 `prerequisite_required` identity、schema/input binding、MCP effect metadata 或 Shell executable recipe 当作
+  model hint。readiness 或 binding 变化必须改变 owner catalog snapshot/manifest identity。
 - accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
   `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
   no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。

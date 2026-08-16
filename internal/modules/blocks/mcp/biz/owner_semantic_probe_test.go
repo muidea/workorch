@@ -46,6 +46,7 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 		schema           workorcheventpayload.Payload
 		endpoint         string
 		wantStatus       runtimecontract.RuntimeSemanticFeasibilityStatus
+		wantReadiness    runtimecontract.RuntimeValidationSurfaceReadiness
 		wantCode         string
 		wantEndpointCall int32
 	}{
@@ -56,6 +57,7 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			schema:           mcpBehaviorProbeSchema(t, nil),
 			endpoint:         server.URL,
 			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityFeasible,
+			wantReadiness:    runtimecontract.RuntimeValidationSurfaceReady,
 			wantEndpointCall: 1,
 		},
 		{
@@ -65,98 +67,109 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			schema:           mcpBehaviorProbeSchema(t, nil),
 			endpoint:         server.URL,
 			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityFeasible,
+			wantReadiness:    runtimecontract.RuntimeValidationSurfaceReady,
 			wantEndpointCall: 1,
 		},
 		{
-			name:         "durable capability is unavailable",
-			effect:       runtimecontract.RuntimeEffectWorkspaceDurable,
-			idempotency:  runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			evidenceKind: runtimecontract.EvidenceKindStateChange,
-			schema:       mcpBehaviorProbeSchema(t, nil),
-			endpoint:     server.URL,
-			wantStatus:   runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:     "mcp_semantic_proof_unavailable",
+			name:          "durable capability is unavailable",
+			effect:        runtimecontract.RuntimeEffectWorkspaceDurable,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			evidenceKind:  runtimecontract.EvidenceKindStateChange,
+			schema:        mcpBehaviorProbeSchema(t, nil),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "owner-managed capability is unavailable",
-			effect:      runtimecontract.RuntimeEffectEphemeralSession,
-			idempotency: runtimecontract.RuntimeOperationIdempotencyOwnerManaged,
-			schema:      mcpBehaviorProbeSchema(t, nil),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "owner-managed capability is unavailable",
+			effect:        runtimecontract.RuntimeEffectEphemeralSession,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencyOwnerManaged,
+			schema:        mcpBehaviorProbeSchema(t, nil),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "non replayable capability is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
-			schema:      mcpBehaviorProbeSchema(t, nil),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "non replayable capability is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			schema:        mcpBehaviorProbeSchema(t, nil),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "required schema input is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      mcpBehaviorProbeSchema(t, []string{"path"}),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "required schema input is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        mcpBehaviorProbeSchema(t, []string{"path"}),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired,
+			wantReadiness: runtimecontract.RuntimeValidationSurfacePrerequisiteRequired,
+			wantCode:      "mcp_validation_input_binding_required",
 		},
 		{
-			name:        "malformed schema is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.StringField("required", "path")),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "malformed schema is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.StringField("required", "path")),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "wrong root schema type is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      workorcheventpayload.New(workorcheventpayload.StringField("type", "string")),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "wrong root schema type is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        workorcheventpayload.New(workorcheventpayload.StringField("type", "string")),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "nested required schema is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      mcpBehaviorProbeNestedRequiredSchema(t),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "nested required schema is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        mcpBehaviorProbeNestedRequiredSchema(t),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired,
+			wantReadiness: runtimecontract.RuntimeValidationSurfacePrerequisiteRequired,
+			wantCode:      "mcp_validation_input_binding_required",
 		},
 		{
-			name:        "malformed combinator is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.StringField("anyOf", "not-an-array")),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "malformed combinator is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.StringField("anyOf", "not-an-array")),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "malformed additional properties is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.StringField("additionalProperties", "not-a-schema")),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "malformed additional properties is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.StringField("additionalProperties", "not-a-schema")),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:        "empty combinator is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.Field{Name: "oneOf", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray}}),
-			endpoint:    server.URL,
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "empty combinator is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        workorcheventpayload.New(workorcheventpayload.StringField("type", "object"), workorcheventpayload.Field{Name: "oneOf", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray}}),
+			endpoint:      server.URL,
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceUnavailable,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
 			name:             "preflight execution failure is unavailable",
@@ -165,17 +178,19 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			schema:           mcpBehaviorProbeSchema(t, nil),
 			endpoint:         server.URL + "/fail",
 			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness:    runtimecontract.RuntimeValidationSurfaceReady,
 			wantCode:         "mcp_semantic_proof_unavailable",
 			wantEndpointCall: 1,
 		},
 		{
-			name:        "preflight endpoint failure is unavailable",
-			effect:      runtimecontract.RuntimeEffectNone,
-			idempotency: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-			schema:      mcpBehaviorProbeSchema(t, nil),
-			endpoint:    "://invalid-endpoint",
-			wantStatus:  runtimecontract.RuntimeSemanticFeasibilityInfeasible,
-			wantCode:    "mcp_semantic_proof_unavailable",
+			name:          "preflight endpoint failure is unavailable",
+			effect:        runtimecontract.RuntimeEffectNone,
+			idempotency:   runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			schema:        mcpBehaviorProbeSchema(t, nil),
+			endpoint:      "://invalid-endpoint",
+			wantStatus:    runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantReadiness: runtimecontract.RuntimeValidationSurfaceReady,
+			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 	}
 
@@ -191,6 +206,23 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 				Schema: tc.schema,
 			}}
 			adapter := NewRuntimeAdapter(getter)
+			snapshot, snapshotErr := adapter.runtimeOperationAdmissibilitySnapshot(ctx)
+			if snapshotErr != nil || len(snapshot.ValidationSurfaces) != 1 {
+				t.Fatalf("semantic validation catalog = %+v err=%v", snapshot, snapshotErr)
+			}
+			surface := snapshot.ValidationSurfaces[0]
+			if surface.Readiness != tc.wantReadiness {
+				t.Fatalf("validation surface readiness = %q, want %q (surface=%+v)", surface.Readiness, tc.wantReadiness, surface)
+			}
+			if tc.wantReadiness != runtimecontract.RuntimeValidationSurfaceReady {
+				if len(snapshot.ValidationRecipes) != 0 {
+					t.Fatalf("non-ready validation surface leaked provider recipe refs: %v", snapshot.ValidationRecipes)
+				}
+				if calls := endpointCalls.Load() - beforeCalls; calls != 0 {
+					t.Fatalf("catalog classification called MCP endpoint %d times", calls)
+				}
+				return
+			}
 			hub := magicevent.NewHub(16)
 			t.Cleanup(func() { hub.Terminate(ctx) })
 			owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
@@ -266,6 +298,84 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 	}
 }
 
+func TestMCPOwnerRejectsLegacyRequiredInputSemanticRecipeWithoutEndpointOrReceipt(t *testing.T) {
+	ctx := context.Background()
+	var endpointCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		endpointCalls.Add(1)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+	getter := &semanticProbeMCPGetter{server: &mcpmodel.Server{
+		ID: common.MCPServerID("mcp-semantic-probe"), Name: "semantic probe", Transport: "http",
+		Endpoint: server.URL, Enabled: true, AllowedTools: []string{"lsp_definition"}, TimeoutMillis: 1000,
+	}, capability: &mcpmodel.Capability{
+		ID: "mcp-semantic-probe:tool:lsp_definition", ServerID: "mcp-semantic-probe", Kind: mcpmodel.CapabilityKindTool,
+		Name: "lsp_definition", EffectScope: string(runtimecontract.RuntimeEffectNone),
+		IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay), Enabled: true,
+		Schema: mcpBehaviorProbeSchema(t, []string{"path", "line", "col"}),
+	}}
+	adapter := NewRuntimeAdapter(getter)
+	snapshot, err := adapter.runtimeOperationAdmissibilitySnapshot(ctx)
+	if err != nil || len(snapshot.ValidationRecipes) != 0 || len(snapshot.ValidationSurfaces) != 1 ||
+		snapshot.ValidationSurfaces[0].Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired {
+		t.Fatalf("required-input catalog = %+v err=%v", snapshot, err)
+	}
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	var receiptQueries, receiptCommits atomic.Int32
+	observer := magicevent.NewSimpleObserver("mcp-required-input-probe-test", hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		receiptQueries.Add(1)
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: false}, nil)
+	})
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		receiptCommits.Add(1)
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{}, nil)
+	})
+	t.Cleanup(func() {
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+	})
+
+	recipeID := "mcp/tool_call/mcp-semantic-probe/lsp_definition"
+	// Simulate a pre-closure caller catalog that still advertised the recipe.
+	// The current MCP owner must classify it from its own latest snapshot and
+	// fail closed before invoking the endpoint or the operation receipt path.
+	command := semanticProbeCommandFromSnapshot(t, snapshot, recipeID, nil, runtimecontract.EvidenceKindValidation)
+	response := hub.Send(magicevent.NewEventWithContext(
+		mcpevents.TopicProbeRuntimeSemanticProofFeasibility,
+		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command,
+	))
+	if response == nil || response.Error() != nil {
+		t.Fatalf("required-input semantic probe response = %v err=%v", response, func() error {
+			if response == nil {
+				return nil
+			}
+			return response.Error()
+		}())
+	}
+	data, getErr := response.Get()
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	result, ok := data.(mcpevents.ProbeRuntimeSemanticProofFeasibilityResult)
+	if !ok || result.Observation.Status != runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired ||
+		result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "mcp_validation_input_binding_required" {
+		t.Fatalf("required-input semantic observation = %#v", data)
+	}
+	if endpointCalls.Load() != 0 || receiptQueries.Load() != 0 || receiptCommits.Load() != 0 {
+		t.Fatalf("required-input probe side effects = endpoint:%d receipt-query:%d receipt-commit:%d", endpointCalls.Load(), receiptQueries.Load(), receiptCommits.Load())
+	}
+}
+
 func mcpBehaviorProbeSchema(t *testing.T, required []string) workorcheventpayload.Payload {
 	t.Helper()
 	fields := []workorcheventpayload.Field{workorcheventpayload.StringField("type", "object")}
@@ -289,26 +399,24 @@ func mcpBehaviorProbeNestedRequiredSchema(t *testing.T) workorcheventpayload.Pay
 
 func semanticProbeCommand(t *testing.T, ctx context.Context, adapter *RuntimeAdapter, evidenceKind string) mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand {
 	t.Helper()
-	_, recipes, revision, err := adapter.OperationAdmissibility(ctx)
-	if err != nil || len(recipes) != 1 {
-		t.Fatalf("probe catalog = recipes=%v revision=%q err=%v", recipes, revision, err)
+	snapshot, err := adapter.runtimeOperationAdmissibilitySnapshot(ctx)
+	if err != nil || len(snapshot.ValidationRecipes) != 1 || len(snapshot.ValidationSurfaces) != 1 || len(snapshot.Capabilities) != 1 {
+		t.Fatalf("probe catalog = %+v err=%v", snapshot, err)
 	}
-	serverID := "mcp-semantic-probe"
-	tool := "lsp_status"
-	capability := runtimecontract.RuntimeMCPCapabilityContext{
-		ID: "mcp-semantic-probe:tool:lsp_status", ServerID: common.MCPServerID(serverID), Kind: mcpmodel.CapabilityKindTool,
-		OperationKind: runtimecontract.StepKindMCPToolCall, Name: tool, EffectScope: string(runtimecontract.RuntimeEffectNone),
-		IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay), Enabled: true,
+	return semanticProbeCommandFromSnapshot(t, snapshot, snapshot.ValidationRecipes[0], snapshot.ValidationSurfaces, evidenceKind)
+}
+
+func semanticProbeCommandFromSnapshot(t *testing.T, snapshot runtimeMCPAdmissibilitySnapshot, recipeID string, surfaces []runtimecontract.RuntimeValidationSurface, evidenceKind string) mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand {
+	t.Helper()
+	serverID, _, err := parseMCPValidationRecipe(recipeID)
+	if err != nil || len(snapshot.Capabilities) != 1 {
+		t.Fatalf("probe recipe/capability catalog = recipe=%q capabilities=%#v err=%v", recipeID, snapshot.Capabilities, err)
 	}
-	// The caller's adapter fixture may intentionally use unsafe metadata/schema;
-	// recover those values from the catalog returned by the adapter so command
-	// validation still represents the exact sealed owner fact.
-	items, err := adapter.EffectiveCapabilities(ctx)
-	if err != nil || len(items) != 1 {
-		t.Fatalf("probe capability catalog = %#v err=%v", items, err)
+	capabilities := runtimeMCPCapabilityContexts(snapshot.Capabilities)
+	if len(capabilities) != 1 {
+		t.Fatalf("probe capability contexts = %#v", capabilities)
 	}
-	capability.EffectScope = items[0].EffectScope
-	capability.IdempotencyClass = items[0].IdempotencyClass
+	capability := capabilities[0]
 	sealedEffect := runtimecontract.NormalizeRuntimeEffectScope(runtimecontract.RuntimeEffectScope(capability.EffectScope))
 	if evidenceKind == "" {
 		evidenceKind = runtimecontract.EvidenceKindValidation
@@ -316,7 +424,8 @@ func semanticProbeCommand(t *testing.T, ctx context.Context, adapter *RuntimeAda
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "mcp-semantic-probe-catalog", OwnerModuleID: ModuleID,
 		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{serverID},
-		ValidationRecipeRefs: recipes, MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{capability}, ObservedRevision: revision,
+		ValidationRecipeRefs: []string{recipeID}, ValidationSurfaces: surfaces,
+		MCPCapabilities: capabilities, ObservedRevision: snapshot.Revision,
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{
@@ -330,7 +439,7 @@ func semanticProbeCommand(t *testing.T, ctx context.Context, adapter *RuntimeAda
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-mcp-semantic-probe", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindMCPToolCall,
 		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{serverID}},
-		RequiredEvidenceKinds: []string{evidenceKind}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{sealedEffect}, ValidationRecipeID: recipes[0], DeclarationRef: "dod/cwi-mcp-semantic-probe",
+		RequiredEvidenceKinds: []string{evidenceKind}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{sealedEffect}, ValidationRecipeID: recipeID, DeclarationRef: "dod/cwi-mcp-semantic-probe",
 	}
 	return mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand(runtimecontract.RuntimeSemanticProofFeasibilityRequest{
 		WorkspaceID: manifest.WorkspaceID, RunID: manifest.RunID, FeasibilityBatchID: "batch-mcp-semantic-probe", WorkspaceDeliverableDirectory: t.TempDir(), Manifest: manifest, Proposal: proposal, OwnerCatalog: catalog,

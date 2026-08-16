@@ -258,10 +258,21 @@ func runtimeAuditOperationAdmissibilities(values []runtimecontract.RuntimeOperat
 	ret := make([]projectioncontract.RuntimeAuditOperationAdmissibility, 0, len(values))
 	for _, raw := range values {
 		value := raw.Normalized()
+		surfaces := make([]projectioncontract.RuntimeAuditValidationSurface, 0, len(value.ValidationSurfaces))
+		for _, surface := range value.ValidationSurfaces {
+			surfaces = append(surfaces, projectioncontract.RuntimeAuditValidationSurface{
+				ID: surface.ID, OwnerModuleID: surface.OwnerModuleID, OperationKind: surface.OperationKind,
+				Readiness: string(surface.Readiness), ReadinessReason: surface.ReadinessReason,
+				InputSchemaHash: surface.InputSchemaHash, InputBindingRef: surface.InputBindingRef,
+				PrerequisiteRef: surface.PrerequisiteRef, CheckRefs: append([]string(nil), surface.CheckRefs...),
+				EffectScope: string(surface.EffectScope), IdempotencyClass: string(surface.IdempotencyClass),
+			})
+		}
 		ret = append(ret, projectioncontract.RuntimeAuditOperationAdmissibility{
 			PrerequisiteID: value.PrerequisiteID, SnapshotID: value.SnapshotID, AcquisitionBinding: value.AcquisitionBinding,
 			OwnerModuleID: value.OwnerModuleID, OperationKinds: append([]string(nil), value.OperationKinds...),
 			TargetRefs: append([]string(nil), value.TargetRefs...), SelectorRefs: append([]string(nil), value.SelectorRefs...),
+			ValidationRecipeRefs: append([]string(nil), value.ValidationRecipeRefs...), ValidationSurfaces: surfaces,
 			ObservedRevision: value.ObservedRevision,
 		})
 	}

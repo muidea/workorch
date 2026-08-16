@@ -19,6 +19,7 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 		{name: "document recovery exhausted", code: "semantic_document_recovery_exhausted", want: runtimecontract.FailureClassCandidateDocumentRecoveryExhausted},
 		{name: "provider body timeout", code: "semantic_provider_body_idle_timeout", want: runtimecontract.FailureClassProviderTransient},
 		{name: "provider protocol", code: "semantic_provider_outcome_invalid", want: runtimecontract.FailureClassProviderProtocol},
+		{name: "MCP validation input prerequisite", code: "mcp_validation_input_binding_required", want: runtimecontract.FailureClassCapabilityUnavailable},
 		{name: "runtime contract", code: "runtime_contract_defect", want: runtimecontract.FailureClassRuntimeContractMisalignment},
 	}
 	for _, tt := range tests {
@@ -34,6 +35,15 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 				t.Fatal("semantic terminal must not infer no-progress exhaustion")
 			}
 		})
+	}
+}
+
+func TestSemanticFailureClassForDiagnosticKeepsMCPInputBindingAsCapabilityPrerequisite(t *testing.T) {
+	got := semanticFailureClassForDiagnostic(runtimecontract.RuntimeOriginalDiagnostic{
+		OriginalClass: "semantic_feasibility", OriginalCode: "mcp_validation_input_binding_required",
+	})
+	if got != runtimecontract.FailureClassCapabilityUnavailable {
+		t.Fatalf("MCP validation input prerequisite class = %q, want %q", got, runtimecontract.FailureClassCapabilityUnavailable)
 	}
 }
 

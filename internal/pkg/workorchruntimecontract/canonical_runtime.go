@@ -600,11 +600,16 @@ type RuntimeOperationAdmissibility struct {
 	TargetRefs        []string
 	SelectorRefs      []string
 	ConstraintRefs    []string
-	// ValidationRecipeRefs is the owner-neutral identity set of validation
-	// surfaces the owner can execute. Shell may additionally retain the full
-	// command recipe below; other owners such as MCP expose only opaque recipe
-	// identities and keep transport parameters inside their own boundary.
+	// ValidationRecipeRefs is the ready-only owner-neutral identity set of
+	// validation surfaces the owner can execute with an already sealed input
+	// binding. Shell may additionally retain the full command recipe below;
+	// other owners such as MCP expose only opaque recipe identities and keep
+	// transport parameters inside their own boundary.
 	ValidationRecipeRefs []string
+	// ValidationSurfaces preserves both ready and non-ready owner facts. Only
+	// surfaces whose Readiness is ready may appear in ValidationRecipeRefs and
+	// therefore in a provider-visible semantic manifest.
+	ValidationSurfaces []RuntimeValidationSurface
 	// MCPCapabilities is the exact owner-sealed capability metadata used for
 	// dynamic mcp/tool_call effect and replay checks. It is intentionally part
 	// of this owner catalog rather than a second global capability authority.
@@ -853,6 +858,7 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
 	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
+	a.ValidationSurfaces = NormalizeRuntimeValidationSurfaces(a.ValidationSurfaces)
 	if len(a.MCPCapabilities) > 0 {
 		caps := make([]RuntimeMCPCapabilityContext, 0, len(a.MCPCapabilities))
 		for _, capability := range a.MCPCapabilities {
@@ -890,6 +896,17 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 		}
 		seenVariants[key] = struct{}{}
 	}
+	seenSurfaces := make(map[string]struct{}, len(a.ValidationSurfaces))
+	for _, raw := range a.ValidationSurfaces {
+		value := raw.Normalized()
+		if value.ID == "" {
+			return fmt.Errorf("runtime operation admissibility has a validation surface without identity")
+		}
+		if _, duplicate := seenSurfaces[value.ID]; duplicate {
+			return fmt.Errorf("runtime operation admissibility duplicates validation surface %q", value.ID)
+		}
+		seenSurfaces[value.ID] = struct{}{}
+	}
 	a = a.Normalized()
 	if a.PrerequisiteID == "" || a.SnapshotID == "" || a.OwnerModuleID == "" || len(a.OperationKinds) == 0 || a.ObservedRevision == "" {
 		return fmt.Errorf("runtime operation admissibility requires identity, owner, kinds and revision")
@@ -908,6 +925,19 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 	if len(a.ValidationRecipes) > 0 {
 		if a.OwnerModuleID != RuntimeModuleShell || !runtimeOperationKindsContain(a.OperationKinds, RuntimeBlockKindManagedValidationSession) {
 			return fmt.Errorf("runtime operation admissibility validation recipes require Shell managed-validation inventory")
+		}
+	}
+	if len(a.ValidationSurfaces) > 0 {
+		for _, surface := range a.ValidationSurfaces {
+			if err := surface.Validate(); err != nil {
+				return err
+			}
+			if surface.OwnerModuleID != a.OwnerModuleID || !runtimeOperationKindsContain(a.OperationKinds, surface.OperationKind) {
+				return fmt.Errorf("runtime validation surface %q is outside owner operation inventory", surface.ID)
+			}
+		}
+		if ready := RuntimeReadyValidationRecipeRefs(a.ValidationSurfaces); !sameStrings(ready, a.ValidationRecipeRefs) {
+			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match ready validation surfaces")
 		}
 	}
 	if expected := StableRuntimeOperationAdmissibilitySnapshotID(a); a.SnapshotID != expected {
@@ -946,6 +976,19 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 	writeHashStrings(h, value.SelectorRefs)
 	writeHashStrings(h, value.ConstraintRefs)
 	writeHashStrings(h, value.ValidationRecipeRefs)
+	for _, surface := range value.ValidationSurfaces {
+		writeHashString(h, surface.ID)
+		writeHashString(h, surface.OwnerModuleID)
+		writeHashString(h, surface.OperationKind)
+		writeHashString(h, string(surface.Readiness))
+		writeHashString(h, surface.ReadinessReason)
+		writeHashString(h, surface.InputSchemaHash)
+		writeHashString(h, surface.InputBindingRef)
+		writeHashString(h, surface.PrerequisiteRef)
+		writeHashStrings(h, surface.CheckRefs)
+		writeHashString(h, string(surface.EffectScope))
+		writeHashString(h, string(surface.IdempotencyClass))
+	}
 	for _, capability := range value.MCPCapabilities {
 		writeHashString(h, string(capability.ID))
 		writeHashString(h, string(capability.ServerID))

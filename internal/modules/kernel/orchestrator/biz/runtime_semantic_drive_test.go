@@ -30,6 +30,15 @@ func TestRuntimeSemanticPrerequisitePathUsesCapabilityStateBeforeAdmissibility(t
 	}
 }
 
+func TestSemanticOwnerFeasibilityTerminalCodePreservesMCPInputBindingPrerequisite(t *testing.T) {
+	fact := runtimecontract.RuntimeSemanticProofFeasibility{OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+		OriginalCode: "mcp_validation_input_binding_required",
+	}}
+	if got := semanticOwnerFeasibilityTerminalCode(fact); got != "mcp_validation_input_binding_required" {
+		t.Fatalf("semantic prerequisite terminal code = %q", got)
+	}
+}
+
 func TestRuntimeSemanticPrerequisitePathPublishesFileCatalogBeforeShellValidationInventory(t *testing.T) {
 	pending := []runtimecontract.RuntimePrerequisite{
 		{ID: "shell-admissibility", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell},

@@ -33,16 +33,33 @@ type runtimeSemanticDefinitionSeedProjection struct {
 }
 
 type runtimeSemanticManifestProjection struct {
-	SchemaVersion             string                                          `json:"schemaVersion"`
-	Hash                      string                                          `json:"hash"`
-	DefinitionRevision        string                                          `json:"definitionRevision"`
-	DefinitionSeedHash        string                                          `json:"definitionSeedHash"`
-	OperationContractRevision string                                          `json:"operationContractRevision"`
-	CoverageItems             []runtimecontract.RuntimeCoverageItem           `json:"coverageItems"`
-	AllowedOwnerModuleIDs     []string                                        `json:"allowedOwnerModuleIds,omitempty"`
-	AllowedOperationKinds     []string                                        `json:"allowedOperationKinds,omitempty"`
-	AllowedTargetPolicies     []runtimecontract.RuntimeOperationTargetPolicy  `json:"allowedTargetPolicies,omitempty"`
-	OwnerCatalogs             []runtimecontract.RuntimeOperationAdmissibility `json:"ownerCatalogs,omitempty"`
+	SchemaVersion             string                                         `json:"schemaVersion"`
+	Hash                      string                                         `json:"hash"`
+	DefinitionRevision        string                                         `json:"definitionRevision"`
+	DefinitionSeedHash        string                                         `json:"definitionSeedHash"`
+	OperationContractRevision string                                         `json:"operationContractRevision"`
+	CoverageItems             []runtimecontract.RuntimeCoverageItem          `json:"coverageItems"`
+	AllowedOwnerModuleIDs     []string                                       `json:"allowedOwnerModuleIds,omitempty"`
+	AllowedOperationKinds     []string                                       `json:"allowedOperationKinds,omitempty"`
+	AllowedTargetPolicies     []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
+	OwnerCatalogs             []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
+}
+
+// runtimeSemanticOwnerCatalogProjection is the provider-safe vocabulary from
+// one sealed owner catalog. Non-ready validation surfaces, owner-private input
+// bindings, executable Shell recipes and dynamic MCP effect metadata remain in
+// Runtime/audit state; the provider receives only identities it may select.
+type runtimeSemanticOwnerCatalogProjection struct {
+	PrerequisiteID       string                                                 `json:"prerequisiteId"`
+	SnapshotID           string                                                 `json:"snapshotId"`
+	OwnerModuleID        string                                                 `json:"ownerModuleId"`
+	OperationKinds       []string                                               `json:"operationKinds"`
+	OperationVariants    []runtimecontract.RuntimeOperationAdmissibilityVariant `json:"operationVariants,omitempty"`
+	TargetRefs           []string                                               `json:"targetRefs,omitempty"`
+	SelectorRefs         []string                                               `json:"selectorRefs,omitempty"`
+	ConstraintRefs       []string                                               `json:"constraintRefs,omitempty"`
+	ValidationRecipeRefs []string                                               `json:"validationRecipeRefs,omitempty"`
+	ObservedRevision     string                                                 `json:"observedRevision"`
 }
 
 type runtimeSemanticSliceProjection struct {
@@ -88,9 +105,31 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		projection.AllowedOwnerModuleIDs = append([]string(nil), manifest.AllowedOwnerModuleIDs...)
 		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
 		projection.AllowedTargetPolicies = append([]runtimecontract.RuntimeOperationTargetPolicy(nil), manifest.AllowedTargetPolicies...)
-		projection.OwnerCatalogs = append([]runtimecontract.RuntimeOperationAdmissibility(nil), manifest.OwnerCatalogs...)
+		projection.OwnerCatalogs = runtimeSemanticOwnerCatalogsForProvider(manifest.OwnerCatalogs)
 	}
 	return projection
+}
+
+func runtimeSemanticOwnerCatalogsForProvider(values []runtimecontract.RuntimeOperationAdmissibility) []runtimeSemanticOwnerCatalogProjection {
+	values = runtimecontract.NormalizeRuntimeOperationAdmissibilities(values)
+	ret := make([]runtimeSemanticOwnerCatalogProjection, 0, len(values))
+	for _, catalog := range values {
+		catalog = catalog.Normalized()
+		readyRecipes := append([]string(nil), catalog.ValidationRecipeRefs...)
+		if len(catalog.ValidationSurfaces) != 0 {
+			// Fail closed at the final rendering boundary as well as catalog
+			// validation: a non-ready identity must never become a model hint.
+			readyRecipes = runtimecontract.RuntimeReadyValidationRecipeRefs(catalog.ValidationSurfaces)
+		}
+		ret = append(ret, runtimeSemanticOwnerCatalogProjection{
+			PrerequisiteID: catalog.PrerequisiteID, SnapshotID: catalog.SnapshotID, OwnerModuleID: catalog.OwnerModuleID,
+			OperationKinds: append([]string(nil), catalog.OperationKinds...), OperationVariants: append([]runtimecontract.RuntimeOperationAdmissibilityVariant(nil), catalog.OperationVariants...),
+			TargetRefs: append([]string(nil), catalog.TargetRefs...), SelectorRefs: append([]string(nil), catalog.SelectorRefs...),
+			ConstraintRefs: append([]string(nil), catalog.ConstraintRefs...), ValidationRecipeRefs: readyRecipes,
+			ObservedRevision: catalog.ObservedRevision,
+		})
+	}
+	return ret
 }
 
 func runtimeSemanticSlicesForProvider(slices []runtimecontract.RuntimeAcceptanceSlice, visibleCoverageIDs []common.CoverageWorkItemID) []runtimeSemanticSliceProjection {

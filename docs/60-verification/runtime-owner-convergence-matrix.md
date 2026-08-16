@@ -45,6 +45,11 @@ Last Verified: 2026-08-16
 - workspace-sensitive recipe catalog 必须绑定 File manifest/observation 的 exact tree revision；Shell 只发布当前适用
   recipe，空 recipe set 不得向 semantic provider 暴露 `validation/managed_session`。File tree change 只退休依赖相交
   catalog，duplicate re-drive/invalidation 不增加 refresh budget。
+- dynamic owner 必须分离 callable capability 与 validation surface readiness；只有已有 owner-sealed input binding、
+  non-durable 且 safe-to-replay 的 `ready` surface 可进入 provider recipe enum/C3。required-input
+  surface 必须保留 `prerequisite_required` audit fact；catalog 判定不得触发 endpoint/receipt，且该 surface identity
+  必须从 provider request、schema、prompt 和 correction allowed values 中消失；readiness/schema/binding 变化必须改变
+  catalog snapshot identity。
 - capability execute command/result 必须来自接收 Owner 的 `pkg/events`；receipt 只返回 factual outcome/effect/evidence。
 
 ### Idempotency, Restart and Budgets
@@ -74,6 +79,7 @@ Last Verified: 2026-08-16
 go test ./internal/modules/kernel/orchestrator/... -count=1
 go test ./internal/modules/blocks/run/... ./internal/modules/blocks/workspace/... ./internal/modules/blocks/result/... -count=1
 go test ./internal/modules/blocks/llm/... ./internal/modules/blocks/file/... ./internal/modules/blocks/git/... ./internal/modules/blocks/shell/... ./internal/modules/blocks/ssh/... ./internal/modules/blocks/web/... ./internal/modules/blocks/mcp/... -count=1
+go test ./internal/pkg/workorchruntimecontract ./internal/modules/application/workorchd/... -count=1
 make verify-boundary-contract
 make test-race
 make build

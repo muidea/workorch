@@ -228,6 +228,48 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	}
 }
 
+func TestRuntimeSemanticProviderProjectionOmitsNonReadyValidationAndOwnerPrivateFacts(t *testing.T) {
+	readyID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_status")
+	requiresInputID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-lsp-bridge", "lsp_definition")
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{"mcp-lsp-bridge"},
+		ValidationRecipeRefs: []string{readyID}, ObservedRevision: "mcp-revision-v1",
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{
+			{
+				ID: readyID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+				Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "status-schema", InputBindingRef: "private-empty-input-binding",
+				CheckRefs: []string{readyID}, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			},
+			{
+				ID: requiresInputID, OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+				Readiness: runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "input_binding_required",
+				InputSchemaHash: "definition-schema", PrerequisiteRef: "private-definition-input-prerequisite",
+				CheckRefs: []string{requiresInputID}, EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			},
+		},
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
+			ID: "mcp-lsp-bridge:tool:lsp_definition", ServerID: "mcp-lsp-bridge", Kind: "tool", OperationKind: runtimecontract.StepKindMCPToolCall,
+			Name: "lsp_definition", EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay), Enabled: true,
+		}},
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	projection := runtimeSemanticManifestProjection{OwnerCatalogs: runtimeSemanticOwnerCatalogsForProvider([]runtimecontract.RuntimeOperationAdmissibility{catalog})}
+	raw, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerContext := string(raw)
+	if !strings.Contains(providerContext, readyID) {
+		t.Fatalf("provider catalog lost ready recipe identity: %s", providerContext)
+	}
+	for _, forbidden := range []string{requiresInputID, "private-empty-input-binding", "private-definition-input-prerequisite", "MCPCapabilities", "ValidationSurfaces", "EffectScope", "IdempotencyClass"} {
+		if strings.Contains(providerContext, forbidden) {
+			t.Fatalf("provider catalog leaked owner-private/non-ready fact %q: %s", forbidden, providerContext)
+		}
+	}
+}
+
 func TestRuntimeSemanticCoverageOrderProjectionOmitsUnrelatedDefinitionSlices(t *testing.T) {
 	request := runtimeSemanticProviderTestRequest(t)
 	request.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder

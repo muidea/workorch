@@ -18,6 +18,10 @@ Last Verified: 2026-08-16
   均使用 MCP execution owner 定义的 concrete typed command/result。
 - Runtime MCP operation 不会通过 Envelope 或 `map[string]any` 传递跨组件结果。
 - 本 block 导入 `blocks/mcpregistry/pkg/events`，通过 EventHub 查询 MCP Server 和 Capability；不注入 registry service/repository。
+- operation-admissibility 在一次 registry snapshot 中同时取得 enabled server 与 tool capability，并由本 execution owner
+  编译 `RuntimeValidationSurface`。完整 capability 仍是 callable inventory；只有 non-durable、`safe_to_replay`、
+  schema 合法且已有 owner-sealed input binding 的 surface 才进入 provider-visible
+  `ValidationRecipeRefs`。catalog acquisition 不打开 MCP transport。
 - request 必须携带 workspace/run/authority/dispatch/operation identity、sealed server/capability ref 和结构化参数；
   result 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回 source refs、bounded summary、truncation
   metadata、owner stable factual category、完整安全 original diagnostic 和 evidence/ref，不返回跨组件 Status 双权威。
@@ -34,3 +38,7 @@ Last Verified: 2026-08-16
   或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
 - CWI reconciliation 将 endpoint/catalog/tool-surface readiness 与 behavior proof 分离；没有 binding 声明的可执行
   tool probe 和完整输入约束时返回 `unverifiable/behavior_probe_unavailable`，连接成功或 tool description 不能关闭 CWI。
+- 无 required input 的安全 validation tool 使用 owner 生成的 empty-input binding，readiness 为 `ready`；schema 含 required
+  input 时保持 tool 可调用，但 validation surface 为 `prerequisite_required/input_binding_required`，不得出现在 semantic
+  provider schema/C3，也不得用空参数调用 endpoint。durable/unsafe replay 或非法 schema 的 surface 为
+  `unavailable`。这些分类只返回事实，不选择 retry、focus、terminal 或替代 tool。

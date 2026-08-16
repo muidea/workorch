@@ -45,13 +45,15 @@ fresh activation
    `file/edit` 或 `patch/apply` replacement，不再选择 create-only `file/write`；
 4. replacement 成功后继续推进至少一个后续 eligible CWI，不能把“正确 fail-closed”当成持续收敛；
    validation-preparation 遇到无当前适用 recipe 时必须选择 profile 允许且 owner-confirmed 的 File preparation，不能先向
-   provider 暴露不可行 recipe、任意 shell command 或重复相同 semantic shape；
+   provider 暴露不可行 recipe、required-input MCP validation surface、任意 shell command 或重复相同 semantic shape；
 5. duplicate/stale/restart/recovery 不产生第二次 provider session、dispatch、durable effect、evidence credit 或
    terminal delivery；
 6. revision 与 progress signature 有界推进，不出现无事实变化的 authority、candidate 或 drive 循环；
 7. terminal delivery 严格按 `Result -> Workspace -> Run` 完成，投影/SSE 只展示已持久化事实。
 
 ## 最新反例后的 code closure
+
+### Manifest-bound Shell recipe 与 terminal closeout
 
 已部署构建 `58b20ec8` 的最新核对已经证明 existing-target replacement、owner receipt/evidence、CWI 026～028 推进和三段 terminal
 delivery 顺序成立；最早未收敛点是后续 validation-preparation CWI：静态 catalog 宣告了对当前 workspace 无实际测试
@@ -69,6 +71,34 @@ terminal closeout 把已满足 CWI 的 producer claimed gap 排在当前失败�
   projection 均有定向回归。
 
 这些修改仍需部署后使用 fresh data 重新证明后续 CWI 和完整 live terminal；本节不关闭 SO-MC-LIVE。
+
+### MCP required-input validation readiness
+
+最新 fresh-data `run-006` 已经连续完成 CWI 026、027、028、029、001 的 semantic seal、owner dispatch/receipt 与
+binding-matched evidence，说明前述 replacement、单 Owner transition 和正向推进路径成立。最早未收敛点移动到 CWI 002：
+semantic catalog 把 `mcp/tool_call/mcp-lsp-bridge/lsp_definition` 当作可直接执行的 validation recipe 暴露给 provider，
+owner feasibility 随后才发现其 schema 必须提供 `line`、`path|file_path` 和 `col|character`，而当前 semantic behavior
+probe 没有 owner-sealed input binding，最终以 `MCP semantic behavior probe cannot invent required tool parameters` 失败。
+
+当前 workspace 已完成对应 code/automated closure：
+
+- owner-neutral `RuntimeValidationSurface` 将 callable operation 与 validation readiness 分离，并持久化
+  `ready | prerequisite_required | unavailable`、schema hash、input binding/prerequisite、check/effect/replay facts；
+- MCP execution owner 在一次一致 registry snapshot 中编译 readiness：只有 non-durable、safe-to-replay、schema 合法且
+  input-complete 的 tool 进入 `ValidationRecipeRefs`；required-input tool 仍保留 callable
+  capability，但只记录 `prerequisite_required/input_binding_required`，catalog acquisition 零 MCP endpoint side effect；
+- `lsp_status` 之类无 required input 的安全 tool 使用 owner-sealed empty-input binding；`lsp_definition` 不再进入
+  semantic recipe enum/C3，旧或伪造 proposal 仍由 MCP owner fail-closed，且不进入 operation receipt/evidence 路径；
+- LLM C3 改为 provider-safe owner catalog projection，去除 non-ready surface identity、input schema/binding/prerequisite、
+  MCP effect metadata 和 Shell executable recipe；renderer 在最后边界再次按 readiness 取交集；
+- Shell confirmed recipe 同样发布 ready surface；readiness/schema/binding 参与 catalog snapshot hash，并进入 Workorchd
+  metadata-only runtime audit，projection 不参与 authority；
+- contract、MCP owner matrix、provider projection、semantic schema、snapshot identity 与 audit projection 均已增加定向回归。
+
+该收口不增加第五状态机，不让 Orchestrator 解析 MCP schema，也不自动发明 prerequisite input。若未来需要自动取得
+`lsp_definition` 参数，必须先由相应 owner 增加 concrete typed acquisition command/result，再接入既有 SM-2 private
+transition。当前仍需部署后以 fresh data 证明 CWI 002 能选择合法 alternative、继续推进后续 CWI 并完成 terminal
+delivery；因此本节仍不关闭 SO-MC-LIVE。
 
 ## 执行前提
 

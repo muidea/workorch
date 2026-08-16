@@ -495,6 +495,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 			return
 		}
 		inventory.ValidationRecipes = confirmed
+		inventory.ValidationSurfaces = shellReadyValidationSurfaces(confirmed, command.WorkspaceManifestBinding)
 	}
 	inventory = inventory.Normalized()
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -506,6 +507,30 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs, command.WorkspaceManifestBinding,
 	)
 	result.Set(shellevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
+}
+
+func shellReadyValidationSurfaces(recipes []runtimecontract.RuntimeValidationRecipe, binding runtimecontract.RuntimeWorkspaceManifestBinding) []runtimecontract.RuntimeValidationSurface {
+	binding = binding.Normalized()
+	ret := make([]runtimecontract.RuntimeValidationSurface, 0, len(recipes))
+	for _, recipe := range runtimecontract.NormalizeRuntimeValidationRecipes(recipes) {
+		digest := sha256.New()
+		_, _ = fmt.Fprintf(digest, "%s\x00%s\x00%d\x00", recipe.ID, recipe.Command, recipe.TimeoutMillis)
+		for _, arg := range recipe.Args {
+			_, _ = fmt.Fprintf(digest, "%s\x00", arg)
+		}
+		schemaHash := "shell-validation-recipe-" + hex.EncodeToString(digest.Sum(nil))[:20]
+		inputBindingRef := "shell-validation-input/" + schemaHash
+		if binding.Manifest.Revision != "" {
+			inputBindingRef += "/" + binding.Manifest.Revision
+		}
+		ret = append(ret, runtimecontract.RuntimeValidationSurface{
+			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: schemaHash, InputBindingRef: inputBindingRef,
+			CheckRefs: []string{recipe.ID}, EffectScope: runtimecontract.RuntimeEffectNone,
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		})
+	}
+	return runtimecontract.NormalizeRuntimeValidationSurfaces(ret)
 }
 
 func runtimeShellManagedValidationRequested(kinds []string) bool {

@@ -136,14 +136,30 @@ type RuntimeAuditFreshnessDependency struct {
 }
 
 type RuntimeAuditOperationAdmissibility struct {
-	PrerequisiteID     string   `json:"prerequisiteId,omitempty"`
-	SnapshotID         string   `json:"snapshotId,omitempty"`
-	AcquisitionBinding string   `json:"acquisitionBinding,omitempty"`
-	OwnerModuleID      string   `json:"ownerModuleId,omitempty"`
-	OperationKinds     []string `json:"operationKinds,omitempty"`
-	TargetRefs         []string `json:"targetRefs,omitempty"`
-	SelectorRefs       []string `json:"selectorRefs,omitempty"`
-	ObservedRevision   string   `json:"observedRevision,omitempty"`
+	PrerequisiteID       string                          `json:"prerequisiteId,omitempty"`
+	SnapshotID           string                          `json:"snapshotId,omitempty"`
+	AcquisitionBinding   string                          `json:"acquisitionBinding,omitempty"`
+	OwnerModuleID        string                          `json:"ownerModuleId,omitempty"`
+	OperationKinds       []string                        `json:"operationKinds,omitempty"`
+	TargetRefs           []string                        `json:"targetRefs,omitempty"`
+	SelectorRefs         []string                        `json:"selectorRefs,omitempty"`
+	ValidationRecipeRefs []string                        `json:"validationRecipeRefs,omitempty"`
+	ValidationSurfaces   []RuntimeAuditValidationSurface `json:"validationSurfaces,omitempty"`
+	ObservedRevision     string                          `json:"observedRevision,omitempty"`
+}
+
+type RuntimeAuditValidationSurface struct {
+	ID               string   `json:"id,omitempty"`
+	OwnerModuleID    string   `json:"ownerModuleId,omitempty"`
+	OperationKind    string   `json:"operationKind,omitempty"`
+	Readiness        string   `json:"readiness,omitempty"`
+	ReadinessReason  string   `json:"readinessReason,omitempty"`
+	InputSchemaHash  string   `json:"inputSchemaHash,omitempty"`
+	InputBindingRef  string   `json:"inputBindingRef,omitempty"`
+	PrerequisiteRef  string   `json:"prerequisiteRef,omitempty"`
+	CheckRefs        []string `json:"checkRefs,omitempty"`
+	EffectScope      string   `json:"effectScope,omitempty"`
+	IdempotencyClass string   `json:"idempotencyClass,omitempty"`
 }
 
 type RuntimeAuditAuthority struct {
@@ -408,6 +424,15 @@ func cloneRuntimeAuditOperationAdmissibilities(items []RuntimeAuditOperationAdmi
 		item.OperationKinds = append([]string(nil), item.OperationKinds...)
 		item.TargetRefs = append([]string(nil), item.TargetRefs...)
 		item.SelectorRefs = append([]string(nil), item.SelectorRefs...)
+		item.ValidationRecipeRefs = append([]string(nil), item.ValidationRecipeRefs...)
+		if item.ValidationSurfaces != nil {
+			surfaces := make([]RuntimeAuditValidationSurface, 0, len(item.ValidationSurfaces))
+			for _, surface := range item.ValidationSurfaces {
+				surface.CheckRefs = append([]string(nil), surface.CheckRefs...)
+				surfaces = append(surfaces, surface)
+			}
+			item.ValidationSurfaces = surfaces
+		}
 		ret = append(ret, item)
 	}
 	return ret

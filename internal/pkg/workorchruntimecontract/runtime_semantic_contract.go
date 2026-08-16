@@ -534,6 +534,7 @@ func (m RuntimeSemanticPlanManifest) Clone() RuntimeSemanticPlanManifest {
 		m.OwnerCatalogs[idx].SelectorRefs = append([]string(nil), m.OwnerCatalogs[idx].SelectorRefs...)
 		m.OwnerCatalogs[idx].ConstraintRefs = append([]string(nil), m.OwnerCatalogs[idx].ConstraintRefs...)
 		m.OwnerCatalogs[idx].ValidationRecipeRefs = append([]string(nil), m.OwnerCatalogs[idx].ValidationRecipeRefs...)
+		m.OwnerCatalogs[idx].ValidationSurfaces = NormalizeRuntimeValidationSurfaces(m.OwnerCatalogs[idx].ValidationSurfaces)
 		m.OwnerCatalogs[idx].ValidationRecipes = append([]RuntimeValidationRecipe(nil), m.OwnerCatalogs[idx].ValidationRecipes...)
 		for recipeIdx := range m.OwnerCatalogs[idx].ValidationRecipes {
 			m.OwnerCatalogs[idx].ValidationRecipes[recipeIdx].Args = append([]string(nil), m.OwnerCatalogs[idx].ValidationRecipes[recipeIdx].Args...)

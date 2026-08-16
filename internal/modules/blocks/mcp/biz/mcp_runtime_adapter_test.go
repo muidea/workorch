@@ -18,6 +18,7 @@ import (
 	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorcheventpayload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -103,6 +104,48 @@ func TestRuntimeAdapterProbeChecksServerPolicyWithoutCallingTool(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("rejected probe called MCP endpoint %d times", calls)
+	}
+}
+
+func TestRuntimeAdapterAdmissibilityKeepsInputRequiringToolCallableButNotValidationReady(t *testing.T) {
+	server := &mcpmodel.Server{
+		ID: common.MCPServerID("mcp-lsp-bridge"), Transport: "http", Endpoint: "http://mcp.invalid",
+		Enabled: true, AllowedTools: []string{"lsp_definition", "lsp_status"},
+	}
+	capability := func(name string, schema workorcheventpayload.Payload) *mcpmodel.Capability {
+		return &mcpmodel.Capability{
+			ID: common.MCPCapabilityID("mcp-lsp-bridge:tool:" + name), ServerID: server.ID,
+			Kind: mcpmodel.CapabilityKindTool, Name: name, Enabled: true,
+			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+			Schema: schema,
+		}
+	}
+	statusSchema := workorcheventpayload.New(workorcheventpayload.StringField("type", "object"))
+	definitionSchema := workorcheventpayload.New(
+		workorcheventpayload.StringField("type", "object"),
+		workorcheventpayload.StringArrayField("required", []string{"line", "path", "col"}),
+	)
+	adapter := NewRuntimeAdapter(staticMCPServerGetter{server: server, capabilities: []*mcpmodel.Capability{
+		capability("lsp_definition", definitionSchema), capability("lsp_status", statusSchema),
+	}})
+
+	snapshot, err := adapter.runtimeOperationAdmissibilitySnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Capabilities) != 2 {
+		t.Fatalf("callable MCP capability count = %d, want 2", len(snapshot.Capabilities))
+	}
+	if got, want := snapshot.ValidationRecipes, []string{"mcp/tool_call/mcp-lsp-bridge/lsp_status"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("provider-visible validation recipes = %v, want %v", got, want)
+	}
+	definition, found := runtimecontract.RuntimeValidationSurfaceForID(snapshot.ValidationSurfaces, "mcp/tool_call/mcp-lsp-bridge/lsp_definition")
+	if !found || definition.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired || definition.PrerequisiteRef == "" || definition.InputBindingRef != "" {
+		t.Fatalf("lsp_definition validation surface = %+v, want input-binding prerequisite", definition)
+	}
+	status, found := runtimecontract.RuntimeValidationSurfaceForID(snapshot.ValidationSurfaces, "mcp/tool_call/mcp-lsp-bridge/lsp_status")
+	if !found || status.Readiness != runtimecontract.RuntimeValidationSurfaceReady || status.InputBindingRef == "" || status.PrerequisiteRef != "" {
+		t.Fatalf("lsp_status validation surface = %+v, want ready empty-input binding", status)
 	}
 }
 
@@ -1148,6 +1191,7 @@ func newMCPService(t *testing.T, server mcpmodel.Server) serverGetter {
 			Kind: mcpmodel.CapabilityKindTool, Name: tool, Enabled: true,
 			EffectScope:      string(runtimecontract.RuntimeEffectNone),
 			IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+			Schema:           workorcheventpayload.New(workorcheventpayload.StringField("type", "object")),
 		})
 	}
 	return staticMCPServerGetter{server: &server, capabilities: capabilities}

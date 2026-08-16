@@ -121,7 +121,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   未观察的合同值。声明了 managed-validation recipe 时，SM-2 必须先取得 File owner 的 manifest/observation，再把
   immutable binding 交给 Shell owner；Shell catalog 只发布对该 manifest 当前适用的 recipe，并依赖 exact File
   workspace-tree revision。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
-  Orchestrator 不检查文件名、不判断 recipe 适用性。SM-3 只请求/校验逐 CWI 的无副作用 proposal；SM-2 通过唯一 typed
+  Orchestrator 不检查文件名、不判断 recipe 适用性。MCP 等动态 owner 同时发布 callable capability 与 typed
+  `RuntimeValidationSurface`；只有带 owner-sealed input binding、non-durable effect 和
+  safe-to-replay class 的 `ready` surface 可进入 `ValidationRecipeRefs`。`prerequisite_required`/`unavailable` 只保留在
+  aggregate/audit，不进入 provider C3/schema/correction，Orchestrator 不解析 schema 或合成输入。SM-3 只请求/校验逐
+  CWI 的无副作用 proposal；SM-2 通过唯一 typed
   `runtime-semantic/probe-proof-feasibility` command 按 canonical owner 投递完整 batch，File/Shell/MCP/Git/Web/SSH
   只返回绑定 manifest/seed/proposal/catalog revision 的 factual feasibility，
   只有 SM-2 private internal event 能封存 `CoverageEvidenceBinding` 与 reconciliation binding set。semantic-plan
@@ -353,6 +357,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   资源回滚重现旧 catalog hash 时可由新 logical request 开启独立 generation。duplicate generation 不写 CAS，预算耗尽才以原始 owner
   diagnostic 执行 `semantic_contract_failed`。上述处理不新增 phase、不消费 candidate correction，也不创建
   Decision/Approval。
+- catalog acquisition 阶段的 validation-surface `prerequisite_required` 是 capability owner 的 readiness fact，不是上述
+  semantic-feasibility transition：它不打开 request、不调 provider/endpoint、不增加 attempt/revision budget，只从
+  provider-selectable recipe set 中移除该 identity。若存在 ready alternative，后续 planning 继续使用同一 canonical
+  catalog；没有合法 proof alternative 时才由既有 SM-2/SM-3 bounded fail-closed 规则终结。未来若自动获取输入，必须
+  先由对应 owner 新增 concrete typed acquisition command/result，不能由 Orchestrator 或 LLM 猜参数。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。Result 强制绑定 workspace/run/resolution scope，并保留正交的 `committed | stale_diagnostic | duplicate` CAS 提交事实；它不携带自由文本 diagnostic/reason/failure，也不得由 convergence state 猜测提交事实。
 - Decision owner 可通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Orchestrator 从 persisted binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
 - governed dispatch 通过 `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner 创建确定性 ticket；ticket、snapshot、dispatch 与 dependency 的绑定随 Runtime aggregate 持久化。

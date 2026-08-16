@@ -59,6 +59,9 @@ Application builds typed RuntimeBootstrap
   revision/baseHash 的 `file/edit` 或 `patch/apply` replacement。
 - workspace-sensitive validation catalog 由 SM-2 先绑定 File manifest revision，再由 Shell owner 过滤当前适用 recipe；
   空 recipe set 不向 semantic provider 暴露 `validation/managed_session`，后续 File tree effect 会精确退休该 catalog。
+- dynamic capability catalog 区分 callable operation 与 validation readiness；MCP required-input tool 仍可被合法 operation
+  调用，但在 owner 尚无 sealed input binding 时只记录 `prerequisite_required` surface，不进入 semantic provider 的
+  recipe enum/C3。LLM projection 不暴露 non-ready identity、owner-private binding/schema/effect 或 executable recipe 内容。
 - terminal closeout 只汇总当前 unsatisfied CWI 的 canonical gap，top failure 以当前 `Facts.Failure` 为先；已满足 CWI 的
   producer claimed gap 只属于 assessment audit。
 - raw candidate CWI、assessment claim、文件存在、Git revision、exit 0 和非空 `PassedChecks` 都不是 credit authority。
