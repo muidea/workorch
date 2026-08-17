@@ -687,11 +687,12 @@ grep '"displayName": "资源 workspace://verification-context"' "$TMP_DIR/mcp-re
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=verification" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
 grep '"displayName": "提示词 workorch.verification-context"' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
 put_json "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
-  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","schema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"enabled":true,"approvalPolicy":"operator"}' \
+  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","effectScope":"none","idempotencyClass":"safe_to_replay","validationProofApplicability":"direct","schema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"enabled":true,"approvalPolicy":"operator"}' \
   "$TMP_DIR/mcp-capability-updated.json"
 grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
 grep '"effectScope": "none"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
 grep '"idempotencyClass": "safe_to_replay"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
+grep '"validationProofApplicability": "direct"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
 get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81%E4%BB%93%E5%BA%93&stage=execution&riskLevel=read_only&enabled=true&q=stdio" "$TMP_DIR/mcp-capabilities-filtered.json"
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
