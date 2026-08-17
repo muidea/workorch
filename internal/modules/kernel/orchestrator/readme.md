@@ -294,7 +294,11 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   转为 `reopened`、清除 current binding、更新 reconciliation，并以 `assessment_owner_fact_postcondition_unmet` lineage
   退休当前 semantic generation；SM-4 只从该 aggregate 幂等 re-drive。若 sealed proof 本身仍缺失，则保持普通
   evidence/repair 主线，不得误触发 semantic replan。同 CWI owner-fact replan 由 `MaxRepairAttemptsPerFocus` 有界，耗尽
-  后 deterministic `owner_fact_convergence_exhausted`；duplicate/restart 不产生第二次 reopen/CAS/request/effect。
+  后 deterministic `owner_fact_convergence_exhausted`；duplicate/restart 不产生第二次 reopen/CAS/request/effect。CWI 重开后
+  固定回到 `semantic-pending/<cwi>`；若该 current-focus prerequisite ID 已由上一 semantic generation 退休，SM-2 必须在
+  重新排入 acquisition 前原子移出同 ID 的 retired prerequisite 及其旧 observation，只保留无关 retired lineage。旧
+  observation 不得复用为当前 authority，审计继续由 CWI reopen lineage 与 semantic generation history 承载，且
+  active/retired 不相交 invariant 不得放宽。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - drive failure 经 `classifyRuntimeDriveFailure` 分类：只有携带 expected/observed revision 的 `RuntimeCASConflictError` 才进入 CAS reload；owner-transient/projection 不终态化业务 Run，语义 conflict 不得消耗 CAS budget。

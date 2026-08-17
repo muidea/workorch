@@ -366,8 +366,11 @@ func ValidateRuntimeFailureTargetObservationBinding(failure FailureFact) error {
 type PrerequisiteState struct {
 	Pending   []RuntimePrerequisite
 	Satisfied []RuntimePrerequisite
-	// Retired keeps completed Focus-scoped prerequisite identities for audit.
-	// It is excluded from reducer, freshness and authority inputs.
+	// Retired keeps completed Focus-scoped prerequisite identities outside
+	// reducer, freshness and authority inputs. When a bounded CWI reopen returns
+	// to its canonical semantic-pending identity, Orchestrator may atomically
+	// remove the same identity before reacquisition; immutable audit for that
+	// generation remains in the CWI reopen and semantic-generation histories.
 	Retired []RuntimePrerequisite
 }
 
@@ -577,8 +580,10 @@ type RuntimeResourceFacts struct {
 	// revisions they observed. They are additional freshness metadata, not a
 	// replacement for the typed facts above.
 	PrerequisiteObservations []RuntimePrerequisiteObservation
-	// RetiredPrerequisiteObservations are lineage only and must never be
-	// invalidated, reacquired or used to build current authority.
+	// RetiredPrerequisiteObservations are lineage only and must never be used to
+	// build current authority. Orchestrator discards the old observation when a
+	// bounded CWI reopen atomically reactivates its canonical pending
+	// prerequisite identity; the observation itself is never reused.
 	RetiredPrerequisiteObservations []RuntimePrerequisiteObservation
 }
 

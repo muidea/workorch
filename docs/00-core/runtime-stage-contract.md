@@ -459,7 +459,10 @@ load facts
   semantic generation。旧 binding/receipt/evidence/assessment 只保留 audit；SM-4 随后从同一 aggregate 幂等驱动新
   semantic generation。普通 evidence gap 不得伪装为 owner-fact gap；同 CWI 重规划次数使用封存的
   `MaxRepairAttemptsPerFocus` 有界，耗尽后以 `owner_fact_convergence_exhausted` fail-closed。duplicate/restart 不重复
-  reopen、request、effect 或预算扣减。
+  reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与
+  上一 generation 已退休 prerequisite 使用同一 canonical ID 时，SM-2 必须在排入 pending 前原子移出该 retired ID 及其
+  旧 observation，且不得复用旧 observation。无关 retired lineage 必须保留，审计由 CWI reopen lineage 与 semantic
+  generation history 持续承载，active/retired 不相交 invariant 保持严格成立。
 - terminal `RuntimeResultCloseout` 以 canonical coverage ledger 为 closure authority。只有 canonical non-satisfied
   assessment/active gap 与当前 unsatisfied CWI 的交集可进入结构化 gap；producer 的 claimed disposition 或已满足 CWI
   的历史 gap 只能保留为 audit。top failure 依次使用 current `Facts.Failure`、current active/formal gap、terminal

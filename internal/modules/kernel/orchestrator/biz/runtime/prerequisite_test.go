@@ -180,6 +180,103 @@ func TestPreflightRuntimeFactsReacquiresFailureTargetWhenTypedFailureChanges(t *
 	}
 }
 
+func TestReduceRuntimeStateWithDirectiveReactivatesRetiredCanonicalPendingFocusPrerequisite(t *testing.T) {
+	facts := validationFacts()
+	facts.Focus = runtimecontract.CoverageFocus{
+		ID:                       "semantic-pending/cwi-1",
+		CoverageWorkItemIDs:      []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindStateChange},
+		TargetRole:               "semantic_proof_target",
+		TargetSelectorRef:        "workspace-relative-new-file-target",
+		TargetSelectorOwnerRef:   runtimecontract.RuntimeModuleFile,
+		TargetSelectorSubjectRef: "workspace_deliverable",
+		ProspectiveTargetRef:     "mcp-config.json",
+		RequireTargetGrounding:   true,
+	}
+	facts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
+	facts.Coverage[0].ReopenLineage = []runtimecontract.RuntimeCWIReopenLineage{{Reason: "assessment_owner_fact_postcondition_unmet"}}
+	requirement := focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: facts.Focus.TargetRole, TargetSelectorRef: facts.Focus.TargetSelectorRef,
+		TargetSelectorOwnerRef: facts.Focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: facts.Focus.TargetSelectorSubjectRef,
+		ProspectiveTargetRef: facts.Focus.ProspectiveTargetRef, Reason: "prospective File target requires owner target selection",
+	})
+
+	prepared := PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{requirement})
+	if len(prepared.Prerequisites.Pending) != 1 {
+		t.Fatalf("initial pending prerequisite = %+v, want one target selection", prepared.Prerequisites.Pending)
+	}
+	retired := prepared.Prerequisites.Pending[0]
+	retiredObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: retired.ID, Kind: retired.Kind, OwnerModuleID: retired.OwnerModuleID,
+		ContentHash: "selection-old", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: "tree-old",
+		}},
+	}
+	retiredObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(retiredObservation)
+	unrelated := runtimecontract.RuntimePrerequisite{
+		ID: "target_selection:focus:completed-focus:blocks/file:unrelated", Kind: runtimecontract.PrerequisiteKindTargetSelection,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "completed-focus", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		Reason: "unrelated completed focus lineage",
+	}
+	unrelatedObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: unrelated.ID, Kind: unrelated.Kind, OwnerModuleID: unrelated.OwnerModuleID,
+		ContentHash: "selection-unrelated", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: "tree-unrelated",
+		}},
+	}
+	unrelatedObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(unrelatedObservation)
+	prepared.Prerequisites.Pending = nil
+	prepared.Prerequisites.Retired = []runtimecontract.RuntimePrerequisite{retired, unrelated}
+	prepared.Resources.RetiredPrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{retiredObservation, unrelatedObservation}
+	if err := prepared.Validate(); err != nil {
+		t.Fatalf("restart fixture is invalid: %v", err)
+	}
+
+	reactivated, decision, err := ReduceRuntimeStateWithDirective(prepared, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
+		t.Fatalf("reactivation decision = %+v, want prerequisite acquisition", decision)
+	}
+	if len(reactivated.Prerequisites.Pending) != 1 || reactivated.Prerequisites.Pending[0].ID != retired.ID {
+		t.Fatalf("canonical pending prerequisite was not reactivated exactly once: %+v", reactivated.Prerequisites.Pending)
+	}
+	if len(reactivated.Prerequisites.Retired) != 1 || reactivated.Prerequisites.Retired[0].ID != unrelated.ID {
+		t.Fatalf("reactivation did not preserve unrelated retired lineage: %+v", reactivated.Prerequisites.Retired)
+	}
+	if len(reactivated.Resources.RetiredPrerequisiteObservations) != 1 || reactivated.Resources.RetiredPrerequisiteObservations[0].ObservationID != unrelatedObservation.ObservationID {
+		t.Fatalf("reactivation did not discard only the superseded owner observation: %+v", reactivated.Resources.RetiredPrerequisiteObservations)
+	}
+	if err := reactivated.Validate(); err != nil {
+		t.Fatalf("reactivated facts are invalid: %v", err)
+	}
+
+	replayed := PreflightRuntimeFacts(reactivated, []runtimecontract.RuntimeRequirement{requirement})
+	if len(replayed.Prerequisites.Pending) != 1 || replayed.Prerequisites.Pending[0].ID != retired.ID ||
+		len(replayed.Prerequisites.Retired) != 1 || replayed.Prerequisites.Retired[0].ID != unrelated.ID ||
+		len(replayed.Resources.RetiredPrerequisiteObservations) != 1 || replayed.Resources.RetiredPrerequisiteObservations[0].ObservationID != unrelatedObservation.ObservationID {
+		t.Fatalf("duplicate SM-4 preflight changed reactivation authority: %+v", replayed)
+	}
+	if err := replayed.Validate(); err != nil {
+		t.Fatalf("replayed reactivation facts are invalid: %v", err)
+	}
+
+	malformed := prepared
+	malformed.Prerequisites.Retired = append([]runtimecontract.RuntimePrerequisite(nil), prepared.Prerequisites.Retired...)
+	for index := range malformed.Prerequisites.Retired {
+		if malformed.Prerequisites.Retired[index].ID == retired.ID {
+			malformed.Prerequisites.Retired[index].SubjectRef = "tampered-semantic-proof-target"
+		}
+	}
+	if _, _, err := ReduceRuntimeStateWithDirective(malformed, nil); err == nil {
+		t.Fatal("malformed retired prerequisite was hidden by canonical pending reactivation")
+	}
+}
+
 func TestCommitPrerequisiteResultRejectsFailureTargetOutsideCurrentTypedFailure(t *testing.T) {
 	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
 	facts := runtimecontract.RuntimeFacts{

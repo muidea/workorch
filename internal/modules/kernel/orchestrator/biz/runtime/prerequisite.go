@@ -60,8 +60,7 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 		// reconciliation after a delayed Focus result). A prerequisite cannot
 		// assert both "satisfied" and "must be acquired" in the same SM-2
 		// authority. Remove the stale satisfaction and its active observation
-		// before scheduling the replacement; retired lineage is reserved for a
-		// completed Focus and must not be abused for current-Focus reacquisition.
+		// before scheduling the replacement.
 		satisfied := make([]runtimecontract.RuntimePrerequisite, 0, len(facts.Prerequisites.Satisfied))
 		for _, prerequisite := range facts.Prerequisites.Satisfied {
 			if _, stale := reacquiring[prerequisite.ID]; stale {
@@ -88,9 +87,74 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 				break
 			}
 		}
+		facts = reactivateReopenedPendingFocusPrerequisites(facts, reacquiring)
 	}
 	facts.Prerequisites.Pending = pending
 	return facts.Normalized()
+}
+
+// reactivateReopenedPendingFocusPrerequisites handles the one bounded case in
+// which a retired prerequisite identity can become current again. A reopened
+// CWI deliberately returns to the stable semantic-pending/<cwi> focus identity;
+// therefore a focus-scoped prerequisite acquired by an earlier semantic
+// generation can have the exact ID needed by the new generation. SM-2 removes
+// that ID and its old owner observation from the retired current collection
+// before scheduling acquisition. Immutable audit remains in the CWI reopen and
+// semantic-generation histories; the old observation must not become authority
+// for the reopened generation.
+func reactivateReopenedPendingFocusPrerequisites(facts runtimecontract.RuntimeFacts, reacquiring map[string]struct{}) runtimecontract.RuntimeFacts {
+	if len(reacquiring) == 0 || len(facts.Focus.CoverageWorkItemIDs) != 1 ||
+		facts.Focus.ID != "semantic-pending/"+string(facts.Focus.CoverageWorkItemIDs[0]) {
+		return facts
+	}
+	coverageID := facts.Focus.CoverageWorkItemIDs[0]
+	reopened := false
+	for _, item := range facts.Coverage {
+		if item.ID == coverageID && item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened && len(item.ReopenLineage) != 0 {
+			reopened = true
+			break
+		}
+	}
+	if !reopened {
+		return facts
+	}
+
+	reactivated := make(map[string]struct{})
+	retired := make([]runtimecontract.RuntimePrerequisite, 0, len(facts.Prerequisites.Retired))
+	for _, prerequisite := range facts.Prerequisites.Retired {
+		_, currentRequirement := reacquiring[prerequisite.ID]
+		if currentRequirement && prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus && prerequisite.FocusID == facts.Focus.ID &&
+			prerequisite.ID == runtimePrerequisiteCanonicalID(prerequisite) {
+			reactivated[prerequisite.ID] = struct{}{}
+			continue
+		}
+		retired = append(retired, prerequisite)
+	}
+	if len(reactivated) == 0 {
+		return facts
+	}
+	facts.Prerequisites.Retired = retired
+	retiredObservations := make([]runtimecontract.RuntimePrerequisiteObservation, 0, len(facts.Resources.RetiredPrerequisiteObservations))
+	for _, observation := range facts.Resources.RetiredPrerequisiteObservations {
+		if _, currentRequirement := reactivated[observation.PrerequisiteID]; currentRequirement {
+			continue
+		}
+		retiredObservations = append(retiredObservations, observation)
+	}
+	facts.Resources.RetiredPrerequisiteObservations = retiredObservations
+	return facts
+}
+
+func runtimePrerequisiteCanonicalID(prerequisite runtimecontract.RuntimePrerequisite) string {
+	return runtimePrerequisiteID(runtimecontract.RuntimeRequirement{
+		Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
+		OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
+		TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs,
+		ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, CapabilityClass: prerequisite.CapabilityClass,
+		RequiredCapabilities: prerequisite.RequiredCapabilities, CapabilityStateKind: prerequisite.CapabilityStateKind,
+		MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,
+	})
 }
 
 // runtimeRequirementsWithShellValidationManifest seals the resource
