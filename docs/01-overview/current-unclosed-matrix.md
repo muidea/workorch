@@ -15,11 +15,13 @@ Last Verified: 2026-08-17
 
 | ID | 状态 | 范围 | Exit |
 | --- | --- | --- | --- |
+| WGSC | open / code closure | 大量 Goal/DoD、semantic dependency、CWI scheduling、stable Definition partition | Workspace owner唯一持久化item lifecycle/disposition；Workorchd静态编译graph/gate/partition；SM-2按语义关系而非序号/ID封存schedule、gate witness和ready projection；删除provider全量coverage-order；C1 partition与C5/focus budget分离；1,000-CWI、Resume/Restart和fresh-data live矩阵通过 |
 | RUNTIME-LIVE | open / deployed-only | fresh development data、真实 provider、Runtime persisted chain | semantic seal、CandidateAttempt、SealedDispatch、owner receipt、binding-matched evidence、existing-target revision-bound replacement、manifest-bound recipe applicability、后续 eligible CWI、authoritative closeout、sealed terminal 与 `Result -> Workspace -> Run` delivery 全部成立 |
 | WRE-LIVE | open / deployed-only | Workspace model/reasoning selection | Web/TUI、Resume sealed selection、Restart fresh selection、active configuration restartRequired、双 Workspace 隔离全部成立 |
 
 实施文档：
 
+- [Workspace Goal/DoD Global Semantic Convergence](../70-roadmap/active/workspace-goal-dod-global-semantic-convergence-closure-plan.md)
 - [Runtime Positive-Convergence Live Closure](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)
 - [Workspace Reasoning Effort Deployed Verification](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)
 

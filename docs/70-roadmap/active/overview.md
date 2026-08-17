@@ -4,7 +4,7 @@ Status: active
 
 Type: roadmap-index
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## Purpose
 
@@ -15,6 +15,7 @@ Last Verified: 2026-08-16
 
 | ID | 状态 | 唯一目标 | Plan |
 | --- | --- | --- | --- |
+| WGSC | open / code closure | 将大量 Goal/DoD 编译为唯一语义依赖图与稳定 Definition partition，由 SM-2 在不使用序号/ID 业务排序、C1 不随同 partition focus 漂移的前提下持续推进 CWI | [Workspace Goal/DoD Global Semantic Convergence](workspace-goal-dod-global-semantic-convergence-closure-plan.md) |
 | RUNTIME-LIVE | deployed verification pending | 在 fresh development data 与真实 provider 上证明 semantic seal、candidate/dispatch、owner receipt/evidence、existing-target revision-bound replacement、后续 CWI 与 terminal delivery 持续收敛 | [Runtime Positive-Convergence Live Closure](runtime-single-owner-model-capability-output-closure-plan.md) |
 | WRE-LIVE | deployed verification pending | 证明 Workspace model/reasoning selection 在 Web/TUI、Resume/Restart、active configuration 和双 Workspace 间保持单 Owner | [Workspace Reasoning Effort Deployed Verification](workspace-reasoning-effort-single-owner-closure-plan.md) |
 

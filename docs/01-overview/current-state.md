@@ -120,7 +120,8 @@ Runtime aggregate 只支持一个 current development baseline，不维护历史
 - 正式资源只由对应 Owner repository 写入；projection store 是可重建读模型，EventRecord 是审计流。
 - Workspace scope 绑定在每次 EventHub context；组件实例、全局 cache 和后台任务不得保存可被静默切换的
   “current workspace”。
-- 普通 Workspace setup 只要求 Template、Goal、DoD 和 workspace directory，不要求用户提交 Runtime JSON。
+- 普通 Workspace setup 的必填业务输入只有 Template、Goal、DoD；workspace directory 输入可选，空值解析为
+  `.workorch-workspaces/<workspace-id>`，且不要求用户提交 Runtime JSON。
 
 ## Explicitly Not Current
 
@@ -136,11 +137,14 @@ Active default prompt、verifier/example 和 container packaging 已对齐当前
 
 ## Open Work
 
-当前保留两个未关队列：
+当前保留三个未关队列：
 
-1. [Runtime positive-convergence live closure](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)：
+1. [Workspace Goal/DoD global semantic convergence](../70-roadmap/active/workspace-goal-dod-global-semantic-convergence-closure-plan.md)：
+   大量 Definition 的 semantic dependency、非序号/ID 排序、immutable C1 partition、bounded C5/focus 和全局 CWI
+   持续收敛代码收口。
+2. [Runtime positive-convergence live closure](../70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)：
    fresh-data real-provider persisted chain、existing-target revision-bound replacement、后续 CWI 推进和 terminal delivery。
-2. [Workspace reasoning effort deployed verification](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)：
+3. [Workspace reasoning effort deployed verification](../70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)：
    Web/TUI、Resume/Restart、active configuration 和双 Workspace 隔离。
 
 完整未关矩阵见 [current-unclosed-matrix.md](current-unclosed-matrix.md)。

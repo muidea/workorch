@@ -4,7 +4,7 @@ Status: active
 
 Type: product-requirements
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## Product Positioning
 
@@ -18,7 +18,8 @@ WorkOrch 是 local-first 的长期任务编排服务。用户为 Workspace 定�
 - Goal 与 DoD 是 Workspace owner 管理的正式定义，不是临时 prompt 字段。
 - 每个 Run 必须绑定不可变的 definition revision 与 typed `RuntimeBootstrap`。
 - 完成必须由 accepted evidence、coverage 与 assessment 支持，不能依赖模型自述。
-- 正常 Workspace 设置只要求模板、Goal、DoD 和目录；不要求用户编写 raw context/evidence JSON。
+- 正常 Workspace 设置的必填业务输入只有模板、Goal 和 DoD；目录输入可选，空值必须解析为
+  `.workorch-workspaces/<workspace-id>`。不要求用户编写 raw context/evidence JSON。
 
 ### Long-Running And Recoverable Execution
 

@@ -4,7 +4,7 @@ Status: active
 
 Type: documentation-index
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## Purpose
 
@@ -83,7 +83,8 @@ profile/capability → 产品接口 → 验证 → 未关工作”组织；历�
   [verification overview](60-verification/overview.md)、
   [runtime-owner-convergence-matrix.md](60-verification/runtime-owner-convergence-matrix.md)、
   [service-acceptance.md](60-verification/service-acceptance.md)。
-- 当前 live 工作：
+- 当前未关工作：
+  [Workspace Goal/DoD global semantic convergence](70-roadmap/active/workspace-goal-dod-global-semantic-convergence-closure-plan.md)、
   [Runtime positive convergence](70-roadmap/active/runtime-single-owner-model-capability-output-closure-plan.md)、
   [Workspace reasoning effort](70-roadmap/active/workspace-reasoning-effort-single-owner-closure-plan.md)。
 
