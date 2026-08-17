@@ -11,8 +11,8 @@ import (
 // complete semantic document plus matching owner facts to immutable focus
 // bindings and a reconciliation contract. It does not mutate an aggregate or
 // choose a Runtime action; only the SM-2 reducer may persist its output.
-func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
-	return CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, feasibilities, nil)
+func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
+	return CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, logicalRequestID, document, feasibilities, nil)
 }
 
 // CompileRuntimeSemanticBindingsWithSourceFocuses compiles one complete
@@ -20,9 +20,13 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, docume
 // eligible CWI rows. Semantic proposals choose only within the sealed
 // manifest; a previous generation's focus/binding must never be supplied as a
 // source declaration.
-func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility, sourceFocuses []CoverageFocus) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
+func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPlanManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility, sourceFocuses []CoverageFocus) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest = manifest.Normalized()
 	document = document.Normalized()
+	generationID := StableRuntimeSemanticGenerationID(manifest.Hash, logicalRequestID)
+	if generationID == "" {
+		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding requires manifest and logical-request generation identity")
+	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
@@ -72,7 +76,7 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
-		focus, err := compileRuntimeSemanticFocus(manifest, item, proofSet, proofFacts, source)
+		focus, err := compileRuntimeSemanticFocus(manifest, generationID, item, proofSet, proofFacts, source)
 		if err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
@@ -176,19 +180,19 @@ func validateRuntimeSemanticProofSetSource(proofSet RuntimeSemanticCWIProofSet, 
 	return nil
 }
 
-func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus) (CoverageFocus, error) {
+func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus) (CoverageFocus, error) {
 	manifest = manifest.Normalized()
 	proofSetHash := StableRuntimeSemanticCWIProofSetHash(proofSet.CoverageWorkItemID, proofSet.Proposals)
 	idSuffix := strings.TrimPrefix(proofSetHash, "runtime-semantic-cwi-proof-set-")
-	manifestSuffix := strings.TrimPrefix(strings.TrimSpace(manifest.Hash), "runtime-semantic-manifest-")
-	if manifestSuffix == "" {
-		return CoverageFocus{}, fmt.Errorf("runtime semantic focus requires a manifest generation identity")
+	generationSuffix := strings.TrimPrefix(strings.TrimSpace(generationID), "runtime-semantic-generation-")
+	if generationSuffix == "" {
+		return CoverageFocus{}, fmt.Errorf("runtime semantic focus requires an exact semantic generation identity")
 	}
 	// The proposal set is CWI-scoped. A generation-specific focus/binding ID
 	// therefore cannot be reused after catalog re-acquisition, even when every
 	// provider proof text happens to be identical.
-	focusID := "semantic-focus-" + idSuffix + "-" + manifestSuffix
-	bindingID := "semantic-binding-" + idSuffix + "-" + manifestSuffix
+	focusID := "semantic-focus-" + idSuffix + "-" + generationSuffix
+	bindingID := "semantic-binding-" + idSuffix + "-" + generationSuffix
 
 	proofs := make([]CoverageEvidenceProof, 0, len(proofSet.Proposals))
 	acceptedKinds := make([]string, 0, len(proofSet.Proposals))

@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## 功能说明
 
@@ -18,9 +18,10 @@ Last Verified: 2026-08-16
   均使用 Shell owner 定义的 concrete typed command/result。
 - 对 profile 明确声明的 managed-validation recipe，SM-2 只通过 typed request 转交 File owner 已持久化的
   `WorkspaceManifest + prerequisite observation`。Shell owner 在自己的 adapter 内判断 recipe 对该 manifest 是否当前
-  可执行，并且只把确认后且可作为直接证明的 recipe 以 `ready + direct` surface 发布到 provider-selectable catalog；
-  例如 `go test` 在没有非排除 `*_test.go` 时不会被
-  宣告为当前可用。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
+  可执行，并为每个声明 recipe 发布 `ready | prerequisite_required | unavailable` factual surface。只有确认后且可作为
+  直接证明的 recipe 才以 `ready + direct` 进入 provider-selectable catalog；例如 `go test` 在没有非排除
+  `*_test.go` 时发布带稳定 prerequisite ref 的 `prerequisite_required`，而不是丢失该 Owner fact。静态 executable/policy
+  不可用时发布 `unavailable`。Shell 不读取 File service/repository，也不取得 workspace tree 所有权。
 - workspace-sensitive Shell catalog 的 observation 必须依赖该 File manifest 的 exact workspace-tree revision；后续
   File receipt 改变该 revision 时，SM-2 仅按依赖交集退休并重获 catalog。该 freshness lineage 不允许 Shell 修改
   Manifest、CWI 或 Runtime 状态。
@@ -51,5 +52,6 @@ Last Verified: 2026-08-16
   空 TODO test 扇出为多个 CWI 的 semantic proof。非工具原生检查必须由封存 recipe 在 stdout/stderr 输出
   `WORKORCH_CHECK_PASSED=<check-ref>`（或对应 `FAILED`/`SKIPPED`）行，由 Shell owner 解析为结构化事实；
   candidate 不能直接提交这些标记或 check ref。
-- 无当前适用 recipe 时，Shell 返回空的 confirmed recipe set；它不得保留静态 profile recipe、选择 File preparation
-  变更、请求 correction，或把 feasibility rejection 解释为新的 retry/terminal 状态。
+- 无当前适用 recipe 时，Shell 返回空的 confirmed recipe set，同时在同一 catalog 保留声明 recipe 的
+  `prerequisite_required`/`unavailable` surface 供 aggregate/audit 使用；它不得把这些 surface 加入 provider-selectable
+  refs、选择 File preparation 变更、请求 correction，或把 feasibility rejection 解释为新的 retry/terminal 状态。

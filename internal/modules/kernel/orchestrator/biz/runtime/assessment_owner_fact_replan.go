@@ -60,6 +60,11 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	if len(item.ReopenLineage) >= runtimecontract.RuntimeCWIReopenLineageLimit {
 		return false, fmt.Errorf("runtime CWI reopen lineage exceeds bounded limit %d", runtimecontract.RuntimeCWIReopenLineageLimit)
 	}
+	// The owner-fact postcondition proves that an accepted state-change shape did
+	// not close this CWI. Preserve only those exact shapes across the successor
+	// semantic focus; attempts, gap text and directives remain focus-local and
+	// are reset by the canonical projection transition.
+	carriedRepair := recordAcceptedNoProgressShapes(*aggregate, facts.Repair, runtimeCWIReopenReasonOwnerFactPostcondition)
 	item.ReopenLineage = append(item.ReopenLineage, lineage)
 	item.CurrentBindingRef = nil
 	item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
@@ -69,6 +74,10 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	if err != nil {
 		return false, err
 	}
+	updated.Repair.FocusID = updated.Focus.ID
+	updated.Repair.SliceID = updated.Focus.SliceID
+	updated.Repair.NoProgressOperationShapes = append([]runtimecontract.RuntimeRejectedOperationShape(nil), carriedRepair.NoProgressOperationShapes...)
+	updated.Repair = updated.Repair.Normalized()
 	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
 	if err != nil {
 		return false, err

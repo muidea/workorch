@@ -4,7 +4,7 @@ Status: active
 
 Type: current-work-index
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## Purpose
 
@@ -29,15 +29,18 @@ Last Verified: 2026-08-16
 
 - SM-1 Run owner、SM-2/3/4 Orchestrator owner、Workspace/Result owner-local terminal transition；
 - one `ApplyInternalEvent` mutation entry、one aggregate CAS coordinator、bounded drive/singleflight；
-- Definition declaration/generation、eligible CWI closure、semantic order/batch/seal identity；
+- Definition declaration/generation、eligible CWI closure、semantic order/batch/seal identity；focus/binding identity 同时绑定
+  `manifestHash + logicalRequestID`，历史 reopened/retired binding 不可重新成为 current；
 - single CandidateEvaluator、attempt 0/1、owner feasibility orthogonality；
 - File create-only write 与 revision-bound existing-target replacement；
-- File manifest-bound Shell recipe applicability、空 recipe semantic filtering 与 exact tree-revision invalidation；
+- File manifest-bound Shell recipe applicability、完整 ready/prerequisite-required/unavailable surface、空 confirmed recipe
+  semantic filtering 与 exact tree-revision invalidation；
 - callable capability、validation surface readiness 与 proof applicability 分离；required-input MCP recipe 保留 typed
   prerequisite audit、零 endpoint side effect，ready auxiliary surface 也不得关闭 CWI；只有 `ready + direct` 进入 provider
   schema/C3/correction，readiness/applicability/schema/binding 变化进入 catalog snapshot identity；
 - profile owner-fact postcondition 只由 current capability catalog 满足；Workorchd 只编译、capability owner 只发布事实、
-  Orchestrator SM-2 只在其余 proof 完整时判定/有界重开，assessment claim 不得越权关闭；
+  Orchestrator SM-2 只在其余 proof 完整时判定/有界重开，assessment claim 不得越权关闭；accepted no-progress operation
+  shape 跨同一 CWI successor focus 保留，SM-3 在第二次副作用前拒绝重放；
 - current-generation bound CWI 可保留在 effect-fenced focus queue，但不得重新进入 planning；duplicate/restart 零 CAS，
   stale manifest/binding/prerequisite 继续 fail-closed；
 - Result closeout 仅保留 current unsatisfied canonical gap，当前 `Facts.Failure` 优先于历史 claimed gap；

@@ -23,8 +23,11 @@ func TestRejectedShapeReplayDistinguishesFullAndPartialReplay(t *testing.T) {
 }
 
 func TestNoProgressAndSemanticReplayArePureShapeFences(t *testing.T) {
-	operation := runtimecontract.RuntimeOperation{ID: "write", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"main.go"}}
-	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}}
+	operation := runtimecontract.RuntimeOperation{ID: "write", Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{"binding-generation-1"}, TargetRefs: []string{"main.go"}}
+	successor := operation
+	successor.ID = "write-successor"
+	successor.BindingRefs = []string{"binding-generation-2"}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: successor}}}}
 	shape := runtimecontract.RuntimeRejectedOperationShape{Operation: operation}
 	if finding, ok := NoProgressReplay(candidate, []runtimecontract.RuntimeRejectedOperationShape{shape}); !ok || finding.Code != CodeNoProgressShape {
 		t.Fatalf("no-progress replay = %+v/%t", finding, ok)

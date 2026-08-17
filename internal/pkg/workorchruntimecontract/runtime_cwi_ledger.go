@@ -511,7 +511,8 @@ func validateRuntimeCWIItem(item RuntimeCoverageItemFact, focus CoverageFocus, b
 		if err := reopen.Validate(); err != nil {
 			return fmt.Errorf("reopen lineage: %w", err)
 		}
-		if _, found := lineage[reopen.PreviousBindingRef.BindingID]; !found {
+		historical, found := lineage[reopen.PreviousBindingRef.BindingID]
+		if !found || !SameRuntimeCWIBindingRef(historical, reopen.PreviousBindingRef) {
 			return fmt.Errorf("reopen lineage references a binding outside binding lineage")
 		}
 		if _, duplicate := seenReopenedBindings[reopen.PreviousBindingRef.BindingID]; duplicate {
@@ -559,6 +560,9 @@ func validateRuntimeCWIItem(item RuntimeCoverageItemFact, focus CoverageFocus, b
 		}
 		if _, retired := seenRetiredBindings[current.BindingID]; retired {
 			return fmt.Errorf("current binding is already retired")
+		}
+		if _, reopened := seenReopenedBindings[current.BindingID]; reopened {
+			return fmt.Errorf("current binding is already reopened")
 		}
 	} else if len(item.BindingLineage) != 0 {
 		latest := item.BindingLineage[len(item.BindingLineage)-1]

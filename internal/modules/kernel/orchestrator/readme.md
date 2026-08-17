@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## 功能说明
 
@@ -45,7 +45,9 @@ CandidateAttempt 或 Runtime transition。
 activation-only `DefinitionFocuses` 与 SM-2 generation-specific focus/binding queue 分开持久化。semantic document
 admission、feasibility merge 与 seal 只读前者的 immutable declaration；receipt/resource-change 触发的 binding retirement、CWI
 reopen 与 reseal 只修改后者，并继续经过 Orchestrator private internal event、controller 与 transition coordinator 的单次 CAS。
-capability owner 只报告资源事实和当前 admissibility，不能请求 CWI/focus 状态。
+focus/binding identity 必须同时绑定该 generation 的 `manifestHash + logicalRequestID`；同 manifest 下的新 logical request
+不得复用旧 focus/binding。`CurrentBindingRef` 不得指向 reopen/retirement lineage 中的历史 binding，reducer 在写入前与
+aggregate validator 在持久化后均 fail-closed。capability owner 只报告资源事实和当前 admissibility，不能请求 CWI/focus 状态。
 
 非当前 aggregate 不原地迁移。Resume/SM-4 load 返回 `fresh_activation_required` 且不调用 LLM/capability owner；
 针对该不兼容 predecessor 的显式 Restart 由 Run owner 返回 `data_reset_required`，不创建 replacement intent，也不要求
@@ -119,8 +121,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   获取的 owner capability/admissibility catalog 编译唯一 semantic-plan manifest；manifest/hash/schema/evaluator
   同时封存 owner snapshot/revision、operation kind、target/selector/constraint 与 recipe vocabulary，禁止 LLM 猜测
   未观察的合同值。声明了 managed-validation recipe 时，SM-2 必须先取得 File owner 的 manifest/observation，再把
-  immutable binding 交给 Shell owner；Shell catalog 只发布对该 manifest 当前适用的 recipe，并依赖 exact File
-  workspace-tree revision。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
+  immutable binding 交给 Shell owner；Shell catalog 对每个声明 recipe 发布 `ready | prerequisite_required | unavailable`
+  factual surface，并依赖 exact File workspace-tree revision；只有对当前 manifest 适用且静态可执行的 recipe 才进入
+  confirmed set。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
   Orchestrator 不检查文件名、不判断 recipe 适用性。MCP 等动态 owner 同时发布 callable capability 与 typed
   `RuntimeValidationSurface`；只有带 owner-sealed input binding、non-durable effect、safe-to-replay class，并由 owner
   显式声明为 `direct` 的 `ready` surface 可进入 `ValidationRecipeRefs`。`auxiliary`/`not_declared`、
@@ -298,7 +301,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   固定回到 `semantic-pending/<cwi>`；若该 current-focus prerequisite ID 已由上一 semantic generation 退休，SM-2 必须在
   重新排入 acquisition 前原子移出同 ID 的 retired prerequisite 及其旧 observation，只保留无关 retired lineage。旧
   observation 不得复用为当前 authority，审计继续由 CWI reopen lineage 与 semantic generation history 承载，且
-  active/retired 不相交 invariant 不得放宽。
+  active/retired 不相交 invariant 不得放宽。导致该 owner-fact gap 的 accepted state-change operation shape 是同一 CWI
+  的防重放事实：SM-2 只把 shape 携带到 successor focus，repair attempt/gap/directive 仍按 focus 清零；SM-3 必须拒绝
+  successor candidate 重放该 shape。新 generation 必须使用新 logical request 派生 focus/binding，历史 reopened binding
+  绝不能重新成为 current。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - drive failure 经 `classifyRuntimeDriveFailure` 分类：只有携带 expected/observed revision 的 `RuntimeCASConflictError` 才进入 CAS reload；owner-transient/projection 不终态化业务 Run，语义 conflict 不得消耗 CAS budget。

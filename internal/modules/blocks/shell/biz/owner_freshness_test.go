@@ -254,13 +254,21 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	if len(response.Acquisition.Admissibility.ValidationRecipes) != 1 || response.Acquisition.Admissibility.ValidationRecipes[0].ID != "confirmed" {
 		t.Fatalf("owner-confirmed recipes = %+v", response.Acquisition.Admissibility.ValidationRecipes)
 	}
-	if len(response.Acquisition.Admissibility.ValidationSurfaces) != 1 {
-		t.Fatalf("owner-confirmed validation surfaces = %+v", response.Acquisition.Admissibility.ValidationSurfaces)
+	if len(response.Acquisition.Admissibility.ValidationSurfaces) != 2 {
+		t.Fatalf("owner validation surfaces = %+v", response.Acquisition.Admissibility.ValidationSurfaces)
 	}
-	surface := response.Acquisition.Admissibility.ValidationSurfaces[0]
+	surface, found := shellValidationSurfaceForTest(response.Acquisition.Admissibility.ValidationSurfaces, "confirmed")
+	if !found {
+		t.Fatalf("owner omitted confirmed validation surface: %+v", response.Acquisition.Admissibility.ValidationSurfaces)
+	}
 	if surface.ID != "confirmed" || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
 		surface.InputBindingRef == "" || !strings.Contains(surface.InputBindingRef, "tree-shell") || surface.PrerequisiteRef != "" {
 		t.Fatalf("owner-confirmed validation surface = %+v", surface)
+	}
+	unavailable, found := shellValidationSurfaceForTest(response.Acquisition.Admissibility.ValidationSurfaces, "unavailable")
+	if !found || unavailable.Readiness != runtimecontract.RuntimeValidationSurfaceUnavailable ||
+		unavailable.ReadinessReason != shellValidationStaticUnavailableReason || unavailable.InputBindingRef != "" || unavailable.PrerequisiteRef != "" {
+		t.Fatalf("owner unavailable validation surface = %+v found=%t", unavailable, found)
 	}
 	if len(response.Acquisition.Admissibility.TargetRefs) != 1 || response.Acquisition.Admissibility.TargetRefs[0] != "validation.txt" {
 		t.Fatalf("owner-confirmed targets = %+v", response.Acquisition.Admissibility.TargetRefs)
@@ -280,6 +288,73 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	if !foundWorkspaceTree {
 		t.Fatalf("owner observation omitted File workspace-tree dependency: %+v", response.Acquisition.Observation)
 	}
+}
+
+func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsReady(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	workspace := t.TempDir()
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "./..."}}
+	acquire := func(prerequisiteID, revision string, targetRefs []string) runtimecontract.RuntimeOperationAdmissibility {
+		t.Helper()
+		command := shellevents.AcquireRuntimeOperationAdmissibilityCommand{
+			WorkspaceID: "ws-shell-prerequisite", RunID: "run-shell-prerequisite", AuthoritySnapshotID: "authority-shell-prerequisite",
+			PrerequisiteID: prerequisiteID, OwnerModuleID: modulecommon.ModuleID,
+			WorkspaceDeliverableDirectory: workspace, RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			RequiredTargetRefs: targetRefs, MaxItems: 8, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+			WorkspaceManifestBinding: shellTestWorkspaceManifestBinding(revision, targetRefs),
+		}
+		result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
+		if result == nil {
+			t.Fatal("Shell owner returned no admissibility result")
+		}
+		data, err := result.Get()
+		if err != nil {
+			t.Fatalf("Shell admissibility: %v", err)
+		}
+		response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
+		if !ok {
+			t.Fatalf("Shell admissibility response = %T", data)
+		}
+		return response.Acquisition.Admissibility
+	}
+
+	waiting := acquire("admissibility-shell-waiting", "tree-without-tests", []string{"main.go"})
+	waitingSurface, found := shellValidationSurfaceForTest(waiting.ValidationSurfaces, recipe.ID)
+	if !found || waitingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
+		waitingSurface.ReadinessReason != shellValidationApplicableInputRequiredReason || waitingSurface.PrerequisiteRef == "" ||
+		waitingSurface.InputBindingRef != "" || len(waiting.ValidationRecipes) != 0 || len(waiting.ValidationRecipeRefs) != 0 {
+		t.Fatalf("manifest-prerequisite validation inventory = %+v surface=%+v found=%t", waiting, waitingSurface, found)
+	}
+
+	ready := acquire("admissibility-shell-ready", "tree-with-tests", []string{"main.go", "main_test.go"})
+	readySurface, found := shellValidationSurfaceForTest(ready.ValidationSurfaces, recipe.ID)
+	if !found || readySurface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
+		!strings.Contains(readySurface.InputBindingRef, "tree-with-tests") || readySurface.PrerequisiteRef != "" ||
+		len(ready.ValidationRecipes) != 1 || len(ready.ValidationRecipeRefs) != 1 || ready.ValidationRecipeRefs[0] != recipe.ID {
+		t.Fatalf("ready validation inventory = %+v surface=%+v found=%t", ready, readySurface, found)
+	}
+	if waiting.SnapshotID == ready.SnapshotID {
+		t.Fatal("validation readiness transition did not change owner snapshot identity")
+	}
+}
+
+func shellValidationSurfaceForTest(values []runtimecontract.RuntimeValidationSurface, id string) (runtimecontract.RuntimeValidationSurface, bool) {
+	for _, value := range values {
+		if value.ID == id {
+			return value, true
+		}
+	}
+	return runtimecontract.RuntimeValidationSurface{}, false
 }
 
 func shellTestWorkspaceManifestBinding(revision string, targetRefs []string) runtimecontract.RuntimeWorkspaceManifestBinding {

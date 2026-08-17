@@ -234,7 +234,7 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot seal while a dispatch is active", common.ErrConflict)
 	}
 	sourceFocuses := aggregate.Facts.DefinitionFocuses
-	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, *ledger.Document, ledger.Feasibilities, sourceFocuses)
+	focuses, _, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities, sourceFocuses)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

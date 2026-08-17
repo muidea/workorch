@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -316,7 +316,9 @@ fail-closed 为 typed terminal。未来若增加 prerequisite acquisition，必�
 candidate attempt。新 catalog revision 必须产生新 manifest/request identity，旧 complete session 只保留 audit；
 generation history 的 identity 是封存的 `manifestHash + logicalRequestID`，所以同一 active generation 内的
 correction/focus request 变化不会制造重复 history，而资源回滚重现旧 catalog hash 时可以用新的 logical request
-建立独立 generation。duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入
+建立独立 generation。该 pair 同时是 semantic focus/binding 的 generation identity；同 manifest 的新 logical request
+必须生成不同 focus/binding ID，而同一 pair 的 restart/replay 必须稳定。duplicate generation 不写 CAS，refresh budget
+耗尽才以原始 owner diagnostic 进入
 `semantic_contract_failed`。
 
 catalog acquisition 已标记的 validation-surface `prerequisite_required` 不进入上述 feasibility transition：正常
@@ -462,7 +464,10 @@ load facts
   reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与
   上一 generation 已退休 prerequisite 使用同一 canonical ID 时，SM-2 必须在排入 pending 前原子移出该 retired ID 及其
   旧 observation，且不得复用旧 observation。无关 retired lineage 必须保留，审计由 CWI reopen lineage 与 semantic
-  generation history 持续承载，active/retired 不相交 invariant 保持严格成立。
+  generation history 持续承载，active/retired 不相交 invariant 保持严格成立。历史 reopened/retired binding 不得再次成为
+  `CurrentBindingRef`。导致 owner-fact gap 的 accepted state-change operation shape 必须作为同一 CWI 的 anti-replay fact
+  跨 successor semantic focus 保留；SM-2 不携带 predecessor repair attempt/gap/directive，SM-3 在 dispatch 前拒绝等价
+  shape，因此新 binding generation 不能重置等价副作用的防重放边界。
 - terminal `RuntimeResultCloseout` 以 canonical coverage ledger 为 closure authority。只有 canonical non-satisfied
   assessment/active gap 与当前 unsatisfied CWI 的交集可进入结构化 gap；producer 的 claimed disposition 或已满足 CWI
   的历史 gap 只能保留为 audit。top failure 依次使用 current `Facts.Failure`、current active/formal gap、terminal

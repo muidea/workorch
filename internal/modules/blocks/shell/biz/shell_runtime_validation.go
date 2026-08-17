@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +12,11 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+const (
+	shellValidationStaticUnavailableReason       = "owner_static_execution_unavailable"
+	shellValidationApplicableInputRequiredReason = "applicable_workspace_input_required"
 )
 
 // PreflightRuntimeValidationRecipes returns the deterministic subset of
@@ -70,13 +77,68 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipesForManifest(workspaceD
 	if err != nil {
 		return nil, err
 	}
-	applicable := make([]runtimemodel.RuntimeValidationRecipe, 0, len(confirmed))
-	for _, recipe := range confirmed {
-		if runtimeValidationRecipeApplicableToManifest(recipe, manifest.TargetRefs) {
+	return runtimeValidationRecipesApplicableToManifest(confirmed, manifest.TargetRefs), nil
+}
+
+func runtimeValidationRecipesApplicableToManifest(recipes []runtimemodel.RuntimeValidationRecipe, targetRefs []string) []runtimemodel.RuntimeValidationRecipe {
+	applicable := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
+	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(recipes) {
+		if runtimeValidationRecipeApplicableToManifest(recipe, targetRefs) {
 			applicable = append(applicable, recipe)
 		}
 	}
-	return runtimemodel.NormalizeRuntimeValidationRecipes(applicable), nil
+	return runtimemodel.NormalizeRuntimeValidationRecipes(applicable)
+}
+
+// shellValidationSurfaces preserves every activation-declared recipe as one
+// Shell-owner readiness fact while keeping the executable recipe inventory
+// ready-only. It owns no Runtime transition and performs no additional I/O.
+func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.RuntimeValidationRecipe, binding runtimemodel.RuntimeWorkspaceManifestBinding) []runtimemodel.RuntimeValidationSurface {
+	binding = binding.Normalized()
+	staticIDs := shellValidationRecipeIDs(staticallyReady)
+	readyIDs := shellValidationRecipeIDs(ready)
+	ret := make([]runtimemodel.RuntimeValidationSurface, 0, len(declared))
+	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(declared) {
+		schemaHash := shellValidationRecipeSchemaHash(recipe)
+		surface := runtimemodel.RuntimeValidationSurface{
+			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
+			CheckRefs: []string{recipe.ID}, ProofApplicability: runtimemodel.RuntimeValidationProofDirect, EffectScope: runtimemodel.RuntimeEffectNone,
+			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencySafeToReplay,
+			InputSchemaHash:  schemaHash,
+		}
+		switch {
+		case readyIDs[recipe.ID]:
+			surface.Readiness = runtimemodel.RuntimeValidationSurfaceReady
+			surface.InputBindingRef = "shell-validation-input/" + schemaHash + "/" + binding.Manifest.Revision
+		case staticIDs[recipe.ID]:
+			surface.Readiness = runtimemodel.RuntimeValidationSurfacePrerequisiteRequired
+			surface.ReadinessReason = shellValidationApplicableInputRequiredReason
+			surface.PrerequisiteRef = "shell-validation-prerequisite/" + schemaHash + "/applicable-workspace-input"
+		default:
+			surface.Readiness = runtimemodel.RuntimeValidationSurfaceUnavailable
+			surface.ReadinessReason = shellValidationStaticUnavailableReason
+		}
+		ret = append(ret, surface)
+	}
+	return runtimemodel.NormalizeRuntimeValidationSurfaces(ret)
+}
+
+func shellValidationRecipeIDs(recipes []runtimemodel.RuntimeValidationRecipe) map[string]bool {
+	ret := make(map[string]bool, len(recipes))
+	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(recipes) {
+		ret[recipe.ID] = true
+	}
+	return ret
+}
+
+func shellValidationRecipeSchemaHash(recipe runtimemodel.RuntimeValidationRecipe) string {
+	recipe = recipe.Normalized()
+	digest := sha256.New()
+	_, _ = fmt.Fprintf(digest, "%s\x00%s\x00%d\x00", recipe.ID, recipe.Command, recipe.TimeoutMillis)
+	for _, arg := range recipe.Args {
+		_, _ = fmt.Fprintf(digest, "%s\x00", arg)
+	}
+	return "shell-validation-recipe-" + hex.EncodeToString(digest.Sum(nil))[:20]
 }
 
 func runtimeValidationRecipeApplicableToManifest(recipe runtimemodel.RuntimeValidationRecipe, targetRefs []string) bool {

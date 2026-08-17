@@ -63,8 +63,31 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 	if progressed.ActiveDispatch != nil {
 		t.Fatalf("assessment dispatch remained active after atomic CWI reopen: %+v", progressed.ActiveDispatch)
 	}
+	if len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
+		progressed.Facts.Repair.NoProgressOperationShapes[0].Operation.Kind != runtimecontract.StepKindFileWrite {
+		t.Fatalf("owner-fact reopen lost accepted operation anti-replay fact: %+v", progressed.Facts.Repair)
+	}
 	if err := progressed.Validate(); err != nil {
 		t.Fatalf("replanned aggregate is invalid: %v", err)
+	}
+
+	// The new binding has a new semantic identity, but the same operation shape
+	// remains blocked for this CWI until an owner-observable gap changes.
+	successorFocus := bootstrapFacts.Focus.Normalized()
+	successorFocus.ID = "semantic-focus-owner-fact-successor"
+	successorBinding := successorFocus.CoverageEvidenceBindings[0].Clone()
+	successorBinding.ID = "semantic-binding-owner-fact-successor"
+	successorBinding.FocusID = successorFocus.ID
+	successorBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(successorBinding)
+	successorFocus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{successorBinding}
+	resealed, err := sealRuntimeCWIBindings(progressed.Facts, "semantic-manifest-owner-fact-successor", []runtimecontract.CoverageFocus{successorFocus}, nil)
+	if err != nil {
+		t.Fatalf("seal successor owner-fact binding: %v", err)
+	}
+	if len(resealed.Repair.NoProgressOperationShapes) != 1 ||
+		resealed.Repair.NoProgressOperationShapes[0].Hash != progressed.Facts.Repair.NoProgressOperationShapes[0].Hash ||
+		resealed.Repair.FocusID != successorFocus.ID {
+		t.Fatalf("successor semantic focus lost CWI anti-replay authority: %+v", resealed.Repair)
 	}
 
 	restarted, err := controller.initialize(context.Background(), bootstrapFacts, controllerDefinition(), nil)

@@ -607,6 +607,23 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 	return "runtime-semantic-manifest-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
+// StableRuntimeSemanticGenerationID binds semantic authority to the exact
+// catalog snapshot and logical provider request that produced it. A resource
+// rollback may reproduce the same manifest hash, so the manifest alone is not
+// a sufficient generation identity for a focus or evidence binding.
+func StableRuntimeSemanticGenerationID(manifestHash, logicalRequestID string) string {
+	manifestHash = strings.TrimSpace(manifestHash)
+	logicalRequestID = strings.TrimSpace(logicalRequestID)
+	if manifestHash == "" || logicalRequestID == "" {
+		return ""
+	}
+	h := sha256.New()
+	writeHashString(h, "runtime-semantic-generation")
+	writeHashString(h, manifestHash)
+	writeHashString(h, logicalRequestID)
+	return "runtime-semantic-generation-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
 // RuntimeSemanticProofProposal is provider-authored and never authoritative.
 // SM-2 may only turn it into a binding after matching owner feasibility.
 type RuntimeSemanticProofProposal struct {

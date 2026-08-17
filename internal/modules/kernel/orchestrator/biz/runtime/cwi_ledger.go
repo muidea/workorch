@@ -403,7 +403,7 @@ func appendRuntimeCWIBindingLineage(values []runtimecontract.RuntimeCWIBindingRe
 			continue
 		}
 		if runtimecontract.SameRuntimeCWIBindingRef(existing, ref) {
-			return values, nil
+			return nil, fmt.Errorf("runtime CWI binding lineage cannot reactivate historical binding %q", ref.BindingID)
 		}
 		return nil, fmt.Errorf("runtime CWI binding lineage reuses binding ID %q with a different identity", ref.BindingID)
 	}
@@ -440,6 +440,7 @@ func sealRuntimeCWIBindings(
 	if err := validateActiveRuntimeCWIBindingsSelected(facts, byID, selected); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
+	repairContinuation := ownerFactReopenRepairContinuation(facts, byID, selected)
 	if err := applySelectedRuntimeCWIBindings(&facts, byID, selected, semanticManifestHash); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
@@ -447,7 +448,56 @@ func sealRuntimeCWIBindings(
 		return runtimecontract.RuntimeFacts{}, err
 	}
 	focuses = appendRetainedRuntimeCWIFocuses(facts, focuses, byID, selected)
-	return projectRuntimeCWISealedFocuses(facts, focuses, pending)
+	projected, err := projectRuntimeCWISealedFocuses(facts, focuses, pending)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	if repairContinuation.coverageID != "" && runtimeFocusContainsCoverage(projected.Focus, repairContinuation.coverageID) {
+		projected.Repair.NoProgressOperationShapes = append([]runtimecontract.RuntimeRejectedOperationShape(nil), repairContinuation.noProgressOperationShapes...)
+		projected.Repair = projected.Repair.Normalized()
+	}
+	return projected, nil
+}
+
+type runtimeCWIRepairContinuation struct {
+	coverageID                common.CoverageWorkItemID
+	noProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape
+}
+
+// ownerFactReopenRepairContinuation carries only operation anti-replay facts
+// across the new semantic focus for the same CWI. It does not carry a repair
+// attempt, active gap, directive or action choice into the successor focus.
+func ownerFactReopenRepairContinuation(facts runtimecontract.RuntimeFacts, byID map[common.CoverageWorkItemID]int, selected map[common.CoverageWorkItemID]runtimecontract.CoverageEvidenceBinding) runtimeCWIRepairContinuation {
+	facts = facts.Normalized()
+	if len(facts.Focus.CoverageWorkItemIDs) != 1 || facts.Repair.FocusID != facts.Focus.ID || len(facts.Repair.NoProgressOperationShapes) == 0 {
+		return runtimeCWIRepairContinuation{}
+	}
+	coverageID := facts.Focus.CoverageWorkItemIDs[0]
+	if _, found := selected[coverageID]; !found {
+		return runtimeCWIRepairContinuation{}
+	}
+	index, found := byID[coverageID]
+	if !found {
+		return runtimeCWIRepairContinuation{}
+	}
+	item := facts.Coverage[index]
+	if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || len(item.ReopenLineage) == 0 ||
+		item.ReopenLineage[len(item.ReopenLineage)-1].Normalized().Reason != runtimeCWIReopenReasonOwnerFactPostcondition {
+		return runtimeCWIRepairContinuation{}
+	}
+	return runtimeCWIRepairContinuation{
+		coverageID:                coverageID,
+		noProgressOperationShapes: append([]runtimecontract.RuntimeRejectedOperationShape(nil), facts.Repair.NoProgressOperationShapes...),
+	}
+}
+
+func runtimeFocusContainsCoverage(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) bool {
+	for _, current := range focus.Normalized().CoverageWorkItemIDs {
+		if current == coverageID {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeCWICoverageIndexes(coverage []runtimecontract.RuntimeCoverageItemFact) (map[common.CoverageWorkItemID]int, error) {

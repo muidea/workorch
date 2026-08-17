@@ -240,7 +240,7 @@ func runtimeTestProjectSealedSemanticFacts(t *testing.T, facts runtimecontract.R
 		t.Fatalf("test semantic projection requires initialized ledger and complete document")
 	}
 	sourceFocuses := facts.DefinitionFocuses
-	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, *ledger.Document, ledger.Feasibilities, sourceFocuses)
+	focuses, contract, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(*ledger.Manifest, ledger.LogicalRequestID, *ledger.Document, ledger.Feasibilities, sourceFocuses)
 	if err != nil {
 		t.Fatalf("compile test semantic bindings for canonical projection: %v", err)
 	}
@@ -649,7 +649,7 @@ func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAg
 	merged := document.Clone()
 	sourceFocuses := append([]runtimecontract.CoverageFocus{aggregate.Facts.Focus}, aggregate.Facts.RemainingFocuses...)
 	sourceFocuses = append(sourceFocuses, aggregate.Facts.CompletedFocuses...)
-	_, reconciliation, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, document, feasibilities, sourceFocuses)
+	_, reconciliation, err := runtimecontract.CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, "test-semantic-request", document, feasibilities, sourceFocuses)
 	if err != nil {
 		t.Fatalf("compile test semantic bindings: %v proposals=%+v", err, document.Proposals)
 	}

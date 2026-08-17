@@ -211,11 +211,28 @@ func TestValidateRuntimeCWILedgerAllowsOneReopenedSuccessorAndBoundsLineage(t *t
 		t.Fatalf("one reopened successor was rejected: %v", err)
 	}
 
+	reactivated := runtimeCWILedgerFacts(t)
+	reactivatedRef := reactivated.Coverage[0].CurrentBindingRef.Clone()
+	reactivated.Coverage[0].ReopenLineage = []RuntimeCWIReopenLineage{{
+		PreviousBindingRef: reactivatedRef, TriggerRef: "assessment/owner-fact-open", Reason: "owner fact remains open",
+	}}
+	if err := ValidateRuntimeCWILedger(reactivated); err == nil || !strings.Contains(err.Error(), "current binding is already reopened") {
+		t.Fatalf("historical reopened binding was reactivated as current: %v", err)
+	}
+
 	duplicate := facts
 	duplicate.Coverage = append([]RuntimeCoverageItemFact(nil), facts.Coverage...)
 	duplicate.Coverage[0].ReopenLineage = append(duplicate.Coverage[0].ReopenLineage, duplicate.Coverage[0].ReopenLineage[0])
 	if err := ValidateRuntimeCWILedger(duplicate); err == nil || !strings.Contains(err.Error(), "duplicates reopen lineage") {
 		t.Fatalf("duplicate reopen lineage error = %v", err)
+	}
+
+	forged := facts
+	forged.Coverage = append([]RuntimeCoverageItemFact(nil), facts.Coverage...)
+	forged.Coverage[0].ReopenLineage = append([]RuntimeCWIReopenLineage(nil), facts.Coverage[0].ReopenLineage...)
+	forged.Coverage[0].ReopenLineage[0].PreviousBindingRef.BindingHash = "forged-binding-hash"
+	if err := ValidateRuntimeCWILedger(forged); err == nil || !strings.Contains(err.Error(), "outside binding lineage") {
+		t.Fatalf("forged reopen binding identity error = %v", err)
 	}
 
 	tooMany := facts

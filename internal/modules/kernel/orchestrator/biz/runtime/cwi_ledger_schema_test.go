@@ -118,6 +118,30 @@ func TestSemanticCWIFocusProjectionRebindsRepairAuthorityAcrossRetirementAndRese
 	}
 }
 
+func TestSemanticCWISealRejectsReactivationOfReopenedBinding(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	facts := aggregate.Facts
+	oldFocus := facts.Focus.Normalized()
+	previous := facts.Coverage[0].CurrentBindingRef.Clone()
+	facts.Coverage[0].ReopenLineage = append(facts.Coverage[0].ReopenLineage, runtimecontract.RuntimeCWIReopenLineage{
+		PreviousBindingRef: previous,
+		TriggerRef:         "assessment/owner-fact-open",
+		Reason:             runtimeCWIReopenReasonOwnerFactPostcondition,
+	})
+	facts.Coverage[0].CurrentBindingRef = nil
+	facts.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
+	facts.Coverage[0].State = runtimecontract.RuntimeCoverageItemStateOpen
+
+	pending, err := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{"cwi-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sealRuntimeCWIBindings(pending, previous.SemanticManifestHash, []runtimecontract.CoverageFocus{oldFocus}, nil); err == nil ||
+		!strings.Contains(err.Error(), "cannot reactivate historical binding") {
+		t.Fatalf("reopened binding reactivation error = %v", err)
+	}
+}
+
 func assertRuntimeRepairAuthorityRebound(t *testing.T, facts runtimecontract.RuntimeFacts, focusID string) {
 	t.Helper()
 	ledger := facts.Repair

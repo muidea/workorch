@@ -35,7 +35,9 @@ type RuntimeRepairLedger struct {
 	NoProgressCount       int
 	SignatureCounts       []RuntimeFailureSignatureCount
 	// NoProgressOperationShapes records accepted operation structures that did
-	// not yet resolve the active same-focus repair gap. It is volatile SM-3
+	// not yet resolve the active repair gap. An SM-2 owner-fact reopen may carry
+	// only these shapes into the successor semantic focus for the same CWI; all
+	// attempts, gap text and directives remain focus-local. It is volatile SM-3
 	// context; callers in Orchestrator decide when a receipt belongs here.
 	NoProgressOperationShapes []RuntimeRejectedOperationShape
 	LastCycleID               string

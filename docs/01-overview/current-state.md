@@ -4,7 +4,7 @@ Status: active
 
 Type: current-fact
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## Purpose
 
@@ -57,8 +57,9 @@ Application builds typed RuntimeBootstrap
 - Candidate document 只进入一个 evaluator；complete rejection 只有 attempt 0 和可证明的同合同 attempt 1。
 - `file/write` 是 create-only、`prospective_owner_target`。已有目标必须使用 owner catalog 中合法且绑定当前
   revision/baseHash 的 `file/edit` 或 `patch/apply` replacement。
-- workspace-sensitive validation catalog 由 SM-2 先绑定 File manifest revision，再由 Shell owner 过滤当前适用 recipe；
-  空 recipe set 不向 semantic provider 暴露 `validation/managed_session`，后续 File tree effect 会精确退休该 catalog。
+- workspace-sensitive validation catalog 由 SM-2 先绑定 File manifest revision，再由 Shell owner 对声明 recipe 发布
+  `ready | prerequisite_required | unavailable` surface 并过滤当前适用 confirmed set；空 confirmed set 不向 semantic
+  provider 暴露 `validation/managed_session`，non-ready surface 仍保留 aggregate/audit，后续 File tree effect 会精确退休该 catalog。
 - dynamic capability catalog 区分 callable operation、validation readiness 与 proof applicability；MCP required-input tool
   仍可被合法 operation 调用，但在 owner 尚无 sealed input binding 时只记录 `prerequisite_required` surface。技术上 ready
   的 auxiliary/not-declared surface 也只保留审计；只有 `ready + direct` 进入 semantic provider 的 recipe enum/C3。LLM
@@ -68,7 +69,8 @@ Application builds typed RuntimeBootstrap
   其余条件均成立后检查 `ready + direct` current fact；assessment claim 或一次成功 File patch 不能替代该事实。
 - owner fact 是唯一缺口时，SM-2 在 assessment commit 的同一 CAS 中重开 current CWI、退休 current binding/semantic
   generation，并由 SM-4 幂等 re-drive；次数由 focus repair budget 有界。普通 proof gap 不走该分支，耗尽后以
-  `owner_fact_convergence_exhausted` fail-closed。
+  `owner_fact_convergence_exhausted` fail-closed。新 focus/binding 同时绑定 `manifestHash + logicalRequestID`；历史 reopened
+  binding 不得重新成为 current，导致该缺口的 accepted operation shape 跨同一 CWI successor focus 保留并由 SM-3 防重放。
 - current semantic generation 已精确绑定且仍位于 active/remaining focus queue 的 CWI 保持 executable lineage；它不重新
   获得 planning eligibility。duplicate/restart projection 过滤已绑定 row 并零 CAS，stale generation/binding 或 prerequisite
   drift 继续拒绝。
