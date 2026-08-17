@@ -4,9 +4,9 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/git` 提供受控的 Git read/write 运行时能力，并返回规范化结果、变更引用、摘要、错误和 raw ref。
 
@@ -23,6 +23,16 @@ Last Verified: 2026-08-16
 - request 必须携带 workspace repository、run/authority/dispatch/operation identity、sealed operation 和结构化参数；
   result 返回唯一 receipt outcome、changed refs、bounded evidence/ref 与 original diagnostic。
 - Orchestrator 和 Approval 流程在写操作进入本 block 前完成策略准入和必要授权。
+- workspace repository manifest 通过 File owner 的 `AcquireWorkspaceManifestCommand/Result` 获取；Git 不读取 File repository/service，也不取得 workspace tree 所有权。
+- effect 执行前后通过 Orchestrator 的 receipt query/commit concrete command 完成幂等握手，Git 只返回 repository owner fact。
+
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/state acquisition/execute；receipt query/commit | 完整 |
+| `blocks/file` | Git → File | `AcquireWorkspaceManifestCommand/Result` | 完整；只读 typed snapshot |
+| Git repository | Git-private adapter | sealed read/write operation 与 revision observation | 完整；无任意 CLI 文本入口 |
 
 ## 相关约束
 
@@ -34,3 +44,13 @@ Last Verified: 2026-08-16
   或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
 - CWI reconciliation 只返回 repository presence/revision 这一 Git fact；binding 同时要求 check、metric 或 artifact
   时必须返回 `unverifiable/git_proof_incomplete`。commit/revision 本身不能替代 semantic validation proof。
+
+## 待完善测试点
+
+- [ ] 覆盖 File manifest 缺失、stale、wrong scope/revision 时 capability state 与 operation admission fail-closed。
+- [ ] 覆盖 prerequisite receipt 在重启、重复 acquisition 和同 key 不同 snapshot 下的幂等/冲突语义。
+- [ ] 覆盖远程操作、历史改写、未声明 ref 与危险参数均不能绕过结构化 operation catalog。
+- [ ] 覆盖 workspace repository 路径逃逸、非 repository 和跨 workspace scope。
+- [ ] 覆盖 effect 后 receipt commit 前崩溃的查询重放，确认 Git 副作用不重复。
+- [ ] 覆盖 commit/revision 只能形成 repository fact，不能单独满足 semantic check/metric/artifact proof。
+- [ ] 覆盖 File/Orchestrator 返回 nil/wrong result 与 safe original diagnostic 保留。

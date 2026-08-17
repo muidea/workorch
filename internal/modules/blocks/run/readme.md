@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
 ## 组件类型
 
@@ -12,7 +12,7 @@ Last Verified: 2026-08-16
 opaque `RuntimeStateRecord` 物理 CAS/查询合同；不解释 SM-2/3/4 语义，也不组合多个 owner 选择下一动作。目录、module ID 和 EventHub
 合同身份均为 `blocks/run`。
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/run` 管理 Run lifecycle、Run-owned replacement intent，以及 Step、RuntimeCheckpoint 的持久化查询/清理，
 并提供 Runtime aggregate 的 opaque 物理持久化、
@@ -68,6 +68,15 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   内容或选择 recovery action。Governance、Eventstream 和 application 按需订阅。
 - Governance、Eventstream 和 application 按需导入 `blocks/run/pkg/events` 订阅或发送命令。
 
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `kernel/orchestrator` | 双向 | recovery inventory/readiness、opaque Runtime record query/CAS、lifecycle/governance/terminal facts | 完整；SM-2/3/4 语义只在 Orchestrator |
+| `blocks/workspace` | 双向 | definition read、execution intent、Run state notification、sealed terminal delivery | 完整；SM-1 转换只在 Run reducer |
+| `blocks/memory` | Run → Memory | activation recall trace upsert | 完整；观测失败不回滚 Run |
+| `application/workorchd` / `kernel/governance` / `blocks/eventstream` | consumer ↔ Run | owner query/intent 与 `RunStateChangedData` | 完整；无 service/repository 注入 |
+
 ## 相关约束
 
 - Run、Step 和 Checkpoint 操作必须携带足够的 workspace/run/step scope。
@@ -102,3 +111,13 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - Run biz 不再持有或构造 Orchestrator adapter；已删除仅用于 禁止的 lifecycle 转发的 service DTO alias 和 test-only
   constructor。Run owner 的生产依赖只包含自身 repository、EventHub、EventHub-backed Workspace typed read port 与
   状态通知能力。
+
+## 待完善测试点
+
+- [ ] 补齐 SM-1 create/start/resume/wait/cancel/supersede/terminal/fresh-activation 的状态转换与非法反向迁移矩阵。
+- [ ] 覆盖 Runtime record stale expected revision、source 非 Orchestrator、scope/schema/hash 不一致和无关物理 rebase。
+- [ ] 覆盖 startup recovery inventory、record load、commands-ready 的先后顺序及重复 readiness 通知。
+- [ ] 覆盖 replacement intent 在 predecessor terminal delivery 各阶段崩溃后的幂等 successor 创建。
+- [ ] 覆盖 Memory recall trace 缺失 subscriber、失败和重复投递，确认均不回滚已提交 Run。
+- [ ] 覆盖不兼容 schema 只进入 `fresh_activation_required`/`data_reset_required`，且不会发布 continuation drive。
+- [ ] 覆盖 Stop/Teardown 重复调用、订阅逆序解除以及停止后 recovery topic 不再响应。

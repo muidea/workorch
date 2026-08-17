@@ -4,9 +4,9 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/decision` 管理 DecisionTicket 与 DecisionResolution 聚合。当前跨 owner 合同提供 ticket/resolution 查询和
 删除、普通 ticket 的幂等解决，以及 Runtime governance ticket 的确定性创建与 resolution 提交；不暴露通用 ticket
@@ -26,6 +26,15 @@ create/update/supersede state setter。
 - `runtime_governance` ticket resolved 后，本 block 通过 Orchestrator 定义的 `CommitRuntimeGovernanceTicketResolutionCommand` 提交 resolution identity、scope、outcome 与 summary；Orchestrator 仅提交 evidence/fact，不由 application scheduler 猜测 authority snapshot 或 dispatch、更不直接恢复 Run。
 - EventHub command 与应用调用只能提交不可变 resolution/proposal fact；ticket 及 Runtime governance proposal 的状态选择、时间戳和 repository update 只允许经 Decision-private lifecycle event/reducer 完成。
 
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `application/workorchd` / `kernel/governance` | consumer → Decision | ticket/resolution 查询、普通 ticket 幂等解决 | 完整 |
+| `kernel/orchestrator` | 双向 | open runtime governance；commit ticket resolution；record Decision evidence | 完整；均为 concrete typed command/result |
+| `blocks/run` | 间接消费 | 只消费 Orchestrator 持久化的 immutable wait/continuation fact | 完整；Decision 不直接恢复 Run |
+| `blocks/eventstream` | Decision → Eventstream | ticket created/resolved 的具体通知 | 完整；无通用状态通知 |
+
 ## Owner 内部职责边界
 
 - `owner.go` 只保留 Decision Biz 的构造、订阅与生命周期；`command_router.go` 是普通 Decision command 的唯一入口，使用静态穷尽分类器将 Topic 委派到 ticket query/mutation 或 resolution handler，未知 Topic fail closed。
@@ -43,3 +52,11 @@ create/update/supersede state setter。
 - Runtime ticket 只拥有治理选择状态；authority snapshot、dispatch 与 ticket 的正式绑定由 Orchestrator 随 Run owner 状态持久化。
 - 普通 Decision resolution 与 `runtime_governance` resolution 都不能由 Application 自动触发 Resume；后者只能走
   typed ticket-resolution command 回到 Orchestrator，Run continuation 仍由 persisted governance fact 与 Run-private reducer 决定。
+
+## 待完善测试点
+
+- [ ] 覆盖 resolution 已持久化但 ticket 更新中断的两阶段恢复，确认只由 Decision-private recovery 收敛。
+- [ ] 覆盖普通与 runtime governance ticket 的重复、stale、冲突 resolution 及跨 scope 拒绝。
+- [ ] 覆盖 Orchestrator open/commit/evidence 合同缺失 subscriber、nil/wrong result 和 owner error。
+- [ ] 覆盖 repository 提交失败时不发布 created/resolved 通知，恢复后通知保持幂等。
+- [ ] 覆盖 ticket、resolution、proposal 查询结果的深拷贝与不可变 scope。

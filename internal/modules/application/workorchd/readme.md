@@ -4,9 +4,9 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `application/workorchd` 是服务端应用模块，负责把 HTTP/Web API、CLI facade、runtime session、execution admission、context registry、read model、projection 和 SSE 接入统一生命周期。它组合多个 owner 的能力形成应用用例，但不拥有 Workspace、Run、Result、Decision、Approval、Memory、MCP、Skill 或 Soul 的正式状态。
 
@@ -45,6 +45,19 @@ Last Verified: 2026-08-16
   activation builder。
 - WorkspaceTemplate 中的 capability / version-control 声明只作为定义与 activation 输入；application 不直接执行 Git、Shell、File 或其他 capability 副作用。
 
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `blocks/workspace` | Application → Workspace | definition/template CRUD、execution intent、terminal/read model query | 完整；Workspace owner 决定 definition 与 active slot |
+| `blocks/run` | Application → Run | create/read、activation/continuation、recovery-safe lifecycle intent | 完整；Application 不指定目标状态 |
+| `kernel/orchestrator` | Application → Orchestrator | Runtime read/drive observation、受限 purge/management query | 完整；不持有 drive/reducer |
+| `blocks/llm` | Application → LLM | active config、catalog、refresh、selection validation、通用 completion/embedding | 完整；不直连 ai-proxy |
+| Decision / Approval / Governance | 双向应用用例 | owner query/resolve 与 governance trace 展示 | 完整；resolve 不触发 Application Resume |
+| Result / Memory / MCP Registry / Skill / Soul | Application → owner | 各 owner 的具体 CRUD/query；activation 只封存 detached snapshot | 完整 |
+| Eventstream / projection | 双向只读链路 | event list/high-watermark/purge、appended/drive/execution observation | 完整；projection 不修复 owner |
+| File / Git / Shell / SSH / Web / MCP execution | 无直接执行 I/O | capability operation 只由 Orchestrator sealed dispatch 调用 | 完整 |
+
 ## 相关约束
 
 - application 只负责入口、用例编排、facade 和投影，不得成为正式状态 owner。
@@ -64,3 +77,14 @@ Last Verified: 2026-08-16
   的 SM-1 state + opaque RuntimeStateRecord inventory/notification 触发 Orchestrator internal drive；SM-4 typed load
   aggregate 后 owner-local 分类并幂等恢复。
 - application 不保留 execution pending/started、owner readback retry 或 scheduler recovery map；请求只有在 typed owner command 成功接收后才返回 accepted。
+
+## 待完善测试点
+
+- [ ] 为七组 `ApplicationPorts` 覆盖缺失 port、nil/wrong owner result、scope mismatch 与 transport-safe error mapping。
+- [ ] 覆盖 HTTP/scheduler 同一 request 的进程内 coalesce、owner 持久化幂等及 Stop 后拒绝新 admission。
+- [ ] 覆盖 Stop 顺序：admission → transport → projection/background tasks → runtime session，并验证重复 Stop 幂等。
+- [ ] 覆盖大量 Goal/DoD 的语义排序、分批 focus 编译、16 项 acceptance slice 上限与 context budget 不全量复制。
+- [ ] 覆盖 projection lag、high-watermark readiness、显式 rebuild 和重启，确认不向任何 owner 回写修复状态。
+- [ ] 覆盖 resume 不携带 patch、restart fresh bootstrap、replacement intent 与 successor 均不在 Application 创建。
+- [ ] 覆盖 activation 中 Soul/Skill/MCP/Memory/profile DTO 深拷贝，以及 registry 后续更新不改变已 sealed Run。
+- [ ] 增加生产边界扫描，确认 server/transport 不持有 Hub、Session、owner service/repository 或 capability executor。

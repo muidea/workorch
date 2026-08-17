@@ -4,9 +4,9 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/mcpregistry` 管理 MCPServer 与 MCPCapability registry 聚合，负责 server/capability 的创建、查询、列表、更新和结构化能力元数据。
 
@@ -24,8 +24,17 @@ Last Verified: 2026-08-16
 - Event Contract owner、receiver 和 state lane identity 统一为 `mcp-registry`；它与执行 MCP operation 的
   `blocks/mcp` / owner `mcp` 严格分离，不共享 owner identity。
 - `blocks/mcp` 通过 EventHub 查询已注册 server/capability 后执行调用，不注入 registry service 或 repository。
-- `kernel/orchestrator` 和 `application/workorchd` 通过 EventHub 获取有界 capability metadata 和 server refs。
+- `application/workorchd` 通过 EventHub 获取有界 capability metadata 和 server refs，并在 fresh activation 中封存选择结果；`kernel/orchestrator` 不直接查询 Registry。
 - `kernel/system` 发送 `EnsureMCPDefaultsCommand`；本 block 在自身 repository 内幂等初始化默认 server/capability。
+
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `application/workorchd` | Application → Registry | Server/Capability create/get/list/update | 完整 |
+| `blocks/mcp` | MCP execution → Registry | detached Server/Capability get/list snapshot | 完整；执行 block 不取得 repository |
+| `kernel/system` | System → Registry | `EnsureMCPDefaultsCommand` 及具体 result | 完整 |
+| `kernel/orchestrator` | 无直接 Registry I/O | 只消费 activation selection 和 MCP execution owner facts | 完整 |
 
 ## 相关约束
 
@@ -38,3 +47,11 @@ Last Verified: 2026-08-16
   不生成 input binding、不修改 Runtime aggregate，也不选择 provider-visible recipe。
 - secret 和 credential 只能使用安全引用，不得进入事件、投影或日志。
 - 未注册或无效 capability 不能被 runtime invocation 使用。
+
+## 待完善测试点
+
+- [ ] 覆盖 Capability 绑定不存在、禁用或跨 Server 的场景，确认 create/update 均 fail-closed。
+- [ ] 覆盖 `effectScope`、`idempotencyClass`、`validationProofApplicability` 的往返持久化与未知值拒绝。
+- [ ] 覆盖所有 detached DTO 的深拷贝，调用方修改 schema、tags、stage hints 后不得污染 Registry。
+- [ ] 覆盖 defaults ensure 不覆盖用户配置，以及 Server 默认派生能力不推断领域语义或 direct proof。
+- [ ] 增加边界测试，确认 Registry 不打开 MCP transport、不生成 input binding，也不向 Orchestrator 暴露 repository。

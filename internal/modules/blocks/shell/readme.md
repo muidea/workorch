@@ -6,7 +6,7 @@ Type: capability-block-contract
 
 Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/shell` 在受控工作目录、超时和资源策略下执行本地 shell command，并返回 exit code、stdout/stderr 摘要、错误分类、耗时和 raw ref。
 
@@ -37,6 +37,15 @@ Last Verified: 2026-08-17
 - Runtime evidence policy 使用 Orchestrator command 携带的具体 `RuntimeEvidencePolicy`，用于 zero-work marker、work-evidence marker、evidence quality、reason 和 tag 判定；本组件不从 operation parameter map 解析跨组件 policy。
 - Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入；只有本 block 返回独立 typed
   `GovernanceRequirement` 时才可进入治理，普通失败或 budget exhaustion 不能创建 ticket。
+- effect 执行前后通过 Orchestrator receipt query/commit concrete command 完成幂等握手；Shell 不以进程退出状态代写 Runtime 状态。
+
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/execute、manifest prerequisite；receipt query/commit | 完整 |
+| `blocks/file` | 间接 typed fact | File owner manifest 由 Orchestrator 转交，Shell 不直连 File | 完整 |
+| 本地进程/workspace | Shell-private adapter | sealed command、cwd、timeout、effect observation | 完整；无任意长期后台任务入口 |
 
 ## 相关约束
 
@@ -55,3 +64,12 @@ Last Verified: 2026-08-17
 - 无当前适用 recipe 时，Shell 返回空的 confirmed recipe set，同时在同一 catalog 保留声明 recipe 的
   `prerequisite_required`/`unavailable` surface 供 aggregate/audit 使用；它不得把这些 surface 加入 provider-selectable
   refs、选择 File preparation 变更、请求 correction，或把 feasibility rejection 解释为新的 retry/terminal 状态。
+
+## 待完善测试点
+
+- [ ] 冻结每个 profile 声明 recipe 的 ready/prerequisite_required/unavailable 与 direct/auxiliary 矩阵。
+- [ ] 覆盖 File manifest revision 变化后的 catalog 退休/重获，以及 stale manifest 不执行 recipe。
+- [ ] 覆盖未声明 workspace effect、symlink/`.git` effect、只 touch 声明目标掩盖额外写入均被拒绝。
+- [ ] 覆盖 candidate 伪造 `WORKORCH_CHECK_*` 标记、未知 check ref 和 marker 冲突。
+- [ ] 覆盖 timeout、取消、输出截断和后台子进程清理。
+- [ ] 覆盖命令已执行但 receipt commit 前崩溃的查询重放，确认不会重复 durable effect。

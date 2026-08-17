@@ -4,11 +4,11 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
-`blocks/file` 提供受 workspace 路径边界约束的文件 list、read、write、edit、patch preview/apply/revert 等运行时能力，并返回规范化执行结果。
+`blocks/file` 提供受 workspace 路径边界约束的文件 list、read、write、edit、patch preview/apply 等运行时能力，并返回规范化执行结果。
 
 ## 组件交互及合同
 
@@ -20,6 +20,7 @@ Last Verified: 2026-08-16
 - request 必须携带 workspace/run/authority/dispatch/operation identity、sealed operation、path/ref 和有界输入；
   result 返回唯一 receipt outcome、target refs、side-effect metadata、bounded evidence/ref 与 original diagnostic。
 - Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 canonical decision。
+- effect 执行前后通过 Orchestrator 定义的 receipt query/commit concrete command 完成幂等握手；File 只提交 owner observation，不直接写 Runtime aggregate。
 - 对跨越信任边界的敏感 file/write、patch/apply（密钥、`.env`、`.git`、CI workflow），File owner 先返回 `governance_required` 且不执行副作用；普通 workspace-local 文件的变更规模不构成 approval。resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证后消费该 grant 并执行，普通布尔参数或调用方声明不能绕过 approval。
 
 - EventHub handler 只校验并复制外部 command；文件副作用只能由 File-private effect event 选择并调用 adapter。
@@ -28,6 +29,14 @@ Last Verified: 2026-08-16
   `exact_target | existing_owner_scope` 的 `file/edit` 或 `patch/apply` variant。实际 replacement 仍须绑定 owner
   观测到的目标 revision；其中 `patch/apply file_write` 必须携带在执行时再次核对的 `baseHash`，
   `text_replace | unified_diff` 也必须通过对应的 owner preflight/replay 合同。
+
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/snapshot/manifest/reconciliation/execute；receipt query/commit | 完整；所有合同均为 concrete typed command/result |
+| Workspace filesystem | File-private adapter | scoped list/read/create/edit/patch 与 owner observation | 完整；adapter 不拥有 Runtime 状态 |
+| 其他 owner | 无直接 I/O | 只经 Orchestrator sealed request/fact 协作 | 完整；无跨 owner service/repository |
 
 ## 相关约束
 
@@ -41,3 +50,13 @@ Last Verified: 2026-08-16
 - CWI reconciliation 仅使用 binding 声明的 exact target、owner selector 或可直接映射到 manifest 的 artifact ref；
   unknown/semantic artifact URI、ambiguous selector 和 workspace absent 分别返回 `unverifiable` 或 `unsatisfied`，不从
   Goal/DoD、目录名或文件名猜测交付目标。
+
+## 待完善测试点
+
+- [ ] 冻结 create-only 语义：已有目标的 `file/write` 必须拒绝，并验证基于 exact revision/baseHash 的合法 replacement。
+- [ ] 覆盖路径逃逸、symlink、binary、redacted、truncated 和不完整 snapshot 均不能进入 patch/apply。
+- [ ] 覆盖敏感目标 governance fence、错误 grant、stale fence 和普通 workspace-local 修改无需额外授权。
+- [ ] 覆盖 effect 已发生但 receipt commit 前崩溃的重放，确认 query/commit 不产生重复副作用。
+- [ ] 覆盖 manifest revision 对 create/edit/delete/content change 的失效，以及不相关 internal path 不污染 deliverable revision。
+- [ ] 覆盖所有跨 owner result 的 nil/wrong type、scope/identity 不一致及有界大文件摘要。
+- [ ] 增加 snapshot/manifest/patch apply 的 allocation 与大目录性能基准。

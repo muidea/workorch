@@ -6,7 +6,7 @@ Type: kernel-module-implementation-contract
 
 Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `kernel/orchestrator` 是 Runtime convergence authority，负责 typed facts、authority transaction、prerequisite、candidate、sealed dispatch、operation evidence、governance wait、sealed terminal 与 SM-4 delivery acknowledgement。它组合多个 owner 和技术 block 完成同一 Run 的确定性收敛闭环，**但不拥有 Run、Workspace 或 Result lifecycle**。
 
@@ -423,8 +423,22 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `ExecutionKey + Fence`，不重放 owner side effect。
 - candidate attempt 只投影为 SM-3 contract attempt；read model 的 repair loop、ineffective retry 和 repair budget 必须来自 `Facts.Repair` 与当前 failure，不得把历史 candidate retry 当成当前 focus repair。
 - prerequisite freshness 只有一条有界的 stale/no-progress `prerequisite_refresh` ledger。owner accepted receipt 的真实资源变更是正常进展：它原子退休精确相交的 observation、持久化 invalidation record，但不扣减 recovery budget。capability-state acquisition key 的代际仅由同一 `PrerequisiteID` 的 persisted invalidation records 推导；因此资源变更会重查 owner 而不会重放旧 receipt，且无关 prerequisite、provider、CAS 与 delivery 记账都不能改变 key。
-- Eventstream 订阅仍在生产发布的 Orchestrator、Run 和 Result typed notification 形成审计记录；Runtime 只消费同步 typed operation result 推进状态。
+- application projection 消费 Orchestrator immutable drive observation；Eventstream 当前不直接订阅 Orchestrator topic，Runtime 只消费同步 typed operation result 推进状态。
 - workspace/run purge 时，Orchestrator 只删除自身 ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation/MemoryTrace；Step 与 RuntimeCheckpoint 必须通过带 WorkspaceID/RunID 的 Run owner purge command 删除，Orchestrator 不持有其 repository。
+
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `blocks/run` | 双向 | SM-1 notification、recovery inventory/readiness、opaque Runtime record query/CAS、terminal/lifecycle fact | 完整；Run 不解释 SM-2/3/4 |
+| Result / Workspace / Run | Orchestrator → owner | 同一 sealed `TerminalOutcome` 的三段 delivery/ack | 完整；各 owner 只做自身 reducer |
+| `blocks/llm` | Orchestrator → LLM | provider ceiling、preflight、candidate request | 完整；LLM 只返回 factual result |
+| File / Git / Shell / MCP / Web / SSH | 双向 | owner capability/admissibility/feasibility/reconciliation/execute 与 receipt query/commit | 完整；能力 owner 不选择下一 action |
+| Decision / Approval / Governance | 双向 | governance open/resolution/evidence 与 immutable continuation/terminal fact | 完整；无 Application resume 旁路 |
+| `blocks/memory` | Orchestrator → Memory | scoped recall/search/trace typed contract | 完整；Memory 只提供 owner fact |
+| `application/workorchd` | Orchestrator → Application | immutable drive observation 与只读 Runtime view | 完整；Application 不推进 reducer |
+| Skill / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Registry 更新不改变既有 Run |
+| `blocks/eventstream` | 无直接订阅 | 审计通过正式 owner notification 形成 | 完整；不从审计重建 authority |
 
 ## 相关约束
 
@@ -490,3 +504,15 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - ToolCall、Patch、ValidationResult、EvidenceRecord、CoverageWorkItem 和 ArtifactContinuation 只属于 Orchestrator 的单一收敛状态机，不对外暴露写入 repository。
 - 跨组件交互只能使用 EventHub 与具体 command/data/result；禁止跨 owner service/repository、Envelope、JSON/reflect 类型桥和通用投递包装。
 - provider-facing LLM cache prefix 必须遵守 C0、C1、C2、C3-C5 稳定分层。
+
+## 待完善测试点
+
+- [ ] 补齐 SM-1～SM-4 跨围栏矩阵：每个外部 fact 只能进入对应 internal event/reducer，禁止跨 owner 目标 state setter。
+- [ ] 覆盖大量 Goal/DoD 的语义依赖排序、分批 focus、公平推进和 C0～C5 context budget，确认不按 ID/序号排序。
+- [ ] 增加 create-only 目标重开回归：已有目标时 semantic replan 必须选择 owner catalog 中合法且 revision-bound 的 replacement，不能重复 `file/write`。
+- [ ] 覆盖 effect 已发生但 receipt 未提交、receipt 已提交但 evidence 未提交、terminal 三段 delivery 每个 ack 前后崩溃的恢复。
+- [ ] 覆盖 owner fact 的 stale、duplicate、out-of-order、rollback/reappearance，只退休精确依赖且不重放旧 authority。
+- [ ] 覆盖 provider request incomplete/unknown submission、CAS conflict、owner transient、governance wait 与 delivery retry 的独立预算。
+- [ ] 覆盖 restart inventory 的分页、cursor loop、nil/wrong result、不兼容 schema和 commands-ready handoff。
+- [ ] 增加大 aggregate、长 focus queue、manifest rendering、invariant validation 和 drive loop 的 allocation/CPU benchmark。
+- [ ] 增加静态边界扫描，持续拒绝 StagePacket、NextAction、DispatchNextStep、ExecutionContextPatch、auto-replan successor 与 map authority rebuild。

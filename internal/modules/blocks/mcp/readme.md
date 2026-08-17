@@ -4,9 +4,9 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/mcp` 调用已注册的 MCP tool、resource 和 prompt，并把外部调用结果规范化为 runtime execution result。
 
@@ -25,6 +25,15 @@ Last Verified: 2026-08-16
 - request 必须携带 workspace/run/authority/dispatch/operation identity、sealed server/capability ref 和结构化参数；
   result 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回 source refs、bounded summary、truncation
   metadata、owner stable factual category、完整安全 original diagnostic 和 evidence/ref，不返回跨组件 Status 双权威。
+- effect 执行前后通过 Orchestrator 的 receipt query/commit concrete command 完成幂等握手；MCP execution owner 不修改 Runtime aggregate。
+
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/execute；receipt query/commit | 完整 |
+| `blocks/mcpregistry` | MCP → Registry | Server/Capability get/list snapshot | 完整；无 registry service/repository 注入 |
+| 外部 MCP server | MCP-private adapter | sealed tool/resource/prompt invocation | 完整；catalog acquisition 不打开 transport |
 
 ## 相关约束
 
@@ -43,3 +52,12 @@ Last Verified: 2026-08-16
   empty-input ready 也只能用于审计/诊断，不能替代直接 DoD 行为证明。schema 含 required input 时保持 tool 可调用，但 validation surface 为
   `prerequisite_required/input_binding_required`，不得出现在 semantic provider schema/C3，也不得用空参数调用 endpoint。
   durable/unsafe replay 或非法 schema 的 surface 为 `unavailable`。这些分类只返回事实，不选择 retry、focus、terminal 或替代 tool。
+
+## 待完善测试点
+
+- [ ] 覆盖 registry snapshot 中 server/capability disabled、漂移、错配或跨 scope 时拒绝执行。
+- [ ] 覆盖 direct/auxiliary/not-declared proof applicability 与 ready/prerequisite/unavailable 的完整矩阵。
+- [ ] 覆盖 required input、owner-sealed empty binding、非法 schema 和调用方伪造 binding。
+- [ ] 增加边界测试，确认 catalog acquisition 不打开 transport、不泄漏 Registry repository。
+- [ ] 覆盖输出截断、raw ref、credential/secret 脱敏和 provider diagnostic 有界化。
+- [ ] 覆盖外部 effect 后 receipt commit 前崩溃的重放，确认 safe-to-replay 与不可重放 operation 均 fail-closed。

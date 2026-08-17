@@ -4,9 +4,9 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 功能说明
+## 功能范围与边界
 
 `blocks/result` 管理 Result 与 Artifact 组成的 formal-outcome 聚合，负责结果状态、证据引用、artifact 元数据和 owner 查询。它不负责 evidence quality、DoD coverage 或 accepted 判定策略。
 
@@ -27,6 +27,15 @@ Last Verified: 2026-08-16
   evidence/artifact slice。该转换必须继续通过隔离回归和 allocation benchmark。
 - `application/workorchd`、Eventstream 和 projection 按需导入本 block 的事件合同查询或订阅。
 
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` | 完整；Result owner 自行派生正式状态 |
+| `application/workorchd` | Application → Result | Result/Artifact get/list/delete 与 workspace purge 协调 | 完整 |
+| Eventstream / projection | Result → consumer | accepted/rejected 的 `ResultChangedData` | 完整；无外围补发 |
+| Run / Workspace | 无 repository 直连 | 通过同一 sealed terminal outcome 的 owner delivery 链路收敛 | 完整 |
+
 ## 相关约束
 
 - Result 和 Artifact 必须携带一致的 workspace/run/result scope，引用不存在或 scope 不一致时必须拒绝。
@@ -37,3 +46,12 @@ Last Verified: 2026-08-16
 - Artifact 正文或大载荷使用 URI/raw ref，不进入 EventHub 通知。
 - Result owner 只按 sealed outcome identity 执行 owner-local transition，不读取 `ConvergenceState`、focus、repair 或
   error message 重新裁决。delivery feedback 保留 stable category 与完整安全 original diagnostic。
+
+## 待完善测试点
+
+- [ ] 覆盖相同 outcome identity 的重复 terminal delivery，以及相同 identity 不同内容的冲突拒绝。
+- [ ] 覆盖 Result 已写入、Artifact 部分写入或通知失败后的恢复与幂等收敛。
+- [ ] 保持 `CloneResult` 隔离回归和 allocation benchmark，覆盖大 evidence/artifact slice。
+- [ ] 覆盖 workspace/run/result/artifact scope 不一致、引用不存在和跨 workspace delete。
+- [ ] 增加合同清单测试，确认不存在 generic Result/Artifact entity write command。
+- [ ] 覆盖大正文只保留 URI/raw ref，EventHub 通知不携带未裁剪 payload。

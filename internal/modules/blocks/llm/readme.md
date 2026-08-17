@@ -4,9 +4,9 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-17
 
-## 职责
+## 功能范围与边界
 
 `blocks/llm` 是 WorkOrch 的 LLM 能力 block，独占：
 
@@ -61,9 +61,28 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - 审计通知：`/run/llm_usage/recorded`。这些 topic、Command、Result/Data 都由 LLM owner 的
   `pkg/events` 定义；Orchestrator 只作为调用方消费 factual result。
 
+## 交互合同完整性
+
+| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| --- | --- | --- | --- |
+| `application/workorchd` | Application → LLM | active configuration、catalog、refresh、selection validation、completion/embedding | 完整；运行中配置冻结 |
+| `kernel/orchestrator` | Orchestrator → LLM | provider ceiling、runtime capabilities/preflight/candidate request | 完整；LLM 不创建 attempt 或 authority |
+| ai-proxy provider | LLM-private adapter | models、Responses、embedding | 完整；application/Orchestrator 不直连 provider |
+| `blocks/eventstream` | LLM → Eventstream | typed LLM usage notification | 完整；不含 raw prompt/body/credential |
+
 ## 非职责
 
 - 不拥有 Run / Result / Evidence / Workspace 业务状态
 - 不复制 ai-proxy 上游路由与 fallback
 - 不在 Runtime reducer 中解释模型品牌或预算算法
 - 不拥有 candidate evaluator、attempt/correction policy、Runtime action 或 terminal disposition
+
+## 待完善测试点
+
+- [ ] 覆盖 `Start()` 后配置冻结、persisted revision 漂移、restartRequired 与 catalog refresh 拒绝。
+- [ ] 冻结 C0～C2 stable prefix hash，覆盖 Goal/DoD 之外的 volatile 数据不会引起 prefix 漂移。
+- [ ] 覆盖未声明 JSON Schema 能力时省略 `response_format`，同时 strict decoder 仍拒绝非法 candidate。
+- [ ] 覆盖 raw provider body、prompt、credential、endpoint 不进入 aggregate、usage event 或 diagnostic。
+- [ ] 覆盖 incomplete/transient/authentication/configuration/protocol/submission-unknown 的稳定分类和原始安全诊断。
+- [ ] 覆盖 provider ceiling 在 catalog 刷新后保持 sealed，且 token/byte 边界等于容量上限时不误拒绝。
+- [ ] 覆盖 request incomplete 与 submission unknown 不被 LLM block 擅自转换成 retry/correction/terminal。
