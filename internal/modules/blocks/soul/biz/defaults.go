@@ -19,13 +19,21 @@ func ensureBuiltinSoulDefaults(ctx context.Context, repo repository.SoulReposito
 		return err
 	}
 	for _, item := range defaults {
+		id := common.SoulID(item.ID)
+		if _, err := repo.Get(ctx, id); err == nil {
+			continue
+		} else if !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
 		value := &soulmodel.Soul{ID: common.SoulID(item.ID), Name: item.Name, Description: item.Description, BusinessDomains: append([]string(nil), item.BusinessDomains...), SoulMD: item.SoulMD, AllowedSkillRefs: append([]string(nil), item.AllowedSkillRefs...), AllowedMCPServerRefs: append([]string(nil), item.AllowedMCPServerRefs...), AllowedCapabilityRefs: append([]string(nil), item.AllowedCapabilityRefs...), AllowedCapabilityCategories: append([]string(nil), item.AllowedCapabilityCategories...), AllowedToolKinds: append([]string(nil), item.AllowedToolKinds...)}
-		if err := repo.Update(ctx, value); err != nil {
-			if !errors.Is(err, common.ErrNotFound) {
+		if err := repo.Create(ctx, value); err != nil {
+			if !errors.Is(err, common.ErrConflict) {
 				return err
 			}
-			if err := repo.Create(ctx, value); err != nil {
-				return err
+			// A concurrent ensure may have created the seed after the read. Treat
+			// that as success only when the resource is now observable.
+			if _, getErr := repo.Get(ctx, id); getErr != nil {
+				return getErr
 			}
 		}
 	}

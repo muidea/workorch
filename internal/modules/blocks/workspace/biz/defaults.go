@@ -20,6 +20,11 @@ func ensureBuiltinWorkspaceTemplateDefaults(ctx context.Context, repo repository
 		return err
 	}
 	for _, item := range defaults {
+		if _, err := repo.Get(ctx, item.ID); err == nil {
+			continue
+		} else if !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
 		contextHints, err := workorcheventpayload.FromMap(item.ContextHints)
 		if err != nil {
 			return err
@@ -29,12 +34,12 @@ func ensureBuiltinWorkspaceTemplateDefaults(ctx context.Context, repo repository
 			return err
 		}
 		value := &workspacemodel.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cloneStringMap(item.SoulBindings), ContextHints: contextHints, EvidencePolicies: evidencePolicies}
-		if err := repo.Update(ctx, value); err != nil {
-			if !errors.Is(err, common.ErrNotFound) {
+		if err := repo.Create(ctx, value); err != nil {
+			if !errors.Is(err, common.ErrConflict) {
 				return err
 			}
-			if err := repo.Create(ctx, value); err != nil {
-				return err
+			if _, getErr := repo.Get(ctx, item.ID); getErr != nil {
+				return getErr
 			}
 		}
 	}

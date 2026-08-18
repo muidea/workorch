@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Current Layout
 
@@ -28,6 +28,11 @@ Markdown file provides the runtime `soulMd` body.
 
 At startup, System coordinates `EnsureDefaultsCommand` defined by Soul owner. Soul owner validates and persists each default;
 System, workorchd and the defaults package do not become Soul state owners.
+
+Default Souls are seed-once, user-editable resources. Soul owner creates a built-in ID only when it is missing; a repeated
+ensure preserves the entire existing object even when its content differs from the embedded declaration. Deleting a built-in
+Soul makes it eligible for recreation on the next ensure. Updating embedded Markdown does not silently overwrite persisted
+Souls and requires an explicit migration contract if a forced refresh is ever needed.
 
 On the product surface, APIs and projections expose full `soulMd`; `soulMDRef` is an embedded-resource implementation detail.
 Workspace templates store Soul IDs/bindings, not filesystem references.

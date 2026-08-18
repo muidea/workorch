@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Current Inventory
 
@@ -22,7 +22,12 @@ The current inventory is exact, not a minimum:
 ensure commands; Workspace owner persists templates and Soul owner persists Souls. System does not define those command schemas
 or write their repositories.
 
-MCP defaults follow the same pattern through MCP Registry owner and are documented separately.
+MCP defaults follow the same pattern through MCP Registry owner.
+
+All built-ins are seed-once, user-editable owner resources. Ensure creates a built-in ID only when it is absent and never
+replaces an existing Soul, WorkspaceTemplate, MCP Server or MCP Capability. Deleting a built-in allows the next startup to
+recreate it from the then-current embedded declaration. An embedded-default change does not migrate existing resources; any
+future forced refresh requires a separate versioned and auditable owner migration contract.
 
 ## Template Contract
 

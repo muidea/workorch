@@ -115,6 +115,128 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	}
 }
 
+func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChanges(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(64)
+	defer hub.Terminate(ctx)
+	souls := memoryrepo.NewSoulRepository()
+	templates := memoryrepo.NewWorkspaceTemplateRepository()
+	mcpServers := memoryrepo.NewMCPServerRepository()
+	mcpCapabilities := memoryrepo.NewMCPCapabilityRepository()
+
+	soulOwner := soulmodule.New()
+	if err := soulOwner.Configure(soulbiz.Dependencies{Souls: souls, EventHub: hub}); err != nil {
+		t.Fatalf("configure soul owner: %v", err)
+	}
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
+		Workspaces: memoryrepo.NewWorkspaceRepository(),
+		Goals:      memoryrepo.NewGoalRepository(),
+		DoDs:       memoryrepo.NewDoDRepository(),
+		Templates:  templates,
+		EventHub:   hub,
+	}); err != nil {
+		t.Fatalf("configure workspace owner: %v", err)
+	}
+	mcpOwner := mcpmodule.New()
+	if err := mcpOwner.Configure(mcpregistrybiz.Dependencies{Servers: mcpServers, Capabilities: mcpCapabilities, EventHub: hub}); err != nil {
+		t.Fatalf("configure MCP owner: %v", err)
+	}
+	if err := soulOwner.Start(); err != nil {
+		t.Fatalf("start soul owner: %v", err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatalf("start workspace owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = mcpOwner.Stop(ctx)
+		_ = workspaceOwner.Stop(ctx)
+		_ = soulOwner.Stop(ctx)
+	})
+
+	module := New()
+	if err := module.Configure(systembiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatalf("Configure error=%v", err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	if err := module.Start(ctx); err == nil {
+		t.Fatal("Start error=nil, want missing MCP subscriber to fail startup")
+	}
+
+	seededSouls, err := souls.List(ctx)
+	if err != nil || len(seededSouls) == 0 {
+		t.Fatalf("souls after partial Start len=%d err=%v", len(seededSouls), err)
+	}
+	seededTemplates, err := templates.List(ctx)
+	if err != nil || len(seededTemplates) == 0 {
+		t.Fatalf("templates after partial Start len=%d err=%v", len(seededTemplates), err)
+	}
+	if got, err := mcpServers.List(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("MCP servers after partial Start len=%d err=%v, want none", len(got), err)
+	}
+
+	customSoul := seededSouls[0]
+	customSoul.Name = "user-customized soul"
+	customSoul.AllowedSkillRefs = []string{"user-customized-skill"}
+	if err := souls.Update(ctx, customSoul); err != nil {
+		t.Fatalf("customize seeded soul: %v", err)
+	}
+	customTemplate := seededTemplates[0]
+	customTemplate.Name = "user-customized template"
+	customTemplate.DoDItems = []string{"user-customized acceptance"}
+	if err := templates.Update(ctx, customTemplate); err != nil {
+		t.Fatalf("customize seeded template: %v", err)
+	}
+
+	if err := mcpOwner.Start(); err != nil {
+		t.Fatalf("start MCP owner before retry: %v", err)
+	}
+	if err := module.Start(ctx); err != nil {
+		t.Fatalf("retry Start after MCP owner becomes available: %v", err)
+	}
+	gotSoul, err := souls.Get(ctx, customSoul.ID)
+	if err != nil || gotSoul.Name != customSoul.Name || len(gotSoul.AllowedSkillRefs) != 1 || gotSoul.AllowedSkillRefs[0] != customSoul.AllowedSkillRefs[0] {
+		t.Fatalf("soul after retry = %+v err=%v, want user customization preserved", gotSoul, err)
+	}
+	gotTemplate, err := templates.Get(ctx, customTemplate.ID)
+	if err != nil || gotTemplate.Name != customTemplate.Name || len(gotTemplate.DoDItems) != 1 || gotTemplate.DoDItems[0] != customTemplate.DoDItems[0] {
+		t.Fatalf("template after retry = %+v err=%v, want user customization preserved", gotTemplate, err)
+	}
+
+	seededServers, err := mcpServers.List(ctx)
+	if err != nil || len(seededServers) == 0 {
+		t.Fatalf("MCP servers after retry len=%d err=%v", len(seededServers), err)
+	}
+	seededCapabilities, err := mcpCapabilities.List(ctx)
+	if err != nil || len(seededCapabilities) == 0 {
+		t.Fatalf("MCP capabilities after retry len=%d err=%v", len(seededCapabilities), err)
+	}
+	customServer := seededServers[0]
+	customServer.Name = "user-customized MCP server"
+	customServer.Enabled = false
+	if err := mcpServers.Update(ctx, customServer); err != nil {
+		t.Fatalf("customize seeded MCP server: %v", err)
+	}
+	customCapability := seededCapabilities[0]
+	customCapability.DisplayName = "user-customized MCP capability"
+	customCapability.Enabled = false
+	if err := mcpCapabilities.Update(ctx, customCapability); err != nil {
+		t.Fatalf("customize seeded MCP capability: %v", err)
+	}
+
+	if err := module.Start(ctx); err != nil {
+		t.Fatalf("repeat Start: %v", err)
+	}
+	gotServer, err := mcpServers.Get(ctx, customServer.ID)
+	if err != nil || gotServer.Name != customServer.Name || gotServer.Enabled != customServer.Enabled {
+		t.Fatalf("MCP server after repeat Start = %+v err=%v, want user customization preserved", gotServer, err)
+	}
+	gotCapability, err := mcpCapabilities.Get(ctx, customCapability.ID)
+	if err != nil || gotCapability.DisplayName != customCapability.DisplayName || gotCapability.Enabled != customCapability.Enabled {
+		t.Fatalf("MCP capability after repeat Start = %+v err=%v, want user customization preserved", gotCapability, err)
+	}
+}
+
 func systemModuleContractDependencies() systembiz.Dependencies {
 	return systembiz.Dependencies{EventHub: magicevent.NewHub(16)}
 }

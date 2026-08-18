@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-18
 
 ## 功能范围与边界
 
@@ -18,7 +18,7 @@ Last Verified: 2026-08-17
 - `application/workorchd` 与需要 definition fact 的 owner 通过 EventHub 读取 Workspace、Goal、DoD、Template 和
   definition revision；其他 owner 不直接访问 Workspace repository。
 - `application/workorchd` 通过 owner command/read port 管理和展示 workspace definition。
-- `kernel/system` 发送 `EnsureWorkspaceTemplateDefaultsCommand`；本 block 在自己的 repository 内幂等初始化默认模板并返回具体 result。
+- `kernel/system` 发送 `EnsureWorkspaceTemplateDefaultsCommand`；本 block 只为缺失的内置 ID 创建默认模板，已存在对象保持不变，并返回具体 result。
 - `WorkspaceTemplate` 是 workspace owner 的 DTO；EventHub result 只返回该 owner DTO，并在 module 内部完成与 repository entity 的双向 mapping、slice/map/payload clone。repository 类型不得泄漏给 application 或其他 owner。
 - 外部定义命令保持唯一入口 `handleCommand -> executeCommand`；Owner 内部按 Workspace、Goal、DoD、Template
   四个命令族做穷尽且 fail-closed 的静态分派。各 handler 只是同一 Biz 内的职责切片，不是新的 Owner、状态机、
@@ -47,6 +47,11 @@ Last Verified: 2026-08-17
 - `fresh_activation_required` 只是 Run owner 的不可继续 disposition；普通 Run notification 不释放 Workspace slot。
   对不兼容 development data 的 restart，Run owner返回 `data_reset_required`，Workspace 不代替 Run 创建 successor、
   不读取旧 aggregate，也不通过旁路 fact 清除 active slot。
+- 默认 WorkspaceTemplate 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。嵌入默认值变更若需迁移，必须使用独立的显式迁移合同。
+
+## 已覆盖测试点
+
+- [x] memory/file backend 上 Template defaults 的部分已存在、缺失补建、重复 ensure 与内置 ID 用户修改非覆盖语义。
 
 ## 待完善测试点
 
@@ -55,4 +60,4 @@ Last Verified: 2026-08-17
 - [ ] 覆盖 execution intent 的缺失 Goal/DoD、跨 scope、重复投递与 active Run 冲突。
 - [ ] 覆盖 sealed terminal outcome 重复/冲突投递，以及仅匹配 outcome identity 才释放 `ActiveRunID`。
 - [ ] 覆盖普通 Run notification、`fresh_activation_required`、`data_reset_required` 均不能旁路释放 slot。
-- [ ] 覆盖 Template defaults 幂等非覆盖和 Template DTO 中 slice/map/payload 的深拷贝。
+- [ ] 覆盖 Template DTO 中 slice/map/payload 的完整深拷贝矩阵。

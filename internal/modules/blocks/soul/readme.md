@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-18
 
 ## 功能范围与边界
 
@@ -15,14 +15,14 @@ Last Verified: 2026-08-17
 - Soul 的 create/get/list/update/delete 和 capability validation 由 `blocks/soul/pkg/events` 定义，并返回 `SoulCommandResult`。
 - `application/workorchd` 通过 EventHub 管理 Soul；Workspace/profile 只绑定 Soul ref。
 - fresh activation 由 `application/workorchd` 读取并封存 Soul 的结构化中立约束；`kernel/orchestrator` 只消费该 typed snapshot，不直接查询 Soul owner。
-- `kernel/system` 发送 `EnsureSoulDefaultsCommand`；本 block 在自己的 repository 内幂等初始化默认 Soul。
+- `kernel/system` 发送 Soul owner-local `EnsureDefaultsCommand`；本 block 只为缺失的内置 ID 创建默认 Soul，已存在对象保持不变。
 
 ## 交互合同完整性
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
 | `application/workorchd` | Application → Soul | create/get/list/update/delete、capability validation | 完整 |
-| `kernel/system` | System → Soul | `EnsureSoulDefaultsCommand` 及具体 result | 完整 |
+| `kernel/system` | System → Soul | `soul/pkg/events.EnsureDefaultsCommand` / `EnsureDefaultsResult` | 完整 |
 | Workspace activation | Application → Run bootstrap | detached stage Soul 内容与结构化约束 | 完整；Orchestrator 无直接 Registry I/O |
 
 ## 相关约束
@@ -31,10 +31,14 @@ Last Verified: 2026-08-17
 - core runtime 不得按 Soul ID、名称或显示文本写死业务分支。
 - Soul 约束必须使用结构化中立字段，并保持 provenance。
 - Soul guidance 不得覆盖当前 Goal、DoD、stage contract、runtime policy 或 requiredOutput。
+- 默认 Soul 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。强制刷新只能通过另行定义的显式迁移合同完成。
+
+## 已覆盖测试点
+
+- [x] memory/file backend 上默认 Soul 的部分已存在、缺失补建、重复 ensure 与内置 ID 用户修改非覆盖语义。
 
 ## 待完善测试点
 
-- [ ] 覆盖默认 Soul 重复 ensure、用户已修改 Soul 和部分默认值已存在时的非覆盖幂等语义。
 - [ ] 覆盖 capability validation 的未知 capability、冲突约束和空 stage binding。
 - [ ] 覆盖 create/update/get/list 的深拷贝，尤其是 stage policy、capability/risk constraint 和 provenance slice。
 - [ ] 增加 activation 边界测试，确认 Orchestrator 不直接查询 Soul，且 sealed Soul snapshot 不受后续 Registry 更新影响。
