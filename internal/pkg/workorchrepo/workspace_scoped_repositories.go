@@ -2100,6 +2100,61 @@ func (r *workspaceScopedResultRepository) ListByRun(ctx context.Context, runID c
 	return nilIfEmpty(ret), nil
 }
 
+func (r *workspaceScopedResultRepository) ListForRecovery(ctx context.Context, cursor string, limit int) ([]*resultmodel.Result, string, error) {
+	if limit < 1 {
+		return nil, "", common.ErrInvalidArgument
+	}
+	ret := make([]*resultmodel.Result, 0, limit+1)
+	for _, root := range r.store.allRunRoots() {
+		localCursor := ""
+		rootComplete := false
+		for page := 0; page < 1000 && len(ret) <= limit; page++ {
+			remaining := limit + 1 - len(ret)
+			items, next, err := r.store.resultRepo(r.store.runPath(root, workspaceScopedResultFile)).ListForRecovery(ctx, localCursor, remaining)
+			if err != nil {
+				return nil, "", err
+			}
+			for _, item := range items {
+				if item == nil || workspaceScopedResultRecoveryKey(root, item) <= cursor {
+					continue
+				}
+				ret = append(ret, item)
+				if len(ret) > limit {
+					break
+				}
+			}
+			if next == "" {
+				rootComplete = true
+				break
+			}
+			if len(ret) > limit {
+				break
+			}
+			localCursor = next
+		}
+		if !rootComplete && len(ret) <= limit {
+			return nil, "", common.ErrConflict
+		}
+		if len(ret) > limit {
+			break
+		}
+	}
+	next := ""
+	if len(ret) > limit {
+		ret = ret[:limit]
+		last := ret[len(ret)-1]
+		next = workspaceScopedResultRecoveryKey(r.store.runRoot(last.WorkspaceID, last.RunID), last)
+	}
+	return nilIfEmpty(ret), next, nil
+}
+
+func workspaceScopedResultRecoveryKey(root string, item *resultmodel.Result) string {
+	if item == nil {
+		return ""
+	}
+	return root + "\x00" + string(item.WorkspaceID) + "\x00" + string(item.ID)
+}
+
 func (r *workspaceScopedResultRepository) Update(ctx context.Context, item *resultmodel.Result) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
@@ -2208,12 +2263,29 @@ func (r *workspaceScopedArtifactRepository) ListByRun(ctx context.Context, runID
 
 func (r *workspaceScopedArtifactRepository) ListByResult(ctx context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
 	ret := []*resultmodel.Artifact{}
-	for _, root := range r.store.allRunRoots() {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	roots := r.store.workspaceRunRoots(workspaceID)
+	if workspaceID == "" {
+		roots = r.store.allRunRoots()
+	}
+	for _, root := range roots {
 		items, err := r.store.artifactRepo(r.store.runPath(root, workspaceScopedArtifactFile)).ListByResult(ctx, resultID)
 		if err != nil {
 			return nil, err
 		}
 		ret = append(ret, items...)
+	}
+	if workspaceID == "" {
+		var matchedWorkspace common.WorkspaceID
+		for _, item := range ret {
+			if item == nil {
+				continue
+			}
+			if matchedWorkspace != "" && matchedWorkspace != item.WorkspaceID {
+				return nil, common.ErrConflict
+			}
+			matchedWorkspace = item.WorkspaceID
+		}
 	}
 	sortArtifacts(ret)
 	return nilIfEmpty(ret), nil

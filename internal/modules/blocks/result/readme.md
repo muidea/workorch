@@ -4,54 +4,80 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-19
 
 ## 功能范围与边界
 
-`blocks/result` 管理 Result 与 Artifact 组成的 formal-outcome 聚合，负责结果状态、证据引用、artifact 元数据和 owner 查询。它不负责 evidence quality、DoD coverage 或 accepted 判定策略。
+`blocks/result` 是 Result formal outcome 聚合的唯一 owner。聚合根为 Result，Artifact 是 owner 物化并与
+Result 同 scope 的正式子实体。该 block 负责 identity、持久化状态、幂等 fence、artifact 元数据、查询与聚合删除；
+不负责 evidence quality、DoD coverage 或 accepted 判定策略，也不读取 Runtime authority 重新裁决结果。
+
+## 写入与状态合同
+
+- Runtime formal Result 的唯一生产写入口是 typed `RuntimeTerminalDeliveryFact`，且 source 必须为
+  `kernel/orchestrator`。调用方只提交 sealed `ResultMaterial`，不能提交 Result ID、state、revision、时间戳或完整
+  Result/Artifact entity。
+- Result owner 按 `<workspace-id>/<run-id>/result/dod-assessment` 派生 canonical Result ID，并对完整规范化 material
+  计算 `result-material-sha256:*`。相同 terminal identity、相同 material 是幂等重放；相同 Result ID 下 identity 或
+  material 任一漂移均为 conflict，不能创建第二条 Result。
+- Result 状态转换矩阵为：同状态幂等；`draft -> accepted | rejected`；`accepted | rejected -> superseded`。其中
+  `draft` 只用于需要先物化 Artifact 子实体的 owner-private pending 状态；无 Artifact 的 terminal delivery 直接单次
+  持久化最终状态。Runtime 的 failed/cancelled/superseded terminal outcome 均形成 rejected Result，不开放外围状态
+  更新命令。
+- terminal material 的顶层 `ArtifactRefs` 是允许引用集合；summary、coverage 与 closeout 中的 artifact ref 必须属于
+  该集合。owner 将每个 raw ref 物化为 canonical child Artifact ID，raw ref 只保存在 `URI`/`SourceRef`，正文不进入
+  EventHub。Artifact scope 必须与父 Result 的 workspace/run/result 完全一致。
+- Result 删除是可重试的聚合删除：先删除聚合根，再清理全部正式子 Artifact；中途失败后可从 orphan cleanup 继续。
+  单独 Artifact delete 只允许清理父 Result 已不存在的 orphan，不能使一个仍存在的 Result 留下悬空引用。
+
+## 查询合同
+
+- 每个 topic 都有独立 concrete result type；不存在同时承载 Result、Artifact、列表和删除计数的通用 result
+  envelope，也不存在 generic entity create/update command。
+- 所有 get/list/delete command 都显式携带 `WorkspaceID`。按 Run/Result 查询时也必须绑定相同 workspace context；
+  memory 与 file backend 对重复局部 ID 采用相同的 scoped/ambiguous 语义。
+- 所有 list command 使用 ID keyset `Cursor` 和 `Limit`，默认 100、单页上限 200。Application 与 Orchestrator 的
+  production collector 同时具备 cursor visited-set 与 1,000 页 hard limit。
+- entity 离开 owner 前通过 `CloneResult`/`CloneArtifact` 隔离可变 slice 与嵌套值。terminal material normalization
+  自身返回 detached value，owner 映射 canonical Artifact ID 时不再额外执行完整 `CloneResult`。allocation benchmark
+  是性能回归观测，不把固定拷贝次数或 alloc 数写成语义合同。
+
+## 通知与恢复合同
+
+- Result 最终状态持久化后由 owner 发布 accepted/rejected `ResultChangedData`；通知含 owner-derived
+  `NotificationID` 与 `TerminalMaterialHash`，不携带 Artifact 正文。
+- terminal Result 行本身是通知的 durable replay source。相同 SM-4 delivery 重放会再次发布同一通知；owner 启动时
+  及运行期间每分钟还会通过 owner-private、单页 200/最多 1,000 页的 recovery inventory 有界重放正式结果。
+- Eventstream 将 `NotificationID` 用作 EventRecord ID；重复 append 只对该 stable identity 视为幂等，其他 ID conflict
+  仍 fail-visible。因此 Result 持久化与 SM-4 acknowledgement 不依赖 projection，可同时关闭“持久化后崩溃/Hub
+  投递中断导致永久缺通知”的窗口。
 
 ## 组件交互及合同
 
-- Result 的 get/list/delete 与 Artifact 的 list/delete 由 `blocks/result/pkg/events` 定义具体 command 和
-  `ResultCommandResult`；没有生产调用方的单项 Artifact get 合同不保留；
-  query result 在离开 owner 前必须显式深拷贝，调用方不能取得 repository entity 的共享可变引用。
-- Runtime Result 的唯一写入口是 typed `RuntimeTerminalDeliveryFact`。调用方只提交 sealed terminal material，
-  Result owner 在自身 reducer 中派生 Result identity、state、时间戳和 delivery fence；不存在接收完整 Result/Artifact
-  entity 的 generic create/update command。
-- Result owner 持久化 terminal delivery 后单点发布 `ResultChangedData`；topic 按 accepted/rejected 状态选择。
-- `kernel/orchestrator` 只有通过 evidence 和 coverage gate 后才能密封 typed `TerminalOutcome`/result payload 并发布
-  terminal delivery fact；delivery 不携带 RuntimeAction 或独立 administrative kind。
-- Runtime accepted/rejected Result 由 Result owner 消费该事实、在自身 reducer 中构造并持久化；结果 ID 同时包含
-  workspace/run scope，重复 terminal delivery 必须幂等。
-- terminal material 只在统一 `CloneResult` 边界执行一次深拷贝；Result owner 不在进入该边界前重复复制顶层
-  evidence/artifact slice。该转换必须继续通过隔离回归和 allocation benchmark。
-- `application/workorchd`、Eventstream 和 projection 按需导入本 block 的事件合同查询或订阅。
-
-## 交互合同完整性
-
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` | 完整；Result owner 自行派生正式状态 |
-| `application/workorchd` | Application → Result | Result/Artifact get/list/delete 与 workspace purge 协调 | 完整 |
-| Eventstream / projection | Result → consumer | accepted/rejected 的 `ResultChangedData` | 完整；无外围补发 |
-| Run / Workspace | 无 repository 直连 | 通过同一 sealed terminal outcome 的 owner delivery 链路收敛 | 完整 |
+| `kernel/orchestrator` | Orchestrator → Result | sealed `RuntimeTerminalDeliveryFact` / `ResultLifecycleCommandResult` | 完整；Result owner 派生 identity/state，SM-4 只接收 owner ack |
+| `application/workorchd` | Application → Result | concrete scoped get/list/delete command/result；workspace purge | 完整；分页有界，聚合根先删、orphan 后清理 |
+| Eventstream / projection | Result → consumer | accepted/rejected `ResultChangedData` + stable `NotificationID` | 完整；Result durable replay、Eventstream 幂等去重，projection 不参与 Runtime authority |
+| Run / Workspace | 无 repository 直连 | 同一 sealed terminal outcome 的 Result → Workspace → Run delivery 顺序 | 完整；Result 不直接迁移 SM-1 或 Workspace lifecycle |
 
 ## 相关约束
 
-- Result 和 Artifact 必须携带一致的 workspace/run/result scope，引用不存在或 scope 不一致时必须拒绝。
-- 本 block 只访问 Result 与 Artifact repository，不得访问 Run、Workspace、Decision 或 EvidenceRecord repository。
-- Result 状态转换必须遵守正式状态机；accepted、rejected 和 superseded 通知不得由外围组件重复发布。
-- 如需新增 Artifact 写入，必须定义只携带不可变 artifact material 的 typed owner command，并由 Result owner
-  派生 identity、state 和时间戳；不得恢复允许调用方提交完整 Artifact entity 的 generic write 合同。
-- Artifact 正文或大载荷使用 URI/raw ref，不进入 EventHub 通知。
+- 本 block 只访问 Result 与 Artifact repository，不得访问 Run、Workspace、Decision、EvidenceRecord repository 或
+  其他 owner service。
 - Result owner 只按 sealed outcome identity 执行 owner-local transition，不读取 `ConvergenceState`、focus、repair 或
-  error message 重新裁决。delivery feedback 保留 stable category 与完整安全 original diagnostic。
+  error message 重新裁决；delivery feedback 保留 stable category 与安全 original diagnostic。
+- 如需新增 Artifact 写入，必须扩展只携带 immutable artifact material 的 typed terminal/owner contract，由 Result
+  owner 派生 identity、state 和时间戳；不得恢复允许调用方提交完整 Artifact entity 的 generic write surface。
+
+## 已覆盖回归
+
+- canonical Result/Artifact ID、规范化 material hash、相同 delivery 重放、material/identity drift conflict。
+- Result pending、Artifact 部分写入后的重启收敛，以及持久化 terminal Result 的启动通知重放。
+- Result/Artifact scope、父引用、聚合级联删除、orphan delete 与 file backend 跨 workspace ResultID 隔离。
+- concrete command/result 类型、默认/最大分页、cursor continuation/cycle guard 和 query clone 隔离。
+- stable Eventstream dedupe、nested artifact reference closure、terminal material isolation 与 allocation benchmark。
 
 ## 待完善测试点
 
-- [ ] 覆盖相同 outcome identity 的重复 terminal delivery，以及相同 identity 不同内容的冲突拒绝。
-- [ ] 覆盖 Result 已写入、Artifact 部分写入或通知失败后的恢复与幂等收敛。
-- [ ] 保持 `CloneResult` 隔离回归和 allocation benchmark，覆盖大 evidence/artifact slice。
-- [ ] 覆盖 workspace/run/result/artifact scope 不一致、引用不存在和跨 workspace delete。
-- [ ] 增加合同清单测试，确认不存在 generic Result/Artifact entity write command。
-- [ ] 覆盖大正文只保留 URI/raw ref，EventHub 通知不携带未裁剪 payload。
+- [ ] 增加 1,000+ evidence/artifact ref 的性能阈值测试；当前 benchmark 只观测常规 slice，不把机器相关数值设为合同。

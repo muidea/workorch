@@ -20,7 +20,7 @@ func TestReadArtifactFallbackListsArtifactsWithURIWorkspaceScope(t *testing.T) {
 	observer.Subscribe(resultevents.TopicArtifactCommandListByRun, func(event magicevent.Event, result magicevent.Result) {
 		captured, _ = event.Data().(resultevents.ListArtifactsByRunCommand)
 		capturedWorkspace = common.RuntimeWorkspaceIDFromContext(event.Context())
-		result.Set(resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{}}, nil)
+		result.Set(resultevents.ListArtifactsByRunResult{Artifacts: []*resultmodel.Artifact{}}, nil)
 	})
 	defer observer.Unsubscribe(resultevents.TopicArtifactCommandListByRun)
 
@@ -29,7 +29,7 @@ func TestReadArtifactFallbackListsArtifactsWithURIWorkspaceScope(t *testing.T) {
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ReadArtifact err = %v, want not found after scoped owner list", err)
 	}
-	if capturedWorkspace != "ws-artifact-scope" || captured.RunID != "run-001" {
+	if capturedWorkspace != "ws-artifact-scope" || captured.WorkspaceID != "ws-artifact-scope" || captured.RunID != "run-001" {
 		t.Fatalf("captured scope = workspace:%q run:%q, want URI workspace/run", capturedWorkspace, captured.RunID)
 	}
 }

@@ -369,7 +369,7 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 		}},
 	}
 	for _, item := range items {
-		event := magicevent.NewEventWithContext(item.topic, "kernel/orchestrator", resultevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
+		event := magicevent.NewEventWithContext(item.topic, "blocks/result", resultevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
 		rawHub.Post(event)
 	}
 
@@ -380,6 +380,42 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 	resultTitle, _ := records[0].Payload.String(recordpayload.PayloadKeyTitle)
 	if records[0].Topic != resultevents.TopicResultAccepted || resultTitle != "typed result" {
 		t.Fatalf("result record = %+v", records[0])
+	}
+}
+
+func TestServiceDeduplicatesStableResultNotificationReplay(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatalf("start event stream service: %v", err)
+	}
+	defer service.Stop()
+
+	data := resultevents.ResultChangedData{
+		NotificationID: "result-notification/delivery-1/material-1",
+		ResultID:       "result-replayed", WorkspaceID: "ws-result-replayed", RunID: "run-result-replayed",
+		State: common.ResultStateAccepted, Title: "replayed result",
+	}
+	for range 2 {
+		rawHub.Post(magicevent.NewEventWithContext(
+			resultevents.TopicResultAccepted,
+			"blocks/result",
+			resultevents.NotificationDestination,
+			magicevent.NewHeader(),
+			ctx,
+			data,
+		))
+	}
+
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID}, 1)
+	time.Sleep(20 * time.Millisecond)
+	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].ID != common.EventRecordID(data.NotificationID) {
+		t.Fatalf("replayed records = %+v, want one stable record", records)
 	}
 }
 

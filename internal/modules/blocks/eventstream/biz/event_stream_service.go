@@ -2,9 +2,11 @@ package eventstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -253,6 +256,10 @@ func (s *Service) subscribeResultNotifications() {
 	for _, topic := range resultTopics {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+			if event.Source() != resultcommon.ModuleID {
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
+				return
+			}
 			data, ok := event.Data().(resultevents.ResultChangedData)
 			if !ok {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
@@ -449,6 +456,12 @@ func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstream
 	if err == nil {
 		err = s.appendRecord(event.Context(), record)
 	}
+	// Only Result notifications carry a stable owner-derived EventRecord ID.
+	// A conflict for that identity is an idempotent replay; conflicts for any
+	// other event must remain visible instead of being silently swallowed.
+	if errors.Is(err, common.ErrConflict) && record != nil && strings.HasPrefix(string(record.ID), "result-notification/") {
+		return
+	}
 	if err != nil {
 		slog.Error("workorch eventstream append failed", "topic", event.ID(), "source", event.Source(), "err", err)
 	}
@@ -623,7 +636,7 @@ func resultRecord(topic string, source string, data resultevents.ResultChangedDa
 			artifactRefs = append(artifactRefs, string(ref))
 		}
 	}
-	return &eventstreammodel.EventRecord{
+	ret := &eventstreammodel.EventRecord{
 		Topic:        topic,
 		SourceModule: source,
 		SubjectType:  "result",
@@ -635,6 +648,10 @@ func resultRecord(topic string, source string, data resultevents.ResultChangedDa
 			SourceType: data.SourceType, SourceRef: data.SourceRef, EvidenceRefs: data.EvidenceRefs, ArtifactRefs: artifactRefs,
 		}).EventPayload(),
 	}
+	if data.NotificationID != "" {
+		ret.ID = common.EventRecordID(data.NotificationID)
+	}
+	return ret
 }
 
 func memoryRecord(topic string, source string, data memoryevents.MemoryChangedData) *eventstreammodel.EventRecord {

@@ -1,9 +1,11 @@
 package events
 
 import (
+	"errors"
 	"testing"
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -30,5 +32,15 @@ func TestCloneResultAndArtifactIsolateEventHubBoundary(t *testing.T) {
 	artifact.EvidenceRefs[0] = "mutated"
 	if clonedArtifact.EvidenceRefs[0] != "artifact-evidence" {
 		t.Fatalf("artifact clone shares evidence refs: %+v", clonedArtifact)
+	}
+}
+
+func TestNormalizeListWindowIsBounded(t *testing.T) {
+	cursor, limit, err := NormalizeListWindow(" cursor ", 0)
+	if err != nil || cursor != "cursor" || limit != DefaultListLimit {
+		t.Fatalf("normalized window = %q/%d err=%v", cursor, limit, err)
+	}
+	if _, _, err := NormalizeListWindow("", MaxListLimit+1); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("oversized limit err = %v", err)
 	}
 }

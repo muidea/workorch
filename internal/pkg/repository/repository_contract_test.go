@@ -729,6 +729,18 @@ func testResultRepositoryContract(t *testing.T, factory func() repository.Result
 	if len(scopedResults) != 1 || scopedResults[0].ID != first.ID {
 		t.Fatalf("scoped duplicate run results = %+v, want %s", scopedResults, first.ID)
 	}
+	recovery, ok := repo.(repository.ResultRecoveryRepository)
+	if !ok {
+		t.Fatalf("result repository %T does not expose bounded owner recovery inventory", repo)
+	}
+	page, next, err := recovery.ListForRecovery(ctx, "", 2)
+	if err != nil || len(page) != 2 || next == "" {
+		t.Fatalf("result recovery first page = %+v next=%q err=%v", page, next, err)
+	}
+	last, finalCursor, err := recovery.ListForRecovery(ctx, next, 2)
+	if err != nil || len(last) != 1 || finalCursor != "" {
+		t.Fatalf("result recovery final page = %+v next=%q err=%v", last, finalCursor, err)
+	}
 	if _, err := repo.Get(ctx, common.ResultID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing result err = %v, want not found", err)
 	}

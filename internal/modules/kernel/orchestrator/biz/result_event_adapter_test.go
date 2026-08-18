@@ -20,16 +20,16 @@ func TestResultEventPurgeRepositoriesUseReadDeleteContractsAndDetachResults(t *t
 	artifactItem := &resultmodel.Artifact{ID: "artifact-adapter", WorkspaceID: "ws-result-adapter", RunID: "run-result-adapter", EvidenceRefs: []string{"artifact-evidence-1"}}
 
 	subscribeResultCommand(t, hub, resultevents.TopicResultCommandListByRun, func(cmd resultevents.ListResultsByRunCommand, response magicevent.Result) {
-		if cmd.RunID != resultItem.RunID {
+		if cmd.WorkspaceID != resultItem.WorkspaceID || cmd.RunID != resultItem.RunID || cmd.Limit != resultevents.MaxListLimit {
 			t.Fatalf("run id = %s", cmd.RunID)
 		}
-		response.Set(resultevents.ResultCommandResult{Results: []*resultmodel.Result{resultItem}}, nil)
+		response.Set(resultevents.ListResultsByRunResult{Results: []*resultmodel.Result{resultItem}}, nil)
 	})
 	subscribeResultCommand(t, hub, resultevents.TopicArtifactCommandListByRun, func(cmd resultevents.ListArtifactsByRunCommand, response magicevent.Result) {
-		if cmd.RunID != artifactItem.RunID {
+		if cmd.WorkspaceID != artifactItem.WorkspaceID || cmd.RunID != artifactItem.RunID || cmd.Limit != resultevents.MaxListLimit {
 			t.Fatalf("run id = %s", cmd.RunID)
 		}
-		response.Set(resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{artifactItem}}, nil)
+		response.Set(resultevents.ListArtifactsByRunResult{Artifacts: []*resultmodel.Artifact{artifactItem}}, nil)
 	})
 
 	results, err := (resultEventResultRepository{hub: hub}).ListByRun(ctx, resultItem.RunID)

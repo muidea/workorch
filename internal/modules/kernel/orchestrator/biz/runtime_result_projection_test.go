@@ -1395,7 +1395,7 @@ func TestRuntimeResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 		},
 	}
 	item := runtimeResultMaterialFromAggregate(aggregate)
-	if item.ID != "ws-1/run-1/result/dod-assessment" || !item.DoDAssessment.Satisfied ||
+	if item.WorkspaceID != "ws-1" || item.RunID != "run-1" || !item.DoDAssessment.Satisfied ||
 		len(item.DoDAssessment.Items) != 1 || item.DoDAssessment.Items[0].Item != "行为已验证" || len(item.EvidenceRefs) != 1 {
 		t.Fatalf("runtime result = %+v", item)
 	}

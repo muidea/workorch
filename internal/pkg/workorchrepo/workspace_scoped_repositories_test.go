@@ -11,9 +11,11 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
@@ -181,6 +183,64 @@ func TestWorkspaceScopedRunLocalGetRequiresUniqueUnscopedID(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].ID != "run-shared-local/step-001" {
 		t.Fatalf("scoped step list = %#v, want one scoped step", steps)
+	}
+}
+
+func TestWorkspaceScopedArtifactListByResultHonorsWorkspaceContext(t *testing.T) {
+	ctx := context.Background()
+	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())
+	for idx, workspaceID := range []common.WorkspaceID{"ws-artifact-a", "ws-artifact-b"} {
+		runID := common.RunID("run-artifact-" + string(rune('a'+idx)))
+		scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		if err := repos.Runs.Create(scoped, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
+			t.Fatalf("create run %s: %v", workspaceID, err)
+		}
+		if err := repos.Artifacts.Create(scoped, &resultmodel.Artifact{
+			ID: common.ArtifactID("artifact-" + string(rune('a'+idx))), WorkspaceID: workspaceID, RunID: runID,
+			ResultID: "result-shared", State: common.ArtifactStateAvailable,
+		}); err != nil {
+			t.Fatalf("create artifact %s: %v", workspaceID, err)
+		}
+	}
+
+	items, err := repos.Artifacts.ListByResult(common.ContextWithRuntimeWorkspaceID(ctx, "ws-artifact-a"), "result-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].WorkspaceID != "ws-artifact-a" || items[0].ID != "artifact-a" {
+		t.Fatalf("scoped artifacts = %+v", items)
+	}
+	if _, err := repos.Artifacts.ListByResult(ctx, "result-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate result query err = %v, want conflict", err)
+	}
+}
+
+func TestWorkspaceScopedResultRecoveryInventoryIsBounded(t *testing.T) {
+	ctx := context.Background()
+	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())
+	for idx, workspaceID := range []common.WorkspaceID{"ws-result-recovery-a", "ws-result-recovery-b", "ws-result-recovery-c"} {
+		runID := common.RunID("run-result-recovery-" + string(rune('a'+idx)))
+		if err := repos.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repos.Results.Create(ctx, &resultmodel.Result{
+			ID: common.ResultID("result-recovery-" + string(rune('a'+idx))), WorkspaceID: workspaceID, RunID: runID,
+			State: common.ResultStateAccepted,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inventory, ok := repos.Results.(repository.ResultRecoveryRepository)
+	if !ok {
+		t.Fatalf("workspace-scoped Result repository %T has no recovery inventory", repos.Results)
+	}
+	first, next, err := inventory.ListForRecovery(ctx, "", 2)
+	if err != nil || len(first) != 2 || next == "" {
+		t.Fatalf("first recovery page = %+v next=%q err=%v", first, next, err)
+	}
+	last, finalCursor, err := inventory.ListForRecovery(ctx, next, 2)
+	if err != nil || len(last) != 1 || finalCursor != "" {
+		t.Fatalf("last recovery page = %+v next=%q err=%v", last, finalCursor, err)
 	}
 }
 

@@ -126,7 +126,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 		Material:                    material,
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultFactTerminalDelivery, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultFactTerminalDelivery, "result", string(material.ID), request.WorkspaceID, request.RunID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultFactTerminalDelivery, "terminal-delivery", request.TerminalDeliveryID, request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
 	if response == nil || response.Error() != nil {
 		if response != nil {
@@ -241,7 +241,7 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resu
 		assessment.DeliverableCoverage = &deliverableCoverage
 	}
 	item := resultevents.ResultMaterial{
-		ID: common.ResultID(string(aggregate.Facts.WorkspaceID) + "/" + string(aggregate.Facts.RunID) + "/result/dod-assessment"), WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		GoalID: aggregate.Definition.GoalID, DoDID: aggregate.Definition.DoDID,
 		Title: "Runtime acceptance result", Summary: terminalSummary,
 		SourceType: resultcommon.SourceTypeDoDAssessment, SourceRef: aggregate.Decision.AuthoritySnapshot.ID,

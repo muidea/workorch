@@ -9,7 +9,6 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
@@ -188,20 +187,21 @@ func Memory(response magicevent.Result, topic string) (memoryevents.MemoryComman
 	return result, nil
 }
 
-func Result(response magicevent.Result, topic string) (resultevents.ResultCommandResult, error) {
+func Result[Response any](response magicevent.Result, topic string) (Response, error) {
+	var zero Response
 	if response == nil {
-		return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := response.Error(); err != nil {
-		return resultevents.ResultCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return resultevents.ResultCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(resultevents.ResultCommandResult)
+	result, ok := data.(Response)
 	if !ok {
-		return resultevents.ResultCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

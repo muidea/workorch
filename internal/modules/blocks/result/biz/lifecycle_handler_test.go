@@ -1,0 +1,205 @@
+package result
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	magicevent "github.com/muidea/magicCommon/event"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+func TestTerminalDeliveryDerivesCanonicalResultAndRejectsMaterialDrift(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	results := memory.NewResultRepository()
+	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := terminalDeliveryFixture("delivery-material", []common.ArtifactID{"workorch://artifact/report"})
+
+	created, err := biz.applyTerminalDelivery(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantID := canonicalRuntimeResultID(command.WorkspaceID, command.RunID)
+	if created.Result == nil || created.Result.ID != wantID || created.Result.TerminalMaterialHash == "" || !created.Transitioned {
+		t.Fatalf("created result = %+v", created)
+	}
+	stored, err := results.Get(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), wantID)
+	if err != nil || stored.State != common.ResultStateAccepted || stored.ID != wantID {
+		t.Fatalf("stored result = %+v err=%v", stored, err)
+	}
+
+	replayed, err := biz.applyTerminalDelivery(ctx, command)
+	if err != nil || replayed.Transitioned || replayed.Result == nil || replayed.Result.ID != wantID {
+		t.Fatalf("replayed result = %+v err=%v", replayed, err)
+	}
+	drifted := command
+	drifted.Material.Summary = "changed sealed material"
+	if _, err := biz.applyTerminalDelivery(ctx, drifted); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("material drift err = %v, want conflict", err)
+	}
+	differentIdentity := command
+	differentIdentity.TerminalDeliveryID = "delivery-other"
+	differentIdentity.CausationID = "terminal-delivery/delivery-other"
+	if _, err := biz.applyTerminalDelivery(ctx, differentIdentity); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("second terminal identity err = %v, want conflict", err)
+	}
+}
+
+func TestTerminalDeliveryRecoversDraftAndPartialArtifactMaterialization(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	results := memory.NewResultRepository()
+	artifacts := memory.NewArtifactRepository()
+	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := terminalDeliveryFixture("delivery-recovery", []common.ArtifactID{"artifact/source-a", "artifact/source-b"})
+	material := command.Material.Normalized()
+	hash, err := resultevents.CanonicalResultMaterialHash(material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultID := canonicalRuntimeResultID(command.WorkspaceID, command.RunID)
+	expectedArtifacts := terminalArtifacts(command, resultID, material.ArtifactRefs)
+	artifactIDs := []common.ArtifactID{expectedArtifacts[0].ID, expectedArtifacts[1].ID}
+	pending := resultFromTerminalMaterial(material, resultID, artifactIDs, hash)
+	identity := command.Identity()
+	pending.TerminalDelivery = &identity
+	pending.State = common.ResultStateDraft
+	pending.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	pending.UpdatedAt = pending.CreatedAt
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
+	if err := results.Create(scoped, pending); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.Create(scoped, expectedArtifacts[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	completed, err := biz.applyTerminalDelivery(ctx, command)
+	if err != nil || completed.Result == nil || completed.Result.State != common.ResultStateAccepted || !completed.Transitioned {
+		t.Fatalf("recovered result = %+v err=%v", completed, err)
+	}
+	children, err := artifacts.ListByResult(scoped, resultID)
+	if err != nil || len(children) != 2 {
+		t.Fatalf("recovered artifacts = %+v err=%v", children, err)
+	}
+	for _, child := range children {
+		if child.WorkspaceID != command.WorkspaceID || child.RunID != command.RunID || child.ResultID != resultID || child.SourceRef == "" || child.MaterialHash == "" {
+			t.Fatalf("invalid child artifact = %+v", child)
+		}
+	}
+}
+
+func TestTerminalDeliveryReplayReemitsStableNotification(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	biz, err := New(hub, nil, Dependencies{Results: memory.NewResultRepository(), Artifacts: memory.NewArtifactRepository(), EventHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const observerID = "/result/consumers/result-replay-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, hub)
+	received := make(chan resultevents.ResultChangedData, 2)
+	observer.Subscribe(resultevents.TopicResultAccepted, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := event.Data().(resultevents.ResultChangedData); ok {
+			received <- data
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(resultevents.TopicResultAccepted) })
+	command := terminalDeliveryFixture("delivery-notification", nil)
+	if _, err := biz.applyTerminalDelivery(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := biz.applyTerminalDelivery(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	first := receiveChangedData(t, received)
+	second := receiveChangedData(t, received)
+	if first.NotificationID == "" || first.NotificationID != second.NotificationID || first.TerminalMaterialHash != second.TerminalMaterialHash {
+		t.Fatalf("notification identities differ: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestResultOwnerStartReplaysDurableTerminalNotification(t *testing.T) {
+	ctx := context.Background()
+	results := memory.NewResultRepository()
+	artifacts := memory.NewArtifactRepository()
+	firstHub := magicevent.NewHub(16)
+	first, err := New(firstHub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: firstHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := terminalDeliveryFixture("delivery-startup-replay", nil)
+	created, err := first.applyTerminalDelivery(ctx, command)
+	if err != nil || created.Result == nil {
+		t.Fatalf("persist terminal result: %+v err=%v", created, err)
+	}
+	firstHub.Terminate(ctx)
+
+	restartedHub := magicevent.NewHub(16)
+	t.Cleanup(func() { restartedHub.Terminate(ctx) })
+	const observerID = "/result/consumers/result-startup-replay-test"
+	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, restartedHub)
+	received := make(chan resultevents.ResultChangedData, 1)
+	observer.Subscribe(resultevents.TopicResultAccepted, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := event.Data().(resultevents.ResultChangedData); ok {
+			received <- data
+		}
+	})
+	t.Cleanup(func() { observer.Unsubscribe(resultevents.TopicResultAccepted) })
+	restarted, err := New(restartedHub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: restartedHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Teardown(ctx) })
+
+	replayed := receiveChangedData(t, received)
+	if replayed.ResultID != created.Result.ID || replayed.NotificationID != resultevents.ResultNotificationID(created.Result) {
+		t.Fatalf("startup replay = %+v, want result %q", replayed, created.Result.ID)
+	}
+}
+
+func receiveChangedData(t *testing.T, values <-chan resultevents.ResultChangedData) resultevents.ResultChangedData {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(time.Second):
+		t.Fatal("result notification was not delivered")
+		return resultevents.ResultChangedData{}
+	}
+}
+
+func terminalDeliveryFixture(deliveryID string, artifactRefs []common.ArtifactID) resultevents.RuntimeTerminalDeliveryFact {
+	return resultevents.RuntimeTerminalDeliveryFact{
+		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{
+			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
+				WorkspaceID: "ws-result-lifecycle", RunID: "run-result-lifecycle", TerminalDeliveryID: deliveryID,
+				AuthoritySnapshotID: "authority-result", DefinitionRevision: "definition-result",
+				EvidenceRevision: "evidence-result", DispatchID: "dispatch-result",
+				Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+			},
+			SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/" + deliveryID,
+		},
+		Material: resultevents.ResultMaterial{
+			WorkspaceID: "ws-result-lifecycle", RunID: "run-result-lifecycle", GoalID: "goal-result", DoDID: "dod-result",
+			Summary: "done", ArtifactRefs: artifactRefs,
+		},
+	}
+}

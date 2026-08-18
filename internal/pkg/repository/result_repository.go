@@ -16,3 +16,13 @@ type ResultRepository interface {
 	CompareAndSwap(context.Context, *result.Result, uint64) error
 	Delete(context.Context, common.ResultID) error
 }
+
+// ResultRecoveryRepository is an owner-private, bounded inventory used to
+// replay derived notifications from durable Result rows after a process or
+// EventHub delivery interruption. The cursor is opaque to callers.
+//
+// It is deliberately separate from ResultRepository so cross-owner query
+// contracts cannot acquire an unscoped list surface.
+type ResultRecoveryRepository interface {
+	ListForRecovery(context.Context, string, int) ([]*result.Result, string, error)
+}

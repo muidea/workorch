@@ -745,6 +745,42 @@ func (r *ResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([
 	return items, nil
 }
 
+func (r *ResultRepository) ListForRecovery(_ context.Context, cursor string, limit int) ([]*resultmodel.Result, string, error) {
+	if limit < 1 {
+		return nil, "", common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items, err := r.list(nil)
+	if err != nil {
+		return nil, "", err
+	}
+	filtered := items[:0]
+	for _, item := range items {
+		if resultRecoveryKey(item) > cursor {
+			filtered = append(filtered, item)
+		}
+	}
+	items = filtered
+	sort.Slice(items, func(i, j int) bool { return resultRecoveryKey(items[i]) < resultRecoveryKey(items[j]) })
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		next = resultRecoveryKey(items[len(items)-1])
+	}
+	if len(items) == 0 {
+		return nil, "", nil
+	}
+	return items, next, nil
+}
+
+func resultRecoveryKey(item *resultmodel.Result) string {
+	if item == nil {
+		return ""
+	}
+	return string(item.WorkspaceID) + "\x00" + string(item.ID)
+}
+
 func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -843,13 +879,16 @@ func (r *ArtifactRepository) Create(_ context.Context, item *resultmodel.Artifac
 	return writeJSONFileAtomic(path, cloneArtifact(item))
 }
 
-func (r *ArtifactRepository) Get(_ context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
+func (r *ArtifactRepository) Get(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	item, err := readJSONItemFile[resultmodel.Artifact](r.artifactPath(id))
 	if err != nil {
 		return nil, err
+	}
+	if !itemMatchesRuntimeWorkspace(ctx, item.WorkspaceID) {
+		return nil, common.ErrNotFound
 	}
 	return cloneArtifact(&item), nil
 }
@@ -883,16 +922,25 @@ func (r *ArtifactRepository) ListByRun(ctx context.Context, runID common.RunID) 
 	return items, nil
 }
 
-func (r *ArtifactRepository) ListByResult(_ context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+func (r *ArtifactRepository) ListByResult(ctx context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item resultmodel.Artifact) bool {
-		return item.ResultID == resultID
+	items, err := r.list(func(item resultmodel.Artifact) bool {
+		return item.ResultID == resultID && itemMatchesRuntimeWorkspace(ctx, item.WorkspaceID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if common.RuntimeWorkspaceIDFromContext(ctx) == "" && listHasMultipleRunWorkspaces(items, func(item *resultmodel.Artifact) common.WorkspaceID {
+		return item.WorkspaceID
+	}) {
+		return nil, common.ErrConflict
+	}
+	return items, nil
 }
 
-func (r *ArtifactRepository) Update(_ context.Context, item *resultmodel.Artifact) error {
+func (r *ArtifactRepository) Update(ctx context.Context, item *resultmodel.Artifact) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -900,22 +948,26 @@ func (r *ArtifactRepository) Update(_ context.Context, item *resultmodel.Artifac
 		return common.ErrInvalidArgument
 	}
 	path := r.artifactPath(item.ID)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return common.ErrNotFound
-	} else if err != nil {
+	current, err := readJSONItemFile[resultmodel.Artifact](path)
+	if err != nil {
 		return err
+	}
+	if !itemMatchesRuntimeWorkspace(ctx, current.WorkspaceID) || current.WorkspaceID != item.WorkspaceID {
+		return common.ErrNotFound
 	}
 	return writeJSONFileAtomic(path, cloneArtifact(item))
 }
 
-func (r *ArtifactRepository) Delete(_ context.Context, id common.ArtifactID) error {
+func (r *ArtifactRepository) Delete(ctx context.Context, id common.ArtifactID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	path := r.artifactPath(id)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return common.ErrNotFound
-	} else if err != nil {
+	current, err := readJSONItemFile[resultmodel.Artifact](path)
+	if err != nil {
 		return err
+	}
+	if !itemMatchesRuntimeWorkspace(ctx, current.WorkspaceID) {
+		return common.ErrNotFound
 	}
 	return os.Remove(path)
 }

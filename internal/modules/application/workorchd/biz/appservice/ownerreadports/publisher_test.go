@@ -186,26 +186,26 @@ func TestResultOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 		if !ok {
 			t.Fatalf("result command type = %T", ev.Data())
 		}
-		if cmd.RunID != runID {
+		if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 			t.Fatalf("result command runID = %q, want %s", cmd.RunID, runID)
 		}
 		if got := common.RuntimeWorkspaceIDFromContext(ev.Context()); got != workspaceID {
 			t.Fatalf("result command workspace context = %q, want %s", got, workspaceID)
 		}
-		response.Set(resultevents.ResultCommandResult{}, nil)
+		response.Set(resultevents.ListResultsByRunResult{}, nil)
 	})
 	subscribeResultReadCommand(t, rawHub, resultevents.TopicArtifactCommandListByRun, func(ev magicevent.Event, response magicevent.Result) {
 		cmd, ok := ev.Data().(resultevents.ListArtifactsByRunCommand)
 		if !ok {
 			t.Fatalf("artifact command type = %T", ev.Data())
 		}
-		if cmd.RunID != runID {
+		if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 			t.Fatalf("artifact command runID = %q, want %s", cmd.RunID, runID)
 		}
 		if got := common.RuntimeWorkspaceIDFromContext(ev.Context()); got != workspaceID {
 			t.Fatalf("artifact command workspace context = %q, want %s", got, workspaceID)
 		}
-		response.Set(resultevents.ResultCommandResult{}, nil)
+		response.Set(resultevents.ListArtifactsByRunResult{}, nil)
 	})
 
 	if _, err := ListResultsByRunOwnerCommand(ctx, rawHub, runID); err != nil {

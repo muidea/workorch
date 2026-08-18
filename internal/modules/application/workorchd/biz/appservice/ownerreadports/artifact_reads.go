@@ -15,13 +15,16 @@ func ListArtifactsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hu
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByWorkspace, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicArtifactCommandListByWorkspace)
+	commandCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	return response.Artifacts, nil
+	return collectResultOwnerPages(func(cursor string) ([]*resultmodel.Artifact, string, error) {
+		event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByWorkspace, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID, Cursor: cursor, Limit: resultevents.MaxListLimit})
+		ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+		response, err := ownerevent.Result[resultevents.ListArtifactsByWorkspaceResult](hub.Send(event), resultevents.TopicArtifactCommandListByWorkspace)
+		return response.Artifacts, response.NextCursor, err
+	})
 }
 
 func ListArtifactsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*resultmodel.Artifact, error) {
@@ -29,12 +32,14 @@ func ListArtifactsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, run
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByRun, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.ListArtifactsByRunCommand{RunID: runID})
-	ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByRun, "run", string(runID), workspaceID, runID, "")
-	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicArtifactCommandListByRun)
+	commandCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	return response.Artifacts, nil
+	return collectResultOwnerPages(func(cursor string) ([]*resultmodel.Artifact, string, error) {
+		event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByRun, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.ListArtifactsByRunCommand{WorkspaceID: workspaceID, RunID: runID, Cursor: cursor, Limit: resultevents.MaxListLimit})
+		ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByRun, "run", string(runID), workspaceID, runID, "")
+		response, err := ownerevent.Result[resultevents.ListArtifactsByRunResult](hub.Send(event), resultevents.TopicArtifactCommandListByRun)
+		return response.Artifacts, response.NextCursor, err
+	})
 }

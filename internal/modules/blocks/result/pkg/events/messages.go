@@ -1,6 +1,9 @@
 package events
 
 import (
+	"fmt"
+	"strings"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -11,51 +14,74 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
+const (
+	DefaultListLimit = 100
+	MaxListLimit     = 200
+)
+
 type GetResultCommand struct {
-	ResultID common.ResultID
+	WorkspaceID common.WorkspaceID
+	ResultID    common.ResultID
 }
 
 type ListResultsByWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
+	Cursor      string
+	Limit       int
 }
 
 type ListResultsByRunCommand struct {
-	RunID common.RunID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	Cursor      string
+	Limit       int
 }
 
 type DeleteResultCommand struct {
-	ResultID common.ResultID
+	WorkspaceID common.WorkspaceID
+	ResultID    common.ResultID
 }
 
 type ListArtifactsByWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
+	Cursor      string
+	Limit       int
 }
 
 type ListArtifactsByRunCommand struct {
-	RunID common.RunID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	Cursor      string
+	Limit       int
 }
 
 type ListArtifactsByResultCommand struct {
-	ResultID common.ResultID
+	WorkspaceID common.WorkspaceID
+	ResultID    common.ResultID
+	Cursor      string
+	Limit       int
 }
 
 type DeleteArtifactCommand struct {
-	ArtifactID common.ArtifactID
+	WorkspaceID common.WorkspaceID
+	ArtifactID  common.ArtifactID
 }
 
 type ResultChangedData struct {
-	ResultID     common.ResultID
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	GoalID       common.GoalID
-	DoDID        common.DoDID
-	State        common.ResultState
-	Title        string
-	Summary      string
-	SourceType   string
-	SourceRef    string
-	EvidenceRefs []string
-	ArtifactRefs []common.ArtifactID
+	NotificationID       string
+	TerminalMaterialHash string
+	ResultID             common.ResultID
+	WorkspaceID          common.WorkspaceID
+	RunID                common.RunID
+	GoalID               common.GoalID
+	DoDID                common.DoDID
+	State                common.ResultState
+	Title                string
+	Summary              string
+	SourceType           string
+	SourceRef            string
+	EvidenceRefs         []string
+	ArtifactRefs         []common.ArtifactID
 }
 
 func ResultChangedDataFromModel(item *resultmodel.Result) ResultChangedData {
@@ -63,25 +89,68 @@ func ResultChangedDataFromModel(item *resultmodel.Result) ResultChangedData {
 		return ResultChangedData{}
 	}
 	return ResultChangedData{
-		ResultID:     item.ID,
-		WorkspaceID:  item.WorkspaceID,
-		RunID:        item.RunID,
-		GoalID:       item.GoalID,
-		DoDID:        item.DoDID,
-		State:        item.State,
-		Title:        item.Title,
-		Summary:      item.Summary,
-		SourceType:   item.SourceType,
-		SourceRef:    item.SourceRef,
-		EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-		ArtifactRefs: append([]common.ArtifactID(nil), item.ArtifactRefs...),
+		NotificationID:       ResultNotificationID(item),
+		TerminalMaterialHash: strings.TrimSpace(item.TerminalMaterialHash),
+		ResultID:             item.ID,
+		WorkspaceID:          item.WorkspaceID,
+		RunID:                item.RunID,
+		GoalID:               item.GoalID,
+		DoDID:                item.DoDID,
+		State:                item.State,
+		Title:                item.Title,
+		Summary:              item.Summary,
+		SourceType:           item.SourceType,
+		SourceRef:            item.SourceRef,
+		EvidenceRefs:         append([]string(nil), item.EvidenceRefs...),
+		ArtifactRefs:         append([]common.ArtifactID(nil), item.ArtifactRefs...),
 	}
 }
 
-type ResultCommandResult struct {
-	Result    *resultmodel.Result
-	Results   []*resultmodel.Result
-	Artifacts []*resultmodel.Artifact
+// ResultNotificationID is stable across SM-4 replay, process restart and
+// notification redelivery. Consumers use it as their idempotency identity.
+func ResultNotificationID(item *resultmodel.Result) string {
+	if item == nil || item.TerminalDelivery == nil || strings.TrimSpace(item.TerminalMaterialHash) == "" {
+		return ""
+	}
+	return fmt.Sprintf("result-notification/%s/%s/%s", strings.TrimSpace(item.TerminalDelivery.TerminalDeliveryID), item.State, strings.TrimPrefix(strings.TrimSpace(item.TerminalMaterialHash), "result-material-sha256:"))
+}
+
+// Each command owns one concrete result shape. This prevents an unrelated
+// topic from being accepted merely because another field in a union envelope
+// happened to be populated.
+type GetResultResult struct{ Result *resultmodel.Result }
+type ListResultsByWorkspaceResult struct {
+	Results    []*resultmodel.Result
+	NextCursor string
+}
+type ListResultsByRunResult struct {
+	Results    []*resultmodel.Result
+	NextCursor string
+}
+type DeleteResultResult struct{ Deleted bool }
+type ListArtifactsByWorkspaceResult struct {
+	Artifacts  []*resultmodel.Artifact
+	NextCursor string
+}
+type ListArtifactsByRunResult struct {
+	Artifacts  []*resultmodel.Artifact
+	NextCursor string
+}
+type ListArtifactsByResultResult struct {
+	Artifacts  []*resultmodel.Artifact
+	NextCursor string
+}
+type DeleteArtifactResult struct{ Deleted bool }
+
+func NormalizeListWindow(cursor string, limit int) (string, int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if limit == 0 {
+		limit = DefaultListLimit
+	}
+	if limit < 1 || limit > MaxListLimit {
+		return "", 0, fmt.Errorf("%w: result list limit must be between 1 and %d", common.ErrInvalidArgument, MaxListLimit)
+	}
+	return cursor, limit, nil
 }
 
 // CloneResult keeps EventHub callers and the Result owner from sharing mutable
@@ -201,42 +270,15 @@ func cloneDoDCoverage(item *workorchresultcontract.DoDCoverage) *workorchresultc
 }
 
 func MessageContracts() []eventcontract.MessageContract {
-	ret := []eventcontract.MessageContract{}
-	for _, topic := range []string{
-		TopicResultCommandGet,
-		TopicResultCommandListByWorkspace,
-		TopicResultCommandListByRun,
-		TopicResultCommandDelete,
-		TopicArtifactCommandListByWorkspace,
-		TopicArtifactCommandListByRun,
-		TopicArtifactCommandListByResult,
-		TopicArtifactCommandDelete,
-	} {
-		class := eventcontract.CommandClassWrite
-		lane := eventcontract.LanePolicyState
-		switch topic {
-		case TopicResultCommandGet, TopicResultCommandListByWorkspace, TopicResultCommandListByRun, TopicArtifactCommandListByWorkspace, TopicArtifactCommandListByRun, TopicArtifactCommandListByResult:
-			class = eventcontract.CommandClassRead
-			lane = eventcontract.LanePolicyQuery
-		}
-		switch topic {
-		case TopicResultCommandGet:
-			ret = append(ret, eventcontract.CommandTopic[GetResultCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicResultCommandListByWorkspace:
-			ret = append(ret, eventcontract.CommandTopic[ListResultsByWorkspaceCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicResultCommandListByRun:
-			ret = append(ret, eventcontract.CommandTopic[ListResultsByRunCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicResultCommandDelete:
-			ret = append(ret, eventcontract.CommandTopic[DeleteResultCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicArtifactCommandListByWorkspace:
-			ret = append(ret, eventcontract.CommandTopic[ListArtifactsByWorkspaceCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicArtifactCommandListByRun:
-			ret = append(ret, eventcontract.CommandTopic[ListArtifactsByRunCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicArtifactCommandListByResult:
-			ret = append(ret, eventcontract.CommandTopic[ListArtifactsByResultCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		case TopicArtifactCommandDelete:
-			ret = append(ret, eventcontract.CommandTopic[DeleteArtifactCommand, ResultCommandResult]("result", definitionPackage, class, lane, topic).MessageContract())
-		}
+	ret := []eventcontract.MessageContract{
+		eventcontract.CommandTopic[GetResultCommand, GetResultResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicResultCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListResultsByWorkspaceCommand, ListResultsByWorkspaceResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicResultCommandListByWorkspace).MessageContract(),
+		eventcontract.CommandTopic[ListResultsByRunCommand, ListResultsByRunResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicResultCommandListByRun).MessageContract(),
+		eventcontract.CommandTopic[DeleteResultCommand, DeleteResultResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicResultCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[ListArtifactsByWorkspaceCommand, ListArtifactsByWorkspaceResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByWorkspace).MessageContract(),
+		eventcontract.CommandTopic[ListArtifactsByRunCommand, ListArtifactsByRunResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByRun).MessageContract(),
+		eventcontract.CommandTopic[ListArtifactsByResultCommand, ListArtifactsByResultResult]("result", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicArtifactCommandListByResult).MessageContract(),
+		eventcontract.CommandTopic[DeleteArtifactCommand, DeleteArtifactResult]("result", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicArtifactCommandDelete).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicResultCreated,

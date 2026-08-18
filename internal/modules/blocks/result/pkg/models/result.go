@@ -30,6 +30,10 @@ type Result struct {
 	CreatedAt       string
 	UpdatedAt       string
 	RuntimeCloseout *runtimecontract.RuntimeResultCloseout
+	// TerminalMaterialHash binds the immutable terminal payload to the
+	// owner-derived Result ID. Reusing the same terminal identity with changed
+	// material is a conflict rather than an idempotent replay.
+	TerminalMaterialHash string
 	// TerminalDelivery is the owner-local immutable fence for the Runtime
 	// Result delivery. It distinguishes a replay of the same sealed terminal
 	// from a conflicting attempt to reuse the Result identifier.

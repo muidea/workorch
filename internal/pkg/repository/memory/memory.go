@@ -721,6 +721,38 @@ func (r *ResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([
 	return items, nil
 }
 
+func (r *ResultRepository) ListForRecovery(_ context.Context, cursor string, limit int) ([]*resultmodel.Result, string, error) {
+	if limit < 1 {
+		return nil, "", common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]*resultmodel.Result, 0, len(r.items))
+	for _, item := range r.items {
+		if item == nil || resultRecoveryKey(item) <= cursor {
+			continue
+		}
+		items = append(items, cloneResult(item))
+	}
+	sort.Slice(items, func(i, j int) bool { return resultRecoveryKey(items[i]) < resultRecoveryKey(items[j]) })
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		next = resultRecoveryKey(items[len(items)-1])
+	}
+	if len(items) == 0 {
+		return nil, "", nil
+	}
+	return items, next, nil
+}
+
+func resultRecoveryKey(item *resultmodel.Result) string {
+	if item == nil {
+		return ""
+	}
+	return string(item.WorkspaceID) + "\x00" + string(item.ID)
+}
+
 func (r *ResultRepository) Update(ctx context.Context, item *resultmodel.Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

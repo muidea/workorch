@@ -164,10 +164,10 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 		return approvalevents.ApprovalCommandResult{Approvals: []*approvalmodel.Approval{{ID: approvalID, WorkspaceID: workspaceID, RunID: runID}}}, nil
 	})
 	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
-		return resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{}}, nil
+		return resultevents.ListArtifactsByWorkspaceResult{Artifacts: []*resultmodel.Artifact{}}, nil
 	})
 	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
-		return resultevents.ResultCommandResult{Results: []*resultmodel.Result{}}, nil
+		return resultevents.ListResultsByWorkspaceResult{Results: []*resultmodel.Result{}}, nil
 	})
 	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandDelete, emptyMemoryResult)
 	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandDeleteResolution, emptyDecisionResult)
@@ -288,10 +288,10 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 				return approvalevents.ApprovalCommandResult{Approvals: []*approvalmodel.Approval{}}, nil
 			})
 			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
-				return resultevents.ResultCommandResult{Artifacts: []*resultmodel.Artifact{}}, nil
+				return resultevents.ListArtifactsByWorkspaceResult{Artifacts: []*resultmodel.Artifact{}}, nil
 			})
 			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicResultCommandListByWorkspace, func(any) (any, error) {
-				return resultevents.ResultCommandResult{Results: []*resultmodel.Result{}}, nil
+				return resultevents.ListResultsByWorkspaceResult{Results: []*resultmodel.Result{}}, nil
 			})
 			testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandDelete, func(any) (any, error) {
 				return workspaceevents.WorkspaceCommandResult{}, nil

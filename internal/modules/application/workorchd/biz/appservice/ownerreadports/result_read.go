@@ -16,10 +16,13 @@ func ReadResultByOwnerCommand(ctx context.Context, hub magicevent.Hub, resultID 
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
-	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandGet, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.GetResultCommand{ResultID: resultID})
+	commandCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandGet, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.GetResultCommand{WorkspaceID: workspaceID, ResultID: resultID})
 	ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicResultCommandGet, "result", string(resultID), workspaceID, "", "")
-	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicResultCommandGet)
+	response, err := ownerevent.Result[resultevents.GetResultResult](hub.Send(event), resultevents.TopicResultCommandGet)
 	if err != nil {
 		return nil, err
 	}

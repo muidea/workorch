@@ -91,11 +91,11 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	results := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{RunID: result.RunID}).Results
+	results := sendResultCommand[resultevents.ListResultsByRunResult](t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{WorkspaceID: result.WorkspaceID, RunID: result.RunID}).Results
 	if len(results) != 1 || results[0].ID != result.ID {
 		t.Fatalf("results = %+v, want created result", results)
 	}
-	artifacts := sendResultCommand(t, ctx, hub, resultevents.TopicArtifactCommandListByResult, resultevents.ListArtifactsByResultCommand{ResultID: result.ID}).Artifacts
+	artifacts := sendResultCommand[resultevents.ListArtifactsByResultResult](t, ctx, hub, resultevents.TopicArtifactCommandListByResult, resultevents.ListArtifactsByResultCommand{WorkspaceID: result.WorkspaceID, ResultID: result.ID}).Artifacts
 	if len(artifacts) != 1 || artifacts[0].ID != artifact.ID {
 		t.Fatalf("artifacts = %+v, want created artifact", artifacts)
 	}
@@ -193,9 +193,52 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	response := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{RunID: result.RunID})
+	response := sendResultCommand[resultevents.ListResultsByRunResult](t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{WorkspaceID: result.WorkspaceID, RunID: result.RunID})
 	if len(response.Results) != 1 || response.Results[0].ID != result.ID {
 		t.Fatalf("items = %+v, want created result", response.Results)
+	}
+}
+
+func TestResultOwnerListContractsAreBoundedAndCursorBased(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	results := memory.NewResultRepository()
+	for _, id := range []common.ResultID{"result-a", "result-b", "result-c"} {
+		item := validModuleTestResult()
+		item.ID = id
+		if err := results.Create(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	module := New()
+	if err := module.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	first := sendResultCommand[resultevents.ListResultsByRunResult](t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{
+		WorkspaceID: "ws-result-test", RunID: "run-result-test", Limit: 2,
+	})
+	if len(first.Results) != 2 || first.Results[0].ID != "result-a" || first.Results[1].ID != "result-b" || first.NextCursor != "result-b" {
+		t.Fatalf("first page = %+v", first)
+	}
+	second := sendResultCommand[resultevents.ListResultsByRunResult](t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{
+		WorkspaceID: "ws-result-test", RunID: "run-result-test", Cursor: first.NextCursor, Limit: 2,
+	})
+	if len(second.Results) != 1 || second.Results[0].ID != "result-c" || second.NextCursor != "" {
+		t.Fatalf("second page = %+v", second)
+	}
+
+	invalid := hub.Send(magicevent.NewEventWithContext(
+		resultevents.TopicResultCommandListByRun, "test", resultevents.CommandDestination, magicevent.NewHeader(), ctx,
+		resultevents.ListResultsByRunCommand{WorkspaceID: "ws-result-test", RunID: "run-result-test", Limit: resultevents.MaxListLimit + 1},
+	))
+	if invalid == nil || invalid.Error() == nil {
+		t.Fatalf("oversized list response = %v, want error", invalid)
 	}
 }
 
@@ -247,12 +290,13 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 		t.Fatalf("terminal result response = %+v", createdResult)
 	}
 	created := receiveResultNotification(t, results)
-	if created.topic != resultevents.TopicResultAccepted || created.data.ResultID != item.ID || created.data.State != item.State {
+	wantAcceptedID := expectedRuntimeResultID(item.WorkspaceID, item.RunID)
+	if created.topic != resultevents.TopicResultAccepted || created.data.ResultID != wantAcceptedID || created.data.State != item.State || created.data.NotificationID == "" {
 		t.Fatalf("created notification = %+v", created)
 	}
 
 	rejectedItem := validModuleTestResult()
-	rejectedItem.ID = "result-test-rejected"
+	rejectedItem.RunID = "run-result-test-rejected"
 	rejectedItem.State = common.ResultStateRejected
 	rejectedItem.Summary = "rejected"
 	rejectedResult := sendResultLifecycleCommand(t, ctx, hub, terminalDeliveryCommand(rejectedItem, runtimecontract.TerminalOutcomeKindFailed, "delivery-rejected"))
@@ -260,7 +304,7 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 		t.Fatalf("rejected terminal result response = %+v", rejectedResult)
 	}
 	updated := receiveResultNotification(t, results)
-	if updated.topic != resultevents.TopicResultRejected || updated.data.ResultID != rejectedItem.ID || updated.data.Summary != "rejected" {
+	if updated.topic != resultevents.TopicResultRejected || updated.data.ResultID != expectedRuntimeResultID(rejectedItem.WorkspaceID, rejectedItem.RunID) || updated.data.Summary != "rejected" {
 		t.Fatalf("updated notification = %+v", updated)
 	}
 }
@@ -293,7 +337,7 @@ func resultModuleContractDependencies() resultbiz.Dependencies {
 	}
 }
 
-func sendResultCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) resultevents.ResultCommandResult {
+func sendResultCommand[Result any, Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) Result {
 	t.Helper()
 	ev := magicevent.NewEventWithContext(topic, "test", resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := hub.Send(ev)
@@ -304,7 +348,7 @@ func sendResultCommand[Command any](t *testing.T, ctx context.Context, hub magic
 	if err != nil {
 		t.Fatalf("result %s: %v", topic, err)
 	}
-	typed, ok := data.(resultevents.ResultCommandResult)
+	typed, ok := data.(Result)
 	if !ok {
 		t.Fatalf("result %s type = %T", topic, data)
 	}
@@ -338,7 +382,7 @@ func terminalDeliveryCommand(item *resultmodel.Result, kind runtimecontract.Term
 			Outcome: runtimecontract.TerminalOutcome{Kind: kind, Code: string(kind), Summary: item.Summary},
 		}, SourceOwner: "kernel/orchestrator", CausationID: "causation-" + deliveryID},
 		Material: resultevents.ResultMaterial{
-			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, GoalID: item.GoalID, DoDID: item.DoDID,
+			WorkspaceID: item.WorkspaceID, RunID: item.RunID, GoalID: item.GoalID, DoDID: item.DoDID,
 			Title: item.Title, Summary: item.Summary, SourceType: item.SourceType, SourceRef: item.SourceRef,
 		},
 	}
@@ -355,6 +399,10 @@ func validModuleTestResult() *resultmodel.Result {
 		Title:       "accepted result",
 		Summary:     "accepted",
 	}
+}
+
+func expectedRuntimeResultID(workspaceID common.WorkspaceID, runID common.RunID) common.ResultID {
+	return common.ResultID(string(workspaceID) + "/" + string(runID) + "/result/dod-assessment")
 }
 
 func validModuleTestArtifact(resultID common.ResultID) *resultmodel.Artifact {
