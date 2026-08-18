@@ -22,8 +22,10 @@ func init() {
 }
 
 type RepositoryInitiator struct {
-	repositories repositorySet
+	repositories *repositorySet
 }
+
+var _ common.Provider = (*RepositoryInitiator)(nil)
 
 type repositorySet struct {
 	Souls                 repository.SoulRepository
@@ -67,6 +69,9 @@ func (r *RepositoryInitiator) Weight() int {
 }
 
 func (r *RepositoryInitiator) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+	// Revoke any previously published provider before attempting a fresh
+	// setup. A failed repeated Setup must not leave stale repositories visible.
+	r.repositories = nil
 	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
@@ -75,7 +80,7 @@ func (r *RepositoryInitiator) Setup(_ context.Context, _ event.Hub, _ task.Backg
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
 	}
-	r.repositories = repositories
+	r.repositories = &repositories
 	return nil
 }
 
@@ -84,11 +89,11 @@ func (r *RepositoryInitiator) Run(_ context.Context) *cd.Error {
 }
 
 func (r *RepositoryInitiator) Teardown(_ context.Context) {
-	r.repositories = repositorySet{}
+	r.repositories = nil
 }
 
 func (r *RepositoryInitiator) RepositoryProvider() common.RepositoryProvider {
-	if r == nil {
+	if r == nil || r.repositories == nil {
 		return nil
 	}
 	return r.repositories
