@@ -2,17 +2,19 @@ package governance
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func (s *Service) startGovernanceWorker(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) error {
@@ -69,6 +71,9 @@ func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 		select {
 		case <-timer.C:
 			s.enqueueGovernanceWork(func(workCtx context.Context) {
+				if err := s.reconcileIncompleteTraces(workCtx); err != nil {
+					return
+				}
 				s.reconcileBlockedRuns(workCtx)
 			})
 		case <-ctx.Done():
@@ -96,40 +101,56 @@ func (s *Service) processTicketCreated(ctx context.Context, data decisionevents.
 	if ticketID == "" {
 		return
 	}
-	s.processPendingTicket(ctx, ticketID)
+	_ = s.processPendingTicket(ctx, ticketID)
 }
 
-func (s *Service) processPendingTicket(ctx context.Context, ticketID common.TicketID) {
+func (s *Service) processPendingTicket(ctx context.Context, ticketID common.TicketID) error {
 	cfg, err := s.loadConfig()
-	if err != nil || !isEnabled(cfg.Governance.AutoTicket.Enabled) {
-		return
+	if err != nil {
+		return err
 	}
-	// A ticket ID is only locally unique.  A background/restart worker must
-	// receive its workspace from an immutable owner fact before it may read or
-	// resolve anything through another owner.
-	if common.RuntimeWorkspaceIDFromContext(ctx) == "" {
-		return
+	if !isEnabled(cfg.Governance.AutoTicket.Enabled) {
+		return nil
 	}
-	if ticketID == "" || s.hasClosedTrace(ctx, "ticket", string(ticketID)) {
-		return
+	// Ticket IDs are workspace-local. Background and restart workers must
+	// receive scope from an immutable owner fact before any cross-owner I/O.
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" || ticketID == "" {
+		return common.ErrInvalidArgument
+	}
+	closed, err := s.hasClosedTrace(ctx, workspaceID, "ticket", string(ticketID))
+	if err != nil {
+		return err
+	}
+	if closed {
+		return nil
 	}
 	ticket, err := s.tickets.Get(ctx, ticketID)
-	if err != nil || ticket == nil || ticket.State != common.DecisionTicketStateOpen {
-		return
+	if err != nil {
+		return err
+	}
+	if ticket == nil || ticket.State != common.DecisionTicketStateOpen {
+		return nil
 	}
 	ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
 	if err != nil {
-		return
+		return err
 	}
 	run, err := s.runs.GetByWorkspaceID(ctx, ticket.WorkspaceID, ticket.RunID)
-	if err != nil || run == nil {
-		return
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return common.ErrNotFound
 	}
 	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
 	memoryItems := s.loadMemoryItems(ctx, ticket.WorkspaceID)
 	eval := s.evaluateTicket(ctx, ticket, run, goal, dod, memoryItems)
+	if eval.infrastructureErr != nil {
+		return eval.infrastructureErr
+	}
 	trace := &governancemodel.AutoGovernanceTrace{
-		ID:                 common.AutoGovernanceTraceID(fmt.Sprintf("%s/auto-governance", ticket.ID)),
+		ID:                 autoGovernanceTraceID(ticket.WorkspaceID, "ticket", string(ticket.ID)),
 		WorkspaceID:        ticket.WorkspaceID,
 		RunID:              ticket.RunID,
 		StepID:             ticket.StepID,
@@ -138,33 +159,35 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		Action:             "escalate",
 		RiskLevel:          "L1",
 		Confidence:         eval.confidence,
-		PolicyMatched:      "",
 		PolicyBlocked:      eval.policyBlocked,
 		BudgetBefore:       eval.budgetBefore,
 		BudgetAfter:        eval.budgetAfter,
 		Reason:             eval.reason,
 		EvidenceRefs:       eval.evidenceRefs,
 		PromptFingerprint:  eval.promptKey,
-		LLMProviderID:      "",
-		LLMModel:           "",
 		LLMDecisionPreview: eval.promptKey,
-		Status:             "evaluated",
+		Status:             autoGovernanceStatusEvaluated,
 		OccurredAt:         nowUTC(),
 	}
-	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, "")
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	if err := s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, ""); err != nil {
+		return err
+	}
 
 	if !eval.canAutoResolve {
-		trace.Status = "escalated"
-		trace.Action = "escalate"
+		trace.Status = autoGovernanceStatusEscalated
 		trace.OccurredAt = nowUTC()
-		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
-		return
+		if err := s.traces.Upsert(ctx, trace); err != nil {
+			return err
+		}
+		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
 	}
 	payload := workorcheventpayload.New(
 		workorcheventpayload.StringField("answer", eval.answer),
-		workorcheventpayload.StringField("source", "auto_governance"),
+		workorcheventpayload.StringField("source", autoGovernanceActor),
+		workorcheventpayload.StringField("resolvedBy", autoGovernanceActor),
 		workorcheventpayload.FloatField("confidence", eval.confidence),
 		workorcheventpayload.StringField("reason", eval.reason),
 		workorcheventpayload.StringField(resolutionPayloadWorkspaceID, string(ticket.WorkspaceID)),
@@ -181,57 +204,83 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		workorcheventpayload.BoolField("inferred", semantic.Inferred),
 		workorcheventpayload.StringField("version", "v1"),
 	))))
-	if err := s.resolve(ctx, ticket.ID, semantic.ResolutionType, payload); err != nil {
-		trace.Status = "blocked"
-		trace.Action = "escalate"
-		trace.PolicyBlocked = "resolve_failed"
-		trace.Reason = err.Error()
-		trace.OccurredAt = nowUTC()
-		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
-		return
-	}
-	trace.Status = "resolved"
+
+	// Persist the exact intended owner mutation before sending it. A restart
+	// can now distinguish an interrupted ensure from a mere evaluation.
+	trace.Status = autoGovernanceStatusResolving
 	trace.Action = "answer"
 	trace.PolicyMatched = eval.policyMatched
 	trace.PolicyBlocked = ""
 	trace.BudgetAfter = eval.budgetAfter
 	trace.Reason = eval.reason
 	trace.OccurredAt = nowUTC()
-	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
-
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	if err := s.resolve(ctx, ticket.ID, semantic.ResolutionType, payload); err != nil {
+		trace.Status = autoGovernanceStatusBlocked
+		trace.Action = "escalate"
+		trace.PolicyMatched = ""
+		trace.PolicyBlocked = "resolve_failed"
+		trace.Reason = err.Error()
+		trace.OccurredAt = nowUTC()
+		if traceErr := s.traces.Upsert(ctx, trace); traceErr != nil {
+			return traceErr
+		}
+		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
+	}
+	trace.Status = autoGovernanceStatusResolved
+	trace.OccurredAt = nowUTC()
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 }
 
-func (s *Service) processPendingApproval(ctx context.Context, approvalID common.ApprovalID) {
+func (s *Service) processPendingApproval(ctx context.Context, approvalID common.ApprovalID) error {
 	cfg, err := s.loadConfig()
-	if err != nil || !isEnabled(cfg.Governance.AutoApproval.Enabled) {
-		return
+	if err != nil {
+		return err
 	}
-	// Approval IDs also require workspace scope.  Do not let a process-global
-	// reconciliation loop turn an unscoped identifier into owner I/O.
-	if common.RuntimeWorkspaceIDFromContext(ctx) == "" {
-		return
+	if !isEnabled(cfg.Governance.AutoApproval.Enabled) {
+		return nil
 	}
-	if approvalID == "" || s.hasClosedTrace(ctx, "approval", string(approvalID)) {
-		return
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" || approvalID == "" {
+		return common.ErrInvalidArgument
+	}
+	closed, err := s.hasClosedTrace(ctx, workspaceID, "approval", string(approvalID))
+	if err != nil {
+		return err
+	}
+	if closed {
+		return nil
 	}
 	approval, err := s.approvals.Get(ctx, approvalID)
-	if err != nil || approval == nil || approval.State != common.ApprovalStatePending {
-		return
+	if err != nil {
+		return err
+	}
+	if approval == nil || approval.State != common.ApprovalStatePending {
+		return nil
 	}
 	ctx, err = common.BindRuntimeWorkspaceContext(ctx, approval.WorkspaceID)
 	if err != nil {
-		return
+		return err
 	}
 	run, err := s.runs.GetByWorkspaceID(ctx, approval.WorkspaceID, approval.RunID)
-	if err != nil || run == nil {
-		return
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return common.ErrNotFound
 	}
 	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
 	eval := s.evaluateApproval(ctx, approval, goal, dod, cfg.Governance)
+	if eval.infrastructureErr != nil {
+		return eval.infrastructureErr
+	}
 	trace := &governancemodel.AutoGovernanceTrace{
-		ID:                 common.AutoGovernanceTraceID(fmt.Sprintf("%s/auto-governance", approval.ID)),
+		ID:                 autoGovernanceTraceID(approval.WorkspaceID, "approval", string(approval.ID)),
 		WorkspaceID:        approval.WorkspaceID,
 		RunID:              approval.RunID,
 		StepID:             approval.StepID,
@@ -240,52 +289,61 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 		Action:             "escalate",
 		RiskLevel:          eval.riskLevel,
 		Confidence:         eval.confidence,
-		PolicyMatched:      "",
 		PolicyBlocked:      eval.policyBlocked,
 		BudgetBefore:       eval.budgetBefore,
 		BudgetAfter:        eval.budgetAfter,
 		Reason:             eval.reason,
 		EvidenceRefs:       eval.evidenceRefs,
 		PromptFingerprint:  eval.promptKey,
-		LLMProviderID:      "",
-		LLMModel:           "",
 		LLMDecisionPreview: eval.promptKey,
-		Status:             "evaluated",
+		Status:             autoGovernanceStatusEvaluated,
 		OccurredAt:         nowUTC(),
 	}
-	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, "")
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	if err := s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, ""); err != nil {
+		return err
+	}
 
 	if !eval.canAutoApprove {
-		trace.Status = "escalated"
-		trace.Action = "escalate"
+		trace.Status = autoGovernanceStatusEscalated
 		trace.OccurredAt = nowUTC()
-		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
-		return
+		if err := s.traces.Upsert(ctx, trace); err != nil {
+			return err
+		}
+		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
 	}
 
-	if err := s.resolveApproval(ctx, approval.ID); err != nil {
-		trace.Status = "blocked"
-		trace.Action = "escalate"
-		trace.PolicyBlocked = "resolve_failed"
-		trace.Reason = err.Error()
-		trace.OccurredAt = nowUTC()
-		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
-		return
-	}
-
-	trace.Status = "resolved"
+	trace.Status = autoGovernanceStatusResolving
 	trace.Action = "approve"
 	trace.PolicyMatched = eval.policyMatched
 	trace.PolicyBlocked = ""
 	trace.BudgetAfter = eval.budgetAfter
 	trace.Reason = eval.reason
 	trace.OccurredAt = nowUTC()
-	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	if err := s.resolveApproval(ctx, approval.ID); err != nil {
+		trace.Status = autoGovernanceStatusBlocked
+		trace.Action = "escalate"
+		trace.PolicyMatched = ""
+		trace.PolicyBlocked = "resolve_failed"
+		trace.Reason = err.Error()
+		trace.OccurredAt = nowUTC()
+		if traceErr := s.traces.Upsert(ctx, trace); traceErr != nil {
+			return traceErr
+		}
+		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
+	}
 
+	trace.Status = autoGovernanceStatusResolved
+	trace.OccurredAt = nowUTC()
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 }
 
 func (s *Service) processRunStateChanged(ctx context.Context, data runevents.RunStateChangedData) {
@@ -303,14 +361,13 @@ func (s *Service) processRunStateChanged(ctx context.Context, data runevents.Run
 			return
 		}
 		if ticket.State == common.DecisionTicketStateOpen {
-			s.processPendingTicket(ctx, ticket.ID)
+			_ = s.processPendingTicket(ctx, ticket.ID)
 			return
 		}
-		if ticket.State != common.DecisionTicketStateResolved {
-			return
+		if ticket.State == common.DecisionTicketStateResolved {
+			_ = s.reconcileIncompleteItemTrace(ctx, ticket.WorkspaceID, "ticket", string(ticket.ID))
 		}
-		// A resolved ticket is owner evidence. Runtime continuation is solely
-		// scheduled by the Orchestrator when it consumes that typed evidence.
+		// Runtime continuation remains solely owned by Orchestrator.
 		return
 	}
 	if data.State == common.RunStateBlockedOnApproval && data.BlockingApprovalID != "" {
@@ -319,14 +376,163 @@ func (s *Service) processRunStateChanged(ctx context.Context, data runevents.Run
 			return
 		}
 		if approval.State == common.ApprovalStatePending {
-			s.processPendingApproval(ctx, approval.ID)
+			_ = s.processPendingApproval(ctx, approval.ID)
 			return
 		}
-		if approval.State != common.ApprovalStateApproved {
-			return
+		if approval.State == common.ApprovalStateApproved {
+			_ = s.reconcileIncompleteItemTrace(ctx, approval.WorkspaceID, "approval", string(approval.ID))
 		}
-		// An approved record is owner evidence. Governance never drives a Run.
+		// Governance never drives a Run.
 	}
+}
+
+func (s *Service) reconcileIncompleteTraces(ctx context.Context) error {
+	if s == nil || s.traces == nil {
+		return common.ErrInvalidArgument
+	}
+	items, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{})
+	if err != nil {
+		return err
+	}
+	latest := map[string]*governancemodel.AutoGovernanceTrace{}
+	for _, item := range items {
+		if !isIncompleteGovernanceTrace(item) {
+			continue
+		}
+		key := string(item.WorkspaceID) + "\x00" + strings.ToLower(strings.TrimSpace(item.ItemType)) + "\x00" + strings.TrimSpace(item.ItemID)
+		prior := latest[key]
+		if prior == nil || item.OccurredAt >= prior.OccurredAt {
+			latest[key] = item
+		}
+	}
+	var firstErr error
+	for _, item := range latest {
+		if err := s.reconcileIncompleteTrace(ctx, item); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *Service) reconcileIncompleteItemTrace(ctx context.Context, workspaceID common.WorkspaceID, itemType string, itemID string) error {
+	if s == nil || s.traces == nil || workspaceID == "" || strings.TrimSpace(itemType) == "" || strings.TrimSpace(itemID) == "" {
+		return common.ErrInvalidArgument
+	}
+	items, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
+		WorkspaceID: workspaceID,
+		ItemType:    itemType,
+		ItemID:      itemID,
+	})
+	if err != nil {
+		return err
+	}
+	var latest *governancemodel.AutoGovernanceTrace
+	for _, item := range items {
+		if !isIncompleteGovernanceTrace(item) {
+			continue
+		}
+		if latest == nil || item.OccurredAt >= latest.OccurredAt {
+			latest = item
+		}
+	}
+	if latest == nil {
+		return nil
+	}
+	return s.reconcileIncompleteTrace(ctx, latest)
+}
+
+func isIncompleteGovernanceTrace(item *governancemodel.AutoGovernanceTrace) bool {
+	if item == nil || item.WorkspaceID == "" || strings.TrimSpace(item.ItemType) == "" || strings.TrimSpace(item.ItemID) == "" {
+		return false
+	}
+	return strings.EqualFold(item.Status, autoGovernanceStatusEvaluated) || strings.EqualFold(item.Status, autoGovernanceStatusResolving)
+}
+
+func (s *Service) reconcileIncompleteTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace) error {
+	if !isIncompleteGovernanceTrace(trace) {
+		return nil
+	}
+	workspaceCtx, err := common.BindRuntimeWorkspaceContext(ctx, trace.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(trace.ItemType)) {
+	case "ticket":
+		item, err := s.tickets.Get(workspaceCtx, common.TicketID(trace.ItemID))
+		if err != nil {
+			return err
+		}
+		return s.reconcileTicketTrace(workspaceCtx, trace, item)
+	case "approval":
+		item, err := s.approvals.Get(workspaceCtx, common.ApprovalID(trace.ItemID))
+		if err != nil {
+			return err
+		}
+		return s.reconcileApprovalTrace(workspaceCtx, trace, item)
+	default:
+		return s.blockIncompleteTrace(workspaceCtx, trace, "unsupported_item_type")
+	}
+}
+
+func (s *Service) reconcileTicketTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace, ticket *decisionmodel.Ticket) error {
+	if ticket == nil || ticket.WorkspaceID != trace.WorkspaceID || ticket.RunID != trace.RunID || string(ticket.ID) != trace.ItemID {
+		return s.blockIncompleteTrace(ctx, trace, "owner_scope_mismatch")
+	}
+	switch ticket.State {
+	case common.DecisionTicketStateOpen:
+		return s.processPendingTicket(ctx, ticket.ID)
+	case common.DecisionTicketStateResolved:
+		if strings.EqualFold(trace.Status, autoGovernanceStatusResolving) || strings.EqualFold(ticket.ResolvedBy, autoGovernanceActor) {
+			return s.finalizeRecoveredTrace(ctx, trace, "answer")
+		}
+		return s.blockIncompleteTrace(ctx, trace, "owner_resolved_externally")
+	default:
+		return s.blockIncompleteTrace(ctx, trace, "owner_state_changed")
+	}
+}
+
+func (s *Service) reconcileApprovalTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace, approval *approvalmodel.Approval) error {
+	if approval == nil || approval.WorkspaceID != trace.WorkspaceID || approval.RunID != trace.RunID || string(approval.ID) != trace.ItemID {
+		return s.blockIncompleteTrace(ctx, trace, "owner_scope_mismatch")
+	}
+	switch approval.State {
+	case common.ApprovalStatePending:
+		return s.processPendingApproval(ctx, approval.ID)
+	case common.ApprovalStateApproved:
+		if strings.EqualFold(trace.Status, autoGovernanceStatusResolving) || strings.EqualFold(approval.ResolvedBy, autoGovernanceActor) {
+			return s.finalizeRecoveredTrace(ctx, trace, "approve")
+		}
+		return s.blockIncompleteTrace(ctx, trace, "owner_resolved_externally")
+	default:
+		return s.blockIncompleteTrace(ctx, trace, "owner_state_changed")
+	}
+}
+
+func (s *Service) finalizeRecoveredTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace, action string) error {
+	trace.Status = autoGovernanceStatusResolved
+	trace.Action = action
+	trace.PolicyBlocked = ""
+	if strings.TrimSpace(trace.Reason) == "" {
+		trace.Reason = "recovered committed auto-governance owner state"
+	}
+	trace.OccurredAt = nowUTC()
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
+}
+
+func (s *Service) blockIncompleteTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace, reason string) error {
+	trace.Status = autoGovernanceStatusBlocked
+	trace.Action = "escalate"
+	trace.PolicyMatched = ""
+	trace.PolicyBlocked = reason
+	trace.Reason = reason
+	trace.OccurredAt = nowUTC()
+	if err := s.traces.Upsert(ctx, trace); err != nil {
+		return err
+	}
+	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, reason)
 }
 
 func (s *Service) reconcileBlockedRuns(ctx context.Context) {
@@ -348,11 +554,11 @@ func (s *Service) reconcileBlockedRuns(ctx context.Context) {
 		switch item.State {
 		case common.RunStateBlockedOnDecision:
 			if item.BlockingTicketID != "" {
-				s.processPendingTicket(workspaceCtx, item.BlockingTicketID)
+				_ = s.processPendingTicket(workspaceCtx, item.BlockingTicketID)
 			}
 		case common.RunStateBlockedOnApproval:
 			if item.BlockingApprovalID != "" {
-				s.processPendingApproval(workspaceCtx, item.BlockingApprovalID)
+				_ = s.processPendingApproval(workspaceCtx, item.BlockingApprovalID)
 			}
 		}
 	}

@@ -39,8 +39,21 @@ func (r *AutoGovernanceTraceRepository) Upsert(_ context.Context, item *governan
 	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" || strings.TrimSpace(item.ItemType) == "" || strings.TrimSpace(item.ItemID) == "" {
 		return common.ErrInvalidArgument
 	}
+	if existing, ok := r.items[item.ID]; ok && !sameAutoGovernanceTraceIdentity(existing, item) {
+		return common.ErrConflict
+	}
 	r.items[item.ID] = cloneAutoGovernanceTrace(item)
 	return nil
+}
+
+func sameAutoGovernanceTraceIdentity(left *governancemodel.AutoGovernanceTrace, right *governancemodel.AutoGovernanceTrace) bool {
+	return left != nil && right != nil &&
+		left.ID == right.ID &&
+		left.WorkspaceID == right.WorkspaceID &&
+		left.RunID == right.RunID &&
+		left.StepID == right.StepID &&
+		strings.EqualFold(strings.TrimSpace(left.ItemType), strings.TrimSpace(right.ItemType)) &&
+		strings.TrimSpace(left.ItemID) == strings.TrimSpace(right.ItemID)
 }
 
 func (r *AutoGovernanceTraceRepository) Get(_ context.Context, id common.AutoGovernanceTraceID) (*governancemodel.AutoGovernanceTrace, error) {

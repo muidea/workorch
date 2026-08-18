@@ -47,8 +47,21 @@ func (r *AutoGovernanceTraceRepository) Upsert(_ context.Context, item *governan
 	if err != nil {
 		return err
 	}
+	if existing, ok := items[item.ID]; ok && !sameAutoGovernanceTraceIdentity(&existing, item) {
+		return common.ErrConflict
+	}
 	items[item.ID] = *cloneAutoGovernanceTrace(item)
 	return saveMap(r.path, items)
+}
+
+func sameAutoGovernanceTraceIdentity(left *governancemodel.AutoGovernanceTrace, right *governancemodel.AutoGovernanceTrace) bool {
+	return left != nil && right != nil &&
+		left.ID == right.ID &&
+		left.WorkspaceID == right.WorkspaceID &&
+		left.RunID == right.RunID &&
+		left.StepID == right.StepID &&
+		strings.EqualFold(strings.TrimSpace(left.ItemType), strings.TrimSpace(right.ItemType)) &&
+		strings.TrimSpace(left.ItemID) == strings.TrimSpace(right.ItemID)
 }
 
 func (r *AutoGovernanceTraceRepository) Get(_ context.Context, id common.AutoGovernanceTraceID) (*governancemodel.AutoGovernanceTrace, error) {

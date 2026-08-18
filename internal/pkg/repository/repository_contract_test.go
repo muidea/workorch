@@ -1252,6 +1252,31 @@ func testAutoGovernanceTraceRepositoryContract(t *testing.T, factory func() repo
 	if len(byStatus) != 1 || byStatus[0].PolicyBlocked != "budget_exhausted" {
 		t.Fatalf("auto governance by status = %+v, want blocked trace", byStatus)
 	}
+	identityConflicts := []struct {
+		name   string
+		mutate func(*governancemodel.AutoGovernanceTrace)
+	}{
+		{name: "workspace", mutate: func(item *governancemodel.AutoGovernanceTrace) { item.WorkspaceID = "ws-other" }},
+		{name: "run", mutate: func(item *governancemodel.AutoGovernanceTrace) { item.RunID = "run-other" }},
+		{name: "item type", mutate: func(item *governancemodel.AutoGovernanceTrace) { item.ItemType = "ticket" }},
+		{name: "item id", mutate: func(item *governancemodel.AutoGovernanceTrace) { item.ItemID = "ticket-other" }},
+	}
+	for _, tc := range identityConflicts {
+		t.Run("upsert identity conflict/"+tc.name, func(t *testing.T) {
+			conflicting := governancemodel.CloneAutoGovernanceTrace(fresh)
+			tc.mutate(conflicting)
+			if err := repo.Upsert(ctx, conflicting); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("cross-scope upsert err = %v, want conflict", err)
+			}
+		})
+	}
+	persisted, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get trace after identity conflict: %v", err)
+	}
+	if persisted.WorkspaceID != item.WorkspaceID || persisted.RunID != item.RunID || persisted.ItemType != item.ItemType || persisted.ItemID != item.ItemID {
+		t.Fatalf("trace identity changed after conflicting upsert: %+v", persisted)
+	}
 
 	if _, err := repo.Get(ctx, common.AutoGovernanceTraceID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing auto governance trace err = %v, want not found", err)

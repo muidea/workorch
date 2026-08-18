@@ -9,7 +9,6 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -114,24 +113,6 @@ func memoryResponse(response magicevent.Result, topic string) (memoryevents.Memo
 	result, ok := data.(memoryevents.MemoryCommandResult)
 	if !ok {
 		return memoryevents.MemoryCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
-	}
-	return result, nil
-}
-
-func orchestratorResponse(response magicevent.Result, topic string) (orchestratorevents.OrchestratorCommandResult, error) {
-	if response == nil {
-		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
-	}
-	if err := response.Error(); err != nil {
-		return orchestratorevents.OrchestratorCommandResult{}, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return orchestratorevents.OrchestratorCommandResult{}, resultErr
-	}
-	result, ok := data.(orchestratorevents.OrchestratorCommandResult)
-	if !ok {
-		return orchestratorevents.OrchestratorCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

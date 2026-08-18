@@ -360,8 +360,9 @@ func TestGovernanceOwnerFactsPropagateWorkspaceScopeToBackgroundWork(t *testing.
 	tickets := &countingGovernanceTicketReader{}
 	approvals := &countingGovernanceApprovalReader{}
 	svc := NewService(servicePorts{
-		Tickets:   tickets,
-		Approvals: approvals,
+		Tickets:              tickets,
+		Approvals:            approvals,
+		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		Runs: replayGovernanceRunReader{items: []*runmodel.Run{
 			{ID: "run-ticket", WorkspaceID: "ws-ticket", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-local"},
 			{ID: "run-approval", WorkspaceID: "ws-approval", State: common.RunStateBlockedOnApproval, BlockingApprovalID: "approval-local"},
@@ -611,7 +612,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 		t.Fatalf("resolved source = %q, want auto_governance", source)
 	}
 
-	traceID := common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance")
+	traceID := autoGovernanceTraceID(workspaceID, "ticket", string(ticketID))
 	trace, err := traceRepo.Get(ctx, traceID)
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
@@ -675,7 +676,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
-	traceID := common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance")
+	traceID := autoGovernanceTraceID(workspaceID, "ticket", string(ticketID))
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, traceID, func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
@@ -752,13 +753,13 @@ func TestServiceEscalatesRuntimeRepairExhaustionTicket(t *testing.T) {
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
-		_, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+		_, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)))
 		return err == nil
 	})
 	if capture.completed(ticketID) {
 		t.Fatal("runtime repair exhaustion must not auto-resolve to a successor replan")
 	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -840,7 +841,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 	if answer != "replan" || recoveryAction != "replan" {
 		t.Fatalf("resolved payload = %+v, want replan recovery action", resolvedPayload)
 	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -900,7 +901,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 	defer svc.Stop()
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
-	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
 
@@ -965,7 +966,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 	defer svc.Stop()
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
-	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
 	if resolveCount != 0 {
@@ -1080,7 +1081,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	if answer != "target=artifact, source=workspace" {
 		t.Fatalf("resolved answer = %q, want structured answer", answer)
 	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1191,7 +1192,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 	defer svc.Stop()
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
-	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
 
@@ -1270,7 +1271,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	if resolveCount.Load() != 1 {
 		t.Fatalf("resolve count = %d, want 1", resolveCount.Load())
 	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"))
+	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1355,7 +1356,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 	if got := resolveCount.Load(); got != 1 {
 		t.Fatalf("resolve count = %d, want 1", got)
 	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"))
+	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1440,7 +1441,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	if resolveCount.Load() != 1 {
 		t.Fatalf("resolve count = %d, want 1", resolveCount.Load())
 	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"))
+	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1629,7 +1630,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		t.Fatalf("bind approval scope: %v", err)
 	}
 	svc.processPendingApproval(scopedCtx, approvalID)
-	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
 
@@ -1691,7 +1692,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 		state:       common.DecisionTicketStateOpen,
 	})))
 	mustNoErr(t, traceRepo.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
-		ID:                common.AutoGovernanceTraceID("ticket-budget-previous/auto-governance"),
+		ID:                autoGovernanceTraceID(workspaceID, "ticket", "ticket-budget-previous"),
 		WorkspaceID:       workspaceID,
 		RunID:             runID,
 		ItemType:          "ticket",
@@ -1745,7 +1746,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
-	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceTraceID(workspaceID, "ticket", string(ticketID)), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
 	if resolveCount != 0 {

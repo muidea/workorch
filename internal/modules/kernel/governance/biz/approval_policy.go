@@ -12,16 +12,17 @@ import (
 )
 
 type approvalEvaluation struct {
-	canAutoApprove bool
-	riskLevel      string
-	confidence     float64
-	reason         string
-	policyMatched  string
-	policyBlocked  string
-	budgetBefore   int
-	budgetAfter    int
-	promptKey      string
-	evidenceRefs   []string
+	canAutoApprove    bool
+	infrastructureErr error
+	riskLevel         string
+	confidence        float64
+	reason            string
+	policyMatched     string
+	policyBlocked     string
+	budgetBefore      int
+	budgetAfter       int
+	promptKey         string
+	evidenceRefs      []string
 }
 
 func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.Approval, goal *workspace.Goal, dod *workspace.DoD, governanceCfg workorchconfig.GovernanceConfig) approvalEvaluation {
@@ -45,7 +46,13 @@ func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.
 		return ret
 	}
 	ret.promptKey = compactPromptKey(approval.Action + "\n" + approval.Reason + "\n" + stableContextDigest(approval.Context))
-	resolvedCount := s.countResolvedApprovalTraces(ctx, approval.RunID)
+	resolvedCount, err := s.countResolvedApprovalTraces(ctx, approval.WorkspaceID, approval.RunID)
+	if err != nil {
+		ret.infrastructureErr = err
+		ret.policyBlocked = "trace_query_failed"
+		ret.reason = "governance trace budget is unavailable"
+		return ret
+	}
 	ret.budgetBefore = resolvedCount
 	maxPerRun := governanceCfg.AutoApproval.MaxPerRun
 	if maxPerRun <= 0 {
@@ -56,7 +63,14 @@ func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.
 		ret.reason = "auto approval budget exhausted"
 		return ret
 	}
-	if blockedReason, ok := s.blockedBySharedBudgetPolicy(ctx, governanceCfg, approval.RunID, "approval", string(approval.ID), ret.promptKey); ok {
+	blockedReason, blocked, err := s.blockedBySharedBudgetPolicy(ctx, governanceCfg, approval.WorkspaceID, approval.RunID, "approval", string(approval.ID), ret.promptKey)
+	if err != nil {
+		ret.infrastructureErr = err
+		ret.policyBlocked = "trace_query_failed"
+		ret.reason = "governance trace policy history is unavailable"
+		return ret
+	}
+	if blocked {
 		ret.policyBlocked = blockedReason
 		ret.reason = "auto governance budget policy blocked approval resolution"
 		return ret

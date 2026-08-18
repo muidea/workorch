@@ -2,6 +2,8 @@ package governance
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
@@ -10,50 +12,72 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func (s *Service) countResolvedTicketTraces(ctx context.Context, runID common.RunID) int {
-	if s == nil || s.traces == nil || runID == "" {
-		return 0
+const (
+	autoGovernanceActor           = "auto_governance"
+	autoGovernanceStatusEvaluated = "evaluated"
+	autoGovernanceStatusResolving = "resolving"
+	autoGovernanceStatusResolved  = "resolved"
+	autoGovernanceStatusEscalated = "escalated"
+	autoGovernanceStatusBlocked   = "blocked"
+)
+
+func autoGovernanceTraceID(workspaceID common.WorkspaceID, itemType string, itemID string) common.AutoGovernanceTraceID {
+	workspace := strings.TrimSpace(string(workspaceID))
+	kind := strings.ToLower(strings.TrimSpace(itemType))
+	item := strings.TrimSpace(itemID)
+	if workspace == "" || kind == "" || item == "" {
+		return ""
 	}
-	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{RunID: runID, ItemType: "ticket"})
+	sum := sha256.Sum256([]byte(workspace + "\x00" + kind + "\x00" + item))
+	return common.AutoGovernanceTraceID("auto-governance/" + hex.EncodeToString(sum[:]))
+}
+
+func autoGovernanceResolutionID(workspaceID common.WorkspaceID, ticketID common.TicketID) common.ResolutionID {
+	workspace := strings.TrimSpace(string(workspaceID))
+	ticket := strings.TrimSpace(string(ticketID))
+	if workspace == "" || ticket == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(workspace + "\x00ticket\x00" + ticket))
+	return common.ResolutionID("auto-governance-resolution/" + hex.EncodeToString(sum[:]))
+}
+
+func (s *Service) countResolvedTicketTraces(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (int, error) {
+	return s.countResolvedTraces(ctx, workspaceID, runID, "ticket", "answer")
+}
+
+func (s *Service) countResolvedApprovalTraces(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (int, error) {
+	return s.countResolvedTraces(ctx, workspaceID, runID, "approval", "approve")
+}
+
+func (s *Service) countResolvedTraces(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, itemType string, action string) (int, error) {
+	if s == nil || s.traces == nil || workspaceID == "" || runID == "" || strings.TrimSpace(itemType) == "" || strings.TrimSpace(action) == "" {
+		return 0, common.ErrInvalidArgument
+	}
+	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		ItemType:    itemType,
+	})
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	count := 0
 	for _, item := range list {
 		if item == nil {
 			continue
 		}
-		if strings.EqualFold(item.Status, "resolved") && strings.EqualFold(item.Action, "answer") {
+		if strings.EqualFold(item.Status, autoGovernanceStatusResolved) && strings.EqualFold(item.Action, action) {
 			count++
 		}
 	}
-	return count
+	return count, nil
 }
 
-func (s *Service) countResolvedApprovalTraces(ctx context.Context, runID common.RunID) int {
-	if s == nil || s.traces == nil || runID == "" {
-		return 0
-	}
-	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{RunID: runID, ItemType: "approval"})
+func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg workorchconfig.GovernanceConfig, workspaceID common.WorkspaceID, runID common.RunID, itemType string, currentItemID string, promptKey string) (string, bool, error) {
+	traces, err := s.loadTracesByRunAndType(ctx, workspaceID, runID, itemType)
 	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, item := range list {
-		if item == nil {
-			continue
-		}
-		if strings.EqualFold(item.Status, "resolved") && strings.EqualFold(item.Action, "approve") {
-			count++
-		}
-	}
-	return count
-}
-
-func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg workorchconfig.GovernanceConfig, runID common.RunID, itemType string, currentItemID string, promptKey string) (string, bool) {
-	traces, err := s.loadTracesByRunAndType(ctx, runID, itemType)
-	if err != nil {
-		return "", false
+		return "", false, err
 	}
 	maxConsecutiveFailures := governanceCfg.Budget.MaxConsecutiveFailures
 	if maxConsecutiveFailures > 0 {
@@ -66,16 +90,16 @@ func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg
 			if strings.TrimSpace(item.ItemID) == strings.TrimSpace(currentItemID) {
 				continue
 			}
-			if strings.EqualFold(item.Status, "resolved") {
+			if strings.EqualFold(item.Status, autoGovernanceStatusResolved) {
 				break
 			}
-			if strings.EqualFold(item.Status, "escalated") || strings.EqualFold(item.Status, "blocked") {
+			if strings.EqualFold(item.Status, autoGovernanceStatusEscalated) || strings.EqualFold(item.Status, autoGovernanceStatusBlocked) {
 				consecutive++
 				continue
 			}
 		}
 		if consecutive >= maxConsecutiveFailures {
-			return "consecutive_failures_exhausted", true
+			return "consecutive_failures_exhausted", true, nil
 		}
 	}
 	maxRepeatedPrompt := governanceCfg.Budget.MaxRepeatedSamePrompt
@@ -93,64 +117,42 @@ func (s *Service) blockedBySharedBudgetPolicy(ctx context.Context, governanceCfg
 			}
 		}
 		if repeated >= maxRepeatedPrompt {
-			return "repeated_prompt_exhausted", true
+			return "repeated_prompt_exhausted", true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }
 
-func (s *Service) loadTracesByRunAndType(ctx context.Context, runID common.RunID, itemType string) ([]*governancemodel.AutoGovernanceTrace, error) {
-	if s == nil || s.traces == nil || runID == "" || strings.TrimSpace(itemType) == "" {
+func (s *Service) loadTracesByRunAndType(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, itemType string) ([]*governancemodel.AutoGovernanceTrace, error) {
+	if s == nil || s.traces == nil || workspaceID == "" || runID == "" || strings.TrimSpace(itemType) == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
-		RunID:    runID,
-		ItemType: itemType,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		ItemType:    itemType,
 	})
 }
 
-func (s *Service) hasAutoResolvedTrace(ctx context.Context, runID common.RunID, itemType string, itemID string) bool {
-	if s == nil || s.traces == nil || runID == "" || itemType == "" || itemID == "" {
-		return false
+func (s *Service) hasClosedTrace(ctx context.Context, workspaceID common.WorkspaceID, itemType string, itemID string) (bool, error) {
+	if s == nil || s.traces == nil || workspaceID == "" || strings.TrimSpace(itemType) == "" || strings.TrimSpace(itemID) == "" {
+		return false, common.ErrInvalidArgument
 	}
 	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
-		RunID:    runID,
-		ItemType: itemType,
-		ItemID:   itemID,
-		Status:   "resolved",
+		WorkspaceID: workspaceID,
+		ItemType:    itemType,
+		ItemID:      itemID,
 	})
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, item := range list {
 		if item == nil {
 			continue
 		}
-		if strings.EqualFold(item.Action, "approve") || strings.EqualFold(item.Action, "answer") {
-			return true
+		if strings.EqualFold(item.Status, autoGovernanceStatusResolved) || strings.EqualFold(item.Status, autoGovernanceStatusBlocked) {
+			return true, nil
 		}
 	}
-	return false
-}
-
-func (s *Service) hasClosedTrace(ctx context.Context, itemType string, itemID string) bool {
-	if s == nil || s.traces == nil || itemType == "" || itemID == "" {
-		return false
-	}
-	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
-		ItemType: itemType,
-		ItemID:   itemID,
-	})
-	if err != nil {
-		return false
-	}
-	for _, item := range list {
-		if item == nil {
-			continue
-		}
-		if strings.EqualFold(item.Status, "resolved") || strings.EqualFold(item.Status, "blocked") {
-			return true
-		}
-	}
-	return false
+	return false, nil
 }

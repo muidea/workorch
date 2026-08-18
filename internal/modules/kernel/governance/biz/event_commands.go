@@ -30,7 +30,7 @@ func eventResolveDecision(send func(magicevent.Event) magicevent.Result) Resolve
 			return common.ErrInvalidArgument
 		}
 		command := decisionevents.EnsureResolvedCommand{
-			ResolutionID: common.ResolutionID("resolution-" + string(ticketID) + "-auto-governance"),
+			ResolutionID: autoGovernanceResolutionID(common.WorkspaceID(workspaceID), ticketID),
 			TicketID:     ticketID,
 			WorkspaceID:  common.WorkspaceID(workspaceID),
 			RunID:        common.RunID(runID),
@@ -54,6 +54,10 @@ func eventResolveApproval(send func(magicevent.Event) magicevent.Result) Resolve
 		command := approvalevents.EnsureApprovedCommand{
 			ApprovalID:  approvalID,
 			WorkspaceID: workspaceID,
+			Context: workorcheventpayload.New(
+				workorcheventpayload.StringField("resolvedBy", autoGovernanceActor),
+				workorcheventpayload.StringField("source", autoGovernanceActor),
+			).Fields,
 		}
 		event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandEnsureApproved, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 		bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "")

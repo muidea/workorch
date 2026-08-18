@@ -18,6 +18,7 @@ const (
 
 type ticketEvaluation struct {
 	canAutoResolve    bool
+	infrastructureErr error
 	answer            string
 	confidence        float64
 	reason            string
@@ -55,7 +56,13 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		return ret
 	}
 	ret.promptKey = compactPromptKey(ticket.Question + "\n" + ticket.Reason)
-	budgetUsed := s.countResolvedTicketTraces(ctx, ticket.RunID)
+	budgetUsed, err := s.countResolvedTicketTraces(ctx, ticket.WorkspaceID, ticket.RunID)
+	if err != nil {
+		ret.infrastructureErr = err
+		ret.policyBlocked = "trace_query_failed"
+		ret.reason = "governance trace budget is unavailable"
+		return ret
+	}
 	ret.budgetBefore = budgetUsed
 	maxPerRun := cfg.Governance.AutoTicket.MaxPerRun
 	if maxPerRun <= 0 {
@@ -69,7 +76,14 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 
 	question := strings.TrimSpace(ticket.Question)
 	reason := strings.TrimSpace(ticket.Reason)
-	if blockedReason, ok := s.blockedBySharedBudgetPolicy(ctx, cfg.Governance, ticket.RunID, "ticket", string(ticket.ID), ret.promptKey); ok {
+	blockedReason, blocked, err := s.blockedBySharedBudgetPolicy(ctx, cfg.Governance, ticket.WorkspaceID, ticket.RunID, "ticket", string(ticket.ID), ret.promptKey)
+	if err != nil {
+		ret.infrastructureErr = err
+		ret.policyBlocked = "trace_query_failed"
+		ret.reason = "governance trace policy history is unavailable"
+		return ret
+	}
+	if blocked {
 		ret.policyBlocked = blockedReason
 		ret.reason = "auto governance budget policy blocked ticket resolution"
 		return ret
