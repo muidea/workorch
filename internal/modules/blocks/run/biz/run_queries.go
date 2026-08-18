@@ -9,12 +9,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (any, error) {
 	switch ev.ID() {
 	case runevents.TopicRunCommandGet:
 		cmd, ok := ev.Data().(runevents.GetRunCommand)
 		if !ok || cmd.RunID == "" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		var item *runmodel.Run
 		var err error
@@ -24,31 +24,31 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 			item, err = m.runs.Get(ctx, cmd.RunID)
 		}
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{Run: item}, nil
+		return runevents.GetRunResult{Run: item}, nil
 	case runevents.TopicRunCommandList:
 		cmd, ok := ev.Data().(runevents.ListRunsCommand)
 		if !ok {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		items, err := m.runs.List(ctx)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States), cmd.Compact)}, nil
+		return runevents.ListRunsResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States), cmd.Compact)}, nil
 	case runevents.TopicRunCommandListByWorkspace:
 		cmd, ok := ev.Data().(runevents.ListRunsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		items, err := m.runs.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States), cmd.Compact)}, nil
+		return runevents.ListRunsByWorkspaceResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States), cmd.Compact)}, nil
 	default:
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 }
 

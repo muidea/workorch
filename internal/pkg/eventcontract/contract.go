@@ -52,6 +52,7 @@ const (
 type ScopePolicy string
 
 const (
+	ScopePolicyProcess          ScopePolicy = "process"
 	ScopePolicyDeclared         ScopePolicy = "declared_scope"
 	ScopePolicyWorkspace        ScopePolicy = "workspace"
 	ScopePolicyWorkspaceRun     ScopePolicy = "workspace_run"
@@ -62,6 +63,7 @@ type IdentityPolicy string
 
 const (
 	IdentityPolicyTopicOwnerReceiver IdentityPolicy = "topic_owner_receiver"
+	IdentityPolicyProcessLifecycle   IdentityPolicy = "process_lifecycle"
 	IdentityPolicyRuntimeAuthority   IdentityPolicy = "runtime_authority"
 	IdentityPolicyRuntimeDispatch    IdentityPolicy = "runtime_dispatch"
 	IdentityPolicyRuntimeOperation   IdentityPolicy = "runtime_operation"

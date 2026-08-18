@@ -7,7 +7,6 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -63,20 +62,21 @@ func approvalResponse(response magicevent.Result, topic string) (approvalevents.
 	return result, nil
 }
 
-func runResponse(response magicevent.Result, topic string) (runevents.RunCommandResult, error) {
+func runResponse[Result any](response magicevent.Result, topic string) (Result, error) {
+	var zero Result
 	if response == nil {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := response.Error(); err != nil {
-		return runevents.RunCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return runevents.RunCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(runevents.RunCommandResult)
+	result, ok := data.(Result)
 	if !ok {
-		return runevents.RunCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

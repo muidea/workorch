@@ -130,15 +130,22 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 }
 
 func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents.WorkspaceExecutionIntentCommand) (runevents.WorkspaceExecutionIntentResult, error) {
+	requestedIntent := replacementIntentFromCommand(cmd)
 	items, err := m.runs.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
 	for _, item := range items {
 		if item != nil && strings.TrimSpace(item.ActivationRequestID) == cmd.RequestID {
+			if !replacementRunMatchesIntent(item, requestedIntent) {
+				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart request identity was reused with different sealed input", common.ErrConflict)
+			}
 			return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart), nil
 		}
 		if item != nil && item.ReplacementIntent != nil && item.ReplacementIntent.RequestID == cmd.RequestID {
+			if !replacementIntentMatches(item.ReplacementIntent, requestedIntent) {
+				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart request identity was reused with different sealed input", common.ErrConflict)
+			}
 			runID := item.ID
 			if item.ReplacementIntent.SuccessorRunID != "" {
 				runID = item.ReplacementIntent.SuccessorRunID
@@ -160,7 +167,7 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		predecessor = item
 	}
 	if predecessor == nil {
-		created, err := m.createWorkspaceExecutionReplacement(ctx, replacementIntentFromCommand(cmd), "")
+		created, err := m.createWorkspaceExecutionReplacement(ctx, requestedIntent, "")
 		if err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}
@@ -174,13 +181,43 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		predecessor.RuntimeActivationStatus.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported {
 		return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentDataResetRequired, runtimecontract.RuntimeExecutionIntentReasonDevelopmentDataIncompatible), nil
 	}
-	if err := m.persistReplacementIntent(ctx, predecessor, replacementIntentFromCommand(cmd)); err != nil {
+	if err := m.persistReplacementIntent(ctx, predecessor, requestedIntent); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
 	// The predecessor owns the durable request. No successor record exists
 	// until SM-4 has persisted Result, Workspace and final Run delivery.
 	m.scheduleReplacementTerminationDelivery(predecessor.WorkspaceID, predecessor.ID)
 	return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonPredecessorSupersedeRequested), nil
+}
+
+func replacementIntentMatches(current *runmodel.ReplacementIntent, requested runmodel.ReplacementIntent) bool {
+	if current == nil || current.Bootstrap == nil || requested.Bootstrap == nil {
+		return false
+	}
+	return current.RequestID == requested.RequestID &&
+		current.WorkspaceID == requested.WorkspaceID &&
+		current.GoalID == requested.GoalID &&
+		current.DoDID == requested.DoDID &&
+		strings.TrimSpace(current.DefinitionRevision) == strings.TrimSpace(requested.DefinitionRevision) &&
+		current.Priority == requested.Priority &&
+		current.ReconciliationScope == requested.ReconciliationScope &&
+		current.Kind == requested.Kind &&
+		strings.TrimSpace(current.Reason) == strings.TrimSpace(requested.Reason) &&
+		runtimecontract.StableRuntimeBootstrapHash(*current.Bootstrap) == runtimecontract.StableRuntimeBootstrapHash(*requested.Bootstrap)
+}
+
+func replacementRunMatchesIntent(current *runmodel.Run, requested runmodel.ReplacementIntent) bool {
+	if current == nil || current.RuntimeBootstrap == nil || requested.Bootstrap == nil {
+		return false
+	}
+	return strings.TrimSpace(current.ActivationRequestID) == requested.RequestID &&
+		current.WorkspaceID == requested.WorkspaceID &&
+		current.GoalID == requested.GoalID &&
+		current.DoDID == requested.DoDID &&
+		strings.TrimSpace(current.DefinitionRevision) == strings.TrimSpace(requested.DefinitionRevision) &&
+		current.Priority == requested.Priority &&
+		current.ReconciliationScope == requested.ReconciliationScope &&
+		runtimecontract.StableRuntimeBootstrapHash(*current.RuntimeBootstrap) == runtimecontract.StableRuntimeBootstrapHash(*requested.Bootstrap)
 }
 
 func replacementIntentFromCommand(cmd runevents.WorkspaceExecutionIntentCommand) runmodel.ReplacementIntent {
@@ -205,7 +242,10 @@ func (m *Biz) persistReplacementIntent(ctx context.Context, predecessor *runmode
 		}
 		if current.ReplacementIntent != nil {
 			if current.ReplacementIntent.RequestID == intent.RequestID {
-				return nil
+				if replacementIntentMatches(current.ReplacementIntent, intent) {
+					return nil
+				}
+				return common.ErrConflict
 			}
 			return common.ErrConflict
 		}
@@ -241,7 +281,10 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 	}
 	for _, item := range items {
 		if item != nil && strings.TrimSpace(item.ActivationRequestID) == intent.RequestID {
-			return item, nil
+			if replacementRunMatchesIntent(item, intent) {
+				return item, nil
+			}
+			return nil, common.ErrConflict
 		}
 	}
 	maxSequence := 0

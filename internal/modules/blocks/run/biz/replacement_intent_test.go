@@ -41,6 +41,11 @@ func TestPersistReplacementIntentKeepsSuccessorAbsent(t *testing.T) {
 	if err := biz.persistReplacementIntent(ctx, predecessor, intent); err != nil {
 		t.Fatalf("duplicate replacement intent: %v", err)
 	}
+	reusedIdentity := intent
+	reusedIdentity.Priority = intent.Priority + 1
+	if err := biz.persistReplacementIntent(ctx, predecessor, reusedIdentity); err != common.ErrConflict {
+		t.Fatalf("same request with different sealed payload err = %v, want conflict", err)
+	}
 	conflicting := intent
 	conflicting.RequestID = "restart-2"
 	if err := biz.persistReplacementIntent(ctx, predecessor, conflicting); err != common.ErrConflict {
@@ -108,6 +113,11 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 	items, _ = runs.ListByWorkspaceID(ctx, predecessor.WorkspaceID)
 	if len(items) != 2 {
 		t.Fatalf("duplicate successor created: %+v", items)
+	}
+	reusedIdentity := intent
+	reusedIdentity.Priority = intent.Priority + 1
+	if _, err := biz.createWorkspaceExecutionReplacement(ctx, reusedIdentity, predecessor.ID); err != common.ErrConflict {
+		t.Fatalf("same activation request with different sealed payload err = %v, want conflict", err)
 	}
 }
 

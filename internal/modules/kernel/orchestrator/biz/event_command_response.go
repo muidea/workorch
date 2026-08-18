@@ -10,7 +10,6 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -42,20 +41,21 @@ func bindGovernanceCommandLane(event magicevent.Event, ownerContracts []eventcon
 	}))
 }
 
-func runCommandResponse(response magicevent.Result, topic string) (runevents.RunCommandResult, error) {
+func runCommandResponse[Result any](response magicevent.Result, topic string) (Result, error) {
+	var zero Result
 	if response == nil {
-		return runevents.RunCommandResult{}, fmt.Errorf("run command %s returned no response", topic)
+		return zero, fmt.Errorf("run command %s returned no response", topic)
 	}
 	if err := response.Error(); err != nil {
-		return runevents.RunCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return runevents.RunCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(runevents.RunCommandResult)
+	result, ok := data.(Result)
 	if !ok {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	return result, nil
 }

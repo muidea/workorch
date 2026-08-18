@@ -21,7 +21,7 @@ func ReadRunByOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{RunID: runID})
 	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(runID), "", runID, "")
-	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandGet)
+	response, err := ownerevent.Run[runevents.GetRunResult](hub.Send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +38,7 @@ func ReadRunByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wor
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: runID})
 	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(runID), workspaceID, runID, "")
-	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandGet)
+	response, err := ownerevent.Run[runevents.GetRunResult](hub.Send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func ListRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmode
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{})
 	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "all", "", "", "")
-	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandList)
+	response, err := ownerevent.Run[runevents.ListRunsResult](hub.Send(event), runevents.TopicRunCommandList)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, h
 		Compact: true,
 	})
 	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "runtime-gap-candidates", "", "", "")
-	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandList)
+	response, err := ownerevent.Run[runevents.ListRunsResult](hub.Send(event), runevents.TopicRunCommandList)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wo
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListByWorkspace, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), commandCtx, runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
 	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListByWorkspace)
+	response, err := ownerevent.Run[runevents.ListRunsByWorkspaceResult](hub.Send(event), runevents.TopicRunCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}

@@ -11,31 +11,16 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (m *Biz) executeRuntimeStateStoreCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) executeRuntimeStateStoreCommand(ctx context.Context, ev magicevent.Event) (runevents.StoreRuntimeStateRecordResult, error) {
 	cmd, ok := ev.Data().(runevents.StoreRuntimeStateRecordCommand)
-	if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+	if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" || ev.Source() != "kernel/orchestrator" {
+		return runevents.StoreRuntimeStateRecordResult{}, common.ErrInvalidArgument
 	}
 	current, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
 	if err != nil {
-		return runevents.RunCommandResult{}, err
+		return runevents.StoreRuntimeStateRecordResult{}, err
 	}
-	if runUsesRuntime(current) {
-		if ev.Source() != "kernel/orchestrator" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
-		}
-		return m.updateRuntimeState(ctx, current, cmd)
-	} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
-	}
-	if err := validateRunUpdate(current, cmd); err != nil {
-		return runevents.RunCommandResult{}, err
-	}
-	item := runFromUpdateCommand(current, cmd)
-	if err := m.runs.CompareAndSwap(ctx, item, current.Revision); err != nil {
-		return runevents.RunCommandResult{}, err
-	}
-	return runevents.RunCommandResult{Run: item}, nil
+	return m.updateRuntimeState(ctx, current, cmd)
 }
 
 // updateRuntimeState persists an Orchestrator-owned aggregate through the
@@ -44,7 +29,7 @@ func (m *Biz) executeRuntimeStateStoreCommand(ctx context.Context, ev magicevent
 // case rebase the opaque RuntimeState write on the latest Run record; only an
 // aggregate revision mismatch is a semantic conflict that returns to the
 // Orchestrator SM-4 recovery owner.
-func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) (runevents.RunCommandResult, error) {
+func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) (runevents.StoreRuntimeStateRecordResult, error) {
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
 		if current == nil {
@@ -106,10 +91,7 @@ func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRec
 	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
 		return common.ErrConflict
 	}
-	if !runUsesRuntime(current) {
-		return nil
-	}
-	if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.RuntimeState.SchemaVersion != runtimemodel.RuntimeStateSchemaVersionCurrent {
+	if current.RuntimeBootstrap == nil || cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil || cmd.RuntimeState.SchemaVersion != runtimemodel.RuntimeStateSchemaVersionCurrent {
 		return common.ErrConflict
 	}
 	if cmd.LifecycleFence != nil {
@@ -120,16 +102,7 @@ func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRec
 			return common.ErrConflict
 		}
 	}
-	if current.RuntimeBootstrap == nil {
-		// The sealed bootstrap is required to validate an aggregate write. Reject a
-		// malformed record instead of letting a generic owner command panic.
-		return common.ErrConflict
-	}
 	return nil
-}
-
-func runUsesRuntime(run *runmodel.Run) bool {
-	return run != nil && run.RuntimeBootstrap != nil
 }
 
 // ValidateRunUpdate exposes the Run owner's SM-1 persistence invariant for

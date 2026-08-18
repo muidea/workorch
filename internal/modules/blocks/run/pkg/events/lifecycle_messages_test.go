@@ -53,6 +53,14 @@ func TestRuntimeContinuationEligibleFactValidate(t *testing.T) {
 	if err := cmd.Validate(); err == nil {
 		t.Fatal("expected binding required")
 	}
+	cmd.ApprovalID = "approval-1"
+	if err := cmd.Validate(); err != nil {
+		t.Fatalf("valid approval continuation: %v", err)
+	}
+	cmd.TicketID = "ticket-1"
+	if err := cmd.Validate(); err == nil {
+		t.Fatal("expected exactly-one continuation binding")
+	}
 }
 
 func TestRuntimeTerminalDeliveryFactValidate(t *testing.T) {

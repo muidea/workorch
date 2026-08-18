@@ -17,7 +17,7 @@ func runtimeStateUpdateOutcome(
 	category runtimecontract.RuntimeFeedbackCategory,
 	observedRevision uint64,
 	cause error,
-) runevents.RunCommandResult {
+) runevents.StoreRuntimeStateRecordResult {
 	workspaceID, runID := cmd.WorkspaceID, cmd.RunID
 	if current != nil {
 		workspaceID, runID = current.WorkspaceID, current.ID
@@ -63,5 +63,5 @@ func runtimeStateUpdateOutcome(
 		ObservedRuntimeRevision: observedRevision,
 		Feedback:                feedback,
 	}
-	return runevents.RunCommandResult{Run: current, RuntimeStateUpdate: &result}
+	return runevents.StoreRuntimeStateRecordResult{RuntimeStateUpdate: &result}
 }

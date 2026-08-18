@@ -151,7 +151,7 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	approvalID := common.ApprovalID("approval-purge-command-payload")
 
 	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
-		return runevents.RunCommandResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
+		return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
 	})
 	testHub.subscribe(orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun, emptyOrchestratorResult)
 	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
@@ -213,7 +213,7 @@ func TestPurgeWorkspaceRecordsTreatsMissingChildRecordsAsAlreadyPurged(t *testin
 	resultListCalled := false
 
 	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
-		return runevents.RunCommandResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
+		return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
 	})
 	for _, command := range []struct {
 		destination string
@@ -276,7 +276,7 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 				return workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: workspaceID}}, nil
 			})
 			testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
-				return runevents.RunCommandResult{Runs: []*runmodel.Run{}}, nil
+				return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{}}, nil
 			})
 			testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
 				return memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil
@@ -358,5 +358,5 @@ func emptyApprovalResult(any) (any, error) {
 }
 
 func emptyRunResult(any) (any, error) {
-	return runevents.RunCommandResult{}, nil
+	return runevents.DeleteRunResult{Deleted: true}, nil
 }

@@ -8,41 +8,41 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (m *Biz) executeCheckpointQueryCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) executeCheckpointQueryCommand(ctx context.Context, ev magicevent.Event) (any, error) {
 	switch ev.ID() {
 	case runevents.TopicRunCommandGetRuntimeCheckpoint:
 		cmd, ok := ev.Data().(runevents.GetRuntimeCheckpointCommand)
 		if !ok || cmd.CheckpointID == "" || m.checkpoints == nil {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		item, err := m.checkpoints.Get(ctx, cmd.CheckpointID)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
 		if cmd.RunID != "" && cmd.RunID != item.RunID {
-			return runevents.RunCommandResult{}, common.ErrConflict
+			return nil, common.ErrConflict
 		}
 		if cmd.WorkspaceID != "" && item.WorkspaceID != cmd.WorkspaceID {
-			return runevents.RunCommandResult{}, common.ErrNotFound
+			return nil, common.ErrNotFound
 		}
 		if err := m.validateRunReadScope(ctx, item.RunID, cmd.WorkspaceID); err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{Checkpoint: item}, nil
+		return runevents.GetRuntimeCheckpointResult{Checkpoint: item}, nil
 	case runevents.TopicRunCommandListCheckpointsByRun:
 		cmd, ok := ev.Data().(runevents.ListRuntimeCheckpointsByRunCommand)
 		if !ok || cmd.RunID == "" || m.checkpoints == nil {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		if err := m.validateRunReadScope(ctx, cmd.RunID, cmd.WorkspaceID); err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
 		items, err := m.checkpoints.ListByRun(ctx, cmd.RunID)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{Checkpoints: items}, nil
+		return runevents.ListRuntimeCheckpointsByRunResult{Checkpoints: items}, nil
 	default:
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 }

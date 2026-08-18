@@ -12,9 +12,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func (m *Biz) purgeRunOwnerResources(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runevents.RunCommandResult, error) {
+func (m *Biz) purgeRunOwnerResources(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runevents.PurgeRuntimeResourcesResult, error) {
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return runevents.PurgeRuntimeResourcesResult{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(
 		runevents.TopicRunCommandPurgeRuntimeResources,
@@ -25,7 +25,7 @@ func (m *Biz) purgeRunOwnerResources(ctx context.Context, workspaceID common.Wor
 		runevents.PurgeRuntimeResourcesCommand{WorkspaceID: workspaceID, RunID: runID},
 	)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandPurgeRuntimeResources, "run", string(runID), workspaceID, runID)
-	return runCommandResponse(m.SendEvent(event), runevents.TopicRunCommandPurgeRuntimeResources)
+	return runCommandResponse[runevents.PurgeRuntimeResourcesResult](m.SendEvent(event), runevents.TopicRunCommandPurgeRuntimeResources)
 }
 
 func purgeRunEvidence(ctx context.Context, evidence RuntimeEvidenceRepositories, runID common.RunID) (int, error) {

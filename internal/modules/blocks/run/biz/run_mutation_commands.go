@@ -9,32 +9,32 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func (m *Biz) executeRunResourceCleanupCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) executeRunResourceCleanupCommand(ctx context.Context, ev magicevent.Event) (any, error) {
 	switch ev.ID() {
 	case runevents.TopicRunCommandPurgeRuntimeResources:
 		cmd, ok := ev.Data().(runevents.PurgeRuntimeResourcesCommand)
 		if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		if _, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID); err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
 		deleted, err := purgeRunRuntimeResources(ctx, m.steps, m.checkpoints, cmd.RunID)
-		return runevents.RunCommandResult{DeletedCount: deleted}, err
+		return runevents.PurgeRuntimeResourcesResult{DeletedCount: deleted}, err
 	case runevents.TopicRunCommandDelete:
 		cmd, ok := ev.Data().(runevents.DeleteRunCommand)
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		if _, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID); err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
 		if err := m.runs.Delete(ctx, cmd.RunID); err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{}, nil
+		return runevents.DeleteRunResult{Deleted: true}, nil
 	default:
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 }
 

@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,52 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
+	biz, runs, _ := newLifecycleTestBiz(t)
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-1")
+	bootstrap := restartTestBootstrap(t, "ws-1")
+	existing := &runmodel.Run{
+		ID: "run-001", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1",
+		RuntimeBootstrap: &bootstrap, ActivationRequestID: "restart-1", ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+		State: common.RunStateActive, Priority: 3,
+	}
+	if err := runs.Create(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
+	cmd := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: "ws-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", Priority: 3, Bootstrap: &bootstrap,
+	}
+	duplicate, err := biz.restartWorkspaceExecutionIntent(ctx, cmd)
+	if err != nil || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart || duplicate.RunID != existing.ID {
+		t.Fatalf("matching duplicate=%+v err=%v", duplicate, err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*runevents.WorkspaceExecutionIntentCommand)
+	}{
+		{name: "goal", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.GoalID = "goal-other" }},
+		{name: "dod", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.DoDID = "dod-other" }},
+		{name: "definition revision", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.DefinitionRevision = "def-other" }},
+		{name: "priority", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.Priority++ }},
+		{name: "bootstrap", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) {
+			changed := value.Bootstrap.Clone()
+			changed.Activation.ProviderSelection.Target.ModelID = "different-model"
+			value.Bootstrap = &changed
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed := cmd
+			bootstrapCopy := cmd.Bootstrap.Clone()
+			changed.Bootstrap = &bootstrapCopy
+			test.mutate(&changed)
+			if _, err := biz.restartWorkspaceExecutionIntent(ctx, changed); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("reused request with changed %s err=%v, want conflict", test.name, err)
+			}
+		})
+	}
+}
 
 func TestWorkspaceExecutionResumeRetainsCurrentRunOpaqueCWILedger(t *testing.T) {
 	biz, runs, hub := newLifecycleTestBiz(t)

@@ -350,28 +350,61 @@ func (d RunStateChangedData) Validate() error {
 	return nil
 }
 
-type RunCommandResult struct {
-	Run          *runmodel.Run
-	Runs         []*runmodel.Run
-	Step         *runmodel.Step
-	Steps        []*runmodel.Step
-	Checkpoint   *runmodel.RuntimeCheckpoint
-	Checkpoints  []*runmodel.RuntimeCheckpoint
-	DeletedCount int
-	// RuntimeStateUpdate is populated only for an opaque Runtime aggregate
-	// update. It gives Orchestrator an exact persistence fact rather than an
-	// ambiguous generic conflict.
+// The Run owner deliberately exposes one result shape per command. Keeping
+// these results distinct prevents an unrelated topic from being accepted just
+// because it populated another field in a shared union envelope.
+type GetRunResult struct{ Run *runmodel.Run }
+type ListRunsResult struct{ Runs []*runmodel.Run }
+type ListRunsByWorkspaceResult struct{ Runs []*runmodel.Run }
+type GetStepResult struct{ Step *runmodel.Step }
+type ListStepsByRunResult struct{ Steps []*runmodel.Step }
+type ListStepSummariesByRunResult struct{ Steps []*runmodel.Step }
+type GetRuntimeCheckpointResult struct{ Checkpoint *runmodel.RuntimeCheckpoint }
+type ListRuntimeCheckpointsByRunResult struct{ Checkpoints []*runmodel.RuntimeCheckpoint }
+type PurgeRuntimeResourcesResult struct{ DeletedCount int }
+type DeleteRunResult struct{ Deleted bool }
+
+// StoreRuntimeStateRecordResult is the concrete opaque-CAS receipt. It exposes
+// only the canonical persistence feedback consumed by Orchestrator, not a
+// second full Run snapshot.
+type StoreRuntimeStateRecordResult struct {
 	RuntimeStateUpdate *RuntimeStateUpdateResult
 }
 
-func (r RunCommandResult) Clone() RunCommandResult {
-	cloned := r
-	cloned.Run = runmodel.CloneRun(r.Run)
-	cloned.Runs = runmodel.CloneRuns(r.Runs)
-	cloned.Step = runmodel.CloneStep(r.Step)
-	cloned.Steps = runmodel.CloneSteps(r.Steps)
-	cloned.Checkpoint = runmodel.CloneRuntimeCheckpoint(r.Checkpoint)
-	cloned.Checkpoints = runmodel.CloneRuntimeCheckpoints(r.Checkpoints)
+func (r GetRunResult) Clone() GetRunResult {
+	return GetRunResult{Run: runmodel.CloneRun(r.Run)}
+}
+
+func (r ListRunsResult) Clone() ListRunsResult {
+	return ListRunsResult{Runs: runmodel.CloneRuns(r.Runs)}
+}
+
+func (r ListRunsByWorkspaceResult) Clone() ListRunsByWorkspaceResult {
+	return ListRunsByWorkspaceResult{Runs: runmodel.CloneRuns(r.Runs)}
+}
+
+func (r GetStepResult) Clone() GetStepResult {
+	return GetStepResult{Step: runmodel.CloneStep(r.Step)}
+}
+
+func (r ListStepsByRunResult) Clone() ListStepsByRunResult {
+	return ListStepsByRunResult{Steps: runmodel.CloneSteps(r.Steps)}
+}
+
+func (r ListStepSummariesByRunResult) Clone() ListStepSummariesByRunResult {
+	return ListStepSummariesByRunResult{Steps: runmodel.CloneSteps(r.Steps)}
+}
+
+func (r GetRuntimeCheckpointResult) Clone() GetRuntimeCheckpointResult {
+	return GetRuntimeCheckpointResult{Checkpoint: runmodel.CloneRuntimeCheckpoint(r.Checkpoint)}
+}
+
+func (r ListRuntimeCheckpointsByRunResult) Clone() ListRuntimeCheckpointsByRunResult {
+	return ListRuntimeCheckpointsByRunResult{Checkpoints: runmodel.CloneRuntimeCheckpoints(r.Checkpoints)}
+}
+
+func (r StoreRuntimeStateRecordResult) Clone() StoreRuntimeStateRecordResult {
+	cloned := StoreRuntimeStateRecordResult{}
 	if r.RuntimeStateUpdate != nil {
 		update := *r.RuntimeStateUpdate
 		update.Feedback = r.RuntimeStateUpdate.Feedback.CloneOriginal()
@@ -382,20 +415,20 @@ func (r RunCommandResult) Clone() RunCommandResult {
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
-		eventcontract.CommandTopic[GetRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGet).MessageContract(),
-		eventcontract.CommandTopic[ListRunsCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandList).MessageContract(),
-		eventcontract.CommandTopic[ListRunsByWorkspaceCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListByWorkspace).MessageContract(),
+		eventcontract.CommandTopic[GetRunCommand, GetRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListRunsCommand, ListRunsResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandList).MessageContract(),
+		eventcontract.CommandTopic[ListRunsByWorkspaceCommand, ListRunsByWorkspaceResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListByWorkspace).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeRecoveryInventoryCommand, QueryRuntimeRecoveryInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeRecoveryInventory).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeStateRecordReadinessCommand, QueryRuntimeStateRecordReadinessResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeStateRecordReadiness).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeStateRecordCommand, QueryRuntimeStateRecordResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeStateRecord).MessageContract(),
-		eventcontract.CommandTopic[GetStepCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetStep).MessageContract(),
-		eventcontract.CommandTopic[ListStepsByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepsByRun).MessageContract(),
-		eventcontract.CommandTopic[ListStepSummariesByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepSummariesByRun).MessageContract(),
-		eventcontract.CommandTopic[GetRuntimeCheckpointCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetRuntimeCheckpoint).MessageContract(),
-		eventcontract.CommandTopic[ListRuntimeCheckpointsByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListCheckpointsByRun).MessageContract(),
-		eventcontract.CommandTopic[PurgeRuntimeResourcesCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPurgeRuntimeResources).MessageContract(),
-		eventcontract.CommandTopic[StoreRuntimeStateRecordCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandStoreRuntimeStateRecord).MessageContract(),
-		eventcontract.CommandTopic[DeleteRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[GetStepCommand, GetStepResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetStep).MessageContract(),
+		eventcontract.CommandTopic[ListStepsByRunCommand, ListStepsByRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepsByRun).MessageContract(),
+		eventcontract.CommandTopic[ListStepSummariesByRunCommand, ListStepSummariesByRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepSummariesByRun).MessageContract(),
+		eventcontract.CommandTopic[GetRuntimeCheckpointCommand, GetRuntimeCheckpointResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetRuntimeCheckpoint).MessageContract(),
+		eventcontract.CommandTopic[ListRuntimeCheckpointsByRunCommand, ListRuntimeCheckpointsByRunResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListCheckpointsByRun).MessageContract(),
+		eventcontract.CommandTopic[PurgeRuntimeResourcesCommand, PurgeRuntimeResourcesResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandPurgeRuntimeResources).MessageContract(),
+		eventcontract.CommandTopic[StoreRuntimeStateRecordCommand, StoreRuntimeStateRecordResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandStoreRuntimeStateRecord).MessageContract(),
+		eventcontract.CommandTopic[DeleteRunCommand, DeleteRunResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandWorkspaceExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[RuntimeGovernanceWaitFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactGovernanceWait).MessageContract(),
 		eventcontract.CommandTopic[RuntimeContinuationEligibleFact, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunFactContinuationEligible).MessageContract(),

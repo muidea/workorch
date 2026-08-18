@@ -285,6 +285,35 @@ func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 	}
 }
 
+func TestReduceApprovalGovernanceWaitAndContinuation(t *testing.T) {
+	current := &runmodel.Run{
+		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeBootstrap:      &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:          &runtimecontract.RuntimeStateRecord{StateRevision: 3},
+		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3, GovernanceFenceID: "runtime-governance/auth-1/dispatch-1"},
+	}
+	wait := runevents.RuntimeGovernanceWaitFact{
+		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
+		CausationID: "cause-wait", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", BlockingApprovalID: "approval-1",
+	}
+	blocked, err := reduceGovernanceWait(current, wait)
+	if err != nil || blocked.Target != common.RunStateBlockedOnApproval || blocked.BlockingApproval != "approval-1" || blocked.BlockingTicketID != "" {
+		t.Fatalf("approval wait transition=%+v err=%v", blocked, err)
+	}
+	current = applyLifecycleTransition(current, blocked)
+	continued, err := reduceContinuationEligible(current, runevents.RuntimeContinuationEligibleFact{
+		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
+		CausationID: "cause-resolution", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", ResolutionID: "resolution-1", ApprovalID: "approval-1",
+	})
+	if err != nil || continued.Target != common.RunStateActive {
+		t.Fatalf("approval continuation transition=%+v err=%v", continued, err)
+	}
+	resumed := applyLifecycleTransition(current, continued)
+	if resumed.State != common.RunStateActive || resumed.BlockingApprovalID != "" || resumed.BlockingTicketID != "" {
+		t.Fatalf("approval continuation did not clear blockers: %+v", resumed)
+	}
+}
+
 func TestReduceGovernanceWaitDuplicateIsNoop(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
@@ -437,6 +466,13 @@ func TestLifecycleHandlerRejectsConflictingEventWorkspaceScopeWithoutMutation(t 
 func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	biz, runs, hub := newLifecycleTestBiz(t)
 	seed := seedRun(t, runs, common.RunStateActive)
+	bootstrap := runtimecontract.RuntimeBootstrap{}
+	state := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 1}
+	seed.RuntimeBootstrap = &bootstrap
+	seed.RuntimeState = &state
+	if err := runs.Update(context.Background(), seed); err != nil {
+		t.Fatalf("seed Runtime state: %v", err)
+	}
 	received := make(chan runevents.RunStateChangedData, 1)
 	observer := magicevent.NewSimpleObserverWithMatchID("/run/consumers/update-test", "/run/consumers/update-test", hub)
 	observer.Subscribe(runevents.TopicRunStateChanged, func(event magicevent.Event, result magicevent.Result) {
@@ -449,10 +485,14 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunStateChanged) })
 
+	nextState := state.Clone()
+	nextState.StateRevision++
+	expected := state.StateRevision
 	_, err := biz.executeCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandStoreRuntimeStateRecord, "test", runevents.CommandDestination, magicevent.NewHeader(), context.Background(),
+		runevents.TopicRunCommandStoreRuntimeStateRecord, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), context.Background(),
 		runevents.StoreRuntimeStateRecordCommand{
 			RunID: seed.ID, WorkspaceID: seed.WorkspaceID,
+			RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected,
 		},
 	))
 	if err != nil {
@@ -506,8 +546,12 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Runtime aggregate update: %v", err)
 	}
-	if result.Run == nil || result.Run.Priority != 17 || result.Run.RuntimeState == nil || result.Run.RuntimeState.StateRevision != nextState.StateRevision {
-		t.Fatalf("rebased Run = %+v", result.Run)
+	if result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAccepted {
+		t.Fatalf("Runtime aggregate receipt = %+v", result.RuntimeStateUpdate)
+	}
+	stored, err := base.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || stored.Priority != 17 || stored.RuntimeState == nil || stored.RuntimeState.StateRevision != nextState.StateRevision {
+		t.Fatalf("rebased stored Run = %+v err=%v", stored, err)
 	}
 	if runs.casCalls != 2 {
 		t.Fatalf("physical CAS calls = %d, want 2", runs.casCalls)

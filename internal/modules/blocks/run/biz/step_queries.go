@@ -9,32 +9,32 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (m *Biz) executeStepQueryCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) executeStepQueryCommand(ctx context.Context, ev magicevent.Event) (any, error) {
 	switch ev.ID() {
 	case runevents.TopicRunCommandGetStep:
 		cmd, ok := ev.Data().(runevents.GetStepCommand)
 		if !ok || cmd.StepID == "" || m.steps == nil {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
 		item, err := m.steps.Get(ctx, cmd.StepID)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
 		if cmd.RunID != "" && cmd.RunID != item.RunID {
-			return runevents.RunCommandResult{}, common.ErrConflict
+			return nil, common.ErrConflict
 		}
 		if err := m.validateRunReadScope(ctx, item.RunID, cmd.WorkspaceID); err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
-		return runevents.RunCommandResult{Step: item}, nil
+		return runevents.GetStepResult{Step: item}, nil
 	case runevents.TopicRunCommandListStepsByRun, runevents.TopicRunCommandListStepSummariesByRun:
 		return m.listStepsByRun(ctx, ev)
 	default:
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 }
 
-func (m *Biz) listStepsByRun(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) listStepsByRun(ctx context.Context, ev magicevent.Event) (any, error) {
 	var cmd runevents.ListStepsByRunCommand
 	var ok bool
 	if ev.ID() == runevents.TopicRunCommandListStepSummariesByRun {
@@ -45,10 +45,10 @@ func (m *Biz) listStepsByRun(ctx context.Context, ev magicevent.Event) (runevent
 		cmd, ok = ev.Data().(runevents.ListStepsByRunCommand)
 	}
 	if !ok || cmd.RunID == "" || m.steps == nil {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	if err := m.validateRunReadScope(ctx, cmd.RunID, cmd.WorkspaceID); err != nil {
-		return runevents.RunCommandResult{}, err
+		return nil, err
 	}
 	var items []*runmodel.Step
 	var err error
@@ -58,7 +58,10 @@ func (m *Biz) listStepsByRun(ctx context.Context, ev magicevent.Event) (runevent
 		items, err = m.steps.ListByRun(ctx, cmd.RunID)
 	}
 	if err != nil {
-		return runevents.RunCommandResult{}, err
+		return nil, err
 	}
-	return runevents.RunCommandResult{Steps: items}, nil
+	if ev.ID() == runevents.TopicRunCommandListStepSummariesByRun {
+		return runevents.ListStepSummariesByRunResult{Steps: items}, nil
+	}
+	return runevents.ListStepsByRunResult{Steps: items}, nil
 }

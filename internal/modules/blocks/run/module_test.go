@@ -74,27 +74,50 @@ func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing
 	}
 }
 
-func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (runevents.RunCommandResult, error) {
-	ev := magicevent.NewEventWithContext(topic, "run/module_test", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+type runTestCommandResult struct {
+	Run        *runmodel.Run
+	Runs       []*runmodel.Run
+	Step       *runmodel.Step
+	Checkpoint *runmodel.RuntimeCheckpoint
+}
+
+func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (runTestCommandResult, error) {
+	source := "run/module_test"
+	if topic == runevents.TopicRunCommandStoreRuntimeStateRecord {
+		source = "kernel/orchestrator"
+	}
+	ev := magicevent.NewEventWithContext(topic, source, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return runTestCommandResult{}, common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
 		if err.Cause != nil {
-			return runevents.RunCommandResult{}, err.Cause
+			return runTestCommandResult{}, err.Cause
 		}
-		return runevents.RunCommandResult{}, err
+		return runTestCommandResult{}, err
 	}
 	data, err := result.Get()
 	if err != nil {
-		return runevents.RunCommandResult{}, err
+		return runTestCommandResult{}, err
 	}
-	response, ok := data.(runevents.RunCommandResult)
-	if !ok {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+	switch response := data.(type) {
+	case runevents.GetRunResult:
+		return runTestCommandResult{Run: response.Run}, nil
+	case runevents.ListRunsResult:
+		return runTestCommandResult{Runs: response.Runs}, nil
+	case runevents.ListRunsByWorkspaceResult:
+		return runTestCommandResult{Runs: response.Runs}, nil
+	case runevents.GetStepResult:
+		return runTestCommandResult{Step: response.Step}, nil
+	case runevents.GetRuntimeCheckpointResult:
+		return runTestCommandResult{Checkpoint: response.Checkpoint}, nil
+	case runevents.StoreRuntimeStateRecordResult, runevents.DeleteRunResult, runevents.ListStepsByRunResult,
+		runevents.ListStepSummariesByRunResult, runevents.ListRuntimeCheckpointsByRunResult, runevents.PurgeRuntimeResourcesResult:
+		return runTestCommandResult{}, nil
+	default:
+		return runTestCommandResult{}, common.ErrInvalidArgument
 	}
-	return response, nil
 }
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -266,7 +289,9 @@ func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)
 	baseRuns := memory.NewRunRepository()
-	run := &runmodel.Run{ID: "run-stop-in-flight", WorkspaceID: "ws-stop-in-flight", State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z"}
+	bootstrap := runtimecontract.RuntimeBootstrap{}
+	state := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 1}
+	run := &runmodel.Run{ID: "run-stop-in-flight", WorkspaceID: "ws-stop-in-flight", State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z", RuntimeBootstrap: &bootstrap, RuntimeState: &state}
 	if err := baseRuns.Create(ctx, run); err != nil {
 		t.Fatal(err)
 	}
@@ -284,8 +309,9 @@ func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 	}
 	commandDone := make(chan error, 1)
 	go func() {
+		revision := state.StateRevision
 		_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandStoreRuntimeStateRecord, runevents.StoreRuntimeStateRecordCommand{
-			RunID: run.ID, WorkspaceID: run.WorkspaceID,
+			RunID: run.ID, WorkspaceID: run.WorkspaceID, RuntimeState: &state, ExpectedRuntimeStateRevision: &revision,
 		})
 		commandDone <- err
 	}()
@@ -628,6 +654,66 @@ func TestRuntimeStateUpdateRejectsNonOrchestratorSource(t *testing.T) {
 	response := hub.Send(event)
 	if response == nil || response.Error() == nil || !errors.Is(response.Error().Cause, common.ErrInvalidArgument) {
 		t.Fatalf("forged Runtime update response = %+v", response)
+	}
+}
+
+func TestRuntimeStateStoreRejectsLegacyLifecycleMutationBypass(t *testing.T) {
+	ctx := context.Background()
+	hub := newRunModuleTestHub(t)
+	runs := memory.NewRunRepository()
+	if err := runs.Create(ctx, &runmodel.Run{ID: "legacy-run", WorkspaceID: "legacy-workspace", State: common.RunStatePending}); err != nil {
+		t.Fatal(err)
+	}
+	module := New()
+	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	forgedFence := &runtimecontract.RuntimeOpaqueLifecycleFence{
+		WorkspaceID: "legacy-workspace", RunID: "legacy-run", RuntimeStateRevision: 1,
+		RuntimeStateRef: "runtime-state/legacy-workspace/legacy-run/1", RuntimeStateHash: "forged-state", BootstrapHash: "forged-bootstrap", GovernanceFenceID: "forged-governance",
+	}
+	event := magicevent.NewEventWithContext(
+		runevents.TopicRunCommandStoreRuntimeStateRecord,
+		"application/workorchd",
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.StoreRuntimeStateRecordCommand{RunID: "legacy-run", WorkspaceID: "legacy-workspace", LifecycleFence: forgedFence},
+	)
+	response := hub.Send(event)
+	if response == nil || response.Error() == nil || !errors.Is(response.Error().Cause, common.ErrInvalidArgument) {
+		t.Fatalf("legacy forged Runtime store response = %+v", response)
+	}
+	authorizedEvent := magicevent.NewEventWithContext(
+		runevents.TopicRunCommandStoreRuntimeStateRecord,
+		"kernel/orchestrator",
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.StoreRuntimeStateRecordCommand{RunID: "legacy-run", WorkspaceID: "legacy-workspace", LifecycleFence: forgedFence},
+	)
+	authorizedResponse := hub.Send(authorizedEvent)
+	if authorizedResponse == nil || authorizedResponse.Error() != nil {
+		t.Fatalf("legacy Orchestrator Runtime store response = %+v", authorizedResponse)
+	}
+	data, resultErr := authorizedResponse.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	receipt, ok := data.(runevents.StoreRuntimeStateRecordResult)
+	if !ok || receipt.RuntimeStateUpdate == nil || receipt.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategorySemanticRejection {
+		t.Fatalf("legacy Orchestrator Runtime store receipt = %+v", data)
+	}
+	stored, err := runs.GetByWorkspaceID(ctx, "legacy-workspace", "legacy-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RuntimeState != nil || stored.RuntimeLifecycleFence != nil || stored.Revision != 1 {
+		t.Fatalf("legacy forged Runtime store mutated Run: %+v", stored)
 	}
 }
 

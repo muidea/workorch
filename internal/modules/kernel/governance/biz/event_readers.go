@@ -72,7 +72,7 @@ func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
 	bindOwnerLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
-	response, err := runResponse(r.send(event), runevents.TopicRunCommandGet)
+	response, err := runResponse[runevents.GetRunResult](r.send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
 	bindOwnerLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
-	response, err := runResponse(r.send(event), runevents.TopicRunCommandGet)
+	response, err := runResponse[runevents.GetRunResult](r.send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{})
 	bindOwnerLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "all", workspaceID, "", "")
-	response, err := runResponse(r.send(event), runevents.TopicRunCommandList)
+	response, err := runResponse[runevents.ListRunsResult](r.send(event), runevents.TopicRunCommandList)
 	if err != nil {
 		return nil, err
 	}

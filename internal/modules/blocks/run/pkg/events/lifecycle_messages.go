@@ -170,8 +170,10 @@ func (c RuntimeContinuationEligibleFact) Validate() error {
 		c.DefinitionRevision == "" || c.EvidenceRevision == "" || c.DispatchID == "" || c.ResolutionID == "" {
 		return fmt.Errorf("%w: continuation eligible requires sealed source, causation, runtime identity and resolution", common.ErrInvalidArgument)
 	}
-	if c.TicketID == "" && c.ApprovalID == "" {
-		return fmt.Errorf("%w: continuation eligible requires ticket or approval binding", common.ErrInvalidArgument)
+	hasTicket := c.TicketID != ""
+	hasApproval := c.ApprovalID != ""
+	if hasTicket == hasApproval {
+		return fmt.Errorf("%w: continuation eligible requires exactly one of ticket or approval", common.ErrInvalidArgument)
 	}
 	return nil
 }

@@ -19,7 +19,7 @@ func TestRunSnapshotReaderPropagatesExplicitWorkspaceScope(t *testing.T) {
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
 	observer.Subscribe(runevents.TopicRunCommandGet, func(ev magicevent.Event, result magicevent.Result) {
 		captured, _ = ev.Data().(runevents.GetRunCommand)
-		result.Set(runevents.RunCommandResult{
+		result.Set(runevents.GetRunResult{
 			Run: &runmodel.Run{
 				ID:          "run-001",
 				WorkspaceID: "ws-run-event-scope",

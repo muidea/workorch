@@ -22,6 +22,22 @@ func TestRuntimeStateStoreIsOpaquePersistenceNotSM1Transition(t *testing.T) {
 	t.Fatal("runtime state store contract missing")
 }
 
+func TestRuntimeCommandsReadyMetadataIsProcessScopedSM4Handoff(t *testing.T) {
+	for _, contract := range Contracts() {
+		if contract.Topic != TopicRunRuntimeCommandsReady {
+			continue
+		}
+		if contract.Metadata.StateMachine != eventcontract.StateMachineSM4 ||
+			contract.Metadata.ScopePolicy != eventcontract.ScopePolicyProcess ||
+			contract.Metadata.IdentityPolicy != eventcontract.IdentityPolicyProcessLifecycle ||
+			contract.Metadata.CanonicalFeedback {
+			t.Fatalf("runtime commands-ready metadata = %+v", contract.Metadata)
+		}
+		return
+	}
+	t.Fatal("runtime commands-ready contract missing")
+}
+
 func TestRunStateChangedDataFromModelIncludesOnlyOpaqueRuntimeReference(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,

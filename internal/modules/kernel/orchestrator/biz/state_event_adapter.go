@@ -35,7 +35,7 @@ func (r runSnapshotReader) Read(ctx context.Context, workspaceID common.Workspac
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(id), workspaceID, id)
-	response, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandGet)
+	response, err := runCommandResponse[runevents.GetRunResult](r.hub.Send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
 	}

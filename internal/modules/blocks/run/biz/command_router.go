@@ -63,14 +63,14 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	setRunMagicResult(result, response, err)
 }
 
-func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, error) {
+func (m *Biz) executeCommand(ev magicevent.Event) (any, error) {
 	if m == nil {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	m.commandMu.RLock()
 	defer m.commandMu.RUnlock()
 	if m.stopping || m.runs == nil || m.Service == nil {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
 	workspaceID := workspaceScopeFromRunCommand(ev.Data())
@@ -78,12 +78,12 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		var err error
 		ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 		if err != nil {
-			return runevents.RunCommandResult{}, err
+			return nil, err
 		}
 	}
 	family, ok := runCommandFamilyForTopic(ev.ID())
 	if !ok {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 	switch family {
 	case runCommandFamilyRunQuery:
@@ -97,7 +97,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 	case runCommandFamilyResourceCleanup:
 		return m.executeRunResourceCleanupCommand(ctx, ev)
 	default:
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
 }
 
@@ -136,7 +136,7 @@ func (m *Biz) validateRunReadScope(ctx context.Context, runID common.RunID, work
 	return err
 }
 
-func setRunMagicResult(result magicevent.Result, data runevents.RunCommandResult, err error) {
+func setRunMagicResult(result magicevent.Result, data any, err error) {
 	if result == nil {
 		return
 	}
@@ -144,5 +144,39 @@ func setRunMagicResult(result magicevent.Result, data runevents.RunCommandResult
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data.Clone(), nil)
+	cloned, ok := cloneRunCommandResult(data)
+	if !ok {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	result.Set(cloned, nil)
+}
+
+func cloneRunCommandResult(data any) (any, bool) {
+	switch value := data.(type) {
+	case runevents.GetRunResult:
+		return value.Clone(), true
+	case runevents.ListRunsResult:
+		return value.Clone(), true
+	case runevents.ListRunsByWorkspaceResult:
+		return value.Clone(), true
+	case runevents.GetStepResult:
+		return value.Clone(), true
+	case runevents.ListStepsByRunResult:
+		return value.Clone(), true
+	case runevents.ListStepSummariesByRunResult:
+		return value.Clone(), true
+	case runevents.GetRuntimeCheckpointResult:
+		return value.Clone(), true
+	case runevents.ListRuntimeCheckpointsByRunResult:
+		return value.Clone(), true
+	case runevents.PurgeRuntimeResourcesResult:
+		return value, true
+	case runevents.StoreRuntimeStateRecordResult:
+		return value.Clone(), true
+	case runevents.DeleteRunResult:
+		return value, true
+	default:
+		return nil, false
+	}
 }

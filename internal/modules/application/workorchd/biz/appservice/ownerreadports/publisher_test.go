@@ -242,7 +242,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("run get command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Run: payload[recordpayload.PayloadKeyRun].(*runmodel.Run)}, nil)
+			result.Set(runevents.GetRunResult{Run: payload[recordpayload.PayloadKeyRun].(*runmodel.Run)}, nil)
 		case runevents.TopicRunCommandListStepsByRun:
 			cmd, ok := ev.Data().(runevents.ListStepsByRunCommand)
 			if !ok {
@@ -251,7 +251,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("step list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Steps: payload[recordpayload.PayloadKeySteps].([]*runmodel.Step)}, nil)
+			result.Set(runevents.ListStepsByRunResult{Steps: payload[recordpayload.PayloadKeySteps].([]*runmodel.Step)}, nil)
 		case runevents.TopicRunCommandListStepSummariesByRun:
 			cmd, ok := ev.Data().(runevents.ListStepSummariesByRunCommand)
 			if !ok {
@@ -260,7 +260,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("step summary list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Steps: payload[recordpayload.PayloadKeySteps].([]*runmodel.Step)}, nil)
+			result.Set(runevents.ListStepSummariesByRunResult{Steps: payload[recordpayload.PayloadKeySteps].([]*runmodel.Step)}, nil)
 		case runevents.TopicRunCommandListCheckpointsByRun:
 			cmd, ok := ev.Data().(runevents.ListRuntimeCheckpointsByRunCommand)
 			if !ok {
@@ -269,7 +269,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("checkpoint list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Checkpoints: payload[recordpayload.PayloadKeyCheckpoints].([]*runmodel.RuntimeCheckpoint)}, nil)
+			result.Set(runevents.ListRuntimeCheckpointsByRunResult{Checkpoints: payload[recordpayload.PayloadKeyCheckpoints].([]*runmodel.RuntimeCheckpoint)}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListToolCallsByRunCommand)
 			if !ok {

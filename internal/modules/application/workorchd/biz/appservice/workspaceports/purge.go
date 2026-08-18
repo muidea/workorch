@@ -50,7 +50,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 			RunID:       runID,
 		})
 		ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, "")
-		if _, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
+		if _, err := ownerevent.Run[runevents.DeleteRunResult](hub.Send(event), runevents.TopicRunCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
 	}
@@ -63,7 +63,7 @@ func WorkspaceRunIDs(ctx context.Context, hub magicevent.Hub, workspaceID common
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListByWorkspace, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
 	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListByWorkspace)
+	response, err := ownerevent.Run[runevents.ListRunsByWorkspaceResult](hub.Send(event), runevents.TopicRunCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}
