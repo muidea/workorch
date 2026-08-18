@@ -67,7 +67,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 	}
 }
 
-func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
+func TestUpdateGoalViewPublishesExplicitWorkspaceScope(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
 	defHub := newDefinitionMagicTestHub(t)
 	hub := defHub.rawHub
@@ -90,7 +90,7 @@ func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 		}}
 	})
 
-	item, err := UpdateGoalView(ctx, hub, "goal-definition-update-scope", "updated goal")
+	item, err := UpdateGoalView(ctx, hub, workspaceID, "goal-definition-update-scope", "updated goal")
 	if err != nil {
 		t.Fatalf("UpdateGoalView err = %v", err)
 	}
@@ -184,7 +184,7 @@ func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 		}}
 	})
 
-	item, err := UpdateDoDView(ctx, hub, "dod-definition-update-scope", []string{"updated dod"})
+	item, err := UpdateDoDView(ctx, hub, workspaceID, "dod-definition-update-scope", []string{"updated dod"})
 	if err != nil {
 		t.Fatalf("UpdateDoDView err = %v", err)
 	}

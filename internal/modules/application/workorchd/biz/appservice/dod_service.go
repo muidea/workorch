@@ -28,33 +28,33 @@ func DefineDoDFromEnv(ctx context.Context, workspaceID string, items []string) (
 	})
 }
 
-func UpdateDoDWithSession(ctx context.Context, session *runtimecore.Session, dodID string, items []string) (ret workorchmanagementcontract.DoD, err error) {
+func UpdateDoDWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, dodID string, items []string) (ret workorchmanagementcontract.DoD, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.DoD, error) {
-		return definitionports.UpdateDoDView(ctx, hub, common.DoDID(dodID), items)
+		return definitionports.UpdateDoDView(ctx, hub, common.WorkspaceID(workspaceID), common.DoDID(dodID), items)
 	})
 }
 
-func UpdateDoDWithBackend(ctx context.Context, backend string, dataRoot string, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
+func UpdateDoDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.DoD, error) {
-		return UpdateDoDWithSession(ctx, session, dodID, items)
+		return UpdateDoDWithSession(ctx, session, workspaceID, dodID, items)
 	})
 }
 
-func UpdateDoDFromEnv(ctx context.Context, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
+func UpdateDoDFromEnv(ctx context.Context, workspaceID string, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
 	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.DoD, error) {
-		return UpdateDoDWithSession(ctx, session, dodID, items)
+		return UpdateDoDWithSession(ctx, session, workspaceID, dodID, items)
 	})
 }
 
-func ReadDoDWithSession(ctx context.Context, session *runtimecore.Session, dodID string) (ret workorchmanagementcontract.DoD, err error) {
+func ReadDoDWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, dodID string) (ret workorchmanagementcontract.DoD, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.DoD, error) {
-		return definitionports.ReadDoDView(ctx, hub, common.DoDID(dodID))
+		return definitionports.ReadDoDView(ctx, hub, common.WorkspaceID(workspaceID), common.DoDID(dodID))
 	})
 }
 
-func ReadDoDWithBackend(ctx context.Context, backend string, dataRoot string, dodID string) (workorchmanagementcontract.DoD, error) {
+func ReadDoDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, dodID string) (workorchmanagementcontract.DoD, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.DoD, error) {
-		return ReadDoDWithSession(ctx, session, dodID)
+		return ReadDoDWithSession(ctx, session, workspaceID, dodID)
 	})
 }
 

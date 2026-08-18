@@ -35,12 +35,12 @@ func defaultDefineGoal(ctx context.Context, backend string, dataRoot string, wor
 	return appservice.DefineGoalWithBackend(ctx, backend, dataRoot, workspaceID, text)
 }
 
-func defaultUpdateGoal(ctx context.Context, backend string, dataRoot string, goalID string, text string) (workorchmanagementcontract.Goal, error) {
-	return appservice.UpdateGoalWithBackend(ctx, backend, dataRoot, goalID, text)
+func defaultUpdateGoal(ctx context.Context, backend string, dataRoot string, workspaceID string, goalID string, text string) (workorchmanagementcontract.Goal, error) {
+	return appservice.UpdateGoalWithBackend(ctx, backend, dataRoot, workspaceID, goalID, text)
 }
 
-func defaultReadGoal(ctx context.Context, backend string, dataRoot string, goalID string) (workorchmanagementcontract.Goal, error) {
-	return appservice.ReadGoalWithBackend(ctx, backend, dataRoot, goalID)
+func defaultReadGoal(ctx context.Context, backend string, dataRoot string, workspaceID string, goalID string) (workorchmanagementcontract.Goal, error) {
+	return appservice.ReadGoalWithBackend(ctx, backend, dataRoot, workspaceID, goalID)
 }
 
 func defaultListGoals(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]workorchmanagementcontract.Goal, error) {
@@ -51,12 +51,12 @@ func defaultDefineDoD(ctx context.Context, backend string, dataRoot string, work
 	return appservice.DefineDoDWithBackend(ctx, backend, dataRoot, workspaceID, items)
 }
 
-func defaultUpdateDoD(ctx context.Context, backend string, dataRoot string, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
-	return appservice.UpdateDoDWithBackend(ctx, backend, dataRoot, dodID, items)
+func defaultUpdateDoD(ctx context.Context, backend string, dataRoot string, workspaceID string, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
+	return appservice.UpdateDoDWithBackend(ctx, backend, dataRoot, workspaceID, dodID, items)
 }
 
-func defaultReadDoD(ctx context.Context, backend string, dataRoot string, dodID string) (workorchmanagementcontract.DoD, error) {
-	return appservice.ReadDoDWithBackend(ctx, backend, dataRoot, dodID)
+func defaultReadDoD(ctx context.Context, backend string, dataRoot string, workspaceID string, dodID string) (workorchmanagementcontract.DoD, error) {
+	return appservice.ReadDoDWithBackend(ctx, backend, dataRoot, workspaceID, dodID)
 }
 
 func defaultListDoDs(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]workorchmanagementcontract.DoD, error) {

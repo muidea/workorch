@@ -3358,17 +3358,21 @@ func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T)
 	for _, workspaceID := range []string{workspaceA.ID, workspaceB.ID} {
 		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 		if err := exports.Repositories.Goals.Create(scopedCtx, &workspacemodel.Goal{
-			ID:          goalID,
-			WorkspaceID: common.WorkspaceID(workspaceID),
-			Text:        "- goal for " + workspaceID,
+			ID:                 goalID,
+			WorkspaceID:        common.WorkspaceID(workspaceID),
+			Text:               "- goal for " + workspaceID,
+			DefinitionRevision: "goal:00000000000000000001:" + strings.Repeat("0", 64),
+			LineageState:       "active",
 		}); err != nil {
 			t.Fatalf("create duplicate goal for %s: %v", workspaceID, err)
 		}
 		if err := exports.Repositories.DoDs.Create(scopedCtx, &workspacemodel.DoD{
-			ID:          dodID,
-			WorkspaceID: common.WorkspaceID(workspaceID),
-			Items:       []string{"dod for " + workspaceID},
-			State:       common.DoDStateReady,
+			ID:                 dodID,
+			WorkspaceID:        common.WorkspaceID(workspaceID),
+			Items:              []string{"dod for " + workspaceID},
+			State:              common.DoDStateReady,
+			DefinitionRevision: "dod:00000000000000000001:" + strings.Repeat("0", 64),
+			LineageState:       "active",
 		}); err != nil {
 			t.Fatalf("create duplicate dod for %s: %v", workspaceID, err)
 		}

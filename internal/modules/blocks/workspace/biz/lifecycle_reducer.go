@@ -67,20 +67,12 @@ func reduceWorkspaceTerminalDelivery(current *workspacemodel.Workspace, cmd work
 		if sameWorkspaceTerminalDelivery(current.TerminalDelivery, &identity) {
 			return workspaceProjectionTransition{Noop: true, Diagnostic: "workspace terminal delivery already applied"}, nil
 		}
-		if current.ActiveRunID == "" {
-			return workspaceProjectionTransition{}, fmt.Errorf("%w: conflicting workspace terminal delivery", common.ErrConflict)
-		}
+		return workspaceProjectionTransition{}, fmt.Errorf("%w: conflicting workspace terminal delivery", common.ErrConflict)
 	}
 
 	desiredState := workspaceStateForTerminal(cmd)
-	// An empty slot can persist the first release fence after a recovery crash,
-	// but it cannot accept an unrelated terminal identity.
 	if current.ActiveRunID == "" {
-		return workspaceProjectionTransition{
-			ClearActive:      true,
-			State:            desiredState,
-			TerminalDelivery: &identity,
-		}, nil
+		return workspaceProjectionTransition{}, fmt.Errorf("%w: workspace has no active run for terminal delivery", common.ErrConflict)
 	}
 	if current.ActiveRunID != cmd.RunID {
 		return workspaceProjectionTransition{}, fmt.Errorf("%w: workspace active run owned by %s", common.ErrConflict, current.ActiveRunID)

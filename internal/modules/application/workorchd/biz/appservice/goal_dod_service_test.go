@@ -21,14 +21,14 @@ func TestUpdateGoalWithBackendUpdatesPersistedGoal(t *testing.T) {
 		t.Fatalf("DefineGoalWithBackend: %v", err)
 	}
 
-	updated, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, goal.ID, "updated goal")
+	updated, err := UpdateGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, goal.ID, "updated goal")
 	if err != nil {
 		t.Fatalf("UpdateGoalWithBackend: %v", err)
 	}
 	if updated.ID != goal.ID || updated.WorkspaceID != workspace.ID || updated.Text != "- updated goal" {
 		t.Fatalf("updated goal = %+v, want updated goal in same workspace", updated)
 	}
-	read, err := ReadGoalWithBackend(context.Background(), "file", dataRoot, goal.ID)
+	read, err := ReadGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, goal.ID)
 	if err != nil {
 		t.Fatalf("ReadGoalWithBackend: %v", err)
 	}
@@ -184,13 +184,13 @@ func TestDefineGoalWithBackendReopensCompletedWorkspaceAndInvalidatesOldOutcome(
 }
 
 func TestUpdateGoalWithBackendValidatesInput(t *testing.T) {
-	if _, err := UpdateGoalWithBackend(context.Background(), "file", t.TempDir(), "", "updated"); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateGoalWithBackend(context.Background(), "file", t.TempDir(), "ws-update-validation", "", "updated"); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty goal id err = %v, want invalid argument", err)
 	}
-	if _, err := UpdateGoalWithBackend(context.Background(), "file", t.TempDir(), "goal-missing", ""); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateGoalWithBackend(context.Background(), "file", t.TempDir(), "ws-update-validation", "goal-missing", ""); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty goal text err = %v, want invalid argument", err)
 	}
-	if _, err := UpdateGoalWithBackend(context.Background(), "file", t.TempDir(), "goal-missing", "updated"); !errors.Is(err, common.ErrNotFound) {
+	if _, err := UpdateGoalWithBackend(context.Background(), "file", t.TempDir(), "ws-update-validation", "goal-missing", "updated"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing goal err = %v, want not found", err)
 	}
 }
@@ -206,7 +206,7 @@ func TestUpdateDoDWithBackendUpdatesPersistedDoD(t *testing.T) {
 		t.Fatalf("DefineDoDWithBackend: %v", err)
 	}
 
-	updated, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, dod.ID, []string{"updated dod", "second dod"})
+	updated, err := UpdateDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, dod.ID, []string{"updated dod", "second dod"})
 	if err != nil {
 		t.Fatalf("UpdateDoDWithBackend: %v", err)
 	}
@@ -286,13 +286,13 @@ func TestDefineDoDWithBackendMergesWorkspaceDoDAndRemovesOlderDefinitions(t *tes
 }
 
 func TestUpdateDoDWithBackendValidatesInput(t *testing.T) {
-	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "", []string{"updated"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "ws-update-validation", "", []string{"updated"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty dod id err = %v, want invalid argument", err)
 	}
-	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "dod-missing", nil); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "ws-update-validation", "dod-missing", nil); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty dod items err = %v, want invalid argument", err)
 	}
-	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "dod-missing", []string{"updated"}); !errors.Is(err, common.ErrNotFound) {
+	if _, err := UpdateDoDWithBackend(context.Background(), "file", t.TempDir(), "ws-update-validation", "dod-missing", []string{"updated"}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing dod err = %v, want not found", err)
 	}
 }

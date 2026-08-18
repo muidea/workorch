@@ -9,6 +9,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspacepkgcontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -16,6 +17,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type recordedWorkspaceNotification struct {
@@ -151,8 +153,9 @@ func TestGoalDoDManager_DefineGoalAndDoDRejectBlankText(t *testing.T) {
 		t.Fatalf("define blank goal err = %v, want invalid argument", err)
 	}
 	if err := manager.UpdateGoal(ctx, workspacecontracts.UpdateGoalCommand{
-		GoalID: "goal-blank",
-		Text:   "   ",
+		WorkspaceID: workspaceID,
+		GoalID:      "goal-blank",
+		Text:        "   ",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("update blank goal err = %v, want invalid argument", err)
 	}
@@ -164,8 +167,9 @@ func TestGoalDoDManager_DefineGoalAndDoDRejectBlankText(t *testing.T) {
 		t.Fatalf("define blank dod item err = %v, want invalid argument", err)
 	}
 	if err := manager.UpdateDoD(ctx, workspacecontracts.UpdateDoDCommand{
-		DoDID: "dod-blank",
-		Items: []string{"   "},
+		WorkspaceID: workspaceID,
+		DoDID:       "dod-blank",
+		Items:       []string{"   "},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("update blank dod item err = %v, want invalid argument", err)
 	}
@@ -379,6 +383,171 @@ func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 	}
 	if lineageDoD.DefinitionRevision == "" {
 		t.Fatalf("definition events = %+v, want dod lineage fields", published)
+	}
+}
+
+func TestGoalDoDManager_DefinitionRevisionIsMonotonicAcrossContentReversion(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+	workspaceID := common.WorkspaceID("ws-definition-revision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+
+	if err := manager.DefineGoal(scoped, workspacecontracts.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-z", Text: "A"}); err != nil {
+		t.Fatalf("define goal: %v", err)
+	}
+	goalA, err := goalRepo.Get(scoped, "goal-z")
+	if err != nil {
+		t.Fatalf("get initial goal: %v", err)
+	}
+	if err := manager.UpdateGoal(scoped, workspacecontracts.UpdateGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-z", Text: "B"}); err != nil {
+		t.Fatalf("update goal to B: %v", err)
+	}
+	goalB, err := goalRepo.Get(scoped, "goal-z")
+	if err != nil {
+		t.Fatalf("get goal B: %v", err)
+	}
+	if err := manager.UpdateGoal(scoped, workspacecontracts.UpdateGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-z", Text: "  B  "}); err != nil {
+		t.Fatalf("repeat normalized goal B: %v", err)
+	}
+	goalBNoop, err := goalRepo.Get(scoped, "goal-z")
+	if err != nil || goalBNoop.DefinitionRevision != goalB.DefinitionRevision || goalBNoop.Text != goalB.Text {
+		t.Fatalf("normalized goal noop = %+v err=%v, want unchanged revision/content", goalBNoop, err)
+	}
+	if err := manager.UpdateGoal(scoped, workspacecontracts.UpdateGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-z", Text: "A"}); err != nil {
+		t.Fatalf("restore goal to A: %v", err)
+	}
+	goalA2, err := goalRepo.Get(scoped, "goal-z")
+	if err != nil {
+		t.Fatalf("get restored goal: %v", err)
+	}
+	assertMonotonicDefinitionRevisions(t, "goal", goalA.DefinitionRevision, goalB.DefinitionRevision, goalA2.DefinitionRevision)
+	if goalA.DefinitionRevision == goalA2.DefinitionRevision {
+		t.Fatalf("content reversion reused revision %q", goalA2.DefinitionRevision)
+	}
+
+	if err := manager.DefineDoD(scoped, workspacecontracts.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-z", Items: []string{"A"}}); err != nil {
+		t.Fatalf("define DoD: %v", err)
+	}
+	dodA, err := dodRepo.Get(scoped, "dod-z")
+	if err != nil {
+		t.Fatalf("get initial DoD: %v", err)
+	}
+	if err := manager.UpdateDoD(scoped, workspacecontracts.UpdateDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-z", Items: []string{"B"}}); err != nil {
+		t.Fatalf("update DoD to B: %v", err)
+	}
+	dodB, err := dodRepo.Get(scoped, "dod-z")
+	if err != nil {
+		t.Fatalf("get DoD B: %v", err)
+	}
+	if err := manager.UpdateDoD(scoped, workspacecontracts.UpdateDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-z", Items: []string{"  B  "}}); err != nil {
+		t.Fatalf("repeat normalized DoD B: %v", err)
+	}
+	dodBNoop, err := dodRepo.Get(scoped, "dod-z")
+	if err != nil || dodBNoop.DefinitionRevision != dodB.DefinitionRevision || len(dodBNoop.Items) != 1 || dodBNoop.Items[0] != dodB.Items[0] {
+		t.Fatalf("normalized DoD noop = %+v err=%v, want unchanged revision/content", dodBNoop, err)
+	}
+	if err := manager.UpdateDoD(scoped, workspacecontracts.UpdateDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-z", Items: []string{"A"}}); err != nil {
+		t.Fatalf("restore DoD to A: %v", err)
+	}
+	dodA2, err := dodRepo.Get(scoped, "dod-z")
+	if err != nil {
+		t.Fatalf("get restored DoD: %v", err)
+	}
+	assertMonotonicDefinitionRevisions(t, "dod", dodA.DefinitionRevision, dodB.DefinitionRevision, dodA2.DefinitionRevision)
+	if dodA.DefinitionRevision == dodA2.DefinitionRevision {
+		t.Fatalf("DoD content reversion reused revision %q", dodA2.DefinitionRevision)
+	}
+	staleRevision := workspacepkgcontracts.ExecutionDefinitionRevision(string(goalA.ID), goalA.DefinitionRevision, string(dodA.ID), dodA.DefinitionRevision)
+	currentRevision := workspacepkgcontracts.ExecutionDefinitionRevision(string(goalA2.ID), goalA2.DefinitionRevision, string(dodA2.ID), dodA2.DefinitionRevision)
+	staleRestart := workspaceevents.WorkspaceExecutionIntentCommand{
+		Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		Bootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{
+			GoalID: goalA.ID, DoDID: dodA.ID, Revision: staleRevision,
+		}},
+	}
+	if err := validateRestartExecutionDefinition(staleRestart, goalA2, dodA2, currentRevision); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stale restart definition err = %v, want conflict", err)
+	}
+}
+
+func TestGoalDoDManager_UsesCanonicalLeafInsteadOfLexicalIDForLineage(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+	workspaceID := common.WorkspaceID("ws-definition-canonical-lineage")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+
+	for _, cmd := range []workspacecontracts.DefineGoalCommand{
+		{WorkspaceID: workspaceID, GoalID: "goal-z", Text: "first"},
+		{WorkspaceID: workspaceID, GoalID: "goal-a", Text: "second"},
+		{WorkspaceID: workspaceID, GoalID: "goal-m", Text: "third"},
+	} {
+		if err := manager.DefineGoal(scoped, cmd); err != nil {
+			t.Fatalf("define goal %s: %v", cmd.GoalID, err)
+		}
+	}
+	goals, err := goalRepo.ListByWorkspaceID(scoped, workspaceID)
+	if err != nil {
+		t.Fatalf("list goals: %v", err)
+	}
+	currentGoal := currentGoalLeaf(goals, workspaceID)
+	if currentGoal == nil || currentGoal.ID != "goal-m" || currentGoal.PreviousGoalID != "goal-a" {
+		t.Fatalf("current goal = %+v, want goal-m after goal-a independent of lexical ID", currentGoal)
+	}
+	if err := manager.UpdateGoal(scoped, workspacecontracts.UpdateGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-z", Text: "historical mutation"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("historical goal update err = %v, want conflict", err)
+	}
+	if err := manager.DeleteGoal(scoped, workspacecontracts.DeleteGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-m"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("current goal delete err = %v, want conflict", err)
+	}
+
+	for _, cmd := range []workspacecontracts.DefineDoDCommand{
+		{WorkspaceID: workspaceID, DoDID: "dod-z", Items: []string{"first"}},
+		{WorkspaceID: workspaceID, DoDID: "dod-a", Items: []string{"second"}},
+		{WorkspaceID: workspaceID, DoDID: "dod-m", Items: []string{"third"}},
+	} {
+		if err := manager.DefineDoD(scoped, cmd); err != nil {
+			t.Fatalf("define DoD %s: %v", cmd.DoDID, err)
+		}
+	}
+	dods, err := dodRepo.ListByWorkspaceID(scoped, workspaceID)
+	if err != nil {
+		t.Fatalf("list DoDs: %v", err)
+	}
+	currentDoD := currentDoDLeaf(dods, workspaceID)
+	if currentDoD == nil || currentDoD.ID != "dod-m" || currentDoD.PreviousDoDID != "dod-a" {
+		t.Fatalf("current DoD = %+v, want dod-m after dod-a independent of lexical ID", currentDoD)
+	}
+	if err := manager.UpdateDoD(scoped, workspacecontracts.UpdateDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-z", Items: []string{"historical mutation"}}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("historical DoD update err = %v, want conflict", err)
+	}
+	if err := manager.DeleteDoD(scoped, workspacecontracts.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-m"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("current DoD delete err = %v, want conflict", err)
+	}
+}
+
+func assertMonotonicDefinitionRevisions(t *testing.T, prefix string, revisions ...string) {
+	t.Helper()
+	var previous uint64
+	previousRevision := ""
+	for _, revision := range revisions {
+		sequence, ok := definitionRevisionSequence(prefix, revision)
+		if !ok || sequence <= previous || (previousRevision != "" && revision <= previousRevision) {
+			t.Fatalf("revision %q sequence = %d/%v after %d", revision, sequence, ok, previous)
+		}
+		previous = sequence
+		previousRevision = revision
 	}
 }
 

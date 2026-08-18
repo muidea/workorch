@@ -1611,6 +1611,49 @@ func testGoalRepositoryContract(t *testing.T, factory func() repository.GoalRepo
 	if err := repo.Update(ctx, &workspacemodel.Goal{ID: common.GoalID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
 	}
+
+	otherWorkspaceID := common.WorkspaceID("ws-contract-other")
+	other := &workspacemodel.Goal{ID: item.ID, WorkspaceID: otherWorkspaceID, Text: "other workspace goal"}
+	if err := repo.Create(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), other); err != nil {
+		t.Fatalf("create same local goal ID in another workspace: %v", err)
+	}
+	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate goal get err = %v, want conflict", err)
+	}
+	for _, workspaceID := range []common.WorkspaceID{item.WorkspaceID, otherWorkspaceID} {
+		got, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), item.ID)
+		if err != nil || got.WorkspaceID != workspaceID {
+			t.Fatalf("scoped goal get for %s = %+v err=%v", workspaceID, got, err)
+		}
+	}
+	wrongScope := *updated
+	wrongScope.Text = "must not cross scope"
+	if err := repo.Update(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), &wrongScope); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("cross-scope goal update err = %v, want conflict", err)
+	}
+	if _, err := repo.ListByWorkspaceID(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), item.WorkspaceID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("cross-scope goal list err = %v, want conflict", err)
+	}
+	scopeOnly := &workspacemodel.Goal{ID: "goal-scope-only", WorkspaceID: item.WorkspaceID, Text: "scope only"}
+	if err := repo.Create(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), scopeOnly); err != nil {
+		t.Fatalf("create scope-only goal: %v", err)
+	}
+	wrongContext := common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID)
+	if _, err := repo.Get(wrongContext, scopeOnly.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong-workspace goal get err = %v, want not found", err)
+	}
+	if err := repo.Delete(wrongContext, scopeOnly.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong-workspace goal delete err = %v, want not found", err)
+	}
+	if _, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), scopeOnly.ID); err != nil {
+		t.Fatalf("goal disappeared after wrong-scope delete: %v", err)
+	}
+	if err := repo.Delete(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), item.ID); err != nil {
+		t.Fatalf("delete duplicate goal in selected workspace: %v", err)
+	}
+	if got, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), item.ID); err != nil || got.WorkspaceID != item.WorkspaceID {
+		t.Fatalf("workspace A goal after workspace B delete = %+v err=%v", got, err)
+	}
 }
 
 func testDoDRepositoryContract(t *testing.T, factory func() repository.DoDRepository) {
@@ -1674,6 +1717,49 @@ func testDoDRepositoryContract(t *testing.T, factory func() repository.DoDReposi
 	}
 	if err := repo.Update(ctx, &workspacemodel.DoD{ID: common.DoDID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
+	}
+
+	otherWorkspaceID := common.WorkspaceID("ws-contract-other")
+	other := &workspacemodel.DoD{ID: item.ID, WorkspaceID: otherWorkspaceID, Items: []string{"other workspace done"}, State: common.DoDStateReady}
+	if err := repo.Create(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), other); err != nil {
+		t.Fatalf("create same local DoD ID in another workspace: %v", err)
+	}
+	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate DoD get err = %v, want conflict", err)
+	}
+	for _, workspaceID := range []common.WorkspaceID{item.WorkspaceID, otherWorkspaceID} {
+		got, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), item.ID)
+		if err != nil || got.WorkspaceID != workspaceID {
+			t.Fatalf("scoped DoD get for %s = %+v err=%v", workspaceID, got, err)
+		}
+	}
+	wrongScope := *updated
+	wrongScope.Items = []string{"must not cross scope"}
+	if err := repo.Update(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), &wrongScope); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("cross-scope DoD update err = %v, want conflict", err)
+	}
+	if _, err := repo.ListByWorkspaceID(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), item.WorkspaceID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("cross-scope DoD list err = %v, want conflict", err)
+	}
+	scopeOnly := &workspacemodel.DoD{ID: "dod-scope-only", WorkspaceID: item.WorkspaceID, Items: []string{"scope only"}, State: common.DoDStateReady}
+	if err := repo.Create(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), scopeOnly); err != nil {
+		t.Fatalf("create scope-only DoD: %v", err)
+	}
+	wrongContext := common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID)
+	if _, err := repo.Get(wrongContext, scopeOnly.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong-workspace DoD get err = %v, want not found", err)
+	}
+	if err := repo.Delete(wrongContext, scopeOnly.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("wrong-workspace DoD delete err = %v, want not found", err)
+	}
+	if _, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), scopeOnly.ID); err != nil {
+		t.Fatalf("DoD disappeared after wrong-scope delete: %v", err)
+	}
+	if err := repo.Delete(common.ContextWithRuntimeWorkspaceID(ctx, otherWorkspaceID), item.ID); err != nil {
+		t.Fatalf("delete duplicate DoD in selected workspace: %v", err)
+	}
+	if got, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), item.ID); err != nil || got.WorkspaceID != item.WorkspaceID {
+		t.Fatalf("workspace A DoD after workspace B delete = %+v err=%v", got, err)
 	}
 }
 

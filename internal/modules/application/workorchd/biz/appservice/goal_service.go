@@ -28,33 +28,33 @@ func DefineGoalFromEnv(ctx context.Context, workspaceID string, text string) (wo
 	})
 }
 
-func UpdateGoalWithSession(ctx context.Context, session *runtimecore.Session, goalID string, text string) (ret workorchmanagementcontract.Goal, err error) {
+func UpdateGoalWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, goalID string, text string) (ret workorchmanagementcontract.Goal, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.Goal, error) {
-		return definitionports.UpdateGoalView(ctx, hub, common.GoalID(goalID), text)
+		return definitionports.UpdateGoalView(ctx, hub, common.WorkspaceID(workspaceID), common.GoalID(goalID), text)
 	})
 }
 
-func UpdateGoalWithBackend(ctx context.Context, backend string, dataRoot string, goalID string, text string) (workorchmanagementcontract.Goal, error) {
+func UpdateGoalWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, goalID string, text string) (workorchmanagementcontract.Goal, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.Goal, error) {
-		return UpdateGoalWithSession(ctx, session, goalID, text)
+		return UpdateGoalWithSession(ctx, session, workspaceID, goalID, text)
 	})
 }
 
-func UpdateGoalFromEnv(ctx context.Context, goalID string, text string) (workorchmanagementcontract.Goal, error) {
+func UpdateGoalFromEnv(ctx context.Context, workspaceID string, goalID string, text string) (workorchmanagementcontract.Goal, error) {
 	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.Goal, error) {
-		return UpdateGoalWithSession(ctx, session, goalID, text)
+		return UpdateGoalWithSession(ctx, session, workspaceID, goalID, text)
 	})
 }
 
-func ReadGoalWithSession(ctx context.Context, session *runtimecore.Session, goalID string) (ret workorchmanagementcontract.Goal, err error) {
+func ReadGoalWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, goalID string) (ret workorchmanagementcontract.Goal, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.Goal, error) {
-		return definitionports.ReadGoalView(ctx, hub, common.GoalID(goalID))
+		return definitionports.ReadGoalView(ctx, hub, common.WorkspaceID(workspaceID), common.GoalID(goalID))
 	})
 }
 
-func ReadGoalWithBackend(ctx context.Context, backend string, dataRoot string, goalID string) (workorchmanagementcontract.Goal, error) {
+func ReadGoalWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, goalID string) (workorchmanagementcontract.Goal, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.Goal, error) {
-		return ReadGoalWithSession(ctx, session, goalID)
+		return ReadGoalWithSession(ctx, session, workspaceID, goalID)
 	})
 }
 

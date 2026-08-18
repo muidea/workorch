@@ -20,23 +20,28 @@ func DefineOrConsolidateWorkspaceGoalView(ctx context.Context, hub magicevent.Hu
 	return definitioncore.MapGoal(item), nil
 }
 
-func UpdateGoalView(ctx context.Context, hub magicevent.Hub, goalID common.GoalID, text string) (workorchmanagementcontract.Goal, error) {
+func UpdateGoalView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (workorchmanagementcontract.Goal, error) {
 	text = strings.TrimSpace(text)
-	if goalID == "" || text == "" {
+	if workspaceID == "" || goalID == "" || text == "" {
 		return workorchmanagementcontract.Goal{}, common.ErrInvalidArgument
 	}
 	text = definitioncore.FormatGoalDefinitionText(text)
 	if text == "" {
 		return workorchmanagementcontract.Goal{}, common.ErrInvalidArgument
 	}
-	item, err := UpdateGoal(ctx, hub, "", goalID, text)
+	item, err := UpdateGoal(ctx, hub, workspaceID, goalID, text)
 	if err != nil {
 		return workorchmanagementcontract.Goal{}, err
 	}
 	return definitioncore.MapGoal(item), nil
 }
 
-func ReadGoalView(ctx context.Context, hub magicevent.Hub, goalID common.GoalID) (workorchmanagementcontract.Goal, error) {
+func ReadGoalView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID) (workorchmanagementcontract.Goal, error) {
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		return workorchmanagementcontract.Goal{}, err
+	}
 	item, err := ReadGoal(ctx, hub, goalID)
 	if err != nil {
 		return workorchmanagementcontract.Goal{}, err

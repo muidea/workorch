@@ -21,20 +21,20 @@ func (p *runtimeApplicationPorts) configureDefinitionPorts() {
 		})
 		return ret, err
 	}
-	ports.Definition.UpdateGoal = func(ctx context.Context, _, _, goalID, text string) (workorchmanagementcontract.Goal, error) {
+	ports.Definition.UpdateGoal = func(ctx context.Context, _, _, workspaceID, goalID, text string) (workorchmanagementcontract.Goal, error) {
 		var ret workorchmanagementcontract.Goal
 		err := p.withSession(ctx, func(session *runtimecore.Session) error {
 			var err error
-			ret, err = appservice.UpdateGoalWithSession(ctx, session, goalID, text)
+			ret, err = appservice.UpdateGoalWithSession(ctx, session, workspaceID, goalID, text)
 			return err
 		})
 		return ret, err
 	}
-	ports.Definition.ReadGoal = func(ctx context.Context, _, _, goalID string) (workorchmanagementcontract.Goal, error) {
+	ports.Definition.ReadGoal = func(ctx context.Context, _, _, workspaceID, goalID string) (workorchmanagementcontract.Goal, error) {
 		var ret workorchmanagementcontract.Goal
 		err := p.withSession(ctx, func(session *runtimecore.Session) error {
 			var err error
-			ret, err = appservice.ReadGoalWithSession(ctx, session, goalID)
+			ret, err = appservice.ReadGoalWithSession(ctx, session, workspaceID, goalID)
 			return err
 		})
 		return ret, err
@@ -57,20 +57,20 @@ func (p *runtimeApplicationPorts) configureDefinitionPorts() {
 		})
 		return ret, err
 	}
-	ports.Definition.UpdateDoD = func(ctx context.Context, _, _, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
+	ports.Definition.UpdateDoD = func(ctx context.Context, _, _, workspaceID, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
 		var ret workorchmanagementcontract.DoD
 		err := p.withSession(ctx, func(session *runtimecore.Session) error {
 			var err error
-			ret, err = appservice.UpdateDoDWithSession(ctx, session, dodID, items)
+			ret, err = appservice.UpdateDoDWithSession(ctx, session, workspaceID, dodID, items)
 			return err
 		})
 		return ret, err
 	}
-	ports.Definition.ReadDoD = func(ctx context.Context, _, _, dodID string) (workorchmanagementcontract.DoD, error) {
+	ports.Definition.ReadDoD = func(ctx context.Context, _, _, workspaceID, dodID string) (workorchmanagementcontract.DoD, error) {
 		var ret workorchmanagementcontract.DoD
 		err := p.withSession(ctx, func(session *runtimecore.Session) error {
 			var err error
-			ret, err = appservice.ReadDoDWithSession(ctx, session, dodID)
+			ret, err = appservice.ReadDoDWithSession(ctx, session, workspaceID, dodID)
 			return err
 		})
 		return ret, err

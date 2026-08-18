@@ -1832,45 +1832,105 @@ type GoalRepository struct {
 	path string
 }
 
+func workspaceScopedMapKey(workspaceID common.WorkspaceID, id string) string {
+	return fmt.Sprintf("%d:%s:%s", len(workspaceID), workspaceID, strings.TrimSpace(id))
+}
+
+func validateRuntimeWorkspaceScope(ctx context.Context, workspaceID common.WorkspaceID) error {
+	scopedWorkspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if scopedWorkspaceID != "" && workspaceID != "" && scopedWorkspaceID != workspaceID {
+		return common.ErrConflict
+	}
+	return nil
+}
+
+func findWorkspaceScopedMapKey[T any](ctx context.Context, items map[string]T, id string, itemID func(T) string, itemWorkspaceID func(T) common.WorkspaceID) (string, error) {
+	id = strings.TrimSpace(id)
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	var found string
+	for key, item := range items {
+		if itemID(item) != id {
+			continue
+		}
+		currentWorkspaceID := itemWorkspaceID(item)
+		if workspaceID != "" && currentWorkspaceID != workspaceID {
+			continue
+		}
+		if found != "" {
+			return "", common.ErrConflict
+		}
+		found = key
+	}
+	if found == "" {
+		return "", common.ErrNotFound
+	}
+	return found, nil
+}
+
 func NewGoalRepository(path string) *GoalRepository {
 	return &GoalRepository{path: path}
 }
 
-func (r *GoalRepository) Create(_ context.Context, item *workspace.Goal) error {
+func (r *GoalRepository) Create(ctx context.Context, item *workspace.Goal) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	items, err := loadMap[string, workspace.Goal](r.path)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
+	lookupCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), item.WorkspaceID)
+	if _, err := findWorkspaceScopedMapKey(lookupCtx, items, string(item.ID), func(current workspace.Goal) string {
+		return string(current.ID)
+	}, func(current workspace.Goal) common.WorkspaceID {
+		return current.WorkspaceID
+	}); err == nil || err == common.ErrConflict {
+		return common.ErrConflict
+	} else if err != common.ErrNotFound {
+		return err
+	}
+	key := workspaceScopedMapKey(item.WorkspaceID, string(item.ID))
+	if _, ok := items[key]; ok {
 		return common.ErrConflict
 	}
-	items[item.ID] = *cloneGoal(item)
+	items[key] = *cloneGoal(item)
 	return saveMap(r.path, items)
 }
 
-func (r *GoalRepository) Get(_ context.Context, id common.GoalID) (*workspace.Goal, error) {
+func (r *GoalRepository) Get(ctx context.Context, id common.GoalID) (*workspace.Goal, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	items, err := loadMap[string, workspace.Goal](r.path)
 	if err != nil {
 		return nil, err
 	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findWorkspaceScopedMapKey(ctx, items, string(id), func(current workspace.Goal) string {
+		return string(current.ID)
+	}, func(current workspace.Goal) common.WorkspaceID {
+		return current.WorkspaceID
+	})
+	if err != nil {
+		return nil, err
 	}
+	item := items[key]
 	return cloneGoal(&item), nil
 }
 
-func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.Goal, error) {
+func (r *GoalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspace.Goal, error) {
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	items, err := loadMap[string, workspace.Goal](r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -1890,25 +1950,61 @@ func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common
 	return ret, nil
 }
 
-func (r *GoalRepository) Update(_ context.Context, item *workspace.Goal) error {
+func (r *GoalRepository) Update(ctx context.Context, item *workspace.Goal) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.GoalID, workspace.Goal](r.path)
+	items, err := loadMap[string, workspace.Goal](r.path)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
+	lookupCtx := ctx
+	if item.WorkspaceID != "" {
+		lookupCtx = common.ContextWithRuntimeWorkspaceID(context.Background(), item.WorkspaceID)
 	}
-	items[item.ID] = *cloneGoal(item)
+	key, err := findWorkspaceScopedMapKey(lookupCtx, items, string(item.ID), func(current workspace.Goal) string {
+		return string(current.ID)
+	}, func(current workspace.Goal) common.WorkspaceID {
+		return current.WorkspaceID
+	})
+	if err != nil {
+		return err
+	}
+	current := items[key]
+	next := cloneGoal(item)
+	if next.WorkspaceID == "" {
+		next.WorkspaceID = current.WorkspaceID
+	}
+	if current.WorkspaceID != "" && next.WorkspaceID != current.WorkspaceID {
+		return common.ErrConflict
+	}
+	items[key] = *next
 	return saveMap(r.path, items)
 }
 
-func (r *GoalRepository) Delete(_ context.Context, id common.GoalID) error {
+func (r *GoalRepository) Delete(ctx context.Context, id common.GoalID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.GoalID, workspace.Goal](r.path, id)
+	items, err := loadMap[string, workspace.Goal](r.path)
+	if err != nil {
+		return err
+	}
+	key, err := findWorkspaceScopedMapKey(ctx, items, string(id), func(current workspace.Goal) string {
+		return string(current.ID)
+	}, func(current workspace.Goal) common.WorkspaceID {
+		return current.WorkspaceID
+	})
+	if err != nil {
+		return err
+	}
+	delete(items, key)
+	return saveMap(r.path, items)
 }
 
 type DoDRepository struct {
@@ -1920,41 +2016,66 @@ func NewDoDRepository(path string) *DoDRepository {
 	return &DoDRepository{path: path}
 }
 
-func (r *DoDRepository) Create(_ context.Context, item *workspace.DoD) error {
+func (r *DoDRepository) Create(ctx context.Context, item *workspace.DoD) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	items, err := loadMap[string, workspace.DoD](r.path)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; ok {
+	lookupCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), item.WorkspaceID)
+	if _, err := findWorkspaceScopedMapKey(lookupCtx, items, string(item.ID), func(current workspace.DoD) string {
+		return string(current.ID)
+	}, func(current workspace.DoD) common.WorkspaceID {
+		return current.WorkspaceID
+	}); err == nil || err == common.ErrConflict {
+		return common.ErrConflict
+	} else if err != common.ErrNotFound {
+		return err
+	}
+	key := workspaceScopedMapKey(item.WorkspaceID, string(item.ID))
+	if _, ok := items[key]; ok {
 		return common.ErrConflict
 	}
-	items[item.ID] = *cloneDoD(item)
+	items[key] = *cloneDoD(item)
 	return saveMap(r.path, items)
 }
 
-func (r *DoDRepository) Get(_ context.Context, id common.DoDID) (*workspace.DoD, error) {
+func (r *DoDRepository) Get(ctx context.Context, id common.DoDID) (*workspace.DoD, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	items, err := loadMap[string, workspace.DoD](r.path)
 	if err != nil {
 		return nil, err
 	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findWorkspaceScopedMapKey(ctx, items, string(id), func(current workspace.DoD) string {
+		return string(current.ID)
+	}, func(current workspace.DoD) common.WorkspaceID {
+		return current.WorkspaceID
+	})
+	if err != nil {
+		return nil, err
 	}
+	item := items[key]
 	return cloneDoD(&item), nil
 }
 
-func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
+func (r *DoDRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	items, err := loadMap[string, workspace.DoD](r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -1974,25 +2095,61 @@ func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 	return ret, nil
 }
 
-func (r *DoDRepository) Update(_ context.Context, item *workspace.DoD) error {
+func (r *DoDRepository) Update(ctx context.Context, item *workspace.DoD) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.DoDID, workspace.DoD](r.path)
+	items, err := loadMap[string, workspace.DoD](r.path)
 	if err != nil {
 		return err
 	}
-	if _, ok := items[item.ID]; !ok {
-		return common.ErrNotFound
+	lookupCtx := ctx
+	if item.WorkspaceID != "" {
+		lookupCtx = common.ContextWithRuntimeWorkspaceID(context.Background(), item.WorkspaceID)
 	}
-	items[item.ID] = *cloneDoD(item)
+	key, err := findWorkspaceScopedMapKey(lookupCtx, items, string(item.ID), func(current workspace.DoD) string {
+		return string(current.ID)
+	}, func(current workspace.DoD) common.WorkspaceID {
+		return current.WorkspaceID
+	})
+	if err != nil {
+		return err
+	}
+	current := items[key]
+	next := cloneDoD(item)
+	if next.WorkspaceID == "" {
+		next.WorkspaceID = current.WorkspaceID
+	}
+	if current.WorkspaceID != "" && next.WorkspaceID != current.WorkspaceID {
+		return common.ErrConflict
+	}
+	items[key] = *next
 	return saveMap(r.path, items)
 }
 
-func (r *DoDRepository) Delete(_ context.Context, id common.DoDID) error {
+func (r *DoDRepository) Delete(ctx context.Context, id common.DoDID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return deleteMapItem[common.DoDID, workspace.DoD](r.path, id)
+	items, err := loadMap[string, workspace.DoD](r.path)
+	if err != nil {
+		return err
+	}
+	key, err := findWorkspaceScopedMapKey(ctx, items, string(id), func(current workspace.DoD) string {
+		return string(current.ID)
+	}, func(current workspace.DoD) common.WorkspaceID {
+		return current.WorkspaceID
+	})
+	if err != nil {
+		return err
+	}
+	delete(items, key)
+	return saveMap(r.path, items)
 }
 
 type RunRepository struct {

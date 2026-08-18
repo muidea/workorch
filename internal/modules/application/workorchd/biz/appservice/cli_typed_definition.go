@@ -25,14 +25,14 @@ func (d *CLICommandDispatcher) handleTypedCLIDefinition(event magicevent.Event, 
 		result.Set(workorchdevents.CLIGoalListResult{Goals: items}, nil)
 	case workorchdevents.CLIGoalGetCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		item, err := ReadGoalWithSession(ctx, d.borrow(), string(command.GoalID))
+		item, err := ReadGoalWithSession(ctx, d.borrow(), string(command.WorkspaceID), string(command.GoalID))
 		if setTypedCLIError(result, err) {
 			return
 		}
 		result.Set(workorchdevents.CLIGoalGetResult{Goal: item}, nil)
 	case workorchdevents.CLIGoalUpdateCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		item, err := UpdateGoalWithSession(ctx, d.borrow(), string(command.GoalID), command.Text)
+		item, err := UpdateGoalWithSession(ctx, d.borrow(), string(command.WorkspaceID), string(command.GoalID), command.Text)
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -53,14 +53,14 @@ func (d *CLICommandDispatcher) handleTypedCLIDefinition(event magicevent.Event, 
 		result.Set(workorchdevents.CLIDoDListResult{DoDs: items}, nil)
 	case workorchdevents.CLIDoDGetCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		item, err := ReadDoDWithSession(ctx, d.borrow(), string(command.DoDID))
+		item, err := ReadDoDWithSession(ctx, d.borrow(), string(command.WorkspaceID), string(command.DoDID))
 		if setTypedCLIError(result, err) {
 			return
 		}
 		result.Set(workorchdevents.CLIDoDGetResult{DoD: item}, nil)
 	case workorchdevents.CLIDoDUpdateCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		item, err := UpdateDoDWithSession(ctx, d.borrow(), string(command.DoDID), command.Items)
+		item, err := UpdateDoDWithSession(ctx, d.borrow(), string(command.WorkspaceID), string(command.DoDID), command.Items)
 		if setTypedCLIError(result, err) {
 			return
 		}

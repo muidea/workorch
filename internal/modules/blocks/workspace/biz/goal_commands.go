@@ -13,45 +13,61 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceCommandDefineGoal:
 		cmd, ok := ev.Data().(workspaceevents.DefineGoalCommand)
-		if !ok || m.goals == nil {
+		if !ok || cmd.WorkspaceID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.DefineGoal(ctx, cmd); err != nil {
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		item, err := m.goals.Get(ctx, cmd.GoalID)
+		if err := m.manager.DefineGoal(scopedCtx, cmd); err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		item, err := m.goals.Get(scopedCtx, cmd.GoalID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{Goal: workspacemodel.CloneGoal(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateGoal:
 		cmd, ok := ev.Data().(workspaceevents.UpdateGoalCommand)
-		if !ok || m.goals == nil {
+		if !ok || cmd.WorkspaceID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.UpdateGoal(ctx, cmd); err != nil {
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		item, err := m.goals.Get(ctx, cmd.GoalID)
+		if err := m.manager.UpdateGoal(scopedCtx, cmd); err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		item, err := m.goals.Get(scopedCtx, cmd.GoalID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{Goal: workspacemodel.CloneGoal(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteGoal:
 		cmd, ok := ev.Data().(workspaceevents.DeleteGoalCommand)
-		if !ok || cmd.GoalID == "" || m.goals == nil {
+		if !ok || cmd.WorkspaceID == "" || cmd.GoalID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.goals.Delete(ctx, cmd.GoalID); err != nil {
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if err := m.manager.DeleteGoal(scopedCtx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandGetGoal:
 		cmd, ok := ev.Data().(workspaceevents.GetGoalCommand)
-		if !ok || cmd.GoalID == "" || m.goals == nil {
+		if !ok || cmd.WorkspaceID == "" || cmd.GoalID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.goals.Get(ctx, cmd.GoalID)
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		item, err := m.goals.Get(scopedCtx, cmd.GoalID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
@@ -61,7 +77,11 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 		if !ok || cmd.WorkspaceID == "" || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.goals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		items, err := m.goals.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}

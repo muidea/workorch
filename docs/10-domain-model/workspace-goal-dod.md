@@ -4,7 +4,7 @@ Status: active
 
 Type: domain-model
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Ownership
 
@@ -43,6 +43,10 @@ application 或 Result owner自行推断。
 ## Definition Revision
 
 - Goal 与 DoD 通过同一 effective definition revision 进入 `RuntimeBootstrap.Definition`。
+- Goal/DoD resource revision 采用 `<kind>:<20 位递增代次>:<content-hash>`。代次在同一 Workspace、同一 kind
+  内单调增加，内容回退不会复用历史 revision；相同规范化内容的重复 update 不推进代次。
+- 新 Goal/DoD identity 连接 owner 当前唯一 canonical leaf，identity 和 repository/list 顺序不表达先后。历史节点
+  不接受直接更新，current leaf 不接受物理删除；谱系歧义必须 fail-closed。
 - Run 创建后保留该不可变引用；运行中的 Workspace 编辑不能就地改写 Run authority。
 - 新定义要参与执行时，用户显式提交 workspace `restart` intent。
 - restart 由 Run owner 管理 predecessor `ReplacementIntent`、终态投递和 successor 创建，不属于 Workspace
@@ -61,3 +65,5 @@ application 或 Result owner自行推断。
 - bootstrap 只封存 definition、activation、profile/capability/governance/resource refs 等 typed 值。
 - per-CWI proof 先由 bounded semantic plan 提议、由 capability owner确认 feasibility，再由 Orchestrator 内部事件密封。
 - 调用方不能上传 target/recipe/check/metric/artifact authority graph。
+- Goal/DoD 的 read/update/delete command 必须带 WorkspaceID；memory/file backend 均按该 scope 解析局部 identity，
+  不允许通过另一个 Workspace 的路径或 context 读取、修改或删除对象。

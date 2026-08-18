@@ -12,8 +12,9 @@ Last Verified: 2026-08-18
 
 ## 组件交互及合同
 
-- Workspace、Goal、DoD 和 Template 的实际 CRUD command，以及 Template defaults ensure command，由
-  `blocks/workspace/pkg/events` 分别定义具体类型；不存在覆盖四类资源的通用 CRUD envelope。
+- Workspace、Goal、DoD 和 Template 的 CRUD input，以及 Template defaults ensure input，均由
+  `blocks/workspace/pkg/events` 定义具体 command 类型；普通 CRUD 当前共享 owner-local typed result union
+  `WorkspaceCommandResult`。该 union 不包含 `map[string]any` authority，也不替代各操作的具体 command。
 - Workspace 创建、状态变化、删除以及 Goal/DoD 定义变化由本 block 发布具体通知。
 - `application/workorchd` 与需要 definition fact 的 owner 通过 EventHub 读取 Workspace、Goal、DoD、Template 和
   definition revision；其他 owner 不直接访问 Workspace repository。
@@ -30,18 +31,25 @@ Last Verified: 2026-08-18
 | --- | --- | --- | --- |
 | `application/workorchd` | Application → Workspace | Workspace/Goal/DoD/Template CRUD、definition read 与 execution intent ingress | 完整 |
 | `kernel/system` | System → Workspace | `EnsureWorkspaceTemplateDefaultsCommand` | 完整 |
-| `blocks/run` | 双向 | scoped execution intent；`RunStateChangedData`；sealed terminal delivery | 完整；状态转换分别留在各自 owner |
-| `kernel/orchestrator` | consumer → Workspace | typed definition/activation fact 读取，不访问 repository | 完整 |
+| `blocks/run` | 双向 | Workspace → Run 的 scoped execution intent；Run → Workspace 的 `RunStateChangedData` | 完整；状态转换分别留在各自 owner |
+| `kernel/orchestrator` | Orchestrator → Workspace | typed definition/activation fact 读取；sealed terminal delivery fact | 完整；不访问 repository，不直接写 Workspace model |
 | `blocks/eventstream` | Workspace → Eventstream | create/state/delete、Goal/DoD definition 通知 | 完整 |
 
 ## 相关约束
 
 - 只访问 Workspace、Goal、DoD 和 WorkspaceTemplate repository，不得持有 Run、Result 或其他 owner repository/service。
-- 所有对象操作必须携带 WorkspaceID 或可唯一解析的对象 scope。
-- definition revision 必须单调、可比较；激活绑定变化必须使旧定义选择可检测为 stale。
+- 所有 Goal/DoD command 必须显式携带 WorkspaceID；owner command boundary 绑定同一 execution scope，memory/file
+  repository 对 scoped Get/Update/Delete 使用一致语义。同一 GoalID/DoDID 可在不同 Workspace 中重复；无 scope 且
+  identity 不唯一时必须 fail-closed。
+- Goal/DoD definition revision 使用 owner-local `<kind>:<20 位递增代次>:<content-hash>`；同一 Workspace、同一
+  definition kind 内可按代次/字符串单调比较，`A → B → A` 仍产生新 revision。相同规范化内容的重复 update 是零
+  revision。新 identity 只能连接当前唯一 canonical leaf，不得按 ID、列表顺序或 repository 顺序推断前驱；历史
+  definition 不可直接更新，当前 canonical leaf 不可物理删除。激活绑定变化必须使旧定义选择可检测为 stale。
 - Workspace block 不驱动 Runtime、不判定 Result、不执行治理恢复；execution-intent ingress 只校验当前
   Workspace/Goal/DoD、选择 active Run，并向 Run owner 发送 concrete typed intent。它消费 scoped sealed terminal outcome，按
-  outcome identity 在自身 reducer 中释放 `ActiveRunID` 并维护 Workspace state projection。它不读取
+  outcome identity 在自身 reducer 中释放 `ActiveRunID` 并维护 Workspace state projection；首次确认必须满足
+  `ActiveRunID == outcome.RunID`，空 slot 不得补写新的 acknowledgement fence，已持久化的同 identity 重投递才是
+  idempotent noop。它不读取
   `ConvergenceState`、RuntimeAction、focus、repair 或 error message 重新裁决；delivery feedback 保留 stable
   category 与完整安全 original diagnostic。
 - `fresh_activation_required` 只是 Run owner 的不可继续 disposition；普通 Run notification 不释放 Workspace slot。
@@ -52,12 +60,14 @@ Last Verified: 2026-08-18
 ## 已覆盖测试点
 
 - [x] memory/file backend 上 Template defaults 的部分已存在、缺失补建、重复 ensure 与内置 ID 用户修改非覆盖语义。
+- [x] Workspace CAS revision，以及 Goal/DoD create/update、`A → B → A` 的单调 revision、相同内容 noop 和 stale restart definition 拒绝。
+- [x] Goal/DoD 非递增 ID 的 canonical leaf 谱系、历史 definition 更新拒绝和 current leaf 删除拒绝。
+- [x] memory/file backend 上 Goal/DoD 局部 identity、错误 Workspace scope 的 Get/Update/Delete 与无 scope 歧义拒绝。
+- [x] sealed terminal outcome 的匹配释放、空 slot/其他 active Run/冲突 identity 拒绝和同 identity 重投递幂等。
 
 ## 待完善测试点
 
-- [ ] 覆盖 Workspace/Goal/DoD 每类定义变更对 definition revision 的单调推进和 stale activation 检测。
 - [ ] 覆盖空工作目录的默认解析、相对/绝对路径规范化、目录逃逸和重复 workspace 隔离。
 - [ ] 覆盖 execution intent 的缺失 Goal/DoD、跨 scope、重复投递与 active Run 冲突。
-- [ ] 覆盖 sealed terminal outcome 重复/冲突投递，以及仅匹配 outcome identity 才释放 `ActiveRunID`。
 - [ ] 覆盖普通 Run notification、`fresh_activation_required`、`data_reset_required` 均不能旁路释放 slot。
 - [ ] 覆盖 Template DTO 中 slice/map/payload 的完整深拷贝矩阵。

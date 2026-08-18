@@ -97,6 +97,14 @@ func runtimeWorkspaceScopedKey(ctx context.Context, id string) (string, bool) {
 	return workspaceScopedKey(workspaceID, id), true
 }
 
+func validateRuntimeWorkspaceScope(ctx context.Context, workspaceID common.WorkspaceID) error {
+	scopedWorkspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if scopedWorkspaceID != "" && workspaceID != "" && scopedWorkspaceID != workspaceID {
+		return common.ErrConflict
+	}
+	return nil
+}
+
 func workspaceFromScopedKey(key string) common.WorkspaceID {
 	workspaceID, _, ok := strings.Cut(key, "/")
 	if !ok {
@@ -1047,7 +1055,13 @@ func NewGoalRepository() *GoalRepository {
 	return &GoalRepository{items: map[string]*workspace.Goal{}}
 }
 
-func (r *GoalRepository) Create(_ context.Context, item *workspace.Goal) error {
+func (r *GoalRepository) Create(ctx context.Context, item *workspace.Goal) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
@@ -1071,7 +1085,10 @@ func (r *GoalRepository) Get(ctx context.Context, id common.GoalID) (*workspace.
 	return &cloned, nil
 }
 
-func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.Goal, error) {
+func (r *GoalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspace.Goal, error) {
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -1093,6 +1110,12 @@ func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common
 }
 
 func (r *GoalRepository) Update(ctx context.Context, item *workspace.Goal) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
@@ -1135,7 +1158,13 @@ func NewDoDRepository() *DoDRepository {
 	return &DoDRepository{items: map[string]*workspace.DoD{}}
 }
 
-func (r *DoDRepository) Create(_ context.Context, item *workspace.DoD) error {
+func (r *DoDRepository) Create(ctx context.Context, item *workspace.DoD) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
@@ -1158,7 +1187,10 @@ func (r *DoDRepository) Get(ctx context.Context, id common.DoDID) (*workspace.Do
 	return cloneDoD(r.items[key]), nil
 }
 
-func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
+func (r *DoDRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -1179,6 +1211,12 @@ func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 }
 
 func (r *DoDRepository) Update(ctx context.Context, item *workspace.DoD) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))

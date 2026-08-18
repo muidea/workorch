@@ -13,45 +13,61 @@ func (m *Biz) executeDoDCommand(ctx context.Context, ev magicevent.Event) (works
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceCommandDefineDoD:
 		cmd, ok := ev.Data().(workspaceevents.DefineDoDCommand)
-		if !ok || m.dods == nil {
+		if !ok || cmd.WorkspaceID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.DefineDoD(ctx, cmd); err != nil {
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		item, err := m.dods.Get(ctx, cmd.DoDID)
+		if err := m.manager.DefineDoD(scopedCtx, cmd); err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		item, err := m.dods.Get(scopedCtx, cmd.DoDID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{DoD: workspacemodel.CloneDoD(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateDoD:
 		cmd, ok := ev.Data().(workspaceevents.UpdateDoDCommand)
-		if !ok || m.dods == nil {
+		if !ok || cmd.WorkspaceID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.UpdateDoD(ctx, cmd); err != nil {
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		item, err := m.dods.Get(ctx, cmd.DoDID)
+		if err := m.manager.UpdateDoD(scopedCtx, cmd); err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		item, err := m.dods.Get(scopedCtx, cmd.DoDID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{DoD: workspacemodel.CloneDoD(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteDoD:
 		cmd, ok := ev.Data().(workspaceevents.DeleteDoDCommand)
-		if !ok || cmd.DoDID == "" || m.dods == nil {
+		if !ok || cmd.WorkspaceID == "" || cmd.DoDID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.dods.Delete(ctx, cmd.DoDID); err != nil {
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		if err := m.manager.DeleteDoD(scopedCtx, cmd); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
 	case workspaceevents.TopicWorkspaceCommandGetDoD:
 		cmd, ok := ev.Data().(workspaceevents.GetDoDCommand)
-		if !ok || cmd.DoDID == "" || m.dods == nil {
+		if !ok || cmd.WorkspaceID == "" || cmd.DoDID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.dods.Get(ctx, cmd.DoDID)
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		item, err := m.dods.Get(scopedCtx, cmd.DoDID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
@@ -61,7 +77,11 @@ func (m *Biz) executeDoDCommand(ctx context.Context, ev magicevent.Event) (works
 		if !ok || cmd.WorkspaceID == "" || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.dods.ListByWorkspaceID(ctx, cmd.WorkspaceID)
+		scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceCommandResult{}, err
+		}
+		items, err := m.dods.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}

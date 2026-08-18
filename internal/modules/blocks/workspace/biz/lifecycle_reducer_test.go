@@ -131,10 +131,30 @@ func TestReduceWorkspaceTerminalDeliveryDoesNotReleaseOtherLiveRun(t *testing.T)
 }
 
 func TestReduceWorkspaceTerminalDeliveryDuplicateReleaseIsNoop(t *testing.T) {
-	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: ""}
+	identity := runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}
+	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, TerminalDelivery: &identity}
+	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceTerminalDeliveryTestCommand(identity, "terminal-delivery/td-1"))
+	if err != nil || !tr.Noop {
+		t.Fatalf("duplicate transition=%+v err=%v, want noop", tr, err)
+	}
+}
+
+func TestReduceWorkspaceTerminalDeliveryRejectsConflictingPersistedFence(t *testing.T) {
+	identity := runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}
+	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, TerminalDelivery: &identity}
+	conflicting := identity
+	conflicting.TerminalDeliveryID = "td-2"
+	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceTerminalDeliveryTestCommand(conflicting, "terminal-delivery/td-2"))
+	if !errors.Is(err, common.ErrConflict) || tr.Noop || tr.TerminalDelivery != nil || tr.ClearActive {
+		t.Fatalf("transition=%+v err=%v, want conflicting fence rejection", tr, err)
+	}
+}
+
+func TestReduceWorkspaceTerminalDeliveryRejectsUnownedEmptySlot(t *testing.T) {
+	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive}
 	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"))
-	if err != nil || tr.Noop || tr.TerminalDelivery == nil {
-		t.Fatalf("expected initial release fence, got %+v err=%v", tr, err)
+	if !errors.Is(err, common.ErrConflict) || tr.TerminalDelivery != nil || tr.ClearActive {
+		t.Fatalf("transition=%+v err=%v, want conflict without acknowledgement", tr, err)
 	}
 }
 

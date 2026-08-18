@@ -30,6 +30,9 @@ Last Verified: 2026-08-18
 以下均已 code/automated-closed，不是独立未关队列，但 live 验收前必须持续通过：
 
 - SM-1 Run owner、SM-2/3/4 Orchestrator owner、Workspace/Result owner-local terminal transition；
+- Workspace Goal/DoD owner-local revision 采用单调 generation + content hash，canonical lineage 不读取 ID/列表顺序；
+  memory/file backend 对局部 identity 和 command Workspace scope 语义一致；terminal release 只接受精确匹配的
+  `ActiveRunID`，空 slot 不能补写首次 acknowledgement fence；
 - one `ApplyInternalEvent` mutation entry、one aggregate CAS coordinator、bounded drive/singleflight；
 - Definition declaration/generation、eligible CWI closure、semantic order/batch/seal identity；focus/binding identity 同时绑定
   `manifestHash + logicalRequestID`，历史 reopened/retired binding 不可重新成为 current；
