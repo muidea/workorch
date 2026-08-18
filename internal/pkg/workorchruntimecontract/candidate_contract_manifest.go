@@ -276,7 +276,7 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q requires a sealed required output", decision.State)
 		}
 		manifest.DependenciesAllowed = runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence)
-		kinds := RuntimeCandidateAllowedOperationKinds(decision, ownerFacts.TargetSelection)
+		kinds := RuntimeCandidateAllowedOperationKinds(decision, ownerFacts.TargetSelection, ownerFacts.OperationAdmissibilities)
 		if len(kinds) == 0 {
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q has no allowed operation kinds", decision.State)
 		}
@@ -320,30 +320,42 @@ func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandida
 }
 
 // RuntimeCandidateAllowedOperationKinds is the owner-neutral C3 narrowing
-// shared by every candidate-contract consumer. A File creation observation
-// only admits durable File kinds. A File scope additionally admits a kind
-// whose descriptor explicitly declares that it can act on an existing,
-// File-owner-grounded target. It never grants a target or chooses an action.
-func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *RuntimeTargetSelection) []string {
+// shared by every candidate-contract consumer. Creation and existing-scope
+// authority come exclusively from the matching owner catalog's typed target
+// policy; descriptors contribute only technical ownership and state support.
+func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *RuntimeTargetSelection, admissibilities []RuntimeOperationAdmissibility) []string {
 	required := decision.RequiredOutput.Normalized()
 	kinds := append([]string(nil), required.AcceptedKinds...)
 	if decision.State != ConvergenceStateNeedStateChange || selection == nil {
 		return normalizeStrings(kinds)
 	}
 	value := selection.Normalized()
-	if value.OwnerModuleID != RuntimeModuleFile ||
-		(value.Disposition != RuntimeTargetSelectionCreate && value.Disposition != RuntimeTargetSelectionScope) {
+	if value.Disposition != RuntimeTargetSelectionCreate && value.Disposition != RuntimeTargetSelectionScope {
 		return normalizeStrings(kinds)
 	}
+	operationPolicies := RuntimeOperationPoliciesFromAdmissibilities(admissibilities)
 	seen := make(map[string]struct{}, len(kinds)+len(required.RequiredOperationSequence))
 	ret := make([]string, 0, len(kinds)+len(required.RequiredOperationSequence))
 	for _, raw := range kinds {
 		descriptor, ok := RuntimeOperationDescriptorForKind(raw)
-		if !ok || !RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+		if !ok || !OperationEffectCompatibleWithPolicies(descriptor.Kind, ConvergenceStateNeedStateChange, operationPolicies) {
 			continue
 		}
-		allowsScopeKind := value.Disposition == RuntimeTargetSelectionScope && descriptor.AllowsGroundedWorkspaceTarget
-		if descriptor.OwnerModuleID != RuntimeModuleFile && !allowsScopeKind {
+		if value.Disposition == RuntimeTargetSelectionCreate && descriptor.OwnerModuleID != value.OwnerModuleID {
+			continue
+		}
+		catalog, found := runtimeCandidateAdmissibilityForKind(admissibilities, descriptor.OwnerModuleID, descriptor.Kind)
+		if !found {
+			continue
+		}
+		contract, _ := RuntimeOperationContractForKind(descriptor.Kind)
+		variantIDs := runtimeCandidateRequiredVariantIDs(descriptor.Kind, contract, required)
+		policy := RuntimeOperationTargetPolicyProspectiveOwnerTarget
+		if value.Disposition == RuntimeTargetSelectionScope && value.ProspectiveTargetRef == "" {
+			policy = RuntimeOperationTargetPolicyExistingOwnerScope
+		}
+		allowed, _, _, _, err := RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(catalog, descriptor.Kind, variantIDs, policy)
+		if err != nil || !allowed {
 			continue
 		}
 		if _, duplicate := seen[descriptor.Kind]; duplicate {
@@ -865,8 +877,8 @@ func runtimeCandidateTargetAuthorizationForKind(
 	}
 	switch value.Disposition {
 	case RuntimeTargetSelectionCreate:
-		// Create kind-narrowing already admits only durable File kinds (or
-		// AllowsNewTarget owners). A sealed ProspectiveTargetRef turns that into
+		// Create kind-narrowing already admits only owner facts that declare a
+		// prospective target. A sealed ProspectiveTargetRef turns that into
 		// prospective_owner_target; without it the authorization stays exact and
 		// only kind narrowing applies.
 		allowsProspective, ownerSelectors, ownerConstraints := runtimeCandidateAdmissibilityAllowsProspective(required, contract, admissibility, hasAdmissibility)
@@ -953,7 +965,8 @@ func runtimeCandidateTargetAuthorizationForKind(
 		if value.CandidateCount != 0 && value.CandidateCount != len(scopeRefs) {
 			return RuntimeOperationTargetAuthorization{}, nil, nil, fmt.Errorf("candidate manifest existing owner scope requires a complete bounded target set")
 		}
-		if !descriptor.AllowsGroundedWorkspaceTarget && descriptor.OwnerModuleID != value.OwnerModuleID && !contract.RequireTargetRefs {
+		if descriptor.OwnerModuleID != value.OwnerModuleID && !contract.RequireTargetRefs &&
+			!runtimeCandidateAdmissibilityAllowsExisting(required, contract, admissibility, hasAdmissibility) {
 			// Non-target kinds outside the scope owner stay exact/empty.
 			return RuntimeOperationTargetAuthorization{
 				Policy: RuntimeOperationTargetPolicyExactTarget,
@@ -1059,7 +1072,7 @@ func runtimeCandidateTargetAuthorizationFromAdmissibility(
 		}, true
 	}
 	if len(admissibility.TargetRefs) != 0 && !creationRequested {
-		if !descriptor.AllowsGroundedWorkspaceTarget && descriptor.OwnerModuleID != admissibility.OwnerModuleID && !contract.RequireTargetRefs {
+		if !contract.RequireTargetRefs && !runtimeCandidateAdmissibilityAllowsExisting(required, contract, admissibility, hasAdmissibility) {
 			return RuntimeOperationTargetAuthorization{
 				Policy: RuntimeOperationTargetPolicyExactTarget,
 			}, true
@@ -1107,6 +1120,20 @@ func runtimeCandidateAdmissibilityAllowsProspective(required RequiredOutputContr
 		return false, nil, nil
 	}
 	return allowed, selectors, constraints
+}
+
+func runtimeCandidateAdmissibilityAllowsExisting(required RequiredOutputContract, contract RuntimeOperationContract, admissibility RuntimeOperationAdmissibility, hasAdmissibility bool) bool {
+	if !hasAdmissibility {
+		return false
+	}
+	variantIDs := runtimeCandidateRequiredVariantIDs(contract.Kind, contract, required.Normalized())
+	allowed, _, _, _, err := RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(
+		admissibility,
+		contract.Kind,
+		variantIDs,
+		RuntimeOperationTargetPolicyExistingOwnerScope,
+	)
+	return err == nil && allowed
 }
 
 func runtimeCandidateRequiredVariantIDs(kind string, contract RuntimeOperationContract, required RequiredOutputContract) []string {

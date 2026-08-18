@@ -134,7 +134,7 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 		}
 	}
 	if len(aggregate.Facts.Resources.OperationAdmissibilities) > 0 {
-		workspace, workspaceErr := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
+		workspace, workspaceErr := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
 		if workspaceErr != nil {
 			return m.runtimeRejectCandidate(ctx, aggregate, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: "workspace_resolution_failed", Reason: workspaceErr.Error(),
@@ -1019,8 +1019,9 @@ func runtimeFeasibilityFact(aggregate runtime.RuntimeAggregate) (*runtimecontrac
 			Reason: fmt.Sprintf("runtime convergence state %s has no accepted operation kinds", aggregate.Decision.State),
 		}, nil
 	}
-	capabilityFeasible := runtimecontract.FeasibleOperationKindsWithActivation(aggregate.Decision.State, required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities)
-	ownerFeasible := runtimecontract.FeasibleOperationKindsWithOwnerValidationRecipes(aggregate.Decision.State, required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities, runtimecontract.RuntimeValidationRecipesFromOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities))
+	activation := runtimecontract.RuntimeActivationForFacts(aggregate.Facts)
+	capabilityFeasible := runtimecontract.FeasibleOperationKindsWithActivation(aggregate.Decision.State, required, aggregate.Facts.Capabilities, activation.OperationPolicies)
+	ownerFeasible := runtimecontract.FeasibleOperationKindsWithOwnerValidationRecipes(aggregate.Decision.State, required, aggregate.Facts.Capabilities, activation.OperationPolicies, runtimecontract.RuntimeValidationRecipesFromOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities))
 	if len(ownerFeasible) == 0 {
 		category := runtimecontract.RuntimeOwnerFeasibilityCategory("")
 		reason := fmt.Sprintf("runtime convergence state %s has no feasible operation kinds under sealed capabilities", aggregate.Decision.State)

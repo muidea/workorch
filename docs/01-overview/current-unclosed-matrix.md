@@ -4,7 +4,7 @@ Status: active
 
 Type: current-work-index
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-18
 
 ## Purpose
 
@@ -34,6 +34,9 @@ Last Verified: 2026-08-17
 - Definition declaration/generation、eligible CWI closure、semantic order/batch/seal identity；focus/binding identity 同时绑定
   `manifestHash + logicalRequestID`，历史 reopened/retired binding 不可重新成为 current；
 - single CandidateEvaluator、attempt 0/1、owner feasibility orthogonality；
+- effect/replay、prospective/existing target policy 与 capability resource prerequisite 只来自 current capability owner
+  发布的 typed policy/catalog fact；Runtime core 只做通用 selector/requirement 编译，不按 MCP、Shell、tool/risk 或
+  File create strategy 分支；
 - File create-only write 与 revision-bound existing-target replacement；
 - File manifest-bound Shell recipe applicability、完整 ready/prerequisite-required/unavailable surface、空 confirmed recipe
   semantic filtering 与 exact tree-revision invalidation；
@@ -48,6 +51,9 @@ Last Verified: 2026-08-17
 - Result closeout 仅保留 current unsatisfied canonical gap，当前 `Facts.Failure` 优先于历史 claimed gap；
 - provider ceiling / ExpectedDocument equality、whole-document recovery、C0～C5 stable prefix；
 - duplicate/stale/restart/partial-CAS/response-loss/budget/guard；
+- SM-4 startup inventory 具备 cursor visited-set、page/item hard limit，覆盖 `A → B → A` cycle 与 commands-ready handoff；
+- Run/Workspace lifecycle adapter 仅暴露 scoped snapshot `Read`，opaque Runtime aggregate read/CAS 保持独立 Run owner
+  合同，Orchestrator 不保留跨 owner Create/Update/Delete/List 表面；
 - Result/Workspace/Run terminal delivery order和 projection non-authority。
 
 完整矩阵见 [Runtime Owner Convergence Verification Matrix](../60-verification/runtime-owner-convergence-matrix.md)。

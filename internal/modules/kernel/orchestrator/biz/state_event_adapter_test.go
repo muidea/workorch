@@ -4,34 +4,16 @@ package orchestrator
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/common"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestUpdateWorkspaceCommandFromModelExcludesLifecycleFields(t *testing.T) {
-	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}
-	selection := runtimecontract.ProviderInferenceSelection{Target: target, ReasoningEffort: "high"}
-	command, err := updateWorkspaceCommandFromModel(&workspacemodel.Workspace{ID: "ws-model", ActiveRunID: "run-current", DefaultLLMSelection: &selection})
-	if err != nil {
-		t.Fatalf("updateWorkspaceCommandFromModel: %v", err)
-	}
-	if command.DefaultLLMSelection == nil || !command.DefaultLLMSelection.Same(selection) {
-		t.Fatalf("command = %+v", command)
-	}
-	target.ModelID = "mutated"
-	if command.DefaultLLMSelection.Target.ModelID != "model-a" {
-		t.Fatalf("command target aliased input = %+v", command.DefaultLLMSelection)
-	}
-}
-
-func TestRunEventRepositoryGetPropagatesRuntimeWorkspaceScope(t *testing.T) {
-	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-run-event-scope")
+func TestRunSnapshotReaderPropagatesExplicitWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	var captured runevents.GetRunCommand
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
@@ -46,9 +28,9 @@ func TestRunEventRepositoryGetPropagatesRuntimeWorkspaceScope(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCommandGet) })
 
-	item, err := (runEventRepository{hub: rawHub}).Get(ctx, "run-001")
+	item, err := (runSnapshotReader{hub: rawHub}).Read(ctx, "ws-run-event-scope", "run-001")
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf("Read: %v", err)
 	}
 	if item.WorkspaceID != "ws-run-event-scope" {
 		t.Fatalf("run workspace = %q", item.WorkspaceID)
@@ -56,4 +38,21 @@ func TestRunEventRepositoryGetPropagatesRuntimeWorkspaceScope(t *testing.T) {
 	if captured.WorkspaceID != "ws-run-event-scope" || captured.RunID != "run-001" {
 		t.Fatalf("captured scope = workspace %q run %q", captured.WorkspaceID, captured.RunID)
 	}
+}
+
+func TestRunAndWorkspaceSnapshotReadersExposeOnlyRead(t *testing.T) {
+	for _, value := range []any{runSnapshotReader{}, workspaceSnapshotReader{}} {
+		typeOf := reflect.TypeOf(value)
+		if typeOf.NumMethod() != 1 || typeOf.Method(0).Name != "Read" {
+			t.Fatalf("%s methods = %v, want only Read", typeOf, exportedMethodNames(typeOf))
+		}
+	}
+}
+
+func exportedMethodNames(typeOf reflect.Type) []string {
+	ret := make([]string, 0, typeOf.NumMethod())
+	for index := 0; index < typeOf.NumMethod(); index++ {
+		ret = append(ret, typeOf.Method(index).Name)
+	}
+	return ret
 }

@@ -258,8 +258,8 @@ func TestRuntimeBootstrapRecipeIsBoundedOrderedAndAffectsProfileEquality(t *test
 	for name, mutate := range map[string]func(*RuntimeBootstrapRecipe){
 		"missing matcher":    func(recipe *RuntimeBootstrapRecipe) { recipe.RequiredGoalTerms = nil; recipe.RequiredDoDTerms = nil },
 		"unknown dependency": func(recipe *RuntimeBootstrapRecipe) { recipe.Artifacts[0].DependsOnArtifactIDs = []string{"missing"} },
-		"noncreating operation": func(recipe *RuntimeBootstrapRecipe) {
-			recipe.Artifacts[0].AllowedOperationKinds = []string{StepKindFileEdit}
+		"unknown operation": func(recipe *RuntimeBootstrapRecipe) {
+			recipe.Artifacts[0].AllowedOperationKinds = []string{"unknown/operation"}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

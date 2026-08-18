@@ -62,7 +62,7 @@ func (x *activeDispatchExecution) prepareClaimedOperation(operation runtimecontr
 }
 
 func (x *activeDispatchExecution) authorizeClaimedOperationReplay(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord) error {
-	idempotency := runtimecontract.ResolveOperationIdempotencyClass(operation, x.aggregate.Facts.Activation.MCPCapabilities)
+	idempotency := runtimecontract.ResolveOperationIdempotencyClass(operation, runtimecontract.RuntimeActivationForFacts(x.aggregate.Facts).OperationPolicies)
 	hasReplayProof := execution.ReplayProof != nil
 	if idempotency != runtimecontract.RuntimeOperationIdempotencySafeToReplay && idempotency != runtimecontract.RuntimeOperationIdempotencyOwnerManaged && !hasReplayProof {
 		_, _ = x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID)

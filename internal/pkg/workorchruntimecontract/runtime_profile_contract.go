@@ -271,9 +271,8 @@ func (r RuntimeBootstrapRecipe) Validate() error {
 			return fmt.Errorf("runtime bootstrap recipe %q duplicates artifact target %q", r.ID, artifact.TargetRef)
 		}
 		for _, kind := range artifact.AllowedOperationKinds {
-			descriptor, ok := RuntimeOperationDescriptorForKind(CanonicalRuntimeBlockKind(kind))
-			if !ok || descriptor.OwnerModuleID != RuntimeModuleFile || !descriptor.AllowsNewTarget {
-				return fmt.Errorf("runtime bootstrap artifact %q has non-creating File operation kind %q", artifact.ID, kind)
+			if _, ok := RuntimeOperationDescriptorForKind(CanonicalRuntimeBlockKind(kind)); !ok {
+				return fmt.Errorf("runtime bootstrap artifact %q has unknown operation kind %q", artifact.ID, kind)
 			}
 		}
 		known[artifact.ID] = artifact

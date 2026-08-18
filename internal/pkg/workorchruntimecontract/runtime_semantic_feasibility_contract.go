@@ -149,16 +149,13 @@ func validateSemanticProposalAgainstOwnerCatalog(proposal RuntimeSemanticProofPr
 		if !allStringsContained([]string{proposal.ValidationRecipeID}, catalog.ValidationRecipeRefs) {
 			return runtimeSemanticProposalConstraint("validationRecipeId", RuntimeSemanticConstraintAllowedValue, proposal.ValidationRecipeID, nil, catalog.ValidationRecipeRefs)
 		}
-		// Dynamic MCP recipes are bound to the exact effect fact published by
-		// the MCP owner.  Do not let a provider choose a broader or different
-		// effect and defer the mismatch until dispatch/evidence commit.
-		if proposal.OperationKind == StepKindMCPToolCall {
-			if capability, found := runtimeMCPCapabilityForValidationRecipe(catalog, proposal.ValidationRecipeID); found {
-				actual := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
-				if actual == RuntimeEffectUnknown || !allStringsContained([]string{string(actual)}, RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes)) {
-					return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintAllowedValue,
-						strings.Join(RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes), ","), nil, []string{string(actual)})
-				}
+		// Every validation recipe is bound to its exact owner-published typed
+		// surface. Do not derive protocol-specific semantics from its identity.
+		if surface, found := RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, proposal.ValidationRecipeID); found {
+			actual := surface.Normalized().EffectScope
+			if actual == RuntimeEffectUnknown || !allStringsContained([]string{string(actual)}, RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes)) {
+				return runtimeSemanticProposalConstraint("requiredEffectScopes", RuntimeSemanticConstraintAllowedValue,
+					strings.Join(RuntimeEffectScopesAsStrings(proposal.RequiredEffectScopes), ","), nil, []string{string(actual)})
 			}
 		}
 	}
@@ -233,22 +230,6 @@ func runtimeSemanticOwnerTargetPolicies(catalog RuntimeOperationAdmissibility, k
 		}
 	}
 	return ret
-}
-
-func runtimeMCPCapabilityForValidationRecipe(catalog RuntimeOperationAdmissibility, recipeID string) (RuntimeMCPCapabilityContext, bool) {
-	parts := strings.SplitN(strings.TrimSpace(recipeID), "/", 4)
-	if len(parts) != 4 || parts[0] != "mcp" || parts[1] != "tool_call" {
-		return RuntimeMCPCapabilityContext{}, false
-	}
-	serverID, tool := parts[2], parts[3]
-	for _, capability := range catalog.MCPCapabilities {
-		capability = SealMCPCapabilityEffect(capability)
-		if capability.Enabled && string(capability.ServerID) == serverID && capability.Name == tool &&
-			CanonicalRuntimeBlockKind(capability.OperationKind) == StepKindMCPToolCall {
-			return capability, true
-		}
-	}
-	return RuntimeMCPCapabilityContext{}, false
 }
 
 func runtimeSemanticVariantExists(contract RuntimeOperationContract, variantID string) bool {

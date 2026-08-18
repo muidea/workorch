@@ -20,6 +20,10 @@ type RuntimeActivationContext struct {
 	Skills            []RuntimeSkillContext
 	MCPServerIDs      []common.MCPServerID
 	MCPCapabilities   []RuntimeMCPCapabilityContext
+	// OperationPolicies are typed effect/replay facts published by capability
+	// owners during activation. Runtime consumes this owner-neutral surface and
+	// never derives authority from MCP names, risk labels, or protocol kinds.
+	OperationPolicies []RuntimeOperationPolicyFact
 	Memories          []RuntimeMemoryContext
 	EvidencePolicies  []RuntimeEvidencePolicy
 	ExecutionContract RuntimeExecutionContract
@@ -119,6 +123,7 @@ func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 	c.Skills = normalizeRuntimeSkills(c.Skills)
 	c.MCPServerIDs = normalizeMCPServerIDs(c.MCPServerIDs)
 	c.MCPCapabilities = normalizeRuntimeMCPCapabilities(c.MCPCapabilities)
+	c.OperationPolicies = NormalizeRuntimeOperationPolicyFacts(c.OperationPolicies)
 	c.Memories = normalizeRuntimeMemories(c.Memories)
 	c.EvidencePolicies = NormalizeRuntimeEvidencePolicies(c.EvidencePolicies)
 	c.ExecutionContract = c.ExecutionContract.Normalized()
@@ -127,6 +132,9 @@ func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 }
 
 func (c RuntimeActivationContext) Validate() error {
+	if err := ValidateRuntimeOperationPolicyFacts(c.OperationPolicies); err != nil {
+		return fmt.Errorf("runtime activation operation policies: %w", err)
+	}
 	c = c.Normalized()
 	if err := c.ProviderSelection.Validate(); err != nil {
 		return fmt.Errorf("runtime activation provider selection: %w", err)
@@ -172,7 +180,7 @@ func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeAc
 	right = right.Normalized()
 	if !left.ProviderSelection.Same(right.ProviderSelection) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
 		len(left.StageSoulBindings) != len(right.StageSoulBindings) || len(left.Skills) != len(right.Skills) ||
-		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.Memories) != len(right.Memories) ||
+		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.OperationPolicies) != len(right.OperationPolicies) || len(left.Memories) != len(right.Memories) ||
 		!SameRuntimeEvidencePolicies(left.EvidencePolicies, right.EvidencePolicies) {
 		return false
 	}
@@ -201,6 +209,11 @@ func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeAc
 	}
 	for idx := range left.MCPCapabilities {
 		if !sameRuntimeMCPCapability(left.MCPCapabilities[idx], right.MCPCapabilities[idx]) {
+			return false
+		}
+	}
+	for idx := range left.OperationPolicies {
+		if !sameRuntimeOperationPolicyFact(left.OperationPolicies[idx], right.OperationPolicies[idx]) {
 			return false
 		}
 	}

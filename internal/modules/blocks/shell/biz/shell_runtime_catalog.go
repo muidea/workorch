@@ -29,10 +29,12 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
 	inventory := runtimemodel.RuntimeOperationAdmissibility{
-		PrerequisiteID: prerequisiteID,
-		OwnerModuleID:  runtimemodel.RuntimeModuleShell,
-		OperationKinds: append([]string(nil), operationKinds...),
-		ConstraintRefs: []string{"workspace-working-directory", "executable-on-path", "bounded-timeout", "validation-target-must-exist"},
+		PrerequisiteID:    prerequisiteID,
+		OwnerModuleID:     runtimemodel.RuntimeModuleShell,
+		OperationKinds:    append([]string(nil), operationKinds...),
+		OperationVariants: shellAdmissibilityOperationVariants(operationKinds),
+		OperationPolicies: shellOperationPolicyFacts(operationKinds),
+		ConstraintRefs:    []string{"workspace-working-directory", "executable-on-path", "bounded-timeout", "validation-target-must-exist"},
 		// Directory mtime changes whenever a workspace child is created. It is
 		// neither Shell policy nor a validation-input revision, and using it here
 		// turns a preceding File effect into a false candidate failure. Shell's
@@ -50,6 +52,56 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
 	return inventory, nil
+}
+
+func shellOperationPolicyFacts(operationKinds []string) []runtimemodel.RuntimeOperationPolicyFact {
+	ret := make([]runtimemodel.RuntimeOperationPolicyFact, 0, 2)
+	for _, raw := range operationKinds {
+		if runtimemodel.CanonicalRuntimeBlockKind(raw) != runtimemodel.StepKindShellCommand {
+			continue
+		}
+		for _, stateChanging := range []bool{false, true} {
+			effect := runtimemodel.RuntimeEffectNone
+			if stateChanging {
+				effect = runtimemodel.RuntimeEffectWorkspaceDurable
+			}
+			value := stateChanging
+			ret = append(ret, runtimemodel.RuntimeOperationPolicyFact{
+				ID:            fmt.Sprintf("shell/command/state-changing/%t/v1", stateChanging),
+				OwnerModuleID: runtimemodel.RuntimeModuleShell,
+				OperationKind: runtimemodel.StepKindShellCommand,
+				ParameterMatches: []runtimemodel.RuntimeOperationParameterMatch{{
+					Name: "stateChanging", Boolean: &value,
+				}},
+				EffectScope: effect, IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
+			})
+		}
+		break
+	}
+	return runtimemodel.NormalizeRuntimeOperationPolicyFacts(ret)
+}
+
+func shellAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.RuntimeOperationAdmissibilityVariant {
+	ret := make([]runtimemodel.RuntimeOperationAdmissibilityVariant, 0, len(operationKinds))
+	for _, raw := range operationKinds {
+		kind := runtimemodel.CanonicalRuntimeBlockKind(raw)
+		switch kind {
+		case runtimemodel.StepKindShellCommand:
+			// Only shell/command needs the owner-authored existing-scope fact
+			// formerly carried by the shared descriptor. Managed validation keeps
+			// its bounded TargetRefs/selector catalog: publishing an existing-scope
+			// variant there would widen semantic target authority before the proof
+			// has selected a concrete validation target.
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{
+				Kind: kind,
+				AllowedTargetPolicies: []runtimemodel.RuntimeOperationTargetPolicy{
+					runtimemodel.RuntimeOperationTargetPolicyExactTarget,
+					runtimemodel.RuntimeOperationTargetPolicyExistingOwnerScope,
+				},
+			})
+		}
+	}
+	return ret
 }
 
 func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {

@@ -28,13 +28,15 @@ func RuntimeActivationContext(
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
 ) runtimecontract.RuntimeActivationContext {
+	mcpCapabilities := runtimeMCPCapabilityContexts(capabilities)
 	ret := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: providerSelection.Normalized(),
 		DialogLanguage:    strings.TrimSpace(dialogLanguage),
 		DefaultSoul:       runtimeSoulContext(defaultSoul),
 		Skills:            runtimeSkillContexts(skills),
 		MCPServerIDs:      runtimeMCPServerIDs(mcpServerIDs),
-		MCPCapabilities:   runtimeMCPCapabilityContexts(capabilities),
+		MCPCapabilities:   mcpCapabilities,
+		OperationPolicies: runtimeMCPOperationPolicies(mcpCapabilities),
 		Memories:          runtimeMemoryContexts(memories),
 		EvidencePolicies:  runtimeEvidencePolicies(evidencePolicies),
 		ExecutionContract: runtimeExecutionContract(executionContract),
@@ -496,6 +498,35 @@ func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontrac
 		ret = append(ret, runtimecontract.SealMCPCapabilityEffect(cap))
 	}
 	return ret
+}
+
+// runtimeMCPOperationPolicies is the application-side adapter from the
+// MCP-registry owner's typed capability metadata to Runtime's owner-neutral
+// effect/replay fact. Runtime core never needs to understand server/tool
+// parameter names after this boundary.
+func runtimeMCPOperationPolicies(capabilities []runtimecontract.RuntimeMCPCapabilityContext) []runtimecontract.RuntimeOperationPolicyFact {
+	ret := make([]runtimecontract.RuntimeOperationPolicyFact, 0, len(capabilities))
+	for _, capability := range capabilities {
+		capability = runtimecontract.SealMCPCapabilityEffect(capability)
+		if !capability.Enabled || capability.OperationKind != runtimecontract.StepKindMCPToolCall || capability.ID == "" || capability.ServerID == "" || strings.TrimSpace(capability.Name) == "" {
+			continue
+		}
+		serverID := string(capability.ServerID)
+		tool := capability.Name
+		ret = append(ret, runtimecontract.RuntimeOperationPolicyFact{
+			ID:            "operation-policy/" + string(capability.ID),
+			OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			OperationKind: capability.OperationKind,
+			SubjectRef:    string(capability.ID),
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
+				{Name: "serverId", String: &serverID},
+				{Name: "tool", String: &tool},
+			},
+			EffectScope:      runtimecontract.RuntimeEffectScope(capability.EffectScope),
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass),
+		})
+	}
+	return runtimecontract.NormalizeRuntimeOperationPolicyFacts(ret)
 }
 
 func runtimeMemoryContexts(items []*memorymodel.MemoryItem) []runtimecontract.RuntimeMemoryContext {

@@ -383,16 +383,33 @@ func queryRuntimeStateRecordReadiness(ctx context.Context, hub magicevent.Hub) (
 	return response.Ready, nil
 }
 
+const (
+	runtimeRecoveryInventoryPageSize = 100
+	runtimeRecoveryInventoryMaxPages = 1000
+	runtimeRecoveryInventoryMaxItems = runtimeRecoveryInventoryPageSize * runtimeRecoveryInventoryMaxPages
+)
+
 func queryRuntimeRecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]runevents.RuntimeRecoveryInventoryItem, error) {
-	if hub == nil {
+	return queryRuntimeRecoveryInventoryBounded(
+		ctx,
+		hub,
+		runtimeRecoveryInventoryPageSize,
+		runtimeRecoveryInventoryMaxPages,
+		runtimeRecoveryInventoryMaxItems,
+	)
+}
+
+func queryRuntimeRecoveryInventoryBounded(ctx context.Context, hub magicevent.Hub, pageSize, maxPages, maxItems int) ([]runevents.RuntimeRecoveryInventoryItem, error) {
+	if hub == nil || pageSize < 1 || maxPages < 1 || maxItems < 1 {
 		return nil, common.ErrInvalidArgument
 	}
 	ret := make([]runevents.RuntimeRecoveryInventoryItem, 0)
 	cursor := ""
-	for {
+	visited := map[string]struct{}{cursor: {}}
+	for pageNumber := 1; pageNumber <= maxPages; pageNumber++ {
 		result := hub.Send(magicevent.NewEventWithContext(
 			runevents.TopicRunCommandRuntimeRecoveryInventory, ModuleID, runevents.CommandDestination,
-			magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{Cursor: cursor, Limit: 100},
+			magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{Cursor: cursor, Limit: pageSize},
 		))
 		if result == nil {
 			return nil, common.ErrInvalidArgument
@@ -405,15 +422,24 @@ func queryRuntimeRecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]r
 		if !ok {
 			return nil, common.ErrInvalidArgument
 		}
+		if len(page.Items) > maxItems-len(ret) {
+			return nil, fmt.Errorf("%w: runtime recovery inventory exceeds %d items", common.ErrConflict, maxItems)
+		}
 		ret = append(ret, page.Items...)
-		if strings.TrimSpace(page.NextCursor) == "" {
+		nextCursor := strings.TrimSpace(page.NextCursor)
+		if nextCursor == "" {
 			return ret, nil
 		}
-		if page.NextCursor == cursor {
-			return nil, common.ErrConflict
+		if _, duplicate := visited[nextCursor]; duplicate {
+			return nil, fmt.Errorf("%w: runtime recovery inventory cursor cycle at %q", common.ErrConflict, nextCursor)
 		}
-		cursor = page.NextCursor
+		if pageNumber == maxPages {
+			return nil, fmt.Errorf("%w: runtime recovery inventory exceeds %d pages", common.ErrConflict, maxPages)
+		}
+		visited[nextCursor] = struct{}{}
+		cursor = nextCursor
 	}
+	return nil, fmt.Errorf("%w: runtime recovery inventory exceeds %d pages", common.ErrConflict, maxPages)
 }
 
 func (m *Biz) Stop(ctx context.Context) error {

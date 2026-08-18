@@ -108,6 +108,12 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		capability.IdempotencyClass != string(runtimecontract.RuntimeOperationIdempotencySafeToReplay) {
 		t.Fatalf("sealed runtime MCP capability = %+v, want explicit non-durable replay-safe tool metadata", capability)
 	}
+	if len(activation.OperationPolicies) != 1 || activation.OperationPolicies[0].OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
+		activation.OperationPolicies[0].OperationKind != runtimecontract.StepKindMCPToolCall ||
+		activation.OperationPolicies[0].EffectScope != runtimecontract.RuntimeEffectNone ||
+		activation.OperationPolicies[0].IdempotencyClass != runtimecontract.RuntimeOperationIdempotencySafeToReplay {
+		t.Fatalf("sealed runtime MCP operation policies = %+v", activation.OperationPolicies)
+	}
 	if activation.ExecutionContract.StateChangePolicy != "must_produce_state_change" || activation.ExecutionContract.MaxRepairAttemptsPerFocus != 7 ||
 		len(activation.ExecutionContract.CapabilityUsagePolicies) != 1 || len(activation.ExecutionContract.ValidationPolicies) != 1 ||
 		activation.ExecutionContract.ValidationPolicies[0].MaxValidationOnlyRetriesPerFocus != 2 || len(activation.ExecutionContract.ProfileContracts) != 1 {

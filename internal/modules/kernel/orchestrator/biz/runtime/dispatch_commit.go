@@ -166,8 +166,8 @@ func SealDispatch(decision runtimecontract.RuntimeDecision, candidate runtimecon
 	return SealDispatchWithActivation(decision, candidate, runtimecontract.RuntimeActivationContext{})
 }
 
-// SealDispatchWithActivation seals a candidate using owner-sealed activation capability
-// metadata for side-effect gating (MCP RiskLevel, etc.).
+// SealDispatchWithActivation seals a candidate using owner-published generic
+// operation policies for effect and replay gating.
 func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext) (SealedDispatch, error) {
 	return SealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil)
 }
@@ -242,7 +242,7 @@ func sealOperationExecutionRecords(
 	ret := make([]runtimecontract.RuntimeOperationExecutionRecord, 0, len(ops))
 	for _, operation := range ops {
 		operation = operation.Normalized()
-		scope := runtimecontract.ResolveExpectedEffectScope(operation, activation.MCPCapabilities)
+		scope := runtimecontract.ResolveExpectedEffectScope(operation, activation.OperationPolicies)
 		execution := runtimecontract.RuntimeOperationExecutionRecord{
 			OperationID:         operation.ID,
 			ExecutionKey:        runtimecontract.StableRuntimeOperationExecutionKey(workspaceID, runID, dispatchID, operation.ID),

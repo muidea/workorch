@@ -171,7 +171,7 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 	if err := ValidateRuntimeCandidateAgainstManifest(input.Manifest, input.Candidate); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionCorrectableOnce, "candidate_manifest_violation", err)
 	}
-	if err := input.Candidate.ValidateWithActivation(input.Decision, input.Facts.Activation); err != nil {
+	if err := input.Candidate.ValidateWithActivation(input.Decision, RuntimeActivationForFacts(input.Facts)); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionCorrectableOnce, "candidate_contract_invalid", err)
 	}
 	contractID := StableAuthorityContractID(input.Facts.WorkspaceID, input.Facts.RunID, transaction)

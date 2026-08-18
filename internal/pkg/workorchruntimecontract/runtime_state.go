@@ -377,7 +377,7 @@ func (r RuntimeStateRecord) Validate() error {
 		return fmt.Errorf("runtime state decision scope mismatch")
 	}
 	if r.ActiveDispatch != nil {
-		if err := r.ActiveDispatch.ValidateWithActivation(r.Decision, r.Facts.Activation); err != nil {
+		if err := r.ActiveDispatch.ValidateWithActivation(r.Decision, RuntimeActivationForFacts(r.Facts)); err != nil {
 			return fmt.Errorf("runtime state active dispatch: %w", err)
 		}
 	}
@@ -404,7 +404,7 @@ func (r RuntimeStateRecord) Validate() error {
 		if !SameAuthorityContract(attempt.Transaction, r.Decision.AuthorityTransaction()) {
 			return fmt.Errorf("pending runtime candidate proposal does not match current authority contract")
 		}
-		if err := attempt.Proposal.ValidateWithActivation(r.Decision, r.Facts.Activation); err != nil {
+		if err := attempt.Proposal.ValidateWithActivation(r.Decision, RuntimeActivationForFacts(r.Facts)); err != nil {
 			return fmt.Errorf("pending runtime candidate proposal is invalid: %w", err)
 		}
 	}

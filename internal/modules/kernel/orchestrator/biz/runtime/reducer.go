@@ -187,11 +187,11 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 	} else if ok {
 		return decision, nil
 	}
-	// A File-owner create observation is stronger than the ordinary focus
+	// An owner create observation is stronger than the ordinary focus
 	// evidence ordering: the selected target is absent, so an initial validation
 	// cannot truthfully run until one owner-admissible durable create commits.
 	// This is not a domain-specific action choice. SM-2 consumes the persisted
-	// File observation and descriptor contract only; File remains the path and
+	// selection and capability-owner catalog only; that owner retains target and
 	// feasibility authority.
 	if hasOwnerGroundedProspectiveCreationScope(facts) && !hasCurrentFocusTargetBoundStateChangeEvidence(facts, proofLineage) {
 		return stateChangeDecision(base, facts)
@@ -413,16 +413,16 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	if len(acceptedKinds) == 0 {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}
-	// An empty-workspace create scope is owner-grounded permission to propose a
-	// new File target, not a general durable-operation grant.  Fail before the
-	// provider when the persisted File admissibility observation cannot accept a
-	// new target for any sealed durable File kind; otherwise retries would only
-	// cycle through candidates that the File owner must reject.
+	// An empty-scope creation fact is owner-grounded permission to propose one
+	// prospective target, not a general durable-operation grant. Fail before the
+	// provider when the matching owner catalog cannot accept a new target for
+	// any sealed durable kind; otherwise retries can only cycle through owner
+	// rejections.
 	if hasOwnerGroundedProspectiveCreationScope(facts) {
-		acceptedKinds = creationScopeAdmissibleFileOperationKinds(facts, acceptedKinds)
+		acceptedKinds = creationScopeAdmissibleOperationKinds(facts, acceptedKinds)
 		if len(acceptedKinds) == 0 {
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
-				"creation_scope_file_capability_unavailable", "empty workspace creation scope has no owner-admissible durable File create operation"), nil
+				"creation_scope_capability_unavailable", "prospective creation scope has no owner-admissible durable operation"), nil
 		}
 	}
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
@@ -519,18 +519,24 @@ func runtimeStringIncluded(values []string, wanted string) bool {
 	return false
 }
 
-// creationScopeAdmissibleFileOperationKinds checks only the committed File
-// owner inventory. It never chooses a target or infers a create grant from an
+// creationScopeAdmissibleOperationKinds checks only the committed target-owner
+// inventory. It never chooses a target or infers a create grant from an
 // owner identity, descriptor effect, or broad selector union. For a static
 // operation kind such as patch/apply, every currently sealed variant must have
 // the same explicit prospective-target fact; a mixed variant set must be
 // narrowed by semantic binding before it can reach candidate rendering.
 //
 // Keeping that interpretation in SM-2 prevents an empty workspace from
-// becoming authority for Git/Shell/MCP side effects, while still allowing the
-// File owner to publish e.g. patch/apply:unified_diff as a concrete creation
-// operation.
-func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []string {
+// becoming authority for unrelated owner side effects, while still allowing
+// the target owner to publish one concrete creation operation variant.
+func creationScopeAdmissibleOperationKinds(facts runtimecontract.RuntimeFacts, acceptedKinds []string) []string {
+	ownerModuleID := facts.Focus.Normalized().TargetSelectorOwnerRef
+	if selection := currentFocusTargetSelection(facts); selection != nil && selection.OwnerModuleID != "" {
+		ownerModuleID = selection.OwnerModuleID
+	}
+	if ownerModuleID == "" {
+		return nil
+	}
 	accepted := make(map[string]struct{}, len(acceptedKinds))
 	for _, kind := range acceptedKinds {
 		accepted[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
@@ -538,7 +544,7 @@ func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFact
 	admissible := make(map[string]struct{}, len(acceptedKinds))
 	for _, inventory := range facts.Resources.OperationAdmissibilities {
 		inventory = inventory.Normalized()
-		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		if inventory.OwnerModuleID != ownerModuleID {
 			continue
 		}
 		for _, kind := range inventory.OperationKinds {
@@ -547,7 +553,7 @@ func creationScopeAdmissibleFileOperationKinds(facts runtimecontract.RuntimeFact
 				continue
 			}
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(kind)
-			if !known || descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
+			if !known || descriptor.OwnerModuleID != ownerModuleID || !runtimecontract.RuntimeEffectIsDurable(descriptor.DefaultEffectScope) {
 				continue
 			}
 			variantIDs := creationScopeOperationVariantIDs(facts, kind)
@@ -739,10 +745,10 @@ func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtime
 // alone is insufficient: the matching persisted owner inventory is the
 // grounding fact.
 //
-// File prospective targets are deliberately stricter than existing non-File
-// scopes. An empty workspace is grounded only when the sealed binding and the
-// current File catalog agree on one concrete prospective target and the owner
-// catalog explicitly advertises its bounded new-target selector constraint.
+// Prospective targets are deliberately stricter than existing owner scopes.
+// An empty scope is grounded only when the sealed binding and current owner
+// catalog agree on one concrete prospective target and the catalog explicitly
+// advertises its bounded selector/constraint fact.
 func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 	focus := facts.Focus.Normalized()
 	if focus.TargetSelectorOwnerRef == "" || focus.TargetSelectorRef == "" {
@@ -772,13 +778,12 @@ func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) boo
 			if _, sealed := prerequisites[catalog.SnapshotID]; !sealed {
 				continue
 			}
-			if focus.TargetSelectorOwnerRef != runtimecontract.RuntimeModuleFile {
+			if focus.ProspectiveTargetRef == "" {
 				return true
 			}
-			if focus.ProspectiveTargetRef == "" || len(focus.TargetRefs) != 0 ||
+			if len(focus.TargetRefs) != 0 ||
 				binding.TargetSelectorSubjectRef == "" || binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
 				binding.ProspectiveTargetRef == "" || binding.ProspectiveTargetRef != focus.ProspectiveTargetRef || len(binding.TargetRefs) != 0 ||
-				!runtimeStringsContain(catalog.ConstraintRefs, "new-target-requires-owner-selector") ||
 				!runtimeBindingProspectiveOperationAllowed(catalog, binding) {
 				continue
 			}
@@ -815,7 +820,7 @@ func runtimeBindingProspectiveOperationAllowed(catalog runtimecontract.RuntimeOp
 
 func hasOwnerGroundedProspectiveCreationScope(facts runtimecontract.RuntimeFacts) bool {
 	return hasOwnerGroundedCreationScope(facts) ||
-		(facts.Focus.Normalized().TargetSelectorOwnerRef == runtimecontract.RuntimeModuleFile && hasSemanticOwnerGroundedTargetScope(facts))
+		(facts.Focus.Normalized().ProspectiveTargetRef != "" && hasSemanticOwnerGroundedTargetScope(facts))
 }
 
 func runtimeStringsContain(values []string, wanted string) bool {
@@ -827,10 +832,10 @@ func runtimeStringsContain(values []string, wanted string) bool {
 	return false
 }
 
-// hasOwnerGroundedCreationScope is the empty-workspace counterpart to an
-// existing target snapshot. It is true only for the File owner's persisted
-// creation observation; the reducer never derives a file path from Goal, DoD,
-// manifest ordering, or provider text.
+// hasOwnerGroundedCreationScope is the empty-scope counterpart to an existing
+// target snapshot. It is true only for a persisted owner creation observation;
+// the reducer never derives a target from Goal, DoD, inventory ordering, or
+// provider text.
 func hasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 	return grounding.HasOwnerGroundedCreationScope(facts)
 }

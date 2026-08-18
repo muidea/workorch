@@ -203,7 +203,7 @@ func buildRuntimeCandidateContextProjection(context runtimecontract.RuntimeCandi
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeCandidateSoul(activation, stage),
 			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
-			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, manifest.State),
+			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, activation.OperationPolicies, manifest.State),
 			Memories:        activation.Memories, EvidencePolicyIDs: runtimeCandidateEvidencePolicyIDs(activation.EvidencePolicies),
 			Continuation: runtimeCandidateContinuationProjection(activation.Continuation),
 		},

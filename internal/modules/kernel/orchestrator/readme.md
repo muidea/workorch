@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-18
 
 ## 功能范围与边界
 
@@ -120,8 +120,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - SM-2 先从 persisted Definition seed、template/profile policy 与 provider request 前通过 typed prerequisite
   获取的 owner capability/admissibility catalog 编译唯一 semantic-plan manifest；manifest/hash/schema/evaluator
   同时封存 owner snapshot/revision、operation kind、target/selector/constraint 与 recipe vocabulary，禁止 LLM 猜测
-  未观察的合同值。声明了 managed-validation recipe 时，SM-2 必须先取得 File owner 的 manifest/observation，再把
-  immutable binding 交给 Shell owner；Shell catalog 对每个声明 recipe 发布 `ready | prerequisite_required | unavailable`
+  未观察的合同值。Shell capability acquisition 对 managed-validation 发布通用
+  `RuntimeCapabilityPrerequisiteFact`，其中声明它需要 File owner 的 manifest；SM-2 只把该 typed resource requirement
+  编译进 prerequisite，不按 Shell、operation kind 或 recipe 名称分支。取得 manifest/observation 后，immutable binding
+  才交给 Shell owner；Shell catalog 对每个声明 recipe 发布 `ready | prerequisite_required | unavailable`
   factual surface，并依赖 exact File workspace-tree revision；只有对当前 manifest 适用且静态可执行的 recipe 才进入
   confirmed set。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
   Orchestrator 不检查文件名、不判断 recipe 适用性。MCP 等动态 owner 同时发布 callable capability 与 typed
@@ -261,8 +263,13 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 
 ## Effect / Receipt / Repair Directive
 
-- `RuntimeEffectScope` 是 operation 的中立 effect 合同；`ResolveExpectedEffectScope` 由 descriptor + shell `stateChanging` + sealed MCP risk/EffectScope 解析 concrete scope。
-- seal 前 `ValidateCandidateEffectCompatibility` 强制：canonical `need_state_change` 至少一个 durable effect；`need_validation` 不得含 durable/unknown；`stateChanging=false` shell 与 read-only/session MCP 不能关闭 durable state-change。
+- `RuntimeEffectScope` 是 operation 的中立 effect 合同；descriptor 只提供保守的 technical default，concrete
+  effect/replay 必须由 capability owner 发布的 `RuntimeOperationPolicyFact` 按 typed scalar selector 精确匹配。Runtime core
+  不按 Shell/MCP、tool 名、risk label 或业务语义分支；当前 owner catalog 存在时会完整替换同 owner/kind 的 activation fallback。
+- target create/existing-scope 权限同样只来自 owner catalog 的 `RuntimeOperationAdmissibilityVariant`；descriptor 不携带
+  create 或跨 owner target policy。seal 前 `ValidateCandidateEffectCompatibility` 强制：canonical `need_state_change`
+  至少一个 durable effect，`need_validation` 不得含 durable/unknown；owner 声明为 non-durable 的 operation 不能关闭
+  durable state-change。
 - `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `ExecutionKey` + `ExpectedEffectScope`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后 `evidence_committed`；owner error 记 `outcome_unknown`，禁止盲重放。
 - owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
 - claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。每项 operation evidence 独立 CAS 持久化；只有最后一项成功或任一项 rejected/stale 时，才在该 evidence CAS 中原子 settle dispatch。
@@ -319,7 +326,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - Runtime terminal Result 只通过 Result owner 的 typed SM-4 delivery command 写入；Orchestrator 不构造或提交完整
   Result/Artifact entity。Orchestrator 的 Result adapter 只为 owner-local terminal cleanup 提供 EventHub read/delete，
   并对 owner query result 再次 detach，不伪装成具备 generic create/update 的 repository facade。
-- 与 `kernel/governance` 协作处理治理策略、decision/approval blocker 和恢复，但 Orchestrator 保持 runtime contract gate 权威。
+- Orchestrator 与 `kernel/governance` 没有直接 EventHub 合同；治理策略经 Decision/Approval/Run owner 的 typed fact 与
+  resolution 间接汇合，Orchestrator 保持 runtime contract gate 权威。
 - Decision 与 Approval 使用各自 `pkg/events` 定义 evidence command；Orchestrator 幂等写入自己的 EvidenceRecord 并返回具体 result。
 - Orchestrator 只在 `kernel/orchestrator/pkg/events` 定义由自身接收的 Runtime drive、receipt commit/query、governance resolution 与只读查询合同；投递给其他 owner 的 command/result 由接收 owner 定义。
 - File target snapshot、target selection、workspace manifest 与 repair-surface confirmation command/result 由 File owner 在 `blocks/file/pkg/events` 定义；前三类 acquisition Result 必须回显 workspace/run/authority scope，prerequisite identity 只由 payload/必需 freshness observation 表达。Git capability-state 与 LLM provider-ceiling acquisition 使用相同 scoped Result 规则。Decision、File、Git、LLM、MCP、Shell、SSH、Web 各自在自身 `pkg/events` 定义并消费 Runtime capability acquisition；其 Result 只返回一份带 workspace/run/authority scope 的 canonical acquisition，prerequisite identity 只由必需 freshness observation 承载。File、Git、MCP、Shell、SSH、Web 的 operation admissibility acquisition 采用相同 scoped canonical fact，prerequisite identity 只存在于 inventory/必需 observation，不再由 Result 外层重复回显；六个 owner 同时拥有 operation feasibility 与 semantic-proof feasibility topic/Command/Result，File、Git、MCP、Shell 各自拥有 CWI reconciliation query。Orchestrator 仅按 canonical owner 分派具体合同并归一 owner-neutral observation。
@@ -333,6 +341,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `ExpectedRuntimeStateRevision` 执行语义 CAS，不直接访问 Run repository，也不把 aggregate 编码进
   `map[string]any`。Run owner 对同一 aggregate revision 上的无关 Run model/lifecycle 写入执行物理
   CAS rebase；完整 Run model revision 不是 aggregate fence。
+- Orchestrator 对 Run/Workspace lifecycle 只持有显式 snapshot reader（各自仅一个 `Read`）；没有
+  `Create/Update/Delete/List` lifecycle mutation facade。opaque RuntimeStateRecord 的 read/CAS 是独立 Run owner 合同，
+  不能借 snapshot reader 扩宽为跨 owner repository。原先没有生产调用方的 generic Run Create EventHub command 同步
+  删除；Run 创建只由 Run owner 消费 typed workspace-execution intent 后在 owner 内完成。
 - Runtime 初始化时封存 typed Goal/DoD definition context；后续 candidate request 与重启恢复只能读取 Run owner 中持久化的定义快照，不能由调用方临时重建。
 - `InitializeRuntimeFromRun` 只读取 Run owner 已持久化的 typed bootstrap，生成 initial facts 并执行 preflight/reducer；Orchestrator 不解析 禁止的 execution context map 来重建定义或 focus。
 - Runtime controller 统一负责 initialize、prerequisite commit、candidate seal 和 evidence commit；服务重启只加载既有 aggregate，不得因重复 Start/Resume 再次执行 reducer 或增加 attempt。
@@ -434,9 +446,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 | Result / Workspace / Run | Orchestrator → owner | 同一 sealed `TerminalOutcome` 的三段 delivery/ack | 完整；各 owner 只做自身 reducer |
 | `blocks/llm` | Orchestrator → LLM | provider ceiling、preflight、candidate request | 完整；LLM 只返回 factual result |
 | File / Git / Shell / MCP / Web / SSH | 双向 | owner capability/admissibility/feasibility/reconciliation/execute 与 receipt query/commit | 完整；能力 owner 不选择下一 action |
-| Decision / Approval / Governance | 双向 | governance open/resolution/evidence 与 immutable continuation/terminal fact | 完整；无 Application resume 旁路 |
+| Decision / Approval | 双向 | governance open/resolution/evidence 与 immutable continuation/terminal fact | 完整；无 Application resume 旁路 |
+| `kernel/governance` | 无直接 I/O | 经 Decision/Approval/Run typed fact 间接协作 | 完整；不存在 Orchestrator ↔ Governance 直连合同 |
 | `blocks/memory` | Orchestrator → Memory | scoped recall/search/trace typed contract | 完整；Memory 只提供 owner fact |
-| `application/workorchd` | Orchestrator → Application | immutable drive observation 与只读 Runtime view | 完整；Application 不推进 reducer |
+| `application/workorchd` | 双向 | Orchestrator → Application immutable drive observation；Application → Orchestrator evidence/read-model list 与 scoped purge command | 完整；Application 不推进 reducer、不持有 aggregate |
 | Skill / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Registry 更新不改变既有 Run |
 | `blocks/eventstream` | 无直接订阅 | 审计通过正式 owner notification 形成 | 完整；不从审计重建 authority |
 
@@ -485,8 +498,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   通过 typed record query load aggregate，并在 owner-local SM-4 中分类 `active_no_dispatch`、
   `active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`；`active + RuntimeBootstrap + no
   RuntimeStateRecord` 进入同一初始化链。
-  SM-4 在 Orchestrator `Run` 中同步完成全部 inventory/load 分页；缺 subscriber、owner error、nil/wrong result 或
-  cursor 异常必须使启动失败。Run 在 Setup 注册 inventory、opaque state-record 与 readiness query；Orchestrator 仅将
+  SM-4 在 Orchestrator `Run` 中同步完成全部 inventory/load 分页；每次请求最多 100 项，单次启动最多 1,000 页、
+  100,000 项，并对所有已见非空 cursor 建立 visited set。任意 cursor 重复（包括 `A → B → A`）、页数/条目越界、
+  缺 subscriber、owner error、nil/wrong result 都必须使启动失败，不能继续空转。Run 在 Setup 注册 inventory、
+  opaque state-record 与 readiness query；Orchestrator 仅将
   已加载且已分类的 startup action 暂存为自身 process-lifecycle handoff，直到 Run owner 发布
   `TopicRunRuntimeCommandsReady` 后才以 run-scoped singleflight 交给 `BackgroundRoutine`。该 handoff 在每次
   启动重新由持久化 inventory 构建，不是第二套 persisted recovery/state machine，也不得依赖 `Weight()` 或调用普通
@@ -505,14 +520,20 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - 跨组件交互只能使用 EventHub 与具体 command/data/result；禁止跨 owner service/repository、Envelope、JSON/reflect 类型桥和通用投递包装。
 - provider-facing LLM cache prefix 必须遵守 C0、C1、C2、C3-C5 稳定分层。
 
+## 已覆盖回归
+
+- [x] create-only 目标重开与 revision-bound existing-target replacement；已有目标不能重复走 `file/write` create。
+- [x] effect/receipt/evidence CAS、owner response loss 与 Result → Workspace → Run 三段 delivery ack 前后崩溃恢复。
+- [x] provider transport、operation recovery、CAS reload、governance wait 与 terminal delivery 的独立预算/guard。
+- [x] startup inventory 多页成功、任意 cursor cycle、页数/条目上限、nil/wrong result、不兼容 schema 与
+  commands-ready handoff。
+- [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace
+  snapshot reader 只读表面的静态/反射边界。
+
 ## 待完善测试点
 
 - [ ] 补齐 SM-1～SM-4 跨围栏矩阵：每个外部 fact 只能进入对应 internal event/reducer，禁止跨 owner 目标 state setter。
 - [ ] 覆盖大量 Goal/DoD 的语义依赖排序、分批 focus、公平推进和 C0～C5 context budget，确认不按 ID/序号排序。
-- [ ] 增加 create-only 目标重开回归：已有目标时 semantic replan 必须选择 owner catalog 中合法且 revision-bound 的 replacement，不能重复 `file/write`。
-- [ ] 覆盖 effect 已发生但 receipt 未提交、receipt 已提交但 evidence 未提交、terminal 三段 delivery 每个 ack 前后崩溃的恢复。
-- [ ] 覆盖 owner fact 的 stale、duplicate、out-of-order、rollback/reappearance，只退休精确依赖且不重放旧 authority。
-- [ ] 覆盖 provider request incomplete/unknown submission、CAS conflict、owner transient、governance wait 与 delivery retry 的独立预算。
-- [ ] 覆盖 restart inventory 的分页、cursor loop、nil/wrong result、不兼容 schema和 commands-ready handoff。
+- [ ] 补齐 owner fact 的 stale、duplicate、out-of-order、rollback/reappearance 组合矩阵；现有 freshness 回归只覆盖
+  精确依赖退休、部分 stale/duplicate 与 restart，不应把组合矩阵标为完成。
 - [ ] 增加大 aggregate、长 focus queue、manifest rendering、invariant validation 和 drive loop 的 allocation/CPU benchmark。
-- [ ] 增加静态边界扫描，持续拒绝 StagePacket、NextAction、DispatchNextStep、ExecutionContextPatch、auto-replan successor 与 map authority rebuild。

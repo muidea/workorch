@@ -86,3 +86,62 @@ func TestRuntimeCapabilityCatalogUnavailableErrorIsTypedAndInvalidArgument(t *te
 		t.Fatalf("catalog error = %v, want invalid argument unwrap", err)
 	}
 }
+
+func TestRuntimeCapabilityAcquisitionSealsOwnerPublishedResourcePrerequisite(t *testing.T) {
+	request := RuntimeCapabilityAcquisitionRequest{
+		WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-1", PrerequisiteID: "capability-1",
+		OwnerModuleID: RuntimeModuleShell, CapabilityClass: RuntimeCapabilityClassValidation,
+		RequiredKinds: []string{RuntimeBlockKindManagedValidationSession},
+	}
+	fact := RuntimeCapabilityPrerequisiteFact{
+		ID: "shell/managed-validation/workspace-manifest/v1", OwnerModuleID: RuntimeModuleShell,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+		Requirement: RuntimeRequirement{
+			Kind: PrerequisiteKindManifest, OwnerModuleID: RuntimeModuleFile,
+			Reason: "managed validation catalog requires the File owner workspace manifest",
+		},
+	}
+	result, err := ResolveRuntimeCapabilityAcquisitionWithPrerequisites(
+		request, RuntimeModuleShell, []RuntimeCapabilityPrerequisiteFact{fact}, RuntimeBlockKindManagedValidationSession, StepKindShellCommand,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Capabilities.PrerequisiteFacts) != 1 || result.Capabilities.PrerequisiteFacts[0].ID != fact.ID {
+		t.Fatalf("owner resource facts = %+v", result.Capabilities.PrerequisiteFacts)
+	}
+	if err := result.ValidateForRequest(request); err != nil {
+		t.Fatalf("sealed owner resource fact rejected: %v", err)
+	}
+
+	tampered := result
+	tampered.Capabilities.PrerequisiteFacts[0].Requirement.Reason = "tampered dependency"
+	if err := tampered.ValidateForRequest(request); err == nil || !strings.Contains(err.Error(), "does not seal returned facts") {
+		t.Fatalf("tampered owner resource fact validation = %v", err)
+	}
+
+	unrelatedRequest := request
+	unrelatedRequest.RequiredKinds = []string{StepKindShellCommand}
+	unrelated, err := ResolveRuntimeCapabilityAcquisitionWithPrerequisites(
+		unrelatedRequest, RuntimeModuleShell, []RuntimeCapabilityPrerequisiteFact{fact}, RuntimeBlockKindManagedValidationSession, StepKindShellCommand,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unrelated.Capabilities.PrerequisiteFacts) != 0 {
+		t.Fatalf("unrequested operation inherited owner resource facts: %+v", unrelated.Capabilities.PrerequisiteFacts)
+	}
+}
+
+func TestMergeRuntimeCapabilityPrerequisiteFactsRejectsConflictingIdentity(t *testing.T) {
+	base := RuntimeCapabilityPrerequisiteFact{
+		ID: "shell/managed-validation/dependency/v1", OwnerModuleID: RuntimeModuleShell,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+		Requirement:   RuntimeRequirement{Kind: PrerequisiteKindManifest, OwnerModuleID: RuntimeModuleFile, Reason: "workspace manifest"},
+	}
+	conflict := base
+	conflict.Requirement.OwnerModuleID = RuntimeModuleGit
+	if _, err := MergeRuntimeCapabilityPrerequisiteFacts([]RuntimeCapabilityPrerequisiteFact{base}, []RuntimeCapabilityPrerequisiteFact{conflict}); err == nil {
+		t.Fatal("conflicting owner resource facts were merged")
+	}
+}

@@ -75,20 +75,20 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 		t.Fatal("unknown kind must have empty owner module")
 	}
 	fileWrite, ok := RuntimeOperationDescriptorForKind(StepKindFileWrite)
-	if !ok || !fileWrite.AllowsNewTarget {
-		t.Fatalf("file/write descriptor must explicitly allow owner-authorized new targets: %+v", fileWrite)
+	if !ok || fileWrite.TargetCardinality != RuntimeOperationTargetCardinalityOne {
+		t.Fatalf("file/write descriptor must retain only its technical target shape: %+v", fileWrite)
 	}
 	patch, ok := RuntimeOperationDescriptorForKind(RuntimeBlockKindPatchApply)
-	if !ok || patch.AllowsNewTarget || patch.TargetCardinality != RuntimeOperationTargetCardinalityOne {
-		t.Fatalf("patch/apply descriptor must not claim absent-target create semantics: %+v", patch)
+	if !ok || patch.TargetCardinality != RuntimeOperationTargetCardinalityOne {
+		t.Fatalf("patch/apply descriptor technical target shape = %+v", patch)
 	}
 	shell, ok := RuntimeOperationDescriptorForKind(StepKindShellCommand)
-	if !ok || !shell.AllowsGroundedWorkspaceTarget || shell.TargetCardinality != RuntimeOperationTargetCardinalityMany {
-		t.Fatalf("shell/command descriptor must explicitly allow File-grounded existing targets: %+v", shell)
+	if !ok || shell.TargetCardinality != RuntimeOperationTargetCardinalityMany {
+		t.Fatalf("shell/command descriptor technical target shape = %+v", shell)
 	}
 	git, ok := RuntimeOperationDescriptorForKind(StepKindGitWrite)
-	if !ok || git.AllowsGroundedWorkspaceTarget {
-		t.Fatalf("git/write must not inherit File-grounded target authority: %+v", git)
+	if !ok || git.OwnerModuleID != RuntimeModuleGit {
+		t.Fatalf("git/write descriptor = %+v", git)
 	}
 }
 
@@ -152,21 +152,17 @@ func TestFeasibleOperationKindsIntersectAcceptedCapabilitiesAndEffect(t *testing
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
 	mcpCaps := RuntimeCapabilities{ValidationKinds: []string{StepKindMCPToolCall}}
-	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
-		ID: "missing", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "inspect", Enabled: true,
-	}}); len(got) != 0 {
+	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, nil); len(got) != 0 {
 		t.Fatalf("MCP without explicit effect must not be feasible, got %v", got)
 	}
-	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
-		ID: "read", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "inspect", Enabled: true,
-		EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
-	}}); !reflect.DeepEqual(got, []string{StepKindMCPToolCall}) {
+	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeOperationPolicyFact{
+		mcpOperationPolicyForTest("read", "srv", "inspect", RuntimeEffectNone, RuntimeOperationIdempotencySafeToReplay),
+	}); !reflect.DeepEqual(got, []string{StepKindMCPToolCall}) {
 		t.Fatalf("explicit non-durable MCP capability must be feasible, got %v", got)
 	}
-	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
-		ID: "write", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "apply", Enabled: true,
-		EffectScope: string(RuntimeEffectWorkspaceDurable), IdempotencyClass: string(RuntimeOperationIdempotencyAtMostOnce),
-	}}); len(got) != 0 {
+	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeOperationPolicyFact{
+		mcpOperationPolicyForTest("write", "srv", "apply", RuntimeEffectWorkspaceDurable, RuntimeOperationIdempotencyAtMostOnce),
+	}); len(got) != 0 {
 		t.Fatalf("durable MCP capability must not be validation feasible, got %v", got)
 	}
 }

@@ -300,6 +300,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	inventory.ValidationRecipeRefs = append([]string(nil), catalogSnapshot.ValidationRecipes...)
 	inventory.ValidationSurfaces = runtimecontract.NormalizeRuntimeValidationSurfaces(catalogSnapshot.ValidationSurfaces)
 	inventory.MCPCapabilities = runtimeMCPCapabilityContexts(catalogSnapshot.Capabilities)
+	inventory.OperationPolicies = runtimeMCPOperationPolicies(inventory.MCPCapabilities, inventory.OperationKinds)
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {
 		setCapabilityError(result, err)
@@ -324,6 +325,38 @@ func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontrac
 		}))
 	}
 	return ret
+}
+
+func runtimeMCPOperationPolicies(capabilities []runtimecontract.RuntimeMCPCapabilityContext, operationKinds []string) []runtimecontract.RuntimeOperationPolicyFact {
+	allowedKinds := make(map[string]struct{}, len(operationKinds))
+	for _, kind := range operationKinds {
+		allowedKinds[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
+	}
+	ret := make([]runtimecontract.RuntimeOperationPolicyFact, 0, len(capabilities))
+	for _, capability := range capabilities {
+		capability = runtimecontract.SealMCPCapabilityEffect(capability)
+		if !capability.Enabled || capability.OperationKind != runtimecontract.StepKindMCPToolCall || capability.ID == "" || capability.ServerID == "" || strings.TrimSpace(capability.Name) == "" {
+			continue
+		}
+		if _, allowed := allowedKinds[capability.OperationKind]; !allowed {
+			continue
+		}
+		serverID := string(capability.ServerID)
+		tool := capability.Name
+		ret = append(ret, runtimecontract.RuntimeOperationPolicyFact{
+			ID:            "operation-policy/" + string(capability.ID),
+			OwnerModuleID: ModuleID,
+			OperationKind: capability.OperationKind,
+			SubjectRef:    string(capability.ID),
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
+				{Name: "serverId", String: &serverID},
+				{Name: "tool", String: &tool},
+			},
+			EffectScope:      runtimecontract.RuntimeEffectScope(capability.EffectScope),
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass),
+		})
+	}
+	return runtimecontract.NormalizeRuntimeOperationPolicyFacts(ret)
 }
 
 func setRuntimeOperationFeasibilityResult(result magicevent.Result, command mcpevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {

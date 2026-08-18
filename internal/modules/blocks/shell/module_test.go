@@ -177,6 +177,12 @@ func TestShellModuleResolvesManagedValidationCapability(t *testing.T) {
 	if !foundManaged || !foundShell {
 		t.Fatalf("validation kinds = %v", result.Acquisition.Capabilities.ValidationKinds)
 	}
+	if len(result.Acquisition.Capabilities.PrerequisiteFacts) != 1 ||
+		result.Acquisition.Capabilities.PrerequisiteFacts[0].OperationKind != runtimecontract.RuntimeBlockKindManagedValidationSession ||
+		result.Acquisition.Capabilities.PrerequisiteFacts[0].Requirement.Kind != runtimecontract.PrerequisiteKindManifest ||
+		result.Acquisition.Capabilities.PrerequisiteFacts[0].Requirement.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		t.Fatalf("managed-validation resource prerequisites = %+v", result.Acquisition.Capabilities.PrerequisiteFacts)
+	}
 }
 
 func registerShellModuleReceiptOwner(t *testing.T, hub magicevent.Hub) {

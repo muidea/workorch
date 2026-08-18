@@ -8,7 +8,6 @@ import (
 
 func TestRunCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	expected := map[string]runCommandFamily{
-		runevents.TopicRunCommandCreate:                  runCommandFamilyCreate,
 		runevents.TopicRunCommandGet:                     runCommandFamilyRunQuery,
 		runevents.TopicRunCommandList:                    runCommandFamilyRunQuery,
 		runevents.TopicRunCommandListByWorkspace:         runCommandFamilyRunQuery,

@@ -545,31 +545,6 @@ func TestRunWriteCommandsRequireWorkspaceScope(t *testing.T) {
 	}
 }
 
-func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
-	ctx := context.Background()
-	rawHub := newRunModuleTestHub(t)
-	runs := memory.NewRunRepository()
-	module := New()
-	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := module.Stop(ctx); err != nil {
-			t.Fatalf("Teardown: %v", err)
-		}
-	})
-
-	_, err := sendRunTestCommand(ctx, rawHub, runevents.TopicRunCommandCreate, runevents.CreateRunCommand{
-		RunID: "run-create-scope",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("create missing workspace err = %v, want invalid argument", err)
-	}
-}
-
 func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-v2", DoDID: "dod-v2", Revision: "definition-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}}

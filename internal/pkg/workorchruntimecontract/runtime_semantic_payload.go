@@ -63,8 +63,8 @@ func deriveRuntimeSemanticProposalEffects(manifest RuntimeSemanticPlanManifest, 
 			continue
 		}
 		if proposal.ValidationRecipeID != "" {
-			if capability, ok := runtimeMCPCapabilityForValidationRecipe(catalog, proposal.ValidationRecipeID); ok {
-				effect := NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
+			if surface, ok := RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, proposal.ValidationRecipeID); ok {
+				effect := NormalizeRuntimeEffectScope(surface.EffectScope)
 				if effect != RuntimeEffectUnknown {
 					return []RuntimeEffectScope{effect}
 				}

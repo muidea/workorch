@@ -18,8 +18,16 @@ func TestResolveExpectedEffectScopeShell(t *testing.T) {
 
 	falseFlag := false
 	op.Parameters = append(op.Parameters, OperationParameter{Name: "stateChanging", Boolean: &falseFlag})
-	if got := ResolveExpectedEffectScope(op, nil); got != RuntimeEffectNone {
-		t.Fatalf("stateChanging=false shell effect = %q, want none", got)
+	if got := ResolveExpectedEffectScope(op, nil); got != RuntimeEffectWorkspaceDurable {
+		t.Fatalf("unpublished stateChanging=false shell effect = %q, want conservative durable default", got)
+	}
+	readOnlyPolicy := RuntimeOperationPolicyFact{
+		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
+		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &falseFlag}},
+		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}
+	if got := ResolveExpectedEffectScope(op, []RuntimeOperationPolicyFact{readOnlyPolicy}); got != RuntimeEffectNone {
+		t.Fatalf("owner-published stateChanging=false shell effect = %q, want none", got)
 	}
 
 	trueFlag := true
@@ -33,7 +41,7 @@ func TestResolveExpectedEffectScopeShell(t *testing.T) {
 	}
 }
 
-func TestResolveExpectedEffectScopeMCP(t *testing.T) {
+func TestResolveExpectedEffectScopeUsesExactOwnerPolicy(t *testing.T) {
 	op := RuntimeOperation{ID: "op-1", Kind: StepKindMCPToolCall, Parameters: []OperationParameter{
 		{Name: "serverId", String: strPtr("lsp")},
 		{Name: "tool", String: strPtr("lsp_initialize")},
@@ -43,36 +51,24 @@ func TestResolveExpectedEffectScopeMCP(t *testing.T) {
 		t.Fatalf("unmatched MCP effect = %q, want unknown", got)
 	}
 
-	// Risk metadata is advisory only; missing explicit owner metadata stays unknown.
-	caps := []RuntimeMCPCapabilityContext{{
-		ID: "cap-1", ServerID: "lsp", Kind: "tool", Name: "lsp_initialize",
-		RiskLevel: "read_only", Enabled: true,
-	}}
-	if got := ResolveExpectedEffectScope(op, caps); got != RuntimeEffectUnknown {
-		t.Fatalf("MCP effect without explicit metadata = %q, want unknown", got)
-	}
-
-	// Explicit sealed EffectScope wins.
-	caps[0].EffectScope = string(RuntimeEffectEphemeralSession)
-	caps[0].RiskLevel = "write"
-	if got := ResolveExpectedEffectScope(op, caps); got != RuntimeEffectEphemeralSession {
+	policies := []RuntimeOperationPolicyFact{mcpOperationPolicyForTest(
+		"cap-1", "lsp", "lsp_initialize", RuntimeEffectEphemeralSession, RuntimeOperationIdempotencyOwnerManaged,
+	)}
+	if got := ResolveExpectedEffectScope(op, policies); got != RuntimeEffectEphemeralSession {
 		t.Fatalf("explicit EffectScope = %q, want ephemeral_session", got)
 	}
 
-	// Mutating risk without an explicit effect is likewise unknown.
-	caps[0].EffectScope = ""
-	caps[0].Name = "apply_edit"
-	caps[0].RiskLevel = "write"
+	// A policy for another exact parameter tuple does not leak authority.
 	op.Parameters = []OperationParameter{
 		{Name: "serverId", String: strPtr("lsp")},
 		{Name: "tool", String: strPtr("apply_edit")},
 	}
-	if got := ResolveExpectedEffectScope(op, caps); got != RuntimeEffectUnknown {
-		t.Fatalf("MCP write risk without explicit effect = %q, want unknown", got)
+	if got := ResolveExpectedEffectScope(op, policies); got != RuntimeEffectUnknown {
+		t.Fatalf("unmatched owner policy effect = %q, want unknown", got)
 	}
 }
 
-func TestResolveOperationIdempotencyClassUsesDescriptorAndExactMCPCapability(t *testing.T) {
+func TestResolveOperationIdempotencyClassUsesDescriptorAndExactOwnerPolicy(t *testing.T) {
 	if got := ResolveOperationIdempotencyClass(RuntimeOperation{ID: "read-1", Kind: StepKindFileRead}, nil); got != RuntimeOperationIdempotencySafeToReplay {
 		t.Fatalf("file/read idempotency = %q", got)
 	}
@@ -85,11 +81,10 @@ func TestResolveOperationIdempotencyClassUsesDescriptorAndExactMCPCapability(t *
 	if got := ResolveOperationIdempotencyClass(op, nil); got != RuntimeOperationIdempotencyUnknown {
 		t.Fatalf("unmatched MCP idempotency = %q", got)
 	}
-	capabilities := []RuntimeMCPCapabilityContext{{
-		ID: "cap-1", ServerID: "srv", Kind: "tool", Name: "inspect", Enabled: true,
-		EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencyOwnerManaged),
-	}}
-	if got := ResolveOperationIdempotencyClass(op, capabilities); got != RuntimeOperationIdempotencyOwnerManaged {
+	policies := []RuntimeOperationPolicyFact{mcpOperationPolicyForTest(
+		"cap-1", "srv", "inspect", RuntimeEffectNone, RuntimeOperationIdempotencyOwnerManaged,
+	)}
+	if got := ResolveOperationIdempotencyClass(op, policies); got != RuntimeOperationIdempotencyOwnerManaged {
 		t.Fatalf("exact MCP idempotency = %q", got)
 	}
 }
@@ -104,11 +99,16 @@ func TestRuntimeMCPCapabilitiesForActionUsesExplicitEffectMetadata(t *testing.T)
 		{ID: "write", ServerID: "srv", Kind: "tool", Name: "apply", Enabled: true,
 			EffectScope: string(RuntimeEffectWorkspaceDurable), IdempotencyClass: string(RuntimeOperationIdempotencyAtMostOnce)},
 	}
-	validation := RuntimeMCPCapabilitiesForState(capabilities, ConvergenceStateNeedValidation)
+	policies := []RuntimeOperationPolicyFact{
+		mcpOperationPolicyForTest("read", "srv", "inspect", RuntimeEffectNone, RuntimeOperationIdempotencySafeToReplay),
+		mcpOperationPolicyForTest("session", "srv", "connect", RuntimeEffectEphemeralSession, RuntimeOperationIdempotencySafeToReplay),
+		mcpOperationPolicyForTest("write", "srv", "apply", RuntimeEffectWorkspaceDurable, RuntimeOperationIdempotencyAtMostOnce),
+	}
+	validation := RuntimeMCPCapabilitiesForState(capabilities, policies, ConvergenceStateNeedValidation)
 	if len(validation) != 2 || validation[0].ID != "read" || validation[1].ID != "session" {
 		t.Fatalf("validation MCP capability projection = %+v, want explicit non-durable capabilities", validation)
 	}
-	stateChange := RuntimeMCPCapabilitiesForState(capabilities, ConvergenceStateNeedStateChange)
+	stateChange := RuntimeMCPCapabilitiesForState(capabilities, policies, ConvergenceStateNeedStateChange)
 	if len(stateChange) != 1 || stateChange[0].ID != "write" {
 		t.Fatalf("state-change MCP capability projection = %+v, want explicit durable capability", stateChange)
 	}
@@ -146,7 +146,12 @@ func TestSealRejectsStateChangingFalseShellUnderStateChange(t *testing.T) {
 	}}}}
 	// Authority snapshot hash must match; use SealRuntimeDecision helper path instead via Validate on operations.
 	ops := []RuntimeOperation{candidate.StateChange.Operations[0].Operation}
-	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, decision.RequiredOutput, nil)
+	policy := RuntimeOperationPolicyFact{
+		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
+		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &falseFlag}},
+		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}
+	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, decision.RequiredOutput, []RuntimeOperationPolicyFact{policy})
 	if err == nil || !strings.Contains(err.Error(), "durable effect") {
 		t.Fatalf("stateChanging=false under state-change must fail seal, got %v", err)
 	}
@@ -167,11 +172,10 @@ func TestSealRejectsReadOnlyMCPUnderStateChange(t *testing.T) {
 			{Name: "tool", String: strPtr("lsp_initialize")},
 		},
 	}}
-	caps := []RuntimeMCPCapabilityContext{{
-		ID: "cap-1", ServerID: "lsp", Kind: "tool", Name: "lsp_initialize",
-		RiskLevel: "read_only", Enabled: true, EffectScope: string(RuntimeEffectEphemeralSession),
-	}}
-	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, required, caps)
+	policies := []RuntimeOperationPolicyFact{mcpOperationPolicyForTest(
+		"cap-1", "lsp", "lsp_initialize", RuntimeEffectEphemeralSession, RuntimeOperationIdempotencySafeToReplay,
+	)}
+	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, required, policies)
 	if err == nil || !strings.Contains(err.Error(), "durable effect") {
 		t.Fatalf("session/read-only MCP under state-change must fail, got %v", err)
 	}
@@ -201,7 +205,12 @@ func TestSealRejectsMixedDurableAndNonDurableStateChangeCandidate(t *testing.T) 
 			},
 		},
 	}
-	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, operations, required, nil); err == nil || !strings.Contains(err.Error(), "validate") {
+	policy := RuntimeOperationPolicyFact{
+		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
+		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &falseFlag}},
+		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}
+	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, operations, required, []RuntimeOperationPolicyFact{policy}); err == nil || !strings.Contains(err.Error(), "validate") {
 		t.Fatalf("mixed state-change candidate must be rejected before seal, got %v", err)
 	}
 }
@@ -245,7 +254,12 @@ func TestSealAcceptsNonDurableShellUnderValidation(t *testing.T) {
 			{Name: "stateChanging", Boolean: &falseFlag},
 		},
 	}}
-	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedValidation, ops, required, nil); err != nil {
+	policy := RuntimeOperationPolicyFact{
+		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
+		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &falseFlag}},
+		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}
+	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedValidation, ops, required, []RuntimeOperationPolicyFact{policy}); err != nil {
 		t.Fatalf("stateChanging=false shell under validation must pass: %v", err)
 	}
 }
@@ -296,14 +310,27 @@ func TestSealMCPCapabilityEffectRequiresExplicitOwnerMetadata(t *testing.T) {
 	if cap.IdempotencyClass != string(RuntimeOperationIdempotencyUnknown) {
 		t.Fatalf("missing IdempotencyClass = %q, want unknown", cap.IdempotencyClass)
 	}
-	// Explicit capability metadata is preserved and used as Runtime effect authority.
+	// Explicit capability metadata is preserved for provider projection; the
+	// owner publishes separate generic operation policy authority.
 	cap.EffectScope = string(RuntimeEffectEphemeralSession)
 	cap.IdempotencyClass = string(RuntimeOperationIdempotencySafeToReplay)
 	op := RuntimeOperation{ID: "op-1", Kind: StepKindMCPToolCall, Parameters: []OperationParameter{
 		{Name: "serverId", String: strPtr("lsp")},
 		{Name: "tool", String: strPtr("lsp_initialize")},
 	}}
-	if scope := ResolveExpectedEffectScope(op, []RuntimeMCPCapabilityContext{cap}); scope != RuntimeEffectEphemeralSession {
+	policy := mcpOperationPolicyForTest("cap-1", "lsp", "lsp_initialize", RuntimeEffectEphemeralSession, RuntimeOperationIdempotencySafeToReplay)
+	if scope := ResolveExpectedEffectScope(op, []RuntimeOperationPolicyFact{policy}); scope != RuntimeEffectEphemeralSession {
 		t.Fatalf("explicit MCP EffectScope = %q, want ephemeral_session", scope)
+	}
+}
+
+func mcpOperationPolicyForTest(id, serverID, tool string, effect RuntimeEffectScope, idempotency RuntimeOperationIdempotencyClass) RuntimeOperationPolicyFact {
+	return RuntimeOperationPolicyFact{
+		ID: id, OwnerModuleID: RuntimeModuleMCP, OperationKind: StepKindMCPToolCall, SubjectRef: id,
+		ParameterMatches: []RuntimeOperationParameterMatch{
+			{Name: "serverId", String: strPtr(serverID)},
+			{Name: "tool", String: strPtr(tool)},
+		},
+		EffectScope: effect, IdempotencyClass: idempotency,
 	}
 }

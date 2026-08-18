@@ -662,11 +662,20 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	}
 	defer llm.Stop(ctx)
 
+	serverID, toolName := "mcp-1", "repo.summary"
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
 			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", Name: "repo.summary", Enabled: true,
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "mcp-1:tool:repo.summary", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+			SubjectRef: "mcp-1:tool:repo.summary",
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
+				{Name: "serverId", String: &serverID}, {Name: "tool", String: &toolName},
+			},
+			EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 		}},
 	}
 	binding := eventTestCoverageBinding(runtimecontract.CoverageEvidenceBinding{
@@ -700,7 +709,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	}
 	context := candidateContextForDecision(decision)
 	context.Activation = activation
-	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, activation.MCPCapabilities)
+	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, activation.OperationPolicies)
 	response, err := RequestRuntimeCandidate(ctx, hub, withOperationsExpectedDocument(t, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-mcp", Sequence: 1, PhysicalCallID: "candidate-call-mcp"},
@@ -820,7 +829,7 @@ func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runti
 		RequiredEffectScopes:  append([]runtimecontract.RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		RequiredEvidenceKinds: append([]string(nil), required.RequiredEvidenceKinds...),
 	}
-	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, context.Activation.MCPCapabilities)
+	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, context.Activation.OperationPolicies)
 	return context
 }
 

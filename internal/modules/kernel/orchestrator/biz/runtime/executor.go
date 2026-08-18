@@ -311,7 +311,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 		scope := runtimecontract.RuntimeEffectUnknown
 		for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
 			if operation.Normalized().ID == operationID {
-				scope = runtimecontract.ResolveExpectedEffectScope(operation, aggregate.Facts.Activation.MCPCapabilities)
+				scope = runtimecontract.ResolveExpectedEffectScope(operation, runtimecontract.RuntimeActivationForFacts(aggregate.Facts).OperationPolicies)
 				break
 			}
 		}
@@ -361,7 +361,7 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 		scope := runtimecontract.RuntimeEffectUnknown
 		for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
 			if operation.Normalized().ID == operationID {
-				scope = runtimecontract.ResolveExpectedEffectScope(operation, aggregate.Facts.Activation.MCPCapabilities)
+				scope = runtimecontract.ResolveExpectedEffectScope(operation, runtimecontract.RuntimeActivationForFacts(aggregate.Facts).OperationPolicies)
 				break
 			}
 		}

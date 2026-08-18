@@ -12,8 +12,7 @@ import (
 type runCommandFamily uint8
 
 const (
-	runCommandFamilyCreate runCommandFamily = iota + 1
-	runCommandFamilyRunQuery
+	runCommandFamilyRunQuery runCommandFamily = iota + 1
 	runCommandFamilyStepQuery
 	runCommandFamilyCheckpointQuery
 	runCommandFamilyRuntimeStateStore
@@ -22,7 +21,6 @@ const (
 
 func runCommandTopics() []string {
 	return []string{
-		runevents.TopicRunCommandCreate,
 		runevents.TopicRunCommandGet,
 		runevents.TopicRunCommandList,
 		runevents.TopicRunCommandListByWorkspace,
@@ -39,8 +37,6 @@ func runCommandTopics() []string {
 
 func runCommandFamilyForTopic(topic string) (runCommandFamily, bool) {
 	switch topic {
-	case runevents.TopicRunCommandCreate:
-		return runCommandFamilyCreate, true
 	case runevents.TopicRunCommandGet,
 		runevents.TopicRunCommandList,
 		runevents.TopicRunCommandListByWorkspace:
@@ -90,8 +86,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
 	switch family {
-	case runCommandFamilyCreate:
-		return m.executeCreateRunCommand(ctx, ev)
 	case runCommandFamilyRunQuery:
 		return m.executeRunQueryCommand(ctx, ev)
 	case runCommandFamilyStepQuery:
@@ -109,8 +103,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 
 func workspaceScopeFromRunCommand(data any) common.WorkspaceID {
 	switch cmd := data.(type) {
-	case runevents.CreateRunCommand:
-		return cmd.WorkspaceID
 	case runevents.GetRunCommand:
 		return cmd.WorkspaceID
 	case runevents.ListRunsByWorkspaceCommand:

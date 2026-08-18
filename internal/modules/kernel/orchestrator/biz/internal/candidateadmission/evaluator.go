@@ -62,7 +62,7 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(input.Manifest, input.Candidate); err != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, diagnosticFailure(CodeInvalid, InvalidSignature(input.Candidate), err))
 	}
-	if err := input.Candidate.ValidateWithActivation(input.Decision, input.Facts.Activation); err != nil {
+	if err := input.Candidate.ValidateWithActivation(input.Decision, runtimecontract.RuntimeActivationForFacts(input.Facts)); err != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, contractFailure(CodeInvalid, InvalidSignature(input.Candidate), err.Error()))
 	}
 	// Aggregate-local target/binding/evidence fences are structural and must
@@ -166,6 +166,7 @@ func MissingValidationFailure(facts runtimecontract.RuntimeFacts, decision runti
 // feasibility in its separate typed owner probe.
 func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateFailure {
 	facts = facts.Normalized()
+	operationPolicies := runtimecontract.RuntimeActivationForFacts(facts).OperationPolicies
 	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || !facts.Focus.RequireTargetGrounding {
 		return nil
 	}
@@ -174,14 +175,15 @@ func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimec
 		durableFileEffect := false
 		for _, operation := range Operations(candidate) {
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-			if !known || !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
+			if !known || !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, operationPolicies)) {
 				continue
 			}
-			if descriptor.OwnerModuleID != runtimecontract.RuntimeModuleFile || len(operation.TargetRefs) != 1 || operation.TargetRefs[0] != selection.ProspectiveTargetRef {
+			if descriptor.OwnerModuleID != selection.OwnerModuleID || len(operation.TargetRefs) != 1 || operation.TargetRefs[0] != selection.ProspectiveTargetRef ||
+				!operationAllowsTargetPolicy(facts, operation, runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget) {
 				return allowedTargetsFailure(
 					CodeTargetOutsideGrounding,
 					SignatureTargetOutsideGrounding,
-					"empty workspace creation scope permits durable effects only on the sealed prospective File target",
+					"empty workspace creation scope permits durable effects only through an owner-published prospective target fact",
 					operation.TargetRefs,
 					[]string{selection.ProspectiveTargetRef},
 					candidate,
@@ -195,33 +197,33 @@ func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimec
 		return allowedTargetsFailure(
 			CodeCreationScopeMissingTarget,
 			SignatureCreationScopeTarget,
-			"empty workspace creation scope requires a durable File operation targeting the sealed prospective workspace-relative path",
+			"empty workspace creation scope requires a durable owner operation targeting the sealed prospective path",
 			nil,
 			[]string{selection.ProspectiveTargetRef},
 			candidate,
 		)
 	}
 	requiredTargets := grounding.RepairTargets(facts)
-	if grounding.OwnerGroundedTargetScopeMaySelectNewFileTarget(facts) {
+	if grounding.OwnerGroundedTargetScopeMaySelectNewTarget(facts) {
 		selection := grounding.CurrentFocusTargetSelection(facts).Normalized()
 		allowedTargets := grounding.WorkspaceScopeTargets(&selection)
 		durableEffect := false
 		for _, operation := range Operations(candidate) {
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-			if !known || !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
+			if !known || !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, operationPolicies)) {
 				continue
 			}
 			durableEffect = true
-			if descriptor.OwnerModuleID == runtimecontract.RuntimeModuleFile && len(operation.TargetRefs) != 0 {
+			if descriptor.OwnerModuleID == selection.OwnerModuleID && len(operation.TargetRefs) != 0 {
 				continue
 			}
-			if descriptor.AllowsGroundedWorkspaceTarget && grounding.TargetRefsAllWithin(operation.TargetRefs, allowedTargets) {
+			if operationAllowsTargetPolicy(facts, operation, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope) && grounding.TargetRefsAllWithin(operation.TargetRefs, allowedTargets) {
 				continue
 			}
 			return allowedTargetsFailure(
 				CodeTargetOutsideGrounding,
 				SignatureTargetOutsideGrounding,
-				"owner-grounded workspace scope permits only a durable File operation or an explicitly target-bound operation within the sealed File inventory",
+				"owner-grounded workspace scope permits only a durable scope-owner operation or an operation with an explicit owner-published existing-scope fact",
 				operation.TargetRefs,
 				allowedTargets,
 				candidate,
@@ -233,7 +235,7 @@ func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimec
 		return allowedTargetsFailure(
 			CodeTargetOutsideGrounding,
 			SignatureTargetOutsideGrounding,
-			"owner-grounded workspace scope requires a durable File operation or an explicitly target-bound operation within the sealed File inventory",
+			"owner-grounded workspace scope requires a durable scope-owner operation or an operation with an explicit owner-published existing-scope fact",
 			nil,
 			allowedTargets,
 			candidate,
@@ -243,7 +245,7 @@ func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimec
 		return nil
 	}
 	for _, operation := range Operations(candidate) {
-		if !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, facts.Activation.MCPCapabilities)) {
+		if !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, operationPolicies)) {
 			continue
 		}
 		if grounding.TargetRefsIntersect(requiredTargets, operation.TargetRefs) {
@@ -258,6 +260,29 @@ func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimec
 		requiredTargets,
 		candidate,
 	)
+}
+
+func operationAllowsTargetPolicy(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation, policy runtimecontract.RuntimeOperationTargetPolicy) bool {
+	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !known {
+		return false
+	}
+	for _, inventory := range facts.Resources.OperationAdmissibilities {
+		inventory = inventory.Normalized()
+		if inventory.OwnerModuleID != descriptor.OwnerModuleID {
+			continue
+		}
+		variant, found, err := runtimecontract.RuntimeOperationAdmissibilityVariantForOperation(inventory, operation)
+		if err != nil || !found {
+			continue
+		}
+		for _, allowed := range variant.AllowedTargetPolicies {
+			if allowed == policy {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func contractFailure(code, signature, reason string) *runtimecontract.RuntimeCandidateFailure {

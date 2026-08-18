@@ -557,6 +557,10 @@ type RuntimeCapabilities struct {
 	StateChangeKinds []string
 	ValidationKinds  []string
 	GovernanceKinds  []string
+	// PrerequisiteFacts are resource dependencies published by the capability
+	// owner for a concrete operation kind. Runtime only compiles the typed
+	// requirements; it must not infer owner-specific prerequisites from kinds.
+	PrerequisiteFacts []RuntimeCapabilityPrerequisiteFact
 }
 
 type RuntimeCapabilityClass string
@@ -620,9 +624,12 @@ type RuntimeOperationAdmissibility struct {
 	// may appear in ValidationRecipeRefs and therefore in a provider-visible
 	// semantic manifest.
 	ValidationSurfaces []RuntimeValidationSurface
+	// OperationPolicies are effect/replay facts published by this capability
+	// owner. Runtime matches their typed parameter selectors generically.
+	OperationPolicies []RuntimeOperationPolicyFact
 	// MCPCapabilities is the exact owner-sealed capability metadata used for
-	// dynamic mcp/tool_call effect and replay checks. It is intentionally part
-	// of this owner catalog rather than a second global capability authority.
+	// provider rendering and protocol-specific feasibility. Effect/replay
+	// authority lives only in OperationPolicies above.
 	MCPCapabilities []RuntimeMCPCapabilityContext
 	// ValidationRecipes contains only the Shell-owner-confirmed executable
 	// recipes for validation/managed_session. It is never provider supplied and
@@ -802,7 +809,14 @@ func RuntimeOperationAdmissibilityAllowsTargetPolicyForVariants(inventory Runtim
 	kind = CanonicalRuntimeBlockKind(kind)
 	variantIDs = normalizeStrings(variantIDs)
 	if len(variantIDs) == 0 {
-		return RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory, kind, "", policy)
+		if contract, found := RuntimeOperationContractForKind(kind); found && len(contract.Variants) != 0 {
+			for _, variant := range contract.Variants {
+				variantIDs = append(variantIDs, variant.ID)
+			}
+			variantIDs = normalizeStrings(variantIDs)
+		} else {
+			return RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory, kind, "", policy)
+		}
 	}
 	var expectedSelectors []string
 	var expectedConstraints []string
@@ -869,6 +883,7 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
 	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
 	a.ValidationSurfaces = NormalizeRuntimeValidationSurfaces(a.ValidationSurfaces)
+	a.OperationPolicies = NormalizeRuntimeOperationPolicyFacts(a.OperationPolicies)
 	if len(a.MCPCapabilities) > 0 {
 		caps := make([]RuntimeMCPCapabilityContext, 0, len(a.MCPCapabilities))
 		for _, capability := range a.MCPCapabilities {
@@ -917,6 +932,9 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 		}
 		seenSurfaces[value.ID] = struct{}{}
 	}
+	if err := ValidateRuntimeOperationPolicyFacts(a.OperationPolicies); err != nil {
+		return err
+	}
 	a = a.Normalized()
 	if a.PrerequisiteID == "" || a.SnapshotID == "" || a.OwnerModuleID == "" || len(a.OperationKinds) == 0 || a.ObservedRevision == "" {
 		return fmt.Errorf("runtime operation admissibility requires identity, owner, kinds and revision")
@@ -948,6 +966,11 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 		}
 		if selectable := RuntimeSelectableValidationRecipeRefs(a.ValidationSurfaces); !sameStrings(selectable, a.ValidationRecipeRefs) {
 			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match selectable validation surfaces")
+		}
+	}
+	for _, policy := range a.OperationPolicies {
+		if policy.OwnerModuleID != a.OwnerModuleID || !runtimeOperationKindsContain(a.OperationKinds, policy.OperationKind) {
+			return fmt.Errorf("runtime operation policy fact %q is outside owner operation inventory", policy.ID)
 		}
 	}
 	if expected := StableRuntimeOperationAdmissibilitySnapshotID(a); a.SnapshotID != expected {
@@ -999,6 +1022,23 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 		writeHashString(h, string(surface.ProofApplicability))
 		writeHashString(h, string(surface.EffectScope))
 		writeHashString(h, string(surface.IdempotencyClass))
+	}
+	for _, policy := range value.OperationPolicies {
+		writeHashString(h, policy.ID)
+		writeHashString(h, policy.OwnerModuleID)
+		writeHashString(h, policy.OperationKind)
+		writeHashString(h, policy.SubjectRef)
+		for _, match := range policy.ParameterMatches {
+			writeHashString(h, match.Name)
+			if match.String != nil {
+				writeHashString(h, "string:"+*match.String)
+			}
+			if match.Boolean != nil {
+				writeHashString(h, fmt.Sprintf("boolean:%t", *match.Boolean))
+			}
+		}
+		writeHashString(h, string(policy.EffectScope))
+		writeHashString(h, string(policy.IdempotencyClass))
 	}
 	for _, capability := range value.MCPCapabilities {
 		writeHashString(h, string(capability.ID))
@@ -1418,6 +1458,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.Capabilities.StateChangeKinds = normalizeStrings(f.Capabilities.StateChangeKinds)
 	f.Capabilities.ValidationKinds = normalizeStrings(f.Capabilities.ValidationKinds)
 	f.Capabilities.GovernanceKinds = normalizeStrings(f.Capabilities.GovernanceKinds)
+	f.Capabilities.PrerequisiteFacts = NormalizeRuntimeCapabilityPrerequisiteFacts(f.Capabilities.PrerequisiteFacts)
 	f.Resources = f.Resources.Normalized()
 	f.Activation = f.Activation.Normalized()
 	f.ReconciliationContract = f.ReconciliationContract.Normalized()
@@ -1483,6 +1524,9 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if f.Focus.ID == "" {
 		return fmt.Errorf("runtime facts require a coverage focus")
+	}
+	if err := ValidateRuntimeCapabilityPrerequisiteFacts(raw.Capabilities.PrerequisiteFacts); err != nil {
+		return fmt.Errorf("runtime capability prerequisite facts: %w", err)
 	}
 	for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
 		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {

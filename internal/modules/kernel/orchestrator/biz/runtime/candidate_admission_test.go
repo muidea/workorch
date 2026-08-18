@@ -402,13 +402,14 @@ func TestEvaluateCandidateAdmissionAllowsFiniteOwnerGroundedWorkspaceScopeThroug
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
+	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, selection.TargetRefs)
 
 	candidate := stateChangeCandidate()
 	groundedTarget := "implementation.go"
 	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{groundedTarget}
 	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters(groundedTarget)
 	if admitted := EvaluateCandidateAdmission(aggregate, candidate); !admitted.Accepted() {
-		t.Fatalf("owner-grounded workspace scope candidate rejected before File admissibility: %+v", admitted)
+		t.Fatalf("owner-grounded workspace scope candidate rejected before File admissibility: result=%+v failure=%+v", admitted, admitted.Failure)
 	}
 }
 
@@ -425,6 +426,7 @@ func TestEvaluateCandidateAdmissionRejectsTargetOutsideFiniteOwnerGroundedWorksp
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
+	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, selection.TargetRefs)
 
 	candidate := stateChangeCandidate()
 	outsideTarget := "new-deliverable.go"
@@ -469,6 +471,7 @@ func TestEvaluateCandidateAdmissionWorkspaceScopeAllowsExplicitFileGroundedTechn
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
+	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleShell, runtimecontract.StepKindShellCommand, "", runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, selection.TargetRefs)
 
 	shell := runtimecontract.RuntimeOperation{ID: "tidy-modules", Kind: runtimecontract.StepKindShellCommand, TargetRefs: []string{"go.sum"}}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: shell}}}}
@@ -540,6 +543,7 @@ func TestEvaluateCandidateAdmissionCreationScopeRequiresConcreteDurableFileTarge
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	aggregate.Facts.Resources.TargetSelection = &selection
 	bindCurrentFocusTargetSelection(&aggregate.Facts)
+	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, nil)
 
 	gitInit := "init"
 	nonFileCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -583,6 +587,7 @@ func TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget(t *testin
 	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 		Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
 	}
+	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, selection.TargetRefs)
 
 	candidate := stateChangeCandidate()
 	wrongTarget := "support.go"
@@ -601,7 +606,7 @@ func TestEvaluateCandidateAdmissionScopeCannotBypassOwnerFailureTarget(t *testin
 	candidate.StateChange.Operations[0].Operation.TargetRefs = []string{"implementation.go"}
 	candidate.StateChange.Operations[0].Operation.Parameters = patchApplyTestParameters("implementation.go")
 	if result := EvaluateCandidateAdmission(aggregate, candidate); !result.Accepted() {
-		t.Fatalf("candidate targeting owner failure target rejected: %+v", result)
+		t.Fatalf("candidate targeting owner failure target rejected: result=%+v failure=%+v", result, result.Failure)
 	}
 }
 
@@ -837,4 +842,34 @@ func aggregateWithActiveRejectedCandidate(t *testing.T) (RuntimeAggregate, runti
 		Revision: "runtime-evidence-00000000000000000001", FailureSignature: "rejected-patch",
 	}}
 	return aggregate, candidate
+}
+
+func addCandidateAdmissionTargetPolicyFixture(facts *runtimecontract.RuntimeFacts, owner, kind, variantID string, policy runtimecontract.RuntimeOperationTargetPolicy, targetRefs []string) {
+	selectorRefs := []string{"file/workspace_deliverable"}
+	constraintRefs := []string{"workspace-relative-path"}
+	variants := []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+		Kind: kind, VariantID: variantID, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{policy},
+		SelectorRefs: selectorRefs, ConstraintRefs: constraintRefs,
+	}}
+	if kind == runtimecontract.RuntimeBlockKindPatchApply && variantID == "file_write" && policy == runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope {
+		variants = nil
+		for _, patchVariant := range []string{"file_write", "text_replace", "unified_diff"} {
+			variants = append(variants, runtimecontract.RuntimeOperationAdmissibilityVariant{
+				Kind: kind, VariantID: patchVariant, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{policy},
+				SelectorRefs: selectorRefs, ConstraintRefs: constraintRefs,
+			})
+		}
+	}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:    "operation_admissibility:test:" + kind,
+		OwnerModuleID:     owner,
+		OperationKinds:    []string{kind},
+		TargetRefs:        append([]string(nil), targetRefs...),
+		SelectorRefs:      selectorRefs,
+		ConstraintRefs:    constraintRefs,
+		OperationVariants: variants,
+		ObservedRevision:  "owner-policy-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
 }

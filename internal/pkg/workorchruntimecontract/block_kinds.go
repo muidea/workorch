@@ -65,20 +65,16 @@ func RuntimeModuleForOperationKind(kind string) string {
 
 // OperationHasWorkspaceSideEffects reports whether a concrete operation may mutate
 // workspace or remote state. Kind-level effect comes from RuntimeOperationDescriptor.
-// Prefer OperationHasWorkspaceSideEffectsWithCapabilities when sealed MCP capability
-// metadata is available.
+// Prefer OperationHasWorkspaceSideEffectsWithPolicies when sealed owner facts
+// are available.
 func OperationHasWorkspaceSideEffects(operation RuntimeOperation) bool {
-	return OperationHasWorkspaceSideEffectsWithCapabilities(operation, nil)
+	return OperationHasWorkspaceSideEffectsWithPolicies(operation, nil)
 }
 
-// OperationHasWorkspaceSideEffectsWithCapabilities is the capability-aware side-effect
-// gate based on ResolveExpectedEffectScope. Unknown kinds default to mutating. MCP tool
-// calls may be narrowed only by owner-sealed EffectScope. Shell/SSH may be narrowed by
-// explicit stateChanging=false at seal time; missing stateChanging keeps the durable
-// kind default.
-func OperationHasWorkspaceSideEffectsWithCapabilities(operation RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) bool {
-	// Prefer concrete ExpectedEffectScope (descriptor + params + sealed MCP metadata).
-	scope := ResolveExpectedEffectScope(operation, capabilities)
+// OperationHasWorkspaceSideEffectsWithPolicies is the owner-fact-aware
+// side-effect gate. Unknown effects fail closed as mutating.
+func OperationHasWorkspaceSideEffectsWithPolicies(operation RuntimeOperation, policies []RuntimeOperationPolicyFact) bool {
+	scope := ResolveExpectedEffectScope(operation, policies)
 	switch scope {
 	case RuntimeEffectNone, RuntimeEffectEphemeralSession, RuntimeEffectGovernanceOnly:
 		return false

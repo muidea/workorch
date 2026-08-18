@@ -36,7 +36,7 @@ func (e eventRuntimeOperationExecutor) ExecuteRuntimeOperation(ctx context.Conte
 	if destination == "" {
 		return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("runtime operation kind %q has no owner module", request.Operation.Kind)
 	}
-	workspace, err := (workspaceEventRepository{hub: e.hub}).Get(ctx, request.WorkspaceID)
+	workspace, err := (workspaceSnapshotReader{hub: e.hub}).Read(ctx, request.WorkspaceID)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}

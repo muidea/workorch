@@ -611,6 +611,10 @@ func addCurrentMCPFailureObservationFreshness(t *testing.T, aggregate *RuntimeAg
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation_admissibility:mcp", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
 		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{"server-a"}, ObservedRevision: revision,
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "test/mcp/read-only", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+			EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	prerequisite := runtimecontract.RuntimePrerequisite{
@@ -992,14 +996,15 @@ func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepositor
 		t.Fatal(err)
 	}
 	var dispatch SealedDispatch
+	effectiveActivation := runtimecontract.RuntimeActivationForFacts(aggregate.Facts)
 	if runtimeCandidateHasManagedValidation(candidate) {
 		recipes, snapshotErr := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
 		if snapshotErr != nil {
 			t.Fatal(snapshotErr)
 		}
-		dispatch, err = sealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, recipes, nil)
+		dispatch, err = sealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, effectiveActivation, recipes, nil)
 	} else {
-		dispatch, err = SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
+		dispatch, err = SealDispatchWithActivation(aggregate.Decision, candidate, effectiveActivation)
 	}
 	if err != nil {
 		t.Fatal(err)

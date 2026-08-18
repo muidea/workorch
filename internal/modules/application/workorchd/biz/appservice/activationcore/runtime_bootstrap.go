@@ -87,12 +87,12 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "managed validation capability required"},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}, Reason: "governance capability required"},
 	}
-	profileRequirements, err := runtimeProfileCapabilityRequirements(activation.ExecutionContract.ProfileContracts, activation.MCPCapabilities)
+	profileRequirements, err := runtimeProfileCapabilityRequirements(activation.ExecutionContract.ProfileContracts, activation.OperationPolicies)
 	if err != nil {
 		return nil, err
 	}
 	requirements = append(requirements, profileRequirements...)
-	focusRequirements, err := runtimeFocusCapabilityRequirements(compiledFocuses, activation.MCPCapabilities)
+	focusRequirements, err := runtimeFocusCapabilityRequirements(compiledFocuses, activation.OperationPolicies)
 	if err != nil {
 		return nil, err
 	}
@@ -307,10 +307,10 @@ func runtimeFocusCapabilityKinds(focuses []runtimecontract.CoverageFocus) ([]str
 // runtimeFocusCapabilityRequirements compiles owner capability
 // prerequisites from sealed focus proof shapes.  This is deliberately a pure
 // activation compiler: it does not inspect the workspace or invoke an owner.
-// MCP tool effect remains determined by the activation-sealed capability
-// metadata; absent metadata stays conservative and is treated as the
-// descriptor's default state-change class.
-func runtimeFocusCapabilityRequirements(focuses []runtimecontract.CoverageFocus, mcpCapabilities []runtimecontract.RuntimeMCPCapabilityContext) ([]runtimecontract.RuntimeRequirement, error) {
+// Dynamic operation effect remains determined by activation-sealed owner
+// policies; absent policy stays conservative and uses the descriptor's
+// default capability class.
+func runtimeFocusCapabilityRequirements(focuses []runtimecontract.CoverageFocus, operationPolicies []runtimecontract.RuntimeOperationPolicyFact) ([]runtimecontract.RuntimeRequirement, error) {
 	ret := make([]runtimecontract.RuntimeRequirement, 0)
 	seen := map[string]struct{}{}
 	for _, focus := range focuses {
@@ -340,7 +340,7 @@ func runtimeFocusCapabilityRequirements(focuses []runtimecontract.CoverageFocus,
 				}
 				return nil, fmt.Errorf("focus accepted step kind %q has no runtime owner", value)
 			}
-			capabilityClass := runtimeProfileCapabilityClass(requirement, kind, descriptor, mcpCapabilities)
+			capabilityClass := runtimeProfileCapabilityClass(requirement, kind, descriptor, operationPolicies)
 			key := descriptor.OwnerModuleID + "|" + string(capabilityClass) + "|" + kind
 			if _, exists := seen[key]; exists {
 				continue
@@ -355,7 +355,7 @@ func runtimeFocusCapabilityRequirements(focuses []runtimecontract.CoverageFocus,
 	return ret, nil
 }
 
-func runtimeProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProfileContract, mcpCapabilities []runtimecontract.RuntimeMCPCapabilityContext) ([]runtimecontract.RuntimeRequirement, error) {
+func runtimeProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProfileContract, operationPolicies []runtimecontract.RuntimeOperationPolicyFact) ([]runtimecontract.RuntimeRequirement, error) {
 	ret := []runtimecontract.RuntimeRequirement{}
 	seen := map[string]struct{}{}
 	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(profiles) {
@@ -369,7 +369,7 @@ func runtimeProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProf
 				if descriptor.OwnerModuleID == "" {
 					return nil, fmt.Errorf("profile accepted step kind %q has no owner module", kind)
 				}
-				capabilityClass := runtimeProfileCapabilityClass(requirement, canonical, descriptor, mcpCapabilities)
+				capabilityClass := runtimeProfileCapabilityClass(requirement, canonical, descriptor, operationPolicies)
 				key := descriptor.OwnerModuleID + "|" + string(capabilityClass) + "|" + canonical
 				if _, exists := seen[key]; exists {
 					continue
@@ -406,28 +406,17 @@ func runtimeProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProf
 }
 
 // runtimeProfileCapabilityClass maps a profile evidence requirement to the
-// inventory class that the owner must acquire for this Run.  Most operation
-// descriptors have a fixed class.  MCP tool calls are intentionally different:
-// their concrete effect is capability-owner metadata sealed in Activation, so a
-// selected non-durable tool can satisfy validation while a durable tool cannot.
-// This only changes the capability inventory; candidate seal still verifies the
-// exact server/tool and sealed effect scope before execution.
-func runtimeProfileCapabilityClass(requirement runtimecontract.RuntimeProfileEvidenceRequirement, kind string, descriptor runtimecontract.RuntimeOperationDescriptor, mcpCapabilities []runtimecontract.RuntimeMCPCapabilityContext) runtimecontract.RuntimeCapabilityClass {
+// inventory class that the owner must acquire for this Run. Descriptor defaults
+// cover fixed kinds; any dynamic effect is read only from owner-published typed
+// policies, without protocol- or capability-name branches.
+func runtimeProfileCapabilityClass(requirement runtimecontract.RuntimeProfileEvidenceRequirement, kind string, descriptor runtimecontract.RuntimeOperationDescriptor, operationPolicies []runtimecontract.RuntimeOperationPolicyFact) runtimecontract.RuntimeCapabilityClass {
 	if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 		return runtimecontract.RuntimeCapabilityClassStateChange
 	}
-	if kind != runtimecontract.StepKindMCPToolCall {
-		return descriptor.CapabilityClass
-	}
-	sealedCapabilities := make([]runtimecontract.RuntimeMCPCapabilityContext, 0, len(mcpCapabilities))
-	for _, capability := range mcpCapabilities {
-		sealedCapabilities = append(sealedCapabilities, runtimecontract.SealMCPCapabilityEffect(capability))
-	}
-	if runtimecontract.OperationEffectCompatibleWithSealedCapabilities(
+	if runtimecontract.OperationEffectCompatibleWithPolicies(
 		kind,
 		runtimecontract.ConvergenceStateNeedValidation,
-		runtimecontract.RuntimeCapabilities{ValidationKinds: []string{kind}},
-		sealedCapabilities,
+		operationPolicies,
 	) {
 		return runtimecontract.RuntimeCapabilityClassValidation
 	}

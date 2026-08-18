@@ -70,7 +70,7 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 	}
 }
 
-func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredGroundedKind(t *testing.T) {
+func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyOwnerPublishedKind(t *testing.T) {
 	decision := RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
@@ -85,8 +85,19 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 		OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionScope,
 		CandidateTargetRefs: []string{"go.sum", "go.mod"},
 	}
+	shellInventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation_admissibility:shell", OwnerModuleID: RuntimeModuleShell,
+		OperationKinds: []string{StepKindShellCommand}, TargetRefs: []string{"go.mod", "go.sum"},
+		OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+			Kind: StepKindShellCommand, AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExistingOwnerScope},
+		}},
+		ObservedRevision: "shell-policy-v1",
+	}
+	shellInventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellInventory)
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
+		TargetSelection: selection, OperationAdmissibilities: []RuntimeOperationAdmissibility{shellInventory},
+	})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 	}
@@ -94,7 +105,7 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 	for _, operation := range manifest.Operations {
 		kinds = append(kinds, operation.Kind)
 	}
-	if want := []string{RuntimeBlockKindPatchApply, StepKindShellCommand}; !reflect.DeepEqual(kinds, want) {
+	if want := []string{StepKindShellCommand}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("scope manifest kinds = %v, want %v", kinds, want)
 	}
 	for _, operation := range manifest.Operations {
@@ -256,6 +267,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 	})
 	t.Run("existing_owner_scope from complete selection", func(t *testing.T) {
 		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
+		decision.RequiredOutput.AcceptedKinds = []string{StepKindFileEdit}
 		selection := &RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable",
 			SelectorRef: "file/workspace_deliverable", Disposition: RuntimeTargetSelectionScope,
@@ -263,8 +275,21 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 			CandidateCount: 2, ObservedRevision: "rev-1",
 		}
 		selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(*selection)
+		inventory := RuntimeOperationAdmissibility{
+			PrerequisiteID: "operation_admissibility:file-edit", OwnerModuleID: RuntimeModuleFile,
+			OperationKinds: []string{StepKindFileEdit}, TargetRefs: []string{"a.go", "b.go"},
+			SelectorRefs: []string{"file/workspace_deliverable"},
+			OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+				Kind: StepKindFileEdit, AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExistingOwnerScope},
+				SelectorRefs: []string{"file/workspace_deliverable"},
+			}},
+			ObservedRevision: "tree-v1",
+		}
+		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
-		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
+		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
+			TargetSelection: selection, OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
+		})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 		}
@@ -292,13 +317,9 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 			OperationKinds: []string{StepKindFileWrite}, TargetRefs: []string{"existing.go", "support.go"},
 			SelectorRefs: []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
 			OperationVariants: []RuntimeOperationAdmissibilityVariant{{
-				Kind: StepKindFileWrite,
-				AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
-					RuntimeOperationTargetPolicyExactTarget,
-					RuntimeOperationTargetPolicyExistingOwnerScope,
-					RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-				},
-				SelectorRefs: []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+				Kind:                  StepKindFileWrite,
+				AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+				SelectorRefs:          []string{"file/workspace_deliverable"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
 			}},
 			ObservedRevision: "tree-v2",
 		}
@@ -723,7 +744,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			TargetSelection:          selection,
 			OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
 		})
-		if err == nil || !strings.Contains(err.Error(), "explicit owner-admissible operation variant") {
+		if err == nil || !strings.Contains(err.Error(), "no allowed operation kinds") {
 			t.Fatalf("selector-only catalog unexpectedly sealed prospective authorization: %v", err)
 		}
 	})

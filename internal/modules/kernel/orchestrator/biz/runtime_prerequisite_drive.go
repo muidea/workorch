@@ -20,7 +20,7 @@ func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime
 	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
+	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -48,6 +48,11 @@ func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime
 				return runtime.RuntimeAggregate{}, err
 			}
 			progressed = true
+			// Re-read and re-order after every persisted owner fact. Capability
+			// acquisition can add owner-published resource dependencies to the
+			// current graph, and those dependencies must be acquired before an
+			// already-copied dependent inventory item.
+			break
 		}
 		if !progressed {
 			return runtime.RuntimeAggregate{}, fmt.Errorf("runtime prerequisite dispatcher made no progress")
@@ -84,7 +89,7 @@ func (m *Biz) confirmRuntimeRepairSurface(ctx context.Context, aggregate runtime
 	}); err != nil {
 		return runtime.RuntimeAggregate{}, false, err
 	}
-	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
+	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, false, err
 	}

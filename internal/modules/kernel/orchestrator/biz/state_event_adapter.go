@@ -14,50 +14,19 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/soulbinding"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type runEventRepository struct {
+// runSnapshotReader is the Orchestrator's only Run lifecycle read surface.
+// Runtime aggregate persistence uses the separate opaque record query/CAS
+// contract below; this reader intentionally cannot create, list, mutate, or
+// delete Run owner state.
+type runSnapshotReader struct {
 	hub magicevent.Hub
 }
 
-func (r runEventRepository) Create(ctx context.Context, item *runmodel.Run) error {
-	if item == nil {
-		return common.ErrInvalidArgument
-	}
-	if r.hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandCreate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, createRunCommandFromModel(item))
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID)
-	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandCreate)
-	return err
-}
-
-func (r runEventRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if workspaceID != "" {
-		return r.GetByWorkspaceID(ctx, workspaceID, id)
-	}
-	if r.hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(id), workspaceID, id)
-	response, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandGet)
-	if err != nil {
-		return nil, err
-	}
-	if response.Run == nil {
-		return nil, common.ErrNotFound
-	}
-	return response.Run, nil
-}
-
-func (r runEventRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+func (r runSnapshotReader) Read(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
 	if workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -76,75 +45,13 @@ func (r runEventRepository) GetByWorkspaceID(ctx context.Context, workspaceID co
 	return response.Run, nil
 }
 
-func (r runEventRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
-	if r.hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{})
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "all", workspaceID, "")
-	response, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandList)
-	if err != nil {
-		return nil, err
-	}
-	return response.Runs, nil
-}
-
-func (r runEventRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
-	if r.hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListByWorkspace, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
-	response, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandListByWorkspace)
-	if err != nil {
-		return nil, err
-	}
-	return response.Runs, nil
-}
-
-func (r runEventRepository) Update(ctx context.Context, item *runmodel.Run) error {
-	if item == nil {
-		return common.ErrInvalidArgument
-	}
-	if r.hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandStoreRuntimeStateRecord, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, storeRuntimeStateRecordCommandFromModel(item))
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandStoreRuntimeStateRecord, "run", string(item.ID), item.WorkspaceID, item.ID)
-	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandStoreRuntimeStateRecord)
-	return err
-}
-
-func (r runEventRepository) Delete(ctx context.Context, id common.RunID) error {
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if r.hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandDelete, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.DeleteRunCommand{WorkspaceID: workspaceID, RunID: id})
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandDelete, "run", string(id), workspaceID, id)
-	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandDelete)
-	return err
-}
-
-type workspaceEventRepository struct {
+// workspaceSnapshotReader is deliberately read-only. Workspace lifecycle and
+// default-selection mutation stay entirely inside the Workspace owner.
+type workspaceSnapshotReader struct {
 	hub magicevent.Hub
 }
 
-func (r workspaceEventRepository) Create(ctx context.Context, item *workspacemodel.Workspace) error {
-	if item == nil {
-		return common.ErrInvalidArgument
-	}
-	if r.hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, createWorkspaceCommandFromModel(item))
-	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(item.ID), item.ID, "")
-	_, err := workspaceCommandResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandCreate)
-	return err
-}
-
-func (r workspaceEventRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+func (r workspaceSnapshotReader) Read(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
 	if r.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -158,47 +65,6 @@ func (r workspaceEventRepository) Get(ctx context.Context, id common.WorkspaceID
 		return nil, common.ErrNotFound
 	}
 	return workspaceeventmapping.Workspace(response.Workspace), nil
-}
-
-func (r workspaceEventRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
-	if r.hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandList, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspacesCommand{})
-	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandList, "workspace", "all", workspaceID, "")
-	response, err := workspaceCommandResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandList)
-	if err != nil {
-		return nil, err
-	}
-	return workspaceeventmapping.Workspaces(response.Workspaces), nil
-}
-
-func (r workspaceEventRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
-	if item == nil {
-		return common.ErrInvalidArgument
-	}
-	command, err := updateWorkspaceCommandFromModel(item)
-	if err != nil {
-		return err
-	}
-	if r.hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandUpdate, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID)
-	_, err = workspaceCommandResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdate)
-	return err
-}
-
-func (r workspaceEventRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
-	if r.hub == nil {
-		return common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDelete, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceCommand{WorkspaceID: id})
-	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDelete, "workspace", string(id), id, "")
-	_, err := workspaceCommandResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandDelete)
-	return err
 }
 
 type memoryEventRepository struct {
@@ -358,22 +224,6 @@ func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.
 	return err
 }
 
-func createRunCommandFromModel(item *runmodel.Run) runevents.CreateRunCommand {
-	if item == nil {
-		return runevents.CreateRunCommand{}
-	}
-	return runevents.CreateRunCommand{
-		RunID:              item.ID,
-		WorkspaceID:        item.WorkspaceID,
-		GoalID:             item.GoalID,
-		DoDID:              item.DoDID,
-		DefinitionRevision: item.DefinitionRevision,
-		InitialStepKind:    item.InitialStepKind,
-		RuntimeBootstrap:   cloneRuntimeBootstrap(item.RuntimeBootstrap),
-		Priority:           item.Priority,
-	}
-}
-
 func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) runevents.StoreRuntimeStateRecordCommand {
 	if item == nil {
 		return runevents.StoreRuntimeStateRecordCommand{}
@@ -451,45 +301,4 @@ func cloneRuntimeStateRecord(value *runtimecontract.RuntimeStateRecord) *runtime
 	}
 	cloned := value.Clone()
 	return &cloned
-}
-
-func cloneRuntimeBootstrap(value *runtimecontract.RuntimeBootstrap) *runtimecontract.RuntimeBootstrap {
-	if value == nil {
-		return nil
-	}
-	cloned := value.Clone()
-	return &cloned
-}
-
-func createWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspaceevents.CreateWorkspaceCommand {
-	if item == nil {
-		return workspaceevents.CreateWorkspaceCommand{}
-	}
-	return workspaceevents.CreateWorkspaceCommand{
-		WorkspaceID:          item.ID,
-		Title:                item.Title,
-		Description:          item.Description,
-		DeliverableDirectory: item.DeliverableDirectory,
-		InternalDirectory:    item.InternalDirectory,
-	}
-}
-
-func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspaceevents.UpdateWorkspaceCommand, error) {
-	if item == nil {
-		return workspaceevents.UpdateWorkspaceCommand{}, common.ErrInvalidArgument
-	}
-	return workspaceevents.UpdateWorkspaceCommand{
-		WorkspaceID:          item.ID,
-		Title:                item.Title,
-		Description:          item.Description,
-		DeliverableDirectory: item.DeliverableDirectory,
-		InternalDirectory:    item.InternalDirectory,
-		TemplateID:           item.TemplateID,
-		ProfileID:            item.ProfileID,
-		DefaultLLMSelection:  runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
-		DefaultSoulID:        item.DefaultSoulID,
-		SoulBindings:         soulbinding.FromSoulIDMap(item.SoulBindings),
-		ContextHints:         item.ContextHints.Clone(),
-		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
-	}, nil
 }

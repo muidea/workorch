@@ -132,6 +132,9 @@ func TestRuntimeAdapterManagedValidationAdmissibilityPublishesOwnerSelector(t *t
 	if !reflect.DeepEqual(inventory.SelectorRefs, []string{"workspace-validation-target"}) {
 		t.Fatalf("selector refs = %+v, want workspace-validation-target", inventory.SelectorRefs)
 	}
+	if len(inventory.OperationVariants) != 0 {
+		t.Fatalf("managed validation unexpectedly widened target authority: %+v", inventory.OperationVariants)
+	}
 	if err := inventory.Validate(); err != nil {
 		t.Fatalf("inventory validation: %v", err)
 	}

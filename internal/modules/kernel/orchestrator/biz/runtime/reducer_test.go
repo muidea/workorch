@@ -250,7 +250,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "creation_scope_file_capability_unavailable" {
+		if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "creation_scope_capability_unavailable" {
 			t.Fatalf("creation scope without File admission decision = %+v", decision)
 		}
 	})

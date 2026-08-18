@@ -8,6 +8,20 @@ type AcquireRuntimeCapabilitiesResult struct {
 }
 
 func ResolveRuntimeCapabilities(command AcquireRuntimeCapabilitiesCommand, ownerModuleID string, supportedKinds ...string) (AcquireRuntimeCapabilitiesResult, error) {
-	resolved, err := runtimecontract.ResolveRuntimeCapabilityAcquisition(runtimecontract.RuntimeCapabilityAcquisitionRequest(command), ownerModuleID, supportedKinds...)
+	resolved, err := runtimecontract.ResolveRuntimeCapabilityAcquisitionWithPrerequisites(
+		runtimecontract.RuntimeCapabilityAcquisitionRequest(command),
+		ownerModuleID,
+		[]runtimecontract.RuntimeCapabilityPrerequisiteFact{{
+			ID:            "shell/managed-validation/workspace-manifest/v1",
+			OwnerModuleID: ownerModuleID,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Requirement: runtimecontract.RuntimeRequirement{
+				Kind:          runtimecontract.PrerequisiteKindManifest,
+				OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				Reason:        "managed validation catalog requires the File owner workspace manifest",
+			},
+		}},
+		supportedKinds...,
+	)
 	return AcquireRuntimeCapabilitiesResult{Acquisition: resolved}, err
 }

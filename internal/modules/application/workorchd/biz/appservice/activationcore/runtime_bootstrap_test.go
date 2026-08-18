@@ -710,11 +710,20 @@ func TestRuntimeBootstrapSoftwareDevProfileIncludesManagedValidation(t *testing.
 }
 
 func TestRuntimeBootstrapRegistersSelectedReadOnlyMCPToolForValidation(t *testing.T) {
+	serverID, toolName := "mcp-1", "repo.summary"
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
-			ID: "mcp-1:tool:repo.summary", ServerID: "mcp-1", Kind: "tool", Name: "repo.summary", Enabled: true,
+			ID: "mcp-1:tool:repo.summary", ServerID: common.MCPServerID(serverID), Kind: "tool", Name: toolName, Enabled: true,
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "operation-policy/mcp-1:tool:repo.summary", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: "mcp-1:tool:repo.summary",
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
+				{Name: "serverId", String: &serverID}, {Name: "tool", String: &toolName},
+			},
+			EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 		}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),

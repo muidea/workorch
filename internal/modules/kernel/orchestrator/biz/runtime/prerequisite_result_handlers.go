@@ -64,6 +64,11 @@ func applyCapabilityPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prer
 	facts.Capabilities.StateChangeKinds = mergeCapabilityKinds(facts.Capabilities.StateChangeKinds, result.Capabilities.StateChangeKinds)
 	facts.Capabilities.ValidationKinds = mergeCapabilityKinds(facts.Capabilities.ValidationKinds, result.Capabilities.ValidationKinds)
 	facts.Capabilities.GovernanceKinds = mergeCapabilityKinds(facts.Capabilities.GovernanceKinds, result.Capabilities.GovernanceKinds)
+	mergedPrerequisiteFacts, err := runtimecontract.MergeRuntimeCapabilityPrerequisiteFacts(facts.Capabilities.PrerequisiteFacts, result.Capabilities.PrerequisiteFacts)
+	if err != nil {
+		return fmt.Errorf("capability prerequisite returned conflicting resource facts: %w", err)
+	}
+	facts.Capabilities.PrerequisiteFacts = mergedPrerequisiteFacts
 	return nil
 }
 

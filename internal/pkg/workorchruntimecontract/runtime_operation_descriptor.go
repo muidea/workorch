@@ -18,8 +18,8 @@ const (
 
 // RuntimeOperationDescriptor is the single shared technical contract for a concrete operation kind.
 // It does not register executors and does not restore a generic RuntimeAdapter registry.
-// DefaultEffectScope is the kind-level default; concrete ExpectedEffectScope may still be
-// narrowed by sealed capability metadata and operation parameters (shell stateChanging, MCP risk).
+// DefaultEffectScope is the conservative kind-level default; concrete
+// ExpectedEffectScope may be replaced only by a capability-owner policy fact.
 type RuntimeOperationDescriptor struct {
 	Kind                 string
 	OwnerModuleID        string
@@ -29,21 +29,6 @@ type RuntimeOperationDescriptor struct {
 	IdempotencyClass     RuntimeOperationIdempotencyClass
 	RequiresOwnerReceipt bool
 	TargetCardinality    RuntimeOperationTargetCardinality
-	// AllowsNewTarget is a technical operation-contract property. It means the
-	// owner can apply this kind to an owner-authorized, workspace-relative
-	// target that is absent at observation time. It does not grant a path: the
-	// capability owner must still publish a matching admissibility selector.
-	AllowsNewTarget bool
-	// AllowsGroundedWorkspaceTarget declares that this technical operation may
-	// mutate an already-existing workspace-relative target when File has sealed
-	// that target in a bounded workspace scope. It never authorizes target
-	// discovery, creation, or a target outside the File owner inventory.
-	//
-	// This is intentionally narrower than AllowsNewTarget: only File-owned
-	// operations can create a target; a non-File owner with this flag still
-	// requires its own sealed capability, admissibility receipt, and operation
-	// receipt.
-	AllowsGroundedWorkspaceTarget bool
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
@@ -68,18 +53,17 @@ func RuntimeOperationDescriptorForKind(kind string) (RuntimeOperationDescriptor,
 
 // FeasibleOperationKinds returns the stably sorted descriptor-only intersection of
 // required accepted kinds and sealed RuntimeCapabilities. It intentionally excludes
-// MCP tool calls because their effect is capability-specific and cannot be proven from
-// a kind alone. Call FeasibleOperationKindsWithActivation on the Runtime mainline.
+// dynamic-effect kinds because their effect cannot be proven from a kind alone.
+// Call FeasibleOperationKindsWithActivation on the Runtime mainline.
 func FeasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities) []string {
 	return feasibleOperationKinds(state, required, capabilities, nil)
 }
 
-// FeasibleOperationKindsWithActivation additionally consumes the activation-sealed
-// MCP capability inventory. This is the only feasibility path that may expose
-// mcp/tool_call, and only when at least one enabled explicit capability effect is
-// compatible with the reducer action.
-func FeasibleOperationKindsWithActivation(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
-	return feasibleOperationKinds(state, required, capabilities, mcpCapabilities)
+// FeasibleOperationKindsWithActivation additionally consumes activation- or
+// catalog-sealed owner operation policies. A dynamic-effect kind is exposed
+// only when one typed fact is compatible with the reducer action.
+func FeasibleOperationKindsWithActivation(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, operationPolicies []RuntimeOperationPolicyFact) []string {
+	return feasibleOperationKinds(state, required, capabilities, operationPolicies)
 }
 
 // FeasibleOperationKindsWithOwnerValidationRecipes further narrows the
@@ -87,8 +71,8 @@ func FeasibleOperationKindsWithActivation(state ConvergenceState, required Requi
 // managed validation recipes. It never runs a command or selects an action;
 // it prevents an empty recipe selection set from being presented as an
 // executable candidate kind.
-func FeasibleOperationKindsWithOwnerValidationRecipes(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext, recipes []RuntimeValidationRecipe) []string {
-	ret := FeasibleOperationKindsWithActivation(state, required, capabilities, mcpCapabilities)
+func FeasibleOperationKindsWithOwnerValidationRecipes(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, operationPolicies []RuntimeOperationPolicyFact, recipes []RuntimeValidationRecipe) []string {
+	ret := FeasibleOperationKindsWithActivation(state, required, capabilities, operationPolicies)
 	if state != ConvergenceStateNeedValidation {
 		return ret
 	}
@@ -104,7 +88,7 @@ func FeasibleOperationKindsWithOwnerValidationRecipes(state ConvergenceState, re
 	return nilIfEmpty(filtered)
 }
 
-func feasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
+func feasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, operationPolicies []RuntimeOperationPolicyFact) []string {
 	required = required.Normalized()
 	capabilities = RuntimeCapabilities{
 		StateChangeKinds: canonicalizeOperationKinds(capabilities.StateChangeKinds),
@@ -142,9 +126,9 @@ func feasibleOperationKinds(state ConvergenceState, required RequiredOutputContr
 		if !runtimeDescriptorAllowsState(descriptor, state) {
 			continue
 		}
-		// Action + effect feasibility (INV-02). MCP has no kind-level effect; it
-		// must be backed by an explicit activation-sealed capability scope.
-		if !OperationEffectCompatibleWithSealedCapabilities(canonical, state, capabilities, mcpCapabilities) {
+		// Action + effect feasibility (INV-02). A kind whose descriptor cannot
+		// prove the effect must be backed by an explicit owner policy fact.
+		if !OperationEffectCompatibleWithPolicies(canonical, state, operationPolicies) {
 			continue
 		}
 		seen[canonical] = struct{}{}
@@ -248,7 +232,7 @@ func init() {
 			Kind: StepKindFileWrite, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
-			RequiresOwnerReceipt: true, AllowsNewTarget: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
+			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,
@@ -281,14 +265,13 @@ func init() {
 			RequiresOwnerReceipt: true,
 		},
 		{
-			// shell/command default is durable; concrete ExpectedEffectScope is narrowed by
-			// sealed stateChanging parameter at seal time (RVC-R6).
+			// The conservative kind default is durable. The Shell owner may publish
+			// a parameter-matched non-durable policy in its current catalog.
 			Kind: StepKindShellCommand, OwnerModuleID: RuntimeModuleShell,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
 			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
-			TargetCardinality:             RuntimeOperationTargetCardinalityMany,
-			AllowsGroundedWorkspaceTarget: true,
+			TargetCardinality: RuntimeOperationTargetCardinalityMany,
 		},
 		{
 			// Managed validation is Shell-owned non-mutating validation. Candidate kind stays
@@ -305,7 +288,8 @@ func init() {
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
 		},
 		{
-			// MCP tool_call default is durable/unknown until sealed capability risk narrows it.
+			// Dynamic tool calls remain unknown until an owner policy fact
+			// supplies the exact parameter-bound effect/replay contract.
 			Kind: StepKindMCPToolCall, OwnerModuleID: RuntimeModuleMCP,
 			DefaultEffectScope: RuntimeEffectUnknown, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
 			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},

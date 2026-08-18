@@ -43,7 +43,7 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
 		Focus: facts.Focus, RemainingFocuses: facts.RemainingFocuses, Evidence: facts.Evidence,
 		Assessments: facts.Assessments, Failure: facts.Failure,
-		Capabilities: facts.Capabilities, Resources: facts.Resources, Activation: facts.Activation,
+		Capabilities: facts.Capabilities, Resources: facts.Resources, Activation: RuntimeActivationForFacts(facts),
 	}
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID {
 		directive := facts.RepairDirective.Clone()
@@ -77,7 +77,7 @@ func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDeci
 	context.RequiredState = decision.State
 	context.RequiredEffectScopes = append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...)
 	context.RequiredEvidenceKinds = append([]string(nil), required.RequiredEvidenceKinds...)
-	context.AdmissibleOperationKinds = FeasibleOperationKindsWithOwnerValidationRecipes(decision.State, decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities, RuntimeValidationRecipesFromOperationAdmissibilities(facts.Resources.OperationAdmissibilities))
+	context.AdmissibleOperationKinds = FeasibleOperationKindsWithOwnerValidationRecipes(decision.State, decision.RequiredOutput, facts.Capabilities, context.Activation.OperationPolicies, RuntimeValidationRecipesFromOperationAdmissibilities(facts.Resources.OperationAdmissibilities))
 	context.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(rejectedShapes)
 	return context.Normalized()
 }
@@ -142,7 +142,7 @@ func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
 	if !slices.Equal(c.RequiredEffectScopes, required.RequiredEffectScopes) || !slices.Equal(c.RequiredEvidenceKinds, required.RequiredEvidenceKinds) {
 		return fmt.Errorf("runtime candidate context requirements do not match sealed decision output")
 	}
-	wantKinds := FeasibleOperationKindsWithOwnerValidationRecipes(decision.State, decision.RequiredOutput, c.Capabilities, c.Activation.MCPCapabilities, RuntimeValidationRecipesFromOperationAdmissibilities(c.Resources.OperationAdmissibilities))
+	wantKinds := FeasibleOperationKindsWithOwnerValidationRecipes(decision.State, decision.RequiredOutput, c.Capabilities, c.Activation.OperationPolicies, RuntimeValidationRecipesFromOperationAdmissibilities(c.Resources.OperationAdmissibilities))
 	if !slices.Equal(c.AdmissibleOperationKinds, wantKinds) {
 		return fmt.Errorf("runtime candidate context admissible operation kinds do not match sealed decision")
 	}
@@ -455,13 +455,13 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		if c.StateChange == nil {
 			return fmt.Errorf("convergence state %s requires a state-change candidate", decision.State)
 		}
-		return validateRuntimeOperations(decision, stateChangingRuntimeOperations(c.StateChange.Operations), activation.MCPCapabilities)
+		return validateRuntimeOperations(decision, stateChangingRuntimeOperations(c.StateChange.Operations), activation.OperationPolicies)
 	case ConvergenceStateNeedValidation:
 		if c.Validation == nil {
 			return fmt.Errorf("convergence state %s requires a validation candidate", decision.State)
 		}
 		operations := validationRuntimeOperations(c.Validation.Operations)
-		if err := validateRuntimeOperations(decision, operations, activation.MCPCapabilities); err != nil {
+		if err := validateRuntimeOperations(decision, operations, activation.OperationPolicies); err != nil {
 			return err
 		}
 		return ValidateRuntimeValidationOperationRecipes(operations, activation.EvidencePolicies)
@@ -518,7 +518,7 @@ func ValidateAuthorityTransaction(decision RuntimeDecision, transaction Authorit
 	return nil
 }
 
-func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) error {
+func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOperation, policies []RuntimeOperationPolicyFact) error {
 	state := decision.State
 	required := decision.RequiredOutput
 	if len(operations) == 0 {
@@ -546,7 +546,7 @@ func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOpe
 			return fmt.Errorf("runtime candidate operation kind %q is not accepted", operation.Kind)
 		}
 		operation.Kind = canonicalKind
-		if state == ConvergenceStateNeedValidation && OperationHasWorkspaceSideEffectsWithCapabilities(operation, capabilities) {
+		if state == ConvergenceStateNeedValidation && OperationHasWorkspaceSideEffectsWithPolicies(operation, policies) {
 			return fmt.Errorf("runtime candidate operation %q has workspace side effects and cannot satisfy produce_validation; emit a non-mutating validation operation or request produce_state_change first", operation.ID)
 		}
 		if len(requiredCoverage) > 0 && !runtimeOperationBoundToRequiredCoverage(decision, operation, requiredCoverage) {
@@ -588,7 +588,7 @@ func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOpe
 	}
 	// Forward/reverse effect gate before seal (INV-02). Failures here must not
 	// consume execution/repair budget — they are candidate contract failures.
-	if err := ValidateCandidateEffectCompatibility(state, operations, required, capabilities); err != nil {
+	if err := ValidateCandidateEffectCompatibility(state, operations, required, policies); err != nil {
 		return err
 	}
 	return nil

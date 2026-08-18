@@ -61,7 +61,7 @@ func (m *Biz) reconcileRuntimeWorkspaceWithCommand(ctx context.Context, run *run
 		return aggregate, false, nil
 	}
 	var deliverableDirectory, internalDirectory string
-	workspace, workspaceErr := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
+	workspace, workspaceErr := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
 	if workspaceErr == nil && workspace != nil {
 		deliverableDirectory = strings.TrimSpace(workspace.DeliverableDirectory)
 		internalDirectory = strings.TrimSpace(workspace.InternalDirectory)

@@ -20,7 +20,6 @@ const (
 	// Continue intent against an already-active Run. It asks SM-4 for a re-drive
 	// without claiming a second SM-1 state transition.
 	TopicRunContinuationRequested           = "/run/continuation-requested"
-	TopicRunCommandCreate                   = "/run/command/create"
 	TopicRunCommandGet                      = "/run/command/get"
 	TopicRunCommandList                     = "/run/command/list"
 	TopicRunCommandListByWorkspace          = "/run/command/list-by-workspace"

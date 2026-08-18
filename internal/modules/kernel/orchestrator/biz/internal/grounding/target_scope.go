@@ -42,9 +42,9 @@ func SameTargetRefs(left, right []string) bool {
 	return true
 }
 
-// CurrentFocusTargetSelection returns only the File-owner selection committed
-// as a satisfied Focus-scoped prerequisite for the current Focus. A raw
-// resource pointer is audit lineage, not target authority.
+// CurrentFocusTargetSelection returns only an owner selection committed as a
+// satisfied Focus-scoped prerequisite for the current Focus. A raw resource
+// pointer is audit lineage, not target authority.
 func CurrentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecontract.RuntimeTargetSelection {
 	facts = facts.Normalized()
 	if facts.Resources.TargetSelection == nil {
@@ -62,7 +62,7 @@ func CurrentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecon
 	return nil
 }
 
-// HasOwnerGroundedCreationScope recognizes only a persisted File-owner create
+// HasOwnerGroundedCreationScope recognizes only a persisted owner create
 // observation matching the activation-sealed selector and prospective target.
 func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 	selection := CurrentFocusTargetSelection(facts)
@@ -72,20 +72,20 @@ func HasOwnerGroundedCreationScope(facts runtimecontract.RuntimeFacts) bool {
 	value := selection.Normalized()
 	focus := facts.Focus.Normalized()
 	return value.Disposition == runtimecontract.RuntimeTargetSelectionCreate &&
-		value.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+		value.OwnerModuleID != "" &&
 		value.TargetRole == focus.TargetRole && value.SelectorRef == focus.TargetSelectorRef &&
 		value.SelectorOwnerRef == focus.TargetSelectorOwnerRef && value.SelectorSubjectRef == focus.TargetSelectorSubjectRef &&
 		runtimecontract.SameRuntimeTargetSelectorCandidateRefs(value.SelectorCandidateRefs, focus.TargetSelectorCandidateRefs) &&
 		value.ProspectiveTargetRef != "" && value.ProspectiveTargetRef == focus.ProspectiveTargetRef
 }
 
-// HasOwnerGroundedTargetScope recognizes a bounded existing File inventory. An
+// HasOwnerGroundedTargetScope recognizes a bounded existing owner inventory. An
 // empty scope is authoritative only when it retains an activation-sealed owner
 // and subject identity.
 func HasOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
 	selection := CurrentFocusTargetSelection(facts)
 	if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-		selection.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		selection.OwnerModuleID == "" {
 		return false
 	}
 	return len(selection.TargetRefs) != 0 ||
@@ -101,10 +101,10 @@ func TargetSelectionHasConcreteTarget(selection runtimecontract.RuntimeTargetSel
 	return selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) != 0
 }
 
-// OwnerGroundedTargetScopeMaySelectNewFileTarget preserves File's bounded
-// workspace-scope adjudication only while no higher-precedence target fact has
-// been sealed for the current focus.
-func OwnerGroundedTargetScopeMaySelectNewFileTarget(facts runtimecontract.RuntimeFacts) bool {
+// OwnerGroundedTargetScopeMaySelectNewTarget preserves an owner's bounded
+// scope adjudication only while no higher-precedence target fact has been
+// sealed for the current focus.
+func OwnerGroundedTargetScopeMaySelectNewTarget(facts runtimecontract.RuntimeFacts) bool {
 	facts = facts.Normalized()
 	if !HasOwnerGroundedTargetScope(facts) || len(facts.Focus.TargetRefs) != 0 {
 		return false
@@ -141,7 +141,7 @@ func RepairTargets(facts runtimecontract.RuntimeFacts) []string {
 }
 
 // WorkspaceScopeTargets returns the canonical bounded inventory observed by
-// File. It does not authorize targets outside that inventory.
+// the target owner. It does not authorize targets outside that inventory.
 func WorkspaceScopeTargets(selection *runtimecontract.RuntimeTargetSelection) []string {
 	if selection == nil {
 		return nil

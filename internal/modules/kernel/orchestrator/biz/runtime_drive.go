@@ -180,7 +180,7 @@ type runtimeDriveTransitionOutcome struct {
 }
 
 func (m *Biz) initializeRuntimeDrive(ctx context.Context, command orchestratorevents.DriveRuntimeCommand) (*runmodel.Run, runtime.RuntimeAggregate, error) {
-	run, err := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
+	run, err := (runSnapshotReader{hub: m.EventHub()}).Read(ctx, command.WorkspaceID, command.RunID)
 	if err != nil {
 		return nil, runtime.RuntimeAggregate{}, err
 	}
@@ -379,7 +379,7 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 	}
 	switch {
 	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
-		run, loadErr := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
+		run, loadErr := (runSnapshotReader{hub: m.EventHub()}).Read(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
 			return runtimeProjectionFailure(loadErr)
 		}

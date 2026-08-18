@@ -257,7 +257,7 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 	if !found {
 		return SealedDispatch{}, fmt.Errorf("governance resume operation %q is missing from source candidate", binding.OperationID)
 	}
-	if err := resume.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation); err != nil {
+	if err := resume.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)); err != nil {
 		return SealedDispatch{}, err
 	}
 	return resume, nil

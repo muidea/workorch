@@ -99,7 +99,7 @@ func validateRuntimeAggregateSM3ActiveDispatch(a RuntimeAggregate) error {
 	if a.ActiveDispatch == nil {
 		return nil
 	}
-	if err := a.ActiveDispatch.ValidateWithActivation(a.Decision, a.Facts.Activation); err != nil {
+	if err := a.ActiveDispatch.ValidateWithActivation(a.Decision, runtimecontract.RuntimeActivationForFacts(a.Facts)); err != nil {
 		return fmt.Errorf("runtime aggregate active dispatch: %w", err)
 	}
 	return nil

@@ -665,11 +665,15 @@ func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T)
 	}
 }
 
-func TestPreflightRuntimeFactsDerivesFileManifestForShellManagedValidation(t *testing.T) {
+func TestPreflightRuntimeFactsCompilesCapabilityOwnerResourcePrerequisite(t *testing.T) {
 	facts := validationFacts()
-	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{
-		ID: "go-test", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go",
-		RecipeDeclared: true, RecipeArgs: []string{"test", "./..."}, RecipeTimeoutMillis: 30000,
+	facts.Capabilities.PrerequisiteFacts = []runtimecontract.RuntimeCapabilityPrerequisiteFact{{
+		ID: "shell/managed-validation/workspace-manifest/v1", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		Requirement: runtimecontract.RuntimeRequirement{
+			Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			Reason: "managed validation catalog requires the File owner workspace manifest",
+		},
 	}}
 	requirements := []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
@@ -684,12 +688,68 @@ func TestPreflightRuntimeFactsDerivesFileManifestForShellManagedValidation(t *te
 	if len(idempotent.Prerequisites.Pending) != 2 {
 		t.Fatalf("derived manifest prerequisite duplicated on re-drive: %+v", idempotent.Prerequisites.Pending)
 	}
+	capabilityOnly := PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{{
+		Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		CapabilityClass:      runtimecontract.RuntimeCapabilityClassValidation,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}})
+	if runtimePrerequisitesContainKindOwner(capabilityOnly.Prerequisites.Pending, runtimecontract.PrerequisiteKindManifest, runtimecontract.RuntimeModuleFile) {
+		t.Fatalf("capability catalog query consumed an operation resource dependency: %+v", capabilityOnly.Prerequisites.Pending)
+	}
 
-	withoutRecipe := facts
-	withoutRecipe.Activation.EvidencePolicies = nil
-	plain := PreflightRuntimeFacts(withoutRecipe, requirements)
+	withoutOwnerFact := facts
+	withoutOwnerFact.Capabilities.PrerequisiteFacts = nil
+	plain := PreflightRuntimeFacts(withoutOwnerFact, requirements)
 	if len(plain.Prerequisites.Pending) != 1 || plain.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
-		t.Fatalf("recipe-independent Shell catalog acquired unrelated File manifest: %+v", plain.Prerequisites.Pending)
+		t.Fatalf("operation kind without an owner fact acquired an inferred resource prerequisite: %+v", plain.Prerequisites.Pending)
+	}
+}
+
+func TestCommitCapabilityPrerequisiteImmediatelyCompilesOwnerResourceFact(t *testing.T) {
+	facts := validationFacts()
+	facts.Capabilities.ValidationKinds = nil
+	requirements := []runtimecontract.RuntimeRequirement{
+		{
+			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			CapabilityClass:      runtimecontract.RuntimeCapabilityClassValidation,
+			RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		},
+		{
+			Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		},
+	}
+	facts = PreflightRuntimeFacts(facts, requirements)
+	var capability runtimecontract.RuntimePrerequisite
+	for _, prerequisite := range facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindCapability {
+			capability = prerequisite
+			break
+		}
+	}
+	if capability.ID == "" {
+		t.Fatalf("capability prerequisite missing from %+v", facts.Prerequisites.Pending)
+	}
+	committed, err := CommitPrerequisiteResult(facts, PrerequisiteResult{
+		PrerequisiteID: capability.ID,
+		Capabilities: &runtimecontract.RuntimeCapabilities{
+			ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			PrerequisiteFacts: []runtimecontract.RuntimeCapabilityPrerequisiteFact{{
+				ID: "shell/managed-validation/workspace-manifest/v1", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+				OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+				Requirement: runtimecontract.RuntimeRequirement{
+					Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					Reason: "managed validation catalog requires the File owner workspace manifest",
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtimePrerequisitesContainKindOwner(committed.Prerequisites.Pending, runtimecontract.PrerequisiteKindManifest, runtimecontract.RuntimeModuleFile) ||
+		!runtimePrerequisitesContainKindOwner(committed.Prerequisites.Pending, runtimecontract.PrerequisiteKindOperationAdmissibility, runtimecontract.RuntimeModuleShell) {
+		t.Fatalf("owner resource dependency was not inserted ahead of dependent inventory: %+v", committed.Prerequisites.Pending)
 	}
 }
 

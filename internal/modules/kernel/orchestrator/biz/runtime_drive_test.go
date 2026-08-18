@@ -4875,10 +4875,10 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("crashed Shell admissibility state=%+v err=%v", crashed, err)
 			}
 			if crashAfterCAS {
-				if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 1 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 2 {
+				if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 1 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 3 {
 					t.Fatalf("after-CAS Shell inventory was not persisted: %+v", crashed.RuntimeState)
 				}
-			} else if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 0 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 1 {
+			} else if len(crashed.RuntimeState.Facts.Resources.OperationAdmissibilities) != 0 || len(crashed.RuntimeState.Facts.Resources.PrerequisiteObservations) != 2 {
 				t.Fatalf("before-CAS Shell inventory leaked into persisted state: %+v", crashed.RuntimeState)
 			}
 
@@ -4900,7 +4900,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			if len(resumed.Facts.Resources.OperationAdmissibilities) != 1 || resumed.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID != runtimecontract.RuntimeModuleShell ||
 				resumed.Facts.Resources.OperationAdmissibilities[0].SnapshotID == "" || resumed.Facts.Resources.OperationAdmissibilities[0].ObservedRevision == "" ||
-				len(resumed.Facts.Resources.PrerequisiteObservations) != 2 || len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 ||
+				len(resumed.Facts.Resources.PrerequisiteObservations) != 3 || len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 ||
 				resumed.ActiveDispatch != nil || len(resumed.CompletedDispatches) != 0 || len(resumed.GovernanceRequests) != 0 || len(resumed.OperationReceipts) != 0 ||
 				len(resumed.Facts.Evidence.Accepted) != 0 || len(resumed.Facts.Evidence.Rejected) != 0 {
 				t.Fatalf("restart Shell admissibility aggregate=%+v", resumed)
@@ -5001,7 +5001,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
-				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
+				len(invalidated.Facts.Resources.PrerequisiteObservations) != 2 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 				invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
@@ -5027,7 +5027,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			reacquiredInventory := reacquired.Facts.Resources.OperationAdmissibilities[0]
 			reacquiredObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(reacquired.Facts.Resources.PrerequisiteObservations, reacquiredInventory.PrerequisiteID)
 			if !found || *staleReacquireCalls != 1 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
-				len(reacquired.Facts.Resources.PrerequisiteObservations) != 2 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquiredObservation.ObservationID == inventoryObservation.ObservationID ||
+				len(reacquired.Facts.Resources.PrerequisiteObservations) != 3 || reacquired.Facts.Recovery.PrerequisiteRefreshes != 1 || reacquiredObservation.ObservationID == inventoryObservation.ObservationID ||
 				len(reacquired.CandidateAttempts) != 0 || reacquired.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Shell inventory stale reacquisition=%+v calls=%d", reacquired, *staleReacquireCalls)
 			}
@@ -5065,7 +5065,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if policyInvalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(policyInvalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
-				len(policyInvalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(policyInvalidated.Facts.Prerequisites.Pending) != 1 ||
+				len(policyInvalidated.Facts.Resources.PrerequisiteObservations) != 2 || len(policyInvalidated.Facts.Prerequisites.Pending) != 1 ||
 				policyInvalidated.Facts.Prerequisites.Pending[0].ID != reacquiredInventory.PrerequisiteID || policyInvalidated.Facts.Recovery.PrerequisiteRefreshes != 2 || len(policyInvalidated.CandidateAttempts) != 0 || policyInvalidated.ActiveDispatch != nil {
 				t.Fatalf("Shell policy stale did not isolate Shell inventory: %+v", policyInvalidated)
 			}
@@ -5093,7 +5093,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			policyInventory := reacquiredPolicy.Facts.Resources.OperationAdmissibilities[0]
 			policyObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(reacquiredPolicy.Facts.Resources.PrerequisiteObservations, policyInventory.PrerequisiteID)
 			if !found || *policyReacquireCalls != 1 || len(reacquiredPolicy.Facts.Resources.OperationAdmissibilities) != 1 ||
-				len(reacquiredPolicy.Facts.Resources.PrerequisiteObservations) != 2 || reacquiredPolicy.Facts.Recovery.PrerequisiteRefreshes != 2 || policyInventory.ObservedRevision == reacquiredInventory.ObservedRevision ||
+				len(reacquiredPolicy.Facts.Resources.PrerequisiteObservations) != 3 || reacquiredPolicy.Facts.Recovery.PrerequisiteRefreshes != 2 || policyInventory.ObservedRevision == reacquiredInventory.ObservedRevision ||
 				policyObservation.ObservationID == reacquiredObservation.ObservationID || len(reacquiredPolicy.CandidateAttempts) != 0 || reacquiredPolicy.ActiveDispatch != nil {
 				t.Fatalf("fresh-process Shell policy stale reacquisition=%+v calls=%d", reacquiredPolicy, *policyReacquireCalls)
 			}

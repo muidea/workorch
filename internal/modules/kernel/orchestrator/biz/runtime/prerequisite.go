@@ -26,7 +26,7 @@ type PrerequisiteResult struct {
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
 	normalizedRequirements := normalizeRuntimeRequirements(requirements)
-	normalizedRequirements = runtimeRequirementsWithShellValidationManifest(facts, normalizedRequirements)
+	normalizedRequirements = runtimeRequirementsWithCapabilityPrerequisiteFacts(facts, normalizedRequirements)
 	pending := make([]runtimecontract.RuntimePrerequisite, 0, len(normalizedRequirements))
 	reacquiring := make(map[string]struct{})
 	for _, requirement := range normalizedRequirements {
@@ -157,41 +157,32 @@ func runtimePrerequisiteCanonicalID(prerequisite runtimecontract.RuntimePrerequi
 	})
 }
 
-// runtimeRequirementsWithShellValidationManifest seals the resource
-// dependency implied by a declared managed-validation recipe.  The rule is
-// owner-neutral orchestration: File still owns the manifest and Shell still
-// decides recipe applicability.  SM-2 only ensures the immutable File fact is
-// acquired before asking Shell for a workspace-sensitive catalog.
-func runtimeRequirementsWithShellValidationManifest(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) []runtimecontract.RuntimeRequirement {
-	if len(runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(facts.Activation.EvidencePolicies)) == 0 {
-		return requirements
-	}
-	requiresManifest := false
+// runtimeRequirementsWithCapabilityPrerequisiteFacts compiles immutable
+// resource dependencies published by capability owners. Runtime core never
+// branches on an owner or operation kind: a fact applies only while its
+// operation is part of the current requirement set.
+func runtimeRequirementsWithCapabilityPrerequisiteFacts(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) []runtimecontract.RuntimeRequirement {
+	requiredKinds := make(map[string]struct{})
 	for _, requirement := range requirements {
-		if requirement.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility &&
-			requirement.OwnerModuleID == runtimecontract.RuntimeModuleShell &&
-			runtimeRequirementKindsContain(requirement.RequiredCapabilities, runtimecontract.RuntimeBlockKindManagedValidationSession) {
-			requiresManifest = true
-			break
+		// Capability acquisition proves that an owner supports a kind; it does
+		// not yet consume the operation resource. Owner-published resource facts
+		// become active when SM-2 requests that kind's admissibility inventory.
+		if requirement.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
+			continue
+		}
+		for _, kind := range requirement.RequiredCapabilities {
+			if kind = runtimecontract.CanonicalRuntimeBlockKind(kind); kind != "" {
+				requiredKinds[kind] = struct{}{}
+			}
 		}
 	}
-	if !requiresManifest {
-		return requirements
-	}
-	return normalizeRuntimeRequirements(append(append([]runtimecontract.RuntimeRequirement(nil), requirements...), runtimecontract.RuntimeRequirement{
-		Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		Reason: "Shell managed-validation admissibility requires File workspace manifest",
-	}))
-}
-
-func runtimeRequirementKindsContain(values []string, wanted string) bool {
-	wanted = runtimecontract.CanonicalRuntimeBlockKind(wanted)
-	for _, value := range values {
-		if runtimecontract.CanonicalRuntimeBlockKind(value) == wanted {
-			return true
+	ret := append([]runtimecontract.RuntimeRequirement(nil), requirements...)
+	for _, fact := range runtimecontract.NormalizeRuntimeCapabilityPrerequisiteFacts(facts.Capabilities.PrerequisiteFacts) {
+		if _, applies := requiredKinds[fact.OperationKind]; applies {
+			ret = append(ret, fact.Requirement)
 		}
 	}
-	return false
+	return normalizeRuntimeRequirements(ret)
 }
 
 // runtimeTargetGroundingRequirements translates a sealed focus declaration
@@ -292,8 +283,8 @@ func ownerGroundedCreationTarget(facts runtimecontract.RuntimeFacts, target stri
 		strings.TrimSpace(selection.ProspectiveTargetRef) == strings.TrimSpace(target)
 }
 
-// currentFocusTargetSelection returns only a File-owner selection committed as
-// a satisfied Focus-scoped prerequisite for the current Focus.  A raw resource
+// currentFocusTargetSelection returns only an owner selection committed as a
+// satisfied Focus-scoped prerequisite for the current Focus. A raw resource
 // pointer is not authority by itself: it can be historical audit lineage or a
 // malformed aggregate and must never skip a current acquisition.
 func currentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecontract.RuntimeTargetSelection {
@@ -345,7 +336,32 @@ func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result Prerequ
 	}
 	facts.Prerequisites.Pending = next
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, *completed)
-	return facts.Normalized(), nil
+	facts = facts.Normalized()
+	if completed.Kind == runtimecontract.PrerequisiteKindCapability && result.Capabilities != nil && len(result.Capabilities.PrerequisiteFacts) != 0 {
+		// Capability owners may reveal typed resource dependencies only when
+		// their sealed catalog is acquired. Recompile the still-active
+		// prerequisite graph immediately so a dependent owner inventory cannot
+		// run ahead of the newly published fact in the same SM-2 drive.
+		facts = PreflightRuntimeFacts(facts, runtimeActivePrerequisiteRequirements(facts))
+	}
+	return facts, nil
+}
+
+func runtimeActivePrerequisiteRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
+	values := append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...)
+	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(values))
+	for _, prerequisite := range values {
+		requirements = append(requirements, runtimecontract.RuntimeRequirement{
+			Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
+			OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
+			TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs,
+			ProspectiveTargetRef: prerequisite.ProspectiveTargetRef, CapabilityClass: prerequisite.CapabilityClass,
+			RequiredCapabilities: prerequisite.RequiredCapabilities, CapabilityStateKind: prerequisite.CapabilityStateKind,
+			MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,
+		})
+	}
+	return normalizeRuntimeRequirements(requirements)
 }
 
 func applyPrerequisiteResult(facts *runtimecontract.RuntimeFacts, prerequisite runtimecontract.RuntimePrerequisite, result PrerequisiteResult) error {

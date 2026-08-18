@@ -436,11 +436,42 @@ func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.R
 func runtimeCandidateManifestForSchema(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
 	decision = runtimeCandidateDecisionForSchemaTest(decision)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
+	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFacts{TargetSelection: selection}
+	if selection != nil {
+		ownerFacts.OperationAdmissibilities = runtimeCandidateScopeOwnerFactsForTest()
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return manifest
+}
+
+// runtimeCandidateScopeOwnerFactsForTest models the owner-published target
+// policy that production receives through prerequisite acquisition. Shared
+// descriptors no longer grant existing-scope authority to File or Shell.
+func runtimeCandidateScopeOwnerFactsForTest() []runtimecontract.RuntimeOperationAdmissibility {
+	file := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation-admissibility:file-scope-test", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, ObservedRevision: "file-scope-policy-v1",
+	}
+	for _, variantID := range []string{"file_write", "text_replace", "unified_diff"} {
+		file.OperationVariants = append(file.OperationVariants, runtimecontract.RuntimeOperationAdmissibilityVariant{
+			Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: variantID,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+		})
+	}
+	file.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(file)
+	shell := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "operation-admissibility:shell-scope-test", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.StepKindShellCommand}, ObservedRevision: "shell-scope-policy-v1",
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.StepKindShellCommand,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+		}},
+	}
+	shell.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shell)
+	return []runtimecontract.RuntimeOperationAdmissibility{file, shell}
 }
 
 // runtimeCandidateDecisionForSchemaTest makes test-only schema fixtures obey
@@ -1456,7 +1487,7 @@ func TestRuntimeCandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGrou
 	manifest := runtimeCandidateManifestForSchema(t, decision, selection)
 	schema := runtimeCandidateSchemaForManifest(manifest)
 	if !strings.Contains(schema, `"enum":["patch/apply","shell/command"]`) {
-		t.Fatalf("scope schema = %s, want durable File and descriptor-declared grounded kind", schema)
+		t.Fatalf("scope schema = %s, want owner-published File and Shell scope kinds", schema)
 	}
 	for _, forbidden := range []string{`"git/write"`} {
 		if strings.Contains(schema, forbidden) {
@@ -1663,7 +1694,8 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 			runtimecontract.StepKindShellCommand, runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply,
 		}},
 		Resources: runtimecontract.RuntimeResourceFacts{
-			TargetSelection: &selection,
+			TargetSelection:          &selection,
+			OperationAdmissibilities: runtimeCandidateScopeOwnerFactsForTest(),
 			ProviderCeiling: &runtimecontract.ProviderCeiling{
 				Selection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, ContextWindowTokens: 128000,
 				ProviderMaxOutputTokens: 16384, EffectiveMaxOutputTokens: 4096, MaxInputTokens: 92928, MaxBytes: 96 * 1024,

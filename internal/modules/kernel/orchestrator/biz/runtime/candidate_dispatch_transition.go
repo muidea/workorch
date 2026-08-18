@@ -294,7 +294,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 		// allows the next attempt to explain exactly what was rejected. Invalid
 		// candidates cannot be persisted because state validation must remain
 		// schema-safe even after a failed attempt.
-		if candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil {
+		if candidate.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)) == nil {
 			proposal := candidate
 			aggregate.CandidateAttempts[idx].Proposal = &proposal
 		}
@@ -450,7 +450,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 		// Final admission may be reached directly after a restart or alternate
 		// owner probe. Preserve a schema-valid rejected candidate here too, so
 		// duplicate delivery has the same durable identity as proposal admission.
-		if candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil {
+		if candidate.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)) == nil {
 			proposal := candidate
 			aggregate.CandidateAttempts[idx].Proposal = &proposal
 		}
@@ -509,7 +509,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime authority cannot seal governance", common.ErrConflict)
 	}
-	if candidate.Governance == nil || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) != nil {
+	if candidate.Governance == nil || candidate.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)) != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance candidate does not match sealed authority", common.ErrConflict)
 	}
 	expectedDependency, found := GovernanceDependencyForAggregate(aggregate)
@@ -582,7 +582,7 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 		}
 		feasibilities = attempt.Feasibilities
 	}
-	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, feasibilities)
+	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, runtimecontract.RuntimeActivationForFacts(aggregate.Facts), manifest, feasibilities)
 	if err != nil {
 		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 			Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
@@ -881,7 +881,7 @@ func duplicateRejectedCandidateAdmission(aggregate RuntimeAggregate, attempt int
 				!sameRejectedCandidateSemanticShape(record.Failure, candidateShape) {
 				continue
 			}
-		} else if record.Failure.Code != candidateAdmissionCodeInvalid || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) == nil || record.Failure.Signature != candidateAdmissionInvalidSignature(candidate) {
+		} else if record.Failure.Code != candidateAdmissionCodeInvalid || candidate.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)) == nil || record.Failure.Signature != candidateAdmissionInvalidSignature(candidate) {
 			continue
 		}
 		failure := *record.Failure

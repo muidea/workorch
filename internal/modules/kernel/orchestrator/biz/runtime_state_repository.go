@@ -88,7 +88,7 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 	if err := aggregate.Validate(); err != nil {
 		return err
 	}
-	run, err := (runEventRepository{hub: r.hub}).GetByWorkspaceID(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	run, err := (runSnapshotReader{hub: r.hub}).Read(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil {
 		return err
 	}

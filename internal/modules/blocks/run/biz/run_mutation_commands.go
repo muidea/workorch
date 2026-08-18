@@ -9,25 +9,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func (m *Biz) executeCreateRunCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
-	cmd, ok := ev.Data().(runevents.CreateRunCommand)
-	if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
-		return runevents.RunCommandResult{}, common.ErrInvalidArgument
-	}
-	if err := m.CreateRun(ctx, cmd); err != nil {
-		return runevents.RunCommandResult{}, err
-	}
-	// The Run owner emits the immutable activation-memory fact after the Run
-	// record is durable. Memory remains the sole owner of RecallTrace
-	// persistence; this notification is only the typed cross-owner handoff.
-	// It is deliberately best-effort so an observability write cannot turn a
-	// successful Run creation into an ambiguous side-effect error. Upsert is
-	// keyed by the stable run activation trace ID, so duplicate create/replay
-	// notifications remain idempotent.
-	m.publishRuntimeActivationMemoryRecall(ctx, cmd)
-	return runevents.RunCommandResult{}, nil
-}
-
 func (m *Biz) executeRunResourceCleanupCommand(ctx context.Context, ev magicevent.Event) (runevents.RunCommandResult, error) {
 	switch ev.ID() {
 	case runevents.TopicRunCommandPurgeRuntimeResources:

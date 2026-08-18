@@ -180,7 +180,7 @@ func TestOwnerGroundedCreationAndWorkspaceScopeRemainBounded(t *testing.T) {
 	selection.CandidateTargetRefs = []string{"go.mod", "go.sum"}
 	selection.CandidateCount = 2
 	facts.Resources.TargetSelection = &selection
-	if !HasOwnerGroundedTargetScope(facts) || !OwnerGroundedTargetScopeMaySelectNewFileTarget(facts) {
+	if !HasOwnerGroundedTargetScope(facts) || !OwnerGroundedTargetScopeMaySelectNewTarget(facts) {
 		t.Fatalf("bounded workspace scope was not recognized: %+v", facts.Resources.TargetSelection)
 	}
 	if !TargetRefsAllWithin([]string{"go.sum"}, WorkspaceScopeTargets(&selection)) ||
@@ -188,7 +188,7 @@ func TestOwnerGroundedCreationAndWorkspaceScopeRemainBounded(t *testing.T) {
 		t.Fatal("workspace scope membership was not exact")
 	}
 	facts.Failure = &runtimecontract.FailureFact{TargetRefs: []string{"go.mod"}}
-	if OwnerGroundedTargetScopeMaySelectNewFileTarget(facts) {
+	if OwnerGroundedTargetScopeMaySelectNewTarget(facts) {
 		t.Fatal("workspace scope bypassed a higher-precedence failure target")
 	}
 }

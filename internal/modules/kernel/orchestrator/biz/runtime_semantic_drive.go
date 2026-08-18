@@ -654,7 +654,7 @@ func runtimeSemanticActiveFeasibilityDocument(ledger runtimecontract.RuntimeSema
 
 func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtime.RuntimeAggregate, proposal runtimecontract.RuntimeSemanticProofProposal) (runtime.RuntimeAggregate, error) {
 	ledger := aggregate.SemanticPlanning.Clone()
-	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
+	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}

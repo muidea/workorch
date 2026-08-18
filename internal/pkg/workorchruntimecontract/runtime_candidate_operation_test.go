@@ -159,9 +159,8 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 		t.Fatalf("expected stateChanging shell rejection under validation, got %v", err)
 	}
 
-	// RVC-R6: explicit stateChanging=false narrows shell to non-durable and is
-	// admissible under produce_validation. Candidate cannot self-declare durable
-	// effect away without the parameter; default shell remains rejected above.
+	// A Shell-owner policy may bind stateChanging=false to a non-durable effect.
+	// The candidate parameter alone is not effect authority.
 	stateChanging = false
 	shellDeclaredReadOnly := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{
 		Operation: RuntimeOperation{
@@ -174,7 +173,12 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 			},
 		},
 	}}}}
-	if err := shellDeclaredReadOnly.Validate(decision); err != nil {
+	readOnlyPolicy := RuntimeOperationPolicyFact{
+		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
+		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &stateChanging}},
+		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}
+	if err := shellDeclaredReadOnly.ValidateWithActivation(decision, RuntimeActivationContext{OperationPolicies: []RuntimeOperationPolicyFact{readOnlyPolicy}}); err != nil {
 		t.Fatalf("stateChanging=false shell under validation must be accepted, got %v", err)
 	}
 }
@@ -197,6 +201,10 @@ func TestValidationCandidateRequiresSelectedObservableRecipe(t *testing.T) {
 	}}}}}
 	activation := RuntimeActivationContext{EvidencePolicies: []RuntimeEvidencePolicy{{
 		ID: "go-test-observable", AppliesTo: StepKindShellCommand, CommandName: "go", RequiredArgs: []string{"test", "-v"},
+	}}, OperationPolicies: []RuntimeOperationPolicyFact{{
+		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
+		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &stateChanging}},
+		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 	}}}
 	if err := candidate.ValidateWithActivation(decision, activation); err == nil || !strings.Contains(err.Error(), `observable recipe argument "-v"`) {
 		t.Fatalf("non-observable validation candidate error = %v", err)
@@ -296,19 +304,17 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 		t.Fatalf("unknown mcp tool must default to side-effecting")
 	}
 
-	readOnlyCaps := []RuntimeMCPCapabilityContext{{
-		ID: "cap-1", ServerID: common.MCPServerID(serverID), Kind: StepKindMCPToolCall, Name: tool,
-		DisplayName: tool, Enabled: true, RiskLevel: "read_only", EffectScope: string(RuntimeEffectNone),
-	}}
-	if OperationHasWorkspaceSideEffectsWithCapabilities(mcpOp, readOnlyCaps) {
+	readOnlyPolicies := []RuntimeOperationPolicyFact{mcpOperationPolicyForTest(
+		"cap-1", serverID, tool, RuntimeEffectNone, RuntimeOperationIdempotencySafeToReplay,
+	)}
+	if OperationHasWorkspaceSideEffectsWithPolicies(mcpOp, readOnlyPolicies) {
 		t.Fatalf("sealed read_only MCP capability should be non-mutating")
 	}
 
-	mutatingCaps := []RuntimeMCPCapabilityContext{{
-		ID: "cap-2", ServerID: common.MCPServerID(serverID), Kind: StepKindMCPToolCall, Name: tool,
-		DisplayName: tool, Enabled: true, RiskLevel: "write", EffectScope: string(RuntimeEffectWorkspaceDurable),
-	}}
-	if !OperationHasWorkspaceSideEffectsWithCapabilities(mcpOp, mutatingCaps) {
+	mutatingPolicies := []RuntimeOperationPolicyFact{mcpOperationPolicyForTest(
+		"cap-2", serverID, tool, RuntimeEffectWorkspaceDurable, RuntimeOperationIdempotencyAtMostOnce,
+	)}
+	if !OperationHasWorkspaceSideEffectsWithPolicies(mcpOp, mutatingPolicies) {
 		t.Fatalf("write MCP capability must remain side-effecting")
 	}
 
@@ -346,7 +352,15 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 	if err := mcpCandidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "cannot satisfy produce_validation") {
 		t.Fatalf("unknown mcp validation candidate must be rejected, got %v", err)
 	}
-	activation := RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}, MCPCapabilities: readOnlyCaps}
+	activation := RuntimeActivationContext{
+		ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		MCPCapabilities: []RuntimeMCPCapabilityContext{{
+			ID: "cap-1", ServerID: common.MCPServerID(serverID), Kind: StepKindMCPToolCall, Name: tool,
+			DisplayName: tool, Enabled: true, RiskLevel: "read_only", EffectScope: string(RuntimeEffectNone),
+			IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
+		}},
+		OperationPolicies: readOnlyPolicies,
+	}
 	if err := mcpCandidate.ValidateWithActivation(decision, activation); err != nil {
 		t.Fatalf("read_only mcp validation candidate should be allowed: %v", err)
 	}

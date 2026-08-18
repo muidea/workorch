@@ -31,9 +31,10 @@ import (
 
 func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	contracts, messages := testContractCatalog(t)
-	// The LLM owner has a separate active-configuration query so application
-	// code can detect restart-pending configuration without reading owner state.
-	const expectedProductionTopicCount = 261
+	// The unused generic Run Create command was removed with the Orchestrator
+	// lifecycle mutation facade. Run creation now has one production path: the
+	// Run owner's typed workspace-execution intent reducer.
+	const expectedProductionTopicCount = 260
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}
