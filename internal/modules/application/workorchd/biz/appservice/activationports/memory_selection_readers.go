@@ -11,6 +11,9 @@ import (
 )
 
 func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
+	if opts.WorkspaceID == "" || opts.Hub == nil || len(opts.IDs) > activationcore.RuntimeMemorySelectionCandidateLimit {
+		return nil, nil, common.ErrInvalidArgument
+	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, opts.WorkspaceID)
 	type memResult struct {
 		item *memorymodel.MemoryItem
@@ -34,19 +37,11 @@ func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOption
 		if r.item.WorkspaceID != opts.WorkspaceID {
 			return nil, nil, common.ErrConflict
 		}
-		if activationcore.MemoryVisibleToLLM(r.item) {
-			ret = append(ret, r.item)
-		}
+		ret = append(ret, r.item)
 	}
-	status := "selected"
-	if len(ret) == 0 && len(results) > 0 {
-		status = "none_selected"
-	}
-	return ret, &MemorySelectionEvidence{
-		Policy:             "explicit_memory_selection",
-		Status:             status,
-		RetrievedMemoryIDs: activationcore.MemoryItemIDs(ret),
-	}, nil
+	return applyRuntimeMemorySelectionBudget(ret, &MemorySelectionEvidence{
+		Policy: "explicit_memory_selection", RefreshSource: "explicit_ids",
+	})
 }
 
 func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
@@ -54,16 +49,7 @@ func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionO
 	if err != nil {
 		return nil, nil, err
 	}
-	selected := activationcore.VisibleMemoryItems(items, 8)
-	status := "selected"
-	if len(selected) == 0 && len(items) > 0 {
-		status = "none_selected"
-	}
-	return selected, &MemorySelectionEvidence{
-		Policy:             "deterministic_workspace_list",
-		Status:             status,
-		CandidateMemoryIDs: activationcore.MemoryItemIDs(items),
-		ExcludedMemoryIDs:  activationcore.MemoryItemIDs(activationcore.ExcludedMemoryItems(items, selected)),
-		RetrievedMemoryIDs: activationcore.MemoryItemIDs(selected),
-	}, nil
+	return applyRuntimeMemorySelectionBudget(items, &MemorySelectionEvidence{
+		Policy: "deterministic_workspace_list", RefreshSource: "workspace_inventory",
+	})
 }

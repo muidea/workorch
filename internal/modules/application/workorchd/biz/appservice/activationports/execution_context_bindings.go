@@ -17,6 +17,7 @@ type workspaceRuntimeActivationBindings struct {
 	defaultSoul       *soulmodel.Soul
 	stageSouls        map[string]*soulmodel.Soul
 	memories          []*memorymodel.MemoryItem
+	memorySelection   *MemorySelectionEvidence
 	governanceHistory []runtimecontract.RuntimeGovernanceHistoryEntry
 	soulRouting       appmodelcore.SoulRouting
 }
@@ -40,7 +41,7 @@ func loadWorkspaceRuntimeActivationBindings(ctx context.Context, request workspa
 			return nil
 		},
 		func() error {
-			memories, _, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
+			memories, evidence, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
 				WorkspaceID: workspace.ID,
 				Hub:         request.Hub,
 
@@ -52,6 +53,7 @@ func loadWorkspaceRuntimeActivationBindings(ctx context.Context, request workspa
 				return err
 			}
 			ret.memories = memories
+			ret.memorySelection = evidence
 			return nil
 		},
 		func() error {

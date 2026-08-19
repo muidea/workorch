@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -75,20 +74,21 @@ func workspaceCommandResponse(response magicevent.Result, topic string) (workspa
 	return result, nil
 }
 
-func memoryCommandResponse(response magicevent.Result, topic string) (memoryevents.MemoryCommandResult, error) {
+func memoryCommandResponse[Response any](response magicevent.Result, topic string) (Response, error) {
+	var zero Response
 	if response == nil {
-		return memoryevents.MemoryCommandResult{}, fmt.Errorf("memory command %s returned no response", topic)
+		return zero, fmt.Errorf("memory command %s returned no response", topic)
 	}
 	if err := response.Error(); err != nil {
-		return memoryevents.MemoryCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return memoryevents.MemoryCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(memoryevents.MemoryCommandResult)
+	result, ok := data.(Response)
 	if !ok {
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	return result, nil
 }

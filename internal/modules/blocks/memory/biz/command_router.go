@@ -1,8 +1,6 @@
 package memory
 
 import (
-	"context"
-
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -51,33 +49,42 @@ func memoryCommandFamilyForTopic(topic string) (memoryCommandFamily, bool) {
 }
 
 func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev)
-	setMemoryMagicResult(result, response, err)
+	if result == nil {
+		return
+	}
+	_ = m.executeCommand(ev, result)
 }
 
-func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandResult, error) {
+func (m *Biz) executeCommand(ev magicevent.Event, result magicevent.Result) error {
 	if m == nil || m.service == nil || ev == nil {
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		setMemoryMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
-	if workspaceID := memoryCommandWorkspaceID(ev.Data()); workspaceID != "" {
-		var err error
-		ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
-		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
-		}
+	workspaceID := memoryCommandWorkspaceID(ev.Data())
+	if workspaceID == "" {
+		setMemoryMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return common.ErrInvalidArgument
+	}
+	var err error
+	ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		setMemoryMagicResult(result, struct{}{}, err)
+		return err
 	}
 	family, ok := memoryCommandFamilyForTopic(ev.ID())
 	if !ok {
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		setMemoryMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return common.ErrInvalidArgument
 	}
 	switch family {
 	case memoryCommandFamilyItem:
-		return m.executeMemoryItemCommand(ctx, ev)
+		return m.executeMemoryItemCommand(ctx, ev, result)
 	case memoryCommandFamilyRecallTrace:
-		return m.executeMemoryRecallTraceCommand(ctx, ev)
+		return m.executeMemoryRecallTraceCommand(ctx, ev, result)
 	default:
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		setMemoryMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return common.ErrInvalidArgument
 	}
 }
 
@@ -111,19 +118,7 @@ func memoryCommandWorkspaceID(data any) common.WorkspaceID {
 	}
 }
 
-func memoryCommandContext(ctx context.Context, workspaceID common.WorkspaceID) context.Context {
-	if workspaceID == "" {
-		return ctx
-	}
-	// executeCommand checks command scope before this helper is reached.
-	bound, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
-	if err != nil {
-		return ctx
-	}
-	return bound
-}
-
-func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryCommandResult, err error) {
+func setMemoryMagicResult[Result any](result magicevent.Result, data Result, err error) {
 	if result == nil {
 		return
 	}
@@ -131,5 +126,5 @@ func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryComm
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data.Clone(), nil)
+	result.Set(data, nil)
 }

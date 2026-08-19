@@ -241,13 +241,14 @@ func memoryQueryFromValues(values url.Values) workorchquerycontract.MemorySearch
 func memoryRecallTraceQueryFromValues(values url.Values) workorchquerycontract.MemoryRecallTraceQuery {
 	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
 	return workorchquerycontract.MemoryRecallTraceQuery{
-		WorkspaceID: common.WorkspaceID(strings.TrimSpace(values.Get("workspaceId"))),
-		RunID:       common.RunID(strings.TrimSpace(values.Get("runId"))),
-		StepID:      common.StepID(strings.TrimSpace(values.Get("stepId"))),
-		Stage:       strings.TrimSpace(values.Get("stage")),
-		Source:      strings.TrimSpace(values.Get("source")),
-		Status:      strings.TrimSpace(values.Get("status")),
-		Limit:       limit,
+		WorkspaceID:   common.WorkspaceID(strings.TrimSpace(values.Get("workspaceId"))),
+		RunID:         common.RunID(strings.TrimSpace(values.Get("runId"))),
+		StepID:        common.StepID(strings.TrimSpace(values.Get("stepId"))),
+		Stage:         strings.TrimSpace(values.Get("stage")),
+		Source:        strings.TrimSpace(values.Get("source")),
+		Status:        strings.TrimSpace(values.Get("status")),
+		CursorAfterID: common.MemoryRecallTraceID(strings.TrimSpace(values.Get("cursorAfterId"))),
+		Limit:         limit,
 	}
 }
 

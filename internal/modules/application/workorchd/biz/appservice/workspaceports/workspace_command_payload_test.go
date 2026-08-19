@@ -151,7 +151,7 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	})
 	testHub.subscribe(orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun, emptyOrchestratorResult)
 	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
-		return memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{{ID: memoryID, WorkspaceID: workspaceID, RunID: runID}}}, nil
+		return memoryevents.ListMemoryByWorkspaceResult{Items: []*memorymodel.MemoryItem{{ID: memoryID, WorkspaceID: workspaceID, RunID: runID}}}, nil
 	})
 	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace, func(any) (any, error) {
 		return decisionevents.PurgeWorkspaceDecisionsResult{Deleted: 1}, nil
@@ -268,7 +268,7 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 				return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{}}, nil
 			})
 			testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace, func(any) (any, error) {
-				return memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil
+				return memoryevents.ListMemoryByWorkspaceResult{Items: []*memorymodel.MemoryItem{}}, nil
 			})
 			testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace, func(any) (any, error) {
 				return decisionevents.PurgeWorkspaceDecisionsResult{}, nil
@@ -335,7 +335,7 @@ func emptyOrchestratorResult(any) (any, error) {
 }
 
 func emptyMemoryResult(any) (any, error) {
-	return memoryevents.MemoryCommandResult{}, nil
+	return memoryevents.DeleteMemoryResult{}, nil
 }
 
 func emptyRunResult(any) (any, error) {

@@ -8,90 +8,107 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event) (memoryevents.MemoryCommandResult, error) {
+func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event, result magicevent.Result) error {
 	switch ev.ID() {
 	case memoryevents.TopicMemoryCommandCreate:
 		cmd, ok := ev.Data().(memoryevents.CreateMemoryCommand)
 		if !ok {
-			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+			setMemoryMagicResult(result, memoryevents.CreateMemoryResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
 		}
-		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
 		if err := m.service.CreateMemoryItem(ctx, cmd); err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.CreateMemoryResult{}, err)
+			return err
 		}
-		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.CreateMemoryResult{}, err)
+			return err
 		}
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryCreated, item)
-		return memoryevents.MemoryCommandResult{}, nil
+		setMemoryMagicResult(result, memoryevents.CreateMemoryResult{WorkspaceID: cmd.WorkspaceID, MemoryID: cmd.MemoryID}, nil)
+		return nil
 	case memoryevents.TopicMemoryCommandGet:
 		cmd, ok := ev.Data().(memoryevents.GetMemoryCommand)
-		if !ok || cmd.MemoryID == "" {
-			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		if !ok || cmd.WorkspaceID == "" || cmd.MemoryID == "" {
+			setMemoryMagicResult(result, memoryevents.GetMemoryResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
 		}
-		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.GetMemoryResult{}, err)
+			return err
 		}
-		return memoryevents.MemoryCommandResult{Item: item}, nil
+		setMemoryMagicResult(result, (memoryevents.GetMemoryResult{Item: item}).Clone(), nil)
+		return nil
 	case memoryevents.TopicMemoryCommandListByWorkspace:
 		cmd, ok := ev.Data().(memoryevents.ListMemoryByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
-			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+			setMemoryMagicResult(result, memoryevents.ListMemoryByWorkspaceResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
 		}
-		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		items, err := m.service.ListMemoryByWorkspace(ctx, cmd.WorkspaceID)
+		items, nextCursor, err := m.service.ListMemoryByWorkspace(ctx, cmd.WorkspaceID, cmd.CursorAfterID, cmd.Limit)
 		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.ListMemoryByWorkspaceResult{}, err)
+			return err
 		}
-		return memoryevents.MemoryCommandResult{Items: items}, nil
+		setMemoryMagicResult(result, (memoryevents.ListMemoryByWorkspaceResult{Items: items, NextCursor: nextCursor}).Clone(), nil)
+		return nil
 	case memoryevents.TopicMemoryCommandSearch:
 		cmd, ok := ev.Data().(memoryevents.SearchMemoryCommand)
-		if !ok {
-			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		if !ok || cmd.Query.WorkspaceID == "" {
+			setMemoryMagicResult(result, memoryevents.SearchMemoryResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
 		}
-		ctx = memoryCommandContext(ctx, cmd.Query.WorkspaceID)
 		items, err := m.service.SearchMemory(ctx, cmd.Query)
 		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.SearchMemoryResult{}, err)
+			return err
 		}
-		return memoryevents.MemoryCommandResult{Items: items}, nil
+		setMemoryMagicResult(result, (memoryevents.SearchMemoryResult{Items: items}).Clone(), nil)
+		return nil
 	case memoryevents.TopicMemoryCommandUpdate:
 		cmd, ok := ev.Data().(memoryevents.UpdateMemoryCommand)
 		if !ok {
-			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
 		}
-		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
+		if _, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID); err != nil {
+			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, err)
+			return err
+		}
 		if err := m.service.UpdateMemoryItem(ctx, memoryevents.CreateMemoryCommand(cmd)); err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, err)
+			return err
 		}
-		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{}, err)
+			return err
 		}
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryUpdated, item)
-		return memoryevents.MemoryCommandResult{}, nil
+		setMemoryMagicResult(result, memoryevents.UpdateMemoryResult{WorkspaceID: cmd.WorkspaceID, MemoryID: cmd.MemoryID}, nil)
+		return nil
 	case memoryevents.TopicMemoryCommandDelete:
 		cmd, ok := ev.Data().(memoryevents.DeleteMemoryCommand)
 		if !ok || cmd.WorkspaceID == "" || cmd.MemoryID == "" {
-			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+			setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
 		}
-		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
+		item, err := m.service.GetMemoryItemScoped(ctx, cmd.WorkspaceID, cmd.MemoryID)
 		if err != nil {
-			return memoryevents.MemoryCommandResult{}, err
-		}
-		if item.WorkspaceID != cmd.WorkspaceID {
-			return memoryevents.MemoryCommandResult{}, common.ErrConflict
+			setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{}, err)
+			return err
 		}
 		if err := m.service.DeleteMemoryItem(ctx, cmd.MemoryID); err != nil {
-			return memoryevents.MemoryCommandResult{}, err
+			setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{}, err)
+			return err
 		}
 		m.publishMemoryChanged(ctx, memoryevents.TopicMemoryDeleted, item)
-		return memoryevents.MemoryCommandResult{}, nil
+		setMemoryMagicResult(result, memoryevents.DeleteMemoryResult{WorkspaceID: cmd.WorkspaceID, MemoryID: cmd.MemoryID}, nil)
+		return nil
 	default:
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		setMemoryMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return common.ErrInvalidArgument
 	}
 }

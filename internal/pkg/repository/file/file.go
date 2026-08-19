@@ -29,7 +29,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -451,6 +450,11 @@ func (r *MemoryRecallTraceRepository) List(_ context.Context, query workorchquer
 		ret = append(ret, cloneMemoryRecallTrace(&item))
 	}
 	sortMemoryRecallTraces(ret)
+	var pageErr error
+	ret, pageErr = pageMemoryRecallTraces(ret, query.CursorAfterID)
+	if pageErr != nil {
+		return nil, pageErr
+	}
 	if query.Limit > 0 && len(ret) > query.Limit {
 		ret = ret[:query.Limit]
 	}
@@ -4047,32 +4051,7 @@ func cloneMemoryItem(item *memorymodel.MemoryItem) *memorymodel.MemoryItem {
 }
 
 func cloneMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) *memorymodel.MemoryRecallTrace {
-	cloned := *item
-	if item.CandidateMemoryIDs != nil {
-		cloned.CandidateMemoryIDs = append([]common.MemoryID(nil), item.CandidateMemoryIDs...)
-	}
-	if item.SelectedMemoryIDs != nil {
-		cloned.SelectedMemoryIDs = append([]common.MemoryID(nil), item.SelectedMemoryIDs...)
-	}
-	if item.ExcludedMemoryIDs != nil {
-		cloned.ExcludedMemoryIDs = append([]common.MemoryID(nil), item.ExcludedMemoryIDs...)
-	}
-	if item.TypeQuota != nil {
-		cloned.TypeQuota = map[string]int{}
-		for key, value := range item.TypeQuota {
-			cloned.TypeQuota[key] = value
-		}
-	}
-	if item.SelectionScores != nil {
-		cloned.SelectionScores = append([]workorchmemorycontract.RecallSelectionScore(nil), item.SelectionScores...)
-	}
-	if item.RetrievedMemoryIDs != nil {
-		cloned.RetrievedMemoryIDs = append([]common.MemoryID(nil), item.RetrievedMemoryIDs...)
-	}
-	if item.RetrievedMemoryHits != nil {
-		cloned.RetrievedMemoryHits = append([]workorchmemorycontract.RecallHit(nil), item.RetrievedMemoryHits...)
-	}
-	return &cloned
+	return memorymodel.CloneMemoryRecallTrace(item)
 }
 
 func cloneSkill(item *skillmodel.Skill) *skillmodel.Skill {
@@ -4270,6 +4249,18 @@ func sortMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) {
 		}
 		return string(items[i].ID) < string(items[j].ID)
 	})
+}
+
+func pageMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace, cursor common.MemoryRecallTraceID) ([]*memorymodel.MemoryRecallTrace, error) {
+	if cursor == "" {
+		return items, nil
+	}
+	for idx, item := range items {
+		if item != nil && item.ID == cursor {
+			return items[idx+1:], nil
+		}
+	}
+	return nil, common.ErrInvalidArgument
 }
 
 func containsTagText(tags []string, needle string) bool {

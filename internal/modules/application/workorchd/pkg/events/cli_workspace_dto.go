@@ -122,6 +122,7 @@ type CLIMemoryRecallTraceInfo struct {
 	Policy                 string
 	Status                 string
 	ProviderID             string
+	ModelID                string
 	Operation              string
 	QueryTextPreview       string
 	QueryTextSha256        string
@@ -138,6 +139,9 @@ type CLIMemoryRecallTraceInfo struct {
 	SelectionScores        []workorchmemorycontract.RecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
 	RetrievedMemoryHits    []workorchmemorycontract.RecallHit
+	ContextBudget          workorchmemorycontract.RecallContextBudget
+	SemanticRecall         *workorchmemorycontract.RecallSelectionEvidence
+	FallbackFrom           string
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string

@@ -340,11 +340,12 @@ func memoryRecallTraceDTOs(items []projectioncontract.MemoryRecallTrace) []worko
 		ret = append(ret, workorchdevents.CLIMemoryRecallTraceInfo{
 			ID: common.MemoryRecallTraceID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), RunID: common.RunID(item.RunID), StepID: common.StepID(item.StepID),
 			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
-			ProviderID: item.ProviderID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
+			ProviderID: item.ProviderID, ModelID: item.ModelID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
 			MinScore: item.MinScore, Limit: item.Limit, EmbeddingModel: item.EmbeddingModel, VectorDimension: item.VectorDimension,
 			RefreshSource: item.RefreshSource, SelectionPolicyVersion: item.SelectionPolicyVersion,
 			CandidateMemoryIDs: memoryIDsFromStrings(item.CandidateMemoryIDs), SelectedMemoryIDs: memoryIDsFromStrings(item.SelectedMemoryIDs), ExcludedMemoryIDs: memoryIDsFromStrings(item.ExcludedMemoryIDs),
 			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: memoryIDsFromStrings(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
+			ContextBudget: item.ContextBudget, SemanticRecall: workorchmemorycontract.CloneRecallSelectionEvidence(item.SemanticRecall), FallbackFrom: item.FallbackFrom,
 			Reason: item.Reason, OccurredAt: item.OccurredAt, EvidenceRef: item.EvidenceRef,
 		})
 	}
@@ -367,11 +368,12 @@ func memoryRecallTraceProjections(items []workorchdevents.CLIMemoryRecallTraceIn
 		ret = append(ret, projectioncontract.MemoryRecallTrace{
 			ID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID),
 			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
-			ProviderID: item.ProviderID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
+			ProviderID: item.ProviderID, ModelID: item.ModelID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
 			MinScore: item.MinScore, Limit: item.Limit, EmbeddingModel: item.EmbeddingModel, VectorDimension: item.VectorDimension,
 			RefreshSource: item.RefreshSource, SelectionPolicyVersion: item.SelectionPolicyVersion,
 			CandidateMemoryIDs: memoryIDStrings(item.CandidateMemoryIDs), SelectedMemoryIDs: memoryIDStrings(item.SelectedMemoryIDs), ExcludedMemoryIDs: memoryIDStrings(item.ExcludedMemoryIDs),
 			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: memoryIDStrings(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
+			ContextBudget: item.ContextBudget, SemanticRecall: workorchmemorycontract.CloneRecallSelectionEvidence(item.SemanticRecall), FallbackFrom: item.FallbackFrom,
 			Reason: item.Reason, OccurredAt: item.OccurredAt, EvidenceRef: item.EvidenceRef,
 		})
 	}

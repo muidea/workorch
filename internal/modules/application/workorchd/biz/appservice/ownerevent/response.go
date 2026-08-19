@@ -6,7 +6,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
@@ -169,20 +168,21 @@ func Approval[Response any](response magicevent.Result, topic string) (Response,
 	return result, nil
 }
 
-func Memory(response magicevent.Result, topic string) (memoryevents.MemoryCommandResult, error) {
+func Memory[Response any](response magicevent.Result, topic string) (Response, error) {
+	var zero Response
 	if response == nil {
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := response.Error(); err != nil {
-		return memoryevents.MemoryCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return memoryevents.MemoryCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(memoryevents.MemoryCommandResult)
+	result, ok := data.(Response)
 	if !ok {
-		return memoryevents.MemoryCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

@@ -31,7 +31,8 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		QueryTextPreview:    activationcore.PreviewRetrievalQuery(queryText),
 		QueryTextSHA256:     activationcore.SHA256Hex(queryText),
 		MinScore:            0.1,
-		Limit:               8,
+		Limit:               100,
+		RefreshSource:       "semantic_vector_search",
 		RetrievedMemoryIDs:  []string{},
 		RetrievedMemoryHits: []MemorySelectionHit{},
 	}
@@ -45,7 +46,7 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		WorkspaceID: opts.WorkspaceID,
 		Vector:      embedding.Vector,
 		MinScore:    0.1,
-		Limit:       8,
+		Limit:       100,
 	})
 	if err != nil {
 		evidence.Status = "degraded"
@@ -55,18 +56,5 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 	evidence.Status = "selected"
 	evidence.EmbeddingModel = embedding.Model
 	evidence.VectorDimension = len(embedding.Vector)
-	evidence.RetrievedMemoryIDs = activationcore.MemoryItemIDs(items)
-	evidence.RetrievedMemoryHits = memorySelectionHits(items)
 	return items, evidence, true
-}
-
-func memorySelectionHits(items []*memorymodel.MemoryItem) []MemorySelectionHit {
-	ret := make([]MemorySelectionHit, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		ret = append(ret, MemorySelectionHit{ID: string(item.ID), Score: item.VectorScore})
-	}
-	return ret
 }

@@ -83,7 +83,7 @@ func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
 	var captured memoryevents.DeleteMemoryCommand
 	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandDelete, memoryevents.CommandDestination, func(cmd memoryevents.DeleteMemoryCommand, result magicevent.Result) {
 		captured = cmd
-		result.Set(memoryevents.MemoryCommandResult{}, nil)
+		result.Set(memoryevents.DeleteMemoryResult{WorkspaceID: cmd.WorkspaceID, MemoryID: cmd.MemoryID}, nil)
 	})
 
 	if err := DeleteMemoryItem(ctx, rawHub, "mem-context-delete"); err != nil {
@@ -101,7 +101,7 @@ func TestPublishMemoryItemPublishesScopedCommandEnvelope(t *testing.T) {
 		if cmd.MemoryID != "mem-write-scope" || cmd.WorkspaceID != "ws-memory-write" || cmd.RunID != "run-memory-write" {
 			t.Fatalf("command = %+v, want scoped memory command", cmd)
 		}
-		result.Set(memoryevents.MemoryCommandResult{}, nil)
+		result.Set(memoryevents.CreateMemoryResult{WorkspaceID: cmd.WorkspaceID, MemoryID: cmd.MemoryID}, nil)
 	})
 
 	if err := PublishMemoryItem(ctx, rawHub, memoryevents.TopicMemoryCommandCreate, &memorymodel.MemoryItem{
@@ -121,19 +121,19 @@ func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
 		if cmd.WorkspaceID != "ws-memory-query-scope" || cmd.MemoryID != "mem-query-scope" {
 			t.Fatalf("get command = %+v, want scoped get", cmd)
 		}
-		result.Set(memoryevents.MemoryCommandResult{Item: &memorymodel.MemoryItem{ID: "mem-query-scope", WorkspaceID: "ws-memory-query-scope"}}, nil)
+		result.Set(memoryevents.GetMemoryResult{Item: &memorymodel.MemoryItem{ID: "mem-query-scope", WorkspaceID: "ws-memory-query-scope"}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.CommandDestination, func(cmd memoryevents.ListMemoryByWorkspaceCommand, result magicevent.Result) {
 		if cmd.WorkspaceID != "ws-memory-query-scope" {
 			t.Fatalf("list command = %+v, want scoped list", cmd)
 		}
-		result.Set(memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil)
+		result.Set(memoryevents.ListMemoryByWorkspaceResult{Items: []*memorymodel.MemoryItem{}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, memoryevents.TopicMemoryCommandSearch, memoryevents.CommandDestination, func(cmd memoryevents.SearchMemoryCommand, result magicevent.Result) {
 		if cmd.Query.WorkspaceID != "ws-memory-query-scope" {
 			t.Fatalf("search command = %+v, want scoped search", cmd)
 		}
-		result.Set(memoryevents.MemoryCommandResult{Items: []*memorymodel.MemoryItem{}}, nil)
+		result.Set(memoryevents.SearchMemoryResult{Items: []*memorymodel.MemoryItem{}}, nil)
 	})
 
 	if _, err := ReadMemoryItem(ctx, rawHub, "mem-query-scope"); err != nil {

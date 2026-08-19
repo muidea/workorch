@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
 // RuntimeActivationContext 是一次 Runtime Run 在 application activation 阶段
@@ -25,6 +26,7 @@ type RuntimeActivationContext struct {
 	// never derives authority from MCP names, risk labels, or protocol kinds.
 	OperationPolicies []RuntimeOperationPolicyFact
 	Memories          []RuntimeMemoryContext
+	MemorySelection   *workorchmemorycontract.RecallSelectionEvidence
 	EvidencePolicies  []RuntimeEvidencePolicy
 	ExecutionContract RuntimeExecutionContract
 	Continuation      RuntimeContinuationContext
@@ -125,6 +127,10 @@ func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 	c.MCPCapabilities = normalizeRuntimeMCPCapabilities(c.MCPCapabilities)
 	c.OperationPolicies = NormalizeRuntimeOperationPolicyFacts(c.OperationPolicies)
 	c.Memories = normalizeRuntimeMemories(c.Memories)
+	if c.MemorySelection != nil {
+		value := c.MemorySelection.Normalized()
+		c.MemorySelection = &value
+	}
 	c.EvidencePolicies = NormalizeRuntimeEvidencePolicies(c.EvidencePolicies)
 	c.ExecutionContract = c.ExecutionContract.Normalized()
 	c.Continuation = c.Continuation.Normalized()
@@ -159,6 +165,26 @@ func (c RuntimeActivationContext) Validate() error {
 			return fmt.Errorf("runtime activation memory requires id and content")
 		}
 	}
+	if len(c.Memories) > 0 && c.MemorySelection == nil {
+		return fmt.Errorf("runtime activation memories require recall selection evidence")
+	}
+	if c.MemorySelection != nil {
+		if err := c.MemorySelection.Validate(); err != nil {
+			return fmt.Errorf("runtime activation memory selection: %w", err)
+		}
+		selected := make(map[common.MemoryID]struct{}, len(c.MemorySelection.SelectedMemoryIDs))
+		for _, id := range c.MemorySelection.SelectedMemoryIDs {
+			selected[id] = struct{}{}
+		}
+		if len(selected) != len(c.Memories) {
+			return fmt.Errorf("runtime activation memory selection differs from sealed memories")
+		}
+		for _, memory := range c.Memories {
+			if _, ok := selected[memory.ID]; !ok {
+				return fmt.Errorf("runtime activation memory %s is absent from selection evidence", memory.ID)
+			}
+		}
+	}
 	if err := ValidateRuntimeEvidencePolicies(c.EvidencePolicies); err != nil {
 		return err
 	}
@@ -181,6 +207,7 @@ func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeAc
 	if !left.ProviderSelection.Same(right.ProviderSelection) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
 		len(left.StageSoulBindings) != len(right.StageSoulBindings) || len(left.Skills) != len(right.Skills) ||
 		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.OperationPolicies) != len(right.OperationPolicies) || len(left.Memories) != len(right.Memories) ||
+		!sameRuntimeMemorySelection(left.MemorySelection, right.MemorySelection) ||
 		!SameRuntimeEvidencePolicies(left.EvidencePolicies, right.EvidencePolicies) {
 		return false
 	}
@@ -416,6 +443,13 @@ func sameRuntimeMemory(left RuntimeMemoryContext, right RuntimeMemoryContext) bo
 	return left.ID == right.ID && left.MemoryType == right.MemoryType && left.Summary == right.Summary && left.Content == right.Content &&
 		left.Importance == right.Importance && left.Confidence == right.Confidence && left.Visibility == right.Visibility && left.Provenance == right.Provenance &&
 		left.VectorScore == right.VectorScore && sameStrings(left.Tags, right.Tags)
+}
+
+func sameRuntimeMemorySelection(left, right *workorchmemorycontract.RecallSelectionEvidence) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return workorchmemorycontract.SameRecallSelectionEvidence(*left, *right)
 }
 
 // normalizeMCPRegistryKindToOperationKind maps registry wire kinds to Runtime operation kinds.

@@ -207,6 +207,7 @@ func memoryRecallEqual(a, b projectioncontract.MemoryRecallTrace) bool {
 		strings.TrimSpace(a.Policy) == strings.TrimSpace(b.Policy) &&
 		strings.TrimSpace(a.Status) == strings.TrimSpace(b.Status) &&
 		strings.TrimSpace(a.ProviderID) == strings.TrimSpace(b.ProviderID) &&
+		strings.TrimSpace(a.ModelID) == strings.TrimSpace(b.ModelID) &&
 		strings.TrimSpace(a.Operation) == strings.TrimSpace(b.Operation) &&
 		strings.TrimSpace(a.QueryTextPreview) == strings.TrimSpace(b.QueryTextPreview) &&
 		strings.TrimSpace(a.QueryTextSha256) == strings.TrimSpace(b.QueryTextSha256) &&
@@ -223,9 +224,19 @@ func memoryRecallEqual(a, b projectioncontract.MemoryRecallTrace) bool {
 		memorySelectionScoresEqual(a.SelectionScores, b.SelectionScores) &&
 		stringSliceEqual(a.RetrievedMemoryIDs, b.RetrievedMemoryIDs) &&
 		memoryHitsEqual(a.RetrievedMemoryHits, b.RetrievedMemoryHits) &&
+		a.ContextBudget == b.ContextBudget &&
+		recallSelectionEvidenceEqual(a.SemanticRecall, b.SemanticRecall) &&
+		strings.TrimSpace(a.FallbackFrom) == strings.TrimSpace(b.FallbackFrom) &&
 		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason) &&
 		strings.TrimSpace(a.OccurredAt) == strings.TrimSpace(b.OccurredAt) &&
 		strings.TrimSpace(a.EvidenceRef) == strings.TrimSpace(b.EvidenceRef)
+}
+
+func recallSelectionEvidenceEqual(a, b *workorchmemorycontract.RecallSelectionEvidence) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return workorchmemorycontract.SameRecallSelectionEvidence(*a, *b)
 }
 
 func llmUsageIdentitiesEqual(a, b []projectioncontract.LLMUsageTrace) bool {

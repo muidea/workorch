@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"errors"
+	"math"
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
@@ -46,6 +48,20 @@ func (s *Service) GetMemoryItem(ctx context.Context, id common.MemoryID) (*memor
 	return s.items.Get(ctx, id)
 }
 
+func (s *Service) GetMemoryItemScoped(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	item, err := s.GetMemoryItem(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.WorkspaceID != workspaceID {
+		return nil, common.ErrConflict
+	}
+	return item, nil
+}
+
 func (s *Service) DeleteMemoryItem(ctx context.Context, id common.MemoryID) error {
 	if id == "" {
 		return common.ErrInvalidArgument
@@ -53,39 +69,117 @@ func (s *Service) DeleteMemoryItem(ctx context.Context, id common.MemoryID) erro
 	return s.items.Delete(ctx, id)
 }
 
-func (s *Service) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
+func (s *Service) ListMemoryByWorkspace(ctx context.Context, workspaceID common.WorkspaceID, cursorAfterID common.MemoryID, limit int) ([]*memorymodel.MemoryItem, common.MemoryID, error) {
 	if workspaceID == "" {
-		return nil, common.ErrInvalidArgument
+		return nil, "", common.ErrInvalidArgument
 	}
-	return s.items.ListByWorkspaceID(ctx, workspaceID)
+	limit = normalizedLimit(limit, modulecommon.MemoryListDefaultLimit, modulecommon.MemoryListMaxLimit)
+	items, err := s.items.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, "", err
+	}
+	page := make([]*memorymodel.MemoryItem, 0, min(limit+1, len(items)))
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID || (cursorAfterID != "" && string(item.ID) <= string(cursorAfterID)) {
+			continue
+		}
+		page = append(page, item)
+		if len(page) > limit {
+			break
+		}
+	}
+	var nextCursor common.MemoryID
+	if len(page) > limit {
+		nextCursor = page[limit-1].ID
+		page = page[:limit]
+	}
+	return memorymodel.CloneMemoryItems(page), nextCursor, nil
 }
 
 func (s *Service) SearchMemory(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
-	if query.WorkspaceID == "" {
+	query = query.Normalized()
+	query.Limit = normalizedLimit(query.Limit, modulecommon.MemorySearchDefaultLimit, modulecommon.MemorySearchMaxLimit)
+	if query.WorkspaceID == "" || len(query.Vector) > modulecommon.MemoryVectorMaxDimension || math.IsNaN(query.MinScore) || math.IsInf(query.MinScore, 0) || query.MinScore < -1 || query.MinScore > 1 {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.items.Search(ctx, query)
+	for _, value := range query.Vector {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, common.ErrInvalidArgument
+		}
+	}
+	for _, memoryType := range query.Types {
+		if !modulecommon.IsSupportedMemoryType(memoryType) {
+			return nil, common.ErrInvalidArgument
+		}
+	}
+	items, err := s.items.Search(ctx, query.Clone())
+	if err != nil {
+		return nil, err
+	}
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return memorymodel.CloneMemoryItems(items), nil
 }
 
-func (s *Service) UpsertMemoryRecallTrace(ctx context.Context, trace *memorymodel.MemoryRecallTrace) error {
+func (s *Service) RecordMemoryRecallTrace(ctx context.Context, trace *memorymodel.MemoryRecallTrace) (memoryevents.MemoryRecallTraceWriteDisposition, error) {
 	if s == nil || s.traces == nil || trace == nil || trace.ID == "" || trace.WorkspaceID == "" || trace.RunID == "" {
-		return common.ErrInvalidArgument
+		return "", common.ErrInvalidArgument
 	}
-	return s.traces.Upsert(ctx, trace)
+	if err := s.traces.Create(ctx, memorymodel.CloneMemoryRecallTrace(trace)); err == nil {
+		return memoryevents.MemoryRecallTraceRecorded, nil
+	} else if !errors.Is(err, common.ErrConflict) {
+		return "", err
+	}
+	existing, err := s.traces.Get(ctx, trace.ID)
+	if err != nil {
+		return "", err
+	}
+	if !memorymodel.SameMemoryRecallTrace(existing, trace) {
+		return "", common.ErrConflict
+	}
+	return memoryevents.MemoryRecallTraceDuplicate, nil
 }
 
-func (s *Service) GetMemoryRecallTrace(ctx context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
-	if s == nil || s.traces == nil || id == "" {
+func (s *Service) GetMemoryRecallTrace(ctx context.Context, workspaceID common.WorkspaceID, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+	if s == nil || s.traces == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.traces.Get(ctx, id)
+	item, err := s.traces.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.WorkspaceID != workspaceID {
+		return nil, common.ErrConflict
+	}
+	return memorymodel.CloneMemoryRecallTrace(item), nil
 }
 
-func (s *Service) ListMemoryRecallTraces(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
-	if s == nil || s.traces == nil {
-		return nil, common.ErrInvalidArgument
+func (s *Service) ListMemoryRecallTraces(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, common.MemoryRecallTraceID, error) {
+	query = query.Normalized()
+	if s == nil || s.traces == nil || query.WorkspaceID == "" {
+		return nil, "", common.ErrInvalidArgument
 	}
-	return s.traces.List(ctx, query)
+	query.Limit = normalizedLimit(query.Limit, modulecommon.MemoryRecallListDefaultLimit, modulecommon.MemoryRecallListMaxLimit)
+	repositoryQuery := query
+	repositoryQuery.Limit = query.Limit + 1
+	items, err := s.traces.List(ctx, repositoryQuery)
+	if err != nil {
+		return nil, "", err
+	}
+	var nextCursor common.MemoryRecallTraceID
+	if len(items) > query.Limit {
+		nextCursor = items[query.Limit-1].ID
+		items = items[:query.Limit]
+	}
+	ret := make([]*memorymodel.MemoryRecallTrace, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != query.WorkspaceID {
+			return nil, "", common.ErrConflict
+		}
+		ret = append(ret, memorymodel.CloneMemoryRecallTrace(item))
+	}
+	return ret, nextCursor, nil
 }
 
 func (s *Service) DeleteMemoryRecallTrace(ctx context.Context, id common.MemoryRecallTraceID) error {
@@ -93,6 +187,16 @@ func (s *Service) DeleteMemoryRecallTrace(ctx context.Context, id common.MemoryR
 		return common.ErrInvalidArgument
 	}
 	return s.traces.Delete(ctx, id)
+}
+
+func normalizedLimit(value, defaultLimit, maxLimit int) int {
+	if value <= 0 {
+		return defaultLimit
+	}
+	if value > maxLimit {
+		return maxLimit
+	}
+	return value
 }
 
 func validateMemoryCommand(cmd memoryevents.CreateMemoryCommand) error {
@@ -111,6 +215,14 @@ func validateMemoryCommand(cmd memoryevents.CreateMemoryCommand) error {
 	}
 	if hasBlank(cmd.Tags) {
 		return common.ErrInvalidArgument
+	}
+	if len(cmd.Vector) > modulecommon.MemoryVectorMaxDimension {
+		return common.ErrInvalidArgument
+	}
+	for _, value := range cmd.Vector {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return common.ErrInvalidArgument
+		}
 	}
 	if cmd.SourceType != modulecommon.MemorySourceUser && strings.TrimSpace(cmd.SourceRef) == "" {
 		return common.ErrInvalidArgument

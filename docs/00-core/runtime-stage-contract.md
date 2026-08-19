@@ -586,6 +586,13 @@ unknown effect 或 zero-work 时不能形成 accepted durable evidence。owner o
 
 LLM 是不可靠的 protocol client，不是 authority。请求必须由 sealed typed context 渲染：
 
+Runtime activation 中的 memory context 必须同时封存一份 bounded typed selection evidence：候选、选中、排除、
+逐项 score/reason、type quota、retrieved hit 与 byte/token budget。其 selected identity 必须与真正封存进 activation
+的 memory identity 精确一致。该 evidence 只证明上下文选择过程，不是 current-run execution evidence，不能关闭
+coverage、改变 SM-2 decision 或为 SM-3 选择 operation；SM-4 恢复也不得从 MemoryRecallTrace 反向重建 authority。
+Run 可在自身创建提交后把同一 sealed evidence 记录到 Memory owner，重复提交只能是零写入 exact replay，内容漂移
+必须 fail closed。
+
 - C0：stable runtime/schema；C1：Goal/DoD；C2：declarative capability/governance contract；
   C3：current focus/required output；C4：failure/evidence/diagnostic；C5：有界 ref。
 - P0–P4 的必要字段缺失时不得提交 provider。raw prompt、raw provider body、credential、endpoint、

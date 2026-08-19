@@ -157,9 +157,9 @@ func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID co
 	if r.send == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, governancecommon.ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, governancecommon.ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID, Limit: 200})
 	bindOwnerLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := memoryResponse(r.send(event), memoryevents.TopicMemoryCommandListByWorkspace)
+	response, err := memoryResponse[memoryevents.ListMemoryByWorkspaceResult](r.send(event), memoryevents.TopicMemoryCommandListByWorkspace)
 	if err != nil {
 		return nil, err
 	}

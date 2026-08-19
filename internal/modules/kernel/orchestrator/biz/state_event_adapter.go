@@ -80,7 +80,7 @@ func (r memoryEventRepository) Create(ctx context.Context, item *memorymodel.Mem
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandCreate, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommandFromModel(item))
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandCreate, "memory", string(item.ID), item.WorkspaceID, item.RunID)
-	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandCreate)
+	_, err := memoryCommandResponse[memoryevents.CreateMemoryResult](r.hub.Send(event), memoryevents.TopicMemoryCommandCreate)
 	return err
 }
 
@@ -89,9 +89,12 @@ func (r memoryEventRepository) Get(ctx context.Context, id common.MemoryID) (*me
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandGet, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.GetMemoryCommand{MemoryID: id})
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandGet, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.GetMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandGet, "memory", string(id), workspaceID, "")
-	response, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandGet)
+	response, err := memoryCommandResponse[memoryevents.GetMemoryResult](r.hub.Send(event), memoryevents.TopicMemoryCommandGet)
 	if err != nil {
 		return nil, err
 	}
@@ -105,13 +108,27 @@ func (r memoryEventRepository) ListByWorkspaceID(ctx context.Context, workspaceI
 	if r.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
-	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
-	response, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandListByWorkspace)
-	if err != nil {
-		return nil, err
+	ret := make([]*memorymodel.MemoryItem, 0)
+	var cursor common.MemoryID
+	seen := map[common.MemoryID]struct{}{}
+	for page := 0; page < 1000; page++ {
+		event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID, CursorAfterID: cursor, Limit: 200})
+		bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
+		response, err := memoryCommandResponse[memoryevents.ListMemoryByWorkspaceResult](r.hub.Send(event), memoryevents.TopicMemoryCommandListByWorkspace)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, response.Items...)
+		if response.NextCursor == "" {
+			return memorymodel.CloneMemoryItems(ret), nil
+		}
+		if _, duplicate := seen[response.NextCursor]; duplicate {
+			return nil, common.ErrConflict
+		}
+		seen[response.NextCursor] = struct{}{}
+		cursor = response.NextCursor
 	}
-	return response.Items, nil
+	return nil, common.ErrConflict
 }
 
 func (r memoryEventRepository) Search(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
@@ -120,7 +137,7 @@ func (r memoryEventRepository) Search(ctx context.Context, query workorchqueryco
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandSearch, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.SearchMemoryCommand{Query: workorchquerycontract.MemorySearchQuery{WorkspaceID: query.WorkspaceID, Query: query.Query, Tags: append([]string(nil), query.Tags...), Types: append([]string(nil), query.Types...), Vector: append([]float64(nil), query.Vector...), MinScore: query.MinScore, Limit: query.Limit}})
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandSearch, "workspace", string(query.WorkspaceID), query.WorkspaceID, "")
-	response, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandSearch)
+	response, err := memoryCommandResponse[memoryevents.SearchMemoryResult](r.hub.Send(event), memoryevents.TopicMemoryCommandSearch)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +153,7 @@ func (r memoryEventRepository) Update(ctx context.Context, item *memorymodel.Mem
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandUpdate, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryevents.CreateMemoryCommandFromModel(item)))
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandUpdate, "memory", string(item.ID), item.WorkspaceID, item.RunID)
-	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandUpdate)
+	_, err := memoryCommandResponse[memoryevents.UpdateMemoryResult](r.hub.Send(event), memoryevents.TopicMemoryCommandUpdate)
 	return err
 }
 
@@ -150,7 +167,7 @@ func (r memoryEventRepository) Delete(ctx context.Context, id common.MemoryID) e
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandDelete, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandDelete, "memory", string(id), workspaceID, "")
-	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandDelete)
+	_, err := memoryCommandResponse[memoryevents.DeleteMemoryResult](r.hub.Send(event), memoryevents.TopicMemoryCommandDelete)
 	return err
 }
 
@@ -171,8 +188,11 @@ func (r memoryRecallTraceEventRepository) Upsert(ctx context.Context, item *memo
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandUpsert, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpsertMemoryRecallTraceCommandFromModel(item))
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandUpsert, "memory_recall_trace", string(item.ID), item.WorkspaceID, item.RunID)
-	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandUpsert)
-	return err
+	response, err := memoryCommandResponse[memoryevents.UpsertMemoryRecallTraceResult](r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandUpsert)
+	if err != nil {
+		return err
+	}
+	return response.Validate(item.WorkspaceID, item.RunID, item.ID)
 }
 
 func (r memoryRecallTraceEventRepository) Get(ctx context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
@@ -180,37 +200,83 @@ func (r memoryRecallTraceEventRepository) Get(ctx context.Context, id common.Mem
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandGet, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.GetMemoryRecallTraceCommand{TraceID: id})
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandGet, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.GetMemoryRecallTraceCommand{WorkspaceID: workspaceID, TraceID: id})
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandGet, "memory_recall_trace", string(id), workspaceID, "")
-	response, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandGet)
+	response, err := memoryCommandResponse[memoryevents.GetMemoryRecallTraceResult](r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandGet)
 	if err != nil {
 		return nil, err
 	}
-	if response.RecallTrace == nil {
+	if response.Trace == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.RecallTrace.Model()
+	return response.Trace.Model()
 }
 
 func (r memoryRecallTraceEventRepository) List(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	if r.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{Query: workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: query.WorkspaceID, RunID: query.RunID, StepID: query.StepID, Stage: query.Stage, Source: query.Source, Status: query.Status, Limit: query.Limit}})
-	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID)
-	response, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandList)
-	if err != nil {
-		return nil, err
+	workspaceID := query.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
 	}
-	ret := make([]*memorymodel.MemoryRecallTrace, 0, len(response.RecallTraces))
-	for _, item := range response.RecallTraces {
-		trace, err := item.Model()
+	if workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	query.WorkspaceID = workspaceID
+	requestedLimit := query.Limit
+	if requestedLimit < 0 {
+		requestedLimit = 0
+	}
+	ret := make([]*memorymodel.MemoryRecallTrace, 0)
+	cursor := query.CursorAfterID
+	seen := map[common.MemoryRecallTraceID]struct{}{}
+	for page := 0; page < 1000; page++ {
+		pageLimit := 200
+		if requestedLimit > 0 && requestedLimit-len(ret) < pageLimit {
+			pageLimit = requestedLimit - len(ret)
+		}
+		if pageLimit <= 0 {
+			return ret, nil
+		}
+		pageQuery := query
+		pageQuery.CursorAfterID = cursor
+		pageQuery.Limit = pageLimit
+		event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{Query: pageQuery})
+		bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", pageQuery.WorkspaceID, pageQuery.RunID)
+		response, err := memoryCommandResponse[memoryevents.ListMemoryRecallTracesResult](r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandList)
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, trace)
+		for _, item := range response.Traces {
+			trace, err := item.Model()
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, trace)
+			if len(ret) > 100000 {
+				return nil, common.ErrConflict
+			}
+		}
+		if requestedLimit > 0 && len(ret) >= requestedLimit {
+			return ret[:requestedLimit], nil
+		}
+		if response.NextCursor == "" {
+			return ret, nil
+		}
+		if len(response.Traces) == 0 {
+			return nil, common.ErrConflict
+		}
+		if _, duplicate := seen[response.NextCursor]; duplicate {
+			return nil, common.ErrConflict
+		}
+		seen[response.NextCursor] = struct{}{}
+		cursor = response.NextCursor
 	}
-	return ret, nil
+	return nil, common.ErrConflict
 }
 
 func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.MemoryRecallTraceID) error {
@@ -218,9 +284,12 @@ func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.
 		return common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" || id == "" {
+		return common.ErrInvalidArgument
+	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandDelete, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.DeleteMemoryRecallTraceCommand{WorkspaceID: workspaceID, TraceID: id})
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandDelete, "memory_recall_trace", string(id), workspaceID, "")
-	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandDelete)
+	_, err := memoryCommandResponse[memoryevents.DeleteMemoryRecallTraceResult](r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandDelete)
 	return err
 }
 

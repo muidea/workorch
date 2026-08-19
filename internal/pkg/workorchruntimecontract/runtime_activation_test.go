@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
 func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *testing.T) {
@@ -18,7 +19,14 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 			ID: "cap-read", ServerID: "mcp-main", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "read", Enabled: true,
 			EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
 		}},
-		Memories:         []RuntimeMemoryContext{{ID: "memory-1", MemoryType: "fact", Summary: "历史约束", Content: "保持 typed contract"}},
+		Memories: []RuntimeMemoryContext{{ID: "memory-1", MemoryType: "fact", Summary: "历史约束", Content: "保持 typed contract"}},
+		MemorySelection: &workorchmemorycontract.RecallSelectionEvidence{
+			Policy: "test_selection", Status: "selected", CandidateMemoryIDs: []common.MemoryID{"memory-1"},
+			SelectedMemoryIDs: []common.MemoryID{"memory-1"}, RetrievedMemoryIDs: []common.MemoryID{"memory-1"},
+			SelectionScores:     []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 1, Reason: "selected_within_context_budget"}},
+			RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "memory-1", Summary: "历史约束"}},
+			ContextBudget:       workorchmemorycontract.RecallContextBudget{MaxItems: 8, MaxBytes: 16384, MaxEstimatedTokens: 4096, UsedItems: 1, UsedBytes: 32, EstimatedTokens: 8},
+		},
 		EvidencePolicies: []RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: "shell/command", ZeroWorkMarkers: []string{"no tests"}, QualityOnZeroWork: "inconclusive"}},
 		Continuation: RuntimeContinuationContext{
 			GovernanceHistory: []RuntimeGovernanceHistoryEntry{{

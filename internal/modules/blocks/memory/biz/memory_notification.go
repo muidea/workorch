@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
 func (m *Biz) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) {
@@ -44,6 +45,7 @@ func (m *Biz) publishMemoryRecallRecorded(ctx context.Context, trace *memorymode
 			ProviderID:         trace.ProviderID,
 			Operation:          trace.Operation,
 			RetrievedMemoryIDs: append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...),
+			SelectionEvidence:  memoryRecallSelectionEvidence(trace),
 			Reason:             trace.Reason,
 			OccurredAt:         trace.OccurredAt,
 		},
@@ -56,4 +58,32 @@ func (m *Biz) publishMemoryRecallRecorded(ctx context.Context, trace *memorymode
 		StepID:      string(trace.StepID),
 	}))
 	m.PostEvent(event)
+}
+
+func memoryRecallSelectionEvidence(trace *memorymodel.MemoryRecallTrace) *workorchmemorycontract.RecallSelectionEvidence {
+	if trace == nil || trace.Source != "activation" {
+		return nil
+	}
+	return workorchmemorycontract.CloneRecallSelectionEvidence(&workorchmemorycontract.RecallSelectionEvidence{
+		Policy: trace.Policy, Status: trace.Status, Reason: trace.Reason, ProviderID: trace.ProviderID, ModelID: trace.ModelID,
+		Operation: trace.Operation, QueryTextPreview: trace.QueryTextPreview, QueryTextSHA256: trace.QueryTextSha256,
+		MinScore: trace.MinScore, Limit: trace.Limit, EmbeddingModel: trace.EmbeddingModel, VectorDimension: trace.VectorDimension,
+		RefreshSource: trace.RefreshSource, SelectionPolicyVersion: trace.SelectionPolicyVersion,
+		CandidateMemoryIDs: append([]common.MemoryID(nil), trace.CandidateMemoryIDs...),
+		SelectedMemoryIDs:  append([]common.MemoryID(nil), trace.SelectedMemoryIDs...), ExcludedMemoryIDs: append([]common.MemoryID(nil), trace.ExcludedMemoryIDs...),
+		TypeQuota: memoryRecallTypeQuotaEntries(trace.TypeQuota), SelectionScores: append([]workorchmemorycontract.RecallSelectionScore(nil), trace.SelectionScores...),
+		RetrievedMemoryIDs: append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...), RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), trace.RetrievedMemoryHits...),
+		ContextBudget: trace.ContextBudget, SemanticRecall: workorchmemorycontract.CloneRecallSelectionEvidence(trace.SemanticRecall), FallbackFrom: trace.FallbackFrom,
+	})
+}
+
+func memoryRecallTypeQuotaEntries(values map[string]int) []workorchmemorycontract.TypeQuotaEntry {
+	if values == nil {
+		return nil
+	}
+	ret := make([]workorchmemorycontract.TypeQuotaEntry, 0, len(values))
+	for memoryType, quota := range values {
+		ret = append(ret, workorchmemorycontract.TypeQuotaEntry{Type: memoryType, Quota: quota})
+	}
+	return ret
 }

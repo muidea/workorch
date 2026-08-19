@@ -4,7 +4,6 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -80,16 +79,12 @@ func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 	}
 	semanticItems, semanticEvidence, semanticHandled := semanticMemoryItems(ctx, opts)
 	if semanticHandled {
-		selected := activationcore.VisibleMemoryItems(semanticItems, 8)
-		if semanticEvidence == nil {
-			semanticEvidence = &MemorySelectionEvidence{}
+		selected, semanticEvidence, err := applyRuntimeMemorySelectionBudget(semanticItems, semanticEvidence)
+		if err != nil {
+			return nil, nil, err
 		}
 		// Successful semantic path (including empty selected set) returns as-is.
 		if semanticEvidence.Status != "degraded" {
-			semanticEvidence.RetrievedMemoryIDs = activationcore.MemoryItemIDs(selected)
-			if len(selected) == 0 && len(semanticItems) > 0 {
-				semanticEvidence.Status = "none_selected"
-			}
 			return selected, semanticEvidence, nil
 		}
 		// Degraded semantic recall must fall back to workspace list baseline while

@@ -325,16 +325,15 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 		if err := m.publishRunEvent(ctx, runevents.TopicRunCreated, item); err != nil {
 			return nil, err
 		}
-		// Restart replacement creation bypasses the generic CreateRun command so
-		// Run can persist the successor and its lineage atomically within the
-		// owner. Preserve the same typed activation-memory handoff used by the
-		// regular create/ensure paths after the Run record is durable.
+		// Workspace execution replacement persists the successor and its lineage
+		// inside the Run owner. Hand off the sealed activation-memory fact only
+		// after the Run record is durable.
 		m.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
 			RunID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
 			DefinitionRevision: item.DefinitionRevision, InitialStepKind: item.InitialStepKind,
 			RuntimeBootstrap: item.RuntimeBootstrap, PredecessorRunID: item.Lineage.PredecessorRunID,
 			PredecessorResultID: item.Lineage.PredecessorResultID, Priority: item.Priority,
-		})
+		}, item.CreatedAt)
 		return item, nil
 	}
 	return nil, common.ErrConflict
@@ -576,7 +575,20 @@ func (m *Biz) recoverPendingWorkspaceExecutionSuccessors() {
 		return
 	}
 	for _, item := range items {
-		if item == nil || item.ReplacementIntent == nil {
+		if item == nil {
+			continue
+		}
+		// The Run record is the durable source for activation selection. Re-drive
+		// the create-once Memory fact on startup so a crash between Run commit and
+		// the cross-owner handoff cannot permanently lose the recall trace. Exact
+		// replay is zero-write at the Memory owner and never becomes SM authority.
+		m.publishRuntimeActivationMemoryRecall(context.Background(), runevents.CreateRunCommand{
+			RunID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
+			DefinitionRevision: item.DefinitionRevision, RuntimeBootstrap: item.RuntimeBootstrap,
+			PredecessorRunID: item.Lineage.PredecessorRunID, PredecessorResultID: item.Lineage.PredecessorResultID,
+			Priority: item.Priority,
+		}, item.CreatedAt)
+		if item.ReplacementIntent == nil {
 			continue
 		}
 		if item.ReplacementIntent.State != runmodel.ReplacementIntentCompleted {

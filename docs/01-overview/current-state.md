@@ -120,6 +120,8 @@ Runtime aggregate 只支持一个 current development baseline，不维护历史
 - 正式资源只由对应 Owner repository 写入；projection store 是可重建读模型，EventRecord 是审计流。
 - Workspace scope 绑定在每次 EventHub context；组件实例、全局 cache 和后台任务不得保存可被静默切换的
   “current workspace”。
+- Memory item/trace command 同样强制该 scope；RecallTrace 采用 create-once exact replay。Activation 的候选、排除、
+  quota、score/hit 与 byte/token budget 作为 sealed context provenance 持久化和投影，但不参与 SM-2 credit。
 - 普通 Workspace setup 的必填业务输入只有 Template、Goal、DoD；workspace directory 输入可选，空值解析为
   `.workorch-workspaces/<workspace-id>`，且不要求用户提交 Runtime JSON。
 

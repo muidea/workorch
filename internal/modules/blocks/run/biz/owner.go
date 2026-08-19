@@ -100,10 +100,10 @@ func (m *Biz) Start() error {
 	m.topics = append(m.topics, runevents.TopicRunCommandWorkspaceExecutionIntent)
 	m.started = true
 	m.commandMu.Unlock()
-	// A crash may occur after the replacement successor is persisted but before
-	// the predecessor terminal notification reaches this process. Re-scan only
-	// Run-owned pending activation records; the helper posts owner-local
-	// activation commands and never reconstructs Runtime authority.
+	// Re-scan Run-owned records for two durable handoffs that may have been
+	// interrupted by a crash: replacement termination delivery and the
+	// create-once activation-memory audit. Neither path reconstructs Runtime
+	// authority or advances an SM-2/SM-3 decision.
 	m.recoverPendingWorkspaceExecutionSuccessors()
 	// The readiness fact is published only after all regular Run commands are
 	// subscribed. Startup recovery may have loaded opaque state during Setup,

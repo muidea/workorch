@@ -27,6 +27,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
@@ -539,6 +540,16 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 		}},
 		{memoryevents.TopicMemoryRecallRecorded, memoryevents.MemoryRecallRecordedData{
 			TraceID: "recall-event-stream-typed", WorkspaceID: workspaceID, RunID: runID, StepID: "step-001", Stage: "execution", Source: "semantic", Status: "completed", RetrievedMemoryIDs: []common.MemoryID{"memory-event-stream-typed"}, OccurredAt: "2026-07-11T00:00:00Z",
+			SelectionEvidence: &workorchmemorycontract.RecallSelectionEvidence{
+				Policy: "semantic", Status: "selected", ProviderID: "embedding-provider", ModelID: "embedding-target",
+				QueryTextPreview: "goal and DoD", QueryTextSHA256: "sha256-query", MinScore: 0.1, Limit: 100,
+				EmbeddingModel: "embedding-model", VectorDimension: 4, RefreshSource: "semantic_vector_search", SelectionPolicyVersion: "activation-memory-selection/v1",
+				CandidateMemoryIDs: []common.MemoryID{"memory-event-stream-typed", "memory-excluded"},
+				SelectedMemoryIDs:  []common.MemoryID{"memory-event-stream-typed"}, ExcludedMemoryIDs: []common.MemoryID{"memory-excluded"},
+				SelectionScores:    []workorchmemorycontract.RecallSelectionScore{{ID: "memory-event-stream-typed", Score: 10, Reason: "selected_within_context_budget"}, {ID: "memory-excluded", Score: 1, Reason: "excluded_type_quota"}},
+				RetrievedMemoryIDs: []common.MemoryID{"memory-event-stream-typed"}, RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "memory-event-stream-typed", Summary: "typed memory"}},
+				ContextBudget: workorchmemorycontract.RecallContextBudget{MaxItems: 8, MaxBytes: 16384, MaxEstimatedTokens: 4096, UsedItems: 1, UsedBytes: 12, EstimatedTokens: 3},
+			},
 		}},
 	}
 	for _, item := range items {
@@ -567,6 +578,27 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 	}
 	if recallRecord == nil || recallRecord.StepID != "step-001" {
 		t.Fatalf("recall records = %+v", records)
+	}
+	selection, ok := recallRecord.Payload.Object(recordpayload.PayloadKeySelectionEvidence)
+	if !ok {
+		t.Fatalf("recall selection evidence missing: %+v", recallRecord.Payload)
+	}
+	candidates, ok := selection.StringSlice(recordpayload.PayloadKeyCandidateMemoryIDs)
+	if !ok || len(candidates) != 2 || candidates[1] != "memory-excluded" {
+		t.Fatalf("recall candidate audit = %#v/%v", candidates, ok)
+	}
+	budget, ok := selection.Object(recordpayload.PayloadKeyContextBudget)
+	if !ok {
+		t.Fatalf("recall context budget missing: %+v", selection)
+	}
+	if usedItems, _ := budget.Int64("usedItems"); usedItems != 1 {
+		t.Fatalf("recall usedItems = %d", usedItems)
+	}
+	queryHash, _ := selection.String(recordpayload.PayloadKeyQueryTextSHA256)
+	policyVersion, _ := selection.String(recordpayload.PayloadKeySelectionPolicyVersion)
+	vectorDimension, _ := selection.Int64(recordpayload.PayloadKeyVectorDimension)
+	if queryHash != "sha256-query" || policyVersion != "activation-memory-selection/v1" || vectorDimension != 4 {
+		t.Fatalf("recall selection provenance = hash:%q policy:%q dimension:%d", queryHash, policyVersion, vectorDimension)
 	}
 }
 

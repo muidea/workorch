@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -99,20 +98,21 @@ func workspaceResponse(response magicevent.Result, topic string) (workspaceevent
 	return result, nil
 }
 
-func memoryResponse(response magicevent.Result, topic string) (memoryevents.MemoryCommandResult, error) {
+func memoryResponse[Response any](response magicevent.Result, topic string) (Response, error) {
+	var zero Response
 	if response == nil {
-		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := response.Error(); err != nil {
-		return memoryevents.MemoryCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return memoryevents.MemoryCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(memoryevents.MemoryCommandResult)
+	result, ok := data.(Response)
 	if !ok {
-		return memoryevents.MemoryCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

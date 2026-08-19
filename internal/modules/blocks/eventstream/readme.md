@@ -19,6 +19,7 @@ module ID 和 EventHub 合同身份均为 `blocks/eventstream`。
 ## 组件交互及合同
 
 - 分 topic 订阅 Workspace、Run、Result、Decision、Approval、Memory、Governance 和 LLM usage 的具体 data 类型；当前不直接订阅 Orchestrator topic。
+- Memory activation recall 的 typed notification 保留 bounded selection evidence（candidate/selected/excluded、quota、score/hit、context budget 与 semantic fallback）；Eventstream 只保存其 audit payload，不据此重建 Runtime authority。
 - 输入通知转换为 `EventRecordData` 后写入 EventRecord repository，并发布 `EventRecordAppendedData`。
 - `ListEventRecordsCommand`、`HighWatermarksCommand`、`PurgeWorkspaceEventsCommand` 及对应 `EventStreamCommandResult` 由 `blocks/eventstream/pkg/events` 定义；EventRecord 只能由已订阅的 owner notification 追加，不暴露外部 append command。
 - `EventRecordQuery` 是 Eventstream owner DTO；module 内部映射 repository query 并 clone `ExcludeTopics`，EventHub 不暴露 repository query/entity。

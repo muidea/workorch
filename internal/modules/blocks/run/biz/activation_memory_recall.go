@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -22,11 +21,11 @@ import (
 // blocks/memory owns RecallTrace persistence and the recorded notification.
 // The operation is intentionally idempotent and best-effort because the Run
 // record is already durable when this cross-owner observability fact is sent.
-func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command runevents.CreateRunCommand) {
+func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command runevents.CreateRunCommand, occurredAt string) {
 	if m == nil || m.EventHub() == nil || command.RuntimeBootstrap == nil {
 		return
 	}
-	trace := runtimeActivationMemoryRecallTrace(command.RunID, command.WorkspaceID, command.RuntimeBootstrap, time.Now().UTC().Format(time.RFC3339Nano))
+	trace := runtimeActivationMemoryRecallTrace(command.RunID, command.WorkspaceID, command.RuntimeBootstrap, occurredAt)
 	if trace == nil {
 		return
 	}
@@ -49,10 +48,18 @@ func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command 
 	if response == nil {
 		return
 	}
-	// Do not let an observability failure alter the already-persisted Run
-	// command result. The memory owner still receives the concrete typed event,
-	// and subsequent owner-local replay can safely upsert the same trace.
-	_ = response.Error()
+	if response.Error() != nil {
+		return
+	}
+	data, err := response.Get()
+	if err != nil {
+		return
+	}
+	ack, ok := data.(memoryevents.UpsertMemoryRecallTraceResult)
+	if !ok {
+		return
+	}
+	_ = ack.Validate(trace.WorkspaceID, trace.RunID, trace.ID)
 }
 
 func runtimeActivationMemoryRecallTrace(runID common.RunID, workspaceID common.WorkspaceID, bootstrap *runtimecontract.RuntimeBootstrap, occurredAt string) *memorymodel.MemoryRecallTrace {
@@ -60,26 +67,43 @@ func runtimeActivationMemoryRecallTrace(runID common.RunID, workspaceID common.W
 		return nil
 	}
 	activation := bootstrap.Activation.Normalized()
-	if len(activation.Memories) == 0 {
+	if activation.MemorySelection == nil {
 		return nil
 	}
+	selection := activation.MemorySelection.Normalized()
 	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/activation", runID))
-	ids := make([]common.MemoryID, 0, len(activation.Memories))
-	hits := make([]workorchmemorycontract.RecallHit, 0, len(activation.Memories))
-	for _, item := range activation.Memories {
-		if item.ID == "" {
-			continue
-		}
-		ids = append(ids, item.ID)
-		hits = append(hits, workorchmemorycontract.RecallHit{ID: item.ID, Summary: item.Summary, VectorScore: item.VectorScore})
-	}
-	if len(ids) == 0 {
-		return nil
-	}
 	return &memorymodel.MemoryRecallTrace{
 		ID: traceID, WorkspaceID: workspaceID, RunID: runID, Stage: "planning", Source: "activation",
-		Policy: "runtime_typed_activation", Status: "selected", Operation: "typed_activation_snapshot", RefreshSource: "activation",
-		SelectedMemoryIDs: append([]common.MemoryID(nil), ids...), RetrievedMemoryIDs: append([]common.MemoryID(nil), ids...), RetrievedMemoryHits: hits,
+		Policy: selection.Policy, Status: selection.Status, ProviderID: selection.ProviderID, ModelID: selection.ModelID, Operation: selection.Operation,
+		QueryTextPreview: selection.QueryTextPreview, QueryTextSha256: selection.QueryTextSHA256, MinScore: selection.MinScore,
+		Limit: selection.Limit, EmbeddingModel: selection.EmbeddingModel, VectorDimension: selection.VectorDimension,
+		RefreshSource: selection.RefreshSource, SelectionPolicyVersion: selection.SelectionPolicyVersion,
+		CandidateMemoryIDs: append([]common.MemoryID(nil), selection.CandidateMemoryIDs...),
+		SelectedMemoryIDs:  append([]common.MemoryID(nil), selection.SelectedMemoryIDs...),
+		ExcludedMemoryIDs:  append([]common.MemoryID(nil), selection.ExcludedMemoryIDs...),
+		TypeQuota:          memoryTypeQuotaMap(selection.TypeQuota), SelectionScores: append([]workorchmemorycontract.RecallSelectionScore(nil), selection.SelectionScores...),
+		RetrievedMemoryIDs: append([]common.MemoryID(nil), selection.RetrievedMemoryIDs...), RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), selection.RetrievedMemoryHits...),
+		ContextBudget: selection.ContextBudget, SemanticRecall: cloneRuntimeMemorySelectionEvidence(selection.SemanticRecall), FallbackFrom: selection.FallbackFrom,
+		Reason:     selection.Reason,
 		OccurredAt: strings.TrimSpace(occurredAt), EvidenceRef: string(traceID),
 	}
+}
+
+func memoryTypeQuotaMap(values []workorchmemorycontract.TypeQuotaEntry) map[string]int {
+	if values == nil {
+		return nil
+	}
+	ret := make(map[string]int, len(values))
+	for _, value := range values {
+		ret[value.Type] = value.Quota
+	}
+	return ret
+}
+
+func cloneRuntimeMemorySelectionEvidence(input *workorchmemorycontract.RecallSelectionEvidence) *workorchmemorycontract.RecallSelectionEvidence {
+	if input == nil {
+		return nil
+	}
+	value := input.Normalized()
+	return &value
 }

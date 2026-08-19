@@ -1068,14 +1068,30 @@ func (r *workspaceScopedMemoryRecallTraceRepository) List(ctx context.Context, q
 		return r.store.memoryRecallTraceRepo(filepath.Join(r.store.workspaceRoot(query.WorkspaceID), workspaceScopedMemoryRecallTraceFile)).List(ctx, query)
 	}
 	ret := []*memorymodel.MemoryRecallTrace{}
+	repositoryQuery := query
+	repositoryQuery.CursorAfterID = ""
+	repositoryQuery.Limit = 0
 	for _, root := range r.store.allWorkspaceRoots() {
-		items, err := r.store.memoryRecallTraceRepo(filepath.Join(root, workspaceScopedMemoryRecallTraceFile)).List(ctx, query)
+		items, err := r.store.memoryRecallTraceRepo(filepath.Join(root, workspaceScopedMemoryRecallTraceFile)).List(ctx, repositoryQuery)
 		if err != nil {
 			return nil, err
 		}
 		ret = append(ret, items...)
 	}
 	sortMemoryRecallTraces(ret)
+	if query.CursorAfterID != "" {
+		start := -1
+		for idx, item := range ret {
+			if item != nil && item.ID == query.CursorAfterID {
+				start = idx + 1
+				break
+			}
+		}
+		if start < 0 {
+			return nil, common.ErrInvalidArgument
+		}
+		ret = ret[start:]
+	}
 	if query.Limit > 0 && len(ret) > query.Limit {
 		ret = ret[:query.Limit]
 	}

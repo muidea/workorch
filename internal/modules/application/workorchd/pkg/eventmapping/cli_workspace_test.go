@@ -8,6 +8,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -139,6 +140,8 @@ func TestCLIWorkspaceSnapshotMappingRoundTripAndNilSemantics(t *testing.T) {
 		MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{
 			ID: "memory-trace-1", TypeQuota: map[string]int{"semantic": 2, "episodic": 1},
 			CandidateMemoryIDs: []string{"memory-1"},
+			ModelID:            "embedding-model", ContextBudget: workorchmemorycontract.RecallContextBudget{MaxItems: 8, MaxBytes: 16384, MaxEstimatedTokens: 4096},
+			SemanticRecall: &workorchmemorycontract.RecallSelectionEvidence{Policy: "semantic", Status: "degraded"}, FallbackFrom: "semantic_vector_search",
 		}},
 	}
 	dto, err := SnapshotDTO(snapshot)
@@ -147,11 +150,15 @@ func TestCLIWorkspaceSnapshotMappingRoundTripAndNilSemantics(t *testing.T) {
 	}
 	dto.Step.Input = workorcheventpayload.New(workorcheventpayload.StringField("input", "mutated"))
 	dto.MemoryRecallTraces[0].TypeQuota[0].Quota = 99
+	dto.MemoryRecallTraces[0].SemanticRecall.Policy = "mutated"
 	if value, _ := snapshot.Step.Input["input"].(string); value != "kept" {
 		t.Fatal("snapshot step payload shares EventHub DTO storage")
 	}
 	if snapshot.MemoryRecallTraces[0].TypeQuota["episodic"] != 1 {
 		t.Fatal("memory recall quota shares EventHub DTO storage")
+	}
+	if snapshot.MemoryRecallTraces[0].SemanticRecall.Policy != "semantic" {
+		t.Fatal("memory recall nested evidence shares EventHub DTO storage")
 	}
 	dto, err = SnapshotDTO(snapshot)
 	if err != nil {

@@ -113,6 +113,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 			mcpSelection.MCPServerIDs,
 			mcpSelection.Capabilities,
 			memories,
+			bindings.memorySelection,
 			workspace.EvidencePolicies,
 			executionContract,
 			continuation,

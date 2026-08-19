@@ -1,6 +1,7 @@
 package events
 
 import (
+	"math"
 	"sort"
 	"strings"
 
@@ -52,6 +53,7 @@ type UpsertMemoryRecallTraceCommand struct {
 	Policy                 string
 	Status                 string
 	ProviderID             string
+	ModelID                string
 	Operation              string
 	QueryTextPreview       string
 	QueryTextSha256        string
@@ -68,6 +70,9 @@ type UpsertMemoryRecallTraceCommand struct {
 	SelectionScores        []workorchmemorycontract.RecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
 	RetrievedMemoryHits    []workorchmemorycontract.RecallHit
+	ContextBudget          workorchmemorycontract.RecallContextBudget
+	SemanticRecall         *workorchmemorycontract.RecallSelectionEvidence
+	FallbackFrom           string
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string
@@ -75,6 +80,15 @@ type UpsertMemoryRecallTraceCommand struct {
 
 func (c UpsertMemoryRecallTraceCommand) Validate() error {
 	if c.TraceID == "" || c.WorkspaceID == "" || c.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if len(c.CandidateMemoryIDs) > workorchmemorycontract.RecallSelectionMaxCandidateCount ||
+		len(c.SelectedMemoryIDs) > workorchmemorycontract.RecallSelectionMaxSelectedCount ||
+		len(c.ExcludedMemoryIDs) > workorchmemorycontract.RecallSelectionMaxCandidateCount ||
+		len(c.SelectionScores) > workorchmemorycontract.RecallSelectionMaxCandidateCount ||
+		len(c.RetrievedMemoryIDs) > workorchmemorycontract.RecallSelectionMaxSelectedCount ||
+		len(c.RetrievedMemoryHits) > workorchmemorycontract.RecallSelectionMaxSelectedCount ||
+		math.IsNaN(c.MinScore) || math.IsInf(c.MinScore, 0) || c.Limit < 0 || c.VectorDimension < 0 {
 		return common.ErrInvalidArgument
 	}
 	seen := make(map[string]struct{}, len(c.TypeQuota))
@@ -87,6 +101,35 @@ func (c UpsertMemoryRecallTraceCommand) Validate() error {
 			return common.ErrInvalidArgument
 		}
 		seen[key] = struct{}{}
+	}
+	for _, score := range c.SelectionScores {
+		if score.ID == "" || strings.TrimSpace(score.Reason) == "" {
+			return common.ErrInvalidArgument
+		}
+	}
+	for _, hit := range c.RetrievedMemoryHits {
+		if hit.ID == "" || hit.VectorDimension < 0 || math.IsNaN(hit.VectorScore) || math.IsInf(hit.VectorScore, 0) {
+			return common.ErrInvalidArgument
+		}
+	}
+	if strings.TrimSpace(c.Source) == "activation" {
+		evidence := workorchmemorycontract.RecallSelectionEvidence{
+			Policy: c.Policy, Status: c.Status, Reason: c.Reason, ProviderID: c.ProviderID, ModelID: c.ModelID,
+			Operation: c.Operation, QueryTextPreview: c.QueryTextPreview, QueryTextSHA256: c.QueryTextSha256,
+			MinScore: c.MinScore, Limit: c.Limit, EmbeddingModel: c.EmbeddingModel, VectorDimension: c.VectorDimension,
+			RefreshSource: c.RefreshSource, SelectionPolicyVersion: c.SelectionPolicyVersion,
+			CandidateMemoryIDs:  append([]common.MemoryID(nil), c.CandidateMemoryIDs...),
+			SelectedMemoryIDs:   append([]common.MemoryID(nil), c.SelectedMemoryIDs...),
+			ExcludedMemoryIDs:   append([]common.MemoryID(nil), c.ExcludedMemoryIDs...),
+			TypeQuota:           append([]workorchmemorycontract.TypeQuotaEntry(nil), c.TypeQuota...),
+			SelectionScores:     append([]workorchmemorycontract.RecallSelectionScore(nil), c.SelectionScores...),
+			RetrievedMemoryIDs:  append([]common.MemoryID(nil), c.RetrievedMemoryIDs...),
+			RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), c.RetrievedMemoryHits...),
+			ContextBudget:       c.ContextBudget, SemanticRecall: cloneRecallSelectionEvidence(c.SemanticRecall), FallbackFrom: c.FallbackFrom,
+		}
+		if err := evidence.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -102,7 +145,9 @@ type GetMemoryCommand struct {
 }
 
 type ListMemoryByWorkspaceCommand struct {
-	WorkspaceID common.WorkspaceID
+	WorkspaceID   common.WorkspaceID
+	CursorAfterID common.MemoryID
+	Limit         int
 }
 
 type SearchMemoryCommand struct {
@@ -116,6 +161,95 @@ type GetMemoryRecallTraceCommand struct {
 
 type ListMemoryRecallTracesCommand struct {
 	Query workorchquerycontract.MemoryRecallTraceQuery
+}
+
+type CreateMemoryResult struct {
+	WorkspaceID common.WorkspaceID
+	MemoryID    common.MemoryID
+}
+
+type GetMemoryResult struct {
+	Item *memorymodel.MemoryItem
+}
+
+func (r GetMemoryResult) Clone() GetMemoryResult {
+	return GetMemoryResult{Item: memorymodel.CloneMemoryItem(r.Item)}
+}
+
+type ListMemoryByWorkspaceResult struct {
+	Items      []*memorymodel.MemoryItem
+	NextCursor common.MemoryID
+}
+
+func (r ListMemoryByWorkspaceResult) Clone() ListMemoryByWorkspaceResult {
+	return ListMemoryByWorkspaceResult{Items: memorymodel.CloneMemoryItems(r.Items), NextCursor: r.NextCursor}
+}
+
+type SearchMemoryResult struct {
+	Items []*memorymodel.MemoryItem
+}
+
+func (r SearchMemoryResult) Clone() SearchMemoryResult {
+	return SearchMemoryResult{Items: memorymodel.CloneMemoryItems(r.Items)}
+}
+
+type UpdateMemoryResult struct {
+	WorkspaceID common.WorkspaceID
+	MemoryID    common.MemoryID
+}
+
+type DeleteMemoryResult struct {
+	WorkspaceID common.WorkspaceID
+	MemoryID    common.MemoryID
+}
+
+type MemoryRecallTraceWriteDisposition string
+
+const (
+	MemoryRecallTraceRecorded  MemoryRecallTraceWriteDisposition = "recorded"
+	MemoryRecallTraceDuplicate MemoryRecallTraceWriteDisposition = "duplicate"
+)
+
+type UpsertMemoryRecallTraceResult struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	TraceID     common.MemoryRecallTraceID
+	Disposition MemoryRecallTraceWriteDisposition
+}
+
+func (r UpsertMemoryRecallTraceResult) Validate(expectedWorkspaceID common.WorkspaceID, expectedRunID common.RunID, expectedTraceID common.MemoryRecallTraceID) error {
+	if r.WorkspaceID != expectedWorkspaceID || r.RunID != expectedRunID || r.TraceID != expectedTraceID {
+		return common.ErrConflict
+	}
+	switch r.Disposition {
+	case MemoryRecallTraceRecorded, MemoryRecallTraceDuplicate:
+		return nil
+	default:
+		return common.ErrInvalidArgument
+	}
+}
+
+type GetMemoryRecallTraceResult struct {
+	Trace *MemoryRecallTrace
+}
+
+func (r GetMemoryRecallTraceResult) Clone() GetMemoryRecallTraceResult {
+	return GetMemoryRecallTraceResult{Trace: cloneMemoryRecallTrace(r.Trace)}
+}
+
+type ListMemoryRecallTracesResult struct {
+	Traces     []*MemoryRecallTrace
+	NextCursor common.MemoryRecallTraceID
+}
+
+func (r ListMemoryRecallTracesResult) Clone() ListMemoryRecallTracesResult {
+	return ListMemoryRecallTracesResult{Traces: cloneMemoryRecallTraces(r.Traces), NextCursor: r.NextCursor}
+}
+
+type DeleteMemoryRecallTraceResult struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	TraceID     common.MemoryRecallTraceID
 }
 
 type MemoryChangedData struct {
@@ -189,6 +323,7 @@ type MemoryRecallRecordedData struct {
 	ProviderID         string
 	Operation          string
 	RetrievedMemoryIDs []common.MemoryID
+	SelectionEvidence  *workorchmemorycontract.RecallSelectionEvidence
 	Reason             string
 	OccurredAt         string
 }
@@ -226,7 +361,7 @@ func (t *MemoryRecallTrace) Model() (*memorymodel.MemoryRecallTrace, error) {
 	return &memorymodel.MemoryRecallTrace{
 		ID: command.TraceID, WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: command.StepID,
 		GraphNodeID: command.GraphNodeID, Stage: command.Stage, Source: command.Source, Policy: command.Policy,
-		Status: command.Status, ProviderID: command.ProviderID, Operation: command.Operation,
+		Status: command.Status, ProviderID: command.ProviderID, ModelID: command.ModelID, Operation: command.Operation,
 		QueryTextPreview: command.QueryTextPreview, QueryTextSha256: command.QueryTextSha256, MinScore: command.MinScore,
 		Limit: command.Limit, EmbeddingModel: command.EmbeddingModel, VectorDimension: command.VectorDimension,
 		RefreshSource: command.RefreshSource, SelectionPolicyVersion: command.SelectionPolicyVersion,
@@ -235,23 +370,10 @@ func (t *MemoryRecallTrace) Model() (*memorymodel.MemoryRecallTrace, error) {
 		ExcludedMemoryIDs:  append([]common.MemoryID(nil), command.ExcludedMemoryIDs...),
 		TypeQuota:          memoryTypeQuotaMap(command.TypeQuota), SelectionScores: append([]workorchmemorycontract.RecallSelectionScore(nil), command.SelectionScores...),
 		RetrievedMemoryIDs:  append([]common.MemoryID(nil), command.RetrievedMemoryIDs...),
-		RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), command.RetrievedMemoryHits...), Reason: command.Reason,
+		RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), command.RetrievedMemoryHits...), ContextBudget: command.ContextBudget,
+		SemanticRecall: cloneRecallSelectionEvidence(command.SemanticRecall), FallbackFrom: command.FallbackFrom, Reason: command.Reason,
 		OccurredAt: command.OccurredAt, EvidenceRef: command.EvidenceRef,
 	}, nil
-}
-
-type MemoryCommandResult struct {
-	Item         *memorymodel.MemoryItem
-	Items        []*memorymodel.MemoryItem
-	RecallTrace  *MemoryRecallTrace
-	RecallTraces []*MemoryRecallTrace
-}
-
-func (r MemoryCommandResult) Clone() MemoryCommandResult {
-	return MemoryCommandResult{
-		Item: memorymodel.CloneMemoryItem(r.Item), Items: memorymodel.CloneMemoryItems(r.Items),
-		RecallTrace: cloneMemoryRecallTrace(r.RecallTrace), RecallTraces: cloneMemoryRecallTraces(r.RecallTraces),
-	}
 }
 
 func cloneMemoryRecallTrace(item *MemoryRecallTrace) *MemoryRecallTrace {
@@ -291,6 +413,7 @@ func UpsertMemoryRecallTraceCommandFromModel(trace *memorymodel.MemoryRecallTrac
 		Policy:                 trace.Policy,
 		Status:                 trace.Status,
 		ProviderID:             trace.ProviderID,
+		ModelID:                trace.ModelID,
 		Operation:              trace.Operation,
 		QueryTextPreview:       trace.QueryTextPreview,
 		QueryTextSha256:        trace.QueryTextSha256,
@@ -307,10 +430,21 @@ func UpsertMemoryRecallTraceCommandFromModel(trace *memorymodel.MemoryRecallTrac
 		SelectionScores:        append([]workorchmemorycontract.RecallSelectionScore(nil), trace.SelectionScores...),
 		RetrievedMemoryIDs:     append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...),
 		RetrievedMemoryHits:    append([]workorchmemorycontract.RecallHit(nil), trace.RetrievedMemoryHits...),
+		ContextBudget:          trace.ContextBudget,
+		SemanticRecall:         cloneRecallSelectionEvidence(trace.SemanticRecall),
+		FallbackFrom:           trace.FallbackFrom,
 		Reason:                 trace.Reason,
 		OccurredAt:             trace.OccurredAt,
 		EvidenceRef:            trace.EvidenceRef,
 	}
+}
+
+func cloneRecallSelectionEvidence(input *workorchmemorycontract.RecallSelectionEvidence) *workorchmemorycontract.RecallSelectionEvidence {
+	if input == nil {
+		return nil
+	}
+	value := input.Normalized()
+	return &value
 }
 
 func memoryTypeQuotaEntries(input map[string]int) []workorchmemorycontract.TypeQuotaEntry {
@@ -338,16 +472,16 @@ func memoryTypeQuotaMap(input []workorchmemorycontract.TypeQuotaEntry) map[strin
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
-		eventcontract.CommandTopic[CreateMemoryCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandCreate).MessageContract(),
-		eventcontract.CommandTopic[GetMemoryCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandGet).MessageContract(),
-		eventcontract.CommandTopic[ListMemoryByWorkspaceCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandListByWorkspace).MessageContract(),
-		eventcontract.CommandTopic[SearchMemoryCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandSearch).MessageContract(),
-		eventcontract.CommandTopic[UpdateMemoryCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandUpdate).MessageContract(),
-		eventcontract.CommandTopic[DeleteMemoryCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandDelete).MessageContract(),
-		eventcontract.CommandTopic[UpsertMemoryRecallTraceCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryRecallTraceCommandUpsert).MessageContract(),
-		eventcontract.CommandTopic[GetMemoryRecallTraceCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryRecallTraceCommandGet).MessageContract(),
-		eventcontract.CommandTopic[ListMemoryRecallTracesCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryRecallTraceCommandList).MessageContract(),
-		eventcontract.CommandTopic[DeleteMemoryRecallTraceCommand, MemoryCommandResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryRecallTraceCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[CreateMemoryCommand, CreateMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandCreate).MessageContract(),
+		eventcontract.CommandTopic[GetMemoryCommand, GetMemoryResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListMemoryByWorkspaceCommand, ListMemoryByWorkspaceResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandListByWorkspace).MessageContract(),
+		eventcontract.CommandTopic[SearchMemoryCommand, SearchMemoryResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandSearch).MessageContract(),
+		eventcontract.CommandTopic[UpdateMemoryCommand, UpdateMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandUpdate).MessageContract(),
+		eventcontract.CommandTopic[DeleteMemoryCommand, DeleteMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[UpsertMemoryRecallTraceCommand, UpsertMemoryRecallTraceResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryRecallTraceCommandUpsert).MessageContract(),
+		eventcontract.CommandTopic[GetMemoryRecallTraceCommand, GetMemoryRecallTraceResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryRecallTraceCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListMemoryRecallTracesCommand, ListMemoryRecallTracesResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryRecallTraceCommandList).MessageContract(),
+		eventcontract.CommandTopic[DeleteMemoryRecallTraceCommand, DeleteMemoryRecallTraceResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryRecallTraceCommandDelete).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicMemoryCreated,

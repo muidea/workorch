@@ -14,20 +14,42 @@ func BuildRuntimeActivationMemoryRecallTrace(runID common.RunID, workspaceID com
 		return nil
 	}
 	activation := bootstrap.Activation.Normalized()
-	if len(activation.Memories) == 0 {
+	if activation.MemorySelection == nil {
 		return nil
 	}
+	selection := activation.MemorySelection.Normalized()
 	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/activation", runID))
-	ids := make([]common.MemoryID, 0, len(activation.Memories))
-	hits := make([]workorchmemorycontract.RecallHit, 0, len(activation.Memories))
-	for _, item := range activation.Memories {
-		ids = append(ids, item.ID)
-		hits = append(hits, workorchmemorycontract.RecallHit{ID: item.ID, Summary: item.Summary, VectorScore: item.VectorScore})
-	}
 	return &memorymodel.MemoryRecallTrace{
 		ID: traceID, WorkspaceID: workspaceID, RunID: runID, Stage: "planning", Source: "activation",
-		Policy: "runtime_typed_activation", Status: "selected", Operation: "typed_activation_snapshot", RefreshSource: "activation",
-		SelectedMemoryIDs: append([]common.MemoryID(nil), ids...), RetrievedMemoryIDs: ids, RetrievedMemoryHits: hits,
+		Policy: selection.Policy, Status: selection.Status, ProviderID: selection.ProviderID, ModelID: selection.ModelID,
+		Operation: selection.Operation, QueryTextPreview: selection.QueryTextPreview, QueryTextSha256: selection.QueryTextSHA256,
+		MinScore: selection.MinScore, Limit: selection.Limit, EmbeddingModel: selection.EmbeddingModel, VectorDimension: selection.VectorDimension,
+		RefreshSource: selection.RefreshSource, SelectionPolicyVersion: selection.SelectionPolicyVersion,
+		CandidateMemoryIDs: append([]common.MemoryID(nil), selection.CandidateMemoryIDs...),
+		SelectedMemoryIDs:  append([]common.MemoryID(nil), selection.SelectedMemoryIDs...), ExcludedMemoryIDs: append([]common.MemoryID(nil), selection.ExcludedMemoryIDs...),
+		TypeQuota: recallTypeQuotaMap(selection.TypeQuota), SelectionScores: append([]workorchmemorycontract.RecallSelectionScore(nil), selection.SelectionScores...),
+		RetrievedMemoryIDs: append([]common.MemoryID(nil), selection.RetrievedMemoryIDs...), RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), selection.RetrievedMemoryHits...),
+		ContextBudget: selection.ContextBudget, SemanticRecall: cloneRecallSelection(selection.SemanticRecall), FallbackFrom: selection.FallbackFrom,
+		Reason:     selection.Reason,
 		OccurredAt: occurredAt, EvidenceRef: string(traceID),
 	}
+}
+
+func recallTypeQuotaMap(values []workorchmemorycontract.TypeQuotaEntry) map[string]int {
+	if values == nil {
+		return nil
+	}
+	ret := make(map[string]int, len(values))
+	for _, value := range values {
+		ret[value.Type] = value.Quota
+	}
+	return ret
+}
+
+func cloneRecallSelection(input *workorchmemorycontract.RecallSelectionEvidence) *workorchmemorycontract.RecallSelectionEvidence {
+	if input == nil {
+		return nil
+	}
+	value := input.Normalized()
+	return &value
 }

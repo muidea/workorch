@@ -22,12 +22,12 @@ func PublishMemoryItem(ctx context.Context, hub magicevent.Hub, topic string, it
 	case memoryevents.TopicMemoryCommandCreate:
 		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommandFromModel(item))
 		ownerevent.BindLane(event, memoryevents.Contracts(), topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, "")
-		_, err := ownerevent.Memory(hub.Send(event), topic)
+		_, err := ownerevent.Memory[memoryevents.CreateMemoryResult](hub.Send(event), topic)
 		return err
 	case memoryevents.TopicMemoryCommandUpdate:
 		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryevents.CreateMemoryCommandFromModel(item)))
 		ownerevent.BindLane(event, memoryevents.Contracts(), topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, "")
-		_, err := ownerevent.Memory(hub.Send(event), topic)
+		_, err := ownerevent.Memory[memoryevents.UpdateMemoryResult](hub.Send(event), topic)
 		return err
 	default:
 		return common.ErrInvalidArgument
@@ -66,6 +66,6 @@ func DeleteMemoryItem(ctx context.Context, hub magicevent.Hub, memoryID string) 
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandDelete, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), commandCtx, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: common.MemoryID(memoryID)})
 	ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandDelete, "memory", memoryID, workspaceID, "", "")
-	_, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandDelete)
+	_, err := ownerevent.Memory[memoryevents.DeleteMemoryResult](hub.Send(event), memoryevents.TopicMemoryCommandDelete)
 	return err
 }

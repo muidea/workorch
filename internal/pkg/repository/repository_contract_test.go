@@ -1120,7 +1120,17 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 				Score:  100,
 				Reason: "current_run",
 			},
+			{ID: common.MemoryID("memory-other"), Score: 10, Reason: "excluded_type_quota"},
 		},
+		ContextBudget: workorchmemorycontract.RecallContextBudget{MaxItems: 8, MaxBytes: 16384, MaxEstimatedTokens: 4096, UsedItems: 1, UsedBytes: 15, EstimatedTokens: 4},
+		SemanticRecall: &workorchmemorycontract.RecallSelectionEvidence{
+			Policy: "semantic_vector_search", Status: "selected",
+			CandidateMemoryIDs: []common.MemoryID{"memory-contract"}, SelectedMemoryIDs: []common.MemoryID{"memory-contract"},
+			SelectionScores:    []workorchmemorycontract.RecallSelectionScore{{ID: "memory-contract", Score: 100, Reason: "selected_within_context_budget"}},
+			RetrievedMemoryIDs: []common.MemoryID{"memory-contract"}, RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "memory-contract", Summary: "contract memory"}},
+			ContextBudget: workorchmemorycontract.RecallContextBudget{MaxItems: 8, MaxBytes: 16384, MaxEstimatedTokens: 4096, UsedItems: 1, UsedBytes: 15, EstimatedTokens: 4},
+		},
+		FallbackFrom:       "semantic_vector_search",
 		RetrievedMemoryIDs: []common.MemoryID{common.MemoryID("memory-contract")},
 		RetrievedMemoryHits: []workorchmemorycontract.RecallHit{
 			{
@@ -1151,6 +1161,7 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 	got.ExcludedMemoryIDs[0] = common.MemoryID("mutated")
 	got.TypeQuota["run_summary"] = 9
 	got.SelectionScores[0].Score = 9
+	got.SemanticRecall.CandidateMemoryIDs[0] = "mutated"
 	fresh, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get memory recall trace fresh: %v", err)
@@ -1161,7 +1172,7 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 		fresh.SelectedMemoryIDs[0] != "memory-contract" ||
 		fresh.ExcludedMemoryIDs[0] != "memory-other" ||
 		fresh.TypeQuota["run_summary"] != 1 ||
-		fresh.SelectionScores[0].Score != 100 {
+		fresh.SelectionScores[0].Score != 100 || fresh.SemanticRecall.CandidateMemoryIDs[0] != "memory-contract" {
 		t.Fatalf("memory recall clone isolation failed: %+v", fresh)
 	}
 
@@ -1186,12 +1197,32 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 	if len(byStage) != 1 || byStage[0].Reason != "provider unavailable" {
 		t.Fatalf("memory recall by stage = %+v, want degraded trace", byStage)
 	}
+	second := memorymodel.CloneMemoryRecallTrace(fresh)
+	second.ID = "memory-recall-contract-2"
+	second.OccurredAt = "2026-05-04T00:00:01Z"
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second memory recall trace: %v", err)
+	}
+	firstPage, err := repo.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, Limit: 1})
+	if err != nil || len(firstPage) != 1 || firstPage[0].ID != item.ID {
+		t.Fatalf("first recall page = %+v, err=%v", firstPage, err)
+	}
+	secondPage, err := repo.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, CursorAfterID: item.ID, Limit: 1})
+	if err != nil || len(secondPage) != 1 || secondPage[0].ID != second.ID {
+		t.Fatalf("second recall page = %+v, err=%v", secondPage, err)
+	}
+	if _, err := repo.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, CursorAfterID: "missing", Limit: 1}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unknown recall cursor error = %v, want invalid argument", err)
+	}
 
 	if _, err := repo.Get(ctx, common.MemoryRecallTraceID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing memory recall err = %v, want not found", err)
 	}
 	if err := repo.Delete(ctx, item.ID); err != nil {
 		t.Fatalf("delete memory recall trace: %v", err)
+	}
+	if err := repo.Delete(ctx, second.ID); err != nil {
+		t.Fatalf("delete second memory recall trace: %v", err)
 	}
 	if _, err := repo.Get(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get deleted memory recall err = %v, want not found", err)

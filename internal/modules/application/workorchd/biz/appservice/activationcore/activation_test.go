@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -95,10 +96,28 @@ func TestEffectiveWorkspaceDoDMergesReadyItems(t *testing.T) {
 func TestBuildActivationMemoryRecallTrace(t *testing.T) {
 	runID := common.RunID("run-001")
 	workspaceID := common.WorkspaceID("ws-001")
-	trace := BuildRuntimeActivationMemoryRecallTrace(runID, workspaceID, &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{Memories: []runtimecontract.RuntimeMemoryContext{
-		{ID: "mem-001", Summary: "first", VectorScore: 0.25},
-		{ID: "mem-002", Summary: "second", VectorScore: 0.5},
-	}}}, "2026-06-04T00:00:00Z")
+	trace := BuildRuntimeActivationMemoryRecallTrace(runID, workspaceID, &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{
+		Memories: []runtimecontract.RuntimeMemoryContext{
+			{ID: "mem-001", Summary: "first", VectorScore: 0.25},
+			{ID: "mem-002", Summary: "second", VectorScore: 0.5},
+		},
+		MemorySelection: &workorchmemorycontract.RecallSelectionEvidence{
+			Policy:             "test_selection",
+			Status:             "selected",
+			CandidateMemoryIDs: []common.MemoryID{"mem-001", "mem-002"},
+			SelectedMemoryIDs:  []common.MemoryID{"mem-001", "mem-002"},
+			RetrievedMemoryIDs: []common.MemoryID{"mem-001", "mem-002"},
+			SelectionScores: []workorchmemorycontract.RecallSelectionScore{
+				{ID: "mem-001", Score: 1, Reason: "selected_within_context_budget"},
+				{ID: "mem-002", Score: 2, Reason: "selected_within_context_budget"},
+			},
+			RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "mem-001", Summary: "first"}, {ID: "mem-002", Summary: "second"}},
+			ContextBudget: workorchmemorycontract.RecallContextBudget{
+				MaxItems: 8, MaxBytes: 16 * 1024, MaxEstimatedTokens: 4096,
+				UsedItems: 2, UsedBytes: 11, EstimatedTokens: 4,
+			},
+		},
+	}}, "2026-06-04T00:00:00Z")
 	if trace == nil {
 		t.Fatal("BuildActivationMemoryRecallTrace returned nil")
 	}
@@ -108,7 +127,7 @@ func TestBuildActivationMemoryRecallTrace(t *testing.T) {
 	if trace.WorkspaceID != workspaceID || trace.RunID != runID {
 		t.Fatalf("trace scope = workspace:%s run:%s", trace.WorkspaceID, trace.RunID)
 	}
-	if trace.Policy != "runtime_typed_activation" || trace.Status != "selected" {
+	if trace.Policy != "test_selection" || trace.Status != "selected" {
 		t.Fatalf("trace policy/status = %s/%s", trace.Policy, trace.Status)
 	}
 	if len(trace.RetrievedMemoryIDs) != 2 || trace.RetrievedMemoryIDs[0] != "mem-001" || trace.RetrievedMemoryIDs[1] != "mem-002" {

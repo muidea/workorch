@@ -61,6 +61,10 @@ Last Verified: 2026-08-19
 - Approval 授权目标创建后不可由 resolution payload 覆盖；Runtime Approval 只接受 Orchestrator 创建，解决入口绑定
   producer source 与 typed principal；SM-2 commit、evidence 和 durable Eventstream record 以持久化 checkpoint
   fail-closed/re-drive；identity 必须包含 workspace/run，查询使用 concrete bounded result。
+- Memory owner 对所有 item/trace command 强制 Workspace scope；RecallTrace 是 create-once immutable record，exact replay
+  零写入且不重复通知，内容漂移 fail closed；十个 topic 使用 concrete bounded result。activation 将完整候选/排除、
+  quota、score/hit 与 byte/token budget 封入只读 selection provenance，Run → Memory 与 projection/Eventstream 保留该
+  audit，但不得据此重建 SM-2 authority。
 
 完整矩阵见 [Runtime Owner Convergence Verification Matrix](../60-verification/runtime-owner-convergence-matrix.md)。
 

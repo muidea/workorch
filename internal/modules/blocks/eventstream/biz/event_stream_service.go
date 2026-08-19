@@ -36,6 +36,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
@@ -733,7 +734,8 @@ func memoryRecallRecord(source string, data memoryevents.MemoryRecallRecordedDat
 		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID, OccurredAt: data.OccurredAt,
 		Payload: (recordpayload.MemoryRecallPayloadData{
 			TraceID: data.TraceID, Stage: data.Stage, Source: data.Source, Policy: data.Policy, Status: data.Status,
-			ProviderID: data.ProviderID, Operation: data.Operation, RetrievedMemoryIDs: data.RetrievedMemoryIDs, Reason: data.Reason,
+			ProviderID: data.ProviderID, Operation: data.Operation, RetrievedMemoryIDs: data.RetrievedMemoryIDs,
+			SelectionEvidence: workorchmemorycontract.CloneRecallSelectionEvidence(data.SelectionEvidence), Reason: data.Reason,
 		}).EventPayload(),
 	}
 }

@@ -3,6 +3,16 @@ package common
 const ModuleID = "blocks/memory"
 
 const (
+	MemoryListDefaultLimit       = 100
+	MemoryListMaxLimit           = 200
+	MemorySearchDefaultLimit     = 20
+	MemorySearchMaxLimit         = 100
+	MemoryRecallListDefaultLimit = 100
+	MemoryRecallListMaxLimit     = 200
+	MemoryVectorMaxDimension     = 16384
+)
+
+const (
 	MemoryTypeDecision        = "decision"
 	MemoryTypeExecutionLesson = "execution_lesson"
 	MemoryTypeProjectContext  = "project_context"

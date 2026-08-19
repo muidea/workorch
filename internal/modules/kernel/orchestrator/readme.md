@@ -347,6 +347,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   不能借 snapshot reader 扩宽为跨 owner repository。原先没有生产调用方的 generic Run Create EventHub command 同步
   删除；Run 创建只由 Run owner 消费 typed workspace-execution intent 后在 owner 内完成。
 - Runtime 初始化时封存 typed Goal/DoD definition context；后续 candidate request 与重启恢复只能读取 Run owner 中持久化的定义快照，不能由调用方临时重建。
+- Runtime activation 同时封存 bounded `MemorySelection` provenance。candidate/selected/excluded、quota、score、hit 与
+  byte/token budget 只说明 context selection，不能作为 SM-2 coverage credit；selected identity 必须与 activation 中
+  的 Memory context 精确一致。Run owner 以稳定 CreatedAt 将该 evidence 交给 Memory owner 做 create-once audit，
+  Orchestrator 恢复不得从 MemoryRecallTrace 重建 authority。
 - `InitializeRuntimeFromRun` 只读取 Run owner 已持久化的 typed bootstrap，生成 initial facts 并执行 preflight/reducer；Orchestrator 不解析 禁止的 execution context map 来重建定义或 focus。
 - Runtime controller 统一负责 initialize、prerequisite commit、candidate seal 和 evidence commit；服务重启只加载既有 aggregate，不得因重复 Start/Resume 再次执行 reducer 或增加 attempt。
 - initialize/restart identity 只比较不可变 workspace/run、definition revision/content 与 activation；`Facts.Focus` 是 SM-2 persisted cursor，合法 focus advance 后不得被拿来与 bootstrap 首 focus 比较并误判 definition drift。
@@ -454,7 +458,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 | File / Git / Shell / MCP / Web / SSH | 双向 | owner capability/admissibility/feasibility/reconciliation/execute 与 receipt query/commit | 完整；能力 owner 不选择下一 action |
 | Decision / Approval | 双向 | governance open/resolution/evidence 与 immutable continuation/terminal fact | 完整；无 Application resume 旁路 |
 | `kernel/governance` | 无直接 I/O | 经 Decision/Approval/Run typed fact 间接协作 | 完整；不存在 Orchestrator ↔ Governance 直连合同 |
-| `blocks/memory` | Orchestrator → Memory | scoped recall/search/trace typed contract | 完整；Memory 只提供 owner fact |
+| `blocks/memory` | Orchestrator → Memory | workspace-scoped concrete item/trace read 与 bounded paged purge | 完整；Memory 只提供 owner fact，activation trace 由 Run owner 记录 |
 | `application/workorchd` | 双向 | Orchestrator → Application immutable drive observation；Application → Orchestrator evidence/read-model list 与 scoped purge command | 完整；Application 不推进 reducer、不持有 aggregate |
 | Skill / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Registry 更新不改变既有 Run |
 | `blocks/eventstream` | 无直接订阅 | 审计通过正式 owner notification 形成 | 完整；不从审计重建 authority |
@@ -537,6 +541,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   commands-ready handoff。
 - [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace
   snapshot reader 只读表面的静态/反射边界。
+- [x] Memory adapter get 强制传播 WorkspaceID；trace 全量恢复/清理按 concrete bounded result 逐页读取，并检测空页游标、重复游标、页数和条目 hard limit。
 
 ## 待完善测试点
 

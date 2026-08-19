@@ -56,7 +56,7 @@ func TestMemoryRecallTraceResultRoundTripDoesNotShareMutableFields(t *testing.T)
 	model := &memorymodel.MemoryRecallTrace{
 		ID: "trace-1", WorkspaceID: "ws-1", RunID: "run-1",
 		CandidateMemoryIDs: []common.MemoryID{"memory-1"}, TypeQuota: map[string]int{"semantic": 2},
-		SelectionScores:     []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 8}},
+		SelectionScores:     []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 8, Reason: "selected"}},
 		RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "memory-1", Summary: "proof"}},
 	}
 	dto := MemoryRecallTraceFromModel(model)

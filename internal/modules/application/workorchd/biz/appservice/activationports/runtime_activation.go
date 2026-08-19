@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -24,6 +25,7 @@ func RuntimeActivationContext(
 	mcpServerIDs []string,
 	capabilities []*mcpmodel.Capability,
 	memories []*memorymodel.MemoryItem,
+	memorySelection *MemorySelectionEvidence,
 	evidencePolicies []workorcheventpayload.Payload,
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
@@ -38,6 +40,7 @@ func RuntimeActivationContext(
 		MCPCapabilities:   mcpCapabilities,
 		OperationPolicies: runtimeMCPOperationPolicies(mcpCapabilities),
 		Memories:          runtimeMemoryContexts(memories),
+		MemorySelection:   runtimeMemorySelectionEvidence(memorySelection),
 		EvidencePolicies:  runtimeEvidencePolicies(evidencePolicies),
 		ExecutionContract: runtimeExecutionContract(executionContract),
 		Continuation:      continuation,
@@ -544,6 +547,55 @@ func runtimeMemoryContexts(items []*memorymodel.MemoryItem) []runtimecontract.Ru
 			Tags: append([]string(nil), item.Tags...), Importance: item.Importance, Confidence: item.Confidence,
 			Visibility: item.Visibility, Provenance: provenance, VectorScore: item.VectorScore,
 		})
+	}
+	return ret
+}
+
+func runtimeMemorySelectionEvidence(input *MemorySelectionEvidence) *workorchmemorycontract.RecallSelectionEvidence {
+	return runtimeMemorySelectionEvidenceDepth(input, 0)
+}
+
+func runtimeMemorySelectionEvidenceDepth(input *MemorySelectionEvidence, depth int) *workorchmemorycontract.RecallSelectionEvidence {
+	if input == nil {
+		return nil
+	}
+	if depth > 1 {
+		return nil
+	}
+	ret := workorchmemorycontract.RecallSelectionEvidence{
+		Policy: input.Policy, Status: input.Status, Reason: input.Reason,
+		ProviderID: input.ProviderID, ModelID: input.ModelID, Operation: input.Operation,
+		QueryTextPreview: input.QueryTextPreview, QueryTextSHA256: input.QueryTextSHA256,
+		MinScore: input.MinScore, Limit: input.Limit, EmbeddingModel: input.EmbeddingModel,
+		VectorDimension: input.VectorDimension, RefreshSource: input.RefreshSource,
+		SelectionPolicyVersion: input.SelectionPolicyVersion,
+		CandidateMemoryIDs:     runtimeMemoryIDs(input.CandidateMemoryIDs),
+		SelectedMemoryIDs:      runtimeMemoryIDs(input.SelectedMemoryIDs),
+		ExcludedMemoryIDs:      runtimeMemoryIDs(input.ExcludedMemoryIDs),
+		TypeQuota:              append([]workorchmemorycontract.TypeQuotaEntry(nil), input.TypeQuota...),
+		SelectionScores:        append([]workorchmemorycontract.RecallSelectionScore(nil), input.SelectionScores...),
+		RetrievedMemoryIDs:     runtimeMemoryIDs(input.RetrievedMemoryIDs),
+		ContextBudget:          input.ContextBudget,
+		FallbackFrom:           input.FallbackFrom,
+		SemanticRecall:         runtimeMemorySelectionEvidenceDepth(input.SemanticRecall, depth+1),
+	}
+	ret.RetrievedMemoryHits = make([]workorchmemorycontract.RecallHit, 0, len(input.RetrievedMemoryHits))
+	for _, hit := range input.RetrievedMemoryHits {
+		ret.RetrievedMemoryHits = append(ret.RetrievedMemoryHits, workorchmemorycontract.RecallHit{
+			ID: common.MemoryID(hit.ID), Summary: hit.Summary, VectorScore: hit.Score, VectorDimension: hit.VectorDimension,
+		})
+	}
+	value := ret.Normalized()
+	return &value
+}
+
+func runtimeMemoryIDs(values []string) []common.MemoryID {
+	if values == nil {
+		return nil
+	}
+	ret := make([]common.MemoryID, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, common.MemoryID(strings.TrimSpace(value)))
 	}
 	return ret
 }

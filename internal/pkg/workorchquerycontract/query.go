@@ -73,13 +73,14 @@ func (q MemorySearchQuery) Normalized() MemorySearchQuery {
 }
 
 type MemoryRecallTraceQuery struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-	Stage       string
-	Source      string
-	Status      string
-	Limit       int
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	StepID        common.StepID
+	Stage         string
+	Source        string
+	Status        string
+	CursorAfterID common.MemoryRecallTraceID
+	Limit         int
 }
 
 func (q MemoryRecallTraceQuery) Normalized() MemoryRecallTraceQuery {
@@ -89,6 +90,7 @@ func (q MemoryRecallTraceQuery) Normalized() MemoryRecallTraceQuery {
 	q.Stage = strings.TrimSpace(q.Stage)
 	q.Source = strings.TrimSpace(q.Source)
 	q.Status = strings.TrimSpace(q.Status)
+	q.CursorAfterID = common.MemoryRecallTraceID(strings.TrimSpace(string(q.CursorAfterID)))
 	return q
 }
 

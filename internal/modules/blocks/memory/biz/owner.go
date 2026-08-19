@@ -28,7 +28,7 @@ type Biz struct {
 }
 
 func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.MemoryItems == nil || deps.EventHub == nil || h == nil {
+	if deps.MemoryItems == nil || deps.MemoryRecallTraces == nil || deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: NewServiceWithRecallTraces(deps.MemoryItems, deps.MemoryRecallTraces)}, nil

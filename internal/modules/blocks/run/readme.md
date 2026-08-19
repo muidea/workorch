@@ -55,7 +55,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - `WorkspaceExecutionIntentCommand` 的 restart 分支携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、
   ordered focus queue 与 prerequisite requirements。RequestID 的幂等身份绑定 workspace、Goal、DoD、definition
   revision、priority、bootstrap hash 与固定 replacement policy；同 ID、不同 sealed payload 必须 conflict。
-- 当 bootstrap 含有 activation 选择的 Memory context 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。该消息只是不可变的 activation fact，Memory owner 独占 RecallTrace 持久化与 `MemoryRecallRecorded` 通知；固定 trace ID 使重复创建/恢复幂等，memory observability 失败不得回滚已成功的 Run 创建。
+- 当 bootstrap 含有 activation Memory selection 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。它使用稳定的 Run CreatedAt，并透传 sealed candidate/selected/excluded、quota、score/hit 与 byte/token budget；该消息只是不可变 activation audit，Memory owner 独占 create-once RecallTrace 持久化与首次 `MemoryRecallRecorded` 通知。固定 trace ID + 完整内容比较使 exact replay 零写入、内容漂移 conflict；memory observability 失败不得回滚已成功的 Run 创建。Run 启动时会从已持久化 bootstrap 重放该 fact，补偿 Run 提交后、Memory 交接前的崩溃窗口。
 - 生产入口由 application 向 Workspace owner 提交 workspace-scoped resume/restart；Workspace 校验并选择 canonical
   definition 后，只有 `blocks/workspace` 可向 Run owner 发送 `WorkspaceExecutionIntentCommand`。Run Biz 在自身 reducer
   中完成 activation、continuation 或 replacement 准入、CAS 持久化并发布 typed fact。Runtime Resume 不接受 loaded
@@ -126,10 +126,10 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 已覆盖：ticket/approval 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload
 冲突、intent 先持久化与 successor 幂等 materialization；Runtime CAS source/scope/schema/hash、aggregate revision race、
 物理 rebase 与 legacy bypass；Setup 阶段 inventory/record read、commands-ready 元数据、typed result clone、workspace scope、
-in-flight Stop 与重复 Start/Stop。
+activation Memory 完整 selection fact、Run 启动补写与 Memory owner exact replay、in-flight Stop 与重复 Start/Stop。
 
 仍待完善：
 
 - [ ] 将 SM-1 所有合法/非法边（尤其 administrative cancel/supersede 与各终态反向迁移）整理为完整表驱动矩阵。
 - [ ] 覆盖 replacement terminal delivery 每个持久化 cut point 的进程崩溃/重启，以及重复 commands-ready 通知的端到端 handoff。
-- [ ] 覆盖 activation Memory recall 的 missing subscriber、owner error 与重复投递，确认均不回滚已提交 Run。
+- [ ] 覆盖 activation Memory recall 的 missing subscriber 与 owner error，确认均不回滚已提交 Run。

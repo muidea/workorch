@@ -31,12 +31,12 @@ func (r MemoryRecallTraceReader) List(ctx context.Context, query workorchqueryco
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandList, "workorchd/readmodelports", memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryRecallTracesCommand{Query: query})
 	ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, "")
-	response, err := ownerevent.Memory(r.Hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandList)
+	response, err := ownerevent.Memory[memoryevents.ListMemoryRecallTracesResult](r.Hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandList)
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*memorymodel.MemoryRecallTrace, 0, len(response.RecallTraces))
-	for _, item := range response.RecallTraces {
+	ret := make([]*memorymodel.MemoryRecallTrace, 0, len(response.Traces))
+	for _, item := range response.Traces {
 		trace, err := item.Model()
 		if err != nil {
 			return nil, err
