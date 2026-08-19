@@ -77,11 +77,16 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(soulevents.EnsureDefaultsCommand); !ok || m == nil || m.souls == nil {
+	// All Soul topics are synchronous commands. A fire-and-forget Post has no
+	// result channel and must never mutate owner state.
+	if result == nil {
+		return
+	}
+	if _, ok := ev.Data().(soulevents.EnsureDefaultsCommand); !ok || m == nil || m.service == nil {
 		setSystemSoulDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
-	setSystemSoulDefaultsResult(result, ensureBuiltinSoulDefaults(ev.Context(), m.souls))
+	setSystemSoulDefaultsResult(result, ensureBuiltinSoulDefaults(ev.Context(), m.service))
 }
 
 func setSystemSoulDefaultsResult(result magicevent.Result, err error) {
@@ -96,85 +101,91 @@ func setSystemSoulDefaultsResult(result magicevent.Result, err error) {
 }
 
 func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeSoulCommand(ev)
-	setMagicResult(result, response, err)
-}
-
-func (m *Biz) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommandResult, error) {
+	if result == nil {
+		return
+	}
 	if m == nil || m.service == nil {
-		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
 	case soulevents.TopicSoulCommandCreate:
 		cmd, ok := ev.Data().(soulevents.CreateSoulCommand)
 		if !ok {
-			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, soulevents.CreateSoulResult{}, common.ErrInvalidArgument)
+			return
 		}
-		if err := m.service.CreateSoul(ctx, cmd); err != nil {
-			return soulevents.SoulCommandResult{}, err
-		}
-		item, err := m.service.GetSoul(ctx, cmd.SoulID)
+		item, err := m.service.CreateSoul(ctx, cmd)
 		if err != nil {
-			return soulevents.SoulCommandResult{}, err
+			setMagicResult(result, soulevents.CreateSoulResult{}, err)
+			return
 		}
-		return soulevents.SoulCommandResult{Soul: item}, nil
+		setMagicResult(result, (soulevents.CreateSoulResult{Soul: item}).Clone(), nil)
 	case soulevents.TopicSoulCommandGet:
 		cmd, ok := ev.Data().(soulevents.GetSoulCommand)
 		if !ok {
-			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, soulevents.GetSoulResult{}, common.ErrInvalidArgument)
+			return
 		}
 		item, err := m.service.GetSoul(ctx, cmd.SoulID)
 		if err != nil {
-			return soulevents.SoulCommandResult{}, err
+			setMagicResult(result, soulevents.GetSoulResult{}, err)
+			return
 		}
-		return soulevents.SoulCommandResult{Soul: item}, nil
+		setMagicResult(result, (soulevents.GetSoulResult{Soul: item}).Clone(), nil)
 	case soulevents.TopicSoulCommandList:
-		if _, ok := ev.Data().(soulevents.ListSoulsCommand); !ok {
-			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+		cmd, ok := ev.Data().(soulevents.ListSoulsCommand)
+		if !ok {
+			setMagicResult(result, soulevents.ListSoulsResult{}, common.ErrInvalidArgument)
+			return
 		}
-		items, err := m.service.ListSouls(ctx)
+		items, nextCursor, err := m.service.ListSouls(ctx, cmd.CursorAfterID, cmd.Limit)
 		if err != nil {
-			return soulevents.SoulCommandResult{}, err
+			setMagicResult(result, soulevents.ListSoulsResult{}, err)
+			return
 		}
-		return soulevents.SoulCommandResult{Souls: items}, nil
+		setMagicResult(result, (soulevents.ListSoulsResult{Souls: items, NextCursor: nextCursor}).Clone(), nil)
 	case soulevents.TopicSoulCommandUpdate:
 		cmd, ok := ev.Data().(soulevents.UpdateSoulCommand)
 		if !ok {
-			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, soulevents.UpdateSoulResult{}, common.ErrInvalidArgument)
+			return
 		}
-		if err := m.service.UpdateSoul(ctx, soulevents.CreateSoulCommand(cmd)); err != nil {
-			return soulevents.SoulCommandResult{}, err
-		}
-		item, err := m.service.GetSoul(ctx, cmd.SoulID)
+		item, err := m.service.UpdateSoul(ctx, soulevents.CreateSoulCommand(cmd))
 		if err != nil {
-			return soulevents.SoulCommandResult{}, err
+			setMagicResult(result, soulevents.UpdateSoulResult{}, err)
+			return
 		}
-		return soulevents.SoulCommandResult{Soul: item}, nil
+		setMagicResult(result, (soulevents.UpdateSoulResult{Soul: item}).Clone(), nil)
 	case soulevents.TopicSoulCommandDelete:
 		cmd, ok := ev.Data().(soulevents.DeleteSoulCommand)
 		if !ok {
-			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, soulevents.DeleteSoulResult{}, common.ErrInvalidArgument)
+			return
 		}
 		if err := m.service.DeleteSoul(ctx, cmd.SoulID); err != nil {
-			return soulevents.SoulCommandResult{}, err
+			setMagicResult(result, soulevents.DeleteSoulResult{}, err)
+			return
 		}
-		return soulevents.SoulCommandResult{}, nil
+		setMagicResult(result, soulevents.DeleteSoulResult{SoulID: cmd.SoulID, Deleted: true}, nil)
 	case soulevents.TopicSoulCommandValidateCapability:
 		cmd, ok := ev.Data().(soulevents.ValidateCapabilitySelectionCommand)
 		if !ok {
-			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{}, common.ErrInvalidArgument)
+			return
 		}
 		if err := m.service.ValidateCapabilitySelection(ctx, cmd); err != nil {
-			return soulevents.SoulCommandResult{}, err
+			setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{}, err)
+			return
 		}
-		return soulevents.SoulCommandResult{}, nil
+		setMagicResult(result, soulevents.ValidateCapabilitySelectionResult{SoulID: cmd.SoulID, Validated: true}, nil)
 	default:
-		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}
 }
 
-func setMagicResult(result magicevent.Result, data soulevents.SoulCommandResult, err error) {
+func setMagicResult[Response any](result magicevent.Result, data Response, err error) {
 	if result == nil {
 		return
 	}
@@ -182,5 +193,5 @@ func setMagicResult(result magicevent.Result, data soulevents.SoulCommandResult,
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data.Clone(), nil)
+	result.Set(data, nil)
 }

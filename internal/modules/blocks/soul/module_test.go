@@ -53,14 +53,8 @@ func TestModuleConfigureRequiresSoulRepository(t *testing.T) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 	module := New()
-	if err := module.Configure(soulbiz.Dependencies{Souls: memoryrepo.NewSoulRepository()}); err != nil {
-		t.Fatalf("Configure without EventHub: %v", err)
-	}
-	if module.bizPtr != nil {
-		t.Fatal("biz must not be constructed without EventHub")
-	}
-	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("Start without EventHub err = %v, want invalid argument", err)
+	if err := module.Configure(soulbiz.Dependencies{Souls: memoryrepo.NewSoulRepository()}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Configure without EventHub err = %v, want invalid argument", err)
 	}
 }
 
@@ -80,7 +74,7 @@ func TestModuleSoulCommandsUseRegistryContract(t *testing.T) {
 		}
 	})
 
-	createResult := sendSoulCommand(t, ctx, hub, soulevents.TopicSoulCommandCreate,
+	createResult := sendSoulCommand[soulevents.CreateSoulResult](t, ctx, hub, soulevents.TopicSoulCommandCreate,
 		soulevents.CreateSoulCommand{
 			SoulID:          "soul-contract",
 			Name:            "Contract Soul",
@@ -92,7 +86,7 @@ func TestModuleSoulCommandsUseRegistryContract(t *testing.T) {
 		t.Fatalf("soul = %+v, want created soul", createResult.Soul)
 	}
 
-	listResult := sendSoulCommand(t, ctx, hub, soulevents.TopicSoulCommandList, soulevents.ListSoulsCommand{})
+	listResult := sendSoulCommand[soulevents.ListSoulsResult](t, ctx, hub, soulevents.TopicSoulCommandList, soulevents.ListSoulsCommand{})
 	if len(listResult.Souls) != 1 || listResult.Souls[0].ID != "soul-contract" {
 		t.Fatalf("souls = %+v, want created soul", listResult.Souls)
 	}
@@ -118,7 +112,10 @@ func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	_ = sendSoulCommand(t, ctx, hub, soulevents.TopicSoulCommandDelete, soulevents.DeleteSoulCommand{SoulID: "soul-delete-contract"})
+	deleted := sendSoulCommand[soulevents.DeleteSoulResult](t, ctx, hub, soulevents.TopicSoulCommandDelete, soulevents.DeleteSoulCommand{SoulID: "soul-delete-contract"})
+	if !deleted.Deleted || deleted.SoulID != "soul-delete-contract" {
+		t.Fatalf("delete result = %+v", deleted)
+	}
 	if _, err := repo.Get(ctx, "soul-delete-contract"); err == nil {
 		t.Fatalf("soul still exists after delete")
 	}
@@ -131,7 +128,7 @@ func soulModuleContractDependencies() soulbiz.Dependencies {
 	}
 }
 
-func sendSoulCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) soulevents.SoulCommandResult {
+func sendSoulCommand[Response any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command any) Response {
 	t.Helper()
 	ev := magicevent.NewEventWithContext(topic, "test", soulevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := hub.Send(ev)
@@ -142,7 +139,7 @@ func sendSoulCommand[Command any](t *testing.T, ctx context.Context, hub magicev
 	if err != nil {
 		t.Fatalf("result %s: %v", topic, err)
 	}
-	typed, ok := data.(soulevents.SoulCommandResult)
+	typed, ok := data.(Response)
 	if !ok {
 		t.Fatalf("result %s type = %T", topic, data)
 	}

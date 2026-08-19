@@ -52,6 +52,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 	defaultSoul := bindings.defaultSoul
+	executionSoul := workspaceExecutionSoul(defaultSoul, bindings.stageSouls)
 	memories := bindings.memories
 	governanceHistory := bindings.governanceHistory
 	soulRouting := bindings.soulRouting
@@ -61,7 +62,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		WorkspaceID:     workspace.ID,
 		Goal:            effectiveGoal,
 		DoD:             effectiveDoD,
-		Soul:            defaultSoul,
+		Soul:            executionSoul,
 		SkillHubCatalog: request.SkillHubCatalog,
 	})
 	if err != nil {
@@ -81,7 +82,11 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 
-	if err := ValidateSoulRoutingCapabilitySelection(ctx, request.Hub, soulRouting, skillIDs, mcpSelection.MCPServerIDs, mcpSelection.CapabilityIDs, activationcore.CapabilityCategories(mcpSelection.Capabilities), activationcore.RequiredToolKinds(skills)); err != nil {
+	if err := validateSelectedMCPCapabilityOwnership(mcpSelection); err != nil {
+		return workspaceRuntimeActivationBuild{}, err
+	}
+	toolKinds := append(activationcore.RequiredToolKinds(skills), runtimeMCPCapabilityToolKinds(mcpSelection.Capabilities)...)
+	if err := ValidateSoulRoutingCapabilitySelection(ctx, request.Hub, soulRouting, skillIDs, mcpSelection.MCPServerIDs, mcpSelection.CapabilityIDs, activationcore.CapabilityCategories(mcpSelection.Capabilities), toolKinds); err != nil {
 		return workspaceRuntimeActivationBuild{}, err
 	}
 

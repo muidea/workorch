@@ -44,7 +44,7 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 		if item == nil {
 			return nil, common.ErrNotFound
 		}
-		return soulevents.SoulCommandResult{Soul: item}, nil
+		return soulevents.GetSoulResult{Soul: item}, nil
 	})
 
 	updated, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), workorchmanagementcontract.WorkspaceSoulBindings{

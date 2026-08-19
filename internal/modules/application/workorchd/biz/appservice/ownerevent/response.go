@@ -7,7 +7,6 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -201,24 +200,6 @@ func Result[Response any](response magicevent.Result, topic string) (Response, e
 	result, ok := data.(Response)
 	if !ok {
 		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
-	}
-	return result, nil
-}
-
-func Soul(response magicevent.Result, topic string) (soulevents.SoulCommandResult, error) {
-	if response == nil {
-		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
-	}
-	if err := response.Error(); err != nil {
-		return soulevents.SoulCommandResult{}, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return soulevents.SoulCommandResult{}, resultErr
-	}
-	result, ok := data.(soulevents.SoulCommandResult)
-	if !ok {
-		return soulevents.SoulCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

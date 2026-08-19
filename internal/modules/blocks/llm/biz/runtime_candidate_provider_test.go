@@ -65,6 +65,9 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	}) {
 		t.Fatalf("semantic section order = %v", got)
 	}
+	if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "planning-soul-guidance") {
+		t.Fatalf("semantic C3 lost planning Soul guidance: %s", authority)
+	}
 
 	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
@@ -363,6 +366,7 @@ func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidate
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target},
+		StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{{Stage: "planning", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-planning", Instructions: "planning-soul-guidance"}}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()},
 	}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "the artifact works", Order: 1}}
@@ -560,7 +564,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			DialogLanguage:    "zh-CN",
 			DefaultSoul:       &runtimecontract.RuntimeSoulContext{ID: "soul-default", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
 			StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{
-				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024)}},
+				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024), AllowedSkillRefs: []string{"*"}}},
 				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
 			},
 			Skills: runtimeSkills, SkillContextBudget: skillBudget,

@@ -3,9 +3,11 @@ package soul
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
 	soulservice "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -27,7 +29,7 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 		AllowedCapabilityCategories: []string{"代码仓库"},
 		AllowedToolKinds:            []string{"shell/command", "patch/apply"},
 	}
-	if err := service.CreateSoul(ctx, cmd); err != nil {
+	if _, err := service.CreateSoul(ctx, cmd); err != nil {
 		t.Fatalf("create soul: %v", err)
 	}
 
@@ -90,7 +92,7 @@ func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewSoulRepository())
 
-	if err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
 		SoulID:                      common.SoulID("soul-wildcard"),
 		Name:                        "wildcard execution",
 		SoulMD:                      "# Wildcard Execution\n\nAllow dynamic refs while constraining capability categories and tool kinds.\n",
@@ -133,14 +135,14 @@ func TestServiceRejectsInvalidSoul(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewSoulRepository())
 
-	if err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
 		SoulID: common.SoulID("soul-invalid"),
 		Name:   "invalid",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create invalid soul err = %v, want invalid argument", err)
 	}
 
-	if err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
 		SoulID:           common.SoulID("soul-blank-skill"),
 		Name:             "blank skill",
 		SoulMD:           "# Blank Skill\n\ninstruction\n",
@@ -159,7 +161,7 @@ func TestServiceDeleteSoul(t *testing.T) {
 		Name:   "delete soul",
 		SoulMD: "# Delete Soul\n",
 	}
-	if err := service.CreateSoul(ctx, cmd); err != nil {
+	if _, err := service.CreateSoul(ctx, cmd); err != nil {
 		t.Fatalf("create soul: %v", err)
 	}
 	if err := service.DeleteSoul(ctx, cmd.SoulID); err != nil {
@@ -173,5 +175,68 @@ func TestServiceDeleteSoul(t *testing.T) {
 	}
 	if err := service.DeleteSoul(ctx, cmd.SoulID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("delete missing soul err = %v, want not found", err)
+	}
+}
+
+func TestServiceCanonicalizesAndBoundsSoulState(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewSoulRepository())
+	created, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
+		SoulID:          "soul-canonical",
+		Name:            "  canonical soul  ",
+		Description:     "  normalized  ",
+		SoulMD:          "\n# Canonical Soul\n\nFollow the contract.\n\n",
+		BusinessDomains: []string{" delivery ", "analysis", "delivery"},
+		AllowedSkillRefs: []string{
+			" skill-b ", "skill-a", "skill-b",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSoul: %v", err)
+	}
+	if created.Name != "canonical soul" || created.Description != "normalized" || created.SoulMD != "# Canonical Soul\n\nFollow the contract.\n" {
+		t.Fatalf("canonical scalar fields = %+v", created)
+	}
+	if !slices.Equal(created.BusinessDomains, []string{"analysis", "delivery"}) || !slices.Equal(created.AllowedSkillRefs, []string{"skill-a", "skill-b"}) {
+		t.Fatalf("canonical lists = domains:%#v skills:%#v", created.BusinessDomains, created.AllowedSkillRefs)
+	}
+	created.BusinessDomains[0] = "mutated"
+	fresh, err := service.GetSoul(ctx, "soul-canonical")
+	if err != nil || fresh.BusinessDomains[0] != "analysis" {
+		t.Fatalf("detached read = %+v err=%v", fresh, err)
+	}
+
+	for name, command := range map[string]soulservice.CreateSoulCommand{
+		"noncanonical id": {SoulID: " soul-space ", Name: "bad", SoulMD: "# bad"},
+		"path id":         {SoulID: "soul/path", Name: "bad", SoulMD: "# bad"},
+		"mixed wildcard":  {SoulID: "soul-wildcard-mixed", Name: "bad", SoulMD: "# bad", AllowedSkillRefs: []string{"*", "skill-a"}},
+		"oversized body":  {SoulID: "soul-large", Name: "bad", SoulMD: strings.Repeat("x", modulecommon.SoulInstructionMaxBytes+1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := service.CreateSoul(ctx, command); !errors.Is(err, common.ErrInvalidArgument) {
+				t.Fatalf("CreateSoul err = %v, want invalid argument", err)
+			}
+		})
+	}
+}
+
+func TestServiceListSoulsUsesBoundedStableCursor(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewSoulRepository())
+	for _, id := range []common.SoulID{"soul-c", "soul-a", "soul-b"} {
+		if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{SoulID: id, Name: string(id), SoulMD: "# " + string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, cursor, err := service.ListSouls(ctx, "", 2)
+	if err != nil || len(first) != 2 || first[0].ID != "soul-a" || first[1].ID != "soul-b" || cursor != "soul-b" {
+		t.Fatalf("first page = %+v cursor=%q err=%v", first, cursor, err)
+	}
+	second, cursor, err := service.ListSouls(ctx, cursor, 2)
+	if err != nil || len(second) != 1 || second[0].ID != "soul-c" || cursor != "" {
+		t.Fatalf("second page = %+v cursor=%q err=%v", second, cursor, err)
+	}
+	if _, _, err := service.ListSouls(ctx, " soul-b ", 2); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("noncanonical cursor err = %v, want invalid argument", err)
 	}
 }

@@ -66,7 +66,7 @@ func TestDeleteSoulPublishesTypedCommand(t *testing.T) {
 	var captured soulevents.DeleteSoulCommand
 	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandDelete, soulevents.CommandDestination, func(cmd soulevents.DeleteSoulCommand, result magicevent.Result) {
 		captured = cmd
-		result.Set(soulevents.SoulCommandResult{}, nil)
+		result.Set(soulevents.DeleteSoulResult{SoulID: cmd.SoulID, Deleted: true}, nil)
 	})
 
 	if err := DeleteSoul(ctx, rawHub, " soul-delete-command "); err != nil {
@@ -175,7 +175,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		if cmd.SoulID != "soul-contract" || cmd.Name != "Soul Contract" {
 			t.Fatalf("soul command = %+v", cmd)
 		}
-		result.Set(soulevents.SoulCommandResult{Soul: &soulmodel.Soul{ID: cmd.SoulID, Name: cmd.Name, SoulMD: cmd.SoulMD}}, nil)
+		result.Set(soulevents.CreateSoulResult{Soul: &soulmodel.Soul{ID: cmd.SoulID, Name: cmd.Name, SoulMD: cmd.SoulMD}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandCreate, skillevents.CommandDestination, func(cmd skillevents.CreateSkillCommand, result magicevent.Result) {
 		if cmd.SkillID != "skill-contract" || cmd.Name != "Skill Contract" {
@@ -208,7 +208,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		if cmd.SoulID != "soul-contract" || len(cmd.CapabilityRefs) != 1 || cmd.CapabilityRefs[0] != "cap-contract" {
 			t.Fatalf("validate command = %+v", cmd)
 		}
-		result.Set(soulevents.SoulCommandResult{}, nil)
+		result.Set(soulevents.ValidateCapabilitySelectionResult{SoulID: cmd.SoulID, Validated: true}, nil)
 	})
 
 	if _, err := CreateSoul(ctx, rawHub, workorchmanagementcontract.SoulMutation{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {

@@ -42,20 +42,57 @@ type GetSoulCommand struct {
 	SoulID common.SoulID
 }
 
-type ListSoulsCommand struct{}
+type ListSoulsCommand struct {
+	CursorAfterID common.SoulID
+	Limit         int
+}
 type EnsureDefaultsCommand struct{}
 
 type EnsureDefaultsResult struct {
 	Ensured bool
 }
 
-type SoulCommandResult struct {
-	Soul  *soulmodel.Soul
-	Souls []*soulmodel.Soul
+type CreateSoulResult struct {
+	Soul *soulmodel.Soul
 }
 
-func (r SoulCommandResult) Clone() SoulCommandResult {
-	return SoulCommandResult{Soul: soulmodel.CloneSoul(r.Soul), Souls: soulmodel.CloneSouls(r.Souls)}
+func (r CreateSoulResult) Clone() CreateSoulResult {
+	return CreateSoulResult{Soul: soulmodel.CloneSoul(r.Soul)}
+}
+
+type GetSoulResult struct {
+	Soul *soulmodel.Soul
+}
+
+func (r GetSoulResult) Clone() GetSoulResult {
+	return GetSoulResult{Soul: soulmodel.CloneSoul(r.Soul)}
+}
+
+type ListSoulsResult struct {
+	Souls      []*soulmodel.Soul
+	NextCursor common.SoulID
+}
+
+func (r ListSoulsResult) Clone() ListSoulsResult {
+	return ListSoulsResult{Souls: soulmodel.CloneSouls(r.Souls), NextCursor: r.NextCursor}
+}
+
+type UpdateSoulResult struct {
+	Soul *soulmodel.Soul
+}
+
+func (r UpdateSoulResult) Clone() UpdateSoulResult {
+	return UpdateSoulResult{Soul: soulmodel.CloneSoul(r.Soul)}
+}
+
+type DeleteSoulResult struct {
+	SoulID  common.SoulID
+	Deleted bool
+}
+
+type ValidateCapabilitySelectionResult struct {
+	SoulID    common.SoulID
+	Validated bool
 }
 
 func MessageContracts() []eventcontract.MessageContract {
@@ -78,17 +115,17 @@ func MessageContracts() []eventcontract.MessageContract {
 		}
 		switch topic {
 		case TopicSoulCommandCreate:
-			ret = append(ret, eventcontract.CommandTopic[CreateSoulCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[CreateSoulCommand, CreateSoulResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandGet:
-			ret = append(ret, eventcontract.CommandTopic[GetSoulCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[GetSoulCommand, GetSoulResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandList:
-			ret = append(ret, eventcontract.CommandTopic[ListSoulsCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[ListSoulsCommand, ListSoulsResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandUpdate:
-			ret = append(ret, eventcontract.CommandTopic[UpdateSoulCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[UpdateSoulCommand, UpdateSoulResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandDelete:
-			ret = append(ret, eventcontract.CommandTopic[DeleteSoulCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[DeleteSoulCommand, DeleteSoulResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandValidateCapability:
-			ret = append(ret, eventcontract.CommandTopic[ValidateCapabilitySelectionCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[ValidateCapabilitySelectionCommand, ValidateCapabilitySelectionResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandEnsureDefaults:
 			ret = append(ret, eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		}

@@ -460,7 +460,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 | `kernel/governance` | 无直接 I/O | 经 Decision/Approval/Run typed fact 间接协作 | 完整；不存在 Orchestrator ↔ Governance 直连合同 |
 | `blocks/memory` | Orchestrator → Memory | workspace-scoped concrete item/trace read 与 bounded paged purge | 完整；Memory 只提供 owner fact，activation trace 由 Run owner 记录 |
 | `application/workorchd` | 双向 | Orchestrator → Application immutable drive observation；Application → Orchestrator evidence/read-model list 与 scoped purge command | 完整；Application 不推进 reducer、不持有 aggregate |
-| Skill Registry / SkillHub Catalog / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Skill provenance/budget 已在 activation 封存，后续 Registry/Catalog 更新不改变既有 Run |
+| Skill Registry / SkillHub Catalog / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Skill provenance/budget 与 Soul guidance/allowlist 已在 activation 封存，后续 Registry/Catalog 更新不改变既有 Run |
 | `blocks/eventstream` | 无直接订阅 | 审计通过正式 owner notification 形成 | 完整；不从审计重建 authority |
 
 ## 相关约束
@@ -533,6 +533,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - provider-facing LLM cache prefix 必须遵守 C0、C1、C2、C3-C5 稳定分层。Skill 只以 Run owner 持久化的 typed
   provenance、bounded instruction/metadata snapshot 和 sealed budget 进入 volatile C3；Orchestrator 不查询 Skill
   Registry/SkillHub、不在 drive 时重新选择或裁剪，也不把 Skill 内容加入 C0～C2。
+- Soul 同样只来自 Run owner 的 activation snapshot：semantic-plan 在 C3 使用 planning guidance，operation candidate
+  在 C3 使用当前 execution/validation/decision guidance 及已封存的 stage-filtered Skill/MCP context。Soul 不进入 C0～C2，
+  不改变 sealed manifest，也不替代 capability owner 的 effect/risk/approval authority。
 
 ## 已覆盖回归
 

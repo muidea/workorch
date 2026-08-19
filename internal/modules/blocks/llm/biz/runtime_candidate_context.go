@@ -173,6 +173,7 @@ func buildRuntimeCandidateContextProjection(context runtimecontract.RuntimeCandi
 	manifest = manifest.Normalized()
 	activation := context.Activation
 	stage := runtimeCandidateStage(manifest.State)
+	stageActivation := runtimeCandidateActivationForStage(activation, stage, manifest.State)
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
 		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
@@ -201,13 +202,23 @@ func buildRuntimeCandidateContextProjection(context runtimecontract.RuntimeCandi
 			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},
 		TargetSelectionInstruction: runtimeTargetSelectionInstruction(context.Resources.TargetSelection, manifest.State),
-		Activation: runtimeCandidateActivationProjection{
-			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeCandidateSoul(activation, stage),
-			Skills: activation.Skills, SkillContextBudget: activation.SkillContextBudget, MCPServerIDs: activation.MCPServerIDs,
-			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, activation.OperationPolicies, manifest.State),
-			Memories:        activation.Memories, EvidencePolicyIDs: runtimeCandidateEvidencePolicyIDs(activation.EvidencePolicies),
-			Continuation: runtimeCandidateContinuationProjection(activation.Continuation),
-		},
+		Activation:                 stageActivation,
+	}
+}
+
+func runtimeCandidateActivationForStage(activation runtimecontract.RuntimeActivationContext, stage string, state runtimecontract.ConvergenceState) runtimeCandidateActivationProjection {
+	soul := runtimeCandidateSoul(activation, stage)
+	skills := runtimeCandidateSkillsForSoul(activation.Skills, soul)
+	capabilities := runtimeCandidateMCPCapabilitiesForSoul(
+		runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, activation.OperationPolicies, state),
+		soul,
+	)
+	return runtimeCandidateActivationProjection{
+		DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: soul,
+		Skills: skills, SkillContextBudget: runtimeCandidateSkillBudget(skills, activation.SkillContextBudget),
+		MCPServerIDs: runtimeCandidateMCPServerIDsForSoul(activation.MCPServerIDs, soul), MCPCapabilities: capabilities,
+		Memories: activation.Memories, EvidencePolicyIDs: runtimeCandidateEvidencePolicyIDs(activation.EvidencePolicies),
+		Continuation: runtimeCandidateContinuationProjection(activation.Continuation),
 	}
 }
 

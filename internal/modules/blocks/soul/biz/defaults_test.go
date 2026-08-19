@@ -2,6 +2,7 @@ package soul
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T) {
@@ -50,7 +52,7 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 			}
 
 			for attempt := 1; attempt <= 2; attempt++ {
-				if err := ensureBuiltinSoulDefaults(ctx, repo); err != nil {
+				if err := ensureBuiltinSoulDefaults(ctx, NewService(repo)); err != nil {
 					t.Fatalf("ensure attempt %d: %v", attempt, err)
 				}
 				got, err := repo.Get(ctx, existing.ID)
@@ -66,5 +68,18 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 				t.Fatalf("seeded souls len=%d want=%d err=%v", len(items), len(defaults), err)
 			}
 		})
+	}
+}
+
+func TestEnsureSoulDefaultsRejectsInvalidSeedBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	repo := memoryrepo.NewSoulRepository()
+	err := ensureSoulDefaults(ctx, NewService(repo), []workorchmanagementcontract.Soul{{ID: "invalid-default", Name: "missing instructions"}})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ensure invalid defaults err = %v, want invalid argument", err)
+	}
+	items, listErr := repo.List(ctx)
+	if listErr != nil || len(items) != 0 {
+		t.Fatalf("invalid default persisted: items=%+v err=%v", items, listErr)
 	}
 }

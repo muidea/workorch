@@ -36,6 +36,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	authorityJSON, err := json.Marshal(runtimeSemanticAuthorityProjection{
 		WorkspaceID:       string(prepared.context.WorkspaceID),
 		RunID:             string(prepared.context.RunID),
+		Soul:              runtimeCandidateSoul(prepared.context.Activation, "planning"),
 		DefinitionSeed:    runtimeSemanticDefinitionSeedForProvider(prepared.context.DefinitionSeed),
 		Manifest:          runtimeSemanticManifestForProvider(prepared.manifest, prepared.context.PlanStep, prepared.context.BatchCoverageWorkItemIDs),
 		Schema:            json.RawMessage(compactSemanticPlanPromptSchema([]byte(prepared.schema))),

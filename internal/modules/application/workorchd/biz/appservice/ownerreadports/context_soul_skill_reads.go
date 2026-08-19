@@ -26,7 +26,7 @@ func ReadSoulByOwnerCommand(ctx context.Context, hub magicevent.Hub, soulID comm
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandGet, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.GetSoulCommand{SoulID: soulID})
 	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandGet, "soul", string(soulID), "", "", "")
-	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandGet)
+	result, err := ownerevent.Result[soulevents.GetSoulResult](hub.Send(event), soulevents.TopicSoulCommandGet)
 	if err != nil {
 		return nil, err
 	}

@@ -19,12 +19,8 @@ func (m *Module) configure(d soulbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if d.Souls == nil {
+	if d.Souls == nil || d.EventHub == nil {
 		return common.ErrInvalidArgument
-	}
-	if d.EventHub == nil {
-		m.bizPtr = nil
-		return nil
 	}
 	x, e := soulbiz.New(d.EventHub, d.BackgroundRoutine, d)
 	if e != nil {
