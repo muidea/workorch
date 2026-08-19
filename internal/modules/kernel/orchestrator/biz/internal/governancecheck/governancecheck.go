@@ -46,9 +46,7 @@ func DependencyMatches(expectedKind, expectedSubject, actualKind, actualSubject 
 // ExternalDependencyMatches compares the complete sealed dependency,
 // including its owner-authored reason, after canonical normalization.
 func ExternalDependencyMatches(left, right runtimecontract.ExternalDependency) bool {
-	left = left.Normalized()
-	right = right.Normalized()
-	return left == right
+	return runtimecontract.SameExternalDependency(left, right)
 }
 
 // RequestForTicket returns the exact persisted request bound to a Decision
@@ -63,6 +61,28 @@ func RequestForTicket(values []runtimecontract.RuntimeGovernanceRequestRecord, t
 		value.DispatchID = strings.TrimSpace(value.DispatchID)
 		value.DependencyKind = strings.TrimSpace(value.DependencyKind)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.RequestedAction = strings.TrimSpace(value.RequestedAction)
+		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.AuthorizationHash = strings.TrimSpace(value.AuthorizationHash)
+		return value, true
+	}
+	return runtimecontract.RuntimeGovernanceRequestRecord{}, false
+}
+
+// RequestForApproval returns the exact persisted request bound to an Approval
+// owner record. It is a lookup only; Approval lifecycle remains owner-local.
+func RequestForApproval(values []runtimecontract.RuntimeGovernanceRequestRecord, approvalID common.ApprovalID) (runtimecontract.RuntimeGovernanceRequestRecord, bool) {
+	for _, value := range values {
+		if value.ApprovalID != approvalID {
+			continue
+		}
+		value.AuthoritySnapshotID = strings.TrimSpace(value.AuthoritySnapshotID)
+		value.DispatchID = strings.TrimSpace(value.DispatchID)
+		value.DependencyKind = strings.TrimSpace(value.DependencyKind)
+		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.RequestedAction = strings.TrimSpace(value.RequestedAction)
+		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.AuthorizationHash = strings.TrimSpace(value.AuthorizationHash)
 		return value, true
 	}
 	return runtimecontract.RuntimeGovernanceRequestRecord{}, false
@@ -81,6 +101,9 @@ func RequestForDispatch(values []runtimecontract.RuntimeGovernanceRequestRecord,
 		value.DispatchID = dispatchID
 		value.DependencyKind = strings.TrimSpace(value.DependencyKind)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
+		value.RequestedAction = strings.TrimSpace(value.RequestedAction)
+		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.AuthorizationHash = strings.TrimSpace(value.AuthorizationHash)
 		return value, true
 	}
 	return runtimecontract.RuntimeGovernanceRequestRecord{}, false
@@ -89,11 +112,14 @@ func RequestForDispatch(values []runtimecontract.RuntimeGovernanceRequestRecord,
 // SameRequestRecord compares the complete normalized ticket binding. It is a
 // replay predicate only; it does not persist or reopen a governance request.
 func SameRequestRecord(left, right runtimecontract.RuntimeGovernanceRequestRecord) bool {
-	return left.TicketID == right.TicketID &&
+	return left.TicketID == right.TicketID && left.ApprovalID == right.ApprovalID &&
 		strings.TrimSpace(left.AuthoritySnapshotID) == strings.TrimSpace(right.AuthoritySnapshotID) &&
 		strings.TrimSpace(left.DispatchID) == strings.TrimSpace(right.DispatchID) &&
 		strings.TrimSpace(left.DependencyKind) == strings.TrimSpace(right.DependencyKind) &&
-		strings.TrimSpace(left.SubjectRef) == strings.TrimSpace(right.SubjectRef)
+		strings.TrimSpace(left.SubjectRef) == strings.TrimSpace(right.SubjectRef) &&
+		strings.TrimSpace(left.RequestedAction) == strings.TrimSpace(right.RequestedAction) &&
+		strings.TrimSpace(left.RiskLevel) == strings.TrimSpace(right.RiskLevel) &&
+		strings.TrimSpace(left.AuthorizationHash) == strings.TrimSpace(right.AuthorizationHash)
 }
 
 // RequestRecordConflicts reports whether two different request records claim
@@ -102,7 +128,8 @@ func RequestRecordConflicts(left, right runtimecontract.RuntimeGovernanceRequest
 	if SameRequestRecord(left, right) {
 		return false
 	}
-	return left.TicketID == right.TicketID ||
+	return (left.TicketID != "" && left.TicketID == right.TicketID) ||
+		(left.ApprovalID != "" && left.ApprovalID == right.ApprovalID) ||
 		(strings.TrimSpace(left.AuthoritySnapshotID) == strings.TrimSpace(right.AuthoritySnapshotID) &&
 			strings.TrimSpace(left.DispatchID) == strings.TrimSpace(right.DispatchID))
 }
@@ -110,7 +137,7 @@ func RequestRecordConflicts(left, right runtimecontract.RuntimeGovernanceRequest
 // RequestBindsResolution compares a persisted request with a typed resolution
 // before Runtime mutates any governance binding or evidence ledger.
 func RequestBindsResolution(request runtimecontract.RuntimeGovernanceRequestRecord, resolution runtimecontract.RuntimeGovernanceResolution) bool {
-	return request.TicketID == resolution.TicketID &&
+	return request.TicketID == resolution.TicketID && request.ApprovalID == resolution.ApprovalID &&
 		strings.TrimSpace(request.AuthoritySnapshotID) == strings.TrimSpace(resolution.AuthoritySnapshotID) &&
 		strings.TrimSpace(request.DispatchID) == strings.TrimSpace(resolution.DispatchID) &&
 		DependencyMatches(request.DependencyKind, request.SubjectRef, resolution.DependencyKind, resolution.SubjectRef)
@@ -121,7 +148,9 @@ func RequestBindsResolution(request runtimecontract.RuntimeGovernanceRequestReco
 func SuspendedBindingMatchesRequest(binding runtimecontract.RuntimeOperationGovernanceBinding, request runtimecontract.RuntimeGovernanceRequestRecord) bool {
 	binding = binding.Normalized()
 	return binding.State == runtimecontract.RuntimeOperationGovernanceBindingSuspended &&
-		DependencyMatches(binding.DependencyKind, binding.SubjectRef, request.DependencyKind, request.SubjectRef)
+		DependencyMatches(binding.DependencyKind, binding.SubjectRef, request.DependencyKind, request.SubjectRef) &&
+		binding.RequestedAction == strings.TrimSpace(request.RequestedAction) && binding.RiskLevel == strings.TrimSpace(request.RiskLevel) &&
+		binding.AuthorizationHash == strings.TrimSpace(request.AuthorizationHash)
 }
 
 // BindingMatchesResolution compares only the immutable governance identity;
@@ -129,7 +158,7 @@ func SuspendedBindingMatchesRequest(binding runtimecontract.RuntimeOperationGove
 // turn a comparison into a transition.
 func BindingMatchesResolution(binding runtimecontract.RuntimeOperationGovernanceBinding, resolution runtimecontract.RuntimeGovernanceResolution) bool {
 	binding = binding.Normalized()
-	return binding.TicketID == resolution.TicketID &&
+	return binding.TicketID == resolution.TicketID && binding.ApprovalID == resolution.ApprovalID &&
 		strings.TrimSpace(binding.GovernanceDispatchID) == strings.TrimSpace(resolution.DispatchID) &&
 		strings.TrimSpace(binding.GovernanceSnapshotID) == strings.TrimSpace(resolution.AuthoritySnapshotID)
 }
@@ -152,14 +181,16 @@ func BindingMatchesReceipt(binding runtimecontract.RuntimeOperationGovernanceBin
 
 func BindingMatchesRequest(binding runtimecontract.RuntimeOperationGovernanceBinding, request runtimecontract.RuntimeGovernanceRequestRecord) bool {
 	binding = binding.Normalized()
-	return binding.TicketID == request.TicketID &&
+	return binding.TicketID == request.TicketID && binding.ApprovalID == request.ApprovalID &&
 		strings.TrimSpace(binding.GovernanceDispatchID) == strings.TrimSpace(request.DispatchID) &&
 		strings.TrimSpace(binding.GovernanceSnapshotID) == strings.TrimSpace(request.AuthoritySnapshotID) &&
-		DependencyMatches(binding.DependencyKind, binding.SubjectRef, request.DependencyKind, request.SubjectRef)
+		DependencyMatches(binding.DependencyKind, binding.SubjectRef, request.DependencyKind, request.SubjectRef) &&
+		binding.RequestedAction == strings.TrimSpace(request.RequestedAction) && binding.RiskLevel == strings.TrimSpace(request.RiskLevel) &&
+		binding.AuthorizationHash == strings.TrimSpace(request.AuthorizationHash)
 }
 
 func ResolutionRecordMatchesRequest(resolution runtimecontract.RuntimeGovernanceResolutionRecord, request runtimecontract.RuntimeGovernanceRequestRecord) bool {
-	return resolution.TicketID == request.TicketID &&
+	return resolution.TicketID == request.TicketID && resolution.ApprovalID == request.ApprovalID &&
 		strings.TrimSpace(resolution.DispatchID) == strings.TrimSpace(request.DispatchID) &&
 		strings.TrimSpace(resolution.AuthoritySnapshotID) == strings.TrimSpace(request.AuthoritySnapshotID)
 }
@@ -237,7 +268,7 @@ func EvaluateOperationSuspension(
 	if execution.OwnerReceiptHash != receiptHash {
 		return OperationSuspensionFinding{}, fmt.Errorf("operation governance receipt hash does not match owner-committed execution")
 	}
-	if persistedReceipt.Governance == nil || persistedReceipt.Governance.Normalized() != requirement {
+	if persistedReceipt.Governance == nil || !runtimecontract.SameRuntimeGovernanceRequirement(*persistedReceipt.Governance, requirement) {
 		return OperationSuspensionFinding{}, fmt.Errorf("operation governance requirement does not match durable receipt")
 	}
 	finding := OperationSuspensionFinding{
@@ -249,11 +280,16 @@ func EvaluateOperationSuspension(
 			ExpectedEffectScope:   execution.ExpectedEffectScope,
 			DependencyKind:        string(requirement.Kind),
 			SubjectRef:            requirement.SubjectRef,
+			RequestedAction:       requirement.RequestedAction,
+			RiskLevel:             requirement.RiskLevel,
+			AuthorizationHash:     runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
 			GovernanceReceiptHash: receiptHash,
 			State:                 runtimecontract.RuntimeOperationGovernanceBindingSuspended,
 		},
 		Dependency: runtimecontract.ExternalDependency{
 			Kind: string(requirement.Kind), SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
+			RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
+			AuthorizationContext: requirement.AuthorizationContext.Clone(),
 		},
 	}
 	if err := runtimecontract.ValidateRuntimeOperationGovernanceBindings([]runtimecontract.RuntimeOperationGovernanceBinding{finding.Binding}); err != nil {
@@ -276,13 +312,19 @@ func DependencyForFacts(facts runtimecontract.RuntimeFacts, bindings []runtimeco
 		if binding.State != runtimecontract.RuntimeOperationGovernanceBindingSuspended {
 			continue
 		}
-		dependency := runtimecontract.ExternalDependency{Kind: binding.DependencyKind, SubjectRef: binding.SubjectRef}
+		dependency := runtimecontract.ExternalDependency{
+			Kind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
+			RequestedAction: binding.RequestedAction, RiskLevel: binding.RiskLevel,
+		}
 		if facts.Failure != nil && facts.Failure.GovernanceDependency != nil {
 			candidate := facts.Failure.GovernanceDependency.Normalized()
 			if !DependencyMatches(dependency.Kind, dependency.SubjectRef, candidate.Kind, candidate.SubjectRef) {
 				return runtimecontract.ExternalDependency{}, false
 			}
 			dependency.Reason = candidate.Reason
+			dependency.RequestedAction = candidate.RequestedAction
+			dependency.RiskLevel = candidate.RiskLevel
+			dependency.AuthorizationContext = candidate.AuthorizationContext.Clone()
 		}
 		if dependency.Reason == "" && facts.Failure != nil {
 			dependency.Reason = strings.TrimSpace(facts.Failure.Message)

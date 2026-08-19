@@ -85,6 +85,68 @@ func TestWorkspaceScopedGovernanceGetRequiresUniqueUnscopedID(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopedFileApprovalRepositoryAddressesExactRunScope(t *testing.T) {
+	ctx := context.Background()
+	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())
+	const (
+		workspaceID = common.WorkspaceID("ws-file-approval-run-scope")
+		approvalID  = common.ApprovalID("approval-shared-across-file-runs")
+	)
+	for _, runID := range []common.RunID{"run-file-approval-a", "run-file-approval-b"} {
+		if err := repos.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnApproval}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+		if err := repos.Approvals.Create(ctx, &approvalmodel.Approval{
+			ID: approvalID, WorkspaceID: workspaceID, RunID: runID,
+			State: common.ApprovalStatePending, Reason: "run-scoped file approval",
+		}); err != nil {
+			t.Fatalf("create approval for %s: %v", runID, err)
+		}
+	}
+	workspaceCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	wrongWorkspaceCtx := common.ContextWithRuntimeWorkspaceID(ctx, "ws-file-approval-wrong-scope")
+	if _, err := repos.Approvals.Get(workspaceCtx, approvalID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("workspace-only duplicate get err = %v, want conflict", err)
+	}
+	if _, err := repos.Approvals.GetScoped(wrongWorkspaceCtx, workspaceID, "run-file-approval-a", approvalID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong workspace context get err = %v, want conflict", err)
+	}
+	if _, err := repos.Approvals.ListByWorkspaceID(wrongWorkspaceCtx, workspaceID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong workspace context list err = %v, want conflict", err)
+	}
+	first, err := repos.Approvals.GetScoped(workspaceCtx, workspaceID, "run-file-approval-a", approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RunID != "run-file-approval-a" {
+		t.Fatalf("first scoped approval run = %q", first.RunID)
+	}
+	first.State = common.ApprovalStateApproved
+	if err := repos.Approvals.Update(wrongWorkspaceCtx, first); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong workspace context update err = %v, want conflict", err)
+	}
+	first, err = repos.Approvals.GetScoped(workspaceCtx, workspaceID, "run-file-approval-a", approvalID)
+	if err != nil || first.State != common.ApprovalStatePending {
+		t.Fatalf("approval after rejected cross-scope update = %+v err=%v", first, err)
+	}
+	if err := repos.Approvals.Create(wrongWorkspaceCtx, &approvalmodel.Approval{
+		ID: "approval-wrong-context-create", WorkspaceID: workspaceID, RunID: "run-file-approval-a",
+		State: common.ApprovalStatePending, Reason: "must not cross workspace context",
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong workspace context create err = %v, want conflict", err)
+	}
+	if err := repos.Approvals.DeleteScoped(workspaceCtx, workspaceID, "run-file-approval-a", approvalID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := repos.Approvals.GetScoped(workspaceCtx, workspaceID, "run-file-approval-b", approvalID)
+	if err != nil {
+		t.Fatalf("second scoped approval after first delete: %v", err)
+	}
+	if second.RunID != "run-file-approval-b" {
+		t.Fatalf("second scoped approval run = %q", second.RunID)
+	}
+}
+
 func TestWorkspaceScopedDefinitionGetRequiresUniqueUnscopedID(t *testing.T) {
 	ctx := context.Background()
 	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())

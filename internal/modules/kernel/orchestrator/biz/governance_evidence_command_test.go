@@ -156,7 +156,8 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	if _, err := module.recordApprovalEvidence(ctx, approvalevents.RecordApprovalEvidenceCommand{
 		EvidenceRecordID: "evidence-approval-pairwise", WorkspaceID: create.WorkspaceID, RunID: create.RunID, StepID: create.StepID,
 		ApprovalID: create.ApprovalID, ApprovalState: common.ApprovalStateApproved, Reason: create.Reason, Action: create.Action,
-		Context: approved.Context.Clone().Fields,
+		ResolutionID: approved.ResolutionID, Principal: approved.ResolutionPrincipal,
+		Context: approved.Context.Clone().Fields, ResolutionContext: approved.ResolutionContext.Clone().Fields,
 	}); err != nil {
 		t.Fatalf("record approval evidence: %v", err)
 	}
@@ -174,9 +175,10 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 	}
 	metadataContext, ok := record.Metadata.Object("context")
 	scope, _ := metadataContext.String("scope")
-	resolvedBy, _ := metadataContext.String("resolvedBy")
-	if !ok || scope != "runtime" || resolvedBy != "tester" {
-		t.Fatalf("approval evidence context = %#v, want merged concrete context", metadataContext)
+	metadataResolution, resolutionOK := record.Metadata.Object("resolutionContext")
+	resolvedBy, _ := metadataResolution.String("resolvedBy")
+	if !ok || !resolutionOK || scope != "runtime" || resolvedBy != "tester" {
+		t.Fatalf("approval evidence contexts = target:%#v resolution:%#v, want separate immutable target and resolution metadata", metadataContext, metadataResolution)
 	}
 }
 

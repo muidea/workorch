@@ -4,7 +4,7 @@ Status: active
 
 Type: current-work-index
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-19
 
 ## Purpose
 
@@ -57,7 +57,10 @@ Last Verified: 2026-08-18
 - SM-4 startup inventory 具备 cursor visited-set、page/item hard limit，覆盖 `A → B → A` cycle 与 commands-ready handoff；
 - Run/Workspace lifecycle adapter 仅暴露 scoped snapshot `Read`，opaque Runtime aggregate read/CAS 保持独立 Run owner
   合同，Orchestrator 不保留跨 owner Create/Update/Delete/List 表面；
-- Result/Workspace/Run terminal delivery order和 projection non-authority。
+- Result/Workspace/Run terminal delivery order和 projection non-authority；
+- Approval 授权目标创建后不可由 resolution payload 覆盖；Runtime Approval 只接受 Orchestrator 创建，解决入口绑定
+  producer source 与 typed principal；SM-2 commit、evidence 和 durable Eventstream record 以持久化 checkpoint
+  fail-closed/re-drive；identity 必须包含 workspace/run，查询使用 concrete bounded result。
 
 完整矩阵见 [Runtime Owner Convergence Verification Matrix](../60-verification/runtime-owner-convergence-matrix.md)。
 

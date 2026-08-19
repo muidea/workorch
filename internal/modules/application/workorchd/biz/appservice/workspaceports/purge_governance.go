@@ -28,33 +28,16 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, work
 }
 
 func purgeWorkspaceApprovals(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandListByWorkspace, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.ListApprovalsByWorkspaceCommand{
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandPurgeWorkspace, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.PurgeWorkspaceApprovalsCommand{
 		WorkspaceID: workspaceID,
 	})
-	ownerevent.BindLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandListByWorkspace)
+	ownerevent.BindLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	_, err := ownerevent.Approval[approvalevents.PurgeWorkspaceApprovalsResult](hub.Send(event), approvalevents.TopicApprovalCommandPurgeWorkspace)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return nil
 		}
 		return err
-	}
-	items := response.Approvals
-	for _, item := range items {
-		if item == nil || item.WorkspaceID != workspaceID {
-			continue
-		}
-		event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandDelete, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.DeleteApprovalCommand{
-			ApprovalID:  item.ID,
-			WorkspaceID: workspaceID,
-			RunID:       item.RunID,
-			StepID:      item.StepID,
-		})
-		ownerevent.BindLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandDelete, "approval", string(item.ID), workspaceID, item.RunID, item.StepID)
-		_, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandDelete)
-		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
 	}
 	return nil
 }

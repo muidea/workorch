@@ -1,10 +1,13 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type RuntimeGovernanceResolutionOutcome string
@@ -18,6 +21,7 @@ const (
 type RuntimeGovernanceResolution struct {
 	ResolutionID        common.ResolutionID
 	TicketID            common.TicketID
+	ApprovalID          common.ApprovalID
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
 	AuthoritySnapshotID string
@@ -42,7 +46,7 @@ func (r RuntimeGovernanceResolution) Normalized() RuntimeGovernanceResolution {
 
 func (r RuntimeGovernanceResolution) Validate() error {
 	r = r.Normalized()
-	if r.ResolutionID == "" || r.TicketID == "" || r.WorkspaceID == "" || r.RunID == "" || r.AuthoritySnapshotID == "" || r.DispatchID == "" {
+	if r.ResolutionID == "" || !validRuntimeGovernanceOwnerIdentity(r.TicketID, r.ApprovalID) || r.WorkspaceID == "" || r.RunID == "" || r.AuthoritySnapshotID == "" || r.DispatchID == "" {
 		return fmt.Errorf("runtime governance resolution requires identity, scope, snapshot and dispatch")
 	}
 	if r.DependencyKind == "" || r.Summary == "" {
@@ -64,6 +68,7 @@ func (r RuntimeGovernanceResolution) EventID() string {
 type RuntimeGovernanceResolutionRecord struct {
 	ResolutionID        common.ResolutionID
 	TicketID            common.TicketID
+	ApprovalID          common.ApprovalID
 	AuthoritySnapshotID string
 	DispatchID          string
 	Outcome             RuntimeGovernanceResolutionOutcome
@@ -71,10 +76,14 @@ type RuntimeGovernanceResolutionRecord struct {
 
 type RuntimeGovernanceRequestRecord struct {
 	TicketID            common.TicketID
+	ApprovalID          common.ApprovalID
 	AuthoritySnapshotID string
 	DispatchID          string
 	DependencyKind      string
 	SubjectRef          string
+	RequestedAction     string
+	RiskLevel           string
+	AuthorizationHash   string
 }
 
 // RuntimeOperationGovernanceBinding preserves the identity of an operation that
@@ -92,6 +101,7 @@ const (
 
 type RuntimeOperationGovernanceBinding struct {
 	TicketID              common.TicketID
+	ApprovalID            common.ApprovalID
 	GovernanceDispatchID  string
 	GovernanceSnapshotID  string
 	OperationDispatchID   string
@@ -101,6 +111,9 @@ type RuntimeOperationGovernanceBinding struct {
 	ExpectedEffectScope   RuntimeEffectScope
 	DependencyKind        string
 	SubjectRef            string
+	RequestedAction       string
+	RiskLevel             string
+	AuthorizationHash     string
 	GovernanceReceiptHash string
 	State                 RuntimeOperationGovernanceBindingState
 	Grant                 *RuntimeOperationGovernanceGrant
@@ -109,11 +122,15 @@ type RuntimeOperationGovernanceBinding struct {
 type RuntimeOperationGovernanceGrant struct {
 	ResolutionID          common.ResolutionID
 	TicketID              common.TicketID
+	ApprovalID            common.ApprovalID
 	ExecutionKey          string
 	GovernanceFence       uint64
 	ResumeFence           uint64
 	DependencyKind        string
 	SubjectRef            string
+	RequestedAction       string
+	RiskLevel             string
+	AuthorizationHash     string
 	GovernanceReceiptHash string
 	EvidenceRefs          []string
 }
@@ -122,6 +139,9 @@ func (g RuntimeOperationGovernanceGrant) Normalized() RuntimeOperationGovernance
 	g.ExecutionKey = strings.TrimSpace(g.ExecutionKey)
 	g.DependencyKind = strings.TrimSpace(g.DependencyKind)
 	g.SubjectRef = strings.TrimSpace(g.SubjectRef)
+	g.RequestedAction = strings.TrimSpace(g.RequestedAction)
+	g.RiskLevel = strings.TrimSpace(g.RiskLevel)
+	g.AuthorizationHash = strings.TrimSpace(g.AuthorizationHash)
 	g.GovernanceReceiptHash = strings.TrimSpace(g.GovernanceReceiptHash)
 	g.EvidenceRefs = normalizeStrings(g.EvidenceRefs)
 	return g
@@ -129,12 +149,15 @@ func (g RuntimeOperationGovernanceGrant) Normalized() RuntimeOperationGovernance
 
 func (g RuntimeOperationGovernanceGrant) Validate() error {
 	g = g.Normalized()
-	if g.ResolutionID == "" || g.TicketID == "" || g.ExecutionKey == "" || g.GovernanceFence == 0 || g.ResumeFence == 0 ||
+	if g.ResolutionID == "" || !validRuntimeGovernanceOwnerIdentity(g.TicketID, g.ApprovalID) || g.ExecutionKey == "" || g.GovernanceFence == 0 || g.ResumeFence == 0 ||
 		g.DependencyKind == "" || g.SubjectRef == "" || g.GovernanceReceiptHash == "" {
 		return fmt.Errorf("runtime operation governance grant requires identity, execution, dependency and receipt hash")
 	}
 	if g.ResumeFence != g.GovernanceFence+1 {
 		return fmt.Errorf("runtime operation governance grant resume fence must follow governance fence")
+	}
+	if g.DependencyKind == string(GovernanceApproval) && (g.ApprovalID == "" || g.RequestedAction == "" || g.AuthorizationHash == "") {
+		return fmt.Errorf("runtime approval governance grant requires approval identity, requested action and authorization hash")
 	}
 	return nil
 }
@@ -142,9 +165,10 @@ func (g RuntimeOperationGovernanceGrant) Validate() error {
 func SameRuntimeOperationGovernanceGrant(left RuntimeOperationGovernanceGrant, right RuntimeOperationGovernanceGrant) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.ResolutionID != right.ResolutionID || left.TicketID != right.TicketID || left.ExecutionKey != right.ExecutionKey ||
+	if left.ResolutionID != right.ResolutionID || left.TicketID != right.TicketID || left.ApprovalID != right.ApprovalID || left.ExecutionKey != right.ExecutionKey ||
 		left.GovernanceFence != right.GovernanceFence || left.ResumeFence != right.ResumeFence || left.DependencyKind != right.DependencyKind ||
-		left.SubjectRef != right.SubjectRef || left.GovernanceReceiptHash != right.GovernanceReceiptHash || len(left.EvidenceRefs) != len(right.EvidenceRefs) {
+		left.SubjectRef != right.SubjectRef || left.RequestedAction != right.RequestedAction || left.RiskLevel != right.RiskLevel ||
+		left.AuthorizationHash != right.AuthorizationHash || left.GovernanceReceiptHash != right.GovernanceReceiptHash || len(left.EvidenceRefs) != len(right.EvidenceRefs) {
 		return false
 	}
 	for idx := range left.EvidenceRefs {
@@ -164,6 +188,9 @@ func (b RuntimeOperationGovernanceBinding) Normalized() RuntimeOperationGovernan
 	b.ExpectedEffectScope = NormalizeRuntimeEffectScope(b.ExpectedEffectScope)
 	b.DependencyKind = strings.TrimSpace(b.DependencyKind)
 	b.SubjectRef = strings.TrimSpace(b.SubjectRef)
+	b.RequestedAction = strings.TrimSpace(b.RequestedAction)
+	b.RiskLevel = strings.TrimSpace(b.RiskLevel)
+	b.AuthorizationHash = strings.TrimSpace(b.AuthorizationHash)
 	b.GovernanceReceiptHash = strings.TrimSpace(b.GovernanceReceiptHash)
 	b.State = RuntimeOperationGovernanceBindingState(strings.TrimSpace(string(b.State)))
 	if b.Grant != nil {
@@ -185,12 +212,15 @@ func (b RuntimeOperationGovernanceBinding) Clone() RuntimeOperationGovernanceBin
 
 func ValidateRuntimeOperationGovernanceBindings(values []RuntimeOperationGovernanceBinding) error {
 	seenExecution := map[string]struct{}{}
-	seenTicket := map[common.TicketID]struct{}{}
+	seenOwnerIdentity := map[string]struct{}{}
 	for _, raw := range values {
 		value := raw.Normalized()
 		if value.OperationDispatchID == "" || value.OperationID == "" || value.ExecutionKey == "" || value.Fence == 0 ||
 			value.ExpectedEffectScope == RuntimeEffectUnknown || value.DependencyKind == "" || value.SubjectRef == "" || value.GovernanceReceiptHash == "" {
 			return fmt.Errorf("operation governance binding requires source operation execution identity and dependency")
+		}
+		if value.DependencyKind == string(GovernanceApproval) && (value.RequestedAction == "" || value.AuthorizationHash == "") {
+			return fmt.Errorf("operation approval governance binding requires requested action and authorization hash")
 		}
 		executionIdentity := value.ExecutionKey + "|" + fmt.Sprintf("%d", value.Fence)
 		if _, duplicate := seenExecution[executionIdentity]; duplicate {
@@ -199,36 +229,39 @@ func ValidateRuntimeOperationGovernanceBindings(values []RuntimeOperationGoverna
 		seenExecution[executionIdentity] = struct{}{}
 		switch value.State {
 		case RuntimeOperationGovernanceBindingSuspended:
-			if value.TicketID != "" || value.GovernanceDispatchID != "" || value.GovernanceSnapshotID != "" || value.Grant != nil {
-				return fmt.Errorf("suspended operation governance binding cannot have ticket or governance dispatch")
+			if value.TicketID != "" || value.ApprovalID != "" || value.GovernanceDispatchID != "" || value.GovernanceSnapshotID != "" || value.Grant != nil {
+				return fmt.Errorf("suspended operation governance binding cannot have owner request or governance dispatch")
 			}
 		case RuntimeOperationGovernanceBindingTicketBound, RuntimeOperationGovernanceBindingRejected:
-			if value.TicketID == "" || value.GovernanceDispatchID == "" || value.GovernanceSnapshotID == "" {
-				return fmt.Errorf("operation governance binding state %q requires ticket and governance dispatch", value.State)
+			if !validRuntimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID) || value.GovernanceDispatchID == "" || value.GovernanceSnapshotID == "" {
+				return fmt.Errorf("operation governance binding state %q requires one owner request and governance dispatch", value.State)
 			}
 			if value.Grant != nil {
 				return fmt.Errorf("operation governance binding state %q cannot carry grant", value.State)
 			}
-			if _, duplicate := seenTicket[value.TicketID]; duplicate {
-				return fmt.Errorf("operation governance binding ticket %q is duplicated", value.TicketID)
+			ownerIdentity := runtimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID)
+			if _, duplicate := seenOwnerIdentity[ownerIdentity]; duplicate {
+				return fmt.Errorf("operation governance binding owner request %q is duplicated", ownerIdentity)
 			}
-			seenTicket[value.TicketID] = struct{}{}
+			seenOwnerIdentity[ownerIdentity] = struct{}{}
 		case RuntimeOperationGovernanceBindingGranted:
-			if value.TicketID == "" || value.GovernanceDispatchID == "" || value.GovernanceSnapshotID == "" || value.Grant == nil {
-				return fmt.Errorf("granted operation governance binding requires ticket, governance dispatch and grant")
+			if !validRuntimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID) || value.GovernanceDispatchID == "" || value.GovernanceSnapshotID == "" || value.Grant == nil {
+				return fmt.Errorf("granted operation governance binding requires owner request, governance dispatch and grant")
 			}
 			if err := value.Grant.Validate(); err != nil {
 				return err
 			}
 			grant := value.Grant.Normalized()
-			if grant.TicketID != value.TicketID || grant.ExecutionKey != value.ExecutionKey || grant.GovernanceFence != value.Fence ||
-				grant.DependencyKind != value.DependencyKind || grant.SubjectRef != value.SubjectRef || grant.GovernanceReceiptHash != value.GovernanceReceiptHash {
+			if grant.TicketID != value.TicketID || grant.ApprovalID != value.ApprovalID || grant.ExecutionKey != value.ExecutionKey || grant.GovernanceFence != value.Fence ||
+				grant.DependencyKind != value.DependencyKind || grant.SubjectRef != value.SubjectRef || grant.RequestedAction != value.RequestedAction ||
+				grant.RiskLevel != value.RiskLevel || grant.AuthorizationHash != value.AuthorizationHash || grant.GovernanceReceiptHash != value.GovernanceReceiptHash {
 				return fmt.Errorf("operation governance grant does not match binding")
 			}
-			if _, duplicate := seenTicket[value.TicketID]; duplicate {
-				return fmt.Errorf("operation governance binding ticket %q is duplicated", value.TicketID)
+			ownerIdentity := runtimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID)
+			if _, duplicate := seenOwnerIdentity[ownerIdentity]; duplicate {
+				return fmt.Errorf("operation governance binding owner request %q is duplicated", ownerIdentity)
 			}
-			seenTicket[value.TicketID] = struct{}{}
+			seenOwnerIdentity[ownerIdentity] = struct{}{}
 		default:
 			return fmt.Errorf("operation governance binding has invalid state %q", value.State)
 		}
@@ -237,24 +270,31 @@ func ValidateRuntimeOperationGovernanceBindings(values []RuntimeOperationGoverna
 }
 
 func ValidateRuntimeGovernanceRequestRecords(values []RuntimeGovernanceRequestRecord) error {
-	seenTickets := map[common.TicketID]struct{}{}
+	seenOwnerIdentities := map[string]struct{}{}
 	seenDispatches := map[string]struct{}{}
 	for _, value := range values {
 		value.AuthoritySnapshotID = strings.TrimSpace(value.AuthoritySnapshotID)
 		value.DispatchID = strings.TrimSpace(value.DispatchID)
 		value.DependencyKind = strings.TrimSpace(value.DependencyKind)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
-		if value.TicketID == "" || value.AuthoritySnapshotID == "" || value.DispatchID == "" || value.DependencyKind == "" {
-			return fmt.Errorf("runtime governance request record requires ticket, snapshot, dispatch and dependency")
+		value.RequestedAction = strings.TrimSpace(value.RequestedAction)
+		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.AuthorizationHash = strings.TrimSpace(value.AuthorizationHash)
+		if !validRuntimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID) || value.AuthoritySnapshotID == "" || value.DispatchID == "" || value.DependencyKind == "" {
+			return fmt.Errorf("runtime governance request record requires owner identity, snapshot, dispatch and dependency")
 		}
-		if _, ok := seenTickets[value.TicketID]; ok {
-			return fmt.Errorf("runtime governance request ticket %s is duplicated", value.TicketID)
+		if value.DependencyKind == string(GovernanceApproval) && (value.ApprovalID == "" || value.SubjectRef == "" || value.RequestedAction == "" || value.AuthorizationHash == "") {
+			return fmt.Errorf("runtime approval governance request record requires approval identity, subject, requested action and authorization hash")
+		}
+		ownerIdentity := runtimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID)
+		if _, ok := seenOwnerIdentities[ownerIdentity]; ok {
+			return fmt.Errorf("runtime governance owner request %s is duplicated", ownerIdentity)
 		}
 		key := value.AuthoritySnapshotID + "|" + value.DispatchID
 		if _, ok := seenDispatches[key]; ok {
 			return fmt.Errorf("runtime governance request dispatch %s is duplicated", key)
 		}
-		seenTickets[value.TicketID] = struct{}{}
+		seenOwnerIdentities[ownerIdentity] = struct{}{}
 		seenDispatches[key] = struct{}{}
 	}
 	return nil
@@ -264,7 +304,7 @@ func ValidateRuntimeGovernanceResolutionRecords(values []RuntimeGovernanceResolu
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		key := string(value.ResolutionID) + "|" + strings.TrimSpace(value.AuthoritySnapshotID)
-		if value.ResolutionID == "" || value.TicketID == "" || strings.TrimSpace(value.AuthoritySnapshotID) == "" || strings.TrimSpace(value.DispatchID) == "" {
+		if value.ResolutionID == "" || !validRuntimeGovernanceOwnerIdentity(value.TicketID, value.ApprovalID) || strings.TrimSpace(value.AuthoritySnapshotID) == "" || strings.TrimSpace(value.DispatchID) == "" {
 			return fmt.Errorf("runtime governance resolution record requires identity, snapshot and dispatch")
 		}
 		if value.Outcome != RuntimeGovernanceResolutionOutcomeContinue && value.Outcome != RuntimeGovernanceResolutionOutcomeFail {
@@ -276,4 +316,25 @@ func ValidateRuntimeGovernanceResolutionRecords(values []RuntimeGovernanceResolu
 		seen[key] = struct{}{}
 	}
 	return nil
+}
+
+func validRuntimeGovernanceOwnerIdentity(ticketID common.TicketID, approvalID common.ApprovalID) bool {
+	return (ticketID != "") != (approvalID != "")
+}
+
+func runtimeGovernanceOwnerIdentity(ticketID common.TicketID, approvalID common.ApprovalID) string {
+	if ticketID != "" {
+		return "ticket:" + string(ticketID)
+	}
+	if approvalID != "" {
+		return "approval:" + string(approvalID)
+	}
+	return ""
+}
+
+// StableRuntimeAuthorizationContextHash binds an owner-authored, typed
+// authorization target to a governance request without exposing mutable maps.
+func StableRuntimeAuthorizationContextHash(context workorcheventpayload.Payload) string {
+	sum := sha256.Sum256([]byte(context.CanonicalString()))
+	return hex.EncodeToString(sum[:])
 }

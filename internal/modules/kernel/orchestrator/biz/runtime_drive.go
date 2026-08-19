@@ -383,7 +383,8 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 		if loadErr != nil {
 			return runtimeProjectionFailure(loadErr)
 		}
-		if run.State == common.RunStateBlockedOnDecision && run.BlockingTicketID == result.BlockingTicketID {
+		if (run.State == common.RunStateBlockedOnDecision && run.BlockingTicketID == result.BlockingTicketID) ||
+			(run.State == common.RunStateBlockedOnApproval && run.BlockingApprovalID == result.BlockingApprovalID) {
 			return nil
 		}
 		// RUNTIME-SMO: publish immutable governance-wait fact; Run owner migrates SM-1.
@@ -424,9 +425,10 @@ func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchest
 			DispatchID:          request.DispatchID,
 			State:               aggregate.Decision.State,
 			BlockingTicketID:    request.TicketID,
+			BlockingApprovalID:  request.ApprovalID,
 		}, nil
 	}
-	return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("governed Runtime wait has no bound ticket")
+	return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("governed Runtime wait has no bound owner request")
 }
 
 func validateRuntimeDriveResult(result orchestratorevents.DriveRuntimeResult) error {
@@ -435,11 +437,13 @@ func validateRuntimeDriveResult(result orchestratorevents.DriveRuntimeResult) er
 	}
 	switch {
 	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
-		if result.State != runtimecontract.ConvergenceStateNeedGovernance || result.BlockingTicketID == "" || result.Terminal != nil {
+		hasTicket := result.BlockingTicketID != ""
+		hasApproval := result.BlockingApprovalID != ""
+		if result.State != runtimecontract.ConvergenceStateNeedGovernance || hasTicket == hasApproval || result.Terminal != nil {
 			return fmt.Errorf("invalid governed Runtime drive result")
 		}
 	case result.Terminal != nil:
-		if (result.State != runtimecontract.ConvergenceStateComplete && result.State != runtimecontract.ConvergenceStateFailed) || result.Terminal == nil || result.BlockingTicketID != "" {
+		if (result.State != runtimecontract.ConvergenceStateComplete && result.State != runtimecontract.ConvergenceStateFailed) || result.Terminal == nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" {
 			return fmt.Errorf("invalid terminal Runtime drive result")
 		}
 	default:

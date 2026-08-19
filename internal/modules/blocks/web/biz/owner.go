@@ -99,7 +99,8 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		ProviderID:                 command.Data.ProviderID, Query: command.Data.Query, Locale: command.Data.Locale, Recency: command.Data.Recency,
 		Domains: command.Data.Domains, ExcludeDomains: command.Data.ExcludeDomains, MaxResults: command.Data.MaxResults,
 		SafeSearch: command.Data.SafeSearch, ApprovalID: command.Data.ApprovalID, URL: command.Data.URL,
-		MaxBytes: command.Data.MaxBytes, ExtractMode: command.Data.ExtractMode, TargetRefs: command.TargetRefs,
+		GovernanceGrant: command.Execution.GovernanceGrant,
+		MaxBytes:        command.Data.MaxBytes, ExtractMode: command.Data.ExtractMode, TargetRefs: command.TargetRefs,
 		EvidencePolicies: command.EvidencePolicies,
 	})
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
@@ -122,7 +123,11 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		if reason == "" {
 			reason = "web operation requires approval before side effects"
 		}
-		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: subject, Reason: reason, RequestedAction: command.OperationKind, RiskLevel: "external"}
+		governance = &runtimecontract.RuntimeGovernanceRequirement{
+			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject, Reason: reason,
+			RequestedAction: command.OperationKind, RiskLevel: "external",
+			AuthorizationContext: operationResult.ApprovalContext.Clone(),
+		}
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
 	if runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope) {
@@ -334,7 +339,8 @@ func (g webApprovalGetter) Get(ctx context.Context, id common.ApprovalID) (*appr
 }
 
 func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
-	if g.hub == nil || id == "" {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if g.hub == nil || id == "" || workspaceID == "" || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(
@@ -343,7 +349,7 @@ func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, 
 		approvalevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		approvalevents.GetApprovalCommand{RunID: runID, ApprovalID: id},
+		approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, RunID: runID, ApprovalID: id},
 	)
 	result := g.hub.Send(ev)
 	if result == nil {
@@ -356,7 +362,7 @@ func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, 
 	if resultErr != nil {
 		return nil, resultErr
 	}
-	response, ok := data.(approvalevents.ApprovalCommandResult)
+	response, ok := data.(approvalevents.GetApprovalResult)
 	if !ok || response.Approval == nil {
 		return nil, common.ErrNotFound
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
@@ -321,6 +322,8 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 
 func sendRuntimeCapabilityOwnerCommand(ctx context.Context, hub magicevent.Hub, command runtimecontract.RuntimeCapabilityAcquisitionRequest) (magicevent.Result, string) {
 	switch command.OwnerModuleID {
+	case runtimecontract.RuntimeModuleApproval:
+		return hub.Send(magicevent.NewEventWithContext(approvalevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, approvalevents.AcquireRuntimeCapabilitiesCommand(command))), runtimecontract.RuntimeModuleApproval
 	case runtimecontract.RuntimeModuleDecision:
 		return hub.Send(magicevent.NewEventWithContext(decisionevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, decisionevents.AcquireRuntimeCapabilitiesCommand(command))), runtimecontract.RuntimeModuleDecision
 	case runtimecontract.RuntimeModuleFile:
@@ -344,6 +347,9 @@ func sendRuntimeCapabilityOwnerCommand(ctx context.Context, hub magicevent.Hub, 
 
 func normalizeRuntimeCapabilityOwnerResult(ownerModuleID string, data any) (runtimecontract.RuntimeCapabilityAcquisition, bool) {
 	switch ownerModuleID {
+	case runtimecontract.RuntimeModuleApproval:
+		value, ok := data.(approvalevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
 	case runtimecontract.RuntimeModuleDecision:
 		value, ok := data.(decisionevents.AcquireRuntimeCapabilitiesResult)
 		return value.Acquisition, ok

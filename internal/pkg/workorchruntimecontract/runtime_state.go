@@ -490,14 +490,15 @@ func (r RuntimeStateRecord) Validate() error {
 		}
 		bound := false
 		for _, request := range r.GovernanceRequests {
-			if request.TicketID == binding.TicketID && request.DispatchID == binding.GovernanceDispatchID &&
-				request.AuthoritySnapshotID == binding.GovernanceSnapshotID && request.DependencyKind == binding.DependencyKind && request.SubjectRef == binding.SubjectRef {
+			if request.TicketID == binding.TicketID && request.ApprovalID == binding.ApprovalID && request.DispatchID == binding.GovernanceDispatchID &&
+				request.AuthoritySnapshotID == binding.GovernanceSnapshotID && request.DependencyKind == binding.DependencyKind && request.SubjectRef == binding.SubjectRef &&
+				request.RequestedAction == binding.RequestedAction && request.RiskLevel == binding.RiskLevel && request.AuthorizationHash == binding.AuthorizationHash {
 				bound = true
 				break
 			}
 		}
 		if !bound {
-			return fmt.Errorf("operation governance binding has no matching ticket request")
+			return fmt.Errorf("operation governance binding has no matching owner request")
 		}
 	}
 	for _, attempt := range r.CandidateAttempts {
@@ -521,7 +522,7 @@ func (r RuntimeStateRecord) Validate() error {
 		matched := false
 		bound := false
 		for _, request := range r.GovernanceRequests {
-			if request.TicketID == resolution.TicketID && request.DispatchID == resolution.DispatchID && request.AuthoritySnapshotID == resolution.AuthoritySnapshotID {
+			if request.TicketID == resolution.TicketID && request.ApprovalID == resolution.ApprovalID && request.DispatchID == resolution.DispatchID && request.AuthoritySnapshotID == resolution.AuthoritySnapshotID {
 				bound = true
 				break
 			}

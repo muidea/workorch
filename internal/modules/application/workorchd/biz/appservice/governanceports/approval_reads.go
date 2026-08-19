@@ -37,7 +37,7 @@ func ApprovalsForQuery(ctx context.Context, hub magicevent.Hub, workspaceID stri
 		err   error
 	)
 	switch {
-	case runID != "":
+	case runID != "" && workspaceID != "":
 		items, err = ListApprovalsByRun(ctx, hub, common.RunID(runID))
 	case workspaceID != "":
 		items, err = ListApprovalsByWorkspace(ctx, hub, common.WorkspaceID(workspaceID))

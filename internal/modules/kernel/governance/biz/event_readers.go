@@ -44,14 +44,13 @@ type eventApprovalReader struct {
 	send func(magicevent.Event) magicevent.Result
 }
 
-func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+func (r eventApprovalReader) GetScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) (*approvalmodel.Approval, error) {
 	if r.send == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, ApprovalID: id})
-	bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandGet, "approval", string(id), workspaceID, "", "")
-	response, err := approvalResponse(r.send(event), approvalevents.TopicApprovalCommandGet)
+	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, RunID: runID, ApprovalID: id})
+	bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandGet, "approval", string(id), workspaceID, runID, "")
+	response, err := approvalResponse[approvalevents.GetApprovalResult](r.send(event), approvalevents.TopicApprovalCommandGet)
 	if err != nil {
 		return nil, err
 	}

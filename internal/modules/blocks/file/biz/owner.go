@@ -13,6 +13,7 @@ import (
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -241,7 +242,7 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
 	if failure != nil && failure.Code == "approval_required" {
-		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: failure.Message, RequestedAction: runtimecontract.StepKindFileWrite, RiskLevel: "high"}
+		governance = fileApprovalRequirement(command.Data.TargetRef, failure.Message, runtimecontract.StepKindFileWrite)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
@@ -289,7 +290,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
 	if failure != nil && failure.Code == "approval_required" {
-		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: failure.Message, RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high"}
+		governance = fileApprovalRequirement(command.Data.TargetRef, failure.Message, runtimecontract.RuntimeBlockKindPatchApply)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
@@ -298,6 +299,17 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		return
 	}
 	result.Set(fileevents.ExecuteOperationResult{Receipt: committed}, nil)
+}
+
+func fileApprovalRequirement(targetRef, reason, requestedAction string) *runtimecontract.RuntimeGovernanceRequirement {
+	return &runtimecontract.RuntimeGovernanceRequirement{
+		Kind: runtimecontract.GovernanceApproval, SubjectRef: targetRef, Reason: reason,
+		RequestedAction: requestedAction, RiskLevel: "high",
+		AuthorizationContext: workorcheventpayload.New(
+			workorcheventpayload.StringField("targetRef", strings.TrimSpace(targetRef)),
+			workorcheventpayload.StringField("operationKind", strings.TrimSpace(requestedAction)),
+		),
+	}
 }
 
 func validatePatchApplyReplayProof(proof *runtimecontract.RuntimeOperationReplayProof, operationID, targetRef string) error {

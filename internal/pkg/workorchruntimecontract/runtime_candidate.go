@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type RuntimeCandidateContext struct {
@@ -267,6 +268,9 @@ func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
 		writeHashString(h, strings.TrimSpace(candidate.Governance.ExternalDependency.Kind))
 		writeHashString(h, strings.TrimSpace(candidate.Governance.ExternalDependency.SubjectRef))
 		writeHashString(h, strings.TrimSpace(candidate.Governance.ExternalDependency.Reason))
+		writeHashString(h, strings.TrimSpace(candidate.Governance.ExternalDependency.RequestedAction))
+		writeHashString(h, strings.TrimSpace(candidate.Governance.ExternalDependency.RiskLevel))
+		writeHashString(h, candidate.Governance.ExternalDependency.AuthorizationContext.CanonicalString())
 	default:
 		writeHashString(h, "empty")
 	}
@@ -383,9 +387,12 @@ func (c AssessmentCandidate) Normalized() AssessmentCandidate {
 }
 
 type ExternalDependency struct {
-	Kind       string `json:"kind"`
-	SubjectRef string `json:"subjectRef"`
-	Reason     string `json:"reason"`
+	Kind                 string                       `json:"kind"`
+	SubjectRef           string                       `json:"subjectRef"`
+	Reason               string                       `json:"reason"`
+	RequestedAction      string                       `json:"requestedAction,omitempty"`
+	RiskLevel            string                       `json:"riskLevel,omitempty"`
+	AuthorizationContext workorcheventpayload.Payload `json:"authorizationContext,omitempty"`
 }
 
 // Normalized returns the canonical, value-only representation of an external
@@ -396,6 +403,9 @@ func (d ExternalDependency) Normalized() ExternalDependency {
 	d.Kind = strings.TrimSpace(d.Kind)
 	d.SubjectRef = strings.TrimSpace(d.SubjectRef)
 	d.Reason = strings.TrimSpace(d.Reason)
+	d.RequestedAction = strings.TrimSpace(d.RequestedAction)
+	d.RiskLevel = strings.TrimSpace(d.RiskLevel)
+	d.AuthorizationContext = d.AuthorizationContext.Clone()
 	return d
 }
 
@@ -404,11 +414,22 @@ func (d ExternalDependency) Validate() error {
 	if d.Kind == "" || d.SubjectRef == "" || d.Reason == "" {
 		return fmt.Errorf("external dependency requires kind, subject ref and reason")
 	}
+	if d.Kind == string(GovernanceApproval) && (d.RequestedAction == "" || len(d.AuthorizationContext.Fields) == 0) {
+		return fmt.Errorf("approval external dependency requires requested action and immutable authorization context")
+	}
 	return nil
 }
 
 func (d ExternalDependency) Clone() ExternalDependency {
 	return d.Normalized()
+}
+
+func SameExternalDependency(left ExternalDependency, right ExternalDependency) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	return left.Kind == right.Kind && left.SubjectRef == right.SubjectRef && left.Reason == right.Reason &&
+		left.RequestedAction == right.RequestedAction && left.RiskLevel == right.RiskLevel &&
+		left.AuthorizationContext.Equal(right.AuthorizationContext)
 }
 
 type GovernanceCandidate struct {

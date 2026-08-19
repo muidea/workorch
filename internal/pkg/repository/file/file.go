@@ -3440,7 +3440,7 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if item == nil || item.ID == "" {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
 		return common.ErrInvalidArgument
 	}
 	path := r.approvalPath(item.ID)
@@ -3471,6 +3471,20 @@ func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*appr
 	return cloneApproval(&item), nil
 }
 
+func (r *ApprovalRepository) GetScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) (*approval.Approval, error) {
+	if workspaceID == "" || runID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	item, err := r.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.WorkspaceID != workspaceID || item.RunID != runID {
+		return nil, common.ErrNotFound
+	}
+	return item, nil
+}
+
 func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -3485,6 +3499,15 @@ func (r *ApprovalRepository) ListByRunID(_ context.Context, runID common.RunID) 
 	return r.list(func(item approval.Approval) bool { return item.RunID == runID })
 }
 
+func (r *ApprovalRepository) ListByRunScope(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]*approval.Approval, error) {
+	if workspaceID == "" || runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.list(func(item approval.Approval) bool { return item.WorkspaceID == workspaceID && item.RunID == runID })
+}
+
 func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -3496,7 +3519,7 @@ func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if item == nil || item.ID == "" {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
 		return common.ErrInvalidArgument
 	}
 	path := r.approvalPath(item.ID)
@@ -3526,6 +3549,13 @@ func (r *ApprovalRepository) Delete(_ context.Context, id common.ApprovalID) err
 		return err
 	}
 	return os.Remove(path)
+}
+
+func (r *ApprovalRepository) DeleteScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) error {
+	if _, err := r.GetScoped(ctx, workspaceID, runID, id); err != nil {
+		return err
+	}
+	return r.Delete(ctx, id)
 }
 
 func (r *ApprovalRepository) approvalRoot() string {
@@ -3957,10 +3987,7 @@ func cloneDecisionResolution(item *decision.Resolution) *decision.Resolution {
 }
 
 func cloneApproval(item *approval.Approval) *approval.Approval {
-	cloned := *item
-	cloned.Context = item.Context.Clone()
-	cloned.AutoGovernance = item.AutoGovernance.Clone()
-	return &cloned
+	return approval.CloneApproval(item)
 }
 
 func applyApprovalFileTimestampFallback(item *approval.Approval, path string) {

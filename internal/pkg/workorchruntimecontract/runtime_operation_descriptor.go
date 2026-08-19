@@ -328,7 +328,7 @@ func init() {
 			RequiresOwnerReceipt: false,
 		},
 		{
-			Kind: RuntimeBlockKindApprovalRequest, OwnerModuleID: RuntimeModuleDecision,
+			Kind: RuntimeBlockKindApprovalRequest, OwnerModuleID: RuntimeModuleApproval,
 			DefaultEffectScope: RuntimeEffectGovernanceOnly, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedGovernance}, CapabilityClass: RuntimeCapabilityClassGovernance,
 			RequiresOwnerReceipt: false,

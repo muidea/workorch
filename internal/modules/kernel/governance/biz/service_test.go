@@ -140,7 +140,7 @@ type countingGovernanceApprovalReader struct {
 	lastScope common.WorkspaceID
 }
 
-func (r *countingGovernanceApprovalReader) Get(ctx context.Context, _ common.ApprovalID) (*approvalmodel.Approval, error) {
+func (r *countingGovernanceApprovalReader) GetScoped(ctx context.Context, _ common.WorkspaceID, _ common.RunID, _ common.ApprovalID) (*approvalmodel.Approval, error) {
 	r.getCount.Add(1)
 	r.lastScope = common.RuntimeWorkspaceIDFromContext(ctx)
 	return nil, common.ErrNotFound
@@ -250,7 +250,7 @@ func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
 		BackgroundRoutine:    routine,
 	})
@@ -302,7 +302,7 @@ func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
 	})
 
@@ -345,7 +345,7 @@ func TestProcessPendingWorkRejectsUnscopedIdentifierBeforeOwnerIO(t *testing.T) 
 	// worker without an immutable source fact must not turn either into an
 	// unscoped read through another owner.
 	svc.processPendingTicket(ctx, "ticket-local")
-	svc.processPendingApproval(ctx, "approval-local")
+	svc.processPendingApproval(ctx, "run-local", "approval-local")
 
 	if got := tickets.getCount.Load(); got != 0 {
 		t.Fatalf("unscoped ticket reads = %d, want 0", got)
@@ -380,7 +380,7 @@ func TestGovernanceOwnerFactsPropagateWorkspaceScopeToBackgroundWork(t *testing.
 	if err != nil {
 		t.Fatalf("bind approval scope: %v", err)
 	}
-	svc.processPendingApproval(approvalCtx, "approval-event")
+	svc.processPendingApproval(approvalCtx, "run-approval-event", "approval-event")
 	if tickets.lastScope != "ws-ticket-event" || approvals.lastScope != "ws-approval-event" {
 		t.Fatalf("notification scopes ticket=%q approval=%q", tickets.lastScope, approvals.lastScope)
 	}
@@ -431,7 +431,7 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
 	})
 
@@ -441,7 +441,7 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind workspace context: %v", err)
 	}
-	svc.processPendingApproval(scopedCtx, approvalID)
+	svc.processPendingApproval(scopedCtx, runID, approvalID)
 
 	if got := countingRuns.getCount.Load(); got != 0 {
 		t.Fatalf("run Get count = %d, want 0 for approval-scoped governance lookup", got)
@@ -590,7 +590,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 				Payload:  payload.Clone(),
 			})
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 3),
 	})
 	mustNoErr(t, svc.Start())
@@ -669,7 +669,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 			resolveCount.Add(1)
 			return nil
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 3),
 	})
 	mustNoErr(t, svc.Start())
@@ -745,7 +745,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionTicket(t *testing.T) {
 				Payload:  payload.Clone(),
 			})
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 5),
 	})
 	mustNoErr(t, svc.Start())
@@ -818,7 +818,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 				Payload:  payload.Clone(),
 			})
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 5),
 	})
 	mustNoErr(t, svc.Start())
@@ -894,7 +894,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 			resolveCount.Add(1)
 			return nil
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 5),
 	})
 	mustNoErr(t, svc.Start())
@@ -959,7 +959,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 			resolveCount++
 			return nil
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 5),
 	})
 	mustNoErr(t, svc.Start())
@@ -1062,7 +1062,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 				Payload:  payload.Clone(),
 			})
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 3),
 	})
 	mustNoErr(t, svc.Start())
@@ -1185,7 +1185,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 			resolveCount++
 			return nil
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig:      testGovernanceConfig(true, 0.82, 3),
 	})
 	mustNoErr(t, svc.Start())
@@ -1245,7 +1245,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
+		ResolveApproval: func(_ context.Context, id common.ApprovalID, _ common.RunID) error {
 			resolveCount.Add(1)
 			item, err := approvalRepo.Get(ctx, id)
 			if err != nil {
@@ -1263,7 +1263,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind approval scope: %v", err)
 	}
-	svc.processPendingApproval(scopedCtx, approvalID)
+	svc.processPendingApproval(scopedCtx, runID, approvalID)
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1
 	})
@@ -1271,7 +1271,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	if resolveCount.Load() != 1 {
 		t.Fatalf("resolve count = %d, want 1", resolveCount.Load())
 	}
-	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)))
+	trace, err := traceRepo.Get(ctx, autoGovernanceApprovalTraceID(workspaceID, runID, approvalID))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1332,7 +1332,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
+		ResolveApproval: func(_ context.Context, id common.ApprovalID, _ common.RunID) error {
 			resolveCount.Add(1)
 			item, err := approvalRepo.Get(ctx, id)
 			if err != nil {
@@ -1356,7 +1356,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 	if got := resolveCount.Load(); got != 1 {
 		t.Fatalf("resolve count = %d, want 1", got)
 	}
-	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)))
+	trace, err := traceRepo.Get(ctx, autoGovernanceApprovalTraceID(workspaceID, runID, approvalID))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1415,7 +1415,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
+		ResolveApproval: func(_ context.Context, id common.ApprovalID, _ common.RunID) error {
 			resolveCount.Add(1)
 			item, err := approvalRepo.Get(ctx, id)
 			if err != nil {
@@ -1433,7 +1433,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	if err != nil {
 		t.Fatalf("bind approval scope: %v", err)
 	}
-	svc.processPendingApproval(scopedCtx, approvalID)
+	svc.processPendingApproval(scopedCtx, runID, approvalID)
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1
 	})
@@ -1441,7 +1441,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	if resolveCount.Load() != 1 {
 		t.Fatalf("resolve count = %d, want 1", resolveCount.Load())
 	}
-	trace, err := traceRepo.Get(ctx, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)))
+	trace, err := traceRepo.Get(ctx, autoGovernanceApprovalTraceID(workspaceID, runID, approvalID))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
@@ -1519,7 +1519,7 @@ func TestServiceStartReconcilesBlockedApprovalAsynchronously(t *testing.T) {
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
+		ResolveApproval: func(_ context.Context, id common.ApprovalID, _ common.RunID) error {
 			item, err := approvalRepo.Get(ctx, id)
 			if err != nil {
 				return err
@@ -1616,7 +1616,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval: func(context.Context, common.ApprovalID) error {
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error {
 			resolveCount++
 			return nil
 		},
@@ -1629,8 +1629,8 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind approval scope: %v", err)
 	}
-	svc.processPendingApproval(scopedCtx, approvalID)
-	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceTraceID(workspaceID, "approval", string(approvalID)), func(trace *governancemodel.AutoGovernanceTrace) bool {
+	svc.processPendingApproval(scopedCtx, runID, approvalID)
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, autoGovernanceApprovalTraceID(workspaceID, runID, approvalID), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})
 
@@ -1715,7 +1715,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 			resolveCount++
 			return nil
 		},
-		ResolveApproval: func(context.Context, common.ApprovalID) error { return nil },
+		ResolveApproval: func(context.Context, common.ApprovalID, common.RunID) error { return nil },
 		LoadConfig: func() (workorchconfig.Config, error) {
 			enabledVal := true
 			allowReadOnly := true

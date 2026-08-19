@@ -284,6 +284,52 @@ func TestMemoryGovernanceRepositoriesRequireScopedLookupForDuplicateWorkspaceLoc
 	}
 }
 
+func TestMemoryApprovalRepositoryScopesDuplicateIDsByWorkspaceAndRun(t *testing.T) {
+	ctx := context.Background()
+	repo := NewApprovalRepository()
+	const (
+		workspaceID = common.WorkspaceID("ws-approval-run-scope")
+		approvalID  = common.ApprovalID("approval-shared-across-runs")
+	)
+	for _, runID := range []common.RunID{"run-approval-a", "run-approval-b"} {
+		if err := repo.Create(ctx, &approvalmodel.Approval{
+			ID: approvalID, WorkspaceID: workspaceID, RunID: runID,
+			State: common.ApprovalStatePending, Reason: "run-scoped approval",
+		}); err != nil {
+			t.Fatalf("create approval for %s: %v", runID, err)
+		}
+	}
+	workspaceCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	wrongWorkspaceCtx := common.ContextWithRuntimeWorkspaceID(ctx, "ws-approval-wrong-scope")
+	if _, err := repo.Get(workspaceCtx, approvalID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("workspace-only duplicate get err = %v, want conflict", err)
+	}
+	first, err := repo.GetScoped(workspaceCtx, workspaceID, "run-approval-a", approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.State = common.ApprovalStateApproved
+	if err := repo.Update(wrongWorkspaceCtx, first); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong workspace context update err = %v, want conflict", err)
+	}
+	if err := repo.Update(workspaceCtx, first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.GetScoped(workspaceCtx, workspaceID, "run-approval-b", approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.State != common.ApprovalStatePending {
+		t.Fatalf("second run approval state = %s, want pending", second.State)
+	}
+	if err := repo.DeleteScoped(workspaceCtx, workspaceID, "run-approval-a", approvalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetScoped(workspaceCtx, workspaceID, "run-approval-b", approvalID); err != nil {
+		t.Fatalf("delete in first run removed second run approval: %v", err)
+	}
+}
+
 func TestMemoryWorkspaceLocalRepositoriesRequireScopedLookup(t *testing.T) {
 	ctx := context.Background()
 	goals := NewGoalRepository()

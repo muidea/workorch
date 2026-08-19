@@ -12,6 +12,7 @@ const (
 	RuntimeModuleWeb          = "blocks/web"
 	RuntimeModuleOrchestrator = "kernel/orchestrator"
 	RuntimeModuleDecision     = "blocks/decision"
+	RuntimeModuleApproval     = "blocks/approval"
 )
 
 const (

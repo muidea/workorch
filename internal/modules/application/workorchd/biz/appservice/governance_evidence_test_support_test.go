@@ -25,9 +25,30 @@ func subscribeGovernanceEvidenceAcks(t *testing.T, rawHub magicevent.Hub) {
 			result.Set(nil, nil)
 			return
 		}
-		result.Set(approvalevents.RecordApprovalEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(approvalevents.RecordApprovalEvidenceResult{
+			EvidenceRecordID: command.EvidenceRecordID,
+			WorkspaceID:      command.WorkspaceID,
+			RunID:            command.RunID,
+			ApprovalID:       command.ApprovalID,
+			ResolutionID:     command.ResolutionID,
+			ApprovalState:    command.ApprovalState,
+		}, nil)
+	})
+	resolutionObserver := magicevent.NewSimpleObserver(approvalevents.ResolutionRecordCommandDestination, rawHub)
+	resolutionObserver.Subscribe(approvalevents.TopicApprovalCommandRecordResolution, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(approvalevents.RecordApprovalResolutionCommand)
+		if !ok {
+			result.Set(nil, nil)
+			return
+		}
+		data := command.Data
+		result.Set(approvalevents.RecordApprovalResolutionResult{
+			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
+			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
+		}, nil)
 	})
 	t.Cleanup(func() {
+		resolutionObserver.Unsubscribe(approvalevents.TopicApprovalCommandRecordResolution)
 		observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
 		observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
 	})

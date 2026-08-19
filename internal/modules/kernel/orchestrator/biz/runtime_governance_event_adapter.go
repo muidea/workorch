@@ -9,12 +9,48 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	approvalcommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func (m *Biz) handleRuntimeGovernanceApprovalResolution(event magicevent.Event, result magicevent.Result) {
+	if m == nil || event == nil || event.Source() != approvalcommon.ModuleID {
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		return
+	}
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceApprovalResolutionCommand)
+	if !ok || m.runtimeController == nil || command.ResolutionID == "" || command.ApprovalID == "" || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.Summary) == "" {
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		return
+	}
+	aggregate, err := m.runtimeController.Load(event.Context(), command.WorkspaceID, command.RunID)
+	if err != nil {
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
+		return
+	}
+	binding, found := governancecheck.RequestForApproval(aggregate.GovernanceRequests, command.ApprovalID)
+	if !found {
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance approval has no persisted binding", common.ErrConflict))
+		return
+	}
+	m.handleRuntimeGovernanceResolutionLocked(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
+		event.Source(), ModuleID, magicevent.NewHeader(), event.Context(),
+		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
+			ResolutionID: command.ResolutionID, ApprovalID: command.ApprovalID,
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+			AuthoritySnapshotID: binding.AuthoritySnapshotID, DispatchID: binding.DispatchID,
+			DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
+			Outcome: command.Outcome, Summary: command.Summary, EvidenceRefs: append([]string(nil), command.EvidenceRefs...),
+		}},
+	), result)
+}
 
 func (m *Biz) handleRuntimeGovernanceTicketResolution(event magicevent.Event, result magicevent.Result) {
 	if m == nil {

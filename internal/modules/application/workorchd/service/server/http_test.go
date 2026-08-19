@@ -4988,7 +4988,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuati
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
 	}
 
-	resolveApprovalForHTTP(t, dataRoot, started.BlockingApprovalID, false)
+	resolveApprovalForHTTP(t, dataRoot, workspace.ID, runID, started.BlockingApprovalID, false)
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
 	resumeRec := httptest.NewRecorder()
@@ -5017,7 +5017,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
 	}
 
-	resolveApprovalForHTTP(t, dataRoot, started.BlockingApprovalID, true)
+	resolveApprovalForHTTP(t, dataRoot, workspace.ID, runID, started.BlockingApprovalID, true)
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
 	resumeRec := httptest.NewRecorder()
@@ -5959,11 +5959,11 @@ func TestApprovalApproveEndpointApprovesApprovalWithoutLegacyRunResume(t *testin
 	if approved.Approval.State != "approved" {
 		t.Fatalf("approval = %+v, want approved", approved.Approval)
 	}
-	semantic, ok := approved.Approval.Context.Object("governanceSemantic")
+	semantic, ok := approved.Approval.ResolutionContext.Object("governanceSemantic")
 	intent, _ := semantic.String("intent")
 	source, _ := semantic.String("source")
 	if !ok || intent != "approve_execution" || source != "web" {
-		t.Fatalf("approval governance semantic = %#v, want approve from web", semantic)
+		t.Fatalf("approval resolution semantic = %#v, want approve from web", semantic)
 	}
 
 	blocked := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateBlockedOnApproval))
@@ -6819,7 +6819,7 @@ func rejectDecisionViaHTTP(t *testing.T, handler http.Handler, ticketID string) 
 	return body.Decision
 }
 
-func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, reject bool) {
+func resolveApprovalForHTTP(t *testing.T, dataRoot string, workspaceID string, runID string, approvalID string, reject bool) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -6838,13 +6838,14 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 		t.Fatalf("command hub: %v", err)
 	}
 	topic := approvalevents.TopicApprovalCommandEnsureApproved
-	var command any = approvalevents.EnsureApprovedCommand{ApprovalID: common.ApprovalID(approvalID)}
+	principal := approvalmodel.ApprovalResolutionPrincipal{Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice"}
+	var command any = approvalevents.EnsureApprovedCommand{ApprovalID: common.ApprovalID(approvalID), WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Principal: principal}
 	if reject {
 		topic = approvalevents.TopicApprovalCommandEnsureRejected
-		command = approvalevents.EnsureRejectedCommand{ApprovalID: common.ApprovalID(approvalID)}
+		command = approvalevents.EnsureRejectedCommand{ApprovalID: common.ApprovalID(approvalID), WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Principal: principal}
 	}
-	event := magicevent.NewEventWithContext(topic, "workorchd/server/http-test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{SubjectType: "approval", SubjectID: approvalID}))
+	event := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event.BindLaneKey(events.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{SubjectType: "approval", SubjectID: approvalID, WorkspaceID: workspaceID, RunID: runID}))
 	result := commandHub.Send(event)
 	if result == nil {
 		t.Fatal("resolve approval: missing command result")
@@ -6856,8 +6857,12 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 	if err != nil {
 		t.Fatalf("resolve approval result: %v", err)
 	}
-	if _, ok := data.(approvalevents.ApprovalCommandResult); !ok {
-		t.Fatalf("resolve approval result type = %T, want ApprovalCommandResult", data)
+	if reject {
+		if _, ok := data.(approvalevents.EnsureRejectedResult); !ok {
+			t.Fatalf("resolve approval result type = %T, want EnsureRejectedResult", data)
+		}
+	} else if _, ok := data.(approvalevents.EnsureApprovedResult); !ok {
+		t.Fatalf("resolve approval result type = %T, want EnsureApprovedResult", data)
 	}
 }
 

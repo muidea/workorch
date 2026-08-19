@@ -44,12 +44,18 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequ
 		return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 	}
 	if policy.Decision == policyApproval {
-		if approvalID == "" {
-			return approvalRequiredFetchResult(request, provider, rawURL, rawURL, policy), nil
+		required := approvalRequiredFetchResult(request, provider, rawURL, rawURL, policy)
+		var approvalErr error
+		if request.GovernanceGrant != nil {
+			approvalID, approvalErr = validateRuntimeApprovalGrant(request.GovernanceGrant, webcommon.StepKindFetch, rawURL, required.ApprovalContext)
+		} else if approvalID == "" {
+			return required, nil
+		} else {
+			approvalErr = a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindFetch, provider.ID, approvalContextURL, rawURL, policy)
 		}
-		if err := a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindFetch, provider.ID, approvalContextURL, rawURL, policy); err != nil {
-			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
+		if approvalErr != nil {
+			wrappedErr := fmt.Errorf("%w: %v", common.ErrInvalidArgument, approvalErr)
+			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, wrappedErr), wrappedErr
 		}
 	}
 	maxBytes := request.MaxBytes
@@ -89,11 +95,17 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequ
 		return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 	}
 	if finalPolicy.Decision == policyApproval {
-		if approvalID == "" {
-			return approvalRequiredFetchResult(request, provider, rawURL, finalURL, finalPolicy), nil
+		required := approvalRequiredFetchResult(request, provider, rawURL, finalURL, finalPolicy)
+		var approvalErr error
+		if request.GovernanceGrant != nil {
+			approvalID, approvalErr = validateRuntimeApprovalGrant(request.GovernanceGrant, webcommon.StepKindFetch, finalURL, required.ApprovalContext)
+		} else if approvalID == "" {
+			return required, nil
+		} else {
+			approvalErr = a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindFetch, provider.ID, approvalContextURL, finalURL, finalPolicy)
 		}
-		if err := a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindFetch, provider.ID, approvalContextURL, finalURL, finalPolicy); err != nil {
-			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+		if approvalErr != nil {
+			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, approvalErr)
 			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 		}
 	}

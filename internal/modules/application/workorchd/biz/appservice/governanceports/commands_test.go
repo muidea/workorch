@@ -26,7 +26,7 @@ func mustGovernancePayload(t *testing.T, input map[string]any) workorcheventpayl
 func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ListApprovalsByRunCommand", data)
@@ -37,7 +37,7 @@ func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 		if cmd.WorkspaceID != "ws-001" {
 			t.Fatalf("workspace command = %q, want ws-001", cmd.WorkspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approvals: []*approvalmodel.Approval{
 				{ID: "approval-001", WorkspaceID: "ws-001", RunID: "run-001"},
 				{ID: "approval-other-workspace", WorkspaceID: "ws-other", RunID: "run-001"},
@@ -213,18 +213,18 @@ func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
-		if cmd.ApprovalID != "approval-contract" {
+		if cmd.ApprovalID != "approval-contract" || cmd.WorkspaceID != "ws-contract" || cmd.RunID != "run-contract" {
 			t.Fatalf("command = %+v", cmd)
 		}
-		return approvalevents.ApprovalCommandResult{Approval: &approvalmodel.Approval{ID: cmd.ApprovalID, State: common.ApprovalStateApproved}}
+		return approvalTestCommandResult{Approval: &approvalmodel.Approval{ID: cmd.ApprovalID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.ApprovalStateApproved}}
 	})
 
-	item, err := ApproveApproval(ctx, hub, "approval-contract")
+	item, err := ApproveApprovalItem(ctx, hub, &approvalmodel.Approval{ID: "approval-contract", WorkspaceID: "ws-contract", RunID: "run-contract"})
 	if err != nil {
 		t.Fatalf("ApproveApproval: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
@@ -245,7 +245,7 @@ func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
 		if cmd.ApprovalID != "approval-scoped-contract" || cmd.WorkspaceID != "ws-scoped-contract" || cmd.RunID != "run-scoped-contract" {
 			t.Fatalf("command = %+v, want scoped approval command", cmd)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approval: &approvalmodel.Approval{
 				ID:          cmd.ApprovalID,
 				WorkspaceID: cmd.WorkspaceID,
@@ -275,6 +275,14 @@ type governanceMagicTestHub struct {
 	approvalObserver magicevent.SimpleObserver
 }
 
+// approvalTestCommandResult is intentionally test-local. Production Approval
+// topics expose distinct result types; this helper only keeps fixture setup
+// compact while converting each topic to its concrete contract below.
+type approvalTestCommandResult struct {
+	Approval  *approvalmodel.Approval
+	Approvals []*approvalmodel.Approval
+}
+
 func newGovernanceMagicTestHub(t *testing.T) *governanceMagicTestHub {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
@@ -295,8 +303,24 @@ func (h *governanceMagicTestHub) subscribeDecision(topic string, handler func(an
 	})
 }
 
-func (h *governanceMagicTestHub) subscribeApproval(topic string, handler func(any) approvalevents.ApprovalCommandResult) {
+func (h *governanceMagicTestHub) subscribeApproval(topic string, handler func(any) approvalTestCommandResult) {
 	h.approvalObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
-		result.Set(handler(ev.Data()), nil)
+		response := handler(ev.Data())
+		switch topic {
+		case approvalevents.TopicApprovalCommandGet:
+			result.Set(approvalevents.GetApprovalResult{Approval: response.Approval}, nil)
+		case approvalevents.TopicApprovalCommandList:
+			result.Set(approvalevents.ListApprovalsResult{Approvals: response.Approvals}, nil)
+		case approvalevents.TopicApprovalCommandListByRun:
+			result.Set(approvalevents.ListApprovalsByRunResult{Approvals: response.Approvals}, nil)
+		case approvalevents.TopicApprovalCommandListByWorkspace:
+			result.Set(approvalevents.ListApprovalsByWorkspaceResult{Approvals: response.Approvals}, nil)
+		case approvalevents.TopicApprovalCommandEnsureApproved:
+			result.Set(approvalevents.EnsureApprovedResult{Approval: response.Approval}, nil)
+		case approvalevents.TopicApprovalCommandEnsureRejected:
+			result.Set(approvalevents.EnsureRejectedResult{Approval: response.Approval}, nil)
+		default:
+			panic("unsupported approval test topic: " + topic)
+		}
 	})
 }

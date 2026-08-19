@@ -102,7 +102,7 @@ func setDecisionEvidenceResult(result magicevent.Result, response decisionevents
 }
 
 func (m *Biz) handleApprovalEvidenceCommand(ev magicevent.Event, result magicevent.Result) {
-	if m == nil {
+	if m == nil || ev == nil || ev.Source() != "blocks/approval" {
 		setApprovalEvidenceResult(result, approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument)
 		return
 	}
@@ -118,7 +118,7 @@ func (m *Biz) handleApprovalEvidenceCommand(ev magicevent.Event, result magiceve
 }
 
 func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents.RecordApprovalEvidenceCommand) (approvalevents.RecordApprovalEvidenceResult, error) {
-	if m == nil || m.evidenceRecords == nil || command.EvidenceRecordID == "" || command.WorkspaceID == "" || command.RunID == "" || command.ApprovalID == "" {
+	if m == nil || m.evidenceRecords == nil || command.EvidenceRecordID == "" || command.WorkspaceID == "" || command.RunID == "" || command.ApprovalID == "" || command.ResolutionID == "" || command.Principal.Validate() != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, common.ErrInvalidArgument
 	}
 	status := ""
@@ -134,9 +134,16 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 	if err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}
+	resolutionContext, err := approvalEvidenceFieldsToPayload(command.ResolutionContext)
+	if err != nil {
+		return approvalevents.RecordApprovalEvidenceResult{}, err
+	}
 	metadataFields := []workorcheventpayload.Field{
 		workorcheventpayload.StringField("approvalId", string(command.ApprovalID)),
 		workorcheventpayload.StringField("approvalState", string(command.ApprovalState)),
+		workorcheventpayload.StringField("resolutionId", string(command.ResolutionID)),
+		workorcheventpayload.StringField("resolvedByKind", string(command.Principal.Kind)),
+		workorcheventpayload.StringField("resolvedBy", command.Principal.SubjectID),
 	}
 	if command.Reason != "" {
 		metadataFields = append(metadataFields, workorcheventpayload.StringField("reason", strings.TrimSpace(command.Reason)))
@@ -147,6 +154,9 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 	if len(approvalContext.Fields) > 0 {
 		metadataFields = append(metadataFields, workorcheventpayload.ObjectField("context", approvalContext))
 	}
+	if len(resolutionContext.Fields) > 0 {
+		metadataFields = append(metadataFields, workorcheventpayload.ObjectField("resolutionContext", resolutionContext))
+	}
 	record := &orchestratormodel.EvidenceRecord{
 		ID:          command.EvidenceRecordID,
 		WorkspaceID: command.WorkspaceID,
@@ -155,7 +165,7 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 		Kind:        orchestratormodel.EvidenceKindApproval,
 		Status:      status,
 		SourceType:  "approval",
-		SourceRef:   string(command.ApprovalID),
+		SourceRef:   string(command.ResolutionID),
 		SubjectType: "approval",
 		SubjectID:   string(command.ApprovalID),
 		CreatedAt:   command.Timestamp,
@@ -169,7 +179,10 @@ func (m *Biz) recordApprovalEvidence(ctx context.Context, command approvalevents
 	if err := repository.CreateOrUpdateEvidenceRecord(ctx, m.evidenceRecords, record); err != nil {
 		return approvalevents.RecordApprovalEvidenceResult{}, err
 	}
-	return approvalevents.RecordApprovalEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil
+	return approvalevents.RecordApprovalEvidenceResult{
+		EvidenceRecordID: command.EvidenceRecordID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		ApprovalID: command.ApprovalID, ResolutionID: command.ResolutionID, ApprovalState: command.ApprovalState,
+	}, nil
 }
 
 func setApprovalEvidenceResult(result magicevent.Result, response approvalevents.RecordApprovalEvidenceResult, err error) {

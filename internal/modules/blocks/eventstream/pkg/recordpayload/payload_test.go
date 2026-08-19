@@ -52,13 +52,15 @@ func TestTypedEventPayloadDecodersRoundTrip(t *testing.T) {
 	}
 
 	approval := ApprovalPayloadData{
-		Reason:  "approve",
-		Action:  "apply",
-		Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "medium")),
-		State:   common.ApprovalStateApproved,
+		Reason: "approve", Action: "apply", Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "medium")),
+		State: common.ApprovalStateApproved, ResolutionID: "resolution-approval-typed",
+		ResolutionContext: workorcheventpayload.New(workorcheventpayload.StringField("note", "reviewed")),
+		ResolvedByKind:    "human_operator", ResolvedBy: "application/workorchd/appservice",
 	}
 	decodedApproval, ok := DecodeApprovalEventPayload(approval.EventPayload())
-	if !ok || decodedApproval.Reason != approval.Reason || decodedApproval.Action != approval.Action || decodedApproval.State != approval.State || !decodedApproval.Context.Equal(approval.Context) {
+	if !ok || decodedApproval.Reason != approval.Reason || decodedApproval.Action != approval.Action || decodedApproval.State != approval.State ||
+		decodedApproval.ResolutionID != approval.ResolutionID || decodedApproval.ResolvedByKind != approval.ResolvedByKind || decodedApproval.ResolvedBy != approval.ResolvedBy ||
+		!decodedApproval.Context.Equal(approval.Context) || !decodedApproval.ResolutionContext.Equal(approval.ResolutionContext) {
 		t.Fatalf("approval round trip = %+v/%v, want %+v", decodedApproval, ok, approval)
 	}
 }

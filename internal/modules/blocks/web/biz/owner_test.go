@@ -12,6 +12,7 @@ import (
 	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -107,7 +108,8 @@ func sendWebFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 }
 
 func TestApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
-	ctx := context.Background()
+	const workspaceID = common.WorkspaceID("ws-web-scope")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
 	rawHub := magicevent.NewHub(8)
 	approvalID := common.ApprovalID("approval-web-scope")
 	runID := common.RunID("run-web-scope")
@@ -120,7 +122,7 @@ func TestApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 			t.Fatalf("command type = %T, want GetApprovalCommand", ev.Data())
 		}
 		captured, source = cmd, ev.Source()
-		result.Set(approvalevents.ApprovalCommandResult{Approval: &approvalmodel.Approval{ID: approvalID, RunID: runID, State: common.ApprovalStateApproved}}, nil)
+		result.Set(approvalevents.GetApprovalResult{Approval: &approvalmodel.Approval{ID: approvalID, WorkspaceID: workspaceID, RunID: runID, State: common.ApprovalStateApproved}}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(approvalevents.TopicApprovalCommandGet); rawHub.Terminate(ctx) })
 	item, err := (webApprovalGetter{hub: rawHub}).GetForRun(ctx, approvalID, runID)
@@ -133,7 +135,35 @@ func TestApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	if source != ModuleID {
 		t.Fatalf("source = %q, want %q", source, ModuleID)
 	}
-	if captured.ApprovalID != approvalID || captured.RunID != runID {
+	if captured.ApprovalID != approvalID || captured.WorkspaceID != workspaceID || captured.RunID != runID {
 		t.Fatalf("command = %+v, want approval/run scope", captured)
+	}
+}
+
+func TestRuntimeApprovalGrantBindsExactWebAuthorizationTarget(t *testing.T) {
+	authorization := workorcheventpayload.New(
+		workorcheventpayload.StringField("providerId", "provider-a"),
+		workorcheventpayload.StringField("query", "release notes"),
+	)
+	grant := &runtimecontract.RuntimeOperationGovernanceGrant{
+		ResolutionID: "resolution-web-grant", ApprovalID: "approval-web-grant",
+		ExecutionKey: "execution-web-grant", GovernanceFence: 1, ResumeFence: 2,
+		DependencyKind: string(runtimecontract.GovernanceApproval), SubjectRef: "release notes",
+		RequestedAction: StepKindSearch, AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(authorization),
+		GovernanceReceiptHash: "receipt-web-grant",
+	}
+	approvalID, err := validateRuntimeApprovalGrant(grant, StepKindSearch, "release notes", authorization)
+	if err != nil || approvalID != "approval-web-grant" {
+		t.Fatalf("exact grant approvalID=%q err=%v", approvalID, err)
+	}
+	changedTarget := workorcheventpayload.New(
+		workorcheventpayload.StringField("providerId", "provider-b"),
+		workorcheventpayload.StringField("query", "release notes"),
+	)
+	if _, err := validateRuntimeApprovalGrant(grant, StepKindSearch, "release notes", changedTarget); err == nil {
+		t.Fatal("grant authorized changed provider target")
+	}
+	if _, err := validateRuntimeApprovalGrant(grant, StepKindSearch, "security advisories", authorization); err == nil {
+		t.Fatal("grant authorized changed subject")
 	}
 }

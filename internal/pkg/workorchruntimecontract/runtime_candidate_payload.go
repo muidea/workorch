@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // RuntimeCandidateDocumentDisposition classifies the provider response before
@@ -172,7 +173,11 @@ func DecodeRuntimeCandidatePayload(state ConvergenceState, payload []byte) (Runt
 		if err := strictDecodeRuntimeCandidatePayload(payload, &value); err != nil {
 			return RuntimeCandidate{}, err
 		}
-		return RuntimeCandidate{Governance: &GovernanceCandidate{ExternalDependency: ExternalDependency{Kind: value.ExternalDependency.Kind, SubjectRef: value.ExternalDependency.SubjectRef, Reason: value.ExternalDependency.Reason}}}, nil
+		return RuntimeCandidate{Governance: &GovernanceCandidate{ExternalDependency: ExternalDependency{
+			Kind: value.ExternalDependency.Kind, SubjectRef: value.ExternalDependency.SubjectRef, Reason: value.ExternalDependency.Reason,
+			RequestedAction: value.ExternalDependency.RequestedAction, RiskLevel: value.ExternalDependency.RiskLevel,
+			AuthorizationContext: value.ExternalDependency.AuthorizationContext.Clone(),
+		}}}, nil
 	default:
 		return RuntimeCandidate{}, fmt.Errorf("convergence state %s does not accept an LLM candidate", state)
 	}
@@ -215,7 +220,9 @@ func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		}
 		payload = runtimeCandidateGovernancePayload{ExternalDependency: runtimeCandidateExternalDependency{
 			Kind: candidate.Governance.ExternalDependency.Kind, SubjectRef: candidate.Governance.ExternalDependency.SubjectRef,
-			Reason: candidate.Governance.ExternalDependency.Reason,
+			Reason: candidate.Governance.ExternalDependency.Reason, RequestedAction: candidate.Governance.ExternalDependency.RequestedAction,
+			RiskLevel:            candidate.Governance.ExternalDependency.RiskLevel,
+			AuthorizationContext: candidate.Governance.ExternalDependency.AuthorizationContext.Clone(),
 		}}
 	default:
 		return nil, fmt.Errorf("convergence state %s does not accept an LLM candidate", manifest.State)
@@ -313,9 +320,12 @@ type runtimeCandidateGovernancePayload struct {
 	ExternalDependency runtimeCandidateExternalDependency `json:"externalDependency"`
 }
 type runtimeCandidateExternalDependency struct {
-	Kind       string `json:"kind"`
-	SubjectRef string `json:"subjectRef,omitempty"`
-	Reason     string `json:"reason"`
+	Kind                 string                       `json:"kind"`
+	SubjectRef           string                       `json:"subjectRef,omitempty"`
+	Reason               string                       `json:"reason"`
+	RequestedAction      string                       `json:"requestedAction,omitempty"`
+	RiskLevel            string                       `json:"riskLevel,omitempty"`
+	AuthorizationContext workorcheventpayload.Payload `json:"authorizationContext,omitempty"`
 }
 type runtimeCandidateAssessmentPayload struct {
 	FocusID             string                           `json:"focusId"`

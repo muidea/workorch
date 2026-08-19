@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
@@ -51,6 +53,7 @@ import (
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -8462,15 +8465,14 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				t.Fatal(err)
 			}
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
-			decisionTickets := filerepository.NewDecisionTicketRepository(filepath.Join(root, "decision-tickets.json"))
-			decisionResolutions := filerepository.NewDecisionResolutionRepository(filepath.Join(root, "decision-resolutions.json"))
+			approvals := filerepository.NewApprovalRepository(filepath.Join(root, "approvals.json"))
 			bootstrap := runtimeBootstrap()
-			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindDecisionRequest}
+			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindApprovalRequest}
 			bootstrap.Focuses[0].TargetRefs = []string{".env"}
 			bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}},
-				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}},
+				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleApproval, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindApprovalRequest}},
 			}
 			bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 			if err := runs.Create(ctx, &runmodel.Run{
@@ -8483,7 +8485,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			type process struct {
 				hub           magicevent.Hub
 				runOwner      *runmodule.Module
-				decisionOwner *decisionmodule.Module
+				approvalOwner *approvalmodule.Module
 				fileOwner     *filemodule.Module
 				workspace     magicevent.SimpleObserver
 				receipts      magicevent.SimpleObserver
@@ -8502,13 +8504,13 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
-				decisionOwner := decisionmodule.New()
-				if err := decisionOwner.Configure(decisionbiz.Dependencies{Tickets: decisionTickets, Resolutions: decisionResolutions, EventHub: hub}); err != nil {
+				approvalOwner := approvalmodule.New()
+				if err := approvalOwner.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: hub}); err != nil {
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
-				if err := decisionOwner.Start(); err != nil {
+				if err := approvalOwner.Start(); err != nil {
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
@@ -8522,14 +8524,14 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				fileOwner := filemodule.New()
 				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 					workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
-					_ = decisionOwner.Stop(ctx)
+					_ = approvalOwner.Stop(ctx)
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
 				if err := fileOwner.Start(); err != nil {
 					workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
-					_ = decisionOwner.Stop(ctx)
+					_ = approvalOwner.Stop(ctx)
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
@@ -8538,7 +8540,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				if err := owner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 					_ = fileOwner.Stop(ctx)
 					workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
-					_ = decisionOwner.Stop(ctx)
+					_ = approvalOwner.Stop(ctx)
 					_ = runOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
@@ -8547,7 +8549,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				receipts := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 				receipts.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, module.handleRuntimeOperationReceipt)
 				receipts.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, module.handleRuntimeOperationReceipt)
-				return process{hub: hub, runOwner: runOwner, decisionOwner: decisionOwner, fileOwner: fileOwner, workspace: workspace, receipts: receipts, module: module, controller: owner.runtimeController}
+				return process{hub: hub, runOwner: runOwner, approvalOwner: approvalOwner, fileOwner: fileOwner, workspace: workspace, receipts: receipts, module: module, controller: owner.runtimeController}
 			}
 			stopProcess := func(value process) {
 				if value.receipts != nil {
@@ -8560,8 +8562,8 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				if value.workspace != nil {
 					value.workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 				}
-				if value.decisionOwner != nil {
-					_ = value.decisionOwner.Stop(ctx)
+				if value.approvalOwner != nil {
+					_ = value.approvalOwner.Stop(ctx)
 				}
 				if value.runOwner != nil {
 					_ = value.runOwner.Stop(ctx)
@@ -8577,7 +8579,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
 			facts.Capabilities = runtimecontract.RuntimeCapabilities{
 				StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
-				GovernanceKinds:  []string{runtimecontract.RuntimeBlockKindDecisionRequest},
+				GovernanceKinds:  []string{runtimecontract.RuntimeBlockKindApprovalRequest},
 			}
 			definition := bootstrap.Definition
 			initialized, err := runtimeTestControllerInitialize(first.controller, ctx, facts, definition, nil)
@@ -8618,6 +8620,8 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			}
 			governed, err := runtimeTestControllerSealGovernanceDispatch(first.controller, ctx, "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 				Kind: binding.DependencyKind, SubjectRef: binding.SubjectRef, Reason: waiting.Facts.Failure.GovernanceDependency.Reason,
+				RequestedAction: binding.RequestedAction, RiskLevel: binding.RiskLevel,
+				AuthorizationContext: waiting.Facts.Failure.GovernanceDependency.AuthorizationContext.Clone(),
 			}}})
 			if err != nil || governed.ActiveDispatch == nil {
 				stopProcess(first)
@@ -8629,12 +8633,12 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				t.Fatalf("governance ticket binding=%+v err=%v", bound, err)
 			}
 			request := bound.GovernanceRequests[0]
-			if _, err := decisionTickets.Get(ctx, request.TicketID); err != nil {
+			if _, err := approvals.GetScoped(ctx, "ws-v2", "run-v2", request.ApprovalID); err != nil {
 				stopProcess(first)
-				t.Fatalf("decision owner did not persist governed ticket %q: %v", request.TicketID, err)
+				t.Fatalf("approval owner did not persist governed approval %q: %v", request.ApprovalID, err)
 			}
 			resolution := runtimecontract.RuntimeGovernanceResolution{
-				ResolutionID: "governance-grant-resolution", TicketID: request.TicketID, WorkspaceID: "ws-v2", RunID: "run-v2",
+				ResolutionID: "governance-grant-resolution", ApprovalID: request.ApprovalID, WorkspaceID: "ws-v2", RunID: "run-v2",
 				AuthoritySnapshotID: request.AuthoritySnapshotID, DispatchID: request.DispatchID,
 				DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
 				Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "persisted approval granted",
@@ -9355,11 +9359,15 @@ func TestRuntimeGovernanceDependencyPreservesSuspendedOperationBinding(t *testin
 			Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
 			Failure: &runtimecontract.FailureFact{
 				Class: runtimecontract.FailureClassGovernanceRequired, Message: "approval required",
-				GovernanceDependency: &runtimecontract.ExternalDependency{Kind: string(runtimecontract.GovernanceApproval), SubjectRef: ".env", Reason: "approval required"},
+				GovernanceDependency: &runtimecontract.ExternalDependency{
+					Kind: string(runtimecontract.GovernanceApproval), SubjectRef: ".env", Reason: "approval required",
+					RequestedAction: "file/write", AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", ".env")),
+				},
 			},
 		},
 		OperationGovernanceBindings: []runtimecontract.RuntimeOperationGovernanceBinding{{
 			ExecutionKey: "exec-1", Fence: 1, DependencyKind: string(runtimecontract.GovernanceApproval), SubjectRef: ".env",
+			RequestedAction: "file/write", AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(workorcheventpayload.New(workorcheventpayload.StringField("targetRef", ".env"))),
 			State: runtimecontract.RuntimeOperationGovernanceBindingSuspended,
 		}},
 	}
@@ -9376,7 +9384,7 @@ func TestRuntimeGovernanceDependencyRejectsGenericFailure(t *testing.T) {
 			Class: runtimecontract.FailureClassGovernanceRequired, Message: "runtime requires governance",
 		},
 	}}
-	if dependency, found := runtime.GovernanceDependencyForAggregate(aggregate); found || dependency != (runtimecontract.ExternalDependency{}) {
+	if dependency, found := runtime.GovernanceDependencyForAggregate(aggregate); found || !runtimecontract.SameExternalDependency(dependency, runtimecontract.ExternalDependency{}) {
 		t.Fatalf("generic governance dependency = %+v found=%v, want none", dependency, found)
 	}
 }

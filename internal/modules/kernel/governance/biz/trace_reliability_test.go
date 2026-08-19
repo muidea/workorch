@@ -111,7 +111,7 @@ func newGovernanceApprovalReliabilityFixture(t *testing.T, traceRepo *faultingAu
 		MemoryItems:          memory.NewMemoryItemRepository(),
 		AutoGovernanceTraces: traceRepo,
 		ResolveDecision:      func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error { return nil },
-		ResolveApproval: func(resolveCtx context.Context, id common.ApprovalID) error {
+		ResolveApproval: func(resolveCtx context.Context, id common.ApprovalID, _ common.RunID) error {
 			fixture.resolveCount.Add(1)
 			item, err := approvalRepo.Get(resolveCtx, id)
 			if err != nil {
@@ -133,7 +133,7 @@ func TestGovernanceTraceQueryFailuresFailClosedBeforeOwnerMutation(t *testing.T)
 				inner: memory.NewAutoGovernanceTraceRepository(), failListAt: failListAt,
 			}
 			fixture := newGovernanceApprovalReliabilityFixture(t, traces)
-			err := fixture.service.processPendingApproval(fixture.context, fixture.approvalID)
+			err := fixture.service.processPendingApproval(fixture.context, fixture.runID, fixture.approvalID)
 			if !errors.Is(err, errGovernanceTraceStoreUnavailable) {
 				t.Fatalf("process approval err = %v, want trace store error", err)
 			}
@@ -155,7 +155,7 @@ func TestGovernanceTracePrecommitFailuresFailClosedBeforeOwnerMutation(t *testin
 				inner: memory.NewAutoGovernanceTraceRepository(), failUpsertAt: failUpsertAt,
 			}
 			fixture := newGovernanceApprovalReliabilityFixture(t, traces)
-			err := fixture.service.processPendingApproval(fixture.context, fixture.approvalID)
+			err := fixture.service.processPendingApproval(fixture.context, fixture.runID, fixture.approvalID)
 			if !errors.Is(err, errGovernanceTraceStoreUnavailable) {
 				t.Fatalf("process approval err = %v, want trace store error", err)
 			}
@@ -175,14 +175,14 @@ func TestGovernanceRecoversOwnerCommitAfterFinalTraceWriteFailure(t *testing.T) 
 	traces := &faultingAutoGovernanceTraceRepository{inner: inner, failUpsertAt: 3}
 	fixture := newGovernanceApprovalReliabilityFixture(t, traces)
 
-	err := fixture.service.processPendingApproval(fixture.context, fixture.approvalID)
+	err := fixture.service.processPendingApproval(fixture.context, fixture.runID, fixture.approvalID)
 	if !errors.Is(err, errGovernanceTraceStoreUnavailable) {
 		t.Fatalf("process approval err = %v, want final trace write error", err)
 	}
 	if got := fixture.resolveCount.Load(); got != 1 {
 		t.Fatalf("resolve count = %d, want 1", got)
 	}
-	traceID := autoGovernanceTraceID(fixture.workspaceID, "approval", string(fixture.approvalID))
+	traceID := autoGovernanceApprovalTraceID(fixture.workspaceID, fixture.runID, fixture.approvalID)
 	trace, err := inner.Get(fixture.context, traceID)
 	if err != nil || trace.Status != autoGovernanceStatusResolving {
 		t.Fatalf("trace before recovery = %+v, err=%v", trace, err)
@@ -200,6 +200,69 @@ func TestGovernanceRecoversOwnerCommitAfterFinalTraceWriteFailure(t *testing.T) 
 	}
 }
 
+func TestGovernanceKeepsApprovalTraceResolvingWhileOwnerDeliveryRecovers(t *testing.T) {
+	inner := memory.NewAutoGovernanceTraceRepository()
+	traces := &faultingAutoGovernanceTraceRepository{inner: inner}
+	fixture := newGovernanceApprovalReliabilityFixture(t, traces)
+	wantErr := errors.New("approval runtime commit response unavailable")
+	fixture.service.resolveApproval = func(resolveCtx context.Context, id common.ApprovalID, runID common.RunID) error {
+		fixture.resolveCount.Add(1)
+		item, err := fixture.approvalRepo.GetScoped(resolveCtx, fixture.workspaceID, runID, id)
+		if err != nil {
+			return err
+		}
+		item.ResolutionProposal = &approvalmodel.ResolutionProposal{
+			ResolutionID: "resolution-recovery-pending", TargetState: common.ApprovalStateApproved,
+			Principal: approvalmodel.ApprovalResolutionPrincipal{
+				Kind: approvalmodel.ApprovalResolutionPrincipalAutoGovernance, SubjectID: "kernel/governance",
+			},
+			State: approvalmodel.ResolutionProposalPending,
+		}
+		if err := fixture.approvalRepo.Update(resolveCtx, item); err != nil {
+			return err
+		}
+		return wantErr
+	}
+
+	err := fixture.service.processPendingApproval(fixture.context, fixture.runID, fixture.approvalID)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("process approval err = %v, want delivery error", err)
+	}
+	traceID := autoGovernanceApprovalTraceID(fixture.workspaceID, fixture.runID, fixture.approvalID)
+	trace, err := inner.Get(fixture.context, traceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.Status != autoGovernanceStatusResolving || trace.PolicyBlocked != "" {
+		t.Fatalf("trace during owner recovery = %+v, want resolving and open", trace)
+	}
+	closed, err := fixture.service.hasClosedApprovalTrace(fixture.context, fixture.workspaceID, fixture.runID, fixture.approvalID)
+	if err != nil || closed {
+		t.Fatalf("trace closed=%t err=%v, want open while owner delivery recovers", closed, err)
+	}
+
+	item, err := fixture.approvalRepo.GetScoped(fixture.context, fixture.workspaceID, fixture.runID, fixture.approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.State = common.ApprovalStateApproved
+	item.ResolutionPrincipal = approvalmodel.ApprovalResolutionPrincipal{
+		Kind: approvalmodel.ApprovalResolutionPrincipalAutoGovernance, SubjectID: "kernel/governance",
+	}
+	item.EvidenceRecordedAt = "2026-08-19T00:00:00Z"
+	item.ResolutionNotificationPublishedAt = "2026-08-19T00:00:01Z"
+	if err := fixture.approvalRepo.Update(fixture.context, item); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.reconcileIncompleteTraces(fixture.context); err != nil {
+		t.Fatalf("reconcile delivered approval trace: %v", err)
+	}
+	trace, err = inner.Get(fixture.context, traceID)
+	if err != nil || trace.Status != autoGovernanceStatusResolved || trace.Action != "approve" {
+		t.Fatalf("recovered trace = %+v err=%v, want resolved approve", trace, err)
+	}
+}
+
 func TestGovernanceTraceIdentityAndBudgetAreWorkspaceScoped(t *testing.T) {
 	ctx := context.Background()
 	traces := memory.NewAutoGovernanceTraceRepository()
@@ -209,14 +272,20 @@ func TestGovernanceTraceIdentityAndBudgetAreWorkspaceScoped(t *testing.T) {
 	runID := common.RunID("run-workspace-local")
 	itemID := "shared-item-id"
 	ticketTraceID := autoGovernanceTraceID(workspaceA, "ticket", itemID)
-	approvalTraceID := autoGovernanceTraceID(workspaceA, "approval", itemID)
+	approvalTraceID := autoGovernanceApprovalTraceID(workspaceA, runID, common.ApprovalID(itemID))
+	otherRunApprovalTraceID := autoGovernanceApprovalTraceID(workspaceA, "run-workspace-local-b", common.ApprovalID(itemID))
 	otherWorkspaceTraceID := autoGovernanceTraceID(workspaceB, "ticket", itemID)
-	if ticketTraceID == approvalTraceID || ticketTraceID == otherWorkspaceTraceID || approvalTraceID == otherWorkspaceTraceID {
-		t.Fatalf("scoped trace IDs collided: ticket=%s approval=%s other=%s", ticketTraceID, approvalTraceID, otherWorkspaceTraceID)
+	if ticketTraceID == approvalTraceID || ticketTraceID == otherWorkspaceTraceID || approvalTraceID == otherWorkspaceTraceID || approvalTraceID == otherRunApprovalTraceID {
+		t.Fatalf("scoped trace IDs collided: ticket=%s approval=%s otherRunApproval=%s other=%s", ticketTraceID, approvalTraceID, otherRunApprovalTraceID, otherWorkspaceTraceID)
 	}
 	mustNoErr(t, traces.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
 		ID: ticketTraceID, WorkspaceID: workspaceA, RunID: runID,
 		ItemType: "ticket", ItemID: itemID, Action: "answer",
+		Status: autoGovernanceStatusResolved, OccurredAt: nowUTC(),
+	}))
+	mustNoErr(t, traces.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
+		ID: approvalTraceID, WorkspaceID: workspaceA, RunID: runID,
+		ItemType: "approval", ItemID: itemID, Action: "approve",
 		Status: autoGovernanceStatusResolved, OccurredAt: nowUTC(),
 	}))
 
@@ -241,5 +310,16 @@ func TestGovernanceTraceIdentityAndBudgetAreWorkspaceScoped(t *testing.T) {
 	}
 	if !closedA || closedB {
 		t.Fatalf("workspace closed state = %t/%t, want true/false", closedA, closedB)
+	}
+	closedApprovalA, err := service.hasClosedApprovalTrace(ctx, workspaceA, runID, common.ApprovalID(itemID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedApprovalB, err := service.hasClosedApprovalTrace(ctx, workspaceA, "run-workspace-local-b", common.ApprovalID(itemID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !closedApprovalA || closedApprovalB {
+		t.Fatalf("run-scoped approval closed state = %t/%t, want true/false", closedApprovalA, closedApprovalB)
 	}
 }

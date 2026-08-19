@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestRuntimeEffectScopeNormalizeAndClassify(t *testing.T) {
@@ -242,6 +243,10 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 		Outcome: RuntimeOperationOutcomeGovernanceRequired, ObservedEffectScope: RuntimeEffectGovernanceOnly,
 		Governance: &RuntimeGovernanceRequirement{
 			Kind: GovernanceApproval, SubjectRef: "web/fetch", Reason: "external network requires approval",
+			RequestedAction: "web.fetch",
+			AuthorizationContext: workorcheventpayload.New(
+				workorcheventpayload.StringField("subjectRef", "web/fetch"),
+			),
 		},
 	}
 	if err := gov.Validate(); err != nil {

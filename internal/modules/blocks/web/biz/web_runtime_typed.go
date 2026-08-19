@@ -24,6 +24,7 @@ type RuntimeOperationRequest struct {
 	MaxResults                    int64
 	SafeSearch                    bool
 	ApprovalID                    common.ApprovalID
+	GovernanceGrant               *runtimecontract.RuntimeOperationGovernanceGrant
 	URL                           string
 	MaxBytes                      int64
 	ExtractMode                   string

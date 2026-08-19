@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // RuntimeRepairClosure is the immutable, focus-scoped repair objective derived
@@ -107,6 +108,10 @@ type RuntimeGovernanceRequirement struct {
 	Reason          string
 	RequestedAction string
 	RiskLevel       string
+	// AuthorizationContext is authored by the capability owner before any
+	// side effect. It is immutable input to an Approval and is never populated
+	// from a later resolution payload.
+	AuthorizationContext workorcheventpayload.Payload
 }
 
 func (k RuntimeGovernanceKind) Normalized() RuntimeGovernanceKind {
@@ -128,6 +133,7 @@ func (r RuntimeGovernanceRequirement) Normalized() RuntimeGovernanceRequirement 
 	r.Reason = strings.TrimSpace(r.Reason)
 	r.RequestedAction = strings.TrimSpace(r.RequestedAction)
 	r.RiskLevel = strings.TrimSpace(r.RiskLevel)
+	r.AuthorizationContext = r.AuthorizationContext.Clone()
 	return r
 }
 
@@ -139,11 +145,22 @@ func (r RuntimeGovernanceRequirement) Validate() error {
 	if r.SubjectRef == "" || r.Reason == "" {
 		return fmt.Errorf("governance requirement requires subject ref and reason")
 	}
+	if r.Kind == GovernanceApproval && (r.RequestedAction == "" || len(r.AuthorizationContext.Fields) == 0) {
+		return fmt.Errorf("approval governance requirement requires requested action and immutable authorization context")
+	}
 	return nil
 }
 
 func (r RuntimeGovernanceRequirement) Clone() RuntimeGovernanceRequirement {
 	return r.Normalized()
+}
+
+func SameRuntimeGovernanceRequirement(left RuntimeGovernanceRequirement, right RuntimeGovernanceRequirement) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	return left.Kind == right.Kind && left.SubjectRef == right.SubjectRef && left.Reason == right.Reason &&
+		left.RequestedAction == right.RequestedAction && left.RiskLevel == right.RiskLevel &&
+		left.AuthorizationContext.Equal(right.AuthorizationContext)
 }
 
 // RuntimeTerminationKind is the administrative terminal kind for SM-1 cancel/supersede.

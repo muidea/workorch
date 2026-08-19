@@ -269,11 +269,11 @@ func TestResolveApprovalWithBackendPersistsGovernanceSemanticPayload(t *testing.
 	if item.State != "approved" {
 		t.Fatalf("approval = %+v, want approved", item)
 	}
-	semantic, ok := item.Context.Object("governanceSemantic")
+	semantic, ok := item.ResolutionContext.Object("governanceSemantic")
 	intent, _ := semantic.String("intent")
 	source, _ := semantic.String("source")
 	if !ok || intent != "approve_execution" || source != "tui" {
-		t.Fatalf("governanceSemantic = %#v, want approve from tui", item.Context)
+		t.Fatalf("governanceSemantic = %#v, want approve from tui", item.ResolutionContext)
 	}
 }
 
@@ -326,8 +326,8 @@ func TestApproveApprovalWithSessionReusesReturnedApproval(t *testing.T) {
 	if item.ID != string(approvalID) || item.State != string(common.ApprovalStateApproved) {
 		t.Fatalf("approval = %+v, want approved", item)
 	}
-	if got := repo.getCount.Load() - before; got != 2 {
-		t.Fatalf("approval Get count during approve = %d, want transition and governance reads", got)
+	if got := repo.getCount.Load() - before; got != 3 {
+		t.Fatalf("approval Get count during approve = %d, want proposal, finalize, and delivery reads", got)
 	}
 }
 
@@ -479,12 +479,21 @@ func (r *appserviceCountingApprovalRepository) Get(ctx context.Context, id commo
 	return r.inner.Get(ctx, id)
 }
 
+func (r *appserviceCountingApprovalRepository) GetScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) (*approvalmodel.Approval, error) {
+	r.getCount.Add(1)
+	return r.inner.GetScoped(ctx, workspaceID, runID, id)
+}
+
 func (r *appserviceCountingApprovalRepository) List(ctx context.Context) ([]*approvalmodel.Approval, error) {
 	return r.inner.List(ctx)
 }
 
 func (r *appserviceCountingApprovalRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*approvalmodel.Approval, error) {
 	return r.inner.ListByRunID(ctx, runID)
+}
+
+func (r *appserviceCountingApprovalRepository) ListByRunScope(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]*approvalmodel.Approval, error) {
+	return r.inner.ListByRunScope(ctx, workspaceID, runID)
 }
 
 func (r *appserviceCountingApprovalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
@@ -497,6 +506,10 @@ func (r *appserviceCountingApprovalRepository) Update(ctx context.Context, item 
 
 func (r *appserviceCountingApprovalRepository) Delete(ctx context.Context, id common.ApprovalID) error {
 	return r.inner.Delete(ctx, id)
+}
+
+func (r *appserviceCountingApprovalRepository) DeleteScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) error {
+	return r.inner.DeleteScoped(ctx, workspaceID, runID, id)
 }
 
 func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalRepository) *runtimecore.Session {

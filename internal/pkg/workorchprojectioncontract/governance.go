@@ -31,19 +31,22 @@ type Decision struct {
 
 // Approval is the complete owner-neutral projection of an approval ticket.
 type Approval struct {
-	ID             string                       `json:"id"`
-	WorkspaceID    string                       `json:"workspaceId"`
-	RunID          string                       `json:"runId"`
-	StepID         string                       `json:"stepId,omitempty"`
-	Reason         string                       `json:"reason"`
-	Action         string                       `json:"action,omitempty"`
-	Context        workorcheventpayload.Payload `json:"context,omitempty"`
-	State          string                       `json:"state"`
-	AutoGovernance *AutoGovernanceSummary       `json:"autoGovernance,omitempty"`
-	ResolvedAt     string                       `json:"resolvedAt,omitempty"`
-	ResolvedBy     string                       `json:"resolvedBy,omitempty"`
-	CreatedAt      string                       `json:"createdAt,omitempty"`
-	UpdatedAt      string                       `json:"updatedAt,omitempty"`
+	ID                string                       `json:"id"`
+	WorkspaceID       string                       `json:"workspaceId"`
+	RunID             string                       `json:"runId"`
+	StepID            string                       `json:"stepId,omitempty"`
+	Reason            string                       `json:"reason"`
+	Action            string                       `json:"action,omitempty"`
+	Context           workorcheventpayload.Payload `json:"context,omitempty"`
+	State             string                       `json:"state"`
+	ResolutionID      string                       `json:"resolutionId,omitempty"`
+	ResolutionContext workorcheventpayload.Payload `json:"resolutionContext,omitempty"`
+	ResolvedByKind    string                       `json:"resolvedByKind,omitempty"`
+	AutoGovernance    *AutoGovernanceSummary       `json:"autoGovernance,omitempty"`
+	ResolvedAt        string                       `json:"resolvedAt,omitempty"`
+	ResolvedBy        string                       `json:"resolvedBy,omitempty"`
+	CreatedAt         string                       `json:"createdAt,omitempty"`
+	UpdatedAt         string                       `json:"updatedAt,omitempty"`
 }
 
 // AutoGovernanceSummary is the immutable projection of automated governance.
@@ -82,6 +85,7 @@ func CloneDecisions(items []Decision) []Decision {
 
 func CloneApproval(item Approval) Approval {
 	item.Context = item.Context.Clone()
+	item.ResolutionContext = item.ResolutionContext.Clone()
 	item.AutoGovernance = cloneAutoGovernanceSummary(item.AutoGovernance)
 	return item
 }

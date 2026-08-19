@@ -41,12 +41,18 @@ func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationReq
 	approvalID := request.ApprovalID
 	if requestedMaxResults > providerMaxResults {
 		policy = policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}}
-		if approvalID == "" {
-			return approvalRequiredSearchResult(request, provider, query, requestedMaxResults, policy), nil
+		required := approvalRequiredSearchResult(request, provider, query, requestedMaxResults, policy)
+		var approvalErr error
+		if request.GovernanceGrant != nil {
+			approvalID, approvalErr = validateRuntimeApprovalGrant(request.GovernanceGrant, webcommon.StepKindSearch, query, required.ApprovalContext)
+		} else if approvalID == "" {
+			return required, nil
+		} else {
+			approvalErr = a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindSearch, provider.ID, approvalContextQuery, query, policy)
 		}
-		if err := a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindSearch, provider.ID, approvalContextQuery, query, policy); err != nil {
-			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
+		if approvalErr != nil {
+			wrappedErr := fmt.Errorf("%w: %v", common.ErrInvalidArgument, approvalErr)
+			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, wrappedErr), wrappedErr
 		}
 		providerMaxResults = webproviderconfig.SystemMaxResults
 	}

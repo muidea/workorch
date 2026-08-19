@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -1305,6 +1306,7 @@ func TestReduceRuntimeStateGovernanceRequiredOpensGovernance(t *testing.T) {
 		TargetRefs: []string{"https://example.com"},
 		GovernanceDependency: &runtimecontract.ExternalDependency{
 			Kind: string(runtimecontract.GovernanceApproval), SubjectRef: "https://example.com", Reason: "web operation requires approval before side effects",
+			RequestedAction: "web/fetch", AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", "https://example.com")),
 		},
 	}
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -35,12 +36,13 @@ func TestRuntimeOperationExecutionResultUsesOnlyPersistedReceiptGovernance(t *te
 	requirement := runtimecontract.RuntimeGovernanceRequirement{
 		Kind: runtimecontract.GovernanceApproval, SubjectRef: ".env", Reason: "sensitive workspace file",
 		RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high",
+		AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", ".env")),
 	}
 	withGovernance := runtimeOperationExecutionResult(
 		runtime.RuntimeOperationExecutionRequest{DispatchID: "dispatch-2", Operation: runtimecontract.RuntimeOperation{ID: "operation-2"}, EvidenceKind: runtimecontract.EvidenceKindStateChange},
 		runtimecontract.RuntimeOperationReceipt{Outcome: runtimecontract.RuntimeOperationOutcomeGovernanceRequired, Governance: &requirement},
 	)
-	if withGovernance.Governance == nil || *withGovernance.Governance != requirement {
+	if withGovernance.Governance == nil || !runtimecontract.SameRuntimeGovernanceRequirement(*withGovernance.Governance, requirement) {
 		t.Fatalf("persisted typed governance was not preserved: %+v", withGovernance)
 	}
 }

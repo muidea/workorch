@@ -34,9 +34,9 @@ func TestCapabilityOperationResultCarriesOnlyReceiptIdentity(t *testing.T) {
 
 func TestRuntimeOperationExecutionEnvelopeValidatesGovernanceGrantIdentity(t *testing.T) {
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-1", TicketID: common.TicketID("ticket-1"),
+		ResolutionID: "resolution-1", ApprovalID: common.ApprovalID("approval-1"),
 		ExecutionKey: "exec/ws/run/dispatch/op", GovernanceFence: 1, ResumeFence: 2,
-		DependencyKind: "approval", SubjectRef: "target.txt", GovernanceReceiptHash: "receipt-hash",
+		DependencyKind: "approval", SubjectRef: "target.txt", RequestedAction: "file/write", AuthorizationHash: "authorization-hash", GovernanceReceiptHash: "receipt-hash",
 	}
 	envelope := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: grant.ExecutionKey, Fence: grant.ResumeFence,

@@ -21,10 +21,14 @@ type DecisionResolutionPayloadData struct {
 }
 
 type ApprovalPayloadData struct {
-	Reason  string
-	Action  string
-	Context workorcheventpayload.Payload
-	State   common.ApprovalState
+	Reason            string
+	Action            string
+	Context           workorcheventpayload.Payload
+	State             common.ApprovalState
+	ResolutionID      common.ResolutionID
+	ResolutionContext workorcheventpayload.Payload
+	ResolvedByKind    string
+	ResolvedBy        string
 }
 
 type AutoGovernancePayloadData struct {
@@ -76,6 +80,12 @@ func (data ApprovalPayloadData) EventPayload() workorcheventpayload.Payload {
 	if len(data.Context.Fields) > 0 {
 		fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyContext, data.Context))
 	}
+	fields = appendOptionalPayloadString(fields, PayloadKeyResolutionID, string(data.ResolutionID))
+	if len(data.ResolutionContext.Fields) > 0 {
+		fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyResolutionContext, data.ResolutionContext))
+	}
+	fields = appendOptionalPayloadString(fields, PayloadKeyResolvedByKind, data.ResolvedByKind)
+	fields = appendOptionalPayloadString(fields, PayloadKeyResolvedBy, data.ResolvedBy)
 	return workorcheventpayload.New(fields...)
 }
 
@@ -148,11 +158,26 @@ func DecodeApprovalEventPayload(payload workorcheventpayload.Payload) (ApprovalP
 	if !ok {
 		return ApprovalPayloadData{}, false
 	}
+	resolutionID, ok := optionalEventPayloadString(payload, PayloadKeyResolutionID)
+	if !ok {
+		return ApprovalPayloadData{}, false
+	}
+	resolutionContext, ok := optionalEventPayloadObject(payload, PayloadKeyResolutionContext)
+	if !ok {
+		return ApprovalPayloadData{}, false
+	}
+	resolvedByKind, ok := optionalEventPayloadString(payload, PayloadKeyResolvedByKind)
+	if !ok {
+		return ApprovalPayloadData{}, false
+	}
+	resolvedBy, ok := optionalEventPayloadString(payload, PayloadKeyResolvedBy)
+	if !ok {
+		return ApprovalPayloadData{}, false
+	}
 	return ApprovalPayloadData{
-		Reason:  reason,
-		Action:  action,
-		Context: context,
-		State:   common.ApprovalState(state),
+		Reason: reason, Action: action, Context: context, State: common.ApprovalState(state),
+		ResolutionID: common.ResolutionID(resolutionID), ResolutionContext: resolutionContext,
+		ResolvedByKind: resolvedByKind, ResolvedBy: resolvedBy,
 	}, true
 }
 

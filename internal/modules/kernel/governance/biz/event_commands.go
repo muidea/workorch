@@ -5,6 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
@@ -46,7 +47,7 @@ func eventResolveDecision(send func(magicevent.Event) magicevent.Result) Resolve
 }
 
 func eventResolveApproval(send func(magicevent.Event) magicevent.Result) ResolveApprovalFunc {
-	return func(ctx context.Context, approvalID common.ApprovalID) error {
+	return func(ctx context.Context, approvalID common.ApprovalID, runID common.RunID) error {
 		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 		if send == nil {
 			return common.ErrInvalidArgument
@@ -54,14 +55,15 @@ func eventResolveApproval(send func(magicevent.Event) magicevent.Result) Resolve
 		command := approvalevents.EnsureApprovedCommand{
 			ApprovalID:  approvalID,
 			WorkspaceID: workspaceID,
-			Context: workorcheventpayload.New(
-				workorcheventpayload.StringField("resolvedBy", autoGovernanceActor),
-				workorcheventpayload.StringField("source", autoGovernanceActor),
-			).Fields,
+			RunID:       runID,
+			Principal: approvalmodel.ApprovalResolutionPrincipal{
+				Kind: approvalmodel.ApprovalResolutionPrincipalAutoGovernance, SubjectID: governancecommon.ModuleID,
+			},
+			ResolutionContext: workorcheventpayload.New(workorcheventpayload.StringField("source", autoGovernanceActor)).Fields,
 		}
 		event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandEnsureApproved, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-		bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "")
-		_, err := approvalResponse(send(event), approvalevents.TopicApprovalCommandEnsureApproved)
+		bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, runID, "")
+		_, err := approvalResponse[approvalevents.EnsureApprovedResult](send(event), approvalevents.TopicApprovalCommandEnsureApproved)
 		return err
 	}
 }

@@ -8,7 +8,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -146,7 +145,6 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-purge-command-payload")
 	runID := common.RunID("run-purge-command-payload")
 	memoryID := common.MemoryID("memory-purge-command-payload")
-	approvalID := common.ApprovalID("approval-purge-command-payload")
 
 	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
 		return runevents.ListRunsByWorkspaceResult{Runs: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}}}, nil
@@ -158,8 +156,8 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace, func(any) (any, error) {
 		return decisionevents.PurgeWorkspaceDecisionsResult{Deleted: 1}, nil
 	})
-	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandListByWorkspace, func(any) (any, error) {
-		return approvalevents.ApprovalCommandResult{Approvals: []*approvalmodel.Approval{{ID: approvalID, WorkspaceID: workspaceID, RunID: runID}}}, nil
+	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandPurgeWorkspace, func(any) (any, error) {
+		return approvalevents.PurgeWorkspaceApprovalsResult{Deleted: 1}, nil
 	})
 	testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
 		return resultevents.ListArtifactsByWorkspaceResult{Artifacts: []*resultmodel.Artifact{}}, nil
@@ -168,7 +166,6 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 		return resultevents.ListResultsByWorkspaceResult{Results: []*resultmodel.Result{}}, nil
 	})
 	testHub.subscribe(memoryevents.CommandDestination, memoryevents.TopicMemoryCommandDelete, emptyMemoryResult)
-	testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandDelete, emptyApprovalResult)
 	testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandDelete, emptyRunResult)
 
 	if err := PurgeWorkspaceRecords(ctx, testHub.raw, workspaceID); err != nil {
@@ -187,9 +184,9 @@ func TestPurgeWorkspaceRecordsSendsOwnerCommands(t *testing.T) {
 	if !ok || decisionCmd.WorkspaceID != workspaceID {
 		t.Fatalf("decision purge command = %#v, want workspace %s", decisionCmd, workspaceID)
 	}
-	approvalCmd, ok := testHub.command(t, approvalevents.TopicApprovalCommandDelete, 0).(approvalevents.DeleteApprovalCommand)
-	if !ok || approvalCmd.ApprovalID != approvalID {
-		t.Fatalf("approval delete command = %#v, want approval %s", approvalCmd, approvalID)
+	approvalCmd, ok := testHub.command(t, approvalevents.TopicApprovalCommandPurgeWorkspace, 0).(approvalevents.PurgeWorkspaceApprovalsCommand)
+	if !ok || approvalCmd.WorkspaceID != workspaceID {
+		t.Fatalf("approval purge command = %#v, want workspace %s", approvalCmd, workspaceID)
 	}
 	runCmd, ok := testHub.command(t, runevents.TopicRunCommandDelete, 0).(runevents.DeleteRunCommand)
 	if !ok || runCmd.RunID != runID {
@@ -214,7 +211,7 @@ func TestPurgeWorkspaceRecordsTreatsMissingChildRecordsAsAlreadyPurged(t *testin
 		{orchestratorevents.CommandDestination, orchestratorevents.TopicOrchestratorCommandPurgeRun},
 		{memoryevents.CommandDestination, memoryevents.TopicMemoryCommandListByWorkspace},
 		{decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace},
-		{approvalevents.CommandDestination, approvalevents.TopicApprovalCommandListByWorkspace},
+		{approvalevents.CommandDestination, approvalevents.TopicApprovalCommandPurgeWorkspace},
 		{resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace},
 		{runevents.CommandDestination, runevents.TopicRunCommandDelete},
 	} {
@@ -276,8 +273,8 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 			testHub.subscribe(decisionevents.CommandDestination, decisionevents.TopicDecisionCommandPurgeWorkspace, func(any) (any, error) {
 				return decisionevents.PurgeWorkspaceDecisionsResult{}, nil
 			})
-			testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandListByWorkspace, func(any) (any, error) {
-				return approvalevents.ApprovalCommandResult{Approvals: []*approvalmodel.Approval{}}, nil
+			testHub.subscribe(approvalevents.CommandDestination, approvalevents.TopicApprovalCommandPurgeWorkspace, func(any) (any, error) {
+				return approvalevents.PurgeWorkspaceApprovalsResult{}, nil
 			})
 			testHub.subscribe(resultevents.CommandDestination, resultevents.TopicArtifactCommandListByWorkspace, func(any) (any, error) {
 				return resultevents.ListArtifactsByWorkspaceResult{Artifacts: []*resultmodel.Artifact{}}, nil
@@ -339,10 +336,6 @@ func emptyOrchestratorResult(any) (any, error) {
 
 func emptyMemoryResult(any) (any, error) {
 	return memoryevents.MemoryCommandResult{}, nil
-}
-
-func emptyApprovalResult(any) (any, error) {
-	return approvalevents.ApprovalCommandResult{}, nil
 }
 
 func emptyRunResult(any) (any, error) {

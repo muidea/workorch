@@ -2282,10 +2282,20 @@ func NewApprovalRepository() *ApprovalRepository {
 	return &ApprovalRepository{items: map[string]*approval.Approval{}}
 }
 
-func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) error {
+func approvalScopedKey(workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) string {
+	return string(workspaceID) + "\x00" + string(runID) + "\x00" + string(id)
+}
+
+func (r *ApprovalRepository) Create(ctx context.Context, item *approval.Approval) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	key := approvalScopedKey(item.WorkspaceID, item.RunID, item.ID)
 	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
@@ -2304,17 +2314,10 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 func (r *ApprovalRepository) Get(ctx context.Context, id common.ApprovalID) (*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
-		item, ok := r.items[key]
-		if !ok {
-			return nil, common.ErrNotFound
-		}
-		cloned := cloneApproval(item)
-		return &cloned, nil
-	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	var ret *approval.Approval
 	for _, item := range r.items {
-		if item.ID != id {
+		if item.ID != id || (workspaceID != "" && item.WorkspaceID != workspaceID) {
 			continue
 		}
 		if ret != nil {
@@ -2326,6 +2329,23 @@ func (r *ApprovalRepository) Get(ctx context.Context, id common.ApprovalID) (*ap
 		return nil, common.ErrNotFound
 	}
 	cloned := cloneApproval(ret)
+	return &cloned, nil
+}
+
+func (r *ApprovalRepository) GetScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) (*approval.Approval, error) {
+	if workspaceID == "" || runID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.items[approvalScopedKey(workspaceID, runID, id)]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	cloned := cloneApproval(item)
 	return &cloned, nil
 }
 
@@ -2376,7 +2396,36 @@ func (r *ApprovalRepository) ListByRunID(ctx context.Context, runID common.RunID
 	return ret, nil
 }
 
-func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*approval.Approval, error) {
+func (r *ApprovalRepository) ListByRunScope(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]*approval.Approval, error) {
+	if workspaceID == "" || runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ret := make([]*approval.Approval, 0)
+	for _, item := range r.items {
+		if item.WorkspaceID == workspaceID && item.RunID == runID {
+			cloned := cloneApproval(item)
+			ret = append(ret, &cloned)
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool { return string(ret[i].ID) < string(ret[j].ID) })
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
+func (r *ApprovalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approval.Approval, error) {
+	if workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -2397,30 +2446,15 @@ func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID co
 }
 
 func (r *ApprovalRepository) Update(ctx context.Context, item *approval.Approval) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
-	if item.WorkspaceID == "" {
-		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
-			key = scopedKey
-		} else {
-			var found string
-			for currentKey, current := range r.items {
-				if current.ID != item.ID {
-					continue
-				}
-				if found != "" {
-					return common.ErrConflict
-				}
-				found = currentKey
-			}
-			if found == "" {
-				return common.ErrNotFound
-			}
-			key = found
-			item.WorkspaceID = r.items[key].WorkspaceID
-		}
-	}
+	key := approvalScopedKey(item.WorkspaceID, item.RunID, item.ID)
 	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
@@ -2433,19 +2467,30 @@ func (r *ApprovalRepository) Update(ctx context.Context, item *approval.Approval
 	return nil
 }
 
+func (r *ApprovalRepository) DeleteScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) error {
+	if workspaceID == "" || runID == "" || id == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := validateRuntimeWorkspaceScope(ctx, workspaceID); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := approvalScopedKey(workspaceID, runID, id)
+	if _, ok := r.items[key]; !ok {
+		return common.ErrNotFound
+	}
+	delete(r.items, key)
+	return nil
+}
+
 func (r *ApprovalRepository) Delete(ctx context.Context, id common.ApprovalID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
-		if _, ok := r.items[key]; !ok {
-			return common.ErrNotFound
-		}
-		delete(r.items, key)
-		return nil
-	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	var found string
 	for key, item := range r.items {
-		if item.ID != id {
+		if item.ID != id || (workspaceID != "" && item.WorkspaceID != workspaceID) {
 			continue
 		}
 		if found != "" {
@@ -2966,10 +3011,7 @@ func cloneEventPayloads(input []workorcheventpayload.Payload) []workorcheventpay
 }
 
 func cloneApproval(item *approval.Approval) approval.Approval {
-	cloned := *item
-	cloned.Context = item.Context.Clone()
-	cloned.AutoGovernance = item.AutoGovernance.Clone()
-	return cloned
+	return *approval.CloneApproval(item)
 }
 
 func cloneMap(input map[string]any) map[string]any {

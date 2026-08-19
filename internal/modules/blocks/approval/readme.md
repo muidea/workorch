@@ -4,50 +4,81 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-19
 
 ## 功能范围与边界
 
-`blocks/approval` 管理 Approval 聚合。当前跨 owner 合同提供查询、列表、删除，以及已有 pending Approval 的
-幂等 approve/reject；Approval 创建不作为公开 EventHub command，调用方也不能提交目标状态或完整 entity。
+`blocks/approval` 是 Approval 聚合的唯一 owner。聚合 identity 为
+`(WorkspaceID, RunID, ApprovalID)`，负责保存不可变授权目标、`pending -> approved|rejected`
+生命周期、解决提案，以及 evidence/audit/notification 的交付检查点。
+
+本 Block 不拥有 SM-1～SM-4，也不执行被授权的副作用。它通过 typed contract 参与 SM-2：
+Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Runtime resolution proposal
+提交给 Orchestrator；崩溃后只从持久化提案和交付检查点重放，不重建 Runtime authority。
+
+`Approval.Context` 是创建时封存的授权目标，approve/reject 不能修改；解决方补充的数据只进入
+`ResolutionContext`，用于审计和说明，不能替换 action、provider、URL/query 或其他目标字段。
+
+## 生命周期与恢复协议
+
+1. Orchestrator 先从 Approval owner 获取 `approval/request` capability，再以
+   `OpenRuntimeApprovalRequestCommand/Result` 创建 Runtime Approval。入口只接受 Orchestrator，
+   相同 identity 的完全相同请求是幂等重放，不同 sealed payload 返回 conflict。
+2. 解决入口只接受两个生产 producer：`application/workorchd/appservice` 的
+   `human_operator` principal，或 `kernel/governance` 的 `auto_governance` principal；Event source、
+   principal kind 和 subject 必须匹配。该 principal 表达进程内 producer authority，不替代 transport
+   层的终端用户认证。
+3. owner 先持久化 `ResolutionProposal`。Runtime Approval 随后同步提交
+   `CommitRuntimeGovernanceApprovalResolutionCommand/Result`；只有 committed/duplicate 才能进入终态，
+   stale proposal 会被持久化为 rejected 并 fail closed。普通 owner-local Approval 不触发 Runtime commit。
+4. 终态落库后，owner 依次取得 Orchestrator evidence 的 exact-scope ack、Eventstream resolution record
+   的 durable ack，再发布稳定 `NotificationID` 的 `TopicApprovalResolved` 展示通知并写入交付检查点。
+   任一阶段失败都保留可恢复状态；后台 reconciliation 从 proposal/terminal checkpoint 继续，不重新解决
+   Approval，也不把失败描述成跨 owner transaction。
+5. Workspace purge 是唯一公开删除语义：先写 deletion tombstone，再按完整 scope 删除；不存在独立的
+   Approval delete command。
 
 ## 组件交互及合同
 
-- Approval 的实际 command/query 由 `blocks/approval/pkg/events` 定义，并返回 `ApprovalCommandResult`。
-- pending Approval 成功解决后由本 block在唯一 `TopicApprovalResolved` 发布 `ApprovalChangedData`；不存在公开的
-  create/update/supersede notification family。
-- `kernel/governance`、`kernel/orchestrator` 和 `application/workorchd` 通过 EventHub 查询或解决已有 Approval。
-- Web capability 在外部访问授权场景查询 Approval；其他 capability owner 消费 sealed governance grant 或返回治理需求，不直接查询 Approval service/repository。
-- Approval 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordApprovalEvidenceCommand`，并接收 `RecordApprovalEvidenceResult`。
-- approve/reject command 只提供不可变授权事实；目标状态、解决人、时间戳和 repository update 只允许经 Approval-private lifecycle event/reducer 完成。
-
-## 交互合同完整性
-
-| 交互组件 | 方向 | 具体合同 | 当前结论 |
+| 交互组件 | 方向 | 具体 typed contract | 约束 |
 | --- | --- | --- | --- |
-| `application/workorchd` / `kernel/governance` | consumer → Approval | get/list/list-by-scope、ensure approved/rejected | 完整 |
-| `kernel/orchestrator` | 双向 | Approval 查询；`RecordApprovalEvidenceCommand/Result` 由 Approval 定义、Orchestrator 消费 | 完整；evidence 状态仍归 Orchestrator |
-| `blocks/web` | Web → Approval | 外部访问所需的 scoped Approval 查询 | 完整；其他 capability owner 无直连 |
-| `blocks/eventstream` | Approval → Eventstream | `TopicApprovalResolved` / `ApprovalChangedData` | 完整；只在提交后发布 |
+| `kernel/orchestrator` | Orchestrator → Approval | `AcquireRuntimeCapabilitiesCommand/Result`、`OpenRuntimeApprovalRequestCommand/Result` | 只接受 Orchestrator；请求绑定 workspace/run、dispatch、authority snapshot、action 与 authorization hash |
+| `kernel/orchestrator` | Approval → Orchestrator | `CommitRuntimeGovernanceApprovalResolutionCommand/Result`、`RecordApprovalEvidenceCommand/Result` | 前者是终态前 SM-2 commit；后者是终态后 exact-scope evidence ack |
+| `application/workorchd` | Application → Approval | `GetApprovalCommand/Result`、三类 bounded list result、`EnsureApprovedCommand/Result`、`EnsureRejectedCommand/Result`、`PurgeWorkspaceApprovalsCommand/Result` | ID-only HTTP 路由先做有界全局发现；重复 identity 必须报 conflict |
+| `kernel/governance` | Governance → Approval | scoped get、`EnsureApprovedCommand/Result` | 仅以 `auto_governance` principal 解决当前 workspace/run Approval |
+| `blocks/web` | Web → Approval | scoped `GetApprovalCommand/Result` | capability 只消费与 sealed target/hash 精确一致的 approved grant |
+| `blocks/eventstream` | Approval → Eventstream | `RecordApprovalResolutionCommand/Result` | 同步持久化；相同 notification material 幂等，不同 material 冲突 |
+| projection / display consumers | Approval → consumer | `TopicApprovalResolved` / `ApprovalChangedData` | 非 authority 通知；携带稳定 notification/resolution identity 和完整 scope |
+
+所有 query/mutation 都有具体 result 类型，不再共用联合 envelope。列表命令必须显式 scope，使用稳定 cursor，
+默认 limit 100、上限 200；`ListAllApprovalsCommand` 还必须显式声明 `Scope: all`。
 
 ## Owner 内部职责边界
 
-- `owner.go` 只保留 Approval Biz 的构造、订阅与生命周期；`command_router.go` 是唯一 command ingress，并用静态穷尽分类器将 Topic 委派到 query、resolution 或 delete handler，未知 Topic fail closed。
-- `query_commands.go` 只读 Approval repository；`resolution_commands.go` 保持 scope admission、Approval-private reducer、evidence、notification 和返回 scope 校验的既有顺序；approve/reject 共享同一 owner transaction，不形成两个状态机。
-- `approval_scope.go` 只负责 workspace/run/step fence 与无 scope 唯一对象解析；`approval_notification.go` 只发布 Owner 已提交的 immutable lifecycle fact。
+- `owner.go` 只负责 Biz 构造、typed topic 订阅、reconciliation 生命周期和 teardown；重复 Start/Teardown
+  不增加订阅或遗留后台任务。
+- `command_router.go` 对 query、resolution、purge 三类 topic 做穷尽分派，未知 topic fail closed。
+- `runtime_governance_adapter.go` 只负责可信 Runtime create ingress；`resolution_commands.go` 负责
+  proposal/commit/finalize 协议；private lifecycle reducer 是聚合变更的唯一入口。
+- `evidence_event.go`、`approval_notification.go` 只执行 scope-validated delivery；`reconciliation.go`
+  只重放持久化 proposal/checkpoint。
+- 本 Block 只持有 Approval repository，不直接访问 Run、Workspace、EvidenceRecord 或 capability implementation。
 
-## 相关约束
+## 已覆盖的合同回归
 
-- Approval 操作必须携带 workspace/run/approval scope；同 ID 跨 workspace 或 run 冲突时不得误操作。
-- 本 block 只访问 Approval repository，不得直接访问 EvidenceRecord、Run、Workspace 或技术 block 实现。
-- 已终态 Approval 的重复解决必须幂等或返回冲突，不能覆盖既有授权结论。
-- private reducer 只允许 `pending -> approved|rejected`，未知目标和反向/交叉终态迁移必须 fail closed。
-- Approval 只表达授权结果，不直接执行副作用或修改 Run/Result 状态。
+- immutable authorization target 与独立 `ResolutionContext`；可信 source/principal 组合及伪造来源拒绝；
+- Runtime request exact replay、sealed payload 冲突、SM-2 commit 的 nil/wrong/stale/duplicate 处理；
+- commit 后崩溃、终态后 evidence 失败、Eventstream ack 失败及 notification 重放恢复；
+- pending/approved/rejected 转换、同结果幂等、相反终态冲突、repository 写失败不提前发布；
+- 同 Approval ID 跨 workspace/run 的 memory/file backend 隔离及错误 scope 拒绝；
+- concrete typed result、显式 all scope、cursor/limit 边界与 detached deep-copy；
+- workspace purge tombstone、重复 Teardown、capability/open ingress 的 Orchestrator-only 边界。
 
-## 待完善测试点
+## 非本 Block 合同
 
-- [ ] 覆盖同一 Approval ID 在不同 workspace/run/step 下的歧义解析和越权拒绝。
-- [ ] 覆盖 pending 到 approved/rejected 的完整转换矩阵，以及同结果重复提交与相反终态冲突。
-- [ ] 覆盖 repository 更新失败时不发布 resolved 通知，成功重放时只形成一个终态事实。
-- [ ] 覆盖 evidence command 的缺失 subscriber、nil/wrong result、重复与 stale scope。
-- [ ] 覆盖查询结果深拷贝，调用方修改证据、metadata 或 scope 后不得污染 owner 状态。
+- 终端用户的登录、角色和凭证验证属于 transport/application；Approval 只校验已经进入进程的 producer
+  authority 与 typed principal。
+- Eventstream 是 durable audit/display owner，不参与授权判定；projection 和普通 resolved notification
+  丢失时可由持久化 audit/checkpoint 重放，不能作为 Runtime authority。
+- 低层 file repository 只负责一个已解析 run path；跨 workspace/run 的定位与歧义拒绝由生产
+  `workspaceScopedApprovalRepository` 提供。

@@ -474,15 +474,15 @@ func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByRun, func(data any) approvalevents.ApprovalCommandResult {
-		cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalTestCommandResult {
+		cmd, ok := data.(approvalevents.ListAllApprovalsCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want ListApprovalsByRunCommand", data)
+			t.Fatalf("command payload type = %T, want ListAllApprovalsCommand", data)
 		}
-		if cmd.RunID != "run-001" {
-			t.Fatalf("command run = %q, want run-001", cmd.RunID)
+		if cmd.Scope != approvalevents.ApprovalListScopeAll {
+			t.Fatalf("command scope = %q, want all", cmd.Scope)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approvals: []*approvalmodel.Approval{
 				{
 					ID:          "approval-001",
@@ -526,21 +526,21 @@ func TestApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
-		cmd, ok := data.(approvalevents.GetApprovalCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
+		cmd, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
+			t.Fatalf("command payload type = %T, want ListApprovalsByWorkspaceCommand", data)
 		}
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
-			Approval: &approvalmodel.Approval{
+		return approvalTestCommandResult{
+			Approvals: []*approvalmodel.Approval{{
 				ID:          "approval-detail-scope",
 				WorkspaceID: workspaceID,
 				RunID:       "run-001",
 				State:       common.ApprovalStatePending,
-			},
+			}},
 		}
 	})
 
@@ -558,24 +558,24 @@ func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
-		cmd, ok := data.(approvalevents.GetApprovalCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
+		cmd, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
+			t.Fatalf("command payload type = %T, want ListApprovalsByWorkspaceCommand", data)
 		}
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
-			Approval: &approvalmodel.Approval{
-				ID:          cmd.ApprovalID,
+		return approvalTestCommandResult{
+			Approvals: []*approvalmodel.Approval{{
+				ID:          "approval-scope-001",
 				WorkspaceID: workspaceID,
 				RunID:       "run-001",
 				State:       common.ApprovalStatePending,
-			},
+			}},
 		}
 	})
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
@@ -583,7 +583,7 @@ func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
 			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approval: &approvalmodel.Approval{
 				ID:          cmd.ApprovalID,
 				WorkspaceID: cmd.WorkspaceID,
@@ -607,26 +607,26 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-approval-semantic")
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
-		cmd, ok := data.(approvalevents.GetApprovalCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
+		_, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
+			t.Fatalf("command payload type = %T, want ListApprovalsByWorkspaceCommand", data)
 		}
-		return approvalevents.ApprovalCommandResult{
-			Approval: &approvalmodel.Approval{
-				ID:          cmd.ApprovalID,
+		return approvalTestCommandResult{
+			Approvals: []*approvalmodel.Approval{{
+				ID:          "approval-semantic-001",
 				WorkspaceID: workspaceID,
 				RunID:       "run-approval-semantic",
 				State:       common.ApprovalStatePending,
-			},
+			}},
 		}
 	})
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
 		}
-		contextPayload := workorcheventpayload.New(cmd.Context...)
+		contextPayload := workorcheventpayload.New(cmd.ResolutionContext...)
 		semantic, ok := contextPayload.Object("governanceSemantic")
 		if !ok {
 			t.Fatalf("governanceSemantic missing from %#v", contextPayload)
@@ -637,13 +637,13 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 		if intent != "approve_execution" || rawInput != "同意继续" || source != "tui" {
 			t.Fatalf("governanceSemantic = %#v, want approve rawInput/source", semantic)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approval: &approvalmodel.Approval{
-				ID:          cmd.ApprovalID,
-				WorkspaceID: cmd.WorkspaceID,
-				RunID:       cmd.RunID,
-				State:       common.ApprovalStateApproved,
-				Context:     contextPayload,
+				ID:                cmd.ApprovalID,
+				WorkspaceID:       cmd.WorkspaceID,
+				RunID:             cmd.RunID,
+				State:             common.ApprovalStateApproved,
+				ResolutionContext: contextPayload,
 			},
 		}
 	})
@@ -658,10 +658,10 @@ func TestResolveApprovalViewWithCommandPublishesGovernanceSemanticContext(t *tes
 	if err != nil {
 		t.Fatalf("ResolveApprovalViewWithCommand err = %v", err)
 	}
-	semantic, ok := item.Context.Object("governanceSemantic")
+	semantic, ok := item.ResolutionContext.Object("governanceSemantic")
 	intent, _ := semantic.String("intent")
 	if !ok || intent != "approve_execution" {
-		t.Fatalf("item semantic = %#v, want approve", item.Context)
+		t.Fatalf("item semantic = %#v, want approve", item.ResolutionContext)
 	}
 }
 
@@ -670,11 +670,11 @@ func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-approval-unique")
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalevents.ApprovalCommandResult {
-		if _, ok := data.(approvalevents.ListApprovalsCommand); !ok {
-			t.Fatalf("command payload type = %T, want ListApprovalsCommand", data)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalTestCommandResult {
+		if _, ok := data.(approvalevents.ListAllApprovalsCommand); !ok {
+			t.Fatalf("command payload type = %T, want ListAllApprovalsCommand", data)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approvals: []*approvalmodel.Approval{
 				{
 					ID:          "approval-unique",
@@ -685,7 +685,7 @@ func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing
 			},
 		}
 	})
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureApprovedCommand", data)
@@ -693,7 +693,7 @@ func TestResolveApprovalViewWithoutScopeResolvesUniquePendingApproval(t *testing
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-approval-unique" {
 			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-approval-unique", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approval: &approvalmodel.Approval{
 				ID:          cmd.ApprovalID,
 				WorkspaceID: cmd.WorkspaceID,
@@ -716,11 +716,11 @@ func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalevents.ApprovalCommandResult {
-		if _, ok := data.(approvalevents.ListApprovalsCommand); !ok {
-			t.Fatalf("command payload type = %T, want ListApprovalsCommand", data)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandList, func(data any) approvalTestCommandResult {
+		if _, ok := data.(approvalevents.ListAllApprovalsCommand); !ok {
+			t.Fatalf("command payload type = %T, want ListAllApprovalsCommand", data)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approvals: []*approvalmodel.Approval{
 				{
 					ID:          "approval-duplicate",
@@ -737,9 +737,9 @@ func TestResolveApprovalViewWithoutScopeConflictsOnDuplicatePendingApprovals(t *
 			},
 		}
 	})
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		t.Fatal("approval mutation should not be published for duplicate no-scope approval")
-		return approvalevents.ApprovalCommandResult{}
+		return approvalTestCommandResult{}
 	})
 
 	_, err := ResolveApprovalView(ctx, hub, nil, "approval-duplicate", "approve", "")
@@ -754,25 +754,23 @@ func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	approvalIDs := []string{"approval-001", "approval-002"}
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandGet, func(data any) approvalevents.ApprovalCommandResult {
-		cmd, ok := data.(approvalevents.GetApprovalCommand)
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandListByWorkspace, func(data any) approvalTestCommandResult {
+		cmd, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
 		if !ok {
-			t.Fatalf("command payload type = %T, want GetApprovalCommand", data)
+			t.Fatalf("command payload type = %T, want ListApprovalsByWorkspaceCommand", data)
 		}
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("get approval command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
-			Approval: &approvalmodel.Approval{
-				ID:          cmd.ApprovalID,
-				WorkspaceID: workspaceID,
-				RunID:       "run-001",
-				State:       common.ApprovalStatePending,
+		return approvalTestCommandResult{
+			Approvals: []*approvalmodel.Approval{
+				{ID: common.ApprovalID(approvalIDs[0]), WorkspaceID: workspaceID, RunID: "run-001", State: common.ApprovalStatePending},
+				{ID: common.ApprovalID(approvalIDs[1]), WorkspaceID: workspaceID, RunID: "run-001", State: common.ApprovalStatePending},
 			},
 		}
 	})
 	approvedCount := 0
-	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalevents.ApprovalCommandResult {
+	testHub.subscribeApproval(approvalevents.TopicApprovalCommandEnsureApproved, func(data any) approvalTestCommandResult {
 		approvedCount++
 		cmd, ok := data.(approvalevents.EnsureApprovedCommand)
 		if !ok {
@@ -782,7 +780,7 @@ func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
 			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
 		}
-		return approvalevents.ApprovalCommandResult{
+		return approvalTestCommandResult{
 			Approval: &approvalmodel.Approval{
 				ID:          approvalID,
 				WorkspaceID: workspaceID,

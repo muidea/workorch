@@ -25,14 +25,14 @@ import (
 )
 
 type ResolveDecisionFunc func(context.Context, common.TicketID, string, workorcheventpayload.Payload) error
-type ResolveApprovalFunc func(context.Context, common.ApprovalID) error
+type ResolveApprovalFunc func(context.Context, common.ApprovalID, common.RunID) error
 
 type TicketReader interface {
 	Get(context.Context, common.TicketID) (*decisionmodel.Ticket, error)
 }
 
 type ApprovalReader interface {
-	Get(context.Context, common.ApprovalID) (*approvalmodel.Approval, error)
+	GetScoped(context.Context, common.WorkspaceID, common.RunID, common.ApprovalID) (*approvalmodel.Approval, error)
 }
 
 type RunReader interface {

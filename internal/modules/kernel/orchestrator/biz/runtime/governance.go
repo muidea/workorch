@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,7 +26,7 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 			return aggregate, nil
 		}
 		if governancecheck.RequestRecordConflicts(current, request) {
-			return RuntimeAggregate{}, fmt.Errorf("%w: governed dispatch is already bound to another ticket", common.ErrConflict)
+			return RuntimeAggregate{}, fmt.Errorf("%w: governed dispatch is already bound to another governance owner record", common.ErrConflict)
 		}
 	}
 	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.Governance == nil {
@@ -44,6 +45,10 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 	if !governancecheck.DependencyMatches(dependency.Kind, dependency.SubjectRef, request.DependencyKind, request.SubjectRef) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance request dependency does not match the sealed candidate", common.ErrConflict)
 	}
+	if strings.TrimSpace(request.RequestedAction) != strings.TrimSpace(dependency.RequestedAction) || strings.TrimSpace(request.RiskLevel) != strings.TrimSpace(dependency.RiskLevel) ||
+		strings.TrimSpace(request.AuthorizationHash) != runtimecontract.StableRuntimeAuthorizationContextHash(dependency.AuthorizationContext) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: governance request authorization target does not match the sealed candidate", common.ErrConflict)
+	}
 	expectedRevision := aggregate.StateRevision
 	for idx := range aggregate.OperationGovernanceBindings {
 		binding := aggregate.OperationGovernanceBindings[idx].Normalized()
@@ -51,6 +56,7 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 			continue
 		}
 		binding.TicketID = request.TicketID
+		binding.ApprovalID = request.ApprovalID
 		binding.GovernanceDispatchID = request.DispatchID
 		binding.GovernanceSnapshotID = request.AuthoritySnapshotID
 		binding.State = runtimecontract.RuntimeOperationGovernanceBindingTicketBound
@@ -139,9 +145,10 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 			}
 			binding.State = runtimecontract.RuntimeOperationGovernanceBindingGranted
 			binding.Grant = &runtimecontract.RuntimeOperationGovernanceGrant{
-				ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID,
+				ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, ApprovalID: resolution.ApprovalID,
 				ExecutionKey: binding.ExecutionKey, GovernanceFence: binding.Fence, ResumeFence: binding.Fence + 1,
 				DependencyKind: binding.DependencyKind, SubjectRef: binding.SubjectRef,
+				RequestedAction: binding.RequestedAction, RiskLevel: binding.RiskLevel, AuthorizationHash: binding.AuthorizationHash,
 				GovernanceReceiptHash: binding.GovernanceReceiptHash, EvidenceRefs: append([]string(nil), resolution.EvidenceRefs...),
 			}
 			grantedBindingIndex = idx
@@ -180,7 +187,7 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 	aggregate.Facts = aggregate.Facts.Normalized()
 	aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, eventID)
 	aggregate.GovernanceResolutions = append(aggregate.GovernanceResolutions, runtimecontract.RuntimeGovernanceResolutionRecord{
-		ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, AuthoritySnapshotID: resolution.AuthoritySnapshotID,
+		ResolutionID: resolution.ResolutionID, TicketID: resolution.TicketID, ApprovalID: resolution.ApprovalID, AuthoritySnapshotID: resolution.AuthoritySnapshotID,
 		DispatchID: resolution.DispatchID, Outcome: resolution.Outcome,
 	})
 	dispatch := *aggregate.ActiveDispatch

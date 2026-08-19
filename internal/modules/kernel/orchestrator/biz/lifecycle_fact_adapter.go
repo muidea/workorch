@@ -209,7 +209,7 @@ func runLifecycleCommandResponse(result magicevent.Result, topic string) (runeve
 }
 
 func governanceWaitFromDriveResult(result orchestratorevents.DriveRuntimeResult) (authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID string, ticketID common.TicketID, approvalID common.ApprovalID) {
-	return result.AuthoritySnapshotID, result.DefinitionRevision, result.EvidenceRevision, result.DispatchID, result.BlockingTicketID, ""
+	return result.AuthoritySnapshotID, result.DefinitionRevision, result.EvidenceRevision, result.DispatchID, result.BlockingTicketID, result.BlockingApprovalID
 }
 
 func continuationFromGovernanceCommit(
@@ -221,5 +221,5 @@ func continuationFromGovernanceCommit(
 	// governance request. Commit may already have sealed a successor authority,
 	// so using aggregate.Decision.AuthoritySnapshot here would lose the binding
 	// that Run must verify against GovernanceResolutions.
-	return resolution.AuthoritySnapshotID, aggregate.Facts.DefinitionRevision, aggregate.Facts.EvidenceRevision, resolution.DispatchID, resolution.ResolutionID, resolution.TicketID, "", aggregate.StateRevision
+	return resolution.AuthoritySnapshotID, aggregate.Facts.DefinitionRevision, aggregate.Facts.EvidenceRevision, resolution.DispatchID, resolution.ResolutionID, resolution.TicketID, resolution.ApprovalID, aggregate.StateRevision
 }

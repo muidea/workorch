@@ -42,6 +42,7 @@ type DriveRuntimeResult struct {
 	DispatchID          string
 	State               runtimecontract.ConvergenceState
 	BlockingTicketID    common.TicketID
+	BlockingApprovalID  common.ApprovalID
 	Terminal            *runtimecontract.RuntimeTerminalDecision
 }
 
@@ -88,6 +89,16 @@ type CommitRuntimeGovernanceResolutionCommand struct {
 type CommitRuntimeGovernanceTicketResolutionCommand struct {
 	ResolutionID common.ResolutionID
 	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	Outcome      runtimecontract.RuntimeGovernanceResolutionOutcome
+	Summary      string
+	EvidenceRefs []string
+}
+
+type CommitRuntimeGovernanceApprovalResolutionCommand struct {
+	ResolutionID common.ResolutionID
+	ApprovalID   common.ApprovalID
 	WorkspaceID  common.WorkspaceID
 	RunID        common.RunID
 	Outcome      runtimecontract.RuntimeGovernanceResolutionOutcome
@@ -317,6 +328,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[RequestRuntimeTerminationCommand, RequestRuntimeTerminationResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorRequestRuntimeTermination).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceResolution).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceTicketResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceTicket).MessageContract(),
+		eventcontract.CommandTopic[CommitRuntimeGovernanceApprovalResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceApproval).MessageContract(),
 	}
 	ret = append(ret,
 		eventcontract.DataTopic[RuntimeDriveObservedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeDriveObserved).MessageContract(),

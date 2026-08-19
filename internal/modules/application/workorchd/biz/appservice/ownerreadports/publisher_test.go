@@ -141,10 +141,10 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 		},
 		{
 			name:      "approval get",
-			topic:     approvalevents.TopicApprovalCommandGet,
+			topic:     approvalevents.TopicApprovalCommandListByWorkspace,
 			wantRunID: "",
 			responsePayload: map[string]any{
-				recordpayload.PayloadKeyApproval: &approvalmodel.Approval{ID: "approval-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
+				recordpayload.PayloadKeyItems: []*approvalmodel.Approval{{ID: "approval-scope-owner-read", WorkspaceID: workspaceID, RunID: runID}},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadApprovalByOwnerCommand(ctx, hub, "approval-scope-owner-read")
@@ -315,15 +315,15 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 				t.Fatalf("ticket list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
 			result.Set(decisionevents.ListTicketsByRunResult{Tickets: payload[recordpayload.PayloadKeyTickets].([]*decisionmodel.Ticket)}, nil)
-		case approvalevents.TopicApprovalCommandGet:
-			cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
+		case approvalevents.TopicApprovalCommandListByWorkspace:
+			cmd, ok := ev.Data().(approvalevents.ListApprovalsByWorkspaceCommand)
 			if !ok {
-				t.Fatalf("approval get command type = %T", ev.Data())
+				t.Fatalf("approval workspace list command type = %T", ev.Data())
 			}
-			if cmd.WorkspaceID != workspaceID || cmd.ApprovalID == "" {
-				t.Fatalf("approval get command = %+v, want workspace %s", cmd, workspaceID)
+			if cmd.WorkspaceID != workspaceID {
+				t.Fatalf("approval workspace list command = %+v, want workspace %s", cmd, workspaceID)
 			}
-			result.Set(approvalevents.ApprovalCommandResult{Approval: payload[recordpayload.PayloadKeyApproval].(*approvalmodel.Approval)}, nil)
+			result.Set(approvalevents.ListApprovalsByWorkspaceResult{Approvals: payload[recordpayload.PayloadKeyItems].([]*approvalmodel.Approval)}, nil)
 		case approvalevents.TopicApprovalCommandListByRun:
 			cmd, ok := ev.Data().(approvalevents.ListApprovalsByRunCommand)
 			if !ok {
@@ -332,7 +332,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("approval list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(approvalevents.ApprovalCommandResult{Approvals: payload[recordpayload.PayloadKeyItems].([]*approvalmodel.Approval)}, nil)
+			result.Set(approvalevents.ListApprovalsByRunResult{Approvals: payload[recordpayload.PayloadKeyItems].([]*approvalmodel.Approval)}, nil)
 		default:
 			t.Fatalf("unhandled magic owner read topic %s", topic)
 		}
@@ -354,6 +354,7 @@ func ownerReadMagicDestination(topic string) (string, bool) {
 		decisionevents.TopicDecisionCommandListTicketsByRun:
 		return decisionevents.CommandDestination, true
 	case approvalevents.TopicApprovalCommandGet,
+		approvalevents.TopicApprovalCommandListByWorkspace,
 		approvalevents.TopicApprovalCommandListByRun:
 		return approvalevents.CommandDestination, true
 	default:

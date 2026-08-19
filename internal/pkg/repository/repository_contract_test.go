@@ -3025,7 +3025,9 @@ func testApprovalRepositoryContract(t *testing.T, factory func() repository.Appr
 	if _, err := repo.Get(ctx, common.ApprovalID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
 	}
-	if err := repo.Update(ctx, &approvalmodel.Approval{ID: common.ApprovalID("missing")}); !errors.Is(err, common.ErrNotFound) {
+	if err := repo.Update(ctx, &approvalmodel.Approval{
+		ID: common.ApprovalID("missing"), WorkspaceID: item.WorkspaceID, RunID: item.RunID,
+	}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
 	}
 }

@@ -2,58 +2,108 @@ package approval
 
 import (
 	"context"
+	"sort"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (m *Biz) executeApprovalQueryCommand(ctx context.Context, ev magicevent.Event) (approvalevents.ApprovalCommandResult, error) {
-	switch ev.ID() {
-	case approvalevents.TopicApprovalCommandGet:
-		cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
-		if !ok || cmd.ApprovalID == "" {
-			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
-		}
-		item, err := m.approvals.Get(ctx, cmd.ApprovalID)
-		if err != nil {
-			return approvalevents.ApprovalCommandResult{}, err
-		}
-		if !approvalMatchesCommandScope(item, approvalCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID}) {
-			return approvalevents.ApprovalCommandResult{}, common.ErrNotFound
-		}
-		return approvalevents.ApprovalCommandResult{Approval: item}, nil
-	case approvalevents.TopicApprovalCommandList:
-		if _, ok := ev.Data().(approvalevents.ListApprovalsCommand); !ok {
-			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
-		}
-		items, err := m.approvals.List(ctx)
-		if err != nil {
-			return approvalevents.ApprovalCommandResult{}, err
-		}
-		return approvalevents.ApprovalCommandResult{Approvals: items}, nil
-	case approvalevents.TopicApprovalCommandListByRun:
-		cmd, ok := ev.Data().(approvalevents.ListApprovalsByRunCommand)
-		if !ok || cmd.RunID == "" {
-			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
-		}
-		items, err := m.approvals.ListByRunID(ctx, cmd.RunID)
-		if err != nil {
-			return approvalevents.ApprovalCommandResult{}, err
-		}
-		items = filterApprovalsByCommandScope(items, approvalCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID})
-		return approvalevents.ApprovalCommandResult{Approvals: items}, nil
-	case approvalevents.TopicApprovalCommandListByWorkspace:
-		cmd, ok := ev.Data().(approvalevents.ListApprovalsByWorkspaceCommand)
-		if !ok || cmd.WorkspaceID == "" {
-			return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
-		}
-		items, err := m.approvals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
-		if err != nil {
-			return approvalevents.ApprovalCommandResult{}, err
-		}
-		return approvalevents.ApprovalCommandResult{Approvals: items}, nil
-	default:
-		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
+func (m *Biz) executeGetApprovalCommand(ctx context.Context, data any) (approvalevents.GetApprovalResult, error) {
+	cmd, ok := data.(approvalevents.GetApprovalCommand)
+	if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.ApprovalID == "" {
+		return approvalevents.GetApprovalResult{}, common.ErrInvalidArgument
 	}
+	item, err := m.approvals.GetScoped(ctx, cmd.WorkspaceID, cmd.RunID, cmd.ApprovalID)
+	if err != nil {
+		return approvalevents.GetApprovalResult{}, err
+	}
+	if item.DeletionRequestedAt != "" {
+		return approvalevents.GetApprovalResult{}, common.ErrNotFound
+	}
+	return approvalevents.GetApprovalResult{Approval: approvalmodel.CloneApproval(item)}, nil
+}
+
+func (m *Biz) executeListApprovalsCommand(ctx context.Context, data any) (approvalevents.ListApprovalsResult, error) {
+	cmd, ok := data.(approvalevents.ListAllApprovalsCommand)
+	if !ok || cmd.Scope != approvalevents.ApprovalListScopeAll {
+		return approvalevents.ListApprovalsResult{}, common.ErrInvalidArgument
+	}
+	cursor, limit, err := approvalevents.NormalizeListWindow(cmd.Cursor, cmd.Limit)
+	if err != nil {
+		return approvalevents.ListApprovalsResult{}, err
+	}
+	items, err := m.approvals.List(ctx)
+	if err != nil {
+		return approvalevents.ListApprovalsResult{}, err
+	}
+	items, next, err := pageApprovals(items, cursor, limit)
+	return approvalevents.ListApprovalsResult{Approvals: items, NextCursor: next}, err
+}
+
+func (m *Biz) executeListApprovalsByRunCommand(ctx context.Context, data any) (approvalevents.ListApprovalsByRunResult, error) {
+	cmd, ok := data.(approvalevents.ListApprovalsByRunCommand)
+	if !ok || cmd.WorkspaceID == "" || cmd.RunID == "" {
+		return approvalevents.ListApprovalsByRunResult{}, common.ErrInvalidArgument
+	}
+	cursor, limit, err := approvalevents.NormalizeListWindow(cmd.Cursor, cmd.Limit)
+	if err != nil {
+		return approvalevents.ListApprovalsByRunResult{}, err
+	}
+	items, err := m.approvals.ListByRunScope(ctx, cmd.WorkspaceID, cmd.RunID)
+	if err != nil {
+		return approvalevents.ListApprovalsByRunResult{}, err
+	}
+	items, next, err := pageApprovals(items, cursor, limit)
+	return approvalevents.ListApprovalsByRunResult{Approvals: items, NextCursor: next}, err
+}
+
+func (m *Biz) executeListApprovalsByWorkspaceCommand(ctx context.Context, data any) (approvalevents.ListApprovalsByWorkspaceResult, error) {
+	cmd, ok := data.(approvalevents.ListApprovalsByWorkspaceCommand)
+	if !ok || cmd.WorkspaceID == "" {
+		return approvalevents.ListApprovalsByWorkspaceResult{}, common.ErrInvalidArgument
+	}
+	cursor, limit, err := approvalevents.NormalizeListWindow(cmd.Cursor, cmd.Limit)
+	if err != nil {
+		return approvalevents.ListApprovalsByWorkspaceResult{}, err
+	}
+	items, err := m.approvals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
+	if err != nil {
+		return approvalevents.ListApprovalsByWorkspaceResult{}, err
+	}
+	items, next, err := pageApprovals(items, cursor, limit)
+	return approvalevents.ListApprovalsByWorkspaceResult{Approvals: items, NextCursor: next}, err
+}
+
+func pageApprovals(items []*approvalmodel.Approval, cursor string, limit int) ([]*approvalmodel.Approval, string, error) {
+	filtered := make([]*approvalmodel.Approval, 0, len(items))
+	for _, item := range items {
+		if item != nil && item.DeletionRequestedAt == "" {
+			filtered = append(filtered, approvalmodel.CloneApproval(item))
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		return approvalevents.ApprovalCursor(filtered[i]) < approvalevents.ApprovalCursor(filtered[j])
+	})
+	start := 0
+	if cursor != "" {
+		found := false
+		for idx, item := range filtered {
+			if approvalevents.ApprovalCursor(item) == cursor {
+				start, found = idx+1, true
+				break
+			}
+		}
+		if !found {
+			return nil, "", common.ErrInvalidArgument
+		}
+	}
+	if start >= len(filtered) {
+		return nil, "", nil
+	}
+	end := start + limit
+	if end >= len(filtered) {
+		return filtered[start:], "", nil
+	}
+	return filtered[start:end], approvalevents.ApprovalCursor(filtered[end-1]), nil
 }

@@ -597,6 +597,7 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, receipt.Governance.Reason)
 		writeHashString(h, receipt.Governance.RequestedAction)
 		writeHashString(h, receipt.Governance.RiskLevel)
+		writeHashString(h, receipt.Governance.AuthorizationContext.CanonicalString())
 	}
 	for _, change := range receipt.ResourceChanges {
 		writeHashString(h, string(change.Domain))

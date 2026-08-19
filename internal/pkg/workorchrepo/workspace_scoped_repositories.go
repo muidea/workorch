@@ -2600,6 +2600,9 @@ func (r *workspaceScopedApprovalRepository) Create(ctx context.Context, item *ap
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	if scoped := common.RuntimeWorkspaceIDFromContext(ctx); scoped != "" && scoped != item.WorkspaceID {
+		return common.ErrConflict
+	}
 	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedApprovalFile)).Create(ctx, item)
 }
 
@@ -2610,6 +2613,16 @@ func (r *workspaceScopedApprovalRepository) Get(ctx context.Context, id common.A
 	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*approvalmodel.Approval, error) {
 		return r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).Get(ctx, id)
 	})
+}
+
+func (r *workspaceScopedApprovalRepository) GetScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) (*approvalmodel.Approval, error) {
+	if workspaceID == "" || runID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if scoped := common.RuntimeWorkspaceIDFromContext(ctx); scoped != "" && scoped != workspaceID {
+		return nil, common.ErrConflict
+	}
+	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(workspaceID, runID), workspaceScopedApprovalFile)).GetScoped(ctx, workspaceID, runID, id)
 }
 
 func (r *workspaceScopedApprovalRepository) List(ctx context.Context) ([]*approvalmodel.Approval, error) {
@@ -2649,7 +2662,23 @@ func (r *workspaceScopedApprovalRepository) ListByRunID(ctx context.Context, run
 	return nil, nil
 }
 
+func (r *workspaceScopedApprovalRepository) ListByRunScope(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]*approvalmodel.Approval, error) {
+	if workspaceID == "" || runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if scoped := common.RuntimeWorkspaceIDFromContext(ctx); scoped != "" && scoped != workspaceID {
+		return nil, common.ErrConflict
+	}
+	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(workspaceID, runID), workspaceScopedApprovalFile)).ListByRunScope(ctx, workspaceID, runID)
+}
+
 func (r *workspaceScopedApprovalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
+	if workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if scoped := common.RuntimeWorkspaceIDFromContext(ctx); scoped != "" && scoped != workspaceID {
+		return nil, common.ErrConflict
+	}
 	ret := []*approvalmodel.Approval{}
 	for _, root := range r.store.workspaceRunRoots(workspaceID) {
 		items, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).ListByWorkspaceID(ctx, workspaceID)
@@ -2663,8 +2692,11 @@ func (r *workspaceScopedApprovalRepository) ListByWorkspaceID(ctx context.Contex
 }
 
 func (r *workspaceScopedApprovalRepository) Update(ctx context.Context, item *approvalmodel.Approval) error {
-	if item == nil || item.ID == "" {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
 		return common.ErrInvalidArgument
+	}
+	if scoped := common.RuntimeWorkspaceIDFromContext(ctx); scoped != "" && scoped != item.WorkspaceID {
+		return common.ErrConflict
 	}
 	if item.WorkspaceID != "" && item.RunID != "" {
 		err := r.store.approvalRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedApprovalFile)).Update(ctx, item)
@@ -2690,6 +2722,16 @@ func (r *workspaceScopedApprovalRepository) Delete(ctx context.Context, id commo
 		return err
 	}
 	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedApprovalFile)).Delete(ctx, id)
+}
+
+func (r *workspaceScopedApprovalRepository) DeleteScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) error {
+	if workspaceID == "" || runID == "" || id == "" {
+		return common.ErrInvalidArgument
+	}
+	if scoped := common.RuntimeWorkspaceIDFromContext(ctx); scoped != "" && scoped != workspaceID {
+		return common.ErrConflict
+	}
+	return r.store.approvalRepo(r.store.runPath(r.store.runRoot(workspaceID, runID), workspaceScopedApprovalFile)).DeleteScoped(ctx, workspaceID, runID, id)
 }
 
 func nilIfEmpty[T any](items []T) []T {

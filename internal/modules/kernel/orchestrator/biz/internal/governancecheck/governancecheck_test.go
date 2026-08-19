@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -110,6 +111,8 @@ func TestGovernanceRequestLookupsUseExactNormalizedIdentity(t *testing.T) {
 func TestEvaluateOperationSuspensionRequiresExactDurableReceipt(t *testing.T) {
 	requirement := runtimecontract.RuntimeGovernanceRequirement{
 		Kind: runtimecontract.GovernanceApproval, SubjectRef: " target.txt ", Reason: " owner approval required ",
+		RequestedAction:      "file/write",
+		AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", "target.txt")),
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "execution-1", Fence: 3, OperationID: "write-1",
@@ -138,18 +141,19 @@ func TestEvaluateOperationSuspensionRequiresExactDurableReceipt(t *testing.T) {
 		t.Fatal("suspension binding did not match its exact execution and receipt")
 	}
 	bound := finding.Binding
-	bound.TicketID = "ticket-1"
+	bound.ApprovalID = "approval-1"
 	bound.GovernanceDispatchID = "governance-dispatch-1"
 	bound.GovernanceSnapshotID = "authority-1"
 	request := runtimecontract.RuntimeGovernanceRequestRecord{
-		TicketID: "ticket-1", DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1",
-		DependencyKind: "approval", SubjectRef: "target.txt",
+		ApprovalID: "approval-1", DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1",
+		DependencyKind: "approval", SubjectRef: "target.txt", RequestedAction: "file/write",
+		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
 	}
 	if !BindingMatchesRequest(bound, request) {
-		t.Fatal("ticket-bound suspension did not match exact request")
+		t.Fatal("approval-bound suspension did not match exact request")
 	}
 	resolution := runtimecontract.RuntimeGovernanceResolutionRecord{
-		ResolutionID: "resolution-1", TicketID: "ticket-1", DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1",
+		ResolutionID: "resolution-1", ApprovalID: "approval-1", DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1",
 	}
 	if !ResolutionRecordMatchesRequest(resolution, request) || !ResolutionRecordMatchesDispatch(resolution, DispatchFacts{
 		DispatchID: "governance-dispatch-1", AuthoritySnapshotID: "authority-1", CandidateGovernance: true,
@@ -193,12 +197,16 @@ func TestGrantForExecutionReturnsDetachedExactResumeGrant(t *testing.T) {
 }
 
 func TestDependencyForFactsPreservesSuspensionAndProviderPolicy(t *testing.T) {
+	authorization := workorcheventpayload.New(workorcheventpayload.StringField("targetRef", "target.txt"))
 	facts := runtimecontract.RuntimeFacts{Failure: &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassGovernanceRequired, Message: "approval required",
-		GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "approval", SubjectRef: "target.txt", Reason: "approval required"},
+		GovernanceDependency: &runtimecontract.ExternalDependency{
+			Kind: "approval", SubjectRef: "target.txt", Reason: "approval required", RequestedAction: "file/write", AuthorizationContext: authorization,
+		},
 	}}
 	bindings := []runtimecontract.RuntimeOperationGovernanceBinding{{
 		DependencyKind: "approval", SubjectRef: "target.txt", State: runtimecontract.RuntimeOperationGovernanceBindingSuspended,
+		RequestedAction: "file/write", AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(authorization),
 	}}
 	dependency, found := DependencyForFacts(facts, bindings)
 	if !found || dependency.Kind != "approval" || dependency.SubjectRef != "target.txt" || dependency.Reason != "approval required" {

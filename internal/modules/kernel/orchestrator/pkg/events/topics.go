@@ -15,6 +15,7 @@ const (
 	TopicOrchestratorQueryRuntimeOperationReceipt      = "/orchestrator/runtime-operation/receipt/query"
 	TopicOrchestratorCommitRuntimeOperationReceipt     = "/orchestrator/runtime-operation/receipt/commit"
 	TopicOrchestratorCommitRuntimeGovernanceResolution = "/orchestrator/runtime-governance/commit-resolution"
+	TopicOrchestratorCommitRuntimeGovernanceApproval   = "/orchestrator/runtime-governance/commit-approval"
 	TopicOrchestratorCommitRuntimeGovernanceTicket     = "/orchestrator/runtime-governance/commit-ticket-resolution"
 	TopicOrchestratorRequestRuntimeTermination         = "/orchestrator/runtime-lifecycle/request-termination"
 	// RUNTIME-SMO observability facts.

@@ -36,8 +36,10 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// Run owner's typed workspace-execution intent reducer. Decision's separate
 	// Ticket/Resolution delete topics were also replaced by one workspace-scoped
 	// aggregate purge topic, reducing the inventory by one without weakening an
-	// owner interaction.
-	const expectedProductionTopicCount = 259
+	// owner interaction. Approval's Runtime closure adds four adjudicated topics:
+	// capability acquisition, request creation, Orchestrator SM-2 commit and the
+	// durable Eventstream resolution record handshake.
+	const expectedProductionTopicCount = 263
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

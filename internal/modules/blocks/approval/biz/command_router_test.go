@@ -14,7 +14,7 @@ func TestApprovalCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 		approvalevents.TopicApprovalCommandListByWorkspace: approvalCommandFamilyQuery,
 		approvalevents.TopicApprovalCommandEnsureApproved:  approvalCommandFamilyResolution,
 		approvalevents.TopicApprovalCommandEnsureRejected:  approvalCommandFamilyResolution,
-		approvalevents.TopicApprovalCommandDelete:          approvalCommandFamilyDelete,
+		approvalevents.TopicApprovalCommandPurgeWorkspace:  approvalCommandFamilyPurge,
 	}
 	topics := approvalCommandTopics()
 	if len(topics) != len(expected) {

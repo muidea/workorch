@@ -18,26 +18,29 @@ import (
 
 func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approvalmodel.Approval) error {
 	if m == nil || m.EventHub() == nil || item == nil || item.ID == "" {
-		return nil
+		return common.ErrInvalidArgument
 	}
 	if item.State != common.ApprovalStateApproved && item.State != common.ApprovalStateRejected {
-		return nil
+		return common.ErrConflict
 	}
 	timestamp := strings.TrimSpace(item.UpdatedAt)
 	if timestamp == "" {
 		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	command := approvalevents.RecordApprovalEvidenceCommand{
-		EvidenceRecordID: orchestratormodel.StableEvidenceRecordID(string(item.ID), "approval", "approval"),
-		WorkspaceID:      item.WorkspaceID,
-		RunID:            item.RunID,
-		StepID:           item.StepID,
-		ApprovalID:       item.ID,
-		ApprovalState:    item.State,
-		Reason:           strings.TrimSpace(item.Reason),
-		Action:           strings.TrimSpace(item.Action),
-		Context:          item.Context.Clone().Fields,
-		Timestamp:        timestamp,
+		EvidenceRecordID:  orchestratormodel.StableEvidenceRecordID(fmt.Sprintf("%s/%s/%s", item.WorkspaceID, item.RunID, item.ID), "approval", "approval"),
+		WorkspaceID:       item.WorkspaceID,
+		RunID:             item.RunID,
+		StepID:            item.StepID,
+		ApprovalID:        item.ID,
+		ApprovalState:     item.State,
+		ResolutionID:      item.ResolutionID,
+		Principal:         item.ResolutionPrincipal.Normalized(),
+		Reason:            strings.TrimSpace(item.Reason),
+		Action:            strings.TrimSpace(item.Action),
+		Context:           item.Context.Clone().Fields,
+		ResolutionContext: item.ResolutionContext.Clone().Fields,
+		Timestamp:         timestamp,
 	}
 	ev := magicevent.NewEventWithContext(
 		approvalevents.TopicApprovalCommandRecordEvidence,
@@ -72,7 +75,8 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 		return resultErr
 	}
 	response, ok := data.(approvalevents.RecordApprovalEvidenceResult)
-	if !ok || response.EvidenceRecordID != command.EvidenceRecordID {
+	if !ok || response.EvidenceRecordID != command.EvidenceRecordID || response.WorkspaceID != command.WorkspaceID || response.RunID != command.RunID ||
+		response.ApprovalID != command.ApprovalID || response.ResolutionID != command.ResolutionID || response.ApprovalState != command.ApprovalState {
 		return fmt.Errorf("%w: approval evidence result type %T", common.ErrInvalidArgument, data)
 	}
 	return nil

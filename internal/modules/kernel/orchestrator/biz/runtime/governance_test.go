@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -151,6 +152,7 @@ func sealGovernanceDispatch(t *testing.T, controller *RuntimeController) Runtime
 	bound, err := controller.bindGovernanceRequest(context.Background(), facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeGovernanceRequestRecord{
 		TicketID: "ticket-1", AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		DispatchID: sealed.ActiveDispatch.ID, DependencyKind: "external-approval", SubjectRef: "subject-1",
+		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(runtimecontract.ExternalDependency{}.AuthorizationContext),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +204,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	requirement := runtimecontract.RuntimeGovernanceRequirement{
 		Kind: runtimecontract.GovernanceApproval, SubjectRef: "target.txt",
 		Reason: "patch apply requires approval before side effects", RequestedAction: "patch/apply", RiskLevel: "high",
+		AuthorizationContext: workorcheventpayload.New(workorcheventpayload.StringField("targetRef", "target.txt")),
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
@@ -250,24 +253,27 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	governed, err := controller.sealGovernanceDispatch(context.Background(), "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: string(requirement.Kind), SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
+			RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel, AuthorizationContext: requirement.AuthorizationContext.Clone(),
 		}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	bound, err := controller.bindGovernanceRequest(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeGovernanceRequestRecord{
-		TicketID: "ticket-operation-1", AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		ApprovalID: "approval-operation-1", AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		DispatchID: governed.ActiveDispatch.ID, DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
+		RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
+		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(bound.OperationGovernanceBindings) != 1 || bound.OperationGovernanceBindings[0].State != runtimecontract.RuntimeOperationGovernanceBindingTicketBound ||
-		bound.OperationGovernanceBindings[0].TicketID != "ticket-operation-1" || bound.OperationGovernanceBindings[0].GovernanceDispatchID != governed.ActiveDispatch.ID {
-		t.Fatalf("ticket-bound operation governance binding = %+v", bound.OperationGovernanceBindings)
+		bound.OperationGovernanceBindings[0].ApprovalID != "approval-operation-1" || bound.OperationGovernanceBindings[0].GovernanceDispatchID != governed.ActiveDispatch.ID {
+		t.Fatalf("approval-bound operation governance binding = %+v", bound.OperationGovernanceBindings)
 	}
 	operationResolution := runtimecontract.RuntimeGovernanceResolution{
-		ResolutionID: "operation-resolution-1", TicketID: "ticket-operation-1", WorkspaceID: "ws-v2", RunID: "run-v2",
+		ResolutionID: "operation-resolution-1", ApprovalID: "approval-operation-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID, DispatchID: governed.ActiveDispatch.ID,
 		DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
 		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "approval granted",

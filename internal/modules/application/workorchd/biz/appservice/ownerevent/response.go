@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -151,20 +150,21 @@ func Decision[Result any](response magicevent.Result, topic string) (Result, err
 	return result, nil
 }
 
-func Approval(response magicevent.Result, topic string) (approvalevents.ApprovalCommandResult, error) {
+func Approval[Response any](response magicevent.Result, topic string) (Response, error) {
+	var zero Response
 	if response == nil {
-		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := response.Error(); err != nil {
-		return approvalevents.ApprovalCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return approvalevents.ApprovalCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(approvalevents.ApprovalCommandResult)
+	result, ok := data.(Response)
 	if !ok {
-		return approvalevents.ApprovalCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

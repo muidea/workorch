@@ -117,6 +117,7 @@ func (s *Service) Start() error {
 		eventstreamevents.TopicEventStreamCommandList,
 		eventstreamevents.TopicEventStreamCommandHighWatermarks,
 		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
+		approvalevents.TopicApprovalCommandRecordResolution,
 	}
 	for _, topic := range s.topics {
 		s.SubscribeFunc(topic, s.handleCommand)
@@ -125,6 +126,18 @@ func (s *Service) Start() error {
 }
 
 func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	if ev != nil && ev.ID() == approvalevents.TopicApprovalCommandRecordResolution {
+		response, err := s.executeRecordApprovalResolution(ev)
+		if result == nil {
+			return
+		}
+		if err != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+			return
+		}
+		result.Set(response, nil)
+		return
+	}
 	response, err := s.executeCommand(ev)
 	if result == nil {
 		return
@@ -134,6 +147,44 @@ func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		return
 	}
 	result.Set(response, nil)
+}
+
+func (s *Service) executeRecordApprovalResolution(ev magicevent.Event) (approvalevents.RecordApprovalResolutionResult, error) {
+	if s == nil || s.repo == nil || ev == nil || ev.Source() != approvalcommon.ModuleID {
+		return approvalevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
+	}
+	command, ok := ev.Data().(approvalevents.RecordApprovalResolutionCommand)
+	if !ok || command.Data.Validate() != nil {
+		return approvalevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
+	}
+	data := command.Data
+	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), data.WorkspaceID)
+	if err != nil {
+		return approvalevents.RecordApprovalResolutionResult{}, err
+	}
+	record := approvalRecord(approvalevents.TopicApprovalResolved, data)
+	if err := s.appendRecord(ctx, record); err != nil {
+		if !errors.Is(err, common.ErrConflict) || !s.samePersistedApprovalResolution(ctx, record) {
+			return approvalevents.RecordApprovalResolutionResult{}, err
+		}
+	}
+	return approvalevents.RecordApprovalResolutionResult{
+		NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
+		WorkspaceID: data.WorkspaceID, RunID: data.RunID,
+	}, nil
+}
+
+func (s *Service) samePersistedApprovalResolution(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
+	if s == nil || s.repo == nil || expected == nil || expected.ID == "" {
+		return false
+	}
+	current, err := s.repo.Get(ctx, expected.ID)
+	if err != nil || current == nil {
+		return false
+	}
+	return current.ID == expected.ID && current.Topic == expected.Topic && current.SourceModule == expected.SourceModule &&
+		current.SubjectType == expected.SubjectType && current.SubjectID == expected.SubjectID && current.WorkspaceID == expected.WorkspaceID &&
+		current.RunID == expected.RunID && current.StepID == expected.StepID && current.Payload.Equal(expected.Payload)
 }
 
 func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventStreamCommandResult, error) {
@@ -460,7 +511,7 @@ func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstream
 	// IDs. A conflict for those identities is an idempotent replay; conflicts
 	// for any other event remain visible.
 	if errors.Is(err, common.ErrConflict) && record != nil &&
-		(strings.HasPrefix(string(record.ID), "result-notification/") || strings.HasPrefix(string(record.ID), "decision-notification/")) {
+		(strings.HasPrefix(string(record.ID), "result-notification/") || strings.HasPrefix(string(record.ID), "decision-notification/") || strings.HasPrefix(string(record.ID), "approval-notification/")) {
 		return
 	}
 	if err != nil {
@@ -541,7 +592,7 @@ func decisionTicketRecord(topic string, data decisionevents.TicketChangedData) *
 }
 
 func approvalRecord(topic string, data approvalevents.ApprovalChangedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
+	ret := &eventstreammodel.EventRecord{
 		Topic:        topic,
 		SourceModule: approvalcommon.ModuleID,
 		SubjectType:  "approval",
@@ -551,8 +602,14 @@ func approvalRecord(topic string, data approvalevents.ApprovalChangedData) *even
 		StepID:       data.StepID,
 		Payload: (recordpayload.ApprovalPayloadData{
 			Reason: data.Reason, Action: data.Action, Context: workorcheventpayload.New(data.Context...), State: data.State,
+			ResolutionID: data.ResolutionID, ResolutionContext: workorcheventpayload.New(data.ResolutionContext...),
+			ResolvedByKind: string(data.Principal.Kind), ResolvedBy: data.Principal.SubjectID,
 		}).EventPayload(),
 	}
+	if data.NotificationID != "" {
+		ret.ID = common.EventRecordID(data.NotificationID)
+	}
+	return ret
 }
 
 func governanceRecord(topic string, data governanceevents.GovernanceData) *eventstreammodel.EventRecord {

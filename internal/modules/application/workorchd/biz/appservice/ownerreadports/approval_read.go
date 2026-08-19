@@ -4,9 +4,6 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -16,17 +13,33 @@ func ReadApprovalByOwnerCommand(ctx context.Context, hub magicevent.Hub, approva
 		return nil, common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, sourceModule, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{
-		WorkspaceID: workspaceID,
-		ApprovalID:  approvalID,
-	})
-	ownerevent.BindLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", "")
-	response, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandGet)
+	var (
+		items []*approvalmodel.Approval
+		err   error
+	)
+	if workspaceID == "" {
+		// ID-only application routes may not carry a workspace scope. The owner
+		// exposes this explicit, bounded global query solely for discovery; any
+		// subsequent mutation is sent with the discovered workspace/run scope.
+		items, err = ListApprovalsByOwnerCommand(ctx, hub)
+	} else {
+		items, err = ListApprovalsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if response.Approval == nil {
-		return nil, common.ErrInvalidArgument
+	var match *approvalmodel.Approval
+	for _, item := range items {
+		if item == nil || item.ID != approvalID {
+			continue
+		}
+		if match != nil {
+			return nil, common.ErrConflict
+		}
+		match = item
 	}
-	return response.Approval, nil
+	if match == nil {
+		return nil, common.ErrNotFound
+	}
+	return match, nil
 }

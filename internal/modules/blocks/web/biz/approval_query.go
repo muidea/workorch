@@ -10,6 +10,7 @@ import (
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func approvalRequiredSearchResult(request RuntimeOperationRequest, provider webmodels.ProviderConfig, query string, maxResults int, policy policyDecision) RuntimeOperationResult {
@@ -65,6 +66,16 @@ func (a *RuntimeAdapter) validateApproval(ctx context.Context, approvalID common
 		return fmt.Errorf("approval context mismatch")
 	}
 	return nil
+}
+
+func validateRuntimeApprovalGrant(grant *runtimecontract.RuntimeOperationGovernanceGrant, action, subject string, authorizationContext workorcheventpayload.Payload) (common.ApprovalID, error) {
+	if grant == nil || grant.Validate() != nil || grant.ApprovalID == "" || grant.TicketID != "" ||
+		strings.TrimSpace(grant.DependencyKind) != string(runtimecontract.GovernanceApproval) ||
+		strings.TrimSpace(grant.RequestedAction) != strings.TrimSpace(action) || strings.TrimSpace(grant.SubjectRef) != strings.TrimSpace(subject) ||
+		strings.TrimSpace(grant.AuthorizationHash) != runtimecontract.StableRuntimeAuthorizationContextHash(authorizationContext) {
+		return "", fmt.Errorf("runtime approval grant does not match immutable authorization target")
+	}
+	return grant.ApprovalID, nil
 }
 
 func (a *RuntimeAdapter) getApproval(ctx context.Context, approvalID common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {

@@ -13,29 +13,50 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func sendApprovalTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (approvalevents.ApprovalCommandResult, error) {
-	ev := magicevent.NewEventWithContext(topic, "approval/module_test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+type approvalTestResult struct {
+	Approval   *approvalmodel.Approval
+	Approvals  []*approvalmodel.Approval
+	NextCursor string
+	Deleted    int
+}
+
+func sendApprovalTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (approvalTestResult, error) {
+	ev := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {
-		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
+		return approvalTestResult{}, common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
 		if err.Cause != nil {
-			return approvalevents.ApprovalCommandResult{}, err.Cause
+			return approvalTestResult{}, err.Cause
 		}
-		return approvalevents.ApprovalCommandResult{}, err
+		return approvalTestResult{}, err
 	}
 	data, err := result.Get()
 	if err != nil {
-		return approvalevents.ApprovalCommandResult{}, err
+		return approvalTestResult{}, err
 	}
-	response, ok := data.(approvalevents.ApprovalCommandResult)
-	if !ok {
-		return approvalevents.ApprovalCommandResult{}, common.ErrInvalidArgument
+	switch response := data.(type) {
+	case approvalevents.GetApprovalResult:
+		return approvalTestResult{Approval: response.Approval}, nil
+	case approvalevents.ListApprovalsResult:
+		return approvalTestResult{Approvals: response.Approvals, NextCursor: response.NextCursor}, nil
+	case approvalevents.ListApprovalsByRunResult:
+		return approvalTestResult{Approvals: response.Approvals, NextCursor: response.NextCursor}, nil
+	case approvalevents.ListApprovalsByWorkspaceResult:
+		return approvalTestResult{Approvals: response.Approvals, NextCursor: response.NextCursor}, nil
+	case approvalevents.EnsureApprovedResult:
+		return approvalTestResult{Approval: response.Approval}, nil
+	case approvalevents.EnsureRejectedResult:
+		return approvalTestResult{Approval: response.Approval}, nil
+	case approvalevents.PurgeWorkspaceApprovalsResult:
+		return approvalTestResult{Deleted: response.Deleted}, nil
+	default:
+		return approvalTestResult{}, common.ErrInvalidArgument
 	}
-	return response, nil
 }
 
 func subscribeApprovalEvidenceAck(rawHub magicevent.Hub) func() {
@@ -46,9 +67,32 @@ func subscribeApprovalEvidenceAck(rawHub magicevent.Hub) func() {
 			result.Set(nil, nil)
 			return
 		}
-		result.Set(approvalevents.RecordApprovalEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
+		result.Set(approvalevents.RecordApprovalEvidenceResult{
+			EvidenceRecordID: command.EvidenceRecordID,
+			WorkspaceID:      command.WorkspaceID,
+			RunID:            command.RunID,
+			ApprovalID:       command.ApprovalID,
+			ResolutionID:     command.ResolutionID,
+			ApprovalState:    command.ApprovalState,
+		}, nil)
 	})
-	return func() { observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence) }
+	resolutionObserver := magicevent.NewSimpleObserver(approvalevents.ResolutionRecordCommandDestination, rawHub)
+	resolutionObserver.Subscribe(approvalevents.TopicApprovalCommandRecordResolution, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(approvalevents.RecordApprovalResolutionCommand)
+		if !ok {
+			result.Set(nil, nil)
+			return
+		}
+		data := command.Data
+		result.Set(approvalevents.RecordApprovalResolutionResult{
+			NotificationID: data.NotificationID, ResolutionID: data.ResolutionID, ApprovalID: data.ApprovalID,
+			WorkspaceID: data.WorkspaceID, RunID: data.RunID,
+		}, nil)
+	})
+	return func() {
+		observer.Unsubscribe(approvalevents.TopicApprovalCommandRecordEvidence)
+		resolutionObserver.Unsubscribe(approvalevents.TopicApprovalCommandRecordResolution)
+	}
 }
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -245,6 +289,9 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		ApprovalID:  approvalID,
 		WorkspaceID: "ws-approval-mutate-b",
 		RunID:       "run-approval-mutate-a",
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice",
+		},
 	})
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("wrong workspace approve err = %v, want not found", err)
@@ -257,20 +304,9 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 		t.Fatalf("approval state = %s, want pending", item.State)
 	}
 
-	_, err = sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandDelete, approvalevents.DeleteApprovalCommand{
-		ApprovalID:  approvalID,
-		WorkspaceID: "ws-approval-mutate-b",
-		RunID:       "run-approval-mutate-a",
-	})
-	if !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("wrong workspace delete err = %v, want not found", err)
-	}
-	if _, err := approvals.Get(ctx, approvalID); err != nil {
-		t.Fatalf("approval should remain after wrong-scope delete: %v", err)
-	}
 }
 
-func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *testing.T) {
+func TestApprovalMutationCommandWithoutScopeFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	defer subscribeApprovalEvidenceAck(rawHub)()
@@ -299,14 +335,14 @@ func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *tes
 		}
 	})
 
-	response, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{
+	_, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{
 		ApprovalID: approvalID,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice",
+		},
 	})
-	if err != nil {
-		t.Fatalf("unscoped approve err = %v, want response", err)
-	}
-	if response.Approval == nil || response.Approval.ID != approvalID || response.Approval.State != common.ApprovalStateApproved {
-		t.Fatalf("response approval = %+v, want approved unique approval", response.Approval)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unscoped approve err = %v, want invalid argument", err)
 	}
 }
 
@@ -351,9 +387,12 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 
 	_, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandEnsureApproved, approvalevents.EnsureApprovedCommand{
 		ApprovalID: approvalID,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice",
+		},
 	})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("unscoped duplicate approve err = %v, want conflict", err)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unscoped duplicate approve err = %v, want invalid argument", err)
 	}
 	items, err := approvals.List(ctx)
 	if err != nil {
@@ -363,5 +402,111 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 		if item.ID == approvalID && item.State != common.ApprovalStatePending {
 			t.Fatalf("approval %s state = %s, want pending after duplicate conflict", item.WorkspaceID, item.State)
 		}
+	}
+}
+
+func TestApprovalListCommandsAreTypedBoundedAndCursorValidated(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(ctx) })
+	approvals := memory.NewApprovalRepository()
+	for _, item := range []*approvalmodel.Approval{
+		{ID: "approval-page-c", WorkspaceID: "ws-page-b", RunID: "run-page-a", State: common.ApprovalStatePending, Reason: "page test"},
+		{ID: "approval-page-a", WorkspaceID: "ws-page-a", RunID: "run-page-a", State: common.ApprovalStatePending, Reason: "page test"},
+		{ID: "approval-page-b", WorkspaceID: "ws-page-a", RunID: "run-page-b", State: common.ApprovalStatePending, Reason: "page test"},
+	} {
+		if err := approvals.Create(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	module := New()
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	first, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandList, approvalevents.ListAllApprovalsCommand{
+		Scope: approvalevents.ApprovalListScopeAll, Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Approvals) != 2 || first.NextCursor == "" {
+		t.Fatalf("first page = %+v, want two items and next cursor", first)
+	}
+	second, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandList, approvalevents.ListAllApprovalsCommand{
+		Scope: approvalevents.ApprovalListScopeAll, Cursor: first.NextCursor, Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Approvals) != 1 || second.NextCursor != "" {
+		t.Fatalf("second page = %+v, want final item", second)
+	}
+	if _, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandList, approvalevents.ListAllApprovalsCommand{
+		Scope: approvalevents.ApprovalListScopeAll, Limit: approvalevents.MaxListLimit + 1,
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("oversized list err = %v, want invalid argument", err)
+	}
+	if _, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandList, approvalevents.ListAllApprovalsCommand{
+		Scope: approvalevents.ApprovalListScopeAll, Cursor: "unknown-cursor", Limit: 1,
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unknown cursor err = %v, want invalid argument", err)
+	}
+}
+
+func TestApprovalPublishesRuntimeGovernanceCapabilityOnlyToOrchestrator(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	command := approvalevents.AcquireRuntimeCapabilitiesCommand(runtimecontract.RuntimeCapabilityAcquisitionRequest{
+		WorkspaceID: "ws-approval-capability", RunID: "run-approval-capability",
+		AuthoritySnapshotID: "authority-approval-capability", PrerequisiteID: "prerequisite-approval-capability",
+		OwnerModuleID: runtimecontract.RuntimeModuleApproval, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance,
+		RequiredKinds: []string{runtimecontract.RuntimeBlockKindApprovalRequest},
+	})
+	send := func(source string) (approvalevents.AcquireRuntimeCapabilitiesResult, error) {
+		event := magicevent.NewEventWithContext(approvalevents.TopicAcquireRuntimeCapabilities, source, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+		result := rawHub.Send(event)
+		if result == nil {
+			return approvalevents.AcquireRuntimeCapabilitiesResult{}, common.ErrInvalidArgument
+		}
+		if resultErr := result.Error(); resultErr != nil {
+			if resultErr.Cause != nil {
+				return approvalevents.AcquireRuntimeCapabilitiesResult{}, resultErr.Cause
+			}
+			return approvalevents.AcquireRuntimeCapabilitiesResult{}, resultErr
+		}
+		data, resultErr := result.Get()
+		if resultErr != nil {
+			return approvalevents.AcquireRuntimeCapabilitiesResult{}, resultErr
+		}
+		response, ok := data.(approvalevents.AcquireRuntimeCapabilitiesResult)
+		if !ok {
+			return approvalevents.AcquireRuntimeCapabilitiesResult{}, common.ErrInvalidArgument
+		}
+		return response, nil
+	}
+	if _, err := send("untrusted/module"); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("untrusted capability request err = %v, want invalid argument", err)
+	}
+	response, err := send(runtimecontract.RuntimeModuleOrchestrator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := runtimecontract.RuntimeCapabilityAcquisitionRequest(command)
+	if err := response.Acquisition.ValidateForRequest(request); err != nil {
+		t.Fatalf("approval capability acquisition: %v", err)
 	}
 }

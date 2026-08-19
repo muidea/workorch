@@ -9,6 +9,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalcommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -219,6 +220,66 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	state, _ := records[0].Payload.String(recordpayload.PayloadKeyState)
 	if state != string(common.ApprovalStateApproved) || risk != "medium" {
 		t.Fatalf("resolved approval payload = %+v", records[0].Payload)
+	}
+}
+
+func TestServiceDurablyAcknowledgesExactApprovalResolutionReplay(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Stop()
+	data := approvalevents.ApprovalChangedData{
+		NotificationID: "approval-notification/resolved/ws-a/run-a/approval-a/resolution-a",
+		ResolutionID:   "resolution-a", ApprovalID: "approval-a", WorkspaceID: "ws-a", RunID: "run-a",
+		Reason: "authorize exact target", Action: "web/search", State: common.ApprovalStateApproved,
+		Context:           workorcheventpayload.New(workorcheventpayload.StringField("query", "release notes")).Fields,
+		ResolutionContext: workorcheventpayload.New(workorcheventpayload.StringField("note", "reviewed")).Fields,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice",
+		},
+	}
+	send := func(source string, value approvalevents.ApprovalChangedData) magicevent.Result {
+		return rawHub.Send(magicevent.NewEventWithContext(
+			approvalevents.TopicApprovalCommandRecordResolution, source, approvalevents.ResolutionRecordCommandDestination,
+			magicevent.NewHeader(), ctx, approvalevents.RecordApprovalResolutionCommand{Data: value},
+		))
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		result := send(approvalcommon.ModuleID, data)
+		if result == nil || result.Error() != nil {
+			t.Fatalf("record attempt %d result = %+v", attempt+1, result)
+		}
+		value, resultErr := result.Get()
+		response, ok := value.(approvalevents.RecordApprovalResolutionResult)
+		if resultErr != nil || !ok || response.NotificationID != data.NotificationID || response.ResolutionID != data.ResolutionID || response.ApprovalID != data.ApprovalID {
+			t.Fatalf("record attempt %d response = %#v err=%v", attempt+1, value, resultErr)
+		}
+	}
+	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || string(records[0].ID) != data.NotificationID {
+		t.Fatalf("records = %+v, want one stable resolution record", records)
+	}
+	record, err := repo.Get(ctx, common.EventRecordID(data.NotificationID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := recordpayload.DecodeApprovalEventPayload(record.Payload)
+	if !ok || payload.ResolutionID != data.ResolutionID || payload.ResolvedByKind != string(data.Principal.Kind) || payload.ResolvedBy != data.Principal.SubjectID {
+		t.Fatalf("approval audit payload = %+v/%t", payload, ok)
+	}
+	changed := data
+	changed.Context = workorcheventpayload.New(workorcheventpayload.StringField("query", "different target")).Fields
+	if result := send(approvalcommon.ModuleID, changed); result == nil || result.Error() == nil {
+		t.Fatalf("changed replay result = %+v, want conflict", result)
+	}
+	if result := send("untrusted/module", data); result == nil || result.Error() == nil {
+		t.Fatalf("untrusted record result = %+v, want error", result)
 	}
 }
 
