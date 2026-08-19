@@ -184,25 +184,25 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(skillevents.CreateSkillResult{Skill: registrySkillFixture(cmd.SkillID, cmd.Name, "v1", cmd.Instruction)}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, func(cmd mcpevents.CreateServerCommand, result magicevent.Result) {
-		env, err := mcpevents.EnvironmentVariableMap(cmd.Env)
-		if err != nil || cmd.ServerID != "mcp-contract" || cmd.Command != "python3" || env["TOKEN"] != "secret" {
+		env, err := mcpevents.EnvironmentReferenceMap(cmd.EnvironmentRefs)
+		if err != nil || cmd.ServerID != "mcp-contract" || cmd.Command != "python3" || env["TOKEN"] != "env://MCP_TOKEN" {
 			t.Fatalf("server command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Server: &mcpevents.MCPServer{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: append([]mcpevents.EnvironmentVariable(nil), cmd.Env...)}}, nil)
+		result.Set(mcpevents.CreateServerResult{Server: &mcpevents.MCPServer{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, EnvironmentRefs: append([]mcpevents.EnvironmentReference(nil), cmd.EnvironmentRefs...)}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, func(cmd mcpevents.CreateCapabilityCommand, result magicevent.Result) {
 		schema := cmd.Schema.Map()
 		if cmd.CapabilityID != "cap-contract" || cmd.ServerID != "mcp-contract" || schema["type"] != "object" {
 			t.Fatalf("capability command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: cmd.CapabilityID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema.Clone()}}, nil)
+		result.Set(mcpevents.CreateCapabilityResult{Capability: &mcpmodel.Capability{ID: cmd.CapabilityID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema.Clone()}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(cmd mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
 		query := cmd.Query
 		if query.ServerID != "mcp-contract" || query.Kind != "tool" {
 			t.Fatalf("capability query = %+v", query)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}}, nil)
+		result.Set(mcpevents.ListCapabilitiesResult{Capabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}, RegistryRevision: "registry-1"}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandValidateCapability, soulevents.CommandDestination, func(cmd soulevents.ValidateCapabilitySelectionCommand, result magicevent.Result) {
 		if cmd.SoulID != "soul-contract" || len(cmd.CapabilityRefs) != 1 || cmd.CapabilityRefs[0] != "cap-contract" {
@@ -217,7 +217,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 	if _, err := CreateSkill(ctx, rawHub, workorchmanagementcontract.SkillMutation{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if _, err := CreateMCPServer(ctx, rawHub, workorchmanagementcontract.MCPServerMutation{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
+	if _, err := CreateMCPServer(ctx, rawHub, workorchmanagementcontract.MCPServerMutation{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", EnvironmentRefs: map[string]string{"TOKEN": "env://MCP_TOKEN"}}); err != nil {
 		t.Fatalf("CreateMCPServer: %v", err)
 	}
 	if _, err := CreateMCPCapability(ctx, rawHub, workorchmanagementcontract.MCPCapabilityMutation{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
@@ -231,6 +231,39 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 	}
 }
 
+func TestMCPPagedReadsRejectCursorCyclesAndRevisionDrift(t *testing.T) {
+	t.Run("capability cursor cycle", func(t *testing.T) {
+		hub := magicevent.NewHub(16)
+		call := 0
+		subscribeMagicCommand(t, hub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(_ mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
+			cursors := []common.MCPCapabilityID{"cursor-a", "cursor-b", "cursor-a"}
+			result.Set(mcpevents.ListCapabilitiesResult{NextCursor: cursors[call], RegistryRevision: "registry-1"}, nil)
+			call++
+		})
+		if _, err := ListMCPCapabilities(context.Background(), hub, contextregistrycore.MCPCapabilityQuery{}); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("cursor cycle err = %v, want conflict", err)
+		}
+		if call != 3 {
+			t.Fatalf("cursor cycle calls = %d, want 3", call)
+		}
+	})
+
+	t.Run("server revision drift", func(t *testing.T) {
+		hub := magicevent.NewHub(16)
+		call := 0
+		subscribeMagicCommand(t, hub, mcpevents.TopicMCPCommandListServers, mcpevents.CommandDestination, func(_ mcpevents.ListServersCommand, result magicevent.Result) {
+			call++
+			result.Set(mcpevents.ListServersResult{NextCursor: common.MCPServerID("cursor-a"), RegistryRevision: "registry-" + string(rune('0'+call))}, nil)
+		})
+		if _, err := ListMCPServers(context.Background(), hub); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("revision drift err = %v, want conflict", err)
+		}
+		if call != 2 {
+			t.Fatalf("revision drift calls = %d, want 2", call)
+		}
+	})
+}
+
 func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
@@ -240,7 +273,7 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 		if got := string(cmd.ServerID); got != "mcp-stdio" {
 			t.Fatalf("server id = %v, want mcp-stdio", got)
 		}
-		result.Set(mcpevents.MCPCommandResult{
+		result.Set(mcpevents.GetServerResult{
 			Server: &mcpevents.MCPServer{
 				ID:                    "mcp-stdio",
 				Name:                  "stdio verification",
@@ -248,7 +281,7 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 				Endpoint:              "/tmp/mcp_stdio_helper.py",
 				Command:               "python3",
 				Args:                  []string{"helper.py"},
-				Env:                   []mcpevents.EnvironmentVariable{{Name: "TOKEN", Value: "secret"}},
+				EnvironmentRefs:       []mcpevents.EnvironmentReference{{Name: "TOKEN", Reference: "env://MCP_TOKEN"}},
 				Enabled:               true,
 				AllowedTools:          []string{"repo.summary"},
 				AllowedResources:      []string{"workspace://acceptance"},
@@ -267,8 +300,8 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 	if server.ID != "mcp-stdio" || server.Name != "stdio verification" || server.Transport != "stdio" {
 		t.Fatalf("server view = %#v", server)
 	}
-	if server.Env["TOKEN"] == "secret" {
-		t.Fatalf("server env was not redacted: %#v", server.Env)
+	if server.EnvironmentRefs["TOKEN"] != "env://MCP_TOKEN" {
+		t.Fatalf("server environment reference = %#v", server.EnvironmentRefs)
 	}
 
 	tools, err := ListMCPServerTools(ctx, rawHub, "mcp-stdio")

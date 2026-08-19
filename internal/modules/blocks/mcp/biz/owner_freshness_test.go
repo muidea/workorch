@@ -116,6 +116,18 @@ func (g *mcpFreshnessServerGetter) ListCapabilities(context.Context, registryeve
 	return capabilities, nil
 }
 
+func (g *mcpFreshnessServerGetter) RegistrySnapshot(ctx context.Context) (*mcpmodel.RegistrySnapshot, string, error) {
+	servers, err := g.ListServers(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	capabilities, err := g.ListCapabilities(ctx, registryevents.CapabilityQuery{})
+	if err != nil {
+		return nil, "", err
+	}
+	return testMCPRegistrySnapshot(servers, capabilities)
+}
+
 func sendMCPFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) mcpevents.ProbeRuntimeOperationFeasibilityResult {
 	t.Helper()
 	serverID := "server-a"

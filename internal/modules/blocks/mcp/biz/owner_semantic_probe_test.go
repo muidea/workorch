@@ -480,3 +480,15 @@ func (g *semanticProbeMCPGetter) ListCapabilities(context.Context, registryevent
 	}
 	return []*mcpmodel.Capability{mcpmodel.CloneCapability(g.capability)}, nil
 }
+
+func (g *semanticProbeMCPGetter) RegistrySnapshot(ctx context.Context) (*mcpmodel.RegistrySnapshot, string, error) {
+	servers, err := g.ListServers(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	capabilities, err := g.ListCapabilities(ctx, registryevents.CapabilityQuery{})
+	if err != nil {
+		return nil, "", err
+	}
+	return testMCPRegistrySnapshot(servers, capabilities)
+}

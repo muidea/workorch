@@ -997,10 +997,20 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	}`, http.StatusCreated)
 	postAndExpect(t, mux, "/api/v1/workorch/mcp/servers", `{
 			"id":"mcp-local-context",
+			"name":"invalid plaintext secret",
+			"transport":"stdio",
+			"command":"context-helper",
+			"environmentRefs":{"TOKEN":"secret-value"},
+			"enabled":true
+		}`, http.StatusBadRequest)
+	postAndExpect(t, mux, "/api/v1/workorch/mcp/servers", `{
+			"id":"mcp-local-context",
 			"name":"local context",
 			"transport":"stdio",
+			"command":"context-helper",
+			"environmentRefs":{"TOKEN":"env://MCP_HTTP_TOKEN"},
 			"enabled":true,
-			"allowedTools":["repo.summary"],
+			"allowedTools":["repo.summary","repo.details"],
 			"allowedResources":["file://README.md"],
 			"allowedPrompts":["delivery.plan"]
 		}`, http.StatusCreated)
@@ -1009,7 +1019,7 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 			"transport":"stdio",
 			"endpoint":".workorch-data/system/mcp-endpoints/mcp-local-context/context-helper.py",
 			"enabled":true,
-			"allowedTools":["repo.summary"],
+			"allowedTools":["repo.summary","repo.details"],
 			"allowedResources":["file://README.md"],
 			"allowedPrompts":["delivery.plan"],
 			"sessionPolicy":"transient"
@@ -1074,6 +1084,12 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 		if spec.wantAbsent != "" && strings.Contains(rec.Body.String(), spec.wantAbsent) {
 			t.Fatalf("%s body = %s, want to not contain %q", spec.path, rec.Body.String(), spec.wantAbsent)
 		}
+	}
+	serverReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/mcp/servers/mcp-local-context", nil)
+	serverRec := httptest.NewRecorder()
+	mux.ServeHTTP(serverRec, serverReq)
+	if serverRec.Code != http.StatusOK || !strings.Contains(serverRec.Body.String(), `"TOKEN": "env://MCP_HTTP_TOKEN"`) || strings.Contains(serverRec.Body.String(), "secret-value") {
+		t.Fatalf("MCP environment reference response = %d/%s", serverRec.Code, serverRec.Body.String())
 	}
 }
 

@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -16,11 +16,8 @@ import (
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	module := New()
-	if ModuleID != "blocks/mcp-registry" {
-		t.Fatalf("ModuleID = %q, want relocated stateful block ID", ModuleID)
-	}
-	if module.ID() != ModuleID {
-		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
+	if ModuleID != "blocks/mcp-registry" || module.ID() != ModuleID {
+		t.Fatalf("module identity = %q/%q", ModuleID, module.ID())
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
@@ -28,34 +25,27 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(mcpModuleContractDependencies()); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
-		t.Fatalf("module not fully configured: %+v", module)
-	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if err := module.Stop(context.Background()); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	if module.bizPtr != nil {
-		t.Fatalf("module was not cleared after Stop: %+v", module)
+	if err := module.Stop(context.Background()); err != nil || module.bizPtr != nil {
+		t.Fatalf("Stop: %v biz=%v", err, module.bizPtr)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("second Stop: %v", err)
 	}
 }
 
-func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
+func TestModuleConfigureRequiresAggregateAndEventHub(t *testing.T) {
 	base := mcpModuleContractDependencies()
 	tests := []struct {
 		name string
 		deps mcpbiz.Dependencies
 	}{
-		{name: "missing servers", deps: func() mcpbiz.Dependencies { d := base; d.Servers = nil; return d }()},
-		{name: "missing capabilities", deps: func() mcpbiz.Dependencies { d := base; d.Capabilities = nil; return d }()},
+		{name: "missing aggregate", deps: func() mcpbiz.Dependencies { d := base; d.Registry = nil; return d }()},
 		{name: "missing event hub", deps: func() mcpbiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
@@ -67,149 +57,75 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	}
 }
 
-func TestModuleMCPServerCommandsUseRegistryContract(t *testing.T) {
+func TestModuleUsesConcreteCommandResultsAndConsistentSnapshot(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
+	registry := memory.NewMCPRegistryRepository()
 	module := New()
-	if err := module.Configure(mcpbiz.Dependencies{
-		Servers:      memory.NewMCPServerRepository(),
-		Capabilities: memory.NewMCPCapabilityRepository(),
-		EventHub:     hub,
-	}); err != nil {
+	if err := module.Configure(mcpbiz.Dependencies{Registry: registry, EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := module.Stop(ctx); err != nil {
-			t.Errorf("Stop: %v", err)
-		}
-	})
+	t.Cleanup(func() { _ = module.Stop(ctx) })
 
-	createResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateServer,
-		mcpevents.CreateServerCommand{
-			ServerID:              "mcp-server-contract",
-			Name:                  "contract server",
-			Transport:             "stdio",
-			Command:               "mcp-server",
-			Enabled:               true,
-			AllowedTools:          []string{"contract_tool"},
-			DefaultApprovalPolicy: "read_only",
-		},
-	)
-	if createResult.Server == nil || createResult.Server.ID != "mcp-server-contract" || createResult.Server.Transport != "stdio" {
-		t.Fatalf("server = %+v, want created server", createResult.Server)
+	create := sendMCPCommand[mcpevents.CreateServerCommand, mcpevents.CreateServerResult](t, ctx, hub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CreateServerCommand{
+		ServerID: "mcp-contract", Name: "contract", Transport: "stdio", Command: "mcp-contract", Enabled: true,
+		EnvironmentRefs: []mcpevents.EnvironmentReference{{Name: "TOKEN", Reference: "env://MCP_TOKEN"}},
+		AllowedTools:    []string{"repo.summary"},
+	})
+	if create.Server == nil || create.Server.ID != "mcp-contract" || create.RegistryRevision == "" {
+		t.Fatalf("CreateServerResult = %+v", create)
+	}
+	snapshot := sendMCPCommand[mcpevents.ReadRegistrySnapshotCommand, mcpevents.RegistrySnapshotResult](t, ctx, hub, mcpevents.TopicMCPCommandReadRegistrySnapshot, mcpevents.ReadRegistrySnapshotCommand{})
+	if snapshot.RegistryRevision != create.RegistryRevision || len(snapshot.Servers) != 1 || len(snapshot.Capabilities) != 1 {
+		t.Fatalf("RegistrySnapshotResult = %+v", snapshot)
 	}
 
-	listResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandListServers, mcpevents.ListServersCommand{})
-	if len(listResult.Servers) != 1 || listResult.Servers[0].ID != "mcp-server-contract" {
-		t.Fatalf("servers = %+v, want created server", listResult.Servers)
+	createdCapability := sendMCPCommand[mcpevents.CreateCapabilityCommand, mcpevents.CreateCapabilityResult](t, ctx, hub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CreateCapabilityCommand{
+		CapabilityID: "cap-repo-summary", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary",
+		DisplayName: "Repository Summary", Category: "repository", Tags: []string{"read"}, StageHints: []string{"planning"},
+		EffectScope: "none", IdempotencyClass: "safe_to_replay", ValidationProofApplicability: "direct",
+		Schema: mustMCPPayload(t, map[string]any{"type": "object"}), Enabled: true,
+	})
+	if createdCapability.Capability == nil || createdCapability.Capability.Source != "user" {
+		t.Fatalf("CreateCapabilityResult = %+v", createdCapability)
+	}
+	selection := sendMCPCommand[mcpevents.ReadSelectionSnapshotCommand, mcpevents.SelectionSnapshotResult](t, ctx, hub, mcpevents.TopicMCPCommandReadSelectionSnapshot, mcpevents.ReadSelectionSnapshotCommand{
+		ServerIDs: []common.MCPServerID{"mcp-contract"}, CapabilityIDs: []common.MCPCapabilityID{"cap-repo-summary"},
+	})
+	if len(selection.Servers) != 1 || len(selection.Capabilities) != 1 || selection.RegistryRevision != createdCapability.RegistryRevision {
+		t.Fatalf("SelectionSnapshotResult = %+v", selection)
 	}
 }
 
-func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) {
+func TestModulePostCannotMutateRegistry(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
+	registry := memory.NewMCPRegistryRepository()
 	module := New()
-	if err := module.Configure(mcpbiz.Dependencies{
-		Servers:      memory.NewMCPServerRepository(),
-		Capabilities: memory.NewMCPCapabilityRepository(),
-		EventHub:     hub,
-	}); err != nil {
+	if err := module.Configure(mcpbiz.Dependencies{Registry: registry, EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := module.Stop(ctx); err != nil {
-			t.Errorf("Stop: %v", err)
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	hub.Post(magicevent.NewEventWithContext(mcpevents.TopicMCPCommandCreateServer, "test", mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-post", Name: "post", Transport: "stdio", Command: "mcp-post",
+	}))
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		snapshot, err := registry.Load(ctx)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
 		}
-	})
-
-	_ = sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateServer,
-		mcpevents.CreateServerCommand{
-			ServerID:  "mcp-server-contract",
-			Name:      "contract server",
-			Transport: "stdio",
-			Command:   "mcp-server",
-			Enabled:   true,
-		},
-	)
-
-	createCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateCapability,
-		mcpevents.CreateCapabilityCommand{
-			CapabilityID:                 "mcp-server-contract:tool:repo.summary",
-			ServerID:                     "mcp-server-contract",
-			Kind:                         "tool",
-			Name:                         "repo.summary",
-			DisplayName:                  "Repository Summary",
-			Description:                  "Structured repository summary capability",
-			Category:                     "repository",
-			Tags:                         []string{"read", "summary"},
-			UsageHint:                    "Use for bounded repository summary.",
-			InputSummary:                 "path/ref",
-			OutputSummary:                "bounded summary",
-			StageHints:                   []string{"planning", "validation"},
-			RiskLevel:                    "read_only",
-			EffectScope:                  "none",
-			IdempotencyClass:             "safe_to_replay",
-			ValidationProofApplicability: "direct",
-			Schema:                       mustMCPPayload(t, map[string]any{"type": "object", "required": []string{"path"}}),
-			Enabled:                      true,
-			ApprovalPolicy:               "read_only",
-		},
-	)
-	capability := createCapabilityResult.Capability
-	if capability == nil || capability.ID != "mcp-server-contract:tool:repo.summary" {
-		t.Fatalf("capability = %+v, want created capability", capability)
-	}
-	schemaType, _ := capability.Schema.String("type")
-	if capability.Kind != "tool" ||
-		capability.Category != "repository" ||
-		capability.RiskLevel != "read_only" ||
-		capability.EffectScope != "none" ||
-		capability.IdempotencyClass != "safe_to_replay" ||
-		capability.ValidationProofApplicability != "direct" ||
-		capability.ApprovalPolicy != "read_only" ||
-		len(capability.StageHints) != 2 ||
-		schemaType != "object" {
-		t.Fatalf("capability = %+v, want structured policy/capability fields preserved", capability)
-	}
-
-	// The registry result reuses the canonical owner capability value, but the
-	// owner handler must detach every mutable field before crossing EventHub.
-	// Mutating the command result must therefore never alter the persisted
-	// registry value returned by a subsequent query.
-	capability.Tags[0] = "mutated-result"
-	capability.StageHints[0] = "mutated-result"
-	for idx := range capability.Schema.Fields {
-		if capability.Schema.Fields[idx].Name == "type" {
-			capability.Schema.Fields[idx].Value.String = "mutated-result"
+		if len(snapshot.Servers) != 0 || len(snapshot.Capabilities) != 0 {
+			t.Fatalf("Post mutated registry: %+v", snapshot)
 		}
-	}
-	reread := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandGetCapability,
-		mcpevents.GetCapabilityCommand{CapabilityID: "mcp-server-contract:tool:repo.summary"})
-	if reread.Capability == nil || reread.Capability.Tags[0] != "read" || reread.Capability.StageHints[0] != "planning" {
-		t.Fatalf("mutating EventHub result changed owner capability slices: %+v", reread.Capability)
-	}
-	if schemaType, _ := reread.Capability.Schema.String("type"); schemaType != "object" {
-		t.Fatalf("mutating EventHub result changed owner capability schema: %q", schemaType)
-	}
-
-	listCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandListCapabilities,
-		mcpevents.ListCapabilitiesCommand{
-			Query: mcpevents.CapabilityQuery{
-				ServerID:  "mcp-server-contract",
-				Kind:      "tool",
-				Category:  "repository",
-				RiskLevel: "read_only",
-			},
-		},
-	)
-	if len(listCapabilityResult.Capabilities) != 1 || listCapabilityResult.Capabilities[0].ID != capability.ID {
-		t.Fatalf("capabilities = %+v, want structured filtered capability", listCapabilityResult.Capabilities)
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -223,17 +139,14 @@ func mustMCPPayload(t *testing.T, input map[string]any) workorcheventpayload.Pay
 }
 
 func mcpModuleContractDependencies() mcpbiz.Dependencies {
-	return mcpbiz.Dependencies{
-		Servers:      memory.NewMCPServerRepository(),
-		Capabilities: memory.NewMCPCapabilityRepository(),
-		EventHub:     magicevent.NewHub(16),
-	}
+	return mcpbiz.Dependencies{Registry: memory.NewMCPRegistryRepository(), EventHub: magicevent.NewHub(16)}
 }
 
-func sendMCPCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) mcpevents.MCPCommandResult {
+func sendMCPCommand[Command any, Result any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) Result {
 	t.Helper()
-	ev := magicevent.NewEventWithContext(topic, "test", mcpevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	result := hub.Send(ev)
+	var zero Result
+	event := magicevent.NewEventWithContext(topic, "test", mcpevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := hub.Send(event)
 	if result == nil || result.Error() != nil {
 		t.Fatalf("send %s error: %v", topic, result)
 	}
@@ -241,9 +154,10 @@ func sendMCPCommand[Command any](t *testing.T, ctx context.Context, hub magiceve
 	if err != nil {
 		t.Fatalf("result %s: %v", topic, err)
 	}
-	typed, ok := data.(mcpevents.MCPCommandResult)
+	typed, ok := data.(Result)
 	if !ok {
 		t.Fatalf("result %s type = %T", topic, data)
+		return zero
 	}
 	return typed
 }

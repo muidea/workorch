@@ -11,13 +11,13 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServerMutation{
-		ID:           "mcp-env-preserve",
-		Name:         "env preserve",
-		Transport:    "stdio",
-		Command:      "tool",
-		Env:          map[string]string{"SECRET": "value"},
-		Enabled:      true,
-		AllowedTools: []string{"lookup"},
+		ID:              "mcp-env-preserve",
+		Name:            "env preserve",
+		Transport:       "stdio",
+		Command:         "tool",
+		EnvironmentRefs: map[string]string{"SECRET": "env://MCP_SECRET"},
+		Enabled:         true,
+		AllowedTools:    []string{"lookup"},
 	}); err != nil {
 		t.Fatalf("CreateMCPServerWithBackend: %v", err)
 	}
@@ -43,8 +43,8 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get server: %v", err)
 	}
-	if item.Env["SECRET"] != "value" {
-		t.Fatalf("env = %+v, want preserved secret", item.Env)
+	if item.Env["SECRET"] != "env://MCP_SECRET" {
+		t.Fatalf("environment refs = %+v, want preserved reference", item.Env)
 	}
 	if err := session.Close(ctx); err != nil {
 		t.Fatalf("close session: %v", err)
@@ -55,24 +55,24 @@ func TestUpdateMCPServerAllowsExplicitEmptyEnvClear(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServerMutation{
-		ID:           "mcp-env-clear",
-		Name:         "env clear",
-		Transport:    "stdio",
-		Command:      "tool",
-		Env:          map[string]string{"SECRET": "value"},
-		Enabled:      true,
-		AllowedTools: []string{"lookup"},
+		ID:              "mcp-env-clear",
+		Name:            "env clear",
+		Transport:       "stdio",
+		Command:         "tool",
+		EnvironmentRefs: map[string]string{"SECRET": "env://MCP_SECRET"},
+		Enabled:         true,
+		AllowedTools:    []string{"lookup"},
 	}); err != nil {
 		t.Fatalf("CreateMCPServerWithBackend: %v", err)
 	}
 	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-clear", workorchmanagementcontract.MCPServerMutation{
-		ID:           "mcp-env-clear",
-		Name:         "env clear updated",
-		Transport:    "stdio",
-		Command:      "tool",
-		Env:          map[string]string{},
-		Enabled:      true,
-		AllowedTools: []string{"lookup"},
+		ID:              "mcp-env-clear",
+		Name:            "env clear updated",
+		Transport:       "stdio",
+		Command:         "tool",
+		EnvironmentRefs: map[string]string{},
+		Enabled:         true,
+		AllowedTools:    []string{"lookup"},
 	}); err != nil {
 		t.Fatalf("UpdateMCPServerWithBackend: %v", err)
 	}

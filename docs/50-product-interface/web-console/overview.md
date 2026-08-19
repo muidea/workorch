@@ -74,7 +74,9 @@ Decision UI 中的历史 `replan` 选择会由服务端合同规范化；它不�
 ### Runtime Control
 
 `RuntimeControlPage` 管理 MCP Registry 的 server/capability metadata，并按用户操作读取 tools、resources、prompts
-发现结果。它不直接发起 Runtime MCP operation；具体执行仍由 sealed dispatch 进入 `blocks/mcp` owner。
+发现结果。Server 表单只接受 `KEY=env://ENV_NAME` 或受支持 workspace placeholder 形式的 environment reference，不接收
+或回显 credential 明文；Capability 使用 `enabled` 作为唯一可用性字段并展示 owner provenance。它不直接发起 Runtime MCP
+operation；具体执行仍由 sealed dispatch 进入 `blocks/mcp` owner。
 
 ### Configuration
 

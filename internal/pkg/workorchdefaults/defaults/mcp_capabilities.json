@@ -31,8 +31,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "direct",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_sync",
@@ -66,8 +65,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "direct",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_definition",
@@ -113,8 +111,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "direct",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_hover",
@@ -160,8 +157,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "direct",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_references",
@@ -208,8 +204,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "direct",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_diagnostics",
@@ -245,8 +240,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "auxiliary",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_status",
@@ -277,8 +271,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "auxiliary",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_shutdown",
@@ -315,8 +308,7 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "auxiliary",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   },
   {
     "id": "mcp-lsp-bridge:tool:lsp_repair",
@@ -352,7 +344,6 @@
     "idempotencyClass": "safe_to_replay",
     "validationProofApplicability": "auxiliary",
     "enabled": true,
-    "approvalPolicy": "auto",
-    "status": "active"
+    "approvalPolicy": "auto"
   }
 ]

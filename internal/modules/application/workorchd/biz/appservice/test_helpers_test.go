@@ -514,12 +514,12 @@ func sendAppserviceTestCommand[Command any, Result any](ctx context.Context, hub
 }
 
 func createTestMCPServerWithExports(ctx context.Context, exports testkit.Exports, cmd mcpevents.CreateServerCommand) error {
-	_, err := sendAppserviceTestCommand[mcpevents.CreateServerCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, cmd)
+	_, err := sendAppserviceTestCommand[mcpevents.CreateServerCommand, mcpevents.CreateServerResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, cmd)
 	return err
 }
 
 func updateTestMCPCapabilityWithExports(ctx context.Context, exports testkit.Exports, cmd mcpevents.UpdateCapabilityCommand) error {
-	_, err := sendAppserviceTestCommand[mcpevents.UpdateCapabilityCommand, mcpevents.MCPCommandResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, cmd)
+	_, err := sendAppserviceTestCommand[mcpevents.UpdateCapabilityCommand, mcpevents.UpdateCapabilityResult](ctx, exports.Infrastructure.CommandHub, mcpevents.TopicMCPCommandUpdateCapability, mcpevents.CommandDestination, cmd)
 	return err
 }
 

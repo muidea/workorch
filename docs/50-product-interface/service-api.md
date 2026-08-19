@@ -163,7 +163,10 @@ resolution. Runtime governance resolution returns through the typed Orchestrator
 Registry requests carry declarative definitions only. MCP Registry owns catalog/selection metadata; the MCP capability block
 owns concrete Runtime execution. Capability create/update/read DTOs expose the Registry-owned
 `validationProofApplicability` value (`direct | auxiliary | not_declared`); technical Runtime readiness remains an MCP execution
-fact and is not writable through this API. Secrets and large content must not be copied into EventHub notifications or projections.
+fact and is not writable through this API. Server DTOs expose `environmentRefs`, never environment values; supported refs are
+resolved only by MCP execution. Plaintext credentials are invalid and must not be copied into EventHub notifications,
+projections or logs. Capability availability uses `enabled` only; provenance (`source`, `sourceRef`, `revision`) is owner-issued
+read metadata and is not accepted as mutation authority.
 
 ### Setup Draft, Events And Raw Content
 

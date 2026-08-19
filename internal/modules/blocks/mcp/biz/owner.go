@@ -321,10 +321,17 @@ func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontrac
 			Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
 			InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
 			RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
-			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: mcpCapabilityAvailability(item.Enabled),
 		}))
 	}
 	return ret
+}
+
+func mcpCapabilityAvailability(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 func runtimeMCPOperationPolicies(capabilities []runtimecontract.RuntimeMCPCapabilityContext, operationKinds []string) []runtimecontract.RuntimeOperationPolicyFact {
@@ -737,44 +744,6 @@ type mcpEventServerGetter struct {
 	hub magicevent.Hub
 }
 
-func (g mcpEventServerGetter) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
-	if g.hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	ev := magicevent.NewEventWithContext(
-		registryevents.TopicMCPCommandListServers,
-		ModuleID,
-		registryevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		registryevents.ListServersCommand{},
-	)
-	result := g.hub.Send(ev)
-	if result == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	if err := result.Error(); err != nil {
-		return nil, err
-	}
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		return nil, resultErr
-	}
-	response, ok := data.(registryevents.MCPCommandResult)
-	if !ok {
-		return nil, common.ErrInvalidArgument
-	}
-	servers := make([]*mcpmodel.Server, 0, len(response.Servers))
-	for _, item := range response.Servers {
-		server, err := item.Model()
-		if err != nil {
-			return nil, err
-		}
-		servers = append(servers, server)
-	}
-	return servers, nil
-}
-
 func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
 	if g.hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
@@ -798,32 +767,40 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 	if resultErr != nil {
 		return nil, resultErr
 	}
-	response, ok := data.(registryevents.MCPCommandResult)
+	response, ok := data.(registryevents.GetServerResult)
 	if !ok || response.Server == nil {
 		return nil, common.ErrNotFound
 	}
 	return response.Server.Model()
 }
 
-func (g mcpEventServerGetter) ListCapabilities(ctx context.Context, query registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+func (g mcpEventServerGetter) RegistrySnapshot(ctx context.Context) (*mcpmodel.RegistrySnapshot, string, error) {
 	if g.hub == nil {
-		return nil, common.ErrInvalidArgument
+		return nil, "", common.ErrInvalidArgument
 	}
-	ev := magicevent.NewEventWithContext(registryevents.TopicMCPCommandListCapabilities, ModuleID, registryevents.CommandDestination, magicevent.NewHeader(), ctx, registryevents.ListCapabilitiesCommand{Query: query})
+	ev := magicevent.NewEventWithContext(registryevents.TopicMCPCommandReadRegistrySnapshot, ModuleID, registryevents.CommandDestination, magicevent.NewHeader(), ctx, registryevents.ReadRegistrySnapshotCommand{})
 	result := g.hub.Send(ev)
 	if result == nil {
-		return nil, common.ErrInvalidArgument
+		return nil, "", common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	data, resultErr := result.Get()
 	if resultErr != nil {
-		return nil, resultErr
+		return nil, "", resultErr
 	}
-	response, ok := data.(registryevents.MCPCommandResult)
+	response, ok := data.(registryevents.RegistrySnapshotResult)
 	if !ok {
-		return nil, common.ErrInvalidArgument
+		return nil, "", common.ErrInvalidArgument
 	}
-	return mcpmodel.CloneCapabilities(response.Capabilities), nil
+	servers := make([]*mcpmodel.Server, 0, len(response.Servers))
+	for _, item := range response.Servers {
+		server, err := item.Model()
+		if err != nil {
+			return nil, "", err
+		}
+		servers = append(servers, server)
+	}
+	return &mcpmodel.RegistrySnapshot{Servers: servers, Capabilities: mcpmodel.CloneCapabilities(response.Capabilities)}, response.RegistryRevision, nil
 }

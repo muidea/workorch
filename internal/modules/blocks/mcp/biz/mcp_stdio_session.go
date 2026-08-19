@@ -17,6 +17,7 @@ import (
 	"time"
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
@@ -239,7 +240,11 @@ func stdioLaunchConfig(server *mcpmodel.Server, request RuntimeOperationRequest)
 	if command == "" {
 		return "", nil, nil, fmt.Errorf("%w: stdio MCP server requires endpoint or command", common.ErrInvalidArgument)
 	}
-	return command, expandWorkspaceStringSlice(server.Args, request), cloneStringEnvForWorkspace(server.Env, request), nil
+	env, err := resolveEnvironmentReferences(server.Env, request)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return command, expandWorkspaceStringSlice(server.Args, request), env, nil
 }
 
 func stdioSessionKey(workspaceID common.WorkspaceID, serverID string) string {
@@ -292,19 +297,31 @@ func cloneStringEnv(input map[string]string) map[string]string {
 	return ret
 }
 
-func cloneStringEnvForWorkspace(input map[string]string, request RuntimeOperationRequest) map[string]string {
+func resolveEnvironmentReferences(input map[string]string, request RuntimeOperationRequest) (map[string]string, error) {
 	if input == nil {
-		return nil
+		return nil, nil
 	}
 	ret := make(map[string]string, len(input))
-	for key, value := range input {
+	for key, reference := range input {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		ret[key] = expandWorkspaceString(value, request)
+		reference = strings.TrimSpace(reference)
+		if !registryevents.ValidEnvironmentReference(reference) {
+			return nil, fmt.Errorf("%w: invalid MCP environment reference", common.ErrInvalidArgument)
+		}
+		if name, ok := strings.CutPrefix(reference, "env://"); ok {
+			value, exists := os.LookupEnv(name)
+			if !exists {
+				return nil, fmt.Errorf("%w: MCP environment reference %q is unavailable", common.ErrNotFound, reference)
+			}
+			ret[key] = value
+			continue
+		}
+		ret[key] = expandWorkspaceString(reference, request)
 	}
-	return ret
+	return ret, nil
 }
 
 func expandWorkspaceStringSlice(input []string, request RuntimeOperationRequest) []string {

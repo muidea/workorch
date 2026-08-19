@@ -19,7 +19,7 @@ func (m *Module) configure(d mcpbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if d.Servers == nil || d.Capabilities == nil {
+	if d.Registry == nil {
 		return common.ErrInvalidArgument
 	}
 	if d.EventHub == nil {

@@ -48,7 +48,6 @@ type embeddedMCPCapability struct {
 	URI                          string         `json:"uri,omitempty"`
 	Enabled                      bool           `json:"enabled"`
 	ApprovalPolicy               string         `json:"approvalPolicy,omitempty"`
-	Status                       string         `json:"status,omitempty"`
 }
 
 func loadEmbeddedTemplates() ([]workorchmanagementcontract.WorkspaceTemplate, error) {
@@ -202,7 +201,7 @@ func BuiltinMCPServerDefaults() ([]workorchmanagementcontract.MCPServer, error) 
 		item.Endpoint = strings.TrimSpace(item.Endpoint)
 		item.Command = strings.TrimSpace(item.Command)
 		item.Args = filterEmptyStrings(item.Args)
-		item.Env = cloneStringMap(item.Env)
+		item.EnvironmentRefs = cloneStringMap(item.EnvironmentRefs)
 		item.AllowedTools = filterEmptyStrings(item.AllowedTools)
 		item.AllowedResources = filterEmptyStrings(item.AllowedResources)
 		item.AllowedPrompts = filterEmptyStrings(item.AllowedPrompts)
@@ -230,7 +229,7 @@ func BuiltinMCPCapabilityDefaults() ([]workorchmanagementcontract.MCPCapability,
 			OutputSummary: strings.TrimSpace(item.OutputSummary), StageHints: filterEmptyStrings(item.StageHints), RiskLevel: strings.TrimSpace(item.RiskLevel),
 			EffectScope: strings.TrimSpace(item.EffectScope), IdempotencyClass: strings.TrimSpace(item.IdempotencyClass), ValidationProofApplicability: strings.TrimSpace(item.ValidationProofApplicability),
 			Schema: cloneContextMap(item.Schema), URI: strings.TrimSpace(item.URI), Enabled: item.Enabled,
-			ApprovalPolicy: strings.TrimSpace(item.ApprovalPolicy), Status: strings.TrimSpace(item.Status),
+			ApprovalPolicy: strings.TrimSpace(item.ApprovalPolicy),
 		})
 	}
 	return defaults, nil

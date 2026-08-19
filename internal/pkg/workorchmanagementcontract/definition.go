@@ -186,7 +186,7 @@ type MCPServer struct {
 	Endpoint              string            `json:"endpoint,omitempty"`
 	Command               string            `json:"command,omitempty"`
 	Args                  []string          `json:"args,omitempty"`
-	Env                   map[string]string `json:"env,omitempty"`
+	EnvironmentRefs       map[string]string `json:"environmentRefs,omitempty"`
 	Enabled               bool              `json:"enabled"`
 	AllowedTools          []string          `json:"allowedTools,omitempty"`
 	AllowedResources      []string          `json:"allowedResources,omitempty"`
@@ -203,7 +203,7 @@ type MCPServerMutation struct {
 	Endpoint              string            `json:"endpoint,omitempty"`
 	Command               string            `json:"command,omitempty"`
 	Args                  []string          `json:"args,omitempty"`
-	Env                   map[string]string `json:"env,omitempty"`
+	EnvironmentRefs       map[string]string `json:"environmentRefs,omitempty"`
 	Enabled               bool              `json:"enabled"`
 	AllowedTools          []string          `json:"allowedTools,omitempty"`
 	AllowedResources      []string          `json:"allowedResources,omitempty"`
@@ -234,7 +234,9 @@ type MCPCapability struct {
 	URI                          string         `json:"uri,omitempty"`
 	Enabled                      bool           `json:"enabled"`
 	ApprovalPolicy               string         `json:"approvalPolicy,omitempty"`
-	Status                       string         `json:"status,omitempty"`
+	Source                       string         `json:"source"`
+	SourceRef                    string         `json:"sourceRef"`
+	Revision                     uint64         `json:"revision"`
 }
 
 type MCPCapabilityMutation struct {

@@ -11,6 +11,8 @@ func Contracts() []eventcontract.Contract {
 		TopicMCPCommandListServers,
 		TopicMCPCommandGetCapability,
 		TopicMCPCommandListCapabilities,
+		TopicMCPCommandReadRegistrySnapshot,
+		TopicMCPCommandReadSelectionSnapshot,
 	)...)
 	ret = append(ret, eventcontract.Build(contractOwner, eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicMCPCommandCreateServer,

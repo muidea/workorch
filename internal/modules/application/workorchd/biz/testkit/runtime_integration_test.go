@@ -583,12 +583,17 @@ func TestNewWithBackendFileStoresSystemRepositoriesUnderSystemDirectory(t *testi
 	if _, err := os.Stat(filepath.Join(dataDir, "system", "soul.json")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected root soul.json err=%v", err)
 	}
-	for _, fileName := range []string{"skill.json", "mcp_server.json"} {
+	for _, fileName := range []string{"skill.json", "mcp_registry.json"} {
 		if _, err := os.Stat(filepath.Join(dataDir, "system", fileName)); err != nil {
 			t.Fatalf("expected system-scoped %s: %v", fileName, err)
 		}
 		if _, err := os.Stat(filepath.Join(dataDir, fileName)); !os.IsNotExist(err) {
 			t.Fatalf("unexpected root-scoped %s err=%v", fileName, err)
+		}
+	}
+	for _, legacyFileName := range []string{"mcp_server.json", "mcp_capability.json"} {
+		if _, err := os.Stat(filepath.Join(dataDir, "system", legacyFileName)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected legacy MCP registry file %s err=%v", legacyFileName, err)
 		}
 	}
 }

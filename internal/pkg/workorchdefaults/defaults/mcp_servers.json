@@ -5,7 +5,7 @@
     "transport": "stdio",
     "command": "lsp-bridge",
     "args": [],
-    "env": {
+    "environmentRefs": {
       "LSP_BRIDGE_CONFIG": "{workspaceManagedConfig:lsp-bridge/mcp-config.json}",
       "WORKORCH_WORKSPACE_ROOT": "{workspaceDeliverableDirectory}"
     },

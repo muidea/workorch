@@ -564,7 +564,7 @@ export type MCPServer = {
   endpoint?: string;
   command?: string;
   args?: string[];
-  env?: Record<string, string>;
+  environmentRefs?: Record<string, string>;
   enabled: boolean;
   allowedTools?: string[];
   allowedResources?: string[];
@@ -603,12 +603,19 @@ export type MCPCapability = {
   outputSummary?: string;
   stageHints?: string[];
   riskLevel?: string;
+  effectScope?: string;
+  idempotencyClass?: string;
+  validationProofApplicability?: string;
   schema?: Record<string, unknown>;
   uri?: string;
   enabled: boolean;
   approvalPolicy?: string;
-  status?: string;
+  source: string;
+  sourceRef: string;
+  revision: number;
 };
+
+export type MCPCapabilityMutation = Omit<MCPCapability, 'source' | 'sourceRef' | 'revision'>;
 
 export type MemoryItem = {
   id: string;

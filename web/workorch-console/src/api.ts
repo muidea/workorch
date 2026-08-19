@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -486,14 +486,14 @@ export const workorchApi = {
     const body = await request<{ capabilities: MCPCapability[] }>(`${apiBase}/mcp/capabilities${suffix}`);
     return body.capabilities ?? [];
   },
-  createMCPCapability: async (capability: MCPCapability) => {
+  createMCPCapability: async (capability: MCPCapabilityMutation) => {
     const body = await request<{ capability: MCPCapability }>(`${apiBase}/mcp/capabilities`, {
       method: 'POST',
       body: JSON.stringify(capability)
     });
     return body.capability;
   },
-  updateMCPCapability: async (capabilityId: string, capability: MCPCapability) => {
+  updateMCPCapability: async (capabilityId: string, capability: MCPCapabilityMutation) => {
     const body = await request<{ capability: MCPCapability }>(`${apiBase}/mcp/capabilities/${encodeURIComponent(capabilityId)}`, {
       method: 'PUT',
       body: JSON.stringify(capability)

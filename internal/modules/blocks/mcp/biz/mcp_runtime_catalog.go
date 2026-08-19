@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
-	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -43,14 +41,22 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 	if a == nil || a.service == nil {
 		return runtimeMCPAdmissibilitySnapshot{}, common.ErrInvalidArgument
 	}
-	lister, ok := a.service.(serverLister)
+	reader, ok := a.service.(registrySnapshotGetter)
 	if !ok {
-		return runtimeMCPAdmissibilitySnapshot{}, fmt.Errorf("%w: mcp server catalog is unavailable", common.ErrInvalidArgument)
+		return runtimeMCPAdmissibilitySnapshot{}, &runtimecontract.RuntimeCapabilityCatalogUnavailableError{
+			OwnerModuleID: ModuleID,
+			SubjectRef:    "mcp_capability_catalog",
+			Reason:        "owner_unavailable",
+		}
 	}
-	servers, err := lister.ListServers(ctx)
+	registry, registryRevision, err := reader.RegistrySnapshot(ctx)
 	if err != nil {
 		return runtimeMCPAdmissibilitySnapshot{}, err
 	}
+	if registry == nil || strings.TrimSpace(registryRevision) == "" {
+		return runtimeMCPAdmissibilitySnapshot{}, common.ErrInvalidArgument
+	}
+	servers := registry.Servers
 	orderedServers := append([]*mcpmodel.Server(nil), servers...)
 	sort.Slice(orderedServers, func(i, j int) bool {
 		if orderedServers[i] == nil {
@@ -62,7 +68,6 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 		return string(orderedServers[i].ID) < string(orderedServers[j].ID)
 	})
 	ids := make([]string, 0, len(orderedServers))
-	persisted := make([]mcpmodel.Server, 0, len(orderedServers))
 	serverAllowedTools := make(map[string]map[string]struct{}, len(orderedServers))
 	for _, server := range orderedServers {
 		if server == nil || !server.Enabled || strings.TrimSpace(string(server.ID)) == "" {
@@ -76,41 +81,23 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 			}
 		}
 		serverAllowedTools[string(server.ID)] = allowed
-		persisted = append(persisted, *server)
 	}
 	if len(ids) == 0 {
 		return runtimeMCPAdmissibilitySnapshot{}, fmt.Errorf("%w: no enabled mcp server is available", common.ErrNotFound)
 	}
-	var persistedCapabilities []*mcpmodel.Capability
-	if lister, ok := a.service.(capabilityLister); ok {
-		allCapabilities, listErr := lister.ListCapabilities(ctx, registryevents.CapabilityQuery{Enabled: boolPtr(true), Kind: mcpmodel.CapabilityKindTool})
-		if listErr != nil {
-			return runtimeMCPAdmissibilitySnapshot{}, listErr
+	persistedCapabilities := make([]*mcpmodel.Capability, 0, len(registry.Capabilities))
+	for _, capability := range registry.Capabilities {
+		if capability == nil || !capability.Enabled || capability.Kind != mcpmodel.CapabilityKindTool ||
+			strings.TrimSpace(string(capability.ID)) == "" || strings.TrimSpace(string(capability.ServerID)) == "" ||
+			strings.TrimSpace(capability.Name) == "" || strings.TrimSpace(capability.Name) != capability.Name ||
+			strings.TrimSpace(capability.EffectScope) == string(runtimecontract.RuntimeEffectUnknown) ||
+			strings.TrimSpace(capability.IdempotencyClass) == string(runtimecontract.RuntimeOperationIdempotencyUnknown) {
+			continue
 		}
-		for _, capability := range allCapabilities {
-			if capability == nil || !capability.Enabled || capability.Kind != mcpmodel.CapabilityKindTool ||
-				strings.TrimSpace(string(capability.ID)) == "" || strings.TrimSpace(string(capability.ServerID)) == "" ||
-				strings.TrimSpace(capability.Name) == "" || strings.TrimSpace(capability.Name) != capability.Name ||
-				strings.TrimSpace(capability.EffectScope) == string(runtimecontract.RuntimeEffectUnknown) ||
-				strings.TrimSpace(capability.IdempotencyClass) == string(runtimecontract.RuntimeOperationIdempotencyUnknown) {
-				continue
-			}
-			if _, enabled := serverAllowedTools[string(capability.ServerID)][capability.Name]; !enabled {
-				continue
-			}
-			persistedCapabilities = append(persistedCapabilities, capability)
+		if _, enabled := serverAllowedTools[string(capability.ServerID)][capability.Name]; !enabled {
+			continue
 		}
-	} else {
-		// Server.AllowedTools is an execution policy, not a capability catalog.
-		// Without the registry owner's typed capability query there is no
-		// owner-attested recipe/effect/idempotency fact to seal into Runtime.
-		// Fail closed instead of manufacturing recipe refs from the server-only
-		// whitelist (RSO-19).
-		return runtimeMCPAdmissibilitySnapshot{}, &runtimecontract.RuntimeCapabilityCatalogUnavailableError{
-			OwnerModuleID: ModuleID,
-			SubjectRef:    "mcp_capability_catalog",
-			Reason:        "owner_unavailable",
-		}
+		persistedCapabilities = append(persistedCapabilities, capability)
 	}
 	sort.Slice(persistedCapabilities, func(i, j int) bool {
 		left, right := persistedCapabilities[i], persistedCapabilities[j]
@@ -131,14 +118,6 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 		}
 		return left.ID < right.ID
 	})
-	raw, err := json.Marshal(struct {
-		Servers      []mcpmodel.Server      `json:"servers"`
-		Capabilities []*mcpmodel.Capability `json:"capabilities,omitempty"`
-	}{Servers: persisted, Capabilities: persistedCapabilities})
-	if err != nil {
-		return runtimeMCPAdmissibilitySnapshot{}, err
-	}
-	sum := sha256.Sum256(raw)
 	surfaces := make([]runtimecontract.RuntimeValidationSurface, 0, len(persistedCapabilities))
 	for _, capability := range persistedCapabilities {
 		surface := runtimeMCPValidationSurface(capability)
@@ -150,7 +129,7 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 		ServerIDs: append([]string(nil), ids...), ValidationRecipes: recipeRefs,
 		ValidationSurfaces: surfaces,
 		Capabilities:       mcpmodel.CloneCapabilities(persistedCapabilities),
-		Revision:           "mcp-admissibility-" + hex.EncodeToString(sum[:])[:20],
+		Revision:           registryRevision,
 	}, nil
 }
 
@@ -211,15 +190,23 @@ func (a *RuntimeAdapter) EffectiveCapabilities(ctx context.Context) ([]*mcpmodel
 	if a == nil || a.service == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	lister, ok := a.service.(capabilityLister)
+	reader, ok := a.service.(registrySnapshotGetter)
 	if !ok {
-		return nil, fmt.Errorf("%w: mcp capability catalog is unavailable", common.ErrInvalidArgument)
+		return nil, &runtimecontract.RuntimeCapabilityCatalogUnavailableError{
+			OwnerModuleID: ModuleID,
+			SubjectRef:    "mcp_capability_catalog",
+			Reason:        "owner_unavailable",
+		}
 	}
-	items, err := lister.ListCapabilities(ctx, registryevents.CapabilityQuery{Enabled: boolPtr(true)})
+	snapshot, _, err := reader.RegistrySnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mcpmodel.CloneCapabilities(items), nil
+	ret := make([]*mcpmodel.Capability, 0, len(snapshot.Capabilities))
+	for _, item := range snapshot.Capabilities {
+		if item != nil && item.Enabled {
+			ret = append(ret, mcpmodel.CloneCapability(item))
+		}
+	}
+	return ret, nil
 }
-
-func boolPtr(value bool) *bool { return &value }

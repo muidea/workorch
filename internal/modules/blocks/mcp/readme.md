@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-20
 
 ## 功能范围与边界
 
@@ -17,8 +17,9 @@ Last Verified: 2026-08-17
 - Runtime capability、operation-admissibility、operation-feasibility、semantic-proof feasibility 与 CWI reconciliation
   均使用 MCP execution owner 定义的 concrete typed command/result。
 - Runtime MCP operation 不会通过 Envelope 或 `map[string]any` 传递跨组件结果。
-- 本 block 导入 `blocks/mcpregistry/pkg/events`，通过 EventHub 查询 MCP Server 和 Capability；不注入 registry service/repository。
-- operation-admissibility 在一次 registry snapshot 中同时取得 enabled server 与 tool capability，并由本 execution owner
+- 本 block 导入 `blocks/mcpregistry/pkg/events`，通过 `ReadRegistrySnapshotCommand/Result` 一次取得同一 owner revision 的
+  bounded Server/Capability catalog；不注入 registry service/repository，也不把两次 list 结果拼成伪一致快照。
+- operation-admissibility 在该 registry snapshot 中同时取得 enabled server 与 capability，并由本 execution owner
   编译 `RuntimeValidationSurface`。完整 capability 仍是 callable inventory；只有 non-durable、`safe_to_replay`、
   schema 合法、已有 owner-sealed input binding，且 registry owner 显式声明 `direct` proof applicability 的 surface 才进入 provider-visible
   `ValidationRecipeRefs`。catalog acquisition 不打开 MCP transport。
@@ -32,14 +33,15 @@ Last Verified: 2026-08-17
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/execute；receipt query/commit | 完整 |
-| `blocks/mcpregistry` | MCP → Registry | Server/Capability get/list snapshot | 完整；无 registry service/repository 注入 |
+| `blocks/mcpregistry` | MCP → Registry | `GetServerCommand/Result`、`ReadRegistrySnapshotCommand/Result` | 完整；同一 revision catalog，无 registry service/repository 注入 |
 | 外部 MCP server | MCP-private adapter | sealed tool/resource/prompt invocation | 完整；catalog acquisition 不打开 transport |
 
 ## 相关约束
 
 - 未注册或不匹配的 Server/Capability 不得调用。
 - 参数和输出必须有界，并受 runtime policy 与 approval 准入约束。
-- credential 和 secret 只能使用安全引用，不得进入事件或日志。
+- Registry 只向本 owner 提供 reference-only environment metadata。stdio 执行时才解析 `env://ENV_NAME` 或受支持的 workspace
+  占位符；缺失引用、明文值或非法引用均在启动外部进程前 fail-closed，credential/secret 不进入 EventHub、projection 或日志。
 - MCP 输出只作为 context/evidence candidate，不能直接创建 accepted Result。
 - 对 `mcp/tool_call`，Orchestrator 仅依据 activation 已密封的 exact capability `effectScope` 判定 canonical state
   相容性；本 block 不得以 risk label 或 tool 名称补推断为 read-only/session/durable。
@@ -55,7 +57,8 @@ Last Verified: 2026-08-17
 
 ## 待完善测试点
 
-- [ ] 覆盖 registry snapshot 中 server/capability disabled、漂移、错配或跨 scope 时拒绝执行。
+- [x] 同一次 Registry snapshot 中的 disabled、错配、跨 Server 与 allowlist 漂移会在 catalog/selection/execute 前拒绝。
+- [x] environment reference 的 owner 校验、执行期解析、缺失 env 与明文值拒绝。
 - [ ] 覆盖 direct/auxiliary/not-declared proof applicability 与 ready/prerequisite/unavailable 的完整矩阵。
 - [ ] 覆盖 required input、owner-sealed empty binding、非法 schema 和调用方伪造 binding。
 - [ ] 增加边界测试，确认 catalog acquisition 不打开 transport、不泄漏 Registry repository。

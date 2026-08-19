@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-contract
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-20
 
 ## 功能范围与边界
 
@@ -15,7 +15,7 @@ Last Verified: 2026-08-18
 - Soul 和 MCP Registry 各自在自己的 `pkg/events` 中定义 owner-local `EnsureDefaultsCommand` / `EnsureDefaultsResult`；
   Workspace 定义 `EnsureWorkspaceTemplateDefaultsCommand` / `EnsureWorkspaceTemplateDefaultsResult`。System 只导入并发送
   这三组具体合同，不定义通用 ensure 类型。
-- `blocks/soul`、`blocks/workspace` 和 `blocks/mcpregistry` 分别订阅自己的 command，并只访问自己的 repository 完成幂等 ensure。
+- `blocks/soul`、`blocks/workspace` 和 `blocks/mcpregistry` 分别订阅自己的 command，并只访问自己的 repository 完成幂等 ensure；MCP Server/Capability 在一个 Registry 聚合 CAS 中原子补齐。
 - System 在 owner 订阅启动后发送同步 EventHub command；缺少 response、返回类型错误或 owner 失败都必须使启动失败。
 - System 只发送具体 typed ensure command；默认资源内容、模型校验、去重和持久化均由对应 owner 负责。
 - 三组 ensure 按 Soul → WorkspaceTemplate → MCP Registry 顺序执行并 fail-fast。部分成功不产生 System 状态；重启或重试从第一组重新发送，由各 owner 的 create-if-missing 语义收敛。

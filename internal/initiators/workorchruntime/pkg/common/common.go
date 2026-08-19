@@ -31,8 +31,7 @@ type GovernanceRepositories struct {
 }
 
 type MCPRepositories struct {
-	Servers      repository.MCPServerRepository
-	Capabilities repository.MCPCapabilityRepository
+	Registry repository.MCPRegistryRepository
 }
 
 type MemoryRepositories struct {

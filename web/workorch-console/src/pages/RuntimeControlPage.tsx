@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Tag } from 'antd';
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
-import type { MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool } from '../types';
+import type { MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool } from '../types';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import {
@@ -20,21 +20,24 @@ function displayMCPEndpoint(endpoint?: string) {
   return index >= 0 ? value.slice(index) : value;
 }
 
-function parseEnvLines(value?: string) {
-  const env: Record<string, string> = {};
+function parseEnvironmentReferenceLines(value?: string) {
+  const references: Record<string, string> = {};
   for (const line of splitLines(value)) {
     const index = line.indexOf('=');
     const key = (index >= 0 ? line.slice(0, index) : line).trim();
     if (!key) {
       continue;
     }
-    env[key] = index >= 0 ? line.slice(index + 1) : '';
+    references[key] = index >= 0 ? line.slice(index + 1).trim() : '';
   }
-  return Object.keys(env).length > 0 ? env : undefined;
+  return Object.keys(references).length > 0 ? references : undefined;
 }
 
-function joinEnvKeys(env?: Record<string, string>) {
-  return Object.keys(env ?? {}).sort().join('\n');
+function joinEnvironmentReferences(references?: Record<string, string>) {
+  return Object.entries(references ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, reference]) => `${name}=${reference}`)
+    .join('\n');
 }
 
 function mcpServerPayload(values: MCPServerFormValues): MCPServer {
@@ -53,12 +56,12 @@ function mcpServerPayload(values: MCPServerFormValues): MCPServer {
     sessionPolicy: values.sessionPolicy?.trim(),
     timeoutMillis: values.timeoutMillis
   };
-  if (values.envMode === 'clear') {
-    payload.env = {};
-  } else if (values.envMode === 'set') {
-    payload.env = parseEnvLines(values.env) ?? {};
+  if (values.environmentRefsMode === 'clear') {
+    payload.environmentRefs = {};
+  } else if (values.environmentRefsMode === 'set') {
+    payload.environmentRefs = parseEnvironmentReferenceLines(values.environmentRefs) ?? {};
   }
-  // envMode=keep intentionally omits env so the backend preserves the current server-side value.
+  // keep intentionally omits environmentRefs so the backend preserves the owner value.
   return payload;
 }
 
@@ -69,8 +72,8 @@ interface MCPServerFormValues {
   endpoint?: string;
   command?: string;
   args?: string;
-  envMode?: 'keep' | 'set' | 'clear';
-  env?: string;
+  environmentRefsMode?: 'keep' | 'set' | 'clear';
+  environmentRefs?: string;
   enabled: boolean;
   allowedTools?: string;
   allowedResources?: string;
@@ -104,8 +107,10 @@ interface MCPCapabilityFormValues {
   inputSummary?: string;
   outputSummary?: string;
   riskLevel?: string;
+  effectScope?: string;
+  idempotencyClass?: string;
+  validationProofApplicability?: string;
   approvalPolicy?: string;
-  status?: string;
   schema?: string;
   uri?: string;
   enabled: boolean;
@@ -225,8 +230,8 @@ export function RuntimeControlPage() {
       endpoint: displayMCPEndpoint(server.endpoint),
       command: server.command,
       args: joinLines(server.args),
-      envMode: 'keep',
-      env: '',
+      environmentRefsMode: 'keep',
+      environmentRefs: '',
       enabled: server.enabled,
       allowedTools: joinLines(server.allowedTools),
       allowedResources: joinLines(server.allowedResources),
@@ -253,8 +258,8 @@ export function RuntimeControlPage() {
       endpoint: '',
       command: '',
       args: '',
-      envMode: 'keep',
-      env: '',
+      environmentRefsMode: 'keep',
+      environmentRefs: '',
       allowedTools: '',
       allowedResources: '',
       allowedPrompts: ''
@@ -309,7 +314,9 @@ export function RuntimeControlPage() {
       outputSummary: '',
       riskLevel: undefined,
       approvalPolicy: '',
-      status: 'draft',
+      effectScope: 'unknown',
+      idempotencyClass: 'unknown',
+      validationProofApplicability: 'not_declared',
       schema: '',
       uri: '',
       enabled: true
@@ -317,7 +324,7 @@ export function RuntimeControlPage() {
     setCapabilityModalOpen(true);
   };
 
-  const capabilityPayload = (values: MCPCapabilityFormValues): MCPCapability => ({
+  const capabilityPayload = (values: MCPCapabilityFormValues): MCPCapabilityMutation => ({
     id: (editingCapability?.id || values.id || '').trim(),
     serverId: (editingCapability?.serverId || values.serverId || '').trim(),
     kind: (editingCapability?.kind || values.kind || '').trim(),
@@ -331,8 +338,10 @@ export function RuntimeControlPage() {
     inputSummary: values.inputSummary?.trim(),
     outputSummary: values.outputSummary?.trim(),
     riskLevel: values.riskLevel?.trim(),
+    effectScope: values.effectScope?.trim(),
+    idempotencyClass: values.idempotencyClass?.trim(),
+    validationProofApplicability: values.validationProofApplicability?.trim(),
     approvalPolicy: values.approvalPolicy?.trim(),
-    status: values.status?.trim(),
     schema: parseCapabilitySchema(values.schema),
     uri: values.uri?.trim(),
     enabled: values.enabled !== false
@@ -530,6 +539,10 @@ export function RuntimeControlPage() {
                   { key: 'output', label: '输出摘要', children: item.outputSummary || '-' },
                   { key: 'uri', label: '资源 URI', children: item.uri || '-' },
                   { key: 'approval', label: '审批策略', children: item.approvalPolicy || '-' },
+                  { key: 'effectScope', label: '影响范围', children: item.effectScope || '-' },
+                  { key: 'idempotencyClass', label: '幂等类别', children: item.idempotencyClass || '-' },
+                  { key: 'proofApplicability', label: '验证证明适用性', children: item.validationProofApplicability || '-' },
+                  { key: 'provenance', label: '来源', children: `${item.source || '-'} / ${item.sourceRef || '-'} / revision ${item.revision ?? '-'}` },
                   { key: 'tags', label: '标签', children: (item.tags ?? []).length > 0 ? <Space wrap>{item.tags?.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space> : '-' }
                 ]}
               />
@@ -561,7 +574,7 @@ export function RuntimeControlPage() {
                   { key: 'endpoint', label: '端点', children: displayMCPEndpoint(selectedServer.endpoint) || '-' },
                   { key: 'command', label: '命令', children: selectedServer.command || '-' },
                   { key: 'args', label: '参数', children: joinLines(selectedServer.args) || '-' },
-                  { key: 'env', label: '环境变量', children: joinEnvKeys(selectedServer.env) || '-' },
+                  { key: 'environmentRefs', label: '环境引用', children: joinEnvironmentReferences(selectedServer.environmentRefs) || '-' },
                   { key: 'approval', label: '默认审批策略', children: selectedServer.defaultApprovalPolicy || '-' },
                   { key: 'timeout', label: '超时毫秒', children: selectedServer.timeoutMillis ?? '-' }
                 ]}
@@ -651,14 +664,14 @@ export function RuntimeControlPage() {
             <Form.Item name="args" label="参数">
               <Input.TextArea rows={2} placeholder="每行一个参数；不使用 shell 字符串" />
             </Form.Item>
-            <Form.Item name="env" label="环境变量">
-              <Input.TextArea rows={3} placeholder="每行 KEY=VALUE；支持 KEY= 设置为空值" />
+            <Form.Item name="environmentRefs" label="环境引用">
+              <Input.TextArea rows={3} placeholder="每行 KEY=env://ENV_NAME；不得填写密钥明文" />
             </Form.Item>
-            <Form.Item name="envMode" label="环境变量提交方式">
+            <Form.Item name="environmentRefsMode" label="环境引用提交方式">
               <Select options={[
-                { value: 'keep', label: '保留已有环境变量' },
+                { value: 'keep', label: '保留已有环境引用' },
                 { value: 'set', label: '使用上方输入覆盖' },
-                { value: 'clear', label: '清空环境变量' }
+                { value: 'clear', label: '清空环境引用' }
               ]} />
             </Form.Item>
             <Form.Item name="enabled" label="是否启用" rules={[{ required: true }]}>
@@ -781,13 +794,34 @@ export function RuntimeControlPage() {
           <Form.Item name="approvalPolicy" label="审批策略">
             <Input placeholder="例如：operator、auto、manual" />
           </Form.Item>
-          <Form.Item name="status" label="管理状态">
+          <Form.Item name="effectScope" label="影响范围">
             <Select
-              allowClear
               options={[
-                { value: 'draft', label: '草稿' },
-                { value: 'active', label: '已确认' },
-                { value: 'deprecated', label: '已废弃' }
+                { value: 'unknown', label: '未知' },
+                { value: 'none', label: '无持久影响' },
+                { value: 'ephemeral_session', label: '临时会话' },
+                { value: 'workspace_durable', label: 'Workspace 持久写入' },
+                { value: 'remote_durable', label: '远端持久写入' },
+                { value: 'governance_only', label: '仅治理' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="idempotencyClass" label="幂等类别">
+            <Select
+              options={[
+                { value: 'unknown', label: '未知' },
+                { value: 'safe_to_replay', label: '可安全重放' },
+                { value: 'at_most_once', label: '至多一次' },
+                { value: 'owner_managed', label: 'Owner 管理' }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="validationProofApplicability" label="验证证明适用性">
+            <Select
+              options={[
+                { value: 'not_declared', label: '未声明' },
+                { value: 'direct', label: '直接证明' },
+                { value: 'auxiliary', label: '辅助证明' }
               ]}
             />
           </Form.Item>

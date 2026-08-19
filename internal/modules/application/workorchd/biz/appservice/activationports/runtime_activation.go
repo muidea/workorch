@@ -503,12 +503,19 @@ func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontrac
 			Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
 			InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
 			RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
-			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: capabilityAvailability(item.Enabled),
 		}
 		// RVC-R8: registry Kind=tool is not a Runtime operation kind; seal OperationKind + EffectScope.
 		ret = append(ret, runtimecontract.SealMCPCapabilityEffect(cap))
 	}
 	return ret
+}
+
+func capabilityAvailability(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 // runtimeMCPOperationPolicies is the application-side adapter from the

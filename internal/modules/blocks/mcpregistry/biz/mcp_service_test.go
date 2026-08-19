@@ -5,207 +5,260 @@ import (
 	"errors"
 	"testing"
 
-	mcpservice "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	backend "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
-func TestServiceCreateAndListServer(t *testing.T) {
+func TestServiceUsesAtomicRegistryAndReferenceOnlyEnvironment(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
+	repository := memory.NewMCPRegistryRepository()
+	service := NewService(repository)
 
-	cmd := mcpservice.CreateServerCommand{
-		ServerID:              common.MCPServerID("mcp-local-context"),
-		Name:                  "local context",
-		Transport:             "stdio",
-		Endpoint:              "repo-context",
-		Enabled:               true,
-		AllowedTools:          []string{"repo.summary"},
-		AllowedResources:      []string{"repo://summary"},
-		AllowedPrompts:        []string{"delivery.plan"},
-		DefaultApprovalPolicy: "manual_for_write",
-		SessionPolicy:         "long_lived",
-		TimeoutMillis:         30000,
-	}
-	if err := service.CreateServer(ctx, cmd); err != nil {
-		t.Fatalf("create mcp server: %v", err)
-	}
-	got, err := service.GetServer(ctx, cmd.ServerID)
+	server, revision, err := service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-local", Name: "local", Transport: "stdio", Command: "mcp-local", Enabled: true,
+		EnvironmentRefs: []mcpevents.EnvironmentReference{{Name: "TOKEN", Reference: "env://WORKORCH_MCP_TOKEN"}},
+		AllowedTools:    []string{"repo.summary"}, AllowedResources: []string{"repo://summary"},
+	})
 	if err != nil {
-		t.Fatalf("get mcp server: %v", err)
+		t.Fatalf("CreateServer: %v", err)
 	}
-	if got.Name != cmd.Name ||
-		got.AllowedTools[0] != "repo.summary" ||
-		got.AllowedPrompts[0] != "delivery.plan" ||
-		got.SessionPolicy != "long_lived" {
-		t.Fatalf("mcp server = %+v, want command values", got)
+	if revision == "" || server.Env["TOKEN"] != "env://WORKORCH_MCP_TOKEN" {
+		t.Fatalf("created server/revision = %+v/%q", server, revision)
 	}
-	list, err := service.ListServers(ctx)
+	snapshot, snapshotRevision, err := service.RegistrySnapshot(ctx)
 	if err != nil {
-		t.Fatalf("list mcp servers: %v", err)
+		t.Fatalf("RegistrySnapshot: %v", err)
 	}
-	if len(list) != 1 {
-		t.Fatalf("mcp servers len = %d, want 1", len(list))
+	if snapshotRevision != revision || len(snapshot.Servers) != 1 || len(snapshot.Capabilities) != 2 {
+		t.Fatalf("snapshot = %+v revision=%q, want one atomic server and two capabilities", snapshot, snapshotRevision)
 	}
-	capabilities, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: cmd.ServerID})
+
+	_, _, err = service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-secret", Name: "secret", Transport: "stdio", Command: "mcp-secret",
+		EnvironmentRefs: []mcpevents.EnvironmentReference{{Name: "TOKEN", Reference: "plaintext-secret"}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("plaintext CreateServer err = %v, want invalid argument", err)
+	}
+	after, _, _ := service.RegistrySnapshot(ctx)
+	if len(after.Servers) != 1 {
+		t.Fatalf("rejected secret changed registry: %+v", after.Servers)
+	}
+}
+
+func TestServiceCapabilityIdentityAvailabilityAndProvenance(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewMCPRegistryRepository())
+	_, _, err := service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-capability", Name: "capability", Transport: "stdio", Command: "mcp-capability", Enabled: true,
+		AllowedResources: []string{"workspace://acceptance"},
+	})
 	if err != nil {
-		t.Fatalf("list mcp capabilities: %v", err)
+		t.Fatalf("CreateServer: %v", err)
 	}
-	if len(capabilities) != 3 {
-		t.Fatalf("mcp capabilities len = %d, want 3", len(capabilities))
+	created, _, err := service.CreateCapability(ctx, mcpevents.CreateCapabilityCommand{
+		CapabilityID: "cap-acceptance", ServerID: "mcp-capability", Kind: mcpmodel.CapabilityKindResource,
+		Name: "workspace://acceptance", DisplayName: "Acceptance", Category: "verification", Enabled: true,
+		EffectScope: "none", IdempotencyClass: "safe_to_replay", ValidationProofApplicability: "auxiliary",
+	})
+	if err != nil {
+		t.Fatalf("CreateCapability: %v", err)
 	}
-	if capabilities[0].DisplayName == "" || !capabilities[0].Enabled {
-		t.Fatalf("default capability = %+v, want display name and enabled", capabilities[0])
+	if created.Source != mcpmodel.CapabilitySourceUser || created.SourceRef != "cap-acceptance" || created.Revision != 1 {
+		t.Fatalf("provenance = %+v", created)
 	}
-	var toolCapabilityDisplayName string
-	for _, capability := range capabilities {
-		if capability.Kind == mcpmodel.CapabilityKindTool && capability.Name == "repo.summary" {
-			toolCapabilityDisplayName = capability.DisplayName
-			break
+	_, _, err = service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-other", Name: "other", Transport: "stdio", Command: "mcp-other", Enabled: true,
+		AllowedResources: []string{"workspace://acceptance"},
+	})
+	if err != nil {
+		t.Fatalf("CreateServer(other): %v", err)
+	}
+	updated, _, err := service.UpdateCapability(ctx, mcpevents.UpdateCapabilityCommand(mcpevents.CreateCapabilityCommand{
+		CapabilityID: created.ID, ServerID: created.ServerID, Kind: created.Kind, Name: created.Name,
+		DisplayName: "Acceptance v2", Category: created.Category, Enabled: true,
+		EffectScope: created.EffectScope, IdempotencyClass: created.IdempotencyClass,
+		ValidationProofApplicability: created.ValidationProofApplicability,
+	}))
+	if err != nil || updated.Revision != 2 || updated.Source != mcpmodel.CapabilitySourceUser {
+		t.Fatalf("UpdateCapability = %+v, err=%v", updated, err)
+	}
+
+	_, _, err = service.UpdateCapability(ctx, mcpevents.UpdateCapabilityCommand(mcpevents.CreateCapabilityCommand{
+		CapabilityID: created.ID, ServerID: "mcp-other", Kind: created.Kind, Name: created.Name,
+		DisplayName: "rebound", Enabled: true, EffectScope: "none", IdempotencyClass: "safe_to_replay",
+		ValidationProofApplicability: "auxiliary",
+	}))
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("identity rebind err = %v, want conflict", err)
+	}
+	_, _, err = service.UpdateCapability(ctx, mcpevents.UpdateCapabilityCommand(mcpevents.CreateCapabilityCommand{
+		CapabilityID: created.ID, ServerID: created.ServerID, Kind: created.Kind, Name: created.Name,
+		DisplayName: "invalid", Enabled: true, EffectScope: "made_up", IdempotencyClass: "sometimes",
+		ValidationProofApplicability: "auxiliary",
+	}))
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid metadata err = %v, want invalid argument", err)
+	}
+
+	_, _, err = service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-disabled", Name: "disabled", Transport: "stdio", Command: "mcp-disabled", Enabled: false,
+		AllowedTools: []string{"tool.disabled"},
+	})
+	if err != nil {
+		t.Fatalf("CreateServer(disabled): %v", err)
+	}
+	_, _, err = service.CreateCapability(ctx, mcpevents.CreateCapabilityCommand{
+		CapabilityID: "cap-disabled", ServerID: "mcp-disabled", Kind: mcpmodel.CapabilityKindTool,
+		Name: "tool.disabled", DisplayName: "disabled", Enabled: true,
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("enabled capability on disabled server err = %v, want conflict", err)
+	}
+}
+
+func TestServiceServerReconciliationPreservesEditsAndDisablesStaleBindings(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewMCPRegistryRepository())
+	_, _, err := service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-tools", Name: "tools", Transport: "stdio", Command: "mcp-tools", Enabled: true,
+		AllowedTools: []string{"tool.a", "tool.b"},
+	})
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	aID := DefaultCapabilityID("mcp-tools", mcpmodel.CapabilityKindTool, "tool.a")
+	a, _, err := service.GetCapability(ctx, aID)
+	if err != nil {
+		t.Fatalf("GetCapability(a): %v", err)
+	}
+	a, _, err = service.UpdateCapability(ctx, mcpevents.UpdateCapabilityCommand(mcpevents.CreateCapabilityCommand{
+		CapabilityID: a.ID, ServerID: a.ServerID, Kind: a.Kind, Name: a.Name, DisplayName: "edited A",
+		Enabled: false, EffectScope: "none", IdempotencyClass: "safe_to_replay",
+		ValidationProofApplicability: "direct",
+	}))
+	if err != nil {
+		t.Fatalf("UpdateCapability(a): %v", err)
+	}
+	_, _, err = service.UpdateServer(ctx, mcpevents.UpdateServerCommand(mcpevents.CreateServerCommand{
+		ServerID: "mcp-tools", Name: "tools", Transport: "stdio", Command: "mcp-tools", Enabled: true,
+		AllowedTools: []string{"tool.a", "tool.c"},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateServer: %v", err)
+	}
+	aAfter, _, _ := service.GetCapability(ctx, aID)
+	bAfter, _, _ := service.GetCapability(ctx, DefaultCapabilityID("mcp-tools", mcpmodel.CapabilityKindTool, "tool.b"))
+	cAfter, _, _ := service.GetCapability(ctx, DefaultCapabilityID("mcp-tools", mcpmodel.CapabilityKindTool, "tool.c"))
+	if aAfter.DisplayName != "edited A" || aAfter.Enabled || aAfter.Revision != a.Revision {
+		t.Fatalf("edited capability was overwritten: %+v", aAfter)
+	}
+	if bAfter.Enabled {
+		t.Fatalf("removed capability remains enabled: %+v", bAfter)
+	}
+	if cAfter == nil || !cAfter.Enabled || cAfter.Source != mcpmodel.CapabilitySourceServerAllowlist {
+		t.Fatalf("new derived capability = %+v", cAfter)
+	}
+}
+
+func TestServiceSelectionSnapshotFailsClosedOnServerRelationship(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewMCPRegistryRepository())
+	_, _, err := service.CreateServer(ctx, mcpevents.CreateServerCommand{
+		ServerID: "mcp-select", Name: "select", Transport: "stdio", Command: "mcp-select", Enabled: true,
+		AllowedTools: []string{"tool.a"},
+	})
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	capID := DefaultCapabilityID("mcp-select", mcpmodel.CapabilityKindTool, "tool.a")
+	if _, _, err := service.SelectionSnapshot(ctx, nil, []common.MCPCapabilityID{capID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("capability without selected server err = %v, want conflict", err)
+	}
+	snapshot, revision, err := service.SelectionSnapshot(ctx, []common.MCPServerID{"mcp-select"}, []common.MCPCapabilityID{capID})
+	if err != nil || revision == "" || len(snapshot.Servers) != 1 || len(snapshot.Capabilities) != 1 {
+		t.Fatalf("SelectionSnapshot = %+v/%q, err=%v", snapshot, revision, err)
+	}
+}
+
+func TestServiceListsArePaginatedAndRejectInvalidBounds(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(memory.NewMCPRegistryRepository())
+	for _, id := range []common.MCPServerID{"mcp-a", "mcp-b", "mcp-c"} {
+		_, _, err := service.CreateServer(ctx, mcpevents.CreateServerCommand{
+			ServerID: id, Name: string(id), Transport: "stdio", Command: string(id), Enabled: true,
+			AllowedTools: []string{"tool.a"},
+		})
+		if err != nil {
+			t.Fatalf("CreateServer(%s): %v", id, err)
 		}
 	}
-	if toolCapabilityDisplayName != "工具 repo.summary" {
-		t.Fatalf("tool capability display name = %q, want generic display name", toolCapabilityDisplayName)
+	servers, cursor, revision, err := service.ListServers(ctx, "", 2)
+	if err != nil || len(servers) != 2 || cursor != "mcp-b" || revision == "" {
+		t.Fatalf("first server page = %+v/%q/%q, err=%v", servers, cursor, revision, err)
+	}
+	servers, next, sameRevision, err := service.ListServers(ctx, cursor, 2)
+	if err != nil || len(servers) != 1 || servers[0].ID != "mcp-c" || next != "" || sameRevision != revision {
+		t.Fatalf("second server page = %+v/%q/%q, err=%v", servers, next, sameRevision, err)
+	}
+	capabilities, capabilityCursor, _, err := service.ListCapabilities(ctx, mcpevents.CapabilityQuery{Kind: mcpmodel.CapabilityKindTool}, "", 2)
+	if err != nil || len(capabilities) != 2 || capabilityCursor == "" {
+		t.Fatalf("capability page = %+v/%q, err=%v", capabilities, capabilityCursor, err)
+	}
+
+	if _, _, _, err := service.ListServers(ctx, "", modulecommon.MaxListLimit+1); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("oversized server limit err = %v", err)
+	}
+	if _, _, _, err := service.ListCapabilities(ctx, mcpevents.CapabilityQuery{Kind: "made_up"}, "", 1); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid capability kind err = %v", err)
+	}
+	if _, _, _, err := service.ListCapabilities(ctx, mcpevents.CapabilityQuery{Query: string(make([]byte, modulecommon.MaxQueryBytes+1))}, "", 1); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("oversized capability query err = %v", err)
 	}
 }
 
-func TestServiceKeepsGeneratedCapabilityMetadataDomainNeutral(t *testing.T) {
+func TestServiceCommitFailureLeavesNoPartialAggregate(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
-
-	serverID := common.MCPServerID("mcp-acceptance")
-	if err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
-		ServerID:         serverID,
-		Name:             "verification server",
-		Transport:        "stdio",
-		Enabled:          true,
-		AllowedResources: []string{"workspace://verification-context"},
-		AllowedPrompts:   []string{"workorch.verification-context"},
-	}); err != nil {
-		t.Fatalf("create server: %v", err)
+	repository := &failingRegistryRepository{fail: true, snapshot: &mcpmodel.RegistrySnapshot{}}
+	service := NewService(repository)
+	command := mcpevents.CreateServerCommand{
+		ServerID: "mcp-atomic", Name: "atomic", Transport: "stdio", Command: "mcp-atomic", Enabled: true,
+		AllowedTools: []string{"tool.a"},
 	}
-
-	resources, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindResource})
-	if err != nil {
-		t.Fatalf("list resource capabilities: %v", err)
+	if _, _, err := service.CreateServer(ctx, command); err == nil {
+		t.Fatal("CreateServer unexpectedly succeeded")
 	}
-	if len(resources) != 1 || resources[0].DisplayName != "资源 workspace://verification-context" || resources[0].URI != "workspace://verification-context" || resources[0].Category != "" || len(resources[0].Tags) != 0 {
-		t.Fatalf("resource capabilities = %+v, want generic owner metadata", resources)
+	if len(repository.snapshot.Servers) != 0 || len(repository.snapshot.Capabilities) != 0 {
+		t.Fatalf("partial aggregate after failure: %+v", repository.snapshot)
 	}
-
-	prompts, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindPrompt})
-	if err != nil {
-		t.Fatalf("list prompt capabilities: %v", err)
+	repository.fail = false
+	if _, _, err := service.CreateServer(ctx, command); err != nil {
+		t.Fatalf("retry CreateServer: %v", err)
 	}
-	if len(prompts) != 1 || prompts[0].DisplayName != "提示词 workorch.verification-context" || prompts[0].Category != "" || len(prompts[0].Tags) != 0 {
-		t.Fatalf("prompt capabilities = %+v, want generic owner metadata", prompts)
+	if len(repository.snapshot.Servers) != 1 || len(repository.snapshot.Capabilities) != 1 {
+		t.Fatalf("atomic retry snapshot: %+v", repository.snapshot)
 	}
 }
 
-func TestServiceRejectsInvalidServer(t *testing.T) {
-	ctx := context.Background()
-	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
-
-	err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-invalid"),
-		Name:          "invalid",
-		Transport:     "stdio",
-		AllowedTools:  []string{""},
-		TimeoutMillis: -1,
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("create invalid mcp server err = %v, want invalid argument", err)
-	}
-
-	err = service.CreateServer(ctx, mcpservice.CreateServerCommand{
-		ServerID:  common.MCPServerID("mcp-blank-name"),
-		Name:      "   ",
-		Transport: "stdio",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("create blank mcp server name err = %v, want invalid argument", err)
-	}
-
-	err = service.CreateServer(ctx, mcpservice.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-invalid-session"),
-		Name:          "invalid session",
-		Transport:     "stdio",
-		Enabled:       true,
-		AllowedTools:  []string{"repo.summary"},
-		SessionPolicy: "sticky",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("create invalid mcp server session err = %v, want invalid argument", err)
-	}
+type failingRegistryRepository struct {
+	fail     bool
+	snapshot *mcpmodel.RegistrySnapshot
 }
 
-func TestServiceCreateAndFilterCapability(t *testing.T) {
-	ctx := context.Background()
-	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
-	if err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
-		ServerID:      common.MCPServerID("mcp-capability"),
-		Name:          "capability server",
-		Transport:     "stdio",
-		Enabled:       true,
-		AllowedTools:  []string{"repo.summary"},
-		SessionPolicy: "transient",
-	}); err != nil {
-		t.Fatalf("create server: %v", err)
+func (r *failingRegistryRepository) Load(context.Context) (*mcpmodel.RegistrySnapshot, error) {
+	return mcpmodel.CloneRegistrySnapshot(r.snapshot), nil
+}
+
+func (r *failingRegistryRepository) Commit(_ context.Context, expected uint64, next *mcpmodel.RegistrySnapshot) error {
+	if r.fail {
+		return errors.New("injected commit failure")
 	}
-	if _, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
-		ServerID:                     common.MCPServerID("mcp-capability"),
-		Kind:                         "tool",
-		Name:                         "invalid-proof-applicability",
-		ValidationProofApplicability: "inferred_from_name",
-	}); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("create capability with invalid proof applicability err = %v, want invalid argument", err)
+	if r.snapshot.Revision != expected {
+		return common.ErrConflict
 	}
-	created, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
-		ServerID:                     common.MCPServerID("mcp-capability"),
-		Kind:                         "resource",
-		Name:                         "workspace://acceptance",
-		DisplayName:                  "工作空间验收资料",
-		Category:                     "验收",
-		StageHints:                   []string{"validation", "acceptance"},
-		RiskLevel:                    "read_only",
-		EffectScope:                  "none",
-		IdempotencyClass:             "safe_to_replay",
-		ValidationProofApplicability: "auxiliary",
-		Enabled:                      true,
-		OutputSummary:                "返回 DoD、Result、Artifact 和证据引用。",
-	})
-	if err != nil {
-		t.Fatalf("create capability: %v", err)
-	}
-	if created.ID == "" || created.URI != "" || created.EffectScope != "none" || created.IdempotencyClass != "safe_to_replay" || created.ValidationProofApplicability != "auxiliary" {
-		t.Fatalf("created capability = %+v, want generated id, explicit runtime metadata, and uri only when provided", created)
-	}
-	if created.Status != "draft" {
-		t.Fatalf("created status = %q, want owner-derived draft", created.Status)
-	}
-	update := mcpservice.UpdateCapabilityCommand(mcpservice.CreateCapabilityCommand{
-		CapabilityID: created.ID, ServerID: created.ServerID, Kind: created.Kind, Name: created.Name,
-		DisplayName: created.DisplayName, Category: created.Category, StageHints: created.StageHints,
-		RiskLevel: created.RiskLevel, EffectScope: created.EffectScope, IdempotencyClass: created.IdempotencyClass, ValidationProofApplicability: created.ValidationProofApplicability,
-		Enabled: created.Enabled, OutputSummary: created.OutputSummary,
-	})
-	updated, err := service.UpdateCapability(ctx, update)
-	if err != nil {
-		t.Fatalf("update capability: %v", err)
-	}
-	if updated.Status != "draft" {
-		t.Fatalf("updated status = %q, want owner state preserved", updated.Status)
-	}
-	list, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{
-		ServerID: common.MCPServerID("mcp-capability"),
-		Stage:    "acceptance",
-		Query:    "验收",
-	})
-	if err != nil {
-		t.Fatalf("list capabilities: %v", err)
-	}
-	if len(list) != 1 || list[0].DisplayName != "工作空间验收资料" {
-		t.Fatalf("filtered capabilities = %+v, want acceptance capability", list)
-	}
+	r.snapshot = mcpmodel.CloneRegistrySnapshot(next)
+	return nil
 }

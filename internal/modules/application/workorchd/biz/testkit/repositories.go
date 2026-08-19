@@ -1,9 +1,13 @@
 package testkit
 
 import (
+	"context"
 	"path/filepath"
+	"sort"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -19,6 +23,7 @@ type RepositoryExports struct {
 	MemoryRecallTraces    repository.MemoryRecallTraceRepository
 	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
 	Skills                repository.SkillRepository
+	MCPRegistry           repository.MCPRegistryRepository
 	MCPServers            repository.MCPServerRepository
 	MCPCapabilities       repository.MCPCapabilityRepository
 	Results               repository.ResultRepository
@@ -89,6 +94,7 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	switch backend {
 	case "memory":
+		registry := memory.NewMCPRegistryRepository()
 		return RepositoryExports{
 			Souls:                 memory.NewSoulRepository(),
 			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
@@ -96,8 +102,9 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			MemoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
 			AutoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
 			Skills:                memory.NewSkillRepository(),
-			MCPServers:            memory.NewMCPServerRepository(),
-			MCPCapabilities:       memory.NewMCPCapabilityRepository(),
+			MCPRegistry:           registry,
+			MCPServers:            aggregateServerRepository{registry: registry},
+			MCPCapabilities:       aggregateCapabilityRepository{registry: registry},
 			Results:               memory.NewResultRepository(),
 			Artifacts:             memory.NewArtifactRepository(),
 			EventRecords:          memory.NewEventRecordRepository(),
@@ -120,6 +127,11 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 	case "file":
 		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+		registry := fileRepo.NewMCPRegistryRepositoryWithLegacy(
+			filepath.Join(dataRoot, "system", "mcp_registry.json"),
+			filepath.Join(dataRoot, "system", "mcp_server.json"),
+			filepath.Join(dataRoot, "system", "mcp_capability.json"),
+		)
 		return RepositoryExports{
 			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
@@ -127,8 +139,9 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
 			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
 			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
-			MCPServers:            fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
-			MCPCapabilities:       fileRepo.NewMCPCapabilityRepository(filepath.Join(dataRoot, "system", "mcp_capability.json")),
+			MCPRegistry:           registry,
+			MCPServers:            aggregateServerRepository{registry: registry},
+			MCPCapabilities:       aggregateCapabilityRepository{registry: registry},
 			Results:               workspaceScopedRepos.Results,
 			Artifacts:             workspaceScopedRepos.Artifacts,
 			EventRecords:          workspaceScopedRepos.EventRecords,
@@ -151,4 +164,139 @@ func buildRepositories(backend string, dataRoot string) RepositoryExports {
 	default:
 		panic("unsupported repository backend: " + backend)
 	}
+}
+
+type aggregateServerRepository struct {
+	registry repository.MCPRegistryRepository
+}
+
+func (r aggregateServerRepository) Create(ctx context.Context, item *mcpmodel.Server) error {
+	return mutateTestRegistry(ctx, r.registry, func(snapshot *mcpmodel.RegistrySnapshot) error {
+		for _, existing := range snapshot.Servers {
+			if existing != nil && item != nil && existing.ID == item.ID {
+				return common.ErrConflict
+			}
+		}
+		if item == nil {
+			return common.ErrInvalidArgument
+		}
+		snapshot.Servers = append(snapshot.Servers, mcpmodel.CloneServer(item))
+		return nil
+	})
+}
+
+func (r aggregateServerRepository) Get(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
+	snapshot, err := r.registry.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range snapshot.Servers {
+		if item != nil && item.ID == id {
+			return mcpmodel.CloneServer(item), nil
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
+func (r aggregateServerRepository) List(ctx context.Context) ([]*mcpmodel.Server, error) {
+	snapshot, err := r.registry.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mcpmodel.CloneServers(snapshot.Servers), nil
+}
+
+func (r aggregateServerRepository) Update(ctx context.Context, item *mcpmodel.Server) error {
+	return mutateTestRegistry(ctx, r.registry, func(snapshot *mcpmodel.RegistrySnapshot) error {
+		for idx, existing := range snapshot.Servers {
+			if existing != nil && item != nil && existing.ID == item.ID {
+				snapshot.Servers[idx] = mcpmodel.CloneServer(item)
+				return nil
+			}
+		}
+		if item == nil {
+			return common.ErrInvalidArgument
+		}
+		return common.ErrNotFound
+	})
+}
+
+type aggregateCapabilityRepository struct {
+	registry repository.MCPRegistryRepository
+}
+
+func (r aggregateCapabilityRepository) Create(ctx context.Context, item *mcpmodel.Capability) error {
+	return mutateTestRegistry(ctx, r.registry, func(snapshot *mcpmodel.RegistrySnapshot) error {
+		for _, existing := range snapshot.Capabilities {
+			if existing != nil && item != nil && existing.ID == item.ID {
+				return common.ErrConflict
+			}
+		}
+		if item == nil {
+			return common.ErrInvalidArgument
+		}
+		snapshot.Capabilities = append(snapshot.Capabilities, mcpmodel.CloneCapability(item))
+		return nil
+	})
+}
+
+func (r aggregateCapabilityRepository) Get(ctx context.Context, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+	snapshot, err := r.registry.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range snapshot.Capabilities {
+		if item != nil && item.ID == id {
+			return mcpmodel.CloneCapability(item), nil
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
+func (r aggregateCapabilityRepository) List(ctx context.Context) ([]*mcpmodel.Capability, error) {
+	snapshot, err := r.registry.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mcpmodel.CloneCapabilities(snapshot.Capabilities), nil
+}
+
+func (r aggregateCapabilityRepository) Update(ctx context.Context, item *mcpmodel.Capability) error {
+	return mutateTestRegistry(ctx, r.registry, func(snapshot *mcpmodel.RegistrySnapshot) error {
+		for idx, existing := range snapshot.Capabilities {
+			if existing != nil && item != nil && existing.ID == item.ID {
+				snapshot.Capabilities[idx] = mcpmodel.CloneCapability(item)
+				return nil
+			}
+		}
+		if item == nil {
+			return common.ErrInvalidArgument
+		}
+		return common.ErrNotFound
+	})
+}
+
+func mutateTestRegistry(ctx context.Context, registry repository.MCPRegistryRepository, apply func(*mcpmodel.RegistrySnapshot) error) error {
+	if registry == nil || apply == nil {
+		return common.ErrInvalidArgument
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		current, err := registry.Load(ctx)
+		if err != nil {
+			return err
+		}
+		next := mcpmodel.CloneRegistrySnapshot(current)
+		if err := apply(next); err != nil {
+			return err
+		}
+		sort.Slice(next.Servers, func(i, j int) bool { return next.Servers[i].ID < next.Servers[j].ID })
+		sort.Slice(next.Capabilities, func(i, j int) bool { return next.Capabilities[i].ID < next.Capabilities[j].ID })
+		next.Revision = current.Revision + 1
+		if err := registry.Commit(ctx, current.Revision, next); err == nil {
+			return nil
+		} else if err != common.ErrConflict {
+			return err
+		}
+	}
+	return common.ErrConflict
 }

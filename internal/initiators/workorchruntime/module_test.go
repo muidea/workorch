@@ -187,8 +187,7 @@ func assertRepositoryGroupsComplete(t *testing.T, repositories repositorySet) {
 	requireNotNil(t, "approval approvals", repositories.Approval().Approvals)
 	requireNotNil(t, "eventstream records", repositories.EventStream().EventRecords)
 	requireNotNil(t, "governance traces", repositories.Governance().AutoGovernanceTraces)
-	requireNotNil(t, "mcp servers", repositories.MCP().Servers)
-	requireNotNil(t, "mcp capabilities", repositories.MCP().Capabilities)
+	requireNotNil(t, "mcp registry", repositories.MCP().Registry)
 	requireNotNil(t, "memory items", repositories.Memory().MemoryItems)
 	requireNotNil(t, "memory recall traces", repositories.Memory().MemoryRecallTraces)
 

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -33,12 +32,8 @@ type serverGetter interface {
 	GetServer(context.Context, common.MCPServerID) (*mcpmodel.Server, error)
 }
 
-type serverLister interface {
-	ListServers(context.Context) ([]*mcpmodel.Server, error)
-}
-
-type capabilityLister interface {
-	ListCapabilities(context.Context, registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error)
+type registrySnapshotGetter interface {
+	RegistrySnapshot(context.Context) (*mcpmodel.RegistrySnapshot, string, error)
 }
 
 const (

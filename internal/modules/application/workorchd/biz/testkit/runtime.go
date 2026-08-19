@@ -218,7 +218,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	mcpModule := mcpmodule.New()
-	if err := configure(mcpModule, mcpModule.Configure(mcpregistrybiz.Dependencies{Servers: repositories.MCPServers, Capabilities: repositories.MCPCapabilities, EventHub: rawHub})); err != nil {
+	if err := configure(mcpModule, mcpModule.Configure(mcpregistrybiz.Dependencies{Registry: repositories.MCPRegistry, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	eventStreamModule := eventstreammodule.New()

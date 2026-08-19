@@ -419,7 +419,7 @@ matches=""
 if ((${#event_contract_dirs[@]} > 0)); then
   matches="$(
     find "${event_contract_dirs[@]}" -type f -name '*.go' -print0 |
-      xargs -0 -r grep -n -E -- 'map\[string\]any|\[\]any|\bany\b|<-chan|\bchan\b|internal/pkg/repository|io\.Writer|http\.ResponseWriter|\*.*Repository|Registry|Recorder' || true
+      xargs -0 -r grep -n -E -- 'map\[string\]any|\[\]any|\bany\b|<-chan|\bchan\b|internal/pkg/repository|io\.Writer|http\.ResponseWriter|\*.*(Repository|Registry)|Recorder' || true
   )"
 fi
 if [[ -n "$matches" ]]; then
@@ -2150,14 +2150,36 @@ for required_field in CapabilityID ServerID Kind Name Schema Enabled; do
 		exit 1
 	fi
 done
-mcp_result_shape="$(sed -n '/^type MCPCommandResult struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
-if ! grep -q -F -- 'mcpmodel.Capability' <<<"$mcp_result_shape"; then
+
+if grep -q -E -- '^type MCPCommandResult struct' internal/modules/blocks/mcpregistry/pkg/events/messages.go; then
+	echo "boundary contract violation: MCP Registry topics must use concrete result types, not MCPCommandResult" >&2
+	exit 1
+fi
+mcp_result_shapes="$(sed -n \
+	-e '/^type CreateCapabilityResult struct {/,/^}/p' \
+	-e '/^type GetCapabilityResult struct {/,/^}/p' \
+	-e '/^type ListCapabilitiesResult struct {/,/^}/p' \
+	-e '/^type UpdateCapabilityResult struct {/,/^}/p' \
+	internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
+if ! grep -q -F -- 'mcpmodel.Capability' <<<"$mcp_result_shapes"; then
 	echo "boundary contract violation: MCP capability results must reuse the canonical owner value" >&2
 	exit 1
 fi
 if ! grep -q -F -- 'mcpmodel.CloneCapability' internal/modules/blocks/mcpregistry/biz/owner.go ||
 	! grep -q -F -- 'mcpmodel.CloneCapabilities' internal/modules/blocks/mcpregistry/biz/owner.go; then
 	echo "boundary contract violation: MCP capability results must detach owner values in the handler" >&2
+	exit 1
+fi
+
+mcp_create_server_shape="$(sed -n '/^type CreateServerCommand struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
+if ! grep -q -E -- '^[[:space:]]*EnvironmentRefs[[:space:]]' <<<"$mcp_create_server_shape" ||
+	grep -q -E -- '^[[:space:]]*Env[[:space:]]' <<<"$mcp_create_server_shape"; then
+	echo "boundary contract violation: MCP Registry server commands must carry reference-only EnvironmentRefs" >&2
+	exit 1
+fi
+if ! grep -q -F -- 'repository.MCPRegistryRepository' internal/modules/blocks/mcpregistry/biz/owner.go ||
+	grep -q -E -- 'repository\.(MCPServerRepository|MCPCapabilityRepository)' internal/modules/blocks/mcpregistry/biz/owner.go; then
+	echo "boundary contract violation: MCP Registry must use one aggregate CAS repository" >&2
 	exit 1
 fi
 

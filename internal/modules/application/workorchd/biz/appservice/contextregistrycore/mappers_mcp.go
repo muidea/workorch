@@ -16,7 +16,7 @@ func MapMCPServer(item *mcpmodel.Server) workorchmanagementcontract.MCPServer {
 		Endpoint:              item.Endpoint,
 		Command:               item.Command,
 		Args:                  CloneStrings(item.Args),
-		Env:                   RedactStringMap(item.Env),
+		EnvironmentRefs:       CloneStringMap(item.Env),
 		Enabled:               item.Enabled,
 		AllowedTools:          CloneStrings(item.AllowedTools),
 		AllowedResources:      CloneStrings(item.AllowedResources),
@@ -76,6 +76,8 @@ func MapMCPCapability(item *mcpmodel.Capability) workorchmanagementcontract.MCPC
 		URI:                          item.URI,
 		Enabled:                      item.Enabled,
 		ApprovalPolicy:               item.ApprovalPolicy,
-		Status:                       item.Status,
+		Source:                       item.Source,
+		SourceRef:                    item.SourceRef,
+		Revision:                     item.Revision,
 	}
 }

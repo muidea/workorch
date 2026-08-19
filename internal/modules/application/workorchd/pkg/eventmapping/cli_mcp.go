@@ -14,7 +14,7 @@ import (
 func MCPServerMutationDTO(item workorchmanagementcontract.MCPServerMutation) workorchdevents.CLIMCPServerMutation {
 	return workorchdevents.CLIMCPServerMutation{
 		ID: item.ID, Name: item.Name, Transport: item.Transport, Endpoint: item.Endpoint,
-		Command: item.Command, Args: append([]string(nil), item.Args...), Env: stringEntries(item.Env), Enabled: item.Enabled,
+		Command: item.Command, Args: append([]string(nil), item.Args...), EnvironmentRefs: stringEntries(item.EnvironmentRefs), Enabled: item.Enabled,
 		AllowedTools: append([]string(nil), item.AllowedTools...), AllowedResources: append([]string(nil), item.AllowedResources...),
 		AllowedPrompts: append([]string(nil), item.AllowedPrompts...), DefaultApprovalPolicy: item.DefaultApprovalPolicy,
 		SessionPolicy: item.SessionPolicy, TimeoutMillis: item.TimeoutMillis,
@@ -22,13 +22,13 @@ func MCPServerMutationDTO(item workorchmanagementcontract.MCPServerMutation) wor
 }
 
 func MCPServerMutation(item workorchdevents.CLIMCPServerMutation) (workorchmanagementcontract.MCPServerMutation, error) {
-	env, err := stringMap(item.Env)
+	env, err := stringMap(item.EnvironmentRefs)
 	if err != nil {
 		return workorchmanagementcontract.MCPServerMutation{}, err
 	}
 	return workorchmanagementcontract.MCPServerMutation{
 		ID: item.ID, Name: item.Name, Transport: item.Transport, Endpoint: item.Endpoint,
-		Command: item.Command, Args: append([]string(nil), item.Args...), Env: env, Enabled: item.Enabled,
+		Command: item.Command, Args: append([]string(nil), item.Args...), EnvironmentRefs: env, Enabled: item.Enabled,
 		AllowedTools: append([]string(nil), item.AllowedTools...), AllowedResources: append([]string(nil), item.AllowedResources...),
 		AllowedPrompts: append([]string(nil), item.AllowedPrompts...), DefaultApprovalPolicy: item.DefaultApprovalPolicy,
 		SessionPolicy: item.SessionPolicy, TimeoutMillis: item.TimeoutMillis,
@@ -83,7 +83,8 @@ func MCPCapabilityDTO(item workorchmanagementcontract.MCPCapability) (workorchde
 		Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
 		InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
 		RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass, ValidationProofApplicability: item.ValidationProofApplicability,
-		Schema: schema, URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+		Schema: schema, URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy,
+		Source: item.Source, SourceRef: item.SourceRef, Revision: item.Revision,
 	}, nil
 }
 
@@ -108,7 +109,8 @@ func MCPCapabilityManagement(item workorchdevents.CLIMCPCapability) workorchmana
 		Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
 		InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
 		RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass, ValidationProofApplicability: item.ValidationProofApplicability,
-		Schema: item.Schema.Map(), URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+		Schema: item.Schema.Map(), URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy,
+		Source: item.Source, SourceRef: item.SourceRef, Revision: item.Revision,
 	}
 }
 

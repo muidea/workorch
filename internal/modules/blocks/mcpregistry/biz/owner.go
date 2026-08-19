@@ -17,29 +17,23 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
-	Servers           repository.MCPServerRepository
-	Capabilities      repository.MCPCapabilityRepository
+	Registry          repository.MCPRegistryRepository
 	EventHub          magicevent.Hub
 	BackgroundRoutine task.BackgroundRoutine
 }
 
 type Biz struct {
 	basebiz.Base
-	service      *Service
-	servers      repository.MCPServerRepository
-	capabilities repository.MCPCapabilityRepository
-	topics       []string
-	started      bool
+	service *Service
+	topics  []string
+	started bool
 }
 
 func New(eventHub magicevent.Hub, background task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
-	if deps.Servers == nil || deps.Capabilities == nil || deps.EventHub == nil {
+	if deps.Registry == nil || deps.EventHub == nil || eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if eventHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, background), service: NewService(deps.Servers, deps.Capabilities), servers: deps.Servers, capabilities: deps.Capabilities}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, background), service: NewService(deps.Registry)}, nil
 }
 
 func (m *Biz) Start() error {
@@ -58,12 +52,13 @@ func (m *Biz) Start() error {
 		mcpevents.TopicMCPCommandGetCapability,
 		mcpevents.TopicMCPCommandListCapabilities,
 		mcpevents.TopicMCPCommandUpdateCapability,
+		mcpevents.TopicMCPCommandReadRegistrySnapshot,
+		mcpevents.TopicMCPCommandReadSelectionSnapshot,
+		mcpevents.TopicMCPCommandEnsureDefaults,
 	}
 	for _, topic := range m.topics {
-		m.SubscribeFunc(topic, m.handleMCPCommand)
+		m.SubscribeFunc(topic, m.handleCommand)
 	}
-	m.topics = append(m.topics, mcpevents.TopicMCPCommandEnsureDefaults)
-	m.SubscribeFunc(mcpevents.TopicMCPCommandEnsureDefaults, m.handleSystemDefaultsCommand)
 	m.started = true
 	return nil
 }
@@ -77,132 +72,135 @@ func (m *Biz) Teardown(context.Context) {
 	}
 	m.topics = nil
 	m.service = nil
-	m.servers = nil
-	m.capabilities = nil
 	m.started = false
 }
 
-func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(mcpevents.EnsureDefaultsCommand); !ok || m == nil || m.servers == nil || m.capabilities == nil {
-		setSystemMCPDefaultsResult(result, common.ErrInvalidArgument)
-		return
-	}
-	setSystemMCPDefaultsResult(result, ensureBuiltinMCPDefaults(ev.Context(), m.servers, m.capabilities))
-}
-
-func setSystemMCPDefaultsResult(result magicevent.Result, err error) {
+func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	// Every Registry topic is a synchronous command/query. Post must never
+	// mutate strong owner state without a result channel.
 	if result == nil {
 		return
 	}
-	if err != nil {
-		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
-		return
-	}
-	result.Set(mcpevents.EnsureDefaultsResult{Ensured: true}, nil)
-}
-
-func (m *Biz) handleMCPCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeMCPCommand(ev)
-	setMagicResult(result, response, err)
-}
-
-func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult, error) {
 	if m == nil || m.service == nil {
-		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
 	case mcpevents.TopicMCPCommandCreateServer:
 		cmd, ok := ev.Data().(mcpevents.CreateServerCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.CreateServerResult{}, common.ErrInvalidArgument)
+			return
 		}
-		if err := m.service.CreateServer(ctx, cmd); err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		server, err := m.service.GetServer(ctx, cmd.ServerID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Server: mcpevents.MCPServerFromModel(server)}, nil
+		server, revision, err := m.service.CreateServer(ctx, cmd)
+		view, viewErr := mcpevents.MCPServerFromModel(server)
+		setMagicResult(result, mcpevents.CreateServerResult{Server: view, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandGetServer:
 		cmd, ok := ev.Data().(mcpevents.GetServerCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.GetServerResult{}, common.ErrInvalidArgument)
+			return
 		}
-		server, err := m.service.GetServer(ctx, cmd.ServerID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Server: mcpevents.MCPServerFromModel(server)}, nil
+		server, revision, err := m.service.GetServer(ctx, cmd.ServerID)
+		view, viewErr := mcpevents.MCPServerFromModel(server)
+		setMagicResult(result, mcpevents.GetServerResult{Server: view, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandListServers:
-		if _, ok := ev.Data().(mcpevents.ListServersCommand); !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+		cmd, ok := ev.Data().(mcpevents.ListServersCommand)
+		if !ok {
+			setMagicResult(result, mcpevents.ListServersResult{}, common.ErrInvalidArgument)
+			return
 		}
-		servers, err := m.service.ListServers(ctx)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Servers: mcpevents.MCPServersFromModels(servers)}, nil
+		servers, cursor, revision, err := m.service.ListServers(ctx, cmd.CursorAfterID, cmd.Limit)
+		views, viewErr := mcpevents.MCPServersFromModels(servers)
+		setMagicResult(result, mcpevents.ListServersResult{Servers: views, NextCursor: cursor, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandUpdateServer:
 		cmd, ok := ev.Data().(mcpevents.UpdateServerCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.UpdateServerResult{}, common.ErrInvalidArgument)
+			return
 		}
-		if err := m.service.UpdateServer(ctx, cmd); err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		server, err := m.service.GetServer(ctx, cmd.ServerID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Server: mcpevents.MCPServerFromModel(server)}, nil
+		server, revision, err := m.service.UpdateServer(ctx, cmd)
+		view, viewErr := mcpevents.MCPServerFromModel(server)
+		setMagicResult(result, mcpevents.UpdateServerResult{Server: view, RegistryRevision: revision}, firstError(err, viewErr))
 	case mcpevents.TopicMCPCommandCreateCapability:
 		cmd, ok := ev.Data().(mcpevents.CreateCapabilityCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.CreateCapabilityResult{}, common.ErrInvalidArgument)
+			return
 		}
-		item, err := m.service.CreateCapability(ctx, cmd)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capability: mcpmodel.CloneCapability(item)}, nil
+		item, revision, err := m.service.CreateCapability(ctx, cmd)
+		setMagicResult(result, mcpevents.CreateCapabilityResult{Capability: mcpmodel.CloneCapability(item), RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandGetCapability:
 		cmd, ok := ev.Data().(mcpevents.GetCapabilityCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.GetCapabilityResult{}, common.ErrInvalidArgument)
+			return
 		}
-		item, err := m.service.GetCapability(ctx, cmd.CapabilityID)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capability: mcpmodel.CloneCapability(item)}, nil
+		item, revision, err := m.service.GetCapability(ctx, cmd.CapabilityID)
+		setMagicResult(result, mcpevents.GetCapabilityResult{Capability: mcpmodel.CloneCapability(item), RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandListCapabilities:
 		cmd, ok := ev.Data().(mcpevents.ListCapabilitiesCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.ListCapabilitiesResult{}, common.ErrInvalidArgument)
+			return
 		}
-		items, err := m.service.ListCapabilities(ctx, cmd.Query)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
-		}
-		return mcpevents.MCPCommandResult{Capabilities: mcpmodel.CloneCapabilities(items)}, nil
+		items, cursor, revision, err := m.service.ListCapabilities(ctx, cmd.Query, cmd.CursorAfterID, cmd.Limit)
+		setMagicResult(result, mcpevents.ListCapabilitiesResult{Capabilities: mcpmodel.CloneCapabilities(items), NextCursor: cursor, RegistryRevision: revision}, err)
 	case mcpevents.TopicMCPCommandUpdateCapability:
 		cmd, ok := ev.Data().(mcpevents.UpdateCapabilityCommand)
 		if !ok {
-			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, mcpevents.UpdateCapabilityResult{}, common.ErrInvalidArgument)
+			return
 		}
-		item, err := m.service.UpdateCapability(ctx, cmd)
-		if err != nil {
-			return mcpevents.MCPCommandResult{}, err
+		item, revision, err := m.service.UpdateCapability(ctx, cmd)
+		setMagicResult(result, mcpevents.UpdateCapabilityResult{Capability: mcpmodel.CloneCapability(item), RegistryRevision: revision}, err)
+	case mcpevents.TopicMCPCommandReadRegistrySnapshot:
+		if _, ok := ev.Data().(mcpevents.ReadRegistrySnapshotCommand); !ok {
+			setMagicResult(result, mcpevents.RegistrySnapshotResult{}, common.ErrInvalidArgument)
+			return
 		}
-		return mcpevents.MCPCommandResult{Capability: mcpmodel.CloneCapability(item)}, nil
+		snapshot, revision, err := m.service.RegistrySnapshot(ctx)
+		setRegistrySnapshotResult(result, snapshot, revision, err)
+	case mcpevents.TopicMCPCommandReadSelectionSnapshot:
+		cmd, ok := ev.Data().(mcpevents.ReadSelectionSnapshotCommand)
+		if !ok {
+			setMagicResult(result, mcpevents.SelectionSnapshotResult{}, common.ErrInvalidArgument)
+			return
+		}
+		snapshot, revision, err := m.service.SelectionSnapshot(ctx, cmd.ServerIDs, cmd.CapabilityIDs)
+		setSelectionSnapshotResult(result, snapshot, revision, err)
+	case mcpevents.TopicMCPCommandEnsureDefaults:
+		if _, ok := ev.Data().(mcpevents.EnsureDefaultsCommand); !ok {
+			setMagicResult(result, mcpevents.EnsureDefaultsResult{}, common.ErrInvalidArgument)
+			return
+		}
+		revision, err := m.service.EnsureBuiltinDefaults(ctx)
+		setMagicResult(result, mcpevents.EnsureDefaultsResult{Ensured: err == nil, RegistryRevision: revision}, err)
 	default:
-		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}
 }
 
-func setMagicResult(result magicevent.Result, data mcpevents.MCPCommandResult, err error) {
+func setRegistrySnapshotResult(result magicevent.Result, snapshot *mcpmodel.RegistrySnapshot, revision string, err error) {
+	if err != nil {
+		setMagicResult(result, mcpevents.RegistrySnapshotResult{}, err)
+		return
+	}
+	servers, viewErr := mcpevents.MCPServersFromModels(snapshot.Servers)
+	setMagicResult(result, mcpevents.RegistrySnapshotResult{Servers: servers, Capabilities: mcpmodel.CloneCapabilities(snapshot.Capabilities), RegistryRevision: revision}, viewErr)
+}
+
+func setSelectionSnapshotResult(result magicevent.Result, snapshot *mcpmodel.RegistrySnapshot, revision string, err error) {
+	if err != nil {
+		setMagicResult(result, mcpevents.SelectionSnapshotResult{}, err)
+		return
+	}
+	servers, viewErr := mcpevents.MCPServersFromModels(snapshot.Servers)
+	setMagicResult(result, mcpevents.SelectionSnapshotResult{Servers: servers, Capabilities: mcpmodel.CloneCapabilities(snapshot.Capabilities), RegistryRevision: revision}, viewErr)
+}
+
+func setMagicResult[Result any](result magicevent.Result, data Result, err error) {
 	if result == nil {
 		return
 	}
@@ -211,4 +209,11 @@ func setMagicResult(result magicevent.Result, data mcpevents.MCPCommandResult, e
 		return
 	}
 	result.Set(data, nil)
+}
+
+func firstError(left, right error) error {
+	if left != nil {
+		return left
+	}
+	return right
 }

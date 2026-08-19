@@ -19,7 +19,7 @@ func mcpServerCommandFromMutation(cmd workorchmanagementcontract.MCPServerMutati
 		Endpoint:              cmd.Endpoint,
 		Command:               cmd.Command,
 		Args:                  contextregistrycore.CloneStrings(cmd.Args),
-		Env:                   mcpevents.EnvironmentVariablesFromMap(cmd.Env),
+		EnvironmentRefs:       mcpevents.EnvironmentReferencesFromMap(cmd.EnvironmentRefs),
 		Enabled:               cmd.Enabled,
 		AllowedTools:          contextregistrycore.CloneStrings(cmd.AllowedTools),
 		AllowedResources:      contextregistrycore.CloneStrings(cmd.AllowedResources),

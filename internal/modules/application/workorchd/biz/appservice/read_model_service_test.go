@@ -1440,17 +1440,28 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "capability snapshot", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	if err := exports.Repositories.MCPServers.Create(ctx, &mcpmodel.Server{
+		ID: "mcp-capability-read-model", Name: "read model", Transport: "stdio", Command: "read-model", Enabled: true,
+		AllowedTools: []string{"repo.summary"},
+	}); err != nil {
+		t.Fatalf("create MCP server: %v", err)
+	}
 	if err := exports.Repositories.MCPCapabilities.Create(ctx, &mcpmodel.Capability{
-		ID:             capabilityID,
-		ServerID:       common.MCPServerID("mcp-capability-read-model"),
-		Kind:           mcpmodel.CapabilityKindTool,
-		Name:           "repo.summary",
-		DisplayName:    "仓库摘要能力",
-		Category:       "代码仓库",
-		RiskLevel:      "read_only",
-		Enabled:        true,
-		ApprovalPolicy: "operator",
-		Status:         "active",
+		ID:                           capabilityID,
+		ServerID:                     common.MCPServerID("mcp-capability-read-model"),
+		Kind:                         mcpmodel.CapabilityKindTool,
+		Name:                         "repo.summary",
+		DisplayName:                  "仓库摘要能力",
+		Category:                     "代码仓库",
+		RiskLevel:                    "read_only",
+		Enabled:                      true,
+		ApprovalPolicy:               "operator",
+		EffectScope:                  "none",
+		IdempotencyClass:             "safe_to_replay",
+		ValidationProofApplicability: mcpmodel.ValidationProofApplicabilityDirect,
+		Source:                       mcpmodel.CapabilitySourceUser,
+		SourceRef:                    "test",
+		Revision:                     1,
 	}); err != nil {
 		t.Fatalf("create capability: %v", err)
 	}
@@ -1645,7 +1656,9 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 		RiskLevel:      "read_only",
 		Enabled:        true,
 		ApprovalPolicy: "operator",
-		Status:         "active",
+		Source:         mcpmodel.CapabilitySourceUser,
+		SourceRef:      "test",
+		Revision:       1,
 	}); err != nil {
 		t.Fatalf("create capability: %v", err)
 	}

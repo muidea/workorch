@@ -13,6 +13,11 @@ const (
 	ValidationProofApplicabilityDirect      = "direct"
 	ValidationProofApplicabilityAuxiliary   = "auxiliary"
 	ValidationProofApplicabilityNotDeclared = "not_declared"
+
+	CapabilitySourceUser            = "user"
+	CapabilitySourceBuiltin         = "builtin"
+	CapabilitySourceServerAllowlist = "server_allowlist"
+	CapabilitySourceLegacyImport    = "legacy_import"
 )
 
 func ValidValidationProofApplicability(value string) bool {
@@ -50,7 +55,9 @@ type Capability struct {
 	URI                          string                       `json:"uri,omitempty"`
 	Enabled                      bool                         `json:"enabled"`
 	ApprovalPolicy               string                       `json:"approvalPolicy,omitempty"`
-	Status                       string                       `json:"status,omitempty"`
+	Source                       string                       `json:"source"`
+	SourceRef                    string                       `json:"sourceRef"`
+	Revision                     uint64                       `json:"revision"`
 }
 
 // CloneCapability returns a detached owner value suitable for crossing a

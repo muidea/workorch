@@ -63,7 +63,7 @@ func CloneFloats(input []float64) []float64 {
 	return append([]float64(nil), input...)
 }
 
-func cloneStringMap(input map[string]string) map[string]string {
+func CloneStringMap(input map[string]string) map[string]string {
 	if input == nil {
 		return nil
 	}
@@ -72,4 +72,8 @@ func cloneStringMap(input map[string]string) map[string]string {
 		ret[key] = value
 	}
 	return ret
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	return CloneStringMap(input)
 }

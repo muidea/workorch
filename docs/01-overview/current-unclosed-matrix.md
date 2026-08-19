@@ -4,7 +4,7 @@ Status: active
 
 Type: current-work-index
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-20
 
 ## Purpose
 
@@ -68,6 +68,10 @@ Last Verified: 2026-08-19
 - Skill owner 与外部 SkillHub Catalog 保持来源分离；Registry owner 签发 canonical content hash provenance，create/get/
   list 使用 concrete result 且 list 有界分页，Post 不得执行写命令。activation 在 Run bootstrap 前封存最多 5 项及
   instruction/metadata byte budget，Skill 只进入 C3；Orchestrator/LLM 不直读 Registry/Catalog，也不重新选择或裁剪。
+- MCP Registry 将 Server/Capability/binding 保存在一个 revisioned aggregate CAS 中；写入、allowlist reconciliation 与
+  defaults ensure 原子提交，Application/MCP 使用 owner-issued 一致 selection/full snapshot。EventHub 只传 reference-only
+  `environmentRefs`，执行 owner 最后解析；Capability 以 `enabled` 为唯一可用性并保存 typed metadata/provenance，所有
+  command/result concrete、list/query/aggregate 有界，Post 不得执行强写。
 
 完整矩阵见 [Runtime Owner Convergence Verification Matrix](../60-verification/runtime-owner-convergence-matrix.md)。
 

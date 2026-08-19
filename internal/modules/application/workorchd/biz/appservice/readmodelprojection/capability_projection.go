@@ -42,6 +42,13 @@ func runtimeCapabilityFromModel(item *mcpmodel.Capability) projectioncontract.Ru
 		RiskLevel:      item.RiskLevel,
 		Enabled:        item.Enabled,
 		ApprovalPolicy: item.ApprovalPolicy,
-		Status:         item.Status,
+		Status:         availabilityStatus(item),
 	}
+}
+
+func availabilityStatus(item *mcpmodel.Capability) string {
+	if item != nil && item.Enabled {
+		return "enabled"
+	}
+	return "disabled"
 }

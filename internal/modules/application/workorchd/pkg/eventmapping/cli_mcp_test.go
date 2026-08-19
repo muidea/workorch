@@ -10,16 +10,16 @@ import (
 func TestCLIMCPMappingPreservesFullContractAndDetachesCollections(t *testing.T) {
 	server := workorchmanagementcontract.MCPServer{
 		ID: "mcp-a", Name: "MCP A", Transport: "stdio", Command: "mcp-a", Args: []string{"serve"},
-		Env: map[string]string{"Z_KEY": "z", "A_KEY": "a"}, Enabled: true,
+		EnvironmentRefs: map[string]string{"Z_KEY": "env://Z_KEY", "A_KEY": "env://A_KEY"}, Enabled: true,
 		AllowedTools: []string{"tool-a"}, DefaultApprovalPolicy: "required", TimeoutMillis: 1000,
 	}
 	dto := MCPServerDTO(server)
-	if len(dto.Env) != 2 || dto.Env[0].Key != "A_KEY" {
-		t.Fatalf("ordered environment = %+v", dto.Env)
+	if len(dto.EnvironmentRefs) != 2 || dto.EnvironmentRefs[0].Key != "A_KEY" {
+		t.Fatalf("ordered environment = %+v", dto.EnvironmentRefs)
 	}
 	dto.Args[0] = "mutated"
-	dto.Env[0].Value = "mutated"
-	if server.Args[0] != "serve" || server.Env["A_KEY"] != "a" {
+	dto.EnvironmentRefs[0].Value = "mutated"
+	if server.Args[0] != "serve" || server.EnvironmentRefs["A_KEY"] != "env://A_KEY" {
 		t.Fatal("MCP server DTO retained canonical collection storage")
 	}
 	dto = MCPServerDTO(server)
@@ -35,7 +35,7 @@ func TestCLIMCPMappingPreservesFullContractAndDetachesCollections(t *testing.T) 
 		ID: "cap-a", ServerID: "mcp-a", Kind: "tool", Name: "tool-a", DisplayName: "Tool A",
 		Tags: []string{"safe"}, Schema: map[string]any{"type": "object", "required": []any{"input"}},
 		EffectScope: "none", IdempotencyClass: "safe_to_replay", ValidationProofApplicability: "direct",
-		Enabled: true, ApprovalPolicy: "required", Status: "ready",
+		Enabled: true, ApprovalPolicy: "required", Source: "user", SourceRef: "cap-a", Revision: 2,
 	}
 	capDTO, err := MCPCapabilityDTO(capability)
 	if err != nil {

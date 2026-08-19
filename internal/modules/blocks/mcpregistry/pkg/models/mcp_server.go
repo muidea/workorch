@@ -2,21 +2,21 @@ package mcp
 
 import "github.com/muidea/workorch/internal/pkg/common"
 
-// Server is the MCP Registry owner model. Map-backed environment state stays
-// owner-local and is converted to ordered EventHub entries at the boundary.
+// Server is the MCP Registry owner model. Env values are references only; the
+// execution owner resolves them after the EventHub boundary.
 type Server struct {
-	ID                    common.MCPServerID
-	Name                  string
-	Transport             string
-	Endpoint              string
-	Command               string
-	Args                  []string
-	Env                   map[string]string
-	Enabled               bool
-	AllowedTools          []string
-	AllowedResources      []string
-	AllowedPrompts        []string
-	DefaultApprovalPolicy string
-	SessionPolicy         string
-	TimeoutMillis         int
+	ID                    common.MCPServerID `json:"id"`
+	Name                  string             `json:"name"`
+	Transport             string             `json:"transport"`
+	Endpoint              string             `json:"endpoint,omitempty"`
+	Command               string             `json:"command,omitempty"`
+	Args                  []string           `json:"args,omitempty"`
+	Env                   map[string]string  `json:"environmentRefs,omitempty"`
+	Enabled               bool               `json:"enabled"`
+	AllowedTools          []string           `json:"allowedTools,omitempty"`
+	AllowedResources      []string           `json:"allowedResources,omitempty"`
+	AllowedPrompts        []string           `json:"allowedPrompts,omitempty"`
+	DefaultApprovalPolicy string             `json:"defaultApprovalPolicy,omitempty"`
+	SessionPolicy         string             `json:"sessionPolicy,omitempty"`
+	TimeoutMillis         int                `json:"timeoutMillis,omitempty"`
 }

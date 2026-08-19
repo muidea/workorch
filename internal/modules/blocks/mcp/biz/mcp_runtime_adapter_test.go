@@ -3,8 +3,10 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -507,7 +509,7 @@ func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing
 		Transport:     "stdio",
 		Command:       os.Args[0],
 		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
-		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_ENV_ECHO": "{workspaceInternalDirectory}/config.json"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_ENV_ECHO": "{workspaceInternalDirectory}"},
 		Enabled:       true,
 		AllowedTools:  []string{"repo.summary"},
 		TimeoutMillis: 1000,
@@ -530,7 +532,7 @@ func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing
 		t.Fatalf("result payload = %#v, want decoded response", decodedMCPResponse(t, result.Response))
 	}
 	structured, ok := resultPayload["structuredContent"].(map[string]any)
-	if !ok || structured["envEcho"] != filepath.Join(internalDir, "config.json") {
+	if !ok || structured["envEcho"] != internalDir {
 		t.Fatalf("structured content = %#v, want env echo from command env", resultPayload["structuredContent"])
 	}
 }
@@ -1163,21 +1165,35 @@ func (g staticMCPServerGetter) GetServer(_ context.Context, id common.MCPServerI
 	return g.server, nil
 }
 
-func (g staticMCPServerGetter) ListServers(_ context.Context) ([]*mcpmodel.Server, error) {
+func (g staticMCPServerGetter) RegistrySnapshot(context.Context) (*mcpmodel.RegistrySnapshot, string, error) {
 	if g.server == nil {
-		return nil, common.ErrNotFound
+		return nil, "", common.ErrNotFound
 	}
-	return []*mcpmodel.Server{g.server}, nil
+	return testMCPRegistrySnapshot([]*mcpmodel.Server{g.server}, g.capabilities)
 }
 
-func (g staticMCPServerGetter) ListCapabilities(_ context.Context, _ registryevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
-	return mcpmodel.CloneCapabilities(g.capabilities), nil
+func testMCPRegistrySnapshot(servers []*mcpmodel.Server, capabilities []*mcpmodel.Capability) (*mcpmodel.RegistrySnapshot, string, error) {
+	snapshot := &mcpmodel.RegistrySnapshot{Servers: mcpmodel.CloneServers(servers), Capabilities: mcpmodel.CloneCapabilities(capabilities)}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, "", err
+	}
+	return snapshot, fmt.Sprintf("test-mcp-registry-%x", sha256.Sum256(raw))[:42], nil
 }
 
 func newMCPService(t *testing.T, server mcpmodel.Server) serverGetter {
 	t.Helper()
 	if server.ID == "" {
 		t.Fatal("mcp server id is required")
+	}
+	for key, value := range server.Env {
+		if registryevents.ValidEnvironmentReference(value) {
+			continue
+		}
+		sum := sha256.Sum256([]byte(string(server.ID) + "\x00" + key))
+		name := fmt.Sprintf("WORKORCH_TEST_MCP_ENV_%X", sum[:8])
+		t.Setenv(name, value)
+		server.Env[key] = "env://" + name
 	}
 	// Tests that exercise admissibility provide an explicit owner catalog. The
 	// fixture intentionally materializes capability facts here rather than

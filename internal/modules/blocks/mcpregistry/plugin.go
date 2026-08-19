@@ -24,8 +24,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 		return err
 	}
 	if setupErr := m.configure(mcpbiz.Dependencies{
-		Servers:           repos.Servers,
-		Capabilities:      repos.Capabilities,
+		Registry:          repos.Registry,
 		EventHub:          eventHub,
 		BackgroundRoutine: backgroundRoutine,
 	}); setupErr != nil {

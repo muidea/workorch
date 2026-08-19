@@ -445,8 +445,7 @@ func repositoryGroupFieldContracts() map[string]map[string]string {
 			"AutoGovernanceTraces": "AutoGovernanceTraceRepository",
 		},
 		"MCPRepositories": {
-			"Servers":      "MCPServerRepository",
-			"Capabilities": "MCPCapabilityRepository",
+			"Registry": "MCPRegistryRepository",
 		},
 		"MemoryRepositories": {
 			"MemoryItems":        "MemoryItemRepository",

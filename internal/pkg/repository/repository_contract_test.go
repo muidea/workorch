@@ -142,6 +142,19 @@ func TestMCPCapabilityRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestMCPRegistryRepositoryContract_Memory(t *testing.T) {
+	testMCPRegistryRepositoryContract(t, memory.NewMCPRegistryRepository())
+}
+
+func TestMCPRegistryRepositoryContract_File(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp_registry.json")
+	testMCPRegistryRepositoryContract(t, file.NewMCPRegistryRepository(path))
+	reloaded, err := file.NewMCPRegistryRepository(path).Load(context.Background())
+	if err != nil || reloaded.Revision != 2 || len(reloaded.Servers) != 1 || len(reloaded.Capabilities) != 1 {
+		t.Fatalf("reloaded registry = %+v, err=%v", reloaded, err)
+	}
+}
+
 func TestResultRepositoryContract_Memory(t *testing.T) {
 	testResultRepositoryContract(t, func() repository.ResultRepository {
 		return memory.NewResultRepository()
@@ -509,6 +522,42 @@ func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRe
 	}
 }
 
+func testMCPRegistryRepositoryContract(t *testing.T, repo repository.MCPRegistryRepository) {
+	t.Helper()
+	ctx := context.Background()
+	initial, err := repo.Load(ctx)
+	if err != nil || initial.Revision != 0 || len(initial.Servers) != 0 || len(initial.Capabilities) != 0 {
+		t.Fatalf("initial registry = %+v, err=%v", initial, err)
+	}
+	server := &mcpmodel.Server{ID: "mcp-aggregate", Name: "aggregate", Env: map[string]string{"TOKEN": "env://TOKEN"}}
+	capability := &mcpmodel.Capability{ID: "cap-aggregate", ServerID: server.ID, Kind: "tool", Name: "read", Tags: []string{"safe"}}
+	first := &mcpmodel.RegistrySnapshot{Revision: 1, Servers: []*mcpmodel.Server{server}, Capabilities: []*mcpmodel.Capability{capability}}
+	if err := repo.Commit(ctx, 0, first); err != nil {
+		t.Fatalf("first Commit: %v", err)
+	}
+	server.Env["TOKEN"] = "mutated"
+	capability.Tags[0] = "mutated"
+	loaded, err := repo.Load(ctx)
+	if err != nil || loaded.Servers[0].Env["TOKEN"] != "env://TOKEN" || loaded.Capabilities[0].Tags[0] != "safe" {
+		t.Fatalf("detached Load = %+v, err=%v", loaded, err)
+	}
+	stale := mcpmodel.CloneRegistrySnapshot(loaded)
+	stale.Revision = 1
+	if err := repo.Commit(ctx, 0, stale); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stale Commit err = %v, want conflict", err)
+	}
+	loaded.Revision = 2
+	loaded.Servers[0].Name = "updated"
+	if err := repo.Commit(ctx, 1, loaded); err != nil {
+		t.Fatalf("second Commit: %v", err)
+	}
+	loaded.Servers[0].Name = "caller-mutated"
+	final, err := repo.Load(ctx)
+	if err != nil || final.Revision != 2 || final.Servers[0].Name != "updated" {
+		t.Fatalf("final registry = %+v, err=%v", final, err)
+	}
+}
+
 func testMCPServerRepositoryContract(t *testing.T, factory func() repository.MCPServerRepository) {
 	t.Helper()
 	ctx := context.Background()
@@ -587,7 +636,9 @@ func testMCPCapabilityRepositoryContract(t *testing.T, factory func() repository
 		Schema:         mustRepositoryPayload(t, map[string]any{"type": "object"}),
 		Enabled:        true,
 		ApprovalPolicy: "operator",
-		Status:         "draft",
+		Source:         mcpmodel.CapabilitySourceUser,
+		SourceRef:      "contract-test",
+		Revision:       1,
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create mcp capability: %v", err)

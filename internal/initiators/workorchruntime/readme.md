@@ -4,7 +4,7 @@ Status: active
 
 Type: initiator-contract
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-20
 
 ## 功能范围与边界
 
@@ -17,6 +17,7 @@ Last Verified: 2026-08-18
 - `Setup` 必须完成配置读取和全部 repository 创建后才发布 provider；首次或重复 `Setup` 失败都必须 fail-closed，不得保留半初始化或上一次 Setup 的旧 provider。
 - `RepositoryProvider` 在成功 `Setup` 前和 `Teardown` 后返回 `nil`；就绪时只返回按职责划分的 repository 接口，不暴露内部 `repositorySet`。
 - `Run` 不创建业务状态；`Teardown` 只释放 provider 引用。
+- MCP Registry 分组只提供一个 `MCPRegistryRepository` 聚合 CAS 合同；Server/Capability 不再作为两个可独立提交的生产 repository 暴露。
 
 ## 交互合同完整性
 

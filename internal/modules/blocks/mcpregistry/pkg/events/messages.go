@@ -1,8 +1,10 @@
 package events
 
 import (
+	pathpkg "path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
@@ -14,6 +16,84 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
+// EnvironmentReference is deliberately reference-only. A credential value is
+// resolved by the MCP execution owner and never crosses EventHub.
+type EnvironmentReference struct {
+	Name      string
+	Reference string
+}
+
+func EnvironmentReferencesFromMap(values map[string]string) []EnvironmentReference {
+	ret := make([]EnvironmentReference, 0, len(values))
+	for name, reference := range values {
+		ret = append(ret, EnvironmentReference{Name: name, Reference: reference})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].Name < ret[j].Name })
+	return ret
+}
+
+func EnvironmentReferenceMap(values []EnvironmentReference) (map[string]string, error) {
+	if len(values) > modulecommon.MaxEnvironmentRefs {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := make(map[string]string, len(values))
+	for _, item := range values {
+		name := strings.TrimSpace(item.Name)
+		reference := strings.TrimSpace(item.Reference)
+		if !validEnvironmentName(name) || !utf8.ValidString(reference) || len(reference) > modulecommon.MaxTextBytes || !ValidEnvironmentReference(reference) {
+			return nil, common.ErrInvalidArgument
+		}
+		if _, exists := ret[name]; exists {
+			return nil, common.ErrInvalidArgument
+		}
+		ret[name] = reference
+	}
+	return ret, nil
+}
+
+func ValidEnvironmentReference(reference string) bool {
+	reference = strings.TrimSpace(reference)
+	if strings.HasPrefix(reference, "env://") {
+		return validEnvironmentName(strings.TrimPrefix(reference, "env://"))
+	}
+	switch reference {
+	case "{workspaceId}", "{runId}", "{stepId}", "{workspaceDeliverableDirectory}", "{workspaceInternalDirectory}":
+		return true
+	}
+	const prefix = "{workspaceManagedConfig:"
+	if !strings.HasPrefix(reference, prefix) || !strings.HasSuffix(reference, "}") {
+		return false
+	}
+	referencePath := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(reference, prefix), "}"))
+	if referencePath == "" || strings.Contains(referencePath, "\\") || pathpkg.IsAbs(referencePath) || pathpkg.Clean(referencePath) != referencePath {
+		return false
+	}
+	for _, part := range strings.Split(referencePath, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func validEnvironmentName(value string) bool {
+	if value == "" || len(value) > modulecommon.MaxNameBytes {
+		return false
+	}
+	for idx, char := range []byte(value) {
+		if idx == 0 {
+			if char != '_' && (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') {
+				return false
+			}
+			continue
+		}
+		if char != '_' && (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 type CreateServerCommand struct {
 	ServerID              common.MCPServerID
 	Name                  string
@@ -21,7 +101,7 @@ type CreateServerCommand struct {
 	Endpoint              string
 	Command               string
 	Args                  []string
-	Env                   []EnvironmentVariable
+	EnvironmentRefs       []EnvironmentReference
 	Enabled               bool
 	AllowedTools          []string
 	AllowedResources      []string
@@ -31,56 +111,8 @@ type CreateServerCommand struct {
 	TimeoutMillis         int
 }
 
-type UpdateServerCommand struct {
-	ServerID              common.MCPServerID
-	Name                  string
-	Transport             string
-	Endpoint              string
-	Command               string
-	Args                  []string
-	Env                   []EnvironmentVariable
-	Enabled               bool
-	AllowedTools          []string
-	AllowedResources      []string
-	AllowedPrompts        []string
-	DefaultApprovalPolicy string
-	SessionPolicy         string
-	TimeoutMillis         int
-}
+type UpdateServerCommand CreateServerCommand
 
-// EnvironmentVariable is the stable EventHub representation of one MCP
-// process environment entry. Maps remain private to the registry owner and
-// provider adapters so message ordering and duplicate handling are explicit.
-type EnvironmentVariable struct {
-	Name  string
-	Value string
-}
-
-func EnvironmentVariablesFromMap(values map[string]string) []EnvironmentVariable {
-	ret := make([]EnvironmentVariable, 0, len(values))
-	for name, value := range values {
-		ret = append(ret, EnvironmentVariable{Name: name, Value: value})
-	}
-	sort.Slice(ret, func(i, j int) bool { return ret[i].Name < ret[j].Name })
-	return ret
-}
-
-func EnvironmentVariableMap(values []EnvironmentVariable) (map[string]string, error) {
-	ret := make(map[string]string, len(values))
-	for _, item := range values {
-		if strings.TrimSpace(item.Name) == "" {
-			return nil, common.ErrInvalidArgument
-		}
-		if _, exists := ret[item.Name]; exists {
-			return nil, common.ErrInvalidArgument
-		}
-		ret[item.Name] = item.Value
-	}
-	return ret, nil
-}
-
-// MCPServer is an owner-local immutable result DTO. It deliberately does not
-// expose the registry persistence model or its map-backed Env field.
 type MCPServer struct {
 	ID                    common.MCPServerID
 	Name                  string
@@ -88,7 +120,7 @@ type MCPServer struct {
 	Endpoint              string
 	Command               string
 	Args                  []string
-	Env                   []EnvironmentVariable
+	EnvironmentRefs       []EnvironmentReference
 	Enabled               bool
 	AllowedTools          []string
 	AllowedResources      []string
@@ -98,32 +130,40 @@ type MCPServer struct {
 	TimeoutMillis         int
 }
 
-func MCPServerFromModel(item *mcpmodel.Server) *MCPServer {
+func MCPServerFromModel(item *mcpmodel.Server) (*MCPServer, error) {
 	if item == nil {
-		return nil
+		return nil, common.ErrInvalidArgument
+	}
+	refs := EnvironmentReferencesFromMap(item.Env)
+	if _, err := EnvironmentReferenceMap(refs); err != nil {
+		return nil, err
 	}
 	return &MCPServer{
 		ID: item.ID, Name: item.Name, Transport: item.Transport, Endpoint: item.Endpoint, Command: item.Command,
-		Args: append([]string(nil), item.Args...), Env: EnvironmentVariablesFromMap(item.Env), Enabled: item.Enabled,
+		Args: append([]string(nil), item.Args...), EnvironmentRefs: refs, Enabled: item.Enabled,
 		AllowedTools: append([]string(nil), item.AllowedTools...), AllowedResources: append([]string(nil), item.AllowedResources...),
 		AllowedPrompts: append([]string(nil), item.AllowedPrompts...), DefaultApprovalPolicy: item.DefaultApprovalPolicy,
 		SessionPolicy: item.SessionPolicy, TimeoutMillis: item.TimeoutMillis,
-	}
+	}, nil
 }
 
-func MCPServersFromModels(items []*mcpmodel.Server) []*MCPServer {
+func MCPServersFromModels(items []*mcpmodel.Server) ([]*MCPServer, error) {
 	ret := make([]*MCPServer, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, MCPServerFromModel(item))
+		value, err := MCPServerFromModel(item)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, value)
 	}
-	return ret
+	return ret, nil
 }
 
 func (s *MCPServer) Model() (*mcpmodel.Server, error) {
 	if s == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	env, err := EnvironmentVariableMap(s.Env)
+	env, err := EnvironmentReferenceMap(s.EnvironmentRefs)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +176,6 @@ func (s *MCPServer) Model() (*mcpmodel.Server, error) {
 	}, nil
 }
 
-// CreateCapabilityCommand carries caller-owned capability configuration only.
-// The registry owner derives lifecycle state; callers submit configuration only.
 type CreateCapabilityCommand struct {
 	CapabilityID                 common.MCPCapabilityID
 	ServerID                     common.MCPServerID
@@ -163,9 +201,6 @@ type CreateCapabilityCommand struct {
 
 type UpdateCapabilityCommand CreateCapabilityCommand
 
-// MCPCapability is the detached EventHub view of registry-owned capability
-// state. It is separate from the persistence model and clones every mutable
-// field at the boundary.
 type CapabilityQuery struct {
 	ServerID  common.MCPServerID
 	Kind      string
@@ -176,76 +211,85 @@ type CapabilityQuery struct {
 	Query     string
 }
 
-type GetServerCommand struct {
-	ServerID common.MCPServerID
+type GetServerCommand struct{ ServerID common.MCPServerID }
+type ListServersCommand struct {
+	CursorAfterID common.MCPServerID
+	Limit         int
 }
-
-type ListServersCommand struct{}
-
-type GetCapabilityCommand struct {
-	CapabilityID common.MCPCapabilityID
-}
-
+type GetCapabilityCommand struct{ CapabilityID common.MCPCapabilityID }
 type ListCapabilitiesCommand struct {
-	Query CapabilityQuery
+	Query         CapabilityQuery
+	CursorAfterID common.MCPCapabilityID
+	Limit         int
 }
-
+type ReadRegistrySnapshotCommand struct{}
+type ReadSelectionSnapshotCommand struct {
+	ServerIDs     []common.MCPServerID
+	CapabilityIDs []common.MCPCapabilityID
+}
 type EnsureDefaultsCommand struct{}
 
-type EnsureDefaultsResult struct {
-	Ensured bool
+type CreateServerResult struct {
+	Server           *MCPServer
+	RegistryRevision string
 }
-
-type MCPCommandResult struct {
-	Server  *MCPServer
-	Servers []*MCPServer
-	// Capability is the canonical registry owner value. The owner handler
-	// always supplies a detached clone; keeping this type here avoids creating
-	// a second isomorphic capability DTO for EventHub consumers.
-	Capability   *mcpmodel.Capability
-	Capabilities []*mcpmodel.Capability
+type GetServerResult struct {
+	Server           *MCPServer
+	RegistryRevision string
+}
+type ListServersResult struct {
+	Servers          []*MCPServer
+	NextCursor       common.MCPServerID
+	RegistryRevision string
+}
+type UpdateServerResult struct {
+	Server           *MCPServer
+	RegistryRevision string
+}
+type CreateCapabilityResult struct {
+	Capability       *mcpmodel.Capability
+	RegistryRevision string
+}
+type GetCapabilityResult struct {
+	Capability       *mcpmodel.Capability
+	RegistryRevision string
+}
+type ListCapabilitiesResult struct {
+	Capabilities     []*mcpmodel.Capability
+	NextCursor       common.MCPCapabilityID
+	RegistryRevision string
+}
+type UpdateCapabilityResult struct {
+	Capability       *mcpmodel.Capability
+	RegistryRevision string
+}
+type RegistrySnapshotResult struct {
+	Servers          []*MCPServer
+	Capabilities     []*mcpmodel.Capability
+	RegistryRevision string
+}
+type SelectionSnapshotResult struct {
+	Servers          []*MCPServer
+	Capabilities     []*mcpmodel.Capability
+	RegistryRevision string
+}
+type EnsureDefaultsResult struct {
+	Ensured          bool
+	RegistryRevision string
 }
 
 func MessageContracts() []eventcontract.MessageContract {
-	ret := []eventcontract.MessageContract{}
-	for _, topic := range []string{
-		TopicMCPCommandCreateServer,
-		TopicMCPCommandGetServer,
-		TopicMCPCommandListServers,
-		TopicMCPCommandUpdateServer,
-		TopicMCPCommandCreateCapability,
-		TopicMCPCommandGetCapability,
-		TopicMCPCommandListCapabilities,
-		TopicMCPCommandUpdateCapability,
-		TopicMCPCommandEnsureDefaults,
-	} {
-		class := eventcontract.CommandClassWrite
-		lane := eventcontract.LanePolicyState
-		switch topic {
-		case TopicMCPCommandGetServer, TopicMCPCommandListServers, TopicMCPCommandGetCapability, TopicMCPCommandListCapabilities:
-			class = eventcontract.CommandClassRead
-			lane = eventcontract.LanePolicyQuery
-		}
-		switch topic {
-		case TopicMCPCommandCreateServer:
-			ret = append(ret, eventcontract.CommandTopic[CreateServerCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandGetServer:
-			ret = append(ret, eventcontract.CommandTopic[GetServerCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandListServers:
-			ret = append(ret, eventcontract.CommandTopic[ListServersCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandUpdateServer:
-			ret = append(ret, eventcontract.CommandTopic[UpdateServerCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandCreateCapability:
-			ret = append(ret, eventcontract.CommandTopic[CreateCapabilityCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandGetCapability:
-			ret = append(ret, eventcontract.CommandTopic[GetCapabilityCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandListCapabilities:
-			ret = append(ret, eventcontract.CommandTopic[ListCapabilitiesCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandUpdateCapability:
-			ret = append(ret, eventcontract.CommandTopic[UpdateCapabilityCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		case TopicMCPCommandEnsureDefaults:
-			ret = append(ret, eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
-		}
+	return []eventcontract.MessageContract{
+		eventcontract.CommandTopic[CreateServerCommand, CreateServerResult](contractOwner, definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMCPCommandCreateServer).MessageContract(),
+		eventcontract.CommandTopic[GetServerCommand, GetServerResult](contractOwner, definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMCPCommandGetServer).MessageContract(),
+		eventcontract.CommandTopic[ListServersCommand, ListServersResult](contractOwner, definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMCPCommandListServers).MessageContract(),
+		eventcontract.CommandTopic[UpdateServerCommand, UpdateServerResult](contractOwner, definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMCPCommandUpdateServer).MessageContract(),
+		eventcontract.CommandTopic[CreateCapabilityCommand, CreateCapabilityResult](contractOwner, definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMCPCommandCreateCapability).MessageContract(),
+		eventcontract.CommandTopic[GetCapabilityCommand, GetCapabilityResult](contractOwner, definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMCPCommandGetCapability).MessageContract(),
+		eventcontract.CommandTopic[ListCapabilitiesCommand, ListCapabilitiesResult](contractOwner, definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMCPCommandListCapabilities).MessageContract(),
+		eventcontract.CommandTopic[UpdateCapabilityCommand, UpdateCapabilityResult](contractOwner, definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMCPCommandUpdateCapability).MessageContract(),
+		eventcontract.CommandTopic[ReadRegistrySnapshotCommand, RegistrySnapshotResult](contractOwner, definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMCPCommandReadRegistrySnapshot).MessageContract(),
+		eventcontract.CommandTopic[ReadSelectionSnapshotCommand, SelectionSnapshotResult](contractOwner, definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMCPCommandReadSelectionSnapshot).MessageContract(),
+		eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult](contractOwner, definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMCPCommandEnsureDefaults).MessageContract(),
 	}
-	return ret
 }

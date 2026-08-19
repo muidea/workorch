@@ -14,96 +14,82 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 )
 
-func TestEnsureBuiltinMCPDefaultsSeedsMissingAndPreservesExisting(t *testing.T) {
+func TestEnsureBuiltinMCPDefaultsIsAtomicAndIdempotent(t *testing.T) {
 	testCases := []struct {
 		name string
-		new  func(*testing.T) (repository.MCPServerRepository, repository.MCPCapabilityRepository)
+		new  func(*testing.T) repository.MCPRegistryRepository
 	}{
-		{name: "memory", new: func(*testing.T) (repository.MCPServerRepository, repository.MCPCapabilityRepository) {
-			return memoryrepo.NewMCPServerRepository(), memoryrepo.NewMCPCapabilityRepository()
-		}},
-		{name: "file", new: func(t *testing.T) (repository.MCPServerRepository, repository.MCPCapabilityRepository) {
-			dir := t.TempDir()
-			return filerepo.NewMCPServerRepository(filepath.Join(dir, "mcp_servers.json")), filerepo.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capabilities.json"))
+		{name: "memory", new: func(*testing.T) repository.MCPRegistryRepository { return memoryrepo.NewMCPRegistryRepository() }},
+		{name: "file", new: func(t *testing.T) repository.MCPRegistryRepository {
+			return filerepo.NewMCPRegistryRepository(filepath.Join(t.TempDir(), "mcp_registry.json"))
 		}},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := context.Background()
-			servers, capabilities := testCase.new(t)
-			serverDefaults, err := workorchdefaults.BuiltinMCPServerDefaults()
-			if err != nil || len(serverDefaults) == 0 {
-				t.Fatalf("load MCP server defaults len=%d err=%v", len(serverDefaults), err)
-			}
-			capabilityDefaults, err := workorchdefaults.BuiltinMCPCapabilityDefaults()
-			if err != nil || len(capabilityDefaults) == 0 {
-				t.Fatalf("load MCP capability defaults len=%d err=%v", len(capabilityDefaults), err)
-			}
-
-			existingServer := &mcpmodel.Server{
-				ID:            common.MCPServerID(serverDefaults[0].ID),
-				Name:          "user-owned MCP server",
-				Transport:     "stdio",
-				Command:       "custom-command",
-				Args:          []string{"--custom"},
-				Env:           map[string]string{"CUSTOM": "true"},
-				Enabled:       false,
-				AllowedTools:  []string{"custom.tool"},
-				TimeoutMillis: 1234,
-			}
-			existingCapability := &mcpmodel.Capability{
-				ID:          common.MCPCapabilityID(capabilityDefaults[0].ID),
-				ServerID:    common.MCPServerID(capabilityDefaults[0].ServerID),
-				Kind:        mcpmodel.CapabilityKindTool,
-				Name:        "custom.tool",
-				DisplayName: "user-owned capability",
-				Description: "preserve this customized built-in ID",
-				Tags:        []string{"custom"},
-				Enabled:     false,
-				Status:      "custom-status",
-			}
-			if err := servers.Create(ctx, existingServer); err != nil {
-				t.Fatalf("create customized MCP server: %v", err)
-			}
-			if err := capabilities.Create(ctx, existingCapability); err != nil {
-				t.Fatalf("create customized MCP capability: %v", err)
-			}
-			existingServer, err = servers.Get(ctx, existingServer.ID)
+			registry := testCase.new(t)
+			service := NewService(registry)
+			firstRevision, err := service.EnsureBuiltinDefaults(ctx)
 			if err != nil {
-				t.Fatalf("read persisted customized MCP server: %v", err)
+				t.Fatalf("EnsureBuiltinDefaults: %v", err)
 			}
-			existingCapability, err = capabilities.Get(ctx, existingCapability.ID)
+			first, err := registry.Load(ctx)
+			if err != nil || len(first.Servers) == 0 || len(first.Capabilities) == 0 {
+				t.Fatalf("first defaults = %+v, err=%v", first, err)
+			}
+			secondRevision, err := service.EnsureBuiltinDefaults(ctx)
 			if err != nil {
-				t.Fatalf("read persisted customized MCP capability: %v", err)
+				t.Fatalf("second EnsureBuiltinDefaults: %v", err)
 			}
-
-			for attempt := 1; attempt <= 2; attempt++ {
-				if err := ensureBuiltinMCPDefaults(ctx, servers, capabilities); err != nil {
-					t.Fatalf("ensure attempt %d: %v", attempt, err)
-				}
-				gotServer, err := servers.Get(ctx, existingServer.ID)
-				if err != nil {
-					t.Fatalf("get customized MCP server after attempt %d: %v", attempt, err)
-				}
-				if !reflect.DeepEqual(gotServer, existingServer) {
-					t.Fatalf("customized MCP server after attempt %d = %+v, want %+v", attempt, gotServer, existingServer)
-				}
-				gotCapability, err := capabilities.Get(ctx, existingCapability.ID)
-				if err != nil {
-					t.Fatalf("get customized MCP capability after attempt %d: %v", attempt, err)
-				}
-				if !reflect.DeepEqual(gotCapability, existingCapability) {
-					t.Fatalf("customized MCP capability after attempt %d = %+v, want %+v", attempt, gotCapability, existingCapability)
-				}
+			second, _ := registry.Load(ctx)
+			if firstRevision != secondRevision || !reflect.DeepEqual(first, second) {
+				t.Fatalf("defaults not idempotent: first=%q/%+v second=%q/%+v", firstRevision, first, secondRevision, second)
 			}
-			gotServers, serverErr := servers.List(ctx)
-			gotCapabilities, capabilityErr := capabilities.List(ctx)
-			if serverErr != nil || len(gotServers) != len(serverDefaults) {
-				t.Fatalf("seeded MCP servers len=%d want=%d err=%v", len(gotServers), len(serverDefaults), serverErr)
-			}
-			if capabilityErr != nil || len(gotCapabilities) != len(capabilityDefaults) {
-				t.Fatalf("seeded MCP capabilities len=%d want=%d err=%v", len(gotCapabilities), len(capabilityDefaults), capabilityErr)
+			for _, capability := range second.Capabilities {
+				if capability.Source == "" || capability.SourceRef == "" || capability.Revision == 0 {
+					t.Fatalf("default capability missing provenance: %+v", capability)
+				}
 			}
 		})
+	}
+}
+
+func TestEnsureBuiltinMCPDefaultsPreservesCustomizedBuiltinID(t *testing.T) {
+	ctx := context.Background()
+	serverDefaults, err := workorchdefaults.BuiltinMCPServerDefaults()
+	if err != nil || len(serverDefaults) == 0 {
+		t.Fatalf("BuiltinMCPServerDefaults = %d, err=%v", len(serverDefaults), err)
+	}
+	capabilityDefaults, err := workorchdefaults.BuiltinMCPCapabilityDefaults()
+	if err != nil || len(capabilityDefaults) == 0 {
+		t.Fatalf("BuiltinMCPCapabilityDefaults = %d, err=%v", len(capabilityDefaults), err)
+	}
+	server := &mcpmodel.Server{
+		ID: common.MCPServerID(serverDefaults[0].ID), Name: "user-owned MCP server", Transport: "stdio", Command: "custom-command",
+		Args: []string{"--custom"}, Env: map[string]string{"CUSTOM": "env://CUSTOM"}, Enabled: false,
+		AllowedTools: []string{"custom.tool"}, TimeoutMillis: 1234,
+	}
+	capability := &mcpmodel.Capability{
+		ID: common.MCPCapabilityID(capabilityDefaults[0].ID), ServerID: server.ID, Kind: mcpmodel.CapabilityKindTool,
+		Name: "custom.tool", DisplayName: "user-owned capability", Description: "preserve customized built-in ID",
+		Tags: []string{"custom"}, Enabled: false, EffectScope: "unknown", IdempotencyClass: "unknown",
+		ValidationProofApplicability: mcpmodel.ValidationProofApplicabilityNotDeclared,
+		Source:                       mcpmodel.CapabilitySourceUser, SourceRef: "user/custom", Revision: 7,
+	}
+	registry := memoryrepo.NewMCPRegistryRepository()
+	seed := &mcpmodel.RegistrySnapshot{Revision: 1, Servers: []*mcpmodel.Server{server}, Capabilities: []*mcpmodel.Capability{capability}}
+	if err := registry.Commit(ctx, 0, seed); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	service := NewService(registry)
+	if _, err := service.EnsureBuiltinDefaults(ctx); err != nil {
+		t.Fatalf("EnsureBuiltinDefaults: %v", err)
+	}
+	after, err := registry.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(after.Servers[0], server) || !reflect.DeepEqual(after.Capabilities[0], capability) {
+		t.Fatalf("custom defaults overwritten: %+v", after)
 	}
 }

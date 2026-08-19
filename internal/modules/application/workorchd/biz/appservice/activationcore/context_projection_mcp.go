@@ -18,7 +18,7 @@ func MCPServerContexts(items []*mcpmodel.Server) []map[string]any {
 			"enabled":               item.Enabled,
 			"command":               item.Command,
 			"args":                  contextregistrycore.CloneStrings(item.Args),
-			"env":                   RedactedMCPEnvContext(item.Env),
+			"environmentRefs":       MCPEnvironmentReferenceContext(item.Env),
 			"allowedTools":          contextregistrycore.CloneStrings(item.AllowedTools),
 			"allowedResources":      contextregistrycore.CloneStrings(item.AllowedResources),
 			"defaultApprovalPolicy": item.DefaultApprovalPolicy,
@@ -28,16 +28,13 @@ func MCPServerContexts(items []*mcpmodel.Server) []map[string]any {
 	return ret
 }
 
-func RedactedMCPEnvContext(env map[string]string) map[string]any {
+func MCPEnvironmentReferenceContext(env map[string]string) map[string]any {
 	if len(env) == 0 {
 		return nil
 	}
 	ret := make(map[string]any, len(env))
-	for key, value := range env {
-		ret[key] = map[string]any{
-			"present":  value != "",
-			"redacted": value != "",
-		}
+	for key, reference := range env {
+		ret[key] = map[string]any{"reference": reference}
 	}
 	return ret
 }
@@ -65,7 +62,9 @@ func MCPCapabilityContexts(items []*mcpmodel.Capability) []map[string]any {
 			"uri":            item.URI,
 			"enabled":        item.Enabled,
 			"approvalPolicy": item.ApprovalPolicy,
-			"status":         item.Status,
+			"source":         item.Source,
+			"sourceRef":      item.SourceRef,
+			"revision":       item.Revision,
 		})
 	}
 	return ret

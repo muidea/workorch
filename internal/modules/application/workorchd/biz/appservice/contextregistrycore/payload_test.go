@@ -66,7 +66,7 @@ func TestMCPServerAndCapabilityPayloads(t *testing.T) {
 			ID:               "srv-001",
 			Name:             "server",
 			Transport:        "stdio",
-			Env:              map[string]string{"TOKEN": "secret", "EMPTY": ""},
+			Env:              map[string]string{"TOKEN": "env://MCP_TOKEN", "ROOT": "{workspaceDeliverableDirectory}"},
 			AllowedTools:     []string{"repo.summary"},
 			AllowedResources: []string{"workspace://acceptance"},
 			AllowedPrompts:   []string{"workorch.acceptance"},
@@ -75,7 +75,7 @@ func TestMCPServerAndCapabilityPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPServerFromPayload err = %v", err)
 	}
-	if server.ID != "srv-001" || server.Env["TOKEN"] != "redacted" || server.Env["EMPTY"] != "" {
+	if server.ID != "srv-001" || server.EnvironmentRefs["TOKEN"] != "env://MCP_TOKEN" || server.EnvironmentRefs["ROOT"] != "{workspaceDeliverableDirectory}" {
 		t.Fatalf("MCPServerFromPayload = %#v", server)
 	}
 	if tools := MCPToolsFromServer(server); len(tools) != 1 || tools[0].ServerID != "srv-001" || tools[0].Name != "repo.summary" {

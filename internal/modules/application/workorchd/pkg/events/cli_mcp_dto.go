@@ -14,7 +14,7 @@ type CLIMCPServerMutation struct {
 	Endpoint              string
 	Command               string
 	Args                  []string
-	Env                   []CLIStringEntry
+	EnvironmentRefs       []CLIStringEntry
 	Enabled               bool
 	AllowedTools          []string
 	AllowedResources      []string
@@ -47,5 +47,7 @@ type CLIMCPCapability struct {
 	URI                          string
 	Enabled                      bool
 	ApprovalPolicy               string
-	Status                       string
+	Source                       string
+	SourceRef                    string
+	Revision                     uint64
 }

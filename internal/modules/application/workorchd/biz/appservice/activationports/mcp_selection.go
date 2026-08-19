@@ -5,7 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -46,20 +46,17 @@ func SelectedWorkspaceMCP(ctx context.Context, request WorkspaceMCPSelectionRequ
 		MCPServerIDs:  selection.SelectedMCPServerIDs,
 		CapabilityIDs: selection.SelectedCapabilityIDs,
 	}
-	err := readmodelcore.RunTasks(
-		func() error {
-			var err error
-			ret.Servers, err = SelectedMCPServers(ctx, request.Hub, ret.MCPServerIDs, request.Workspace)
-			return err
-		},
-		func() error {
-			var err error
-			ret.Capabilities, err = SelectedMCPCapabilities(ctx, request.Hub, ret.CapabilityIDs)
-			return err
-		},
-	)
+	if len(ret.MCPServerIDs) == 0 && len(ret.CapabilityIDs) == 0 {
+		return ret, nil
+	}
+	servers, capabilities, _, err := ownerreadports.ReadMCPSelectionSnapshot(ctx, request.Hub, ret.MCPServerIDs, ret.CapabilityIDs)
 	if err != nil {
 		return WorkspaceMCPSelectionResult{}, err
 	}
+	ret.Servers = make([]*mcpmodel.Server, 0, len(servers))
+	for _, server := range servers {
+		ret.Servers = append(ret.Servers, activationcore.MCPServerForWorkspace(server, request.Workspace))
+	}
+	ret.Capabilities = capabilities
 	return ret, nil
 }

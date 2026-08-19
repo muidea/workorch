@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-20
 
 ## Purpose
 
@@ -15,7 +15,7 @@ single-owner boundary, not two representations of the same mutable state.
 
 | Concern | Owner |
 | --- | --- |
-| MCP server definition, discovered catalog metadata and `MCPCapability` lifecycle | `blocks/mcpregistry` |
+| MCP server definition, discovered catalog metadata and `MCPCapability` availability/provenance | `blocks/mcpregistry` |
 | Workspace/profile/Soul/Skill references used to select allowed capabilities | their respective state owners; compiled by workorchd |
 | Frozen per-Run MCP metadata | `RuntimeBootstrap.Activation`, sealed by Run owner |
 | Concrete `mcp/tool_call`, `mcp/resource_read`, `mcp/prompt_get` operation | `blocks/mcp` |
@@ -32,8 +32,13 @@ An `MCPCapability` provides bounded metadata such as:
 - identity, server identity, `kind`, technical name and display name;
 - description/category/tags/stage hints;
 - input/output summary and optional URI/schema metadata;
-- risk level, approval policy, enabled/status;
+- risk level, approval policy and the single authoritative `enabled` availability flag;
 - Runtime operation kind, effect scope, idempotency class and validation proof applicability.
+
+Server and Capability are one revisioned Registry aggregate. Writes use whole-aggregate CAS, list queries are bounded and
+carry a stable `RegistryRevision`, and Runtime/activation consumers use owner-issued consistent snapshot commands rather than
+joining separately observed Server and Capability lists. Capability provenance is the owner-issued `source`, `sourceRef` and
+monotonic item `revision`; there is no separate draft/active/deprecated lifecycle state.
 
 Effect scope, idempotency and `direct | auxiliary | not_declared` proof applicability are explicit Registry-owner metadata.
 Runtime must not infer them from tool name, description, category, risk label or DoD text. MCP execution independently compiles
@@ -43,6 +48,10 @@ callable/auditable but cannot directly close CWI coverage.
 
 The management API exposes server/capability list/create/read/update plus server tool/resource/prompt discovery. Exact routes
 are listed in [Service API](../../50-product-interface/service-api.md).
+
+Server environment configuration is reference-only (`environmentRefs`). `env://ENV_NAME` is resolved by MCP execution at the
+last responsible moment; supported workspace placeholders contain no secret. Plaintext secret values are rejected before
+Registry persistence or EventHub publication.
 
 ## Activation And Selection
 
@@ -81,7 +90,7 @@ fact needed for the operation. The UI may correlate approval and capability proj
 
 ## Projection Rules
 
-Catalog pages may show display name, kind, server, risk, approval policy, stage hints and enabled/status. Run pages should
+Catalog pages may show display name, kind, server, risk, approval policy, stage hints, enabled and provenance. Run pages should
 distinguish:
 
 - allowed/selected capability snapshot;

@@ -37,6 +37,10 @@ The repository initiator creates one backend and exposes owner-scoped groups. Ea
 No application or sibling owner receives the full private repository set. File and memory backends implement the same
 repository contracts and must detach mutable slices/maps/entities at their boundaries.
 
+MCP Registry is one revisioned `RegistrySnapshot` aggregate containing Server and Capability metadata. Its repository exposes
+only whole-snapshot `Load` plus `Commit(expectedRevision)`; a Server update and the corresponding allowlist reconciliation can
+never commit as separate physical transactions.
+
 ## Runtime Aggregate Persistence
 
 `RuntimeStateRecord` is semantically owned by Orchestrator and physically stored by Run owner. Run owner validates only:

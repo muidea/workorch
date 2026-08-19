@@ -58,8 +58,7 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	defer hub.Terminate(ctx)
 	souls := memoryrepo.NewSoulRepository()
 	templates := memoryrepo.NewWorkspaceTemplateRepository()
-	mcpServers := memoryrepo.NewMCPServerRepository()
-	mcpCapabilities := memoryrepo.NewMCPCapabilityRepository()
+	mcpRegistry := memoryrepo.NewMCPRegistryRepository()
 
 	soulOwner := soulmodule.New()
 	if err := soulOwner.Configure(soulbiz.Dependencies{Souls: souls, EventHub: hub}); err != nil {
@@ -76,7 +75,7 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 		t.Fatalf("configure workspace owner: %v", err)
 	}
 	mcpOwner := mcpmodule.New()
-	if err := mcpOwner.Configure(mcpregistrybiz.Dependencies{Servers: mcpServers, Capabilities: mcpCapabilities, EventHub: hub}); err != nil {
+	if err := mcpOwner.Configure(mcpregistrybiz.Dependencies{Registry: mcpRegistry, EventHub: hub}); err != nil {
 		t.Fatalf("configure MCP owner: %v", err)
 	}
 	for name, start := range map[string]func() error{
@@ -107,11 +106,8 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	if got, err := templates.List(ctx); err != nil || len(got) == 0 {
 		t.Fatalf("templates after Start len=%d err=%v", len(got), err)
 	}
-	if got, err := mcpServers.List(ctx); err != nil || len(got) == 0 {
-		t.Fatalf("MCP servers after Start len=%d err=%v", len(got), err)
-	}
-	if got, err := mcpCapabilities.List(ctx); err != nil || len(got) == 0 {
-		t.Fatalf("MCP capabilities after Start len=%d err=%v", len(got), err)
+	if got, err := mcpRegistry.Load(ctx); err != nil || len(got.Servers) == 0 || len(got.Capabilities) == 0 {
+		t.Fatalf("MCP registry after Start = %+v err=%v", got, err)
 	}
 }
 
@@ -121,8 +117,7 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	defer hub.Terminate(ctx)
 	souls := memoryrepo.NewSoulRepository()
 	templates := memoryrepo.NewWorkspaceTemplateRepository()
-	mcpServers := memoryrepo.NewMCPServerRepository()
-	mcpCapabilities := memoryrepo.NewMCPCapabilityRepository()
+	mcpRegistry := memoryrepo.NewMCPRegistryRepository()
 
 	soulOwner := soulmodule.New()
 	if err := soulOwner.Configure(soulbiz.Dependencies{Souls: souls, EventHub: hub}); err != nil {
@@ -139,7 +134,7 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 		t.Fatalf("configure workspace owner: %v", err)
 	}
 	mcpOwner := mcpmodule.New()
-	if err := mcpOwner.Configure(mcpregistrybiz.Dependencies{Servers: mcpServers, Capabilities: mcpCapabilities, EventHub: hub}); err != nil {
+	if err := mcpOwner.Configure(mcpregistrybiz.Dependencies{Registry: mcpRegistry, EventHub: hub}); err != nil {
 		t.Fatalf("configure MCP owner: %v", err)
 	}
 	if err := soulOwner.Start(); err != nil {
@@ -171,8 +166,8 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	if err != nil || len(seededTemplates) == 0 {
 		t.Fatalf("templates after partial Start len=%d err=%v", len(seededTemplates), err)
 	}
-	if got, err := mcpServers.List(ctx); err != nil || len(got) != 0 {
-		t.Fatalf("MCP servers after partial Start len=%d err=%v, want none", len(got), err)
+	if got, err := mcpRegistry.Load(ctx); err != nil || len(got.Servers) != 0 || len(got.Capabilities) != 0 {
+		t.Fatalf("MCP registry after partial Start = %+v err=%v, want empty", got, err)
 	}
 
 	customSoul := seededSouls[0]
@@ -203,37 +198,32 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 		t.Fatalf("template after retry = %+v err=%v, want user customization preserved", gotTemplate, err)
 	}
 
-	seededServers, err := mcpServers.List(ctx)
-	if err != nil || len(seededServers) == 0 {
-		t.Fatalf("MCP servers after retry len=%d err=%v", len(seededServers), err)
+	registrySnapshot, err := mcpRegistry.Load(ctx)
+	if err != nil || len(registrySnapshot.Servers) == 0 || len(registrySnapshot.Capabilities) == 0 {
+		t.Fatalf("MCP registry after retry = %+v err=%v", registrySnapshot, err)
 	}
-	seededCapabilities, err := mcpCapabilities.List(ctx)
-	if err != nil || len(seededCapabilities) == 0 {
-		t.Fatalf("MCP capabilities after retry len=%d err=%v", len(seededCapabilities), err)
-	}
-	customServer := seededServers[0]
+	customServer := registrySnapshot.Servers[0]
 	customServer.Name = "user-customized MCP server"
 	customServer.Enabled = false
-	if err := mcpServers.Update(ctx, customServer); err != nil {
-		t.Fatalf("customize seeded MCP server: %v", err)
-	}
-	customCapability := seededCapabilities[0]
+	customCapability := registrySnapshot.Capabilities[0]
 	customCapability.DisplayName = "user-customized MCP capability"
-	customCapability.Enabled = false
-	if err := mcpCapabilities.Update(ctx, customCapability); err != nil {
-		t.Fatalf("customize seeded MCP capability: %v", err)
+	for _, capability := range registrySnapshot.Capabilities {
+		if capability.ServerID == customServer.ID {
+			capability.Enabled = false
+		}
+	}
+	registrySnapshot.Revision++
+	if err := mcpRegistry.Commit(ctx, registrySnapshot.Revision-1, registrySnapshot); err != nil {
+		t.Fatalf("customize seeded MCP aggregate: %v", err)
 	}
 
 	if err := module.Start(ctx); err != nil {
 		t.Fatalf("repeat Start: %v", err)
 	}
-	gotServer, err := mcpServers.Get(ctx, customServer.ID)
-	if err != nil || gotServer.Name != customServer.Name || gotServer.Enabled != customServer.Enabled {
-		t.Fatalf("MCP server after repeat Start = %+v err=%v, want user customization preserved", gotServer, err)
-	}
-	gotCapability, err := mcpCapabilities.Get(ctx, customCapability.ID)
-	if err != nil || gotCapability.DisplayName != customCapability.DisplayName || gotCapability.Enabled != customCapability.Enabled {
-		t.Fatalf("MCP capability after repeat Start = %+v err=%v, want user customization preserved", gotCapability, err)
+	gotRegistry, err := mcpRegistry.Load(ctx)
+	if err != nil || gotRegistry.Servers[0].Name != customServer.Name || gotRegistry.Servers[0].Enabled != customServer.Enabled ||
+		gotRegistry.Capabilities[0].DisplayName != customCapability.DisplayName || gotRegistry.Capabilities[0].Enabled != customCapability.Enabled {
+		t.Fatalf("MCP aggregate after repeat Start = %+v err=%v, want user customization preserved", gotRegistry, err)
 	}
 }
 

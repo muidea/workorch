@@ -38,8 +38,10 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// aggregate purge topic, reducing the inventory by one without weakening an
 	// owner interaction. Approval's Runtime closure adds four adjudicated topics:
 	// capability acquisition, request creation, Orchestrator SM-2 commit and the
-	// durable Eventstream resolution record handshake.
-	const expectedProductionTopicCount = 263
+	// durable Eventstream resolution record handshake. MCP Registry adds two
+	// bounded concrete reads so activation and execution consume one
+	// revision-consistent selection/full aggregate instead of joining lists.
+	const expectedProductionTopicCount = 265
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}
