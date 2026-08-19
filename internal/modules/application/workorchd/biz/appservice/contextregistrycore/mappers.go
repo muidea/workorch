@@ -40,8 +40,10 @@ func MapRepositorySkill(item *skillmodel.Skill) workorchmanagementcontract.Skill
 		RequiredMCPServerRefs:  CloneStrings(item.RequiredMCPServerRefs),
 		RequiredCapabilityRefs: CloneStrings(item.RequiredCapabilityRefs),
 		Constraints:            CloneStrings(item.Constraints),
-		Source:                 SkillSourceRepository,
-		Scope:                  SkillScopeRepository,
+		Source:                 item.Provenance.Source,
+		Scope:                  item.Provenance.Scope,
+		WorkspaceID:            string(item.Provenance.WorkspaceID),
+		ContentHash:            item.Provenance.ContentHash,
 		ManagedBy:              SkillManagedBy,
 		SourceSkillID:          string(item.ID),
 	}

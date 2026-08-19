@@ -19,12 +19,8 @@ func (m *Module) configure(deps skillbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	if deps.Skills == nil {
+	if deps.Skills == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
-	}
-	if deps.EventHub == nil {
-		m.bizPtr = nil
-		return nil
 	}
 	b, err := skillbiz.New(deps.EventHub, deps.BackgroundRoutine, deps)
 	if err != nil {

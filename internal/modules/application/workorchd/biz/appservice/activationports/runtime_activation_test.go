@@ -1,6 +1,7 @@
 package activationports
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -11,18 +12,26 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 	defaultSoul := &soulmodel.Soul{ID: "soul-default", Name: "default", SoulMD: "default instructions"}
 	executionSoul := &soulmodel.Soul{ID: "soul-execution", Name: "execution", SoulMD: "execution instructions"}
-	activation := RuntimeActivationContext(
+	selectedSkill := workorchmanagementcontract.Skill{
+		ID: "skill-1", Name: "skill", Version: "v1", Instruction: "skill instructions",
+		Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+	}
+	selectedSkill.ContentHash = workorchskillcontract.StableContentHash(workorchskillcontract.Content{
+		ID: selectedSkill.ID, Name: selectedSkill.Name, Version: selectedSkill.Version, Instruction: selectedSkill.Instruction,
+	})
+	activation, err := RuntimeActivationContext(
 		runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ReasoningEffort: "high"},
 		"zh-CN",
 		defaultSoul,
 		map[string]*soulmodel.Soul{"execution": executionSoul},
 		appmodelcore.SoulRouting{Bindings: map[string]appmodelcore.SoulRoutingBinding{"execution": {SoulID: "soul-execution", Source: "workspace_stage_binding"}}},
-		[]workorchmanagementcontract.Skill{{ID: "skill-1", Name: "skill", Instruction: "skill instructions"}},
+		[]workorchmanagementcontract.Skill{selectedSkill},
 		[]string{"mcp-1"},
 		[]*mcpmodel.Capability{{
 			ID: "cap-1", ServerID: "mcp-1", Kind: "tool", Name: "read", Enabled: true,
@@ -94,6 +103,9 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		},
 		runtimecontract.RuntimeContinuationContext{},
 	)
+	if err != nil {
+		t.Fatalf("RuntimeActivationContext: %v", err)
+	}
 	if err := activation.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +162,30 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		stagePolicy.Stages[0].Governance.DecisionMode != "when_required" || len(stagePolicy.Stages[0].PolicyRefs.EvidencePolicies) != 1 ||
 		len(stagePolicy.Stages[0].PolicyRefs.CapabilityUsagePolicies) != 1 {
 		t.Fatalf("runtime template stage policy = %+v", stagePolicy)
+	}
+}
+
+func TestRuntimeActivationContextBoundsSkillHubInstructionBeforeC3(t *testing.T) {
+	instruction := strings.Repeat("界", runtimecontract.RuntimeSkillInstructionMaxBytesPerSkill)
+	skill := workorchmanagementcontract.Skill{
+		ID: "skillhub:global:large", Name: "large", Instruction: instruction,
+		Source: workorchskillcontract.SourceSkillHub, Scope: workorchskillcontract.ScopeGlobal,
+	}
+	skill.ContentHash = workorchskillcontract.StableContentHash(workorchskillcontract.Content{ID: skill.ID, Name: skill.Name, Instruction: skill.Instruction})
+	activation, err := RuntimeActivationContext(
+		runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		"zh-CN", nil, nil, appmodelcore.SoulRouting{}, []workorchmanagementcontract.Skill{skill}, nil, nil, nil, nil, nil, nil,
+		runtimecontract.RuntimeContinuationContext{},
+	)
+	if err != nil {
+		t.Fatalf("RuntimeActivationContext: %v", err)
+	}
+	if len(activation.Skills) != 1 || !activation.Skills[0].InstructionTruncated ||
+		activation.Skills[0].OriginalInstructionBytes != len(instruction) ||
+		len(activation.Skills[0].Instruction) > runtimecontract.RuntimeSkillInstructionMaxBytesPerSkill ||
+		activation.SkillContextBudget == nil || activation.SkillContextBudget.TruncatedSkills != 1 ||
+		activation.Skills[0].Provenance.ContentHash != skill.ContentHash {
+		t.Fatalf("bounded Skill activation = %+v budget=%+v", activation.Skills, activation.SkillContextBudget)
 	}
 }
 

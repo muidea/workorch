@@ -28,6 +28,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func mustRepositoryPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -462,6 +463,10 @@ func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRe
 		RequiredCapabilityRefs: []string{"mcp-contract:tool:repo.summary"},
 		Constraints:            []string{"cite evidence"},
 	}
+	item.Provenance = workorchskillcontract.Provenance{
+		Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+		ContentHash: workorchskillcontract.StableContentHash(item.Content()),
+	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create skill: %v", err)
 	}
@@ -484,7 +489,11 @@ func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRe
 	if fresh.RequiredCapabilityRefs[0] != "mcp-contract:tool:repo.summary" {
 		t.Fatalf("skill clone isolation failed, requiredCapabilityRefs = %+v", fresh.RequiredCapabilityRefs)
 	}
+	if !workorchskillcontract.SameProvenance(fresh.Provenance, item.Provenance) {
+		t.Fatalf("skill provenance = %+v, want %+v", fresh.Provenance, item.Provenance)
+	}
 	fresh.Description = "updated skill"
+	fresh.Provenance.ContentHash = workorchskillcontract.StableContentHash(fresh.Content())
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update skill: %v", err)
 	}
@@ -492,7 +501,7 @@ func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRe
 	if err != nil {
 		t.Fatalf("list skills: %v", err)
 	}
-	if len(list) != 1 || list[0].Description != "updated skill" {
+	if len(list) != 1 || list[0].Description != "updated skill" || list[0].Provenance.ContentHash != workorchskillcontract.StableContentHash(list[0].Content()) {
 		t.Fatalf("skills = %+v, want updated skill", list)
 	}
 	if _, err := repo.Get(ctx, common.SkillID("missing")); !errors.Is(err, common.ErrNotFound) {

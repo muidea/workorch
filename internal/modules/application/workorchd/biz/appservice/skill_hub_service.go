@@ -10,12 +10,12 @@ import (
 )
 
 const (
-	skillSourceRepository = contextregistrycore.SkillSourceRepository
-	skillSourceSkillHub   = contextregistrycore.SkillSourceSkillHub
+	skillSourceWorkOrchRegistry = contextregistrycore.SkillSourceWorkOrchRegistry
+	skillSourceSkillHub         = contextregistrycore.SkillSourceSkillHub
 
-	skillScopeRepository = contextregistrycore.SkillScopeRepository
-	skillScopeGlobal     = contextregistrycore.SkillScopeGlobal
-	skillScopeWorkspace  = contextregistrycore.SkillScopeWorkspace
+	skillScopeWorkOrchRegistry = contextregistrycore.SkillScopeWorkOrchRegistry
+	skillScopeGlobal           = contextregistrycore.SkillScopeGlobal
+	skillScopeWorkspace        = contextregistrycore.SkillScopeWorkspace
 
 	skillManagedByWorkorch = contextregistrycore.SkillManagedBy
 	skillManagedBySkillHub = contextregistrycore.SkillManagedBySkillHub

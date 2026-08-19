@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func MapSkillHubStatusItem(item SkillHubStatusItem, scope string, workspaceID string, status SkillHubStatus, instruction string, metadata map[string]string) workorchmanagementcontract.Skill {
@@ -11,7 +12,7 @@ func MapSkillHubStatusItem(item SkillHubStatusItem, scope string, workspaceID st
 	if sourceSkillID == "" {
 		return workorchmanagementcontract.Skill{}
 	}
-	return workorchmanagementcontract.Skill{
+	ret := workorchmanagementcontract.Skill{
 		ID:           SkillHubSkillRef(scope, workspaceID, sourceSkillID),
 		Name:         FirstNonEmpty(metadata["name"], sourceSkillID),
 		Version:      FirstNonEmpty(item.Version, item.LocalVersion, item.RepoVersion, metadata["version"]),
@@ -42,13 +43,24 @@ func MapSkillHubStatusItem(item SkillHubStatusItem, scope string, workspaceID st
 		RepoPath:         item.RepoPath,
 		GlobalPath:       status.GlobalPath,
 		ProjectPath:      status.ProjectPath,
-		ContentHash:      FirstNonEmpty(item.ActualHash, item.AppliedHash, item.SourceHash),
 		SourceHash:       item.SourceHash,
 		AppliedHash:      item.AppliedHash,
 		ActualHash:       item.ActualHash,
 		Agent:            item.Agent,
 		ManagedBy:        SkillManagedBySkillHub,
 		SourceSkillID:    sourceSkillID,
+	}
+	ret.ContentHash = workorchskillcontract.StableContentHash(skillContent(ret))
+	return ret
+}
+
+func skillContent(item workorchmanagementcontract.Skill) workorchskillcontract.Content {
+	return workorchskillcontract.Content{
+		ID: item.ID, Name: item.Name, Version: item.Version, Description: item.Description,
+		TriggerRules: append([]string(nil), item.TriggerRules...), Instruction: item.Instruction,
+		ReferenceRefs: append([]string(nil), item.ReferenceRefs...), RequiredToolKinds: append([]string(nil), item.RequiredToolKinds...),
+		RequiredMCPServerRefs: append([]string(nil), item.RequiredMCPServerRefs...), RequiredCapabilityRefs: append([]string(nil), item.RequiredCapabilityRefs...),
+		Constraints: append([]string(nil), item.Constraints...),
 	}
 }
 

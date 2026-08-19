@@ -7,6 +7,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 // RuntimeActivationContext 是一次 Runtime Run 在 application activation 阶段
@@ -14,13 +15,14 @@ import (
 // provider-facing 所需的稳定内容快照，不使用 map/JSON bridge 表达组件合同。
 // ProviderSelection 是 Run owner 封存的不可变事实，不进入 C0/C1/C2 stable prefix。
 type RuntimeActivationContext struct {
-	ProviderSelection ProviderInferenceSelection
-	DialogLanguage    string
-	DefaultSoul       *RuntimeSoulContext
-	StageSoulBindings []RuntimeStageSoulBinding
-	Skills            []RuntimeSkillContext
-	MCPServerIDs      []common.MCPServerID
-	MCPCapabilities   []RuntimeMCPCapabilityContext
+	ProviderSelection  ProviderInferenceSelection
+	DialogLanguage     string
+	DefaultSoul        *RuntimeSoulContext
+	StageSoulBindings  []RuntimeStageSoulBinding
+	Skills             []RuntimeSkillContext
+	SkillContextBudget *RuntimeSkillContextBudget
+	MCPServerIDs       []common.MCPServerID
+	MCPCapabilities    []RuntimeMCPCapabilityContext
 	// OperationPolicies are typed effect/replay facts published by capability
 	// owners during activation. Runtime consumes this owner-neutral surface and
 	// never derives authority from MCP names, risk labels, or protocol kinds.
@@ -52,21 +54,20 @@ type RuntimeStageSoulBinding struct {
 }
 
 type RuntimeSkillContext struct {
-	ID                     string
-	Name                   string
-	Version                string
-	Description            string
-	TriggerRules           []string
-	Instruction            string
-	ReferenceRefs          []string
-	RequiredToolKinds      []string
-	RequiredMCPServerRefs  []string
-	RequiredCapabilityRefs []string
-	Constraints            []string
-	Source                 string
-	Scope                  string
-	WorkspaceID            string
-	ContentHash            string
+	ID                       string
+	Name                     string
+	Version                  string
+	Description              string
+	TriggerRules             []string
+	Instruction              string
+	ReferenceRefs            []string
+	RequiredToolKinds        []string
+	RequiredMCPServerRefs    []string
+	RequiredCapabilityRefs   []string
+	Constraints              []string
+	Provenance               workorchskillcontract.Provenance
+	OriginalInstructionBytes int
+	InstructionTruncated     bool
 }
 
 type RuntimeMCPCapabilityContext struct {
@@ -123,6 +124,10 @@ func (c RuntimeActivationContext) Normalized() RuntimeActivationContext {
 	}
 	c.StageSoulBindings = normalizeRuntimeStageSoulBindings(c.StageSoulBindings)
 	c.Skills = normalizeRuntimeSkills(c.Skills)
+	if c.SkillContextBudget != nil {
+		value := c.SkillContextBudget.Normalized()
+		c.SkillContextBudget = &value
+	}
 	c.MCPServerIDs = normalizeMCPServerIDs(c.MCPServerIDs)
 	c.MCPCapabilities = normalizeRuntimeMCPCapabilities(c.MCPCapabilities)
 	c.OperationPolicies = NormalizeRuntimeOperationPolicyFacts(c.OperationPolicies)
@@ -141,6 +146,9 @@ func (c RuntimeActivationContext) Validate() error {
 	if err := ValidateRuntimeOperationPolicyFacts(c.OperationPolicies); err != nil {
 		return fmt.Errorf("runtime activation operation policies: %w", err)
 	}
+	if err := ValidateRuntimeSkillContexts(c.Skills, c.SkillContextBudget); err != nil {
+		return fmt.Errorf("runtime activation skills: %w", err)
+	}
 	c = c.Normalized()
 	if err := c.ProviderSelection.Validate(); err != nil {
 		return fmt.Errorf("runtime activation provider selection: %w", err)
@@ -148,11 +156,6 @@ func (c RuntimeActivationContext) Validate() error {
 	for _, binding := range c.StageSoulBindings {
 		if binding.Stage == "" || binding.Soul.ID == "" {
 			return fmt.Errorf("runtime activation stage soul binding requires stage and soul")
-		}
-	}
-	for _, skill := range c.Skills {
-		if skill.ID == "" || strings.TrimSpace(skill.Instruction) == "" {
-			return fmt.Errorf("runtime activation skill requires id and instruction")
 		}
 	}
 	for _, capability := range c.MCPCapabilities {
@@ -207,6 +210,7 @@ func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeAc
 	if !left.ProviderSelection.Same(right.ProviderSelection) || left.DialogLanguage != right.DialogLanguage || !sameRuntimeSoulPointers(left.DefaultSoul, right.DefaultSoul) ||
 		len(left.StageSoulBindings) != len(right.StageSoulBindings) || len(left.Skills) != len(right.Skills) ||
 		len(left.MCPServerIDs) != len(right.MCPServerIDs) || len(left.MCPCapabilities) != len(right.MCPCapabilities) || len(left.OperationPolicies) != len(right.OperationPolicies) || len(left.Memories) != len(right.Memories) ||
+		!sameRuntimeSkillContextBudget(left.SkillContextBudget, right.SkillContextBudget) ||
 		!sameRuntimeMemorySelection(left.MemorySelection, right.MemorySelection) ||
 		!SameRuntimeEvidencePolicies(left.EvidencePolicies, right.EvidencePolicies) {
 		return false
@@ -301,10 +305,7 @@ func normalizeRuntimeSkills(values []RuntimeSkillContext) []RuntimeSkillContext 
 		value.RequiredMCPServerRefs = normalizeStrings(value.RequiredMCPServerRefs)
 		value.RequiredCapabilityRefs = normalizeStrings(value.RequiredCapabilityRefs)
 		value.Constraints = normalizeStrings(value.Constraints)
-		value.Source = strings.TrimSpace(value.Source)
-		value.Scope = strings.TrimSpace(value.Scope)
-		value.WorkspaceID = strings.TrimSpace(value.WorkspaceID)
-		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		value.Provenance = value.Provenance.Normalized()
 		if value.ID != "" {
 			byID[value.ID] = value
 		}
@@ -415,7 +416,8 @@ func sameRuntimeSkill(left RuntimeSkillContext, right RuntimeSkillContext) bool 
 	}
 	left, right = leftValues[0], rightValues[0]
 	return left.ID == right.ID && left.Name == right.Name && left.Version == right.Version && left.Description == right.Description &&
-		left.Instruction == right.Instruction && left.Source == right.Source && left.Scope == right.Scope && left.WorkspaceID == right.WorkspaceID && left.ContentHash == right.ContentHash &&
+		left.Instruction == right.Instruction && workorchskillcontract.SameProvenance(left.Provenance, right.Provenance) &&
+		left.OriginalInstructionBytes == right.OriginalInstructionBytes && left.InstructionTruncated == right.InstructionTruncated &&
 		sameStrings(left.TriggerRules, right.TriggerRules) && sameStrings(left.ReferenceRefs, right.ReferenceRefs) && sameStrings(left.RequiredToolKinds, right.RequiredToolKinds) &&
 		sameStrings(left.RequiredMCPServerRefs, right.RequiredMCPServerRefs) && sameStrings(left.RequiredCapabilityRefs, right.RequiredCapabilityRefs) && sameStrings(left.Constraints, right.Constraints)
 }

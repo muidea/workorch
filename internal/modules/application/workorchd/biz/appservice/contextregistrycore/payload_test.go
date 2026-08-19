@@ -10,6 +10,7 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func TestSoulFromPayload(t *testing.T) {
@@ -35,19 +36,28 @@ func TestSoulFromPayload(t *testing.T) {
 func TestSkillsFromPayload(t *testing.T) {
 	got, err := SkillsFromPayload(map[string]any{
 		recordpayload.PayloadKeySkills: []*skillmodel.Skill{
-			{ID: "skill-001", Name: "skill", Version: "v1", RequiredToolKinds: []string{"shell/command"}},
+			registrySkillPayloadFixture(),
 		},
 	}, recordpayload.PayloadKeySkills)
 	if err != nil {
 		t.Fatalf("SkillsFromPayload err = %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "skill-001" || got[0].Source != SkillSourceRepository || got[0].ManagedBy != SkillManagedBy {
+	if len(got) != 1 || got[0].ID != "skill-001" || got[0].Source != SkillSourceWorkOrchRegistry || got[0].ManagedBy != SkillManagedBy {
 		t.Fatalf("SkillsFromPayload = %#v", got)
 	}
 
 	if _, err := SkillsFromPayload(map[string]any{recordpayload.PayloadKeySkills: []any{}}, recordpayload.PayloadKeySkills); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("SkillsFromPayload bad err = %v", err)
 	}
+}
+
+func registrySkillPayloadFixture() *skillmodel.Skill {
+	item := &skillmodel.Skill{ID: "skill-001", Name: "skill", Version: "v1", Instruction: "instruction", RequiredToolKinds: []string{"shell/command"}}
+	item.Provenance = workorchskillcontract.Provenance{
+		Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+		ContentHash: workorchskillcontract.StableContentHash(item.Content()),
+	}
+	return item
 }
 
 func TestMCPServerAndCapabilityPayloads(t *testing.T) {

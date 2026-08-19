@@ -65,6 +65,9 @@ Last Verified: 2026-08-19
   零写入且不重复通知，内容漂移 fail closed；十个 topic 使用 concrete bounded result。activation 将完整候选/排除、
   quota、score/hit 与 byte/token budget 封入只读 selection provenance，Run → Memory 与 projection/Eventstream 保留该
   audit，但不得据此重建 SM-2 authority。
+- Skill owner 与外部 SkillHub Catalog 保持来源分离；Registry owner 签发 canonical content hash provenance，create/get/
+  list 使用 concrete result 且 list 有界分页，Post 不得执行写命令。activation 在 Run bootstrap 前封存最多 5 项及
+  instruction/metadata byte budget，Skill 只进入 C3；Orchestrator/LLM 不直读 Registry/Catalog，也不重新选择或裁剪。
 
 完整矩阵见 [Runtime Owner Convergence Verification Matrix](../60-verification/runtime-owner-convergence-matrix.md)。
 

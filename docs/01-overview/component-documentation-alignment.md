@@ -45,7 +45,7 @@ Last Verified: 2026-08-16
 | blocks/decision | DecisionTicket/Resolution owner，支持查询、删除、普通 resolve 与 Runtime governance 事务 | 删除不存在的通用 create/update/supersede EventHub facade 和泛化通知 | [README](../../internal/modules/blocks/decision/readme.md) |
 | blocks/approval | Approval owner，支持查询、删除及已有 pending approval 的 approve/reject | 删除不存在的公开 create/update/supersede command 与多通知族 | [README](../../internal/modules/blocks/approval/readme.md) |
 | blocks/memory | MemoryItem/RecallTrace owner | 明确 repository query 只在 owner 内部，跨 owner 只使用具体 EventHub DTO | [README](../../internal/modules/blocks/memory/readme.md) |
-| blocks/skill | Skill 定义、版本与查询 owner；不执行能力副作用 | 清除阶段性复杂度记录，保留 owner-local CRUD/notification 边界 | [README](../../internal/modules/blocks/skill/readme.md) |
+| blocks/skill | WorkOrch Registry Skill 内容、binding 与 typed provenance owner；SkillHub Catalog 不属于本 Block | 写面收窄为 create，get/list 使用 concrete bounded result；activation 在 C3 前封存 provenance 与 byte budget | [README](../../internal/modules/blocks/skill/readme.md) |
 | blocks/soul | Soul/版本/默认资源 owner；提供 activation 使用的内容快照 | 明确默认资源 ensure 由 Soul 自己定义并执行，不由 System 代写 | [README](../../internal/modules/blocks/soul/readme.md) |
 | blocks/mcpregistry | MCP server/capability catalog 与选择元数据 owner；不执行 Runtime MCP operation | 区分 catalog/selection 与 capability execution，ensure 合同归接收 owner | [README](../../internal/modules/blocks/mcpregistry/readme.md) |
 | blocks/eventstream | 有界 EventRecord 审计存储与查询 owner；projection/replay 只读 | 删除用事件重建 authority、修复 owner 状态或驱动 Runtime 的暗示 | [README](../../internal/modules/blocks/eventstream/readme.md) |

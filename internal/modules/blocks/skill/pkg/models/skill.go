@@ -1,6 +1,9 @@
 package skill
 
-import "github.com/muidea/workorch/internal/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
+)
 
 type Skill struct {
 	ID                     common.SkillID
@@ -14,6 +17,20 @@ type Skill struct {
 	RequiredMCPServerRefs  []string
 	RequiredCapabilityRefs []string
 	Constraints            []string
+	Provenance             workorchskillcontract.Provenance
+}
+
+func (s *Skill) Content() workorchskillcontract.Content {
+	if s == nil {
+		return workorchskillcontract.Content{}
+	}
+	return workorchskillcontract.Content{
+		ID: string(s.ID), Name: s.Name, Version: s.Version, Description: s.Description,
+		TriggerRules: append([]string(nil), s.TriggerRules...), Instruction: s.Instruction,
+		ReferenceRefs: append([]string(nil), s.ReferenceRefs...), RequiredToolKinds: append([]string(nil), s.RequiredToolKinds...),
+		RequiredMCPServerRefs: append([]string(nil), s.RequiredMCPServerRefs...), RequiredCapabilityRefs: append([]string(nil), s.RequiredCapabilityRefs...),
+		Constraints: append([]string(nil), s.Constraints...),
+	}
 }
 
 func CloneSkill(item *Skill) *Skill {

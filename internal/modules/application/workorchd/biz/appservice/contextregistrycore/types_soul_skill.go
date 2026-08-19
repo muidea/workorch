@@ -1,9 +1,11 @@
 package contextregistrycore
 
+import "github.com/muidea/workorch/internal/pkg/workorchskillcontract"
+
 const (
-	SkillSourceRepository = "repository"
-	SkillScopeRepository  = "repository"
-	SkillManagedBy        = "workorch"
+	SkillSourceWorkOrchRegistry = workorchskillcontract.SourceWorkOrchRegistry
+	SkillScopeWorkOrchRegistry  = workorchskillcontract.ScopeGlobal
+	SkillManagedBy              = "workorch"
 )
 
 type SkillQuery struct {

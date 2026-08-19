@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-19
 
 ## 功能范围与边界
 
@@ -49,6 +49,10 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 13. profile `RequiredOwnerFacts` 作为 immutable declaration 进入 C2 和 stable prefix；它不是 current availability。
     current selectable identity 只能来自同 owner 的 C3 catalog。semantic instruction 明确禁止模型发明或宣称 owner fact；
     assessment credit/replan 仍只属于 Orchestrator SM-2。
+14. Skill 只从 Run owner 的 sealed activation 进入 volatile C3。每项携带 WorkOrch Registry 或 SkillHub typed
+    provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
+    不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime
+    invariant/request 前置校验中 fail-closed。
 
 ## EventHub 合同
 
@@ -67,6 +71,7 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 | --- | --- | --- | --- |
 | `application/workorchd` | Application → LLM | active configuration、catalog、refresh、selection validation、completion/embedding | 完整；运行中配置冻结 |
 | `kernel/orchestrator` | Orchestrator → LLM | provider ceiling、runtime capabilities/preflight/candidate request | 完整；LLM 不创建 attempt 或 authority |
+| Skill Registry / SkillHub Catalog | 无直接 I/O | Run activation 中已封存的 bounded Skill C3 snapshot/budget | 完整；LLM 不查询或解释 Registry/Catalog |
 | ai-proxy provider | LLM-private adapter | models、Responses、embedding | 完整；application/Orchestrator 不直连 provider |
 | `blocks/eventstream` | LLM → Eventstream | typed LLM usage notification | 完整；不含 raw prompt/body/credential |
 

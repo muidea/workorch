@@ -12,6 +12,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransientFailures(t *testing.T) {
@@ -523,6 +524,17 @@ func runtimeCandidateContextManifest(action runtimecontract.ConvergenceState, ki
 }
 
 func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T) {
+	skillInstruction := "typed skill instructions"
+	runtimeSkills, skillBudget, err := runtimecontract.SealRuntimeSkillContexts([]runtimecontract.RuntimeSkillContext{{
+		ID: "skill-1", Instruction: skillInstruction,
+		Provenance: workorchskillcontract.Provenance{
+			Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+			ContentHash: workorchskillcontract.StableContentHash(workorchskillcontract.Content{ID: "skill-1", Instruction: skillInstruction}),
+		},
+	}})
+	if err != nil {
+		t.Fatalf("seal runtime Skill: %v", err)
+	}
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
@@ -551,7 +563,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024)}},
 				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
 			},
-			Skills: []runtimecontract.RuntimeSkillContext{{ID: "skill-1", Instruction: "typed skill instructions"}},
+			Skills: runtimeSkills, SkillContextBudget: skillBudget,
 			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 				ID: "go-test-observable", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", RequiredArgs: []string{"test", "-v"},
 			}},
@@ -672,7 +684,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/write"`, `"name":"content"`, `"targetCardinality":"one"`,
 		`"forbiddenParameters":["input","output","payload","path","targetRef","targetRefs"]`,
-		`"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"evidencePolicyIds":["go-test-observable"]`,
+		`"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"evidencePolicyIds":["go-test-observable"]`, `"skillContextBudget"`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)

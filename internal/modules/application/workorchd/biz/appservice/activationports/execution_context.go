@@ -95,6 +95,25 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 
+	runtimeActivation, err := RuntimeActivationContext(
+		providerSelection,
+		dialogLanguage,
+		defaultSoul,
+		bindings.stageSouls,
+		soulRouting,
+		skills,
+		mcpSelection.MCPServerIDs,
+		mcpSelection.Capabilities,
+		memories,
+		bindings.memorySelection,
+		workspace.EvidencePolicies,
+		executionContract,
+		continuation,
+	)
+	if err != nil {
+		return workspaceRuntimeActivationBuild{}, err
+	}
+
 	return workspaceRuntimeActivationBuild{
 		EffectiveGoal: effectiveGoal,
 		EffectiveDoD:  effectiveDoD,
@@ -103,21 +122,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 			string(effectiveDoD.ID), effectiveDoD.DefinitionRevision,
 		),
 		DefinitionChangeImpact: RuntimeDefinitionChangeImpact(definitionChangeImpact),
-		RuntimeActivation: RuntimeActivationContext(
-			providerSelection,
-			dialogLanguage,
-			defaultSoul,
-			bindings.stageSouls,
-			soulRouting,
-			skills,
-			mcpSelection.MCPServerIDs,
-			mcpSelection.Capabilities,
-			memories,
-			bindings.memorySelection,
-			workspace.EvidencePolicies,
-			executionContract,
-			continuation,
-		),
+		RuntimeActivation:      runtimeActivation,
 	}, nil
 }
 

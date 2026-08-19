@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func RuntimeActivationContext(
@@ -29,21 +30,26 @@ func RuntimeActivationContext(
 	evidencePolicies []workorcheventpayload.Payload,
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
-) runtimecontract.RuntimeActivationContext {
+) (runtimecontract.RuntimeActivationContext, error) {
 	mcpCapabilities := runtimeMCPCapabilityContexts(capabilities)
+	runtimeSkills, skillBudget, err := runtimeSkillContexts(skills)
+	if err != nil {
+		return runtimecontract.RuntimeActivationContext{}, err
+	}
 	ret := runtimecontract.RuntimeActivationContext{
-		ProviderSelection: providerSelection.Normalized(),
-		DialogLanguage:    strings.TrimSpace(dialogLanguage),
-		DefaultSoul:       runtimeSoulContext(defaultSoul),
-		Skills:            runtimeSkillContexts(skills),
-		MCPServerIDs:      runtimeMCPServerIDs(mcpServerIDs),
-		MCPCapabilities:   mcpCapabilities,
-		OperationPolicies: runtimeMCPOperationPolicies(mcpCapabilities),
-		Memories:          runtimeMemoryContexts(memories),
-		MemorySelection:   runtimeMemorySelectionEvidence(memorySelection),
-		EvidencePolicies:  runtimeEvidencePolicies(evidencePolicies),
-		ExecutionContract: runtimeExecutionContract(executionContract),
-		Continuation:      continuation,
+		ProviderSelection:  providerSelection.Normalized(),
+		DialogLanguage:     strings.TrimSpace(dialogLanguage),
+		DefaultSoul:        runtimeSoulContext(defaultSoul),
+		Skills:             runtimeSkills,
+		SkillContextBudget: skillBudget,
+		MCPServerIDs:       runtimeMCPServerIDs(mcpServerIDs),
+		MCPCapabilities:    mcpCapabilities,
+		OperationPolicies:  runtimeMCPOperationPolicies(mcpCapabilities),
+		Memories:           runtimeMemoryContexts(memories),
+		MemorySelection:    runtimeMemorySelectionEvidence(memorySelection),
+		EvidencePolicies:   runtimeEvidencePolicies(evidencePolicies),
+		ExecutionContract:  runtimeExecutionContract(executionContract),
+		Continuation:       continuation,
 	}
 	stages := make([]string, 0, len(soulRouting.Bindings))
 	for stage := range soulRouting.Bindings {
@@ -60,7 +66,7 @@ func RuntimeActivationContext(
 			Stage: stage, Source: binding.Source, Soul: *soul,
 		})
 	}
-	return ret.Normalized()
+	return ret.Normalized(), nil
 }
 
 func RuntimeDefinitionChangeImpact(input map[string]any) *runtimecontract.RuntimeDefinitionChangeImpact {
@@ -459,7 +465,7 @@ func runtimeSoulContext(item *soulmodel.Soul) *runtimecontract.RuntimeSoulContex
 	}
 }
 
-func runtimeSkillContexts(items []workorchmanagementcontract.Skill) []runtimecontract.RuntimeSkillContext {
+func runtimeSkillContexts(items []workorchmanagementcontract.Skill) ([]runtimecontract.RuntimeSkillContext, *runtimecontract.RuntimeSkillContextBudget, error) {
 	ret := make([]runtimecontract.RuntimeSkillContext, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, runtimecontract.RuntimeSkillContext{
@@ -467,11 +473,13 @@ func runtimeSkillContexts(items []workorchmanagementcontract.Skill) []runtimecon
 			TriggerRules: append([]string(nil), item.TriggerRules...), Instruction: item.Instruction,
 			ReferenceRefs: append([]string(nil), item.ReferenceRefs...), RequiredToolKinds: append([]string(nil), item.RequiredToolKinds...),
 			RequiredMCPServerRefs: append([]string(nil), item.RequiredMCPServerRefs...), RequiredCapabilityRefs: append([]string(nil), item.RequiredCapabilityRefs...),
-			Constraints: append([]string(nil), item.Constraints...), Source: item.Source, Scope: item.Scope,
-			WorkspaceID: item.WorkspaceID, ContentHash: item.ContentHash,
+			Constraints: append([]string(nil), item.Constraints...),
+			Provenance: workorchskillcontract.Provenance{
+				Source: item.Source, Scope: item.Scope, WorkspaceID: common.WorkspaceID(item.WorkspaceID), ContentHash: item.ContentHash,
+			},
 		})
 	}
-	return ret
+	return runtimecontract.SealRuntimeSkillContexts(ret)
 }
 
 func runtimeMCPServerIDs(values []string) []common.MCPServerID {

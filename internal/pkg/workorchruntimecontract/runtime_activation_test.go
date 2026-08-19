@@ -5,16 +5,19 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *testing.T) {
+	skills, skillBudget := sealedRuntimeSkillFixture(t, "skill-go", "执行 Go 验证")
 	activation := RuntimeActivationContext{
-		ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ReasoningEffort: "high"},
-		DialogLanguage:    "zh-CN",
-		DefaultSoul:       &RuntimeSoulContext{ID: "soul-default", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
-		StageSoulBindings: []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},
-		Skills:            []RuntimeSkillContext{{ID: "skill-go", Name: "Go", Instruction: "执行 Go 验证", RequiredToolKinds: []string{"shell/command"}}},
-		MCPServerIDs:      []common.MCPServerID{"mcp-main"},
+		ProviderSelection:  ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ReasoningEffort: "high"},
+		DialogLanguage:     "zh-CN",
+		DefaultSoul:        &RuntimeSoulContext{ID: "soul-default", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
+		StageSoulBindings:  []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},
+		Skills:             skills,
+		SkillContextBudget: skillBudget,
+		MCPServerIDs:       []common.MCPServerID{"mcp-main"},
 		MCPCapabilities: []RuntimeMCPCapabilityContext{{
 			ID: "cap-read", ServerID: "mcp-main", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "read", Enabled: true,
 			EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
@@ -104,6 +107,19 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 			}
 		})
 	}
+}
+
+func sealedRuntimeSkillFixture(t *testing.T, id, instruction string) ([]RuntimeSkillContext, *RuntimeSkillContextBudget) {
+	t.Helper()
+	contentHash := workorchskillcontract.StableContentHash(workorchskillcontract.Content{ID: id, Name: "Go", Instruction: instruction, RequiredToolKinds: []string{"shell/command"}})
+	items, budget, err := SealRuntimeSkillContexts([]RuntimeSkillContext{{
+		ID: id, Name: "Go", Instruction: instruction, RequiredToolKinds: []string{"shell/command"},
+		Provenance: workorchskillcontract.Provenance{Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal, ContentHash: contentHash},
+	}})
+	if err != nil {
+		t.Fatalf("seal runtime Skill fixture: %v", err)
+	}
+	return items, budget
 }
 
 func TestRuntimeContinuationContextRetainsBoundedGovernanceHistoryAfterDefinitionChange(t *testing.T) {

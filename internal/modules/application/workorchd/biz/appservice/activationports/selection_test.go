@@ -11,6 +11,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func TestSelectedWorkspaceMemoryItemsLoadsDefaultProviderOnlyForImplicitSelection(t *testing.T) {
@@ -120,11 +121,13 @@ func TestSelectWorkspaceExecutionSkillsAutoSelectsRepositorySkill(t *testing.T) 
 		}
 	})
 	exports := testRuntimeExports(runtime)
-	if err := exports.Repositories.Skills.Create(ctx, &skillmodel.Skill{
+	if err := exports.Repositories.Skills.Create(ctx, registrySelectionSkill(&skillmodel.Skill{
 		ID:           "skill-auto-runports",
 		Name:         "Auto Runports Skill",
+		Version:      "v1",
 		TriggerRules: []string{"auto runports"},
-	}); err != nil {
+		Instruction:  "Use the owner EventHub port.",
+	})); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
 
@@ -155,10 +158,9 @@ func TestSelectWorkspaceExecutionSkillsResolvesExplicitRepositorySkill(t *testin
 		}
 	})
 	exports := testRuntimeExports(runtime)
-	if err := exports.Repositories.Skills.Create(ctx, &skillmodel.Skill{
-		ID:   "skill-explicit-runports",
-		Name: "Explicit Runports Skill",
-	}); err != nil {
+	if err := exports.Repositories.Skills.Create(ctx, registrySelectionSkill(&skillmodel.Skill{
+		ID: "skill-explicit-runports", Name: "Explicit Runports Skill", Version: "v1", Instruction: "Use the explicit owner EventHub port.",
+	})); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
 
@@ -176,4 +178,12 @@ func TestSelectWorkspaceExecutionSkillsResolvesExplicitRepositorySkill(t *testin
 	if len(result.IDs) != 1 || result.IDs[0] != "skill-explicit-runports" || result.Evidence.Policy != "explicit_skill_selection" {
 		t.Fatalf("selection = ids:%+v evidence:%+v, want explicit evidence", result.IDs, result.Evidence)
 	}
+}
+
+func registrySelectionSkill(item *skillmodel.Skill) *skillmodel.Skill {
+	item.Provenance = workorchskillcontract.Provenance{
+		Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+		ContentHash: workorchskillcontract.StableContentHash(item.Content()),
+	}
+	return item
 }

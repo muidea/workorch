@@ -82,7 +82,7 @@ func TestListSkillsWithBackendIncludesSkillHubGlobalSkills(t *testing.T) {
 		t.Fatalf("len(items) = %d, want 2: %+v", len(items), items)
 	}
 	repositorySkill := findTestSkill(items, "skill-repository")
-	if repositorySkill.ManagedBy != skillManagedByWorkorch || repositorySkill.Scope != skillScopeRepository {
+	if repositorySkill.ManagedBy != skillManagedByWorkorch || repositorySkill.Scope != skillScopeWorkOrchRegistry || repositorySkill.Source != skillSourceWorkOrchRegistry {
 		t.Fatalf("repository skill metadata = %+v", repositorySkill)
 	}
 	globalSkill := findTestSkill(items, "skillhub:global:go-service-delivery")
@@ -90,7 +90,7 @@ func TestListSkillsWithBackendIncludesSkillHubGlobalSkills(t *testing.T) {
 		globalSkill.Scope != skillScopeGlobal ||
 		globalSkill.SourceSkillID != "go-service-delivery" ||
 		globalSkill.Agent != "codex" ||
-		globalSkill.ContentHash != "sha256:actual" ||
+		len(globalSkill.ContentHash) != 64 || globalSkill.ActualHash != "sha256:actual" ||
 		!strings.Contains(globalSkill.Instruction, "Global workorchmanagementcontract.Skill Instruction") {
 		t.Fatalf("global skill metadata = %+v", globalSkill)
 	}

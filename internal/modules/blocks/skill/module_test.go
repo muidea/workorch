@@ -52,8 +52,8 @@ func TestModuleConfigureRequiresSkillsRepository(t *testing.T) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 	module := New()
-	if err := module.Configure(skillbiz.Dependencies{Skills: memory.NewSkillRepository()}); err != nil {
-		t.Fatalf("Configure without EventHub: %v", err)
+	if err := module.Configure(skillbiz.Dependencies{Skills: memory.NewSkillRepository()}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Configure without EventHub err = %v, want invalid argument", err)
 	}
 	if module.bizPtr != nil {
 		t.Fatal("biz must not be constructed without EventHub")
@@ -79,7 +79,7 @@ func TestModuleSkillCommandsUseRegistryContract(t *testing.T) {
 		}
 	})
 
-	createResult := sendSkillCommand(t, ctx, hub, skillevents.TopicSkillCommandCreate,
+	createResult := sendSkillCommand[skillevents.CreateSkillCommand, skillevents.CreateSkillResult](t, ctx, hub, skillevents.TopicSkillCommandCreate,
 		skillevents.CreateSkillCommand{
 			SkillID:      "skill-contract",
 			Name:         "Contract Skill",
@@ -91,8 +91,11 @@ func TestModuleSkillCommandsUseRegistryContract(t *testing.T) {
 	if createResult.Skill == nil || createResult.Skill.ID != "skill-contract" || createResult.Skill.Version != "1.0.0" {
 		t.Fatalf("skill = %+v, want created skill", createResult.Skill)
 	}
+	if err := createResult.Skill.Provenance.Validate(); err != nil {
+		t.Fatalf("created Skill provenance: %v", err)
+	}
 
-	listResult := sendSkillCommand(t, ctx, hub, skillevents.TopicSkillCommandList, skillevents.ListSkillsCommand{})
+	listResult := sendSkillCommand[skillevents.ListSkillsCommand, skillevents.ListSkillsResult](t, ctx, hub, skillevents.TopicSkillCommandList, skillevents.ListSkillsCommand{})
 	if len(listResult.Skills) != 1 || listResult.Skills[0].ID != "skill-contract" {
 		t.Fatalf("skills = %+v, want created skill", listResult.Skills)
 	}
@@ -105,8 +108,9 @@ func skillModuleContractDependencies() skillbiz.Dependencies {
 	}
 }
 
-func sendSkillCommand[Command any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) skillevents.SkillCommandResult {
+func sendSkillCommand[Command any, Response any](t *testing.T, ctx context.Context, hub magicevent.Hub, topic string, command Command) Response {
 	t.Helper()
+	var zero Response
 	ev := magicevent.NewEventWithContext(topic, "test", skillevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := hub.Send(ev)
 	if result == nil || result.Error() != nil {
@@ -116,9 +120,10 @@ func sendSkillCommand[Command any](t *testing.T, ctx context.Context, hub magice
 	if err != nil {
 		t.Fatalf("result %s: %v", topic, err)
 	}
-	typed, ok := data.(skillevents.SkillCommandResult)
+	typed, ok := data.(Response)
 	if !ok {
 		t.Fatalf("result %s type = %T", topic, data)
+		return zero
 	}
 	return typed
 }

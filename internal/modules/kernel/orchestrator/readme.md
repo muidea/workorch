@@ -460,7 +460,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 | `kernel/governance` | 无直接 I/O | 经 Decision/Approval/Run typed fact 间接协作 | 完整；不存在 Orchestrator ↔ Governance 直连合同 |
 | `blocks/memory` | Orchestrator → Memory | workspace-scoped concrete item/trace read 与 bounded paged purge | 完整；Memory 只提供 owner fact，activation trace 由 Run owner 记录 |
 | `application/workorchd` | 双向 | Orchestrator → Application immutable drive observation；Application → Orchestrator evidence/read-model list 与 scoped purge command | 完整；Application 不推进 reducer、不持有 aggregate |
-| Skill / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Registry 更新不改变既有 Run |
+| Skill Registry / SkillHub Catalog / Soul / MCP Registry | 无直接 I/O | 只消费 Run owner 已持久化的 activation snapshot | 完整；Skill provenance/budget 已在 activation 封存，后续 Registry/Catalog 更新不改变既有 Run |
 | `blocks/eventstream` | 无直接订阅 | 审计通过正式 owner notification 形成 | 完整；不从审计重建 authority |
 
 ## 相关约束
@@ -530,7 +530,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - assessment-only focus 不允许 executable operation；没有 current-run accepted evidence 的 satisfied assessment 必须被拒绝，不能用 summary、历史 memory 或自造 ref 关闭 coverage。
 - ToolCall、Patch、ValidationResult、EvidenceRecord、CoverageWorkItem 和 ArtifactContinuation 只属于 Orchestrator 的单一收敛状态机，不对外暴露写入 repository。
 - 跨组件交互只能使用 EventHub 与具体 command/data/result；禁止跨 owner service/repository、Envelope、JSON/reflect 类型桥和通用投递包装。
-- provider-facing LLM cache prefix 必须遵守 C0、C1、C2、C3-C5 稳定分层。
+- provider-facing LLM cache prefix 必须遵守 C0、C1、C2、C3-C5 稳定分层。Skill 只以 Run owner 持久化的 typed
+  provenance、bounded instruction/metadata snapshot 和 sealed budget 进入 volatile C3；Orchestrator 不查询 Skill
+  Registry/SkillHub、不在 drive 时重新选择或裁剪，也不把 Skill 内容加入 C0～C2。
 
 ## 已覆盖回归
 
@@ -542,6 +544,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace
   snapshot reader 只读表面的静态/反射边界。
 - [x] Memory adapter get 强制传播 WorkspaceID；trace 全量恢复/清理按 concrete bounded result 逐页读取，并检测空页游标、重复游标、页数和条目 hard limit。
+- [x] Skill activation 的 typed provenance/budget invariant，以及 Orchestrator/LLM 不导入 Skill owner、repository 或
+  EventHub topic 的静态边界。
 
 ## 待完善测试点
 

@@ -29,15 +29,16 @@ type runtimeCandidateResourceProjection struct {
 }
 
 type runtimeCandidateActivationProjection struct {
-	DialogLanguage    string                                        `json:"dialogLanguage,omitempty"`
-	CurrentStage      string                                        `json:"currentStage"`
-	Soul              *runtimecontract.RuntimeSoulContext           `json:"soul,omitempty"`
-	Skills            []runtimecontract.RuntimeSkillContext         `json:"skills,omitempty"`
-	MCPServerIDs      []common.MCPServerID                          `json:"mcpServerIds,omitempty"`
-	MCPCapabilities   []runtimecontract.RuntimeMCPCapabilityContext `json:"mcpCapabilities,omitempty"`
-	Memories          []runtimecontract.RuntimeMemoryContext        `json:"memories,omitempty"`
-	EvidencePolicyIDs []string                                      `json:"evidencePolicyIds,omitempty"`
-	Continuation      *runtimecontract.RuntimeContinuationContext   `json:"continuation,omitempty"`
+	DialogLanguage     string                                        `json:"dialogLanguage,omitempty"`
+	CurrentStage       string                                        `json:"currentStage"`
+	Soul               *runtimecontract.RuntimeSoulContext           `json:"soul,omitempty"`
+	Skills             []runtimecontract.RuntimeSkillContext         `json:"skills,omitempty"`
+	SkillContextBudget *runtimecontract.RuntimeSkillContextBudget    `json:"skillContextBudget,omitempty"`
+	MCPServerIDs       []common.MCPServerID                          `json:"mcpServerIds,omitempty"`
+	MCPCapabilities    []runtimecontract.RuntimeMCPCapabilityContext `json:"mcpCapabilities,omitempty"`
+	Memories           []runtimecontract.RuntimeMemoryContext        `json:"memories,omitempty"`
+	EvidencePolicyIDs  []string                                      `json:"evidencePolicyIds,omitempty"`
+	Continuation       *runtimecontract.RuntimeContinuationContext   `json:"continuation,omitempty"`
 }
 
 type runtimeCandidateContextProjection struct {
@@ -202,7 +203,7 @@ func buildRuntimeCandidateContextProjection(context runtimecontract.RuntimeCandi
 		TargetSelectionInstruction: runtimeTargetSelectionInstruction(context.Resources.TargetSelection, manifest.State),
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeCandidateSoul(activation, stage),
-			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
+			Skills: activation.Skills, SkillContextBudget: activation.SkillContextBudget, MCPServerIDs: activation.MCPServerIDs,
 			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, activation.OperationPolicies, manifest.State),
 			Memories:        activation.Memories, EvidencePolicyIDs: runtimeCandidateEvidencePolicyIDs(activation.EvidencePolicies),
 			Continuation: runtimeCandidateContinuationProjection(activation.Continuation),

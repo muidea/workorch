@@ -70,54 +70,59 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeSkillCommand(ev)
-	setMagicResult(result, response, err)
-}
-
-func (m *Biz) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommandResult, error) {
+	// All Skill topics are synchronous commands. In particular, the create
+	// command must never mutate state when accidentally delivered through Post.
+	if result == nil {
+		return
+	}
 	if m == nil || m.service == nil {
-		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
 	case skillevents.TopicSkillCommandCreate:
 		cmd, ok := ev.Data().(skillevents.CreateSkillCommand)
 		if !ok {
-			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, skillevents.CreateSkillResult{}, common.ErrInvalidArgument)
+			return
 		}
-		if err := m.service.CreateSkill(ctx, cmd); err != nil {
-			return skillevents.SkillCommandResult{}, err
-		}
-		item, err := m.service.GetSkill(ctx, cmd.SkillID)
+		item, err := m.service.CreateSkill(ctx, cmd)
 		if err != nil {
-			return skillevents.SkillCommandResult{}, err
+			setMagicResult(result, skillevents.CreateSkillResult{}, err)
+			return
 		}
-		return skillevents.SkillCommandResult{Skill: item}, nil
+		setMagicResult(result, (skillevents.CreateSkillResult{Skill: item}).Clone(), nil)
 	case skillevents.TopicSkillCommandGet:
 		cmd, ok := ev.Data().(skillevents.GetSkillCommand)
 		if !ok {
-			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+			setMagicResult(result, skillevents.GetSkillResult{}, common.ErrInvalidArgument)
+			return
 		}
 		item, err := m.service.GetSkill(ctx, cmd.SkillID)
 		if err != nil {
-			return skillevents.SkillCommandResult{}, err
+			setMagicResult(result, skillevents.GetSkillResult{}, err)
+			return
 		}
-		return skillevents.SkillCommandResult{Skill: item}, nil
+		setMagicResult(result, (skillevents.GetSkillResult{Skill: item}).Clone(), nil)
 	case skillevents.TopicSkillCommandList:
-		if _, ok := ev.Data().(skillevents.ListSkillsCommand); !ok {
-			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+		cmd, ok := ev.Data().(skillevents.ListSkillsCommand)
+		if !ok {
+			setMagicResult(result, skillevents.ListSkillsResult{}, common.ErrInvalidArgument)
+			return
 		}
-		items, err := m.service.ListSkills(ctx)
+		items, nextCursor, err := m.service.ListSkills(ctx, cmd.CursorAfterID, cmd.Limit)
 		if err != nil {
-			return skillevents.SkillCommandResult{}, err
+			setMagicResult(result, skillevents.ListSkillsResult{}, err)
+			return
 		}
-		return skillevents.SkillCommandResult{Skills: items}, nil
+		setMagicResult(result, (skillevents.ListSkillsResult{Skills: items, NextCursor: nextCursor}).Clone(), nil)
 	default:
-		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+		setMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}
 }
 
-func setMagicResult(result magicevent.Result, data skillevents.SkillCommandResult, err error) {
+func setMagicResult[Response any](result magicevent.Result, data Response, err error) {
 	if result == nil {
 		return
 	}
@@ -125,5 +130,5 @@ func setMagicResult(result magicevent.Result, data skillevents.SkillCommandResul
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data.Clone(), nil)
+	result.Set(data, nil)
 }

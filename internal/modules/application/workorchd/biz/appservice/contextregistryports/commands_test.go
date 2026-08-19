@@ -21,6 +21,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
@@ -180,7 +181,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		if cmd.SkillID != "skill-contract" || cmd.Name != "Skill Contract" {
 			t.Fatalf("skill command = %+v", cmd)
 		}
-		result.Set(skillevents.SkillCommandResult{Skill: &skillmodel.Skill{ID: cmd.SkillID, Name: cmd.Name, Instruction: cmd.Instruction}}, nil)
+		result.Set(skillevents.CreateSkillResult{Skill: registrySkillFixture(cmd.SkillID, cmd.Name, "v1", cmd.Instruction)}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, func(cmd mcpevents.CreateServerCommand, result magicevent.Result) {
 		env, err := mcpevents.EnvironmentVariableMap(cmd.Env)
@@ -338,8 +339,8 @@ func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(16)
 	subscribeMagicCommand(t, rawHub, skillevents.TopicSkillCommandList, skillevents.CommandDestination, func(_ skillevents.ListSkillsCommand, result magicevent.Result) {
-		result.Set(skillevents.SkillCommandResult{
-			Skills: []*skillmodel.Skill{{ID: "repo-skill", Name: "Repository Skill"}},
+		result.Set(skillevents.ListSkillsResult{
+			Skills: []*skillmodel.Skill{registrySkillFixture("repo-skill", "Repository Skill", "v1", "repository instruction")},
 		}, nil)
 	})
 	catalog := fakeSkillHubCatalog{
@@ -378,4 +379,13 @@ func subscribeMagicCommand[Command any](t *testing.T, hub magicevent.Hub, topic 
 		}
 		handle(cmd, result)
 	})
+}
+
+func registrySkillFixture(id common.SkillID, name, version, instruction string) *skillmodel.Skill {
+	item := &skillmodel.Skill{ID: id, Name: name, Version: version, Instruction: instruction}
+	item.Provenance = workorchskillcontract.Provenance{
+		Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+		ContentHash: workorchskillcontract.StableContentHash(item.Content()),
+	}
+	return item
 }

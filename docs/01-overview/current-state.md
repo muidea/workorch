@@ -4,7 +4,7 @@ Status: active
 
 Type: current-fact
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-19
 
 ## Purpose
 
@@ -100,6 +100,9 @@ Runtime aggregate 只支持一个 current development baseline，不维护历史
 - active LLM configuration 在进程启动时冻结；保存配置只影响下一次进程启动，当前投影显示 `restartRequired`。
 - Provider-facing context 保持 C0～C5 分区；raw prompt/body、credential、endpoint 和未脱敏内容不进入 aggregate、
   Eventstream、projection 或 Memory。
+- Skill 只以 activation-time sealed snapshot 进入 volatile C3：WorkOrch Registry 与 SkillHub Catalog 使用不同 typed
+  provenance，最多 5 项，instruction 单项 8 KiB/总计 24 KiB，metadata 总计 16 KiB。LLM/Orchestrator 不直读
+  Registry/Catalog，也不在请求或 drive 阶段重新选择、裁剪或提升 Skill 到 C0～C2。
 
 ## Component Snapshot
 
@@ -122,6 +125,9 @@ Runtime aggregate 只支持一个 current development baseline，不维护历史
   “current workspace”。
 - Memory item/trace command 同样强制该 scope；RecallTrace 采用 create-once exact replay。Activation 的候选、排除、
   quota、score/hit 与 byte/token budget 作为 sealed context provenance 持久化和投影，但不参与 SM-2 credit。
+- Skill Block 只拥有 WorkOrch Registry；SkillHub 是 Application-private external catalog。Registry create 由 owner 签发
+  canonical content hash provenance，get/list 使用 concrete bounded EventHub result；选择后的两类 Skill 都以 detached
+  typed provenance 与 byte budget 封入 Run activation，后续源数据变化不具备 current-run authority。
 - 普通 Workspace setup 的必填业务输入只有 Template、Goal、DoD；workspace directory 输入可选，空值解析为
   `.workorch-workspaces/<workspace-id>`，且不要求用户提交 Runtime JSON。
 

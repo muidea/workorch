@@ -28,39 +28,40 @@ type GetSkillCommand struct {
 	SkillID common.SkillID
 }
 
-type ListSkillsCommand struct{}
-
-type SkillCommandResult struct {
-	Skill  *skillmodel.Skill
-	Skills []*skillmodel.Skill
+type ListSkillsCommand struct {
+	CursorAfterID common.SkillID
+	Limit         int
 }
 
-func (r SkillCommandResult) Clone() SkillCommandResult {
-	return SkillCommandResult{Skill: skillmodel.CloneSkill(r.Skill), Skills: skillmodel.CloneSkills(r.Skills)}
+type CreateSkillResult struct {
+	Skill *skillmodel.Skill
+}
+
+func (r CreateSkillResult) Clone() CreateSkillResult {
+	return CreateSkillResult{Skill: skillmodel.CloneSkill(r.Skill)}
+}
+
+type GetSkillResult struct {
+	Skill *skillmodel.Skill
+}
+
+func (r GetSkillResult) Clone() GetSkillResult {
+	return GetSkillResult{Skill: skillmodel.CloneSkill(r.Skill)}
+}
+
+type ListSkillsResult struct {
+	Skills     []*skillmodel.Skill
+	NextCursor common.SkillID
+}
+
+func (r ListSkillsResult) Clone() ListSkillsResult {
+	return ListSkillsResult{Skills: skillmodel.CloneSkills(r.Skills), NextCursor: r.NextCursor}
 }
 
 func MessageContracts() []eventcontract.MessageContract {
-	ret := []eventcontract.MessageContract{}
-	for _, topic := range []string{
-		TopicSkillCommandCreate,
-		TopicSkillCommandGet,
-		TopicSkillCommandList,
-	} {
-		class := eventcontract.CommandClassWrite
-		lane := eventcontract.LanePolicyState
-		switch topic {
-		case TopicSkillCommandGet, TopicSkillCommandList:
-			class = eventcontract.CommandClassRead
-			lane = eventcontract.LanePolicyQuery
-		}
-		switch topic {
-		case TopicSkillCommandCreate:
-			ret = append(ret, eventcontract.CommandTopic[CreateSkillCommand, SkillCommandResult]("skill", definitionPackage, class, lane, topic).MessageContract())
-		case TopicSkillCommandGet:
-			ret = append(ret, eventcontract.CommandTopic[GetSkillCommand, SkillCommandResult]("skill", definitionPackage, class, lane, topic).MessageContract())
-		case TopicSkillCommandList:
-			ret = append(ret, eventcontract.CommandTopic[ListSkillsCommand, SkillCommandResult]("skill", definitionPackage, class, lane, topic).MessageContract())
-		}
+	return []eventcontract.MessageContract{
+		eventcontract.CommandTopic[CreateSkillCommand, CreateSkillResult]("skill", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicSkillCommandCreate).MessageContract(),
+		eventcontract.CommandTopic[GetSkillCommand, GetSkillResult]("skill", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicSkillCommandGet).MessageContract(),
+		eventcontract.CommandTopic[ListSkillsCommand, ListSkillsResult]("skill", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicSkillCommandList).MessageContract(),
 	}
-	return ret
 }

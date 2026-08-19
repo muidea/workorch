@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 const (
-	SkillSourceSkillHub    = "skill-hub"
-	SkillScopeGlobal       = "global"
-	SkillScopeWorkspace    = "workspace"
+	SkillSourceSkillHub    = workorchskillcontract.SourceSkillHub
+	SkillScopeGlobal       = workorchskillcontract.ScopeGlobal
+	SkillScopeWorkspace    = workorchskillcontract.ScopeWorkspace
 	SkillManagedBySkillHub = "skill-hub"
 )
 

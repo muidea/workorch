@@ -40,6 +40,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 type countingStepRepository struct {
@@ -3105,6 +3106,16 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 
 	workspaceID := common.WorkspaceID("ws-context-bundle")
 	runID := common.RunID("run-context-bundle")
+	contextSkills, contextSkillBudget, err := orchestratormodel.SealRuntimeSkillContexts([]orchestratormodel.RuntimeSkillContext{{
+		ID: "skill-context", Name: "context", Instruction: "context",
+		Provenance: workorchskillcontract.Provenance{
+			Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
+			ContentHash: workorchskillcontract.StableContentHash(workorchskillcontract.Content{ID: "skill-context", Name: "context", Instruction: "context"}),
+		},
+	}})
+	if err != nil {
+		t.Fatalf("seal context Skill: %v", err)
+	}
 	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:                   workspaceID,
 		Title:                "context bundle workspace",
@@ -3118,9 +3129,10 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 		WorkspaceID: workspaceID,
 		State:       common.RunStateActive,
 		RuntimeBootstrap: &orchestratormodel.RuntimeBootstrap{Activation: orchestratormodel.RuntimeActivationContext{
-			Skills:       []orchestratormodel.RuntimeSkillContext{{ID: "skill-context", Name: "context", Instruction: "context"}},
-			MCPServerIDs: []common.MCPServerID{"mcp-context"},
-			Memories:     []orchestratormodel.RuntimeMemoryContext{{ID: "memory-context", Summary: "prior context"}},
+			Skills:             contextSkills,
+			SkillContextBudget: contextSkillBudget,
+			MCPServerIDs:       []common.MCPServerID{"mcp-context"},
+			Memories:           []orchestratormodel.RuntimeMemoryContext{{ID: "memory-context", Summary: "prior context"}},
 		}},
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
