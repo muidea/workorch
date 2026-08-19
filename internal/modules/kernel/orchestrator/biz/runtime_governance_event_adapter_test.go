@@ -326,7 +326,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 			t.Fatalf("replay %d resolution=%+v", replay, result)
 		}
 		data, getErr := result.Get()
-		response, ok := data.(decisionevents.DecisionCommandResult)
+		response, ok := data.(decisionevents.EnsureResolvedResult)
 		if getErr != nil || !ok || response.Ticket == nil || response.Resolution == nil || response.Resolution.ID != resolve.ResolutionID {
 			t.Fatalf("replay %d result=%+v getErr=%v", replay, data, getErr)
 		}

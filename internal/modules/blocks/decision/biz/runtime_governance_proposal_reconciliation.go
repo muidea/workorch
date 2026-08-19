@@ -3,6 +3,8 @@ package decision
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"time"
 
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
@@ -16,8 +18,8 @@ const runtimeGovernanceProposalReconciliationInterval = time.Second
 // ReconcileRuntimeGovernanceProposals performs one owner-local recovery pass.
 // Lifecycle callers use the scheduled loop; tests and controlled recovery may
 // invoke a single pass without introducing a second runtime authority.
-func (m *Biz) ReconcileRuntimeGovernanceProposals(ctx context.Context) {
-	m.reconcileRuntimeGovernanceProposals(ctx)
+func (m *Biz) ReconcileRuntimeGovernanceProposals(ctx context.Context) error {
+	return m.reconcileRuntimeGovernanceProposals(ctx)
 }
 
 func (m *Biz) startRuntimeGovernanceProposalReconciliation() error {
@@ -35,7 +37,7 @@ func (m *Biz) startRuntimeGovernanceProposalReconciliation() error {
 	m.reconcileDone = done
 	if err := m.BackgroundRoutine().AsyncFunction(func() {
 		defer close(done)
-		m.reconcileRuntimeGovernanceProposals(ctx)
+		m.logRuntimeGovernanceReconciliationError(m.reconcileRuntimeGovernanceProposals(ctx))
 		ticker := time.NewTicker(runtimeGovernanceProposalReconciliationInterval)
 		defer ticker.Stop()
 		for {
@@ -43,7 +45,7 @@ func (m *Biz) startRuntimeGovernanceProposalReconciliation() error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				m.reconcileRuntimeGovernanceProposals(ctx)
+				m.logRuntimeGovernanceReconciliationError(m.reconcileRuntimeGovernanceProposals(ctx))
 			}
 		}
 	}); err != nil {
@@ -76,27 +78,114 @@ func (m *Biz) stopRuntimeGovernanceProposalReconciliation() {
 	}
 }
 
-func (m *Biz) reconcileRuntimeGovernanceProposals(ctx context.Context) {
-	if m == nil || m.tickets == nil || m.service == nil {
-		return
-	}
-	tickets, err := m.tickets.List(ctx)
+func (m *Biz) logRuntimeGovernanceReconciliationError(err error) {
 	if err != nil {
-		return
-	}
-	for _, ticket := range tickets {
-		if ctx.Err() != nil || ticket == nil || ticket.DecisionKind != "runtime_governance" ||
-			ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil ||
-			ticket.RuntimeGovernanceProposal.State != decisionmodel.RuntimeGovernanceResolutionProposalPending {
-			continue
-		}
-		m.reconcileRuntimeGovernanceProposal(ctx, ticket)
+		slog.Error("decision owner reconciliation failed", "err", err)
 	}
 }
 
-func (m *Biz) reconcileRuntimeGovernanceProposal(ctx context.Context, ticket *decisionmodel.Ticket) {
+func (m *Biz) reconcileRuntimeGovernanceProposals(ctx context.Context) error {
+	if m == nil || m.tickets == nil || m.service == nil {
+		return common.ErrInvalidArgument
+	}
+	tickets, err := m.tickets.List(ctx)
+	if err != nil {
+		return err
+	}
+	var reconcileErrs []error
+	for _, ticket := range tickets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if ticket == nil {
+			continue
+		}
+		ticketCtx, err := common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+		if err != nil {
+			reconcileErrs = append(reconcileErrs, err)
+			continue
+		}
+		if ticket.DeletionRequestedAt != "" {
+			if err := m.service.PurgeDecisionAggregate(ticketCtx, ticket); err != nil {
+				reconcileErrs = append(reconcileErrs, fmt.Errorf("purge decision %s: %w", ticket.ID, err))
+			}
+			continue
+		}
+		if ticket.DecisionKind != "runtime_governance" {
+			if err := m.reconcileOrdinaryDecisionDelivery(ticketCtx, ticket); err != nil {
+				reconcileErrs = append(reconcileErrs, fmt.Errorf("reconcile decision delivery %s: %w", ticket.ID, err))
+			}
+			continue
+		}
+		if ticket.CreatedNotificationPublishedAt == "" {
+			if err := m.ensureTicketCreatedNotification(ticketCtx, ticket); err != nil {
+				reconcileErrs = append(reconcileErrs, fmt.Errorf("deliver runtime governance creation %s: %w", ticket.ID, err))
+				continue
+			}
+		}
+		if ticket.RuntimeGovernanceProposal == nil {
+			continue
+		}
+		proposal := ticket.RuntimeGovernanceProposal
+		switch {
+		case ticket.State == common.DecisionTicketStateOpen && proposal.State == decisionmodel.RuntimeGovernanceResolutionProposalPending:
+			if err := m.reconcileRuntimeGovernanceProposal(ticketCtx, ticket); err != nil {
+				reconcileErrs = append(reconcileErrs, fmt.Errorf("reconcile runtime governance proposal %s: %w", ticket.ID, err))
+			}
+		case ticket.State == common.DecisionTicketStateResolved && proposal.State == decisionmodel.RuntimeGovernanceResolutionProposalCommitted &&
+			(proposal.EvidenceRecordedAt == "" || proposal.ResolutionNotificationPublishedAt == ""):
+			resolution, err := m.resolutions.GetByTicketID(ticketCtx, ticket.ID)
+			if err != nil {
+				reconcileErrs = append(reconcileErrs, fmt.Errorf("load runtime governance resolution %s: %w", ticket.ID, err))
+				continue
+			}
+			if err := m.recordAndPublishResolvedTicket(ticketCtx, ticket, resolution, false); err != nil {
+				reconcileErrs = append(reconcileErrs, fmt.Errorf("deliver runtime governance resolution %s: %w", ticket.ID, err))
+			}
+		}
+	}
+	return errors.Join(reconcileErrs...)
+}
+
+func (m *Biz) reconcileOrdinaryDecisionDelivery(ctx context.Context, ticket *decisionmodel.Ticket) error {
+	if m == nil || ticket == nil || ticket.DecisionKind == "runtime_governance" {
+		return common.ErrInvalidArgument
+	}
+	switch ticket.State {
+	case common.DecisionTicketStateOpen:
+		resolution, err := m.resolutions.GetByTicketID(ctx, ticket.ID)
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		resolvedTicket, persisted, transitioned, err := m.service.EnsureResolvedTicketAndReturnWithTransition(ctx, decisioncontracts.ResolveTicketCommand{
+			ResolutionID: resolution.ID, TicketID: ticket.ID, WorkspaceID: ticket.WorkspaceID, RunID: ticket.RunID, StepID: ticket.StepID,
+			Type: resolution.Type, Payload: resolution.Payload.Clone(), ContinuationAction: resolution.ContinuationAction,
+			ResumeRunID: resolution.ResumeRunID, SuccessorRunID: resolution.SuccessorRunID,
+		})
+		if err != nil {
+			return err
+		}
+		return m.recordAndPublishResolvedTicket(ctx, resolvedTicket, persisted, transitioned)
+	case common.DecisionTicketStateResolved:
+		if ticket.ResolutionNotificationPublishedAt != "" {
+			return nil
+		}
+		resolution, err := m.resolutions.GetByTicketID(ctx, ticket.ID)
+		if err != nil {
+			return err
+		}
+		return m.recordAndPublishResolvedTicket(ctx, ticket, resolution, false)
+	default:
+		return common.ErrConflict
+	}
+}
+
+func (m *Biz) reconcileRuntimeGovernanceProposal(ctx context.Context, ticket *decisionmodel.Ticket) error {
 	if m == nil || ticket == nil || ticket.RuntimeGovernanceProposal == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	proposal := ticket.RuntimeGovernanceProposal.Clone()
 	command := decisioncontracts.ResolveTicketCommand{
@@ -107,19 +196,19 @@ func (m *Biz) reconcileRuntimeGovernanceProposal(ctx context.Context, ticket *de
 	}
 	commit, err := m.commitRuntimeGovernanceTicketProposal(ctx, ticket, &proposal)
 	if err != nil {
-		if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
-			_ = m.service.RejectRuntimeGovernanceResolutionProposal(ctx, command, "aggregate_commit_rejected", err.Error())
-		}
-		return
+		return err
 	}
 	switch commit.Disposition {
 	case orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted,
 		orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate:
 		resolvedTicket, resolution, transitioned, err := m.service.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, command)
-		if err == nil {
-			_ = m.recordAndPublishResolvedTicket(ctx, resolvedTicket, resolution, transitioned)
+		if err != nil {
+			return err
 		}
+		return m.recordAndPublishResolvedTicket(ctx, resolvedTicket, resolution, transitioned)
 	case orchestratorevents.RuntimeGovernanceResolutionDispositionStale:
-		_ = m.service.RejectRuntimeGovernanceResolutionProposal(ctx, command, "aggregate_commit_stale", "runtime governance proposal belongs to a stale aggregate authority")
+		return m.service.RejectRuntimeGovernanceResolutionProposal(ctx, command, "aggregate_commit_stale", "runtime governance proposal belongs to a stale aggregate authority")
+	default:
+		return common.ErrConflict
 	}
 }

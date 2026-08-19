@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -21,17 +22,53 @@ func (m *Biz) publishTicketCreated(ctx context.Context, ticket *decisionmodel.Ti
 	return nil
 }
 
-func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution, transitioned bool) error {
-	if err := m.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
+func (m *Biz) ensureTicketCreatedNotification(ctx context.Context, ticket *decisionmodel.Ticket) error {
+	if ticket == nil {
+		return nil
+	}
+	if ticket.CreatedNotificationPublishedAt != "" {
+		return nil
+	}
+	if err := m.publishTicketCreated(ctx, ticket); err != nil {
 		return err
 	}
-	if !transitioned {
+	updated, err := m.service.MarkTicketCreatedNotificationPublished(ctx, ticket)
+	if err != nil {
+		return err
+	}
+	*ticket = *updated
+	return nil
+}
+
+func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution, transitioned bool) error {
+	runtimeProposal := ticket != nil && ticket.DecisionKind == "runtime_governance" && ticket.RuntimeGovernanceProposal != nil &&
+		ticket.RuntimeGovernanceProposal.State == decisionmodel.RuntimeGovernanceResolutionProposalCommitted
+	if !runtimeProposal || ticket.RuntimeGovernanceProposal.EvidenceRecordedAt == "" {
+		if err := m.recordDecisionResolutionEvidence(ctx, ticket, resolution); err != nil {
+			return err
+		}
+		if runtimeProposal {
+			updated, err := m.service.MarkRuntimeGovernanceEvidenceRecorded(ctx, ticket)
+			if err != nil {
+				return err
+			}
+			*ticket = *updated
+		}
+	}
+	shouldPublish := transitioned
+	if runtimeProposal {
+		shouldPublish = shouldPublish || ticket.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt == ""
+	} else if ticket != nil {
+		shouldPublish = shouldPublish || ticket.ResolutionNotificationPublishedAt == ""
+	}
+	if !shouldPublish {
 		return nil
 	}
 	if m == nil || m.EventHub() == nil || ticket == nil || resolution == nil {
 		return nil
 	}
 	data := decisionevents.TicketResolvedData{
+		NotificationID:     decisionResolvedNotificationID(ticket, resolution),
 		Ticket:             ticketChangedData(ticket),
 		ResolutionID:       resolution.ID,
 		ResolutionType:     resolution.Type,
@@ -43,6 +80,19 @@ func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisi
 	event := magicevent.NewEventWithContext(decisionevents.TopicTicketResolved, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	m.bindDecisionNotificationLane(event, ticket)
 	m.PostEvent(event)
+	if runtimeProposal {
+		updated, err := m.service.MarkRuntimeGovernanceNotificationPublished(ctx, ticket)
+		if err != nil {
+			return err
+		}
+		*ticket = *updated
+	} else {
+		updated, err := m.service.MarkResolutionNotificationPublished(ctx, ticket)
+		if err != nil {
+			return err
+		}
+		*ticket = *updated
+	}
 	return nil
 }
 
@@ -51,14 +101,29 @@ func ticketChangedData(ticket *decisionmodel.Ticket) decisionevents.TicketChange
 		return decisionevents.TicketChangedData{}
 	}
 	return decisionevents.TicketChangedData{
-		TicketID:     ticket.ID,
-		WorkspaceID:  ticket.WorkspaceID,
-		RunID:        ticket.RunID,
-		StepID:       ticket.StepID,
-		Reason:       ticket.Reason,
-		DecisionKind: ticket.DecisionKind,
-		State:        ticket.State,
+		NotificationID: decisionCreatedNotificationID(ticket),
+		TicketID:       ticket.ID,
+		WorkspaceID:    ticket.WorkspaceID,
+		RunID:          ticket.RunID,
+		StepID:         ticket.StepID,
+		Reason:         ticket.Reason,
+		DecisionKind:   ticket.DecisionKind,
+		State:          ticket.State,
 	}
+}
+
+func decisionCreatedNotificationID(ticket *decisionmodel.Ticket) string {
+	if ticket == nil || ticket.WorkspaceID == "" || ticket.ID == "" {
+		return ""
+	}
+	return fmt.Sprintf("decision-notification/created/%s/%s", ticket.WorkspaceID, ticket.ID)
+}
+
+func decisionResolvedNotificationID(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) string {
+	if ticket == nil || resolution == nil || ticket.WorkspaceID == "" || ticket.ID == "" || resolution.ID == "" {
+		return ""
+	}
+	return fmt.Sprintf("decision-notification/resolved/%s/%s/%s", ticket.WorkspaceID, ticket.ID, resolution.ID)
 }
 
 func (m *Biz) bindDecisionNotificationLane(event magicevent.Event, ticket *decisionmodel.Ticket) {

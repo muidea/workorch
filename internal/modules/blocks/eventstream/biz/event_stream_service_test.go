@@ -419,6 +419,45 @@ func TestServiceDeduplicatesStableResultNotificationReplay(t *testing.T) {
 	}
 }
 
+func TestServiceDeduplicatesStableDecisionNotificationReplay(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatalf("start event stream service: %v", err)
+	}
+	defer service.Stop()
+
+	data := decisionevents.TicketResolvedData{
+		NotificationID: "decision-notification/resolved/ws-decision-replayed/ticket-decision-replayed/resolution-decision-replayed",
+		Ticket: decisionevents.TicketChangedData{
+			TicketID: "ticket-decision-replayed", WorkspaceID: "ws-decision-replayed", RunID: "run-decision-replayed",
+			State: common.DecisionTicketStateResolved,
+		},
+		ResolutionID: "resolution-decision-replayed", ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}
+	for range 2 {
+		rawHub.Post(magicevent.NewEventWithContext(
+			decisionevents.TopicTicketResolved,
+			decisioncommon.ModuleID,
+			decisionevents.NotificationDestination,
+			magicevent.NewHeader(),
+			ctx,
+			data,
+		))
+	}
+
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.Ticket.WorkspaceID}, 1)
+	time.Sleep(20 * time.Millisecond)
+	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: data.Ticket.WorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].ID != common.EventRecordID(data.NotificationID) {
+		t.Fatalf("replayed Decision records = %+v, want one stable record", records)
+	}
+}
+
 func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()

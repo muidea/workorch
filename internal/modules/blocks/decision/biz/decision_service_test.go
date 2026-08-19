@@ -67,8 +67,10 @@ func (h *recordingDecisionHub) Posted() []magicevent.Event {
 }
 
 type countingDecisionTicketRepository struct {
-	inner    *memory.DecisionTicketRepository
-	getCount atomic.Int64
+	inner          *memory.DecisionTicketRepository
+	getCount       atomic.Int64
+	updates        atomic.Int64
+	failNextUpdate atomic.Bool
 }
 
 func newCountingDecisionTicketRepository() *countingDecisionTicketRepository {
@@ -97,6 +99,10 @@ func (r *countingDecisionTicketRepository) ListByWorkspaceID(ctx context.Context
 }
 
 func (r *countingDecisionTicketRepository) Update(ctx context.Context, item *decisionModel.Ticket) error {
+	r.updates.Add(1)
+	if r.failNextUpdate.Swap(false) {
+		return errors.New("injected ticket update failure")
+	}
 	return r.inner.Update(ctx, item)
 }
 
@@ -107,6 +113,30 @@ func (r *countingDecisionTicketRepository) Delete(ctx context.Context, id common
 type countingDecisionResolutionRepository struct {
 	inner              *memory.DecisionResolutionRepository
 	getByTicketIDCount atomic.Int64
+}
+
+type failingDeleteDecisionResolutionRepository struct {
+	inner      *memory.DecisionResolutionRepository
+	failDelete atomic.Bool
+}
+
+func newFailingDeleteDecisionResolutionRepository() *failingDeleteDecisionResolutionRepository {
+	return &failingDeleteDecisionResolutionRepository{inner: memory.NewDecisionResolutionRepository()}
+}
+
+func (r *failingDeleteDecisionResolutionRepository) Create(ctx context.Context, item *decisionModel.Resolution) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *failingDeleteDecisionResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionModel.Resolution, error) {
+	return r.inner.GetByTicketID(ctx, ticketID)
+}
+
+func (r *failingDeleteDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
+	if r.failDelete.Load() {
+		return errors.New("injected resolution delete failure")
+	}
+	return r.inner.DeleteByTicketID(ctx, ticketID)
 }
 
 func newCountingDecisionResolutionRepository() *countingDecisionResolutionRepository {
@@ -256,6 +286,206 @@ func TestService_RuntimeGovernanceCommittedProposalReplaysExactResolution(t *tes
 	changed.Payload = mustDecisionPayload(t, map[string]any{"summary": "changed input"})
 	if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, changed); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("changed replay err = %v, want conflict", err)
+	}
+}
+
+func TestService_RuntimeGovernanceCommittedFinalizeReplayIsZeroWrite(t *testing.T) {
+	ctx := context.Background()
+	tickets := newCountingDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	service := NewService(tickets, resolutions)
+	if err := tickets.Create(ctx, &decisionModel.Ticket{
+		ID:                     "ticket-runtime-zero-write",
+		WorkspaceID:            "ws-runtime-zero-write",
+		RunID:                  "run-runtime-zero-write",
+		StepID:                 "runtime/dispatch-zero-write",
+		Reason:                 "confirm recovery",
+		DecisionKind:           "runtime_governance",
+		State:                  common.DecisionTicketStateOpen,
+		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID:       "resolution-runtime-zero-write",
+		TicketID:           "ticket-runtime-zero-write",
+		WorkspaceID:        "ws-runtime-zero-write",
+		RunID:              "run-runtime-zero-write",
+		StepID:             "runtime/dispatch-zero-write",
+		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:            mustDecisionPayload(t, map[string]any{"summary": "continue", "apiKey": "sk-secret123456"}),
+		ContinuationAction: "resume",
+		ResumeRunID:        "run-runtime-zero-write",
+	}
+	if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, cmd); err != nil {
+		t.Fatalf("prepare proposal: %v", err)
+	}
+	first, _, transitioned, err := service.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, cmd)
+	if err != nil || !transitioned {
+		t.Fatalf("first finalize = transitioned:%v err:%v", transitioned, err)
+	}
+	updates := tickets.updates.Load()
+	updatedAt := first.UpdatedAt
+	proposalUpdatedAt := first.RuntimeGovernanceProposal.UpdatedAt
+	replayed, _, transitioned, err := service.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, cmd)
+	if err != nil {
+		t.Fatalf("replay finalize: %v", err)
+	}
+	if transitioned {
+		t.Fatal("exact finalize replay unexpectedly transitioned")
+	}
+	if got := tickets.updates.Load(); got != updates {
+		t.Fatalf("exact finalize replay wrote ticket: updates %d -> %d", updates, got)
+	}
+	if replayed.UpdatedAt != updatedAt || replayed.RuntimeGovernanceProposal.UpdatedAt != proposalUpdatedAt {
+		t.Fatalf("exact finalize replay changed timestamps: ticket %q -> %q proposal %q -> %q", updatedAt, replayed.UpdatedAt, proposalUpdatedAt, replayed.RuntimeGovernanceProposal.UpdatedAt)
+	}
+}
+
+func TestService_OrdinaryResolutionReplayUsesCanonicalSealedFingerprint(t *testing.T) {
+	ctx := context.Background()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	service := NewService(tickets, resolutions)
+	if err := service.CreateTicket(ctx, decisionservice.CreateTicketCommand{
+		TicketID: "ticket-resolution-fingerprint", WorkspaceID: "ws-resolution-fingerprint", RunID: "run-resolution-fingerprint", Reason: "need input",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID:       "resolution-fingerprint",
+		TicketID:           "ticket-resolution-fingerprint",
+		WorkspaceID:        "ws-resolution-fingerprint",
+		RunID:              "run-resolution-fingerprint",
+		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:            mustDecisionPayload(t, map[string]any{"answer": "continue", "apiKey": "sk-secret123456"}),
+		ContinuationAction: "resume",
+		ResumeRunID:        "run-resolution-fingerprint",
+		SuccessorRunID:     "run-resolution-successor",
+	}
+	if _, _, _, err := service.EnsureResolvedTicketAndReturnWithTransition(ctx, cmd); err != nil {
+		t.Fatalf("first resolution: %v", err)
+	}
+	if _, _, transitioned, err := service.EnsureResolvedTicketAndReturnWithTransition(ctx, cmd); err != nil || transitioned {
+		t.Fatalf("same raw payload replay = transitioned:%v err:%v", transitioned, err)
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*decisionservice.ResolveTicketCommand)
+	}{
+		{name: "continuation", change: func(value *decisionservice.ResolveTicketCommand) { value.ContinuationAction = "restart" }},
+		{name: "resume run", change: func(value *decisionservice.ResolveTicketCommand) { value.ResumeRunID = "run-other" }},
+		{name: "successor run", change: func(value *decisionservice.ResolveTicketCommand) { value.SuccessorRunID = "run-other" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := cmd
+			tc.change(&changed)
+			if _, _, _, err := service.EnsureResolvedTicketAndReturnWithTransition(ctx, changed); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("changed replay err = %v, want conflict", err)
+			}
+		})
+	}
+}
+
+func TestService_DecisionAggregatePurgeHidesAndRecoversPartialDeletion(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-decision-purge-recovery")
+	ticketID := common.TicketID("ticket-decision-purge-recovery")
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := newFailingDeleteDecisionResolutionRepository()
+	if err := tickets.Create(scopedCtx, &decisionModel.Ticket{
+		ID: ticketID, WorkspaceID: workspaceID, RunID: "run-decision-purge-recovery", State: common.DecisionTicketStateResolved, Reason: "purge recovery",
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := resolutions.Create(scopedCtx, &decisionModel.Resolution{ID: "resolution-decision-purge-recovery", TicketID: ticketID, Type: decisioncommon.ResolutionTypeProvideMissingInfo}); err != nil {
+		t.Fatalf("create resolution: %v", err)
+	}
+	rawHub := magicevent.NewHub(16)
+	t.Cleanup(func() { rawHub.Terminate(ctx) })
+	owner, err := New(rawHub, nil, Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub})
+	if err != nil {
+		t.Fatalf("New Biz: %v", err)
+	}
+	item, err := tickets.Get(scopedCtx, ticketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	resolutions.failDelete.Store(true)
+	if err := owner.service.PurgeDecisionAggregate(scopedCtx, item); err == nil {
+		t.Fatal("partial purge unexpectedly succeeded")
+	}
+	tombstone, err := tickets.Get(scopedCtx, ticketID)
+	if err != nil || tombstone.DeletionRequestedAt == "" {
+		t.Fatalf("partial purge tombstone = %+v err=%v", tombstone, err)
+	}
+	if _, err := owner.executeGetTicketCommand(scopedCtx, decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: ticketID}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("public get of tombstone err = %v, want not found", err)
+	}
+	page, err := owner.executeListTicketsByWorkspaceCommand(scopedCtx, decisionevents.ListTicketsByWorkspaceCommand{WorkspaceID: workspaceID})
+	if err != nil || len(page.Tickets) != 0 {
+		t.Fatalf("public list of tombstone = %+v err=%v", page, err)
+	}
+
+	resolutions.failDelete.Store(false)
+	if err := owner.ReconcileRuntimeGovernanceProposals(ctx); err != nil {
+		t.Fatalf("recover aggregate purge: %v", err)
+	}
+	if _, err := tickets.Get(scopedCtx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ticket after purge recovery err = %v, want not found", err)
+	}
+	if _, err := resolutions.GetByTicketID(scopedCtx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("resolution after purge recovery err = %v, want not found", err)
+	}
+}
+
+func TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut(t *testing.T) {
+	ctx := context.Background()
+	tickets := newCountingDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	hub := newRecordingDecisionHub(t)
+	owner, err := New(hub, nil, Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub})
+	if err != nil {
+		t.Fatalf("New Biz: %v", err)
+	}
+	create := decisionservice.CreateTicketCommand{
+		TicketID: "ticket-ordinary-cut", WorkspaceID: "ws-ordinary-cut", RunID: "run-ordinary-cut", Reason: "need input",
+	}
+	if err := owner.service.CreateTicket(ctx, create); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	tickets.failNextUpdate.Store(true)
+	command := decisionevents.EnsureResolvedCommand{
+		ResolutionID: "resolution-ordinary-cut", TicketID: create.TicketID, WorkspaceID: create.WorkspaceID, RunID: create.RunID,
+		Type: decisioncommon.ResolutionTypeProvideMissingInfo, Payload: mustDecisionPayload(t, map[string]any{"answer": "continue"}).Fields,
+	}
+	if _, err := owner.executeEnsureResolvedCommand(ctx, command); err == nil {
+		t.Fatal("resolution unexpectedly crossed injected ticket update failure")
+	}
+	open, err := tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, create.WorkspaceID), create.TicketID)
+	if err != nil || open.State != common.DecisionTicketStateOpen {
+		t.Fatalf("ticket at write cut = %+v err=%v", open, err)
+	}
+	if _, err := resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, create.WorkspaceID), create.TicketID); err != nil {
+		t.Fatalf("orphan resolution was not persisted: %v", err)
+	}
+	if err := owner.ReconcileRuntimeGovernanceProposals(ctx); err != nil {
+		t.Fatalf("reconcile ordinary resolution cut: %v", err)
+	}
+	resolved, err := tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, create.WorkspaceID), create.TicketID)
+	if err != nil || resolved.State != common.DecisionTicketStateResolved || resolved.ResolutionNotificationPublishedAt == "" {
+		t.Fatalf("recovered ticket = %+v err=%v", resolved, err)
+	}
+	published := hub.Posted()
+	if len(published) != 1 || published[0].ID() != decisionevents.TopicTicketResolved {
+		t.Fatalf("recovery notifications = %+v, want one resolved notification", published)
+	}
+	if err := owner.ReconcileRuntimeGovernanceProposals(ctx); err != nil {
+		t.Fatalf("idempotent ordinary reconciliation: %v", err)
+	}
+	if got := len(hub.Posted()); got != 1 {
+		t.Fatalf("ordinary notification replayed after durable marker: %d", got)
 	}
 }
 
@@ -811,10 +1041,12 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	}
 
 	cmd := decisionservice.ResolveTicketCommand{
-		ResolutionID: orphan.ID,
-		TicketID:     createCmd.TicketID,
-		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:      mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "retry_same_step"}),
+		ResolutionID:       orphan.ID,
+		TicketID:           createCmd.TicketID,
+		Type:               decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:            mustDecisionPayload(t, map[string]any{"actor": "operator", "intent": "retry_same_step"}),
+		ContinuationAction: orphan.ContinuationAction,
+		ResumeRunID:        orphan.ResumeRunID,
 	}
 	ticket, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, cmd)
 	if err != nil {

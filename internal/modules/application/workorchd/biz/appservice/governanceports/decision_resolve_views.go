@@ -127,33 +127,7 @@ func ReadDecisionTicketForResolution(ctx context.Context, hub magicevent.Hub, ti
 	if scope != "" {
 		return ReadDecisionTicket(common.ContextWithRuntimeWorkspaceID(ctx, scope), hub, ticketID)
 	}
-	candidates, err := DecisionTicketsForQuery(ctx, hub, "", "")
-	if err != nil {
-		return nil, err
-	}
-	var matches []*decisionmodel.Ticket
-	var openMatches []*decisionmodel.Ticket
-	for _, item := range candidates {
-		if item == nil || item.ID != ticketID {
-			continue
-		}
-		matches = append(matches, item)
-		if item.State == common.DecisionTicketStateOpen {
-			openMatches = append(openMatches, item)
-		}
-	}
-	switch {
-	case len(openMatches) == 1:
-		return openMatches[0], nil
-	case len(openMatches) > 1:
-		return nil, common.ErrConflict
-	case len(matches) == 1:
-		return matches[0], nil
-	case len(matches) > 1:
-		return nil, common.ErrConflict
-	default:
-		return nil, common.ErrNotFound
-	}
+	return ReadDecisionTicket(ctx, hub, ticketID)
 }
 
 func resolveDecisionTicket(ctx context.Context, hub magicevent.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload workorcheventpayload.Payload, scope common.WorkspaceID) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {

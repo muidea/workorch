@@ -5,7 +5,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -26,20 +25,21 @@ func bindOwnerLane(event magicevent.Event, ownerContracts []eventcontract.Contra
 	}))
 }
 
-func decisionResponse(response magicevent.Result, topic string) (decisionevents.DecisionCommandResult, error) {
+func decisionResponse[Result any](response magicevent.Result, topic string) (Result, error) {
+	var zero Result
 	if response == nil {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := response.Error(); err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return zero, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return decisionevents.DecisionCommandResult{}, resultErr
+		return zero, resultErr
 	}
-	result, ok := data.(decisionevents.DecisionCommandResult)
+	result, ok := data.(Result)
 	if !ok {
-		return decisionevents.DecisionCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
 	}
 	return result, nil
 }

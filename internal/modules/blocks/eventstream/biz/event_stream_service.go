@@ -456,10 +456,11 @@ func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstream
 	if err == nil {
 		err = s.appendRecord(event.Context(), record)
 	}
-	// Only Result notifications carry a stable owner-derived EventRecord ID.
-	// A conflict for that identity is an idempotent replay; conflicts for any
-	// other event must remain visible instead of being silently swallowed.
-	if errors.Is(err, common.ErrConflict) && record != nil && strings.HasPrefix(string(record.ID), "result-notification/") {
+	// Result and Decision notifications carry stable owner-derived EventRecord
+	// IDs. A conflict for those identities is an idempotent replay; conflicts
+	// for any other event remain visible.
+	if errors.Is(err, common.ErrConflict) && record != nil &&
+		(strings.HasPrefix(string(record.ID), "result-notification/") || strings.HasPrefix(string(record.ID), "decision-notification/")) {
 		return
 	}
 	if err != nil {
@@ -523,7 +524,7 @@ func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstream
 }
 
 func decisionTicketRecord(topic string, data decisionevents.TicketChangedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
+	ret := &eventstreammodel.EventRecord{
 		Topic:        topic,
 		SourceModule: decisioncommon.ModuleID,
 		SubjectType:  "decision_ticket",
@@ -533,6 +534,10 @@ func decisionTicketRecord(topic string, data decisionevents.TicketChangedData) *
 		StepID:       data.StepID,
 		Payload:      (recordpayload.DecisionTicketPayloadData{Reason: data.Reason, State: data.State}).EventPayload(),
 	}
+	if data.NotificationID != "" {
+		ret.ID = common.EventRecordID(data.NotificationID)
+	}
+	return ret
 }
 
 func approvalRecord(topic string, data approvalevents.ApprovalChangedData) *eventstreammodel.EventRecord {
@@ -724,7 +729,7 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 }
 
 func decisionResolvedRecord(topic string, data decisionevents.TicketResolvedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
+	ret := &eventstreammodel.EventRecord{
 		Topic:        topic,
 		SourceModule: decisioncommon.ModuleID,
 		SubjectType:  "decision_ticket",
@@ -738,6 +743,10 @@ func decisionResolvedRecord(topic string, data decisionevents.TicketResolvedData
 			ContinuationAction: data.ContinuationAction, ResumeRunID: data.ResumeRunID, SuccessorRunID: data.SuccessorRunID,
 		}).EventPayload(),
 	}
+	if data.NotificationID != "" {
+		ret.ID = common.EventRecordID(data.NotificationID)
+	}
+	return ret
 }
 
 func (s *Service) publishRecordAppended(ctx context.Context, record *eventstreammodel.EventRecord) error {

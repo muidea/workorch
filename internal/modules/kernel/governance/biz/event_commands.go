@@ -40,7 +40,7 @@ func eventResolveDecision(send func(magicevent.Event) magicevent.Result) Resolve
 		}
 		event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandEnsureResolved, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 		bindOwnerLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), common.WorkspaceID(workspaceID), common.RunID(runID), common.StepID(stepID))
-		_, err := decisionResponse(send(event), decisionevents.TopicDecisionCommandEnsureResolved)
+		_, err := decisionResponse[decisionevents.EnsureResolvedResult](send(event), decisionevents.TopicDecisionCommandEnsureResolved)
 		return err
 	}
 }

@@ -305,7 +305,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.TicketID == "" {
 				t.Fatalf("ticket get command = %+v, want workspace %s", cmd, workspaceID)
 			}
-			result.Set(decisionevents.DecisionCommandResult{Ticket: payload[recordpayload.PayloadKeyTicket].(*decisionmodel.Ticket)}, nil)
+			result.Set(decisionevents.GetTicketResult{Ticket: payload[recordpayload.PayloadKeyTicket].(*decisionmodel.Ticket)}, nil)
 		case decisionevents.TopicDecisionCommandListTicketsByRun:
 			cmd, ok := ev.Data().(decisionevents.ListTicketsByRunCommand)
 			if !ok {
@@ -314,7 +314,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("ticket list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(decisionevents.DecisionCommandResult{Tickets: payload[recordpayload.PayloadKeyTickets].([]*decisionmodel.Ticket)}, nil)
+			result.Set(decisionevents.ListTicketsByRunResult{Tickets: payload[recordpayload.PayloadKeyTickets].([]*decisionmodel.Ticket)}, nil)
 		case approvalevents.TopicApprovalCommandGet:
 			cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
 			if !ok {

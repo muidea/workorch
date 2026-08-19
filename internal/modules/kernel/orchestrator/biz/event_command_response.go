@@ -7,7 +7,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -91,24 +90,6 @@ func memoryCommandResponse(response magicevent.Result, topic string) (memoryeven
 	result, ok := data.(memoryevents.MemoryCommandResult)
 	if !ok {
 		return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
-	}
-	return result, nil
-}
-
-func decisionCommandResponse(response magicevent.Result, topic string) (decisionevents.DecisionCommandResult, error) {
-	if response == nil {
-		return decisionevents.DecisionCommandResult{}, fmt.Errorf("decision command %s returned no response", topic)
-	}
-	if err := response.Error(); err != nil {
-		return decisionevents.DecisionCommandResult{}, err
-	}
-	data, resultErr := response.Get()
-	if resultErr != nil {
-		return decisionevents.DecisionCommandResult{}, resultErr
-	}
-	result, ok := data.(decisionevents.DecisionCommandResult)
-	if !ok {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
 	}
 	return result, nil
 }

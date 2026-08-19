@@ -10,18 +10,20 @@ import (
 // It is persisted with its ticket so a process failure cannot make a resolved
 // ticket precede the authoritative Orchestrator aggregate commit.
 type RuntimeGovernanceResolutionProposal struct {
-	ResolutionID       common.ResolutionID
-	ResolutionType     string
-	Payload            workorcheventpayload.Payload
-	ContinuationAction string
-	ResumeRunID        common.RunID
-	SuccessorRunID     common.RunID
-	PayloadHash        string
-	State              RuntimeGovernanceResolutionProposalState
-	FailureClass       string
-	FailureReason      string
-	CreatedAt          string
-	UpdatedAt          string
+	ResolutionID                      common.ResolutionID
+	ResolutionType                    string
+	Payload                           workorcheventpayload.Payload
+	ContinuationAction                string
+	ResumeRunID                       common.RunID
+	SuccessorRunID                    common.RunID
+	PayloadHash                       string
+	State                             RuntimeGovernanceResolutionProposalState
+	FailureClass                      string
+	FailureReason                     string
+	CreatedAt                         string
+	UpdatedAt                         string
+	EvidenceRecordedAt                string
+	ResolutionNotificationPublishedAt string
 }
 
 type RuntimeGovernanceResolutionProposalState string

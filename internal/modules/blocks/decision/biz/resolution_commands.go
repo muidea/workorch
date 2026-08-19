@@ -3,42 +3,29 @@ package decision
 import (
 	"context"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func (m *Biz) executeResolutionCommand(ctx context.Context, ev magicevent.Event) (decisionevents.DecisionCommandResult, error) {
-	switch ev.ID() {
-	case decisionevents.TopicDecisionCommandEnsureResolved:
-		return m.executeEnsureResolvedCommand(ctx, ev.Data())
-	case decisionevents.TopicDecisionCommandGetResolution:
-		return m.executeGetResolutionCommand(ctx, ev.Data())
-	case decisionevents.TopicDecisionCommandDeleteResolution:
-		return m.executeDeleteResolutionCommand(ctx, ev.Data())
-	default:
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-	}
-}
-
-func (m *Biz) executeEnsureResolvedCommand(ctx context.Context, data any) (decisionevents.DecisionCommandResult, error) {
+func (m *Biz) executeEnsureResolvedCommand(ctx context.Context, data any) (decisionevents.EnsureResolvedResult, error) {
 	cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 	if !ok {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		return decisionevents.EnsureResolvedResult{}, common.ErrInvalidArgument
 	}
 	if !decisionCommandHasScope(cmd) {
 		ticket, err := m.resolveUniqueTicketForUnscopedCommand(ctx, cmd.TicketID)
 		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
+			return decisionevents.EnsureResolvedResult{}, err
 		}
 		cmd.WorkspaceID = ticket.WorkspaceID
 		cmd.RunID = ticket.RunID
 		cmd.StepID = ticket.StepID
 		ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
 		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
+			return decisionevents.EnsureResolvedResult{}, err
 		}
 	}
 	resolveCommand := resolveTicketContract(cmd)
@@ -47,43 +34,28 @@ func (m *Biz) executeEnsureResolvedCommand(ctx context.Context, data any) (decis
 	}
 	ticket, resolution, transitioned, err := m.service.EnsureResolvedTicketAndReturnWithTransition(ctx, resolveCommand)
 	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.EnsureResolvedResult{}, err
 	}
 	if err := m.recordAndPublishResolvedTicket(ctx, ticket, resolution, transitioned); err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.EnsureResolvedResult{}, err
 	}
-	return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
+	return decisionevents.EnsureResolvedResult{Ticket: decisionmodel.CloneTicket(ticket), Resolution: decisionmodel.CloneResolution(resolution)}, nil
 }
 
-func (m *Biz) executeGetResolutionCommand(ctx context.Context, data any) (decisionevents.DecisionCommandResult, error) {
+func (m *Biz) executeGetResolutionCommand(ctx context.Context, data any) (decisionevents.GetResolutionResult, error) {
 	cmd, ok := data.(decisionevents.GetResolutionCommand)
 	if !ok || cmd.TicketID == "" {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		return decisionevents.GetResolutionResult{}, common.ErrInvalidArgument
 	}
 	resolutionCtx, err := m.resolveResolutionTicketContextForCommand(ctx, cmd.TicketID, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID})
 	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.GetResolutionResult{}, err
 	}
 	item, err := m.resolutions.GetByTicketID(resolutionCtx, cmd.TicketID)
 	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.GetResolutionResult{}, err
 	}
-	return decisionevents.DecisionCommandResult{Resolution: item}, nil
-}
-
-func (m *Biz) executeDeleteResolutionCommand(ctx context.Context, data any) (decisionevents.DecisionCommandResult, error) {
-	cmd, ok := data.(decisionevents.DeleteResolutionCommand)
-	if !ok || cmd.TicketID == "" {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-	}
-	resolutionCtx, err := m.resolveResolutionTicketContextForCommand(ctx, cmd.TicketID, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID})
-	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
-	}
-	if err := m.resolutions.DeleteByTicketID(resolutionCtx, cmd.TicketID); err != nil {
-		return decisionevents.DecisionCommandResult{}, err
-	}
-	return decisionevents.DecisionCommandResult{}, nil
+	return decisionevents.GetResolutionResult{Resolution: decisionmodel.CloneResolution(item)}, nil
 }
 
 func decisionCommandHasScope(cmd decisionevents.EnsureResolvedCommand) bool {

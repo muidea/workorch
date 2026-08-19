@@ -33,8 +33,11 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	contracts, messages := testContractCatalog(t)
 	// The unused generic Run Create command was removed with the Orchestrator
 	// lifecycle mutation facade. Run creation now has one production path: the
-	// Run owner's typed workspace-execution intent reducer.
-	const expectedProductionTopicCount = 260
+	// Run owner's typed workspace-execution intent reducer. Decision's separate
+	// Ticket/Resolution delete topics were also replaced by one workspace-scoped
+	// aggregate purge topic, reducing the inventory by one without weakening an
+	// owner interaction.
+	const expectedProductionTopicCount = 259
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

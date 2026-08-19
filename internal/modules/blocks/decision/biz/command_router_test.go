@@ -12,10 +12,9 @@ func TestDecisionCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 		decisionevents.TopicDecisionCommandListTickets:      decisionCommandFamilyTicketQuery,
 		decisionevents.TopicDecisionCommandListTicketsByRun: decisionCommandFamilyTicketQuery,
 		decisionevents.TopicDecisionCommandListTicketsByWS:  decisionCommandFamilyTicketQuery,
-		decisionevents.TopicDecisionCommandDeleteTicket:     decisionCommandFamilyTicketMutation,
 		decisionevents.TopicDecisionCommandEnsureResolved:   decisionCommandFamilyResolution,
 		decisionevents.TopicDecisionCommandGetResolution:    decisionCommandFamilyResolution,
-		decisionevents.TopicDecisionCommandDeleteResolution: decisionCommandFamilyResolution,
+		decisionevents.TopicDecisionCommandPurgeWorkspace:   decisionCommandFamilyAggregatePurge,
 	}
 	topics := decisionCommandTopics()
 	if len(topics) != len(expected) {

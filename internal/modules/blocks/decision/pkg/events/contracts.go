@@ -17,9 +17,8 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionCommandGetResolution,
 	)...)
 	ret = append(ret, eventcontract.Build("decision", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
-		TopicDecisionCommandDeleteTicket,
-		TopicDecisionCommandDeleteResolution,
 		TopicDecisionCommandEnsureResolved,
+		TopicDecisionCommandPurgeWorkspace,
 		TopicDecisionCommandRecordEvidence,
 		TopicOpenRuntimeGovernanceRequest,
 	)...)

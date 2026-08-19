@@ -154,7 +154,7 @@ func TestListDecisionsWithBackendReturnsFilteredTickets(t *testing.T) {
 		t.Fatalf("ticket ids = %q/%q, want %q/%q", items[0].ID, items[1].ID, first.BlockingTicketID, second.BlockingTicketID)
 	}
 
-	filteredByRun, err := ListDecisionsWithBackend(context.Background(), "file", dataRoot, "", "run-decision-list-b")
+	filteredByRun, err := ListDecisionsWithBackend(context.Background(), "file", dataRoot, second.WorkspaceID, "run-decision-list-b")
 	if err != nil {
 		t.Fatalf("ListDecisionsWithBackend filtered by run: %v", err)
 	}
@@ -207,15 +207,15 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDecisionPageWithBackend: %v", err)
 	}
-	if len(page.Decisions) != 1 || page.Decisions[0].ID != second.BlockingTicketID || page.Decisions[0].State != string(common.DecisionTicketStateOpen) {
-		t.Fatalf("page decisions = %+v, want open second ticket first", page.Decisions)
+	if len(page.Decisions) != 1 || page.Decisions[0].ID != first.BlockingTicketID || page.Decisions[0].State != string(common.DecisionTicketStateResolved) {
+		t.Fatalf("page decisions = %+v, want first composite-key ticket", page.Decisions)
 	}
-	wantCursor := second.WorkspaceID + "\x00" + second.BlockingTicketID
+	wantCursor := first.WorkspaceID + "\x00" + first.ID + "\x00" + first.BlockingTicketID
 	if !page.HasMore || page.NextCursorAfterID != wantCursor {
 		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
-	if len(page.Decisions[0].Context.Fields) != 0 || len(page.Decisions[0].ResolutionPayload.Fields) != 0 {
-		t.Fatalf("projected decision carries unexpected payloads: %+v", page.Decisions[0])
+	if len(page.Decisions[0].Context.Fields) != 0 || len(page.Decisions[0].ResolutionPayload.Fields) == 0 {
+		t.Fatalf("projected decision must hide raw context and retain safe resolution audit payload: %+v", page.Decisions[0])
 	}
 
 	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, workorchquerycontract.RunResourcePageQuery{
@@ -225,8 +225,8 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDecisionPageWithBackend next: %v", err)
 	}
-	if len(next.Decisions) != 1 || next.Decisions[0].ID != first.BlockingTicketID || next.HasMore {
-		t.Fatalf("next page = %+v, want resolved first ticket without more", next)
+	if len(next.Decisions) != 1 || next.Decisions[0].ID != second.BlockingTicketID || next.HasMore {
+		t.Fatalf("next page = %+v, want second composite-key ticket without more", next)
 	}
 
 	detail, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID)
@@ -421,7 +421,7 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	}
 }
 
-func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t *testing.T) {
+func TestResolveDecisionWithSessionWithoutScopeConflictsOnDuplicateFileTicket(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "file", t.TempDir())
 	exports, err := testSessionExports(session)
 	if err != nil {
@@ -460,18 +460,19 @@ func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t 
 		t.Fatalf("create current ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(context.Background(), session, string(ticketID), appmodelcore.ResolveDecisionCommand{
+	_, err = ResolveDecisionWithSession(context.Background(), session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "current"}),
 	})
-	if err != nil {
-		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("ResolveDecisionWithSession err = %v, want conflict", err)
 	}
-	if item.WorkspaceID != "ws-duplicate-current" || item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan {
-		t.Fatalf("decision = %+v, want current workspace resolved replan", item)
+	current, err := exports.Repositories.Tickets.Get(currentCtx, ticketID)
+	if err != nil || current.State != common.DecisionTicketStateOpen {
+		t.Fatalf("current duplicate ticket changed = %+v err=%v", current, err)
 	}
-	if item.ResolutionID != "resolution-ws-duplicate-current-ticket-duplicate-resolution-replan" {
-		t.Fatalf("resolutionID = %q, want current workspace-scoped resolution", item.ResolutionID)
+	if _, err := exports.Repositories.Resolutions.GetByTicketID(currentCtx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("current duplicate resolution err = %v, want not found", err)
 	}
 }
 
@@ -943,8 +944,8 @@ func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo || operator != "tester" {
 		t.Fatalf("decision = %+v, want resolved response from returned entities", item)
 	}
-	if got := tickets.getCount.Load(); got != 1 {
-		t.Fatalf("ticket Get count = %d, want service resolve read without app response reread", got)
+	if got := tickets.getCount.Load(); got != 3 {
+		t.Fatalf("ticket Get count = %d, want lookup + resolve + durable notification marker without app response reread", got)
 	}
 	if got := resolutions.getByTicketIDCount.Load(); got != 1 {
 		t.Fatalf("resolution GetByTicketID count = %d, want one kernel orphan-check read on first resolve", got)
@@ -1110,8 +1111,8 @@ func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidatio
 			t.Fatalf("item = %+v, want resolved replan response", item)
 		}
 	}
-	if got := tickets.getCount.Load(); got != 2 {
-		t.Fatalf("ticket Get count = %d, want one scoped prevalidation read per ticket with returned entities reused", got)
+	if got := tickets.getCount.Load(); got != 6 {
+		t.Fatalf("ticket Get count = %d, want lookup + resolve + durable notification marker per ticket", got)
 	}
 	if got := resolutions.getByTicketIDCount.Load(); got != 2 {
 		t.Fatalf("resolution GetByTicketID count = %d, want one orphan-check read per ticket on first batch resolve", got)

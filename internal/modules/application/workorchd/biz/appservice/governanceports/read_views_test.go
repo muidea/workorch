@@ -29,7 +29,7 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByWS, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByWS, func(data any) any {
 		cmd, ok := data.(decisionevents.ListTicketsByWorkspaceCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ListTicketsByWorkspaceCommand", data)
@@ -37,19 +37,16 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return decisionevents.DecisionCommandResult{
-			Tickets: []*decisionmodel.Ticket{
-				{
-					ID:          "ticket-001",
-					WorkspaceID: workspaceID,
-					RunID:       "run-001",
-					State:       common.DecisionTicketStateResolved,
-					CreatedAt:   "2026-06-05T01:00:00Z",
-				},
-			},
+		item := &decisionmodel.Ticket{
+			ID:          "ticket-001",
+			WorkspaceID: workspaceID,
+			RunID:       "run-001",
+			State:       common.DecisionTicketStateResolved,
+			CreatedAt:   "2026-06-05T01:00:00Z",
 		}
+		return decisionevents.ListTicketsByWorkspaceResult{Tickets: []*decisionmodel.Ticket{item}, NextCursor: decisionevents.TicketCursor(item)}
 	})
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) any {
 		cmd, ok := data.(decisionevents.GetResolutionCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want GetResolutionCommand", data)
@@ -57,7 +54,7 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 		if cmd.TicketID != "ticket-001" {
 			t.Fatalf("command ticket = %q, want ticket-001", cmd.TicketID)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.GetResolutionResult{
 			Resolution: &decisionmodel.Resolution{
 				ID:       "resolution-001",
 				TicketID: common.TicketID("ticket-001"),
@@ -95,7 +92,7 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 	if item.AutoGovernance == nil || item.AutoGovernance.TraceID != "trace-001" {
 		t.Fatalf("auto governance = %+v, want trace-001", item.AutoGovernance)
 	}
-	if page.Limit != 10 || page.NextCursorAfterID != string(workspaceID)+"\x00ticket-001" {
+	if page.Limit != 10 || page.NextCursorAfterID != string(workspaceID)+"\x00run-001\x00ticket-001" {
 		t.Fatalf("page = %+v, want limit 10 and scoped next cursor", page)
 	}
 }
@@ -105,7 +102,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-read")
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
@@ -113,7 +110,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-001" {
 			t.Fatalf("command = %+v, want scoped ticket", cmd)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.GetTicketResult{
 			Ticket: &decisionmodel.Ticket{
 				ID:          "ticket-001",
 				WorkspaceID: workspaceID,
@@ -122,7 +119,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 			},
 		}
 	})
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
@@ -133,7 +130,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		if answer, _ := workorcheventpayload.New(cmd.Payload...).String("answer"); answer != "resume" {
 			t.Fatalf("payload = %#v, want answer resume", cmd.Payload)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.EnsureResolvedResult{
 			Ticket: &decisionmodel.Ticket{
 				ID:          "ticket-001",
 				WorkspaceID: workspaceID,
@@ -165,12 +162,12 @@ func TestResolveDecisionViewNormalizesRuntimeReplanToAllowedContinuation(t *test
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-runtime-replan")
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok || cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-runtime-replan" {
 			t.Fatalf("get ticket command = %#v", data)
 		}
-		return decisionevents.DecisionCommandResult{Ticket: &decisionmodel.Ticket{
+		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
 			ID:                     "ticket-runtime-replan",
 			WorkspaceID:            workspaceID,
 			RunID:                  "run-runtime-replan",
@@ -179,7 +176,7 @@ func TestResolveDecisionViewNormalizesRuntimeReplanToAllowedContinuation(t *test
 			AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
 		}}
 	})
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
 			t.Fatalf("resolve command payload = %T", data)
@@ -194,7 +191,7 @@ func TestResolveDecisionViewNormalizesRuntimeReplanToAllowedContinuation(t *test
 		if intent, _ := payload.String("runtimeContinuationIntent"); intent != "resume" {
 			t.Fatalf("runtimeContinuationIntent = %q, want resume", intent)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.EnsureResolvedResult{
 			Ticket:     &decisionmodel.Ticket{ID: "ticket-runtime-replan", WorkspaceID: workspaceID, RunID: "run-runtime-replan", DecisionKind: "runtime_governance", State: common.DecisionTicketStateResolved},
 			Resolution: &decisionmodel.Resolution{ID: "resolution-runtime-replan", TicketID: "ticket-runtime-replan", Type: cmd.Type, Payload: payload},
 		}
@@ -216,8 +213,8 @@ func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeReplan
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
-		return decisionevents.DecisionCommandResult{Ticket: &decisionmodel.Ticket{
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
+		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
 			ID:                     "ticket-runtime-replan-conflict",
 			WorkspaceID:            "ws-governance-runtime-replan-conflict",
 			RunID:                  "run-runtime-replan-conflict",
@@ -227,9 +224,9 @@ func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeReplan
 		}}
 	})
 	resolved := false
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(any) any {
 		resolved = true
-		return decisionevents.DecisionCommandResult{}
+		return decisionevents.EnsureResolvedResult{}
 	})
 
 	_, err := ResolveDecisionView(ctx, hub, nil, "ticket-runtime-replan-conflict", appmodelcore.ResolveDecisionCommand{ResolutionType: decisioncommon.ResolutionTypeReplan}, "ws-governance-runtime-replan-conflict")
@@ -262,7 +259,7 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 			testHub := newGovernanceMagicTestHub(t)
 			hub := testHub.rawHub
 			workspaceID := common.WorkspaceID("ws-governance-invalid-missing-info")
-			testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+			testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 				cmd, ok := data.(decisionevents.GetTicketCommand)
 				if !ok {
 					t.Fatalf("command payload type = %T, want GetTicketCommand", data)
@@ -270,7 +267,7 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 				if cmd.WorkspaceID != workspaceID || cmd.TicketID != "ticket-invalid-missing-info" {
 					t.Fatalf("command = %+v, want invalid missing info ticket", cmd)
 				}
-				return decisionevents.DecisionCommandResult{
+				return decisionevents.GetTicketResult{
 					Ticket: &decisionmodel.Ticket{
 						ID:          "ticket-invalid-missing-info",
 						WorkspaceID: workspaceID,
@@ -280,9 +277,9 @@ func TestResolveDecisionViewRejectsNonSemanticMissingInfoPayload(t *testing.T) {
 				}
 			})
 			resolved := false
-			testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+			testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 				resolved = true
-				return decisionevents.DecisionCommandResult{}
+				return decisionevents.EnsureResolvedResult{}
 			})
 
 			_, err := ResolveDecisionView(ctx, hub, nil, "ticket-invalid-missing-info", appmodelcore.ResolveDecisionCommand{
@@ -304,7 +301,7 @@ func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
@@ -312,7 +309,7 @@ func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("get ticket command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.GetTicketResult{
 			Ticket: &decisionmodel.Ticket{
 				ID:          "ticket-detail-scope",
 				WorkspaceID: workspaceID,
@@ -331,45 +328,39 @@ func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
 	}
 }
 
-func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T) {
+func TestResolveDecisionViewWithoutScopeUsesDirectOwnerLookup(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTickets, func(data any) decisionevents.DecisionCommandResult {
-		if _, ok := data.(decisionevents.ListTicketsCommand); !ok {
-			t.Fatalf("command payload type = %T, want ListTicketsCommand", data)
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
+		cmd, ok := data.(decisionevents.GetTicketCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
 		}
-		return decisionevents.DecisionCommandResult{
-			Tickets: []*decisionmodel.Ticket{
-				{
-					ID:          "ticket-duplicate",
-					WorkspaceID: "ws-old",
-					RunID:       "run-002",
-					State:       common.DecisionTicketStateResolved,
-				},
-				{
-					ID:          "ticket-duplicate",
-					WorkspaceID: "ws-current",
-					RunID:       "run-002",
-					State:       common.DecisionTicketStateOpen,
-				},
-			},
+		if cmd.WorkspaceID != "" || cmd.TicketID != "ticket-unique" {
+			t.Fatalf("unscoped owner lookup = %+v", cmd)
 		}
+		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
+			ID:          "ticket-unique",
+			WorkspaceID: "ws-current",
+			RunID:       "run-002",
+			State:       common.DecisionTicketStateOpen,
+		}}
 	})
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
 		}
-		if cmd.WorkspaceID != "ws-current" || cmd.TicketID != "ticket-duplicate" {
-			t.Fatalf("command scope = workspace:%q ticket:%q, want current open ticket", cmd.WorkspaceID, cmd.TicketID)
+		if cmd.WorkspaceID != "ws-current" || cmd.TicketID != "ticket-unique" {
+			t.Fatalf("command scope = workspace:%q ticket:%q, want unique owner result", cmd.WorkspaceID, cmd.TicketID)
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
-		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
+		return decisionevents.EnsureResolvedResult{Ticket: ticket, Resolution: resolution}
 	})
 
-	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-duplicate", appmodelcore.ResolveDecisionCommand{
+	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-unique", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    "replan",
 		ResolutionPayload: mustGovernancePayload(t, map[string]any{"operator": "test"}),
 	}, "")
@@ -387,7 +378,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-scope")
 	ticketIDs := []string{"ticket-scope-001", "ticket-scope-002"}
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want GetTicketCommand", data)
@@ -395,7 +386,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("get ticket command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.GetTicketResult{
 			Ticket: &decisionmodel.Ticket{
 				ID:          cmd.TicketID,
 				WorkspaceID: workspaceID,
@@ -405,7 +396,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		}
 	})
 	resolvedCount := 0
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 		resolvedCount++
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
@@ -416,7 +407,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
-		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
+		return decisionevents.EnsureResolvedResult{Ticket: ticket, Resolution: resolution}
 	})
 	items, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         ticketIDs,
@@ -444,21 +435,21 @@ func TestBatchResolveDecisionViewsRejectsMixedAllowedActionsBeforeWrites(t *test
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	workspaceID := common.WorkspaceID("ws-governance-actions")
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetTicket, func(data any) any {
 		cmd := data.(decisionevents.GetTicketCommand)
 		actions := []string{"provide_missing_info"}
 		if cmd.TicketID == "ticket-action-b" {
 			actions = []string{"replan"}
 		}
-		return decisionevents.DecisionCommandResult{Ticket: &decisionmodel.Ticket{
+		return decisionevents.GetTicketResult{Ticket: &decisionmodel.Ticket{
 			ID: cmd.TicketID, WorkspaceID: workspaceID, RunID: "run-actions", State: common.DecisionTicketStateOpen,
 			AllowedRecoveryActions: actions,
 		}}
 	})
 	resolvedCount := 0
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(_ any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(_ any) any {
 		resolvedCount++
-		return decisionevents.DecisionCommandResult{}
+		return decisionevents.EnsureResolvedResult{}
 	})
 	_, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs: []string{"ticket-action-a", "ticket-action-b"}, ResolutionType: "provide_missing_info",

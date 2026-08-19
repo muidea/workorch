@@ -5088,8 +5088,8 @@ func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("unmarshal decision list: %v", err)
 	}
-	if len(listed.Decisions) != 2 || listed.Decisions[0].ID != startedB.BlockingTicketID || listed.Decisions[1].ID != startedA.BlockingTicketID {
-		t.Fatalf("listed decisions = %+v, want newest tickets first", listed.Decisions)
+	if len(listed.Decisions) != 2 || listed.Decisions[0].ID != startedA.BlockingTicketID || listed.Decisions[1].ID != startedB.BlockingTicketID {
+		t.Fatalf("listed decisions = %+v, want owner composite-key order", listed.Decisions)
 	}
 
 	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/decisions?workspaceId="+workspaceB.ID, nil)
@@ -6798,8 +6798,8 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 	if err != nil {
 		t.Fatalf("EnsureResolvedTicket result: %v", err)
 	}
-	if _, ok := data.(decisionevents.DecisionCommandResult); !ok {
-		t.Fatalf("EnsureResolvedTicket result type = %T, want DecisionCommandResult", data)
+	if _, ok := data.(decisionevents.EnsureResolvedResult); !ok {
+		t.Fatalf("EnsureResolvedTicket result type = %T, want EnsureResolvedResult", data)
 	}
 }
 

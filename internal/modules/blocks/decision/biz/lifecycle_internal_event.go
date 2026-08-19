@@ -24,11 +24,16 @@ type lifecycleInternalEvent struct {
 type lifecycleInternalEventKind string
 
 const (
-	lifecycleInternalEventResolutionObserved  lifecycleInternalEventKind = "resolution_observed"
-	lifecycleInternalEventResolutionRecovered lifecycleInternalEventKind = "resolution_recovered"
-	lifecycleInternalEventProposalPrepared    lifecycleInternalEventKind = "proposal_prepared"
-	lifecycleInternalEventProposalCommitted   lifecycleInternalEventKind = "proposal_committed"
-	lifecycleInternalEventProposalRejected    lifecycleInternalEventKind = "proposal_rejected"
+	lifecycleInternalEventResolutionObserved              lifecycleInternalEventKind = "resolution_observed"
+	lifecycleInternalEventResolutionRecovered             lifecycleInternalEventKind = "resolution_recovered"
+	lifecycleInternalEventProposalPrepared                lifecycleInternalEventKind = "proposal_prepared"
+	lifecycleInternalEventProposalCommitted               lifecycleInternalEventKind = "proposal_committed"
+	lifecycleInternalEventProposalRejected                lifecycleInternalEventKind = "proposal_rejected"
+	lifecycleInternalEventCreatedNotificationPublished    lifecycleInternalEventKind = "created_notification_published"
+	lifecycleInternalEventResolutionNotificationPublished lifecycleInternalEventKind = "resolution_notification_published"
+	lifecycleInternalEventProposalEvidenceRecorded        lifecycleInternalEventKind = "proposal_evidence_recorded"
+	lifecycleInternalEventProposalNotificationPublished   lifecycleInternalEventKind = "proposal_notification_published"
+	lifecycleInternalEventAggregateDeletionRequested      lifecycleInternalEventKind = "aggregate_deletion_requested"
 )
 
 func (s *Service) applyLifecycleInternalEvent(ctx context.Context, current *decisionModel.Ticket, event lifecycleInternalEvent) (*decisionModel.Ticket, error) {
@@ -92,6 +97,35 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 		next.RuntimeGovernanceProposal.FailureClass = strings.TrimSpace(event.FailureClass)
 		next.RuntimeGovernanceProposal.FailureReason = strings.TrimSpace(event.FailureReason)
 		next.RuntimeGovernanceProposal.UpdatedAt = now
+	case lifecycleInternalEventCreatedNotificationPublished:
+		if current.CreatedNotificationPublishedAt != "" {
+			return nil, common.ErrConflict
+		}
+		next.CreatedNotificationPublishedAt = now
+	case lifecycleInternalEventResolutionNotificationPublished:
+		if current.DecisionKind == "runtime_governance" || current.State != common.DecisionTicketStateResolved || current.ResolutionNotificationPublishedAt != "" {
+			return nil, common.ErrConflict
+		}
+		next.ResolutionNotificationPublishedAt = now
+	case lifecycleInternalEventProposalEvidenceRecorded:
+		if current.DecisionKind != "runtime_governance" || current.State != common.DecisionTicketStateResolved || current.RuntimeGovernanceProposal == nil ||
+			current.RuntimeGovernanceProposal.State != decisionModel.RuntimeGovernanceResolutionProposalCommitted || current.RuntimeGovernanceProposal.EvidenceRecordedAt != "" {
+			return nil, common.ErrConflict
+		}
+		next.RuntimeGovernanceProposal.EvidenceRecordedAt = now
+		next.RuntimeGovernanceProposal.UpdatedAt = now
+	case lifecycleInternalEventProposalNotificationPublished:
+		if current.DecisionKind != "runtime_governance" || current.State != common.DecisionTicketStateResolved || current.RuntimeGovernanceProposal == nil ||
+			current.RuntimeGovernanceProposal.State != decisionModel.RuntimeGovernanceResolutionProposalCommitted || current.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt != "" {
+			return nil, common.ErrConflict
+		}
+		next.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt = now
+		next.RuntimeGovernanceProposal.UpdatedAt = now
+	case lifecycleInternalEventAggregateDeletionRequested:
+		if current.DeletionRequestedAt != "" {
+			return nil, common.ErrConflict
+		}
+		next.DeletionRequestedAt = now
 	default:
 		return nil, common.ErrInvalidArgument
 	}

@@ -2,7 +2,6 @@ package decision
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -17,6 +16,10 @@ import (
 )
 
 func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magicevent.Result) {
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(decisionevents.OpenRuntimeGovernanceRequestCommand)
 	if !ok || m == nil || m.service == nil || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" ||
 		command.DispatchID == "" || command.Transaction.AuthoritySnapshotID == "" || command.Dependency.Kind == "" || command.Dependency.Reason == "" ||
@@ -24,7 +27,12 @@ func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magi
 		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
 		return
 	}
-	ticket, created, err := m.service.EnsureTicketAndReturn(event.Context(), decisioncontracts.CreateTicketCommand{
+	ctx, err := common.BindRuntimeWorkspaceContext(event.Context(), command.WorkspaceID)
+	if err != nil {
+		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
+		return
+	}
+	ticket, _, err := m.service.EnsureTicketAndReturn(ctx, decisioncontracts.CreateTicketCommand{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID: common.StepID("runtime/" + command.DispatchID), Reason: command.Dependency.Reason,
 		DecisionKind: "runtime_governance", Question: command.Dependency.Reason,
@@ -35,11 +43,9 @@ func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magi
 		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
 		return
 	}
-	if created {
-		if err := m.publishTicketCreated(event.Context(), ticket); err != nil {
-			setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
-			return
-		}
+	if err := m.ensureTicketCreatedNotification(ctx, ticket); err != nil {
+		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
+		return
 	}
 	setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
@@ -58,49 +64,40 @@ func setRuntimeGovernanceRequestResult(result magicevent.Result, response decisi
 	result.Set(response, nil)
 }
 
-func (m *Biz) executeRuntimeGovernanceResolution(ctx context.Context, cmd decisionevents.EnsureResolvedCommand, resolveCommand decisioncontracts.ResolveTicketCommand) (decisionevents.DecisionCommandResult, error) {
+func (m *Biz) executeRuntimeGovernanceResolution(ctx context.Context, cmd decisionevents.EnsureResolvedCommand, resolveCommand decisioncontracts.ResolveTicketCommand) (decisionevents.EnsureResolvedResult, error) {
 	currentTicket, err := m.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.EnsureResolvedResult{}, err
 	}
-	if currentTicket.DecisionKind != cmd.DecisionKind {
-		return decisionevents.DecisionCommandResult{}, common.ErrConflict
+	if currentTicket.DeletionRequestedAt != "" || currentTicket.DecisionKind != cmd.DecisionKind {
+		return decisionevents.EnsureResolvedResult{}, common.ErrConflict
 	}
 	ticket, proposal, err := m.service.EnsureRuntimeGovernanceResolutionProposal(ctx, resolveCommand)
 	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.EnsureResolvedResult{}, err
 	}
 	commit, err := m.commitRuntimeGovernanceTicketProposal(ctx, ticket, proposal)
 	if err != nil {
-		if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
-			_ = m.service.RejectRuntimeGovernanceResolutionProposal(ctx, resolveCommand, "aggregate_commit_rejected", err.Error())
-		}
-		return decisionevents.DecisionCommandResult{}, err
+		return decisionevents.EnsureResolvedResult{}, err
 	}
 	switch commit.Disposition {
 	case orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted,
 		orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate:
 		ticket, resolution, transitioned, err := m.service.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, resolveCommand)
 		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
+			return decisionevents.EnsureResolvedResult{}, err
 		}
-		// The aggregate and public Decision resolution are already durable on a
-		// duplicate replay. Re-emitting Decision evidence would create a second
-		// owner-side audit effect even though the Runtime continuation is only
-		// being joined after restart.
-		if transitioned {
-			if err := m.recordAndPublishResolvedTicket(ctx, ticket, resolution, true); err != nil {
-				return decisionevents.DecisionCommandResult{}, err
-			}
+		if err := m.recordAndPublishResolvedTicket(ctx, ticket, resolution, transitioned); err != nil {
+			return decisionevents.EnsureResolvedResult{}, err
 		}
-		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
+		return decisionevents.EnsureResolvedResult{Ticket: decisionmodel.CloneTicket(ticket), Resolution: decisionmodel.CloneResolution(resolution)}, nil
 	case orchestratorevents.RuntimeGovernanceResolutionDispositionStale:
 		if err := m.service.RejectRuntimeGovernanceResolutionProposal(ctx, resolveCommand, "aggregate_commit_stale", "runtime governance proposal belongs to a stale aggregate authority"); err != nil {
-			return decisionevents.DecisionCommandResult{}, err
+			return decisionevents.EnsureResolvedResult{}, err
 		}
-		return decisionevents.DecisionCommandResult{}, common.ErrConflict
+		return decisionevents.EnsureResolvedResult{}, common.ErrConflict
 	default:
-		return decisionevents.DecisionCommandResult{}, common.ErrConflict
+		return decisionevents.EnsureResolvedResult{}, common.ErrConflict
 	}
 }
 

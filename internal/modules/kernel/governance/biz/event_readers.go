@@ -30,7 +30,7 @@ func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisi
 	}
 	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: id})
 	bindOwnerLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), workspaceID, "", "")
-	response, err := decisionResponse(r.send(event), decisionevents.TopicDecisionCommandGetTicket)
+	response, err := decisionResponse[decisionevents.GetTicketResult](r.send(event), decisionevents.TopicDecisionCommandGetTicket)
 	if err != nil {
 		return nil, err
 	}

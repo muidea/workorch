@@ -13,8 +13,8 @@ type decisionCommandFamily uint8
 
 const (
 	decisionCommandFamilyTicketQuery decisionCommandFamily = iota + 1
-	decisionCommandFamilyTicketMutation
 	decisionCommandFamilyResolution
+	decisionCommandFamilyAggregatePurge
 )
 
 func decisionCommandTopics() []string {
@@ -24,9 +24,8 @@ func decisionCommandTopics() []string {
 		decisionevents.TopicDecisionCommandListTickets,
 		decisionevents.TopicDecisionCommandListTicketsByRun,
 		decisionevents.TopicDecisionCommandListTicketsByWS,
-		decisionevents.TopicDecisionCommandDeleteTicket,
 		decisionevents.TopicDecisionCommandGetResolution,
-		decisionevents.TopicDecisionCommandDeleteResolution,
+		decisionevents.TopicDecisionCommandPurgeWorkspace,
 	}
 }
 
@@ -37,54 +36,59 @@ func decisionCommandFamilyForTopic(topic string) (decisionCommandFamily, bool) {
 		decisionevents.TopicDecisionCommandListTicketsByRun,
 		decisionevents.TopicDecisionCommandListTicketsByWS:
 		return decisionCommandFamilyTicketQuery, true
-	case decisionevents.TopicDecisionCommandDeleteTicket:
-		return decisionCommandFamilyTicketMutation, true
 	case decisionevents.TopicDecisionCommandEnsureResolved,
-		decisionevents.TopicDecisionCommandGetResolution,
-		decisionevents.TopicDecisionCommandDeleteResolution:
+		decisionevents.TopicDecisionCommandGetResolution:
 		return decisionCommandFamilyResolution, true
+	case decisionevents.TopicDecisionCommandPurgeWorkspace:
+		return decisionCommandFamilyAggregatePurge, true
 	default:
 		return 0, false
 	}
 }
 
 func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
-	response, err := m.executeCommand(ev)
-	setDecisionMagicResult(result, response, err)
-}
-
-func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionCommandResult, error) {
 	if m == nil || m.tickets == nil || m.resolutions == nil || m.service == nil || ev == nil {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		setDecisionMagicResult(result, struct{}{}, common.ErrInvalidArgument)
+		return
 	}
 	ctx, err := m.bindDecisionCommandScope(ev.Context(), ev.Data())
 	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+		setDecisionMagicResult(result, struct{}{}, err)
+		return
 	}
-	family, ok := decisionCommandFamilyForTopic(ev.ID())
-	if !ok {
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-	}
-	switch family {
-	case decisionCommandFamilyTicketQuery:
-		return m.executeTicketQueryCommand(ctx, ev)
-	case decisionCommandFamilyTicketMutation:
-		return m.executeTicketMutationCommand(ctx, ev)
-	case decisionCommandFamilyResolution:
-		return m.executeResolutionCommand(ctx, ev)
+	switch ev.ID() {
+	case decisionevents.TopicDecisionCommandGetTicket:
+		response, err := m.executeGetTicketCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
+	case decisionevents.TopicDecisionCommandListTickets:
+		response, err := m.executeListTicketsCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
+	case decisionevents.TopicDecisionCommandListTicketsByRun:
+		response, err := m.executeListTicketsByRunCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
+	case decisionevents.TopicDecisionCommandListTicketsByWS:
+		response, err := m.executeListTicketsByWorkspaceCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
+	case decisionevents.TopicDecisionCommandEnsureResolved:
+		response, err := m.executeEnsureResolvedCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
+	case decisionevents.TopicDecisionCommandGetResolution:
+		response, err := m.executeGetResolutionCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
+	case decisionevents.TopicDecisionCommandPurgeWorkspace:
+		response, err := m.executePurgeWorkspaceCommand(ctx, ev.Data())
+		setDecisionMagicResult(result, response, err)
 	default:
-		return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
+		setDecisionMagicResult(result, struct{}{}, common.ErrInvalidArgument)
 	}
 }
 
 func (m *Biz) bindDecisionCommandScope(ctx context.Context, data any) (context.Context, error) {
 	workspaceID := common.WorkspaceID("")
 	switch cmd := data.(type) {
-	case decisionevents.DeleteTicketCommand:
-		workspaceID = cmd.WorkspaceID
 	case decisionevents.EnsureResolvedCommand:
 		workspaceID = cmd.WorkspaceID
-	case decisionevents.DeleteResolutionCommand:
+	case decisionevents.PurgeWorkspaceDecisionsCommand:
 		workspaceID = cmd.WorkspaceID
 	case decisionevents.GetTicketCommand:
 		workspaceID = cmd.WorkspaceID
@@ -101,7 +105,7 @@ func (m *Biz) bindDecisionCommandScope(ctx context.Context, data any) (context.C
 	return common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 }
 
-func setDecisionMagicResult(result magicevent.Result, data decisionevents.DecisionCommandResult, err error) {
+func setDecisionMagicResult[Result any](result magicevent.Result, data Result, err error) {
 	if result == nil {
 		return
 	}
@@ -109,5 +113,5 @@ func setDecisionMagicResult(result magicevent.Result, data decisionevents.Decisi
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data.Clone(), nil)
+	result.Set(data, nil)
 }

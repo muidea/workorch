@@ -13,43 +13,16 @@ import (
 )
 
 func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {
-	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByWS, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByWorkspaceCommand{
+	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandPurgeWorkspace, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.PurgeWorkspaceDecisionsCommand{
 		WorkspaceID: workspaceID,
 	})
-	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "")
-	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByWS)
+	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	_, err := ownerevent.Decision[decisionevents.PurgeWorkspaceDecisionsResult](hub.Send(event), decisionevents.TopicDecisionCommandPurgeWorkspace)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return nil
 		}
 		return err
-	}
-	items := response.Tickets
-	for _, item := range items {
-		if item == nil || item.WorkspaceID != workspaceID {
-			continue
-		}
-		resolutionEvent := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteResolution, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteResolutionCommand{
-			TicketID:    item.ID,
-			WorkspaceID: workspaceID,
-			RunID:       item.RunID,
-			StepID:      item.StepID,
-		})
-		ownerevent.BindLane(resolutionEvent, decisionevents.Contracts(), decisionevents.TopicDecisionCommandDeleteResolution, "decision_ticket", string(item.ID), workspaceID, item.RunID, item.StepID)
-		if _, err := ownerevent.Decision(hub.Send(resolutionEvent), decisionevents.TopicDecisionCommandDeleteResolution); err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
-		ticketEvent := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteTicket, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteTicketCommand{
-			TicketID:    item.ID,
-			WorkspaceID: workspaceID,
-			RunID:       item.RunID,
-			StepID:      item.StepID,
-		})
-		ownerevent.BindLane(ticketEvent, decisionevents.Contracts(), decisionevents.TopicDecisionCommandDeleteTicket, "decision_ticket", string(item.ID), workspaceID, item.RunID, item.StepID)
-		_, err := ownerevent.Decision(hub.Send(ticketEvent), decisionevents.TopicDecisionCommandDeleteTicket)
-		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
 	}
 	return nil
 }

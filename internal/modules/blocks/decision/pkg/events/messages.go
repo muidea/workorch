@@ -1,6 +1,9 @@
 package events
 
 import (
+	"fmt"
+	"strings"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -12,12 +15,14 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type DeleteTicketCommand struct {
-	TicketID    common.TicketID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-}
+const (
+	DefaultListLimit = 100
+	MaxListLimit     = 200
+)
+
+type TicketListScope string
+
+const TicketListScopeAll TicketListScope = "all"
 
 type EnsureResolvedCommand struct {
 	ResolutionID       common.ResolutionID
@@ -32,13 +37,6 @@ type EnsureResolvedCommand struct {
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID
 }
-type DeleteResolutionCommand struct {
-	TicketID    common.TicketID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-}
-
 type OpenRuntimeGovernanceRequestCommand struct {
 	TicketID               common.TicketID
 	WorkspaceID            common.WorkspaceID
@@ -65,14 +63,26 @@ type GetTicketCommand struct {
 	TicketID    common.TicketID
 }
 
-type ListTicketsCommand struct{}
+type ListTicketsCommand struct {
+	Scope  TicketListScope
+	Cursor string
+	Limit  int
+}
 
 type ListTicketsByRunCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
+	Cursor      string
+	Limit       int
 }
 
 type ListTicketsByWorkspaceCommand struct {
+	WorkspaceID common.WorkspaceID
+	Cursor      string
+	Limit       int
+}
+
+type PurgeWorkspaceDecisionsCommand struct {
 	WorkspaceID common.WorkspaceID
 }
 
@@ -83,16 +93,18 @@ type GetResolutionCommand struct {
 }
 
 type TicketChangedData struct {
-	TicketID     common.TicketID
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	StepID       common.StepID
-	Reason       string
-	DecisionKind string
-	State        common.DecisionTicketState
+	NotificationID string
+	TicketID       common.TicketID
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	StepID         common.StepID
+	Reason         string
+	DecisionKind   string
+	State          common.DecisionTicketState
 }
 
 type TicketResolvedData struct {
+	NotificationID     string
 	Ticket             TicketChangedData
 	ResolutionID       common.ResolutionID
 	ResolutionType     string
@@ -102,31 +114,54 @@ type TicketResolvedData struct {
 	SuccessorRunID     common.RunID
 }
 
-type DecisionCommandResult struct {
-	Ticket      *decisionmodel.Ticket
-	Tickets     []*decisionmodel.Ticket
-	Resolution  *decisionmodel.Resolution
-	Resolutions []*decisionmodel.Resolution
+type GetTicketResult struct{ Ticket *decisionmodel.Ticket }
+type ListTicketsResult struct {
+	Tickets    []*decisionmodel.Ticket
+	NextCursor string
+}
+type ListTicketsByRunResult struct {
+	Tickets    []*decisionmodel.Ticket
+	NextCursor string
+}
+type ListTicketsByWorkspaceResult struct {
+	Tickets    []*decisionmodel.Ticket
+	NextCursor string
+}
+type GetResolutionResult struct{ Resolution *decisionmodel.Resolution }
+type EnsureResolvedResult struct {
+	Ticket     *decisionmodel.Ticket
+	Resolution *decisionmodel.Resolution
+}
+type PurgeWorkspaceDecisionsResult struct{ Deleted int }
+
+func NormalizeListWindow(cursor string, limit int) (string, int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if limit == 0 {
+		limit = DefaultListLimit
+	}
+	if limit < 1 || limit > MaxListLimit {
+		return "", 0, fmt.Errorf("%w: decision list limit must be between 1 and %d", common.ErrInvalidArgument, MaxListLimit)
+	}
+	return cursor, limit, nil
 }
 
-func (r DecisionCommandResult) Clone() DecisionCommandResult {
-	return DecisionCommandResult{
-		Ticket: decisionmodel.CloneTicket(r.Ticket), Tickets: decisionmodel.CloneTickets(r.Tickets),
-		Resolution: decisionmodel.CloneResolution(r.Resolution), Resolutions: decisionmodel.CloneResolutions(r.Resolutions),
+func TicketCursor(item *decisionmodel.Ticket) string {
+	if item == nil {
+		return ""
 	}
+	return string(item.WorkspaceID) + "\x00" + string(item.RunID) + "\x00" + string(item.ID)
 }
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities).MessageContract(),
-		eventcontract.CommandTopic[GetTicketCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetTicket).MessageContract(),
-		eventcontract.CommandTopic[ListTicketsCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTickets).MessageContract(),
-		eventcontract.CommandTopic[ListTicketsByRunCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTicketsByRun).MessageContract(),
-		eventcontract.CommandTopic[ListTicketsByWorkspaceCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTicketsByWS).MessageContract(),
-		eventcontract.CommandTopic[DeleteTicketCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandDeleteTicket).MessageContract(),
-		eventcontract.CommandTopic[GetResolutionCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetResolution).MessageContract(),
-		eventcontract.CommandTopic[DeleteResolutionCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandDeleteResolution).MessageContract(),
-		eventcontract.CommandTopic[EnsureResolvedCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandEnsureResolved).MessageContract(),
+		eventcontract.CommandTopic[GetTicketCommand, GetTicketResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetTicket).MessageContract(),
+		eventcontract.CommandTopic[ListTicketsCommand, ListTicketsResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTickets).MessageContract(),
+		eventcontract.CommandTopic[ListTicketsByRunCommand, ListTicketsByRunResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTicketsByRun).MessageContract(),
+		eventcontract.CommandTopic[ListTicketsByWorkspaceCommand, ListTicketsByWorkspaceResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTicketsByWS).MessageContract(),
+		eventcontract.CommandTopic[GetResolutionCommand, GetResolutionResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetResolution).MessageContract(),
+		eventcontract.CommandTopic[EnsureResolvedCommand, EnsureResolvedResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandEnsureResolved).MessageContract(),
+		eventcontract.CommandTopic[PurgeWorkspaceDecisionsCommand, PurgeWorkspaceDecisionsResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandPurgeWorkspace).MessageContract(),
 		eventcontract.CommandTopic[RecordDecisionEvidenceCommand, RecordDecisionEvidenceResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandRecordEvidence).MessageContract(),
 		eventcontract.CommandTopic[OpenRuntimeGovernanceRequestCommand, OpenRuntimeGovernanceRequestResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOpenRuntimeGovernanceRequest).MessageContract(),
 	}

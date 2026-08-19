@@ -59,7 +59,7 @@ func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByRun, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandListTicketsByRun, func(data any) any {
 		cmd, ok := data.(decisionevents.ListTicketsByRunCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ListTicketsByRunCommand", data)
@@ -70,7 +70,7 @@ func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 		if cmd.WorkspaceID != "ws-001" {
 			t.Fatalf("workspace command = %q, want ws-001", cmd.WorkspaceID)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.ListTicketsByRunResult{
 			Tickets: []*decisionmodel.Ticket{
 				{ID: "ticket-001", WorkspaceID: "ws-001", RunID: "run-001"},
 				{ID: "ticket-other-workspace", WorkspaceID: "ws-other", RunID: "run-001"},
@@ -93,7 +93,7 @@ func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	readCount := 0
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandGetResolution, func(data any) any {
 		readCount++
 		cmd, ok := data.(decisionevents.GetResolutionCommand)
 		if !ok {
@@ -102,7 +102,7 @@ func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 		if cmd.TicketID != "ticket-resolved" {
 			t.Fatalf("ticket command = %v, want ticket-resolved", cmd.TicketID)
 		}
-		return decisionevents.DecisionCommandResult{
+		return decisionevents.GetResolutionResult{
 			Resolution: &decisionmodel.Resolution{
 				ID:       "resolution-001",
 				TicketID: "ticket-resolved",
@@ -138,7 +138,7 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
@@ -154,7 +154,7 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 		}
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
-		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
+		return decisionevents.EnsureResolvedResult{Ticket: ticket, Resolution: resolution}
 	})
 
 	ticket, resolution, err := ResolveDecision(ctx, hub, &decisionmodel.Ticket{
@@ -176,7 +176,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
 	var resolutionIDs []common.ResolutionID
-	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) decisionevents.DecisionCommandResult {
+	testHub.subscribeDecision(decisionevents.TopicDecisionCommandEnsureResolved, func(data any) any {
 		cmd, ok := data.(decisionevents.EnsureResolvedCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want EnsureResolvedCommand", data)
@@ -184,7 +184,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 		resolutionIDs = append(resolutionIDs, cmd.ResolutionID)
 		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
 		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: workorcheventpayload.New(cmd.Payload...)}
-		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}
+		return decisionevents.EnsureResolvedResult{Ticket: ticket, Resolution: resolution}
 	})
 
 	for _, workspaceID := range []common.WorkspaceID{"ws-scope-a", "ws-scope-b"} {
@@ -289,7 +289,7 @@ func newGovernanceMagicTestHub(t *testing.T) *governanceMagicTestHub {
 	return ret
 }
 
-func (h *governanceMagicTestHub) subscribeDecision(topic string, handler func(any) decisionevents.DecisionCommandResult) {
+func (h *governanceMagicTestHub) subscribeDecision(topic string, handler func(any) any) {
 	h.decisionObserver.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
 		result.Set(handler(ev.Data()), nil)
 	})

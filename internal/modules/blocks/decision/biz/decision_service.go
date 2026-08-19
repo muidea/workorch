@@ -78,6 +78,9 @@ func (s *Service) EnsureTicketAndReturn(ctx context.Context, cmd decisioncontrac
 
 	item, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err == nil {
+		if item.DeletionRequestedAt != "" {
+			return nil, false, common.ErrConflict
+		}
 		if item.WorkspaceID != cmd.WorkspaceID ||
 			item.RunID != cmd.RunID ||
 			item.StepID != cmd.StepID ||
@@ -120,6 +123,9 @@ func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontra
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if ticket.DeletionRequestedAt != "" {
+		return nil, nil, common.ErrNotFound
 	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
@@ -199,6 +205,9 @@ func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Contex
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if ticket.DeletionRequestedAt != "" {
+		return nil, nil, false, common.ErrNotFound
+	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, false, common.ErrNotFound
 	}
@@ -226,9 +235,7 @@ func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Contex
 		return nil, nil, false, resErr
 	}
 	if existingResolution != nil {
-		if existingResolution.ID != cmd.ResolutionID ||
-			existingResolution.Type != cmd.Type ||
-			!sameResolutionPayload(existingResolution.Payload, cmd.Payload) {
+		if !resolutionMatchesCommand(existingResolution, cmd) {
 			return nil, nil, false, common.ErrConflict
 		}
 		transitioned := ticket.State != common.DecisionTicketStateResolved
@@ -374,6 +381,9 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if err != nil {
 		return nil, nil, err
 	}
+	if ticket.DeletionRequestedAt != "" {
+		return nil, nil, common.ErrNotFound
+	}
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
@@ -395,8 +405,7 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 		if resolution == nil || ticket.RuntimeGovernanceProposal == nil ||
 			ticket.RuntimeGovernanceProposal.State != decisionModel.RuntimeGovernanceResolutionProposalCommitted ||
 			!sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) ||
-			resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type ||
-			!sameResolutionPayload(resolution.Payload, common.RedactSensitivePayload(cmd.Payload)) {
+			!resolutionMatchesCommand(resolution, cmd) {
 			return nil, nil, common.ErrConflict
 		}
 		ret := ticket.RuntimeGovernanceProposal.Clone()
@@ -450,6 +459,9 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if ticket.DeletionRequestedAt != "" {
+		return nil, nil, false, common.ErrNotFound
+	}
 	if !ticketMatchesResolveScope(ticket, cmd) || ticket.DecisionKind != "runtime_governance" {
 		return nil, nil, false, common.ErrNotFound
 	}
@@ -468,7 +480,7 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 		return nil, nil, false, err
 	}
 	if resolution != nil {
-		if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || !sameResolutionPayload(resolution.Payload, common.RedactSensitivePayload(cmd.Payload)) {
+		if !resolutionMatchesCommand(resolution, cmd) {
 			return nil, nil, false, common.ErrConflict
 		}
 	} else {
@@ -479,6 +491,10 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 	}
 	if ticket.State != common.DecisionTicketStateOpen && ticket.State != common.DecisionTicketStateResolved {
 		return nil, nil, false, common.ErrConflict
+	}
+	if ticket.State == common.DecisionTicketStateResolved &&
+		ticket.RuntimeGovernanceProposal.State == decisionModel.RuntimeGovernanceResolutionProposalCommitted {
+		return ticket, resolution, false, nil
 	}
 	transitioned := ticket.State == common.DecisionTicketStateOpen
 	ticket, err = s.applyLifecycleInternalEvent(ctx, ticket, lifecycleInternalEvent{
@@ -502,6 +518,9 @@ func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context,
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
 		return err
+	}
+	if ticket.DeletionRequestedAt != "" {
+		return common.ErrNotFound
 	}
 	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
 	if err != nil {
@@ -576,4 +595,126 @@ func resolutionFromResolveCommand(cmd decisioncontracts.ResolveTicketCommand) *d
 		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
 		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),
 	}
+}
+
+func resolutionMatchesCommand(existing *decisionModel.Resolution, cmd decisioncontracts.ResolveTicketCommand) bool {
+	if existing == nil {
+		return false
+	}
+	expected := resolutionFromResolveCommand(cmd)
+	return existing.ID == expected.ID &&
+		existing.TicketID == expected.TicketID &&
+		existing.Type == expected.Type &&
+		existing.Payload.Equal(expected.Payload) &&
+		existing.ContinuationAction == expected.ContinuationAction &&
+		existing.ResumeRunID == expected.ResumeRunID &&
+		existing.SuccessorRunID == expected.SuccessorRunID
+}
+
+func (s *Service) MarkTicketCreatedNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	ctx, err := common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.tickets.Get(ctx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.CreatedNotificationPublishedAt != "" {
+		return current, nil
+	}
+	return s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventCreatedNotificationPublished, TicketID: current.ID})
+}
+
+func (s *Service) MarkRuntimeGovernanceEvidenceRecorded(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+	return s.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalEvidenceRecorded)
+}
+
+func (s *Service) MarkRuntimeGovernanceNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+	return s.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalNotificationPublished)
+}
+
+func (s *Service) MarkResolutionNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" || ticket.DecisionKind == "runtime_governance" {
+		return nil, common.ErrInvalidArgument
+	}
+	ctx, err := common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.tickets.Get(ctx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.ResolutionNotificationPublishedAt != "" {
+		return current, nil
+	}
+	return s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionNotificationPublished, TicketID: current.ID})
+}
+
+func (s *Service) markRuntimeGovernanceDelivery(ctx context.Context, ticket *decisionModel.Ticket, kind lifecycleInternalEventKind) (*decisionModel.Ticket, error) {
+	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	ctx, err := common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.tickets.Get(ctx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.RuntimeGovernanceProposal == nil {
+		return nil, common.ErrConflict
+	}
+	switch kind {
+	case lifecycleInternalEventProposalEvidenceRecorded:
+		if current.RuntimeGovernanceProposal.EvidenceRecordedAt != "" {
+			return current, nil
+		}
+	case lifecycleInternalEventProposalNotificationPublished:
+		if current.RuntimeGovernanceProposal.ResolutionNotificationPublishedAt != "" {
+			return current, nil
+		}
+	default:
+		return nil, common.ErrInvalidArgument
+	}
+	return s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: kind, TicketID: current.ID})
+}
+
+// PurgeDecisionAggregate is the sole physical deletion path for Ticket and
+// Resolution. A persisted deletion marker hides the aggregate from public
+// reads before either repository item is removed, so a crash can only leave a
+// recoverable owner-private tombstone, never a visible orphan.
+func (s *Service) PurgeDecisionAggregate(ctx context.Context, ticket *decisionModel.Ticket) error {
+	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	ctx, err := common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	current, err := s.tickets.Get(ctx, ticket.ID)
+	if err != nil {
+		return err
+	}
+	if current.WorkspaceID != ticket.WorkspaceID {
+		return common.ErrConflict
+	}
+	if current.DeletionRequestedAt == "" {
+		current, err = s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventAggregateDeletionRequested, TicketID: current.ID})
+		if err != nil {
+			return err
+		}
+	}
+	if err := s.resolutions.DeleteByTicketID(ctx, current.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	if err := s.tickets.Delete(ctx, current.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
+		return err
+	}
+	return nil
 }

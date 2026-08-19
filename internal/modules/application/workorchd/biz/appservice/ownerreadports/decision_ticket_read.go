@@ -21,7 +21,7 @@ func ReadDecisionTicketByOwnerCommand(ctx context.Context, hub magicevent.Hub, t
 		TicketID:    ticketID,
 	})
 	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(ticketID), workspaceID, "", "")
-	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandGetTicket)
+	response, err := ownerevent.Decision[decisionevents.GetTicketResult](hub.Send(event), decisionevents.TopicDecisionCommandGetTicket)
 	if err != nil {
 		return nil, err
 	}

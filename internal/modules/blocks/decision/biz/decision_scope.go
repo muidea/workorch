@@ -18,7 +18,7 @@ func (s decisionCommandScope) hasScope() bool {
 }
 
 func ticketMatchesDecisionScope(item *decisionmodel.Ticket, scope decisionCommandScope) bool {
-	if item == nil {
+	if item == nil || item.DeletionRequestedAt != "" {
 		return false
 	}
 	if scope.WorkspaceID != "" && item.WorkspaceID != scope.WorkspaceID {
@@ -119,7 +119,7 @@ func (m *Biz) resolveUniqueTicketForUnscopedCommand(ctx context.Context, ticketI
 	var matches []*decisionmodel.Ticket
 	var openMatches []*decisionmodel.Ticket
 	for _, item := range items {
-		if item == nil || item.ID != ticketID {
+		if item == nil || item.DeletionRequestedAt != "" || item.ID != ticketID {
 			continue
 		}
 		matches = append(matches, item)
