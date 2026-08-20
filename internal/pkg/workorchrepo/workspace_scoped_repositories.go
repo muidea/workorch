@@ -46,6 +46,7 @@ const (
 	workspaceScopedResultFile              = "result.json"
 	workspaceScopedArtifactFile            = "artifact.json"
 	workspaceScopedEventRecordFile         = "."
+	workspaceScopedEventPositionFile       = ".eventstream-position"
 	workspaceScopedTicketFile              = "ticket.json"
 	workspaceScopedResolutionFile          = "resolution.json"
 	workspaceScopedApprovalFile            = "approval.json"
@@ -2349,10 +2350,23 @@ func (r *workspaceScopedEventRecordRepository) Append(ctx context.Context, item 
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	positionStore := r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventPositionFile))
+	if err := positionStore.ObserveEventRecordStreamPosition(item.StreamPosition); err != nil {
+		return err
+	}
 	if item.WorkspaceID != "" && item.RunID != "" {
 		return r.store.eventRecordRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedEventRecordFile)).Append(ctx, item)
 	}
 	return r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).Append(ctx, item)
+}
+
+func (r *workspaceScopedEventRecordRepository) ReserveEventRecordStreamPosition(ctx context.Context) (int64, error) {
+	if r == nil || r.store == nil {
+		return 0, common.ErrInvalidArgument
+	}
+	// Records are physically partitioned by run. Reserve their global cursor
+	// positions from one system-scoped durable counter.
+	return r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventPositionFile)).ReserveEventRecordStreamPosition(ctx)
 }
 
 func (r *workspaceScopedEventRecordRepository) Get(ctx context.Context, id common.EventRecordID) (*eventstreammodel.EventRecord, error) {
@@ -2379,7 +2393,9 @@ func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query w
 	listQuery := query
 	if query.WorkspaceID == "" {
 		listQuery.CursorAfterID = ""
-		listQuery.Limit = 0
+		if query.CursorAfterID != "" {
+			listQuery.Limit = 0
+		}
 	} else if query.RunID == "" {
 		listQuery.CursorAfterID = ""
 		if query.CursorAfterID != "" {
@@ -2418,7 +2434,7 @@ func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query w
 		}
 		ret = append(ret, items...)
 	}
-	sortEventRecords(ret)
+	repository.SortEventRecords(ret, query)
 	if query.RunID == "" || query.WorkspaceID == "" {
 		ret = applyEventRecordCursorAndLimit(ret, query)
 	}
@@ -2437,6 +2453,26 @@ func (r *workspaceScopedEventRecordRepository) Delete(ctx context.Context, id co
 		return r.store.eventRecordRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedEventRecordFile)).Delete(ctx, id)
 	}
 	return r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).Delete(ctx, id)
+}
+
+func (r *workspaceScopedEventRecordRepository) PurgeWorkspace(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
+	if r == nil || r.store == nil || workspaceID == "" {
+		return 0, common.ErrInvalidArgument
+	}
+	deleted := 0
+	systemDeleted, err := r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).PurgeWorkspace(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	deleted += systemDeleted
+	for _, root := range r.store.workspaceRunRoots(workspaceID) {
+		count, err := r.store.eventRecordRepo(r.store.runPath(root, workspaceScopedEventRecordFile)).PurgeWorkspace(ctx, workspaceID)
+		if err != nil {
+			return deleted, err
+		}
+		deleted += count
+	}
+	return deleted, nil
 }
 
 type workspaceScopedDecisionTicketRepository struct {
@@ -2858,15 +2894,6 @@ func sortResults(items []*resultmodel.Result) {
 
 func sortArtifacts(items []*resultmodel.Artifact) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
-}
-
-func sortEventRecords(items []*eventstreammodel.EventRecord) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].OccurredAt == items[j].OccurredAt {
-			return string(items[i].ID) < string(items[j].ID)
-		}
-		return items[i].OccurredAt < items[j].OccurredAt
-	})
 }
 
 func sortTickets(items []*decisionmodel.Ticket) {

@@ -106,6 +106,10 @@ type eventRecordLogLine struct {
 	PayloadRef string                  `json:"payloadRef,omitempty"`
 }
 
+type eventRecordStreamPositionState struct {
+	Position int64 `json:"position"`
+}
+
 type mapFileCacheEntry struct {
 	mu     sync.RWMutex
 	loaded bool
@@ -1019,6 +1023,9 @@ func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.Even
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	if err := r.observeEventRecordStreamPosition(item.StreamPosition); err != nil {
+		return err
+	}
 	root := r.eventLogRoot()
 	idPath := filepath.Join(root, "ids", safeEventRecordFileName(string(item.ID))+".marker")
 	if err := os.MkdirAll(filepath.Dir(idPath), 0o755); err != nil {
@@ -1043,6 +1050,85 @@ func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.Even
 		return err
 	}
 	return nil
+}
+
+func (r *EventRecordRepository) ReserveEventRecordStreamPosition(_ context.Context) (int64, error) {
+	if r == nil {
+		return 0, common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	state, err := r.eventRecordStreamPositionState()
+	if err != nil {
+		return 0, err
+	}
+	if state.Position == int64(^uint64(0)>>1) {
+		return 0, common.ErrConflict
+	}
+	state.Position++
+	if err := writeJSONFileAtomic(r.eventRecordStreamPositionPath(), state); err != nil {
+		return 0, err
+	}
+	return state.Position, nil
+}
+
+// ObserveEventRecordStreamPosition advances the durable floor for records
+// appended through a repository decorator that may hide the optional reserve
+// capability from Eventstream.
+func (r *EventRecordRepository) ObserveEventRecordStreamPosition(position int64) error {
+	if r == nil || position < 0 {
+		return common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.observeEventRecordStreamPosition(position)
+}
+
+func (r *EventRecordRepository) observeEventRecordStreamPosition(position int64) error {
+	if position <= 0 {
+		return nil
+	}
+	state, err := r.eventRecordStreamPositionState()
+	if err != nil {
+		return err
+	}
+	if state.Position >= position {
+		return nil
+	}
+	state.Position = position
+	return writeJSONFileAtomic(r.eventRecordStreamPositionPath(), state)
+}
+
+func (r *EventRecordRepository) eventRecordStreamPositionState() (eventRecordStreamPositionState, error) {
+	path := r.eventRecordStreamPositionPath()
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var state eventRecordStreamPositionState
+		if unmarshalErr := json.Unmarshal(data, &state); unmarshalErr != nil || state.Position < 0 {
+			if unmarshalErr != nil {
+				return eventRecordStreamPositionState{}, unmarshalErr
+			}
+			return eventRecordStreamPositionState{}, common.ErrInvalidArgument
+		}
+		return state, nil
+	}
+	if !os.IsNotExist(err) {
+		return eventRecordStreamPositionState{}, err
+	}
+	state := eventRecordStreamPositionState{}
+	if scanErr := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+		if item != nil && item.StreamPosition > state.Position {
+			state.Position = item.StreamPosition
+		}
+		return nil
+	}); scanErr != nil {
+		return eventRecordStreamPositionState{}, scanErr
+	}
+	return state, nil
+}
+
+func (r *EventRecordRepository) eventRecordStreamPositionPath() string {
+	return filepath.Join(r.eventLogRoot(), ".eventstream-stream-position.json")
 }
 
 func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
@@ -1102,7 +1188,7 @@ func (r *EventRecordRepository) List(_ context.Context, query workorchquerycontr
 			return nil, err
 		}
 	}
-	sortEventRecordPointers(ret)
+	repository.SortEventRecords(ret, query)
 	if !boundedLatest {
 		ret = applyEventRecordCursorAndLimit(ret, query)
 	}
@@ -1168,6 +1254,138 @@ func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordI
 	}
 	_ = os.Remove(filepath.Join(r.eventLogRoot(), "ids", safeEventRecordFileName(string(id))+".marker"))
 	return nil
+}
+
+// PurgeWorkspace compacts the append log so purged records, tombstones and
+// external payload files are physically removed instead of merely hidden by
+// delete markers.
+func (r *EventRecordRepository) PurgeWorkspace(_ context.Context, workspaceID common.WorkspaceID) (int, error) {
+	if r == nil || workspaceID == "" {
+		return 0, common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	deletedIDs, err := r.deletedEventIDs()
+	if err != nil {
+		return 0, err
+	}
+	retained := make([]*eventstream.EventRecord, 0)
+	deleted := 0
+	matchedPhysicalRecord := false
+	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+		if item == nil {
+			return nil
+		}
+		_, alreadyDeleted := deletedIDs[item.ID]
+		if item.WorkspaceID == workspaceID {
+			matchedPhysicalRecord = true
+			if !alreadyDeleted {
+				deleted++
+			}
+			return nil
+		}
+		if alreadyDeleted {
+			return nil
+		}
+		if err := r.hydrateEventRecordPayload(item); err != nil {
+			return err
+		}
+		retained = append(retained, cloneEventRecord(item))
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if !matchedPhysicalRecord {
+		return 0, nil
+	}
+
+	root := filepath.Clean(r.eventLogRoot())
+	absRoot, err := filepath.Abs(root)
+	if err != nil || root == "." || root == string(filepath.Separator) || absRoot == string(filepath.Separator) {
+		return 0, common.ErrInvalidArgument
+	}
+	parent := filepath.Dir(absRoot)
+	if err := os.MkdirAll(absRoot, 0o755); err != nil {
+		return 0, err
+	}
+	temporaryRoot, err := os.MkdirTemp(parent, "."+filepath.Base(absRoot)+".compact-")
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		_ = os.RemoveAll(temporaryRoot)
+	}()
+	temporaryRepository := NewEventRecordRepository(temporaryRoot)
+	for _, item := range retained {
+		if err := temporaryRepository.Append(context.Background(), item); err != nil {
+			return 0, err
+		}
+	}
+
+	backupRoot, err := os.MkdirTemp(parent, ".eventstream-purge-backup-")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = os.RemoveAll(backupRoot) }()
+	if err := replaceEventRecordStorage(absRoot, temporaryRoot, backupRoot); err != nil {
+		return 0, err
+	}
+	if err := os.RemoveAll(backupRoot); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+func replaceEventRecordStorage(root, replacementRoot, backupRoot string) error {
+	names := []string{"events", "payloads", "ids", "deleted"}
+	movedOld := make([]string, 0, len(names))
+	for _, name := range names {
+		current := filepath.Join(root, name)
+		if _, err := os.Stat(current); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			for idx := len(movedOld) - 1; idx >= 0; idx-- {
+				_ = os.Rename(filepath.Join(backupRoot, movedOld[idx]), filepath.Join(root, movedOld[idx]))
+			}
+			return err
+		}
+		if err := os.Rename(current, filepath.Join(backupRoot, name)); err != nil {
+			for idx := len(movedOld) - 1; idx >= 0; idx-- {
+				_ = os.Rename(filepath.Join(backupRoot, movedOld[idx]), filepath.Join(root, movedOld[idx]))
+			}
+			return err
+		}
+		movedOld = append(movedOld, name)
+	}
+	movedNew := make([]string, 0, len(names))
+	for _, name := range names {
+		replacement := filepath.Join(replacementRoot, name)
+		if _, err := os.Stat(replacement); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return restoreEventRecordStorage(root, replacementRoot, backupRoot, movedOld, movedNew, err)
+		}
+		if err := os.Rename(replacement, filepath.Join(root, name)); err != nil {
+			return restoreEventRecordStorage(root, replacementRoot, backupRoot, movedOld, movedNew, err)
+		}
+		movedNew = append(movedNew, name)
+	}
+	return nil
+}
+
+func restoreEventRecordStorage(root, replacementRoot, backupRoot string, movedOld, movedNew []string, cause error) error {
+	for idx := len(movedNew) - 1; idx >= 0; idx-- {
+		name := movedNew[idx]
+		_ = os.Rename(filepath.Join(root, name), filepath.Join(replacementRoot, name))
+	}
+	for idx := len(movedOld) - 1; idx >= 0; idx-- {
+		name := movedOld[idx]
+		_ = os.Rename(filepath.Join(backupRoot, name), filepath.Join(root, name))
+	}
+	return cause
 }
 
 func (r *EventRecordRepository) eventLogRoot() string {
@@ -4115,15 +4333,6 @@ func listArtifacts(items map[common.ArtifactID]resultmodel.Artifact, matches fun
 		return nil
 	}
 	return ret
-}
-
-func sortEventRecordPointers(items []*eventstream.EventRecord) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].OccurredAt == items[j].OccurredAt {
-			return string(items[i].ID) < string(items[j].ID)
-		}
-		return items[i].OccurredAt < items[j].OccurredAt
-	})
 }
 
 func applyEventRecordCursorAndLimit(items []*eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) []*eventstream.EventRecord {

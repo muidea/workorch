@@ -446,6 +446,52 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 	}
 }
 
+func TestWorkspaceScopedEventPurgePreservesOwnerFilesAndGlobalPosition(t *testing.T) {
+	ctx := context.Background()
+	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())
+	workspaceID := common.WorkspaceID("ws-event-purge-files")
+	runID := common.RunID("run-event-purge-files")
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	if err := repos.Workspaces.Create(scoped, &workspacemodel.Workspace{ID: workspaceID, Title: "preserve me", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Runs.Create(scoped, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}); err != nil {
+		t.Fatal(err)
+	}
+	positions := make([]int64, 2)
+	for index := range positions {
+		position, err := repos.EventRecords.ReserveEventRecordStreamPosition(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		positions[index] = position
+	}
+	for _, item := range []*eventstreammodel.EventRecord{
+		{ID: "event-purge-system", Topic: "/test", WorkspaceID: workspaceID, StreamPosition: positions[0], Revision: 1},
+		{ID: "event-purge-run", Topic: "/test", WorkspaceID: workspaceID, RunID: runID, StreamPosition: positions[1], Revision: 2},
+	} {
+		if err := repos.EventRecords.Append(scoped, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if deleted, err := repos.EventRecords.PurgeWorkspace(scoped, workspaceID); err != nil || deleted != 2 {
+		t.Fatalf("purge deleted=%d err=%v", deleted, err)
+	}
+	if workspace, err := repos.Workspaces.Get(scoped, workspaceID); err != nil || workspace.Title != "preserve me" {
+		t.Fatalf("workspace after event purge = %+v err=%v", workspace, err)
+	}
+	if run, err := repos.Runs.Get(scoped, runID); err != nil || run.State != common.RunStateActive {
+		t.Fatalf("run after event purge = %+v err=%v", run, err)
+	}
+	if items, err := repos.EventRecords.List(scoped, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID}); err != nil || len(items) != 0 {
+		t.Fatalf("events after purge = %+v err=%v", items, err)
+	}
+	thirdPosition, err := repos.EventRecords.ReserveEventRecordStreamPosition(ctx)
+	if err != nil || thirdPosition <= positions[1] {
+		t.Fatalf("post-purge position=%d err=%v, want > %d", thirdPosition, err, positions[1])
+	}
+}
+
 func corruptFirstJSONLLine(t *testing.T, path string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

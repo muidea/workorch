@@ -4,12 +4,10 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -26,8 +24,6 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub
 	if hub == nil {
 		return nil, nil, common.ErrInvalidArgument
 	}
-	eventRecords := readmodelports.EventRecordReader{Hub: hub}
-
 	var goal *workspacemodel.Goal
 	var dod *workspacemodel.DoD
 	err := readmodelcore.RunTasks(
@@ -35,14 +31,14 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub
 			var err error
 			goal, err = activationcore.SelectWorkspaceExecutionGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 				return definitionports.ListGoalsByWorkspace(ctx, hub, workspaceID)
-			}, eventRecords, workspaceID, "")
+			}, workspaceID, "")
 			return err
 		},
 		func() error {
 			var err error
 			dod, err = activationcore.SelectWorkspaceExecutionDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 				return definitionports.ListDoDsByWorkspace(ctx, hub, workspaceID)
-			}, eventRecords, workspaceID, "")
+			}, workspaceID, "")
 			return err
 		},
 	)
@@ -56,26 +52,23 @@ func WorkspaceExecutionDefinitionsContext(ctx context.Context, hub magicevent.Hu
 	if hub == nil || workspaceID == "" || goal == nil || dod == nil {
 		return WorkspaceExecutionDefinitionContext{}, common.ErrInvalidArgument
 	}
-	eventRecords := readmodelports.EventRecordReader{Hub: hub}
 	effectiveGoal, goalContexts, err := activationcore.EffectiveWorkspaceGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 		return definitionports.ListGoalsByWorkspace(ctx, hub, workspaceID)
-	}, eventRecords, workspaceID, goal)
+	}, workspaceID, goal)
 	if err != nil {
 		return WorkspaceExecutionDefinitionContext{}, err
 	}
 	effectiveDoD, doDContexts, err := activationcore.EffectiveWorkspaceDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 		return definitionports.ListDoDsByWorkspace(ctx, hub, workspaceID)
-	}, eventRecords, workspaceID, dod)
+	}, workspaceID, dod)
 	if err != nil {
 		return WorkspaceExecutionDefinitionContext{}, err
 	}
-	goalRevisions := activationcore.WorkspaceDefinitionRevisionContexts(ctx, eventRecords, workspaceID, workspaceevents.TopicGoalDefined)
-	doDRevisions := activationcore.WorkspaceDefinitionRevisionContexts(ctx, eventRecords, workspaceID, workspaceevents.TopicDoDDefined)
 	return WorkspaceExecutionDefinitionContext{
 		EffectiveGoal:          effectiveGoal,
 		EffectiveDoD:           effectiveDoD,
 		GoalContexts:           goalContexts,
 		DoDContexts:            doDContexts,
-		DefinitionChangeImpact: activationcore.DefinitionChangeImpactFromDefinitions(effectiveGoal, goalContexts, goalRevisions, effectiveDoD, doDContexts, doDRevisions),
+		DefinitionChangeImpact: activationcore.DefinitionChangeImpactFromDefinitions(effectiveGoal, goalContexts, nil, effectiveDoD, doDContexts, nil),
 	}, nil
 }

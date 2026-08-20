@@ -318,7 +318,7 @@ func TestDeleteWorkspaceRecordSendsOwnerCommand(t *testing.T) {
 func TestPurgeWorkspaceEventStreamSendsOwnerCommand(t *testing.T) {
 	testHub := newWorkspaceCommandTestHub(t)
 	testHub.subscribe(eventstreamevents.CommandDestination, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(any) (any, error) {
-		return eventstreamevents.EventStreamCommandResult{}, nil
+		return eventstreamevents.PurgeWorkspaceResult{}, nil
 	})
 	workspaceID := common.WorkspaceID("ws-eventstream-purge-command")
 	if err := PurgeWorkspaceEventStream(context.Background(), testHub.raw, workspaceID); err != nil {

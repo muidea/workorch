@@ -34,7 +34,7 @@ func CheckGoalDoDQuality(ctx context.Context, hub magicevent.Hub, cmd Command) (
 		func(ctx context.Context, workspaceID common.WorkspaceID) (string, common.GoalID, error) {
 			item, err := activationcore.SelectWorkspaceExecutionGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 				return definitionports.ListGoalsByWorkspace(ctx, hub, workspaceID)
-			}, nil, workspaceID, "")
+			}, workspaceID, "")
 			if err != nil {
 				return "", "", err
 			}
@@ -62,7 +62,7 @@ func CheckGoalDoDQuality(ctx context.Context, hub magicevent.Hub, cmd Command) (
 		func(ctx context.Context, workspaceID common.WorkspaceID) ([]string, common.DoDID, error) {
 			item, err := activationcore.SelectWorkspaceExecutionDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 				return definitionports.ListDoDsByWorkspace(ctx, hub, workspaceID)
-			}, nil, workspaceID, "")
+			}, workspaceID, "")
 			if err != nil {
 				return nil, "", err
 			}

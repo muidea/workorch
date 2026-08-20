@@ -65,7 +65,7 @@ func managerTestEventPorts(hub magicevent.Hub) EventPorts {
 			if err != nil {
 				return nil, err
 			}
-			result, ok := data.(eventstreamevents.EventStreamCommandResult)
+			result, ok := data.(eventstreamevents.HighWatermarksResult)
 			if !ok {
 				return nil, common.ErrInvalidArgument
 			}
@@ -1057,7 +1057,7 @@ func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
 		if len(command.WorkspaceIDs) != 1 || command.WorkspaceIDs[0] != "ws-a" {
 			t.Fatalf("high-watermark command = %+v", command)
 		}
-		result.Set(eventstreamevents.EventStreamCommandResult{HighWatermarks: []eventstreamevents.WorkspaceHighWatermark{{WorkspaceID: "ws-a", Revision: 42}}}, nil)
+		result.Set(eventstreamevents.HighWatermarksResult{HighWatermarks: []eventstreamevents.WorkspaceHighWatermark{{WorkspaceID: "ws-a", Revision: 42}}}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(eventstreamevents.TopicEventStreamCommandHighWatermarks) })
 	scheduled := map[string]int{}

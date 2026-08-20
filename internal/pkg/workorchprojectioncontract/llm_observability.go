@@ -19,6 +19,7 @@ type EventRecord struct {
 	WorkspaceID    string                       `json:"workspaceId,omitempty"`
 	RunID          string                       `json:"runId,omitempty"`
 	StepID         string                       `json:"stepId,omitempty"`
+	StreamPosition int64                        `json:"streamPosition,omitempty"`
 	Revision       int64                        `json:"revision,omitempty"`
 	Payload        workorcheventpayload.Payload `json:"payload,omitempty"`
 	PayloadSummary workorcheventpayload.Payload `json:"payloadSummary,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	eventstreambiz "github.com/muidea/workorch/internal/modules/blocks/eventstream/biz"
 
@@ -16,25 +17,26 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func sendEventStreamTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (eventstreamevents.EventStreamCommandResult, error) {
-	ev := magicevent.NewEventWithContext(topic, "eventstream/module_test", eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+func sendEventStreamTestCommand[Command any, Response any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (Response, error) {
+	var zero Response
+	ev := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	result := rawHub.Send(ev)
 	if result == nil {
-		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
 		if err.Cause != nil {
-			return eventstreamevents.EventStreamCommandResult{}, err.Cause
+			return zero, err.Cause
 		}
-		return eventstreamevents.EventStreamCommandResult{}, err
+		return zero, err
 	}
 	data, err := result.Get()
 	if err != nil {
-		return eventstreamevents.EventStreamCommandResult{}, err
+		return zero, err
 	}
-	response, ok := data.(eventstreamevents.EventStreamCommandResult)
+	response, ok := data.(Response)
 	if !ok {
-		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	return response, nil
 }
@@ -139,7 +141,7 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 		}
 	})
 
-	response, err := sendEventStreamTestCommand(ctx, rawHub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
+	response, err := sendEventStreamTestCommand[eventstreamevents.PurgeWorkspaceCommand, eventstreamevents.PurgeWorkspaceResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
 	if err != nil {
 		t.Fatalf("purge err = %v", err)
 	}
@@ -152,6 +154,74 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatalf("event records after purge = %d, want 0", len(items))
+	}
+}
+
+func TestPurgeWorkspaceCommandPostedWithoutResultDoesNotDelete(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	repo := memory.NewEventRecordRepository()
+	workspaceID := common.WorkspaceID("ws-eventstream-post-purge")
+	if err := repo.Append(ctx, &eventstreammodel.EventRecord{ID: "event-post-purge", WorkspaceID: workspaceID, Topic: "/test"}); err != nil {
+		t.Fatal(err)
+	}
+	module := New()
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	forged := rawHub.Send(magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "untrusted/module",
+		eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx,
+		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
+	))
+	if forged == nil || forged.Error() == nil || !errors.Is(forged.Error().Cause, common.ErrInvalidArgument) {
+		t.Fatalf("forged purge result = %+v, want invalid argument", forged)
+	}
+
+	rawHub.Post(magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "eventstream/module_test",
+		eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx,
+		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
+	))
+	time.Sleep(20 * time.Millisecond)
+	if _, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), "event-post-purge"); err != nil {
+		t.Fatalf("posted purge mutated owner state: %v", err)
+	}
+}
+
+func TestListEventsCommandUsesConcreteBoundedResult(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(16)
+	repo := memory.NewEventRecordRepository()
+	workspaceID := common.WorkspaceID("ws-eventstream-list")
+	for _, item := range []*eventstreammodel.EventRecord{
+		{ID: "event-list-1", WorkspaceID: workspaceID, Topic: "/test", Revision: 1},
+		{ID: "event-list-2", WorkspaceID: workspaceID, Topic: "/test", Revision: 2},
+	} {
+		if err := repo.Append(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	module := New()
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	response, err := sendEventStreamTestCommand[eventstreamevents.ListEventsCommand, eventstreamevents.ListEventsResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandList, eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{WorkspaceID: workspaceID, Limit: 1}})
+	if err != nil || len(response.Events) != 1 || response.Events[0].ID != "event-list-2" {
+		t.Fatalf("list response = %+v err=%v", response, err)
+	}
+	if _, err := sendEventStreamTestCommand[eventstreamevents.ListEventsCommand, eventstreamevents.ListEventsResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandList, eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{WorkspaceID: workspaceID, Limit: eventstreamevents.MaxListLimit + 1}}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("oversized list err = %v, want invalid argument", err)
 	}
 }
 
@@ -176,7 +246,7 @@ func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = module.Stop(ctx) })
-	response, err := sendEventStreamTestCommand(ctx, rawHub, eventstreamevents.TopicEventStreamCommandHighWatermarks, eventstreamevents.HighWatermarksCommand{
+	response, err := sendEventStreamTestCommand[eventstreamevents.HighWatermarksCommand, eventstreamevents.HighWatermarksResult](ctx, rawHub, eventstreamevents.TopicEventStreamCommandHighWatermarks, eventstreamevents.HighWatermarksCommand{
 		WorkspaceIDs: []common.WorkspaceID{"ws-b", "ws-a"},
 	})
 	if err != nil {

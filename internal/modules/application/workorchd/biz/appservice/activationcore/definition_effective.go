@@ -11,7 +11,6 @@ import (
 func EffectiveWorkspaceGoal(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error),
-	eventRecords EventRecordLister,
 	workspaceID common.WorkspaceID,
 	selected *workspacemodel.Goal,
 ) (*workspacemodel.Goal, []map[string]any, error) {
@@ -22,7 +21,7 @@ func EffectiveWorkspaceGoal(
 	if err != nil {
 		return nil, nil, err
 	}
-	items = OrderedWorkspaceGoals(ctx, eventRecords, workspaceID, items)
+	items = OrderedWorkspaceGoals(items)
 	contexts := make([]map[string]any, 0, len(items))
 	parts := make([]string, 0, len(items))
 	seen := map[string]struct{}{}

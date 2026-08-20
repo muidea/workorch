@@ -153,17 +153,18 @@ func eventRecordStreamEvent(data eventstreamevents.EventRecordData) (streamEvent
 		return streamEvent{}, false
 	}
 	return streamEvent{
-		ID:           string(data.ID),
-		Version:      data.Version,
-		Topic:        data.Topic,
-		OccurredAt:   data.OccurredAt,
-		SourceModule: data.SourceModule,
-		SubjectType:  data.SubjectType,
-		SubjectID:    data.SubjectID,
-		WorkspaceID:  string(data.WorkspaceID),
-		RunID:        string(data.RunID),
-		StepID:       string(data.StepID),
-		Revision:     data.Revision,
-		Payload:      data.Payload.Map(),
+		ID:             string(data.ID),
+		Version:        data.Version,
+		Topic:          data.Topic,
+		OccurredAt:     data.OccurredAt,
+		SourceModule:   data.SourceModule,
+		SubjectType:    data.SubjectType,
+		SubjectID:      data.SubjectID,
+		WorkspaceID:    string(data.WorkspaceID),
+		RunID:          string(data.RunID),
+		StepID:         string(data.StepID),
+		StreamPosition: data.StreamPosition,
+		Revision:       data.Revision,
+		Payload:        data.Payload.Map(),
 	}, true
 }

@@ -83,7 +83,7 @@ func PurgeWorkspaceEventStream(ctx context.Context, hub magicevent.Hub, workspac
 	}
 	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
 	ownerevent.BindLane(event, eventstreamevents.Contracts(), eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
-	_, err := ownerevent.EventStream(hub.Send(event), eventstreamevents.TopicEventStreamCommandPurgeWorkspace)
+	_, err := ownerevent.EventStream[eventstreamevents.PurgeWorkspaceResult](hub.Send(event), eventstreamevents.TopicEventStreamCommandPurgeWorkspace)
 	if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
 		return nil
 	}

@@ -41,7 +41,12 @@ func (data MemoryPayloadData) EventPayload() workorcheventpayload.Payload {
 		workorcheventpayload.IntField(PayloadKeyConfidence, int64(data.Confidence)),
 		workorcheventpayload.StringField(PayloadKeyVisibility, data.Visibility),
 	}
-	fields = appendOptionalPayloadString(fields, PayloadKeyContent, data.Content)
+	if data.Content != "" {
+		fields = append(fields,
+			workorcheventpayload.StringField(PayloadKeyContentSHA256, SHA256String(data.Content)),
+			workorcheventpayload.IntField(PayloadKeyContentBytes, int64(len(data.Content))),
+		)
+	}
 	fields = appendOptionalPayloadString(fields, PayloadKeySourceRef, data.SourceRef)
 	return workorcheventpayload.New(fields...)
 }
@@ -89,7 +94,6 @@ func recallSelectionEvidencePayload(input workorchmemorycontract.RecallSelection
 	fields = appendOptionalPayloadString(fields, PayloadKeyProviderID, value.ProviderID)
 	fields = appendOptionalPayloadString(fields, PayloadKeyModelID, value.ModelID)
 	fields = appendOptionalPayloadString(fields, PayloadKeyOperation, value.Operation)
-	fields = appendOptionalPayloadString(fields, PayloadKeyQueryTextPreview, value.QueryTextPreview)
 	fields = appendOptionalPayloadString(fields, PayloadKeyQueryTextSHA256, value.QueryTextSHA256)
 	fields = appendOptionalPayloadString(fields, PayloadKeyEmbeddingModel, value.EmbeddingModel)
 	fields = appendOptionalPayloadString(fields, PayloadKeyRefreshSource, value.RefreshSource)
@@ -134,7 +138,7 @@ func recallHitPayloads(values []workorchmemorycontract.RecallHit) []workorcheven
 	ret := make([]workorcheventpayload.Payload, 0, len(values))
 	for _, value := range values {
 		ret = append(ret, workorcheventpayload.New(
-			workorcheventpayload.StringField("id", string(value.ID)), workorcheventpayload.StringField(PayloadKeySummary, value.Summary),
+			workorcheventpayload.StringField("id", string(value.ID)),
 			workorcheventpayload.FloatField("vectorScore", value.VectorScore), workorcheventpayload.IntField("vectorDimension", int64(value.VectorDimension)),
 		))
 	}

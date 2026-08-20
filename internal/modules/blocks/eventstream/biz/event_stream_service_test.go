@@ -2,6 +2,9 @@ package eventstream
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,8 +17,10 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
@@ -97,6 +102,14 @@ func (r *countingEventRecordRepository) Delete(ctx context.Context, id common.Ev
 	return r.base.Delete(ctx, id)
 }
 
+func (r *countingEventRecordRepository) PurgeWorkspace(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
+	return r.base.PurgeWorkspace(ctx, workspaceID)
+}
+
+func (r *countingEventRecordRepository) ReserveEventRecordStreamPosition(ctx context.Context) (int64, error) {
+	return r.base.ReserveEventRecordStreamPosition(ctx)
+}
+
 func (r *countingEventRecordRepository) AppendCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -120,12 +133,13 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 	defer service.Stop()
 
 	ticket := decisionevents.TicketChangedData{
-		TicketID:    "ticket-event-stream-typed",
-		WorkspaceID: "ws-event-stream-typed",
-		RunID:       "run-event-stream-typed",
-		StepID:      "run-event-stream-typed/decision",
-		Reason:      "select recovery path",
-		State:       common.DecisionTicketStateOpen,
+		NotificationID: "decision-notification/created/ws-event-stream-typed/ticket-event-stream-typed",
+		TicketID:       "ticket-event-stream-typed",
+		WorkspaceID:    "ws-event-stream-typed",
+		RunID:          "run-event-stream-typed",
+		StepID:         "run-event-stream-typed/decision",
+		Reason:         "select recovery path",
+		State:          common.DecisionTicketStateOpen,
 	}
 	created := magicevent.NewEventWithContext(
 		decisionevents.TopicTicketCreated,
@@ -145,6 +159,7 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 		magicevent.NewHeader(),
 		ctx,
 		decisionevents.TicketResolvedData{
+			NotificationID: "decision-notification/resolved/ws-event-stream-typed/ticket-event-stream-typed/resolution-event-stream-typed",
 			Ticket:         ticket,
 			ResolutionID:   "resolution-event-stream-typed",
 			ResolutionType: decisioncommon.ResolutionTypeReplan,
@@ -172,11 +187,10 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 	if records[1].Topic != decisionevents.TopicTicketResolved || records[1].Revision != 2 {
 		t.Fatalf("resolved record = %+v, want revision 2", records[1])
 	}
-	resolutionPayload, _ := records[1].Payload.Object(recordpayload.PayloadKeyPayload)
-	resolutionActor, _ := resolutionPayload.String("actor")
 	resolutionType, _ := records[1].Payload.String(recordpayload.PayloadKeyType)
-	if resolutionType != string(decisioncommon.ResolutionTypeReplan) || resolutionActor != "operator" {
-		t.Fatalf("resolved payload = %+v, want typed resolution payload", records[1].Payload)
+	resolutionHash, _ := records[1].Payload.String(recordpayload.PayloadKeyPayloadSHA256)
+	if _, raw := records[1].Payload.Object(recordpayload.PayloadKeyPayload); resolutionType != string(decisioncommon.ResolutionTypeReplan) || raw || resolutionHash == "" {
+		t.Fatalf("resolved payload = %+v, want typed metadata and redacted resolution material", records[1].Payload)
 	}
 }
 
@@ -190,12 +204,14 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	defer service.Stop()
 
 	data := approvalevents.ApprovalChangedData{
-		ApprovalID:  "approval-event-stream-typed",
-		WorkspaceID: "ws-approval-event-stream-typed",
-		RunID:       "run-approval-event-stream-typed",
-		StepID:      "run-approval-event-stream-typed/approval",
-		Reason:      "approve workspace write",
-		Action:      "apply patch",
+		NotificationID: "approval-notification/resolved/ws-approval-event-stream-typed/run-approval-event-stream-typed/approval-event-stream-typed/resolution-event-stream-typed",
+		ResolutionID:   "resolution-event-stream-typed",
+		ApprovalID:     "approval-event-stream-typed",
+		WorkspaceID:    "ws-approval-event-stream-typed",
+		RunID:          "run-approval-event-stream-typed",
+		StepID:         "run-approval-event-stream-typed/approval",
+		Reason:         "approve workspace write",
+		Action:         "apply patch",
 		Context: []workorcheventpayload.Field{{
 			Name: "risk",
 			Value: workorcheventpayload.Value{
@@ -203,9 +219,11 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 				String: "medium",
 			},
 		}},
-		State: common.ApprovalStatePending,
+		State: common.ApprovalStateApproved,
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "application/workorchd/appservice",
+		},
 	}
-	data.State = common.ApprovalStateApproved
 	resolved := magicevent.NewEventWithContext(approvalevents.TopicApprovalResolved, approvalcommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	rawHub.Post(resolved)
 
@@ -216,10 +234,9 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	if records[0].Revision != 1 {
 		t.Fatalf("approval revision = %d, want 1", records[0].Revision)
 	}
-	contextPayload, _ := records[0].Payload.Object(recordpayload.PayloadKeyContext)
-	risk, _ := contextPayload.String("risk")
 	state, _ := records[0].Payload.String(recordpayload.PayloadKeyState)
-	if state != string(common.ApprovalStateApproved) || risk != "medium" {
+	contextHash, _ := records[0].Payload.String(recordpayload.PayloadKeyContextSHA256)
+	if _, raw := records[0].Payload.Object(recordpayload.PayloadKeyContext); state != string(common.ApprovalStateApproved) || raw || contextHash == "" {
 		t.Fatalf("resolved approval payload = %+v", records[0].Payload)
 	}
 }
@@ -343,12 +360,13 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 		FailureReason:        "waiting for decision",
 		RuntimeStateRevision: 7,
 		RuntimeStateRef:      "runtime-state/ws-event-stream-state/run-event-stream-state/7",
+		CausationID:          "run-state/run-event-stream-state/7",
 	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, "kernel/orchestrator", runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, runcommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	rawHub.Post(event)
 
 	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
-	if len(records) != 1 || records[0].Topic != runevents.TopicRunStateChanged || records[0].SourceModule != "kernel/orchestrator" || records[0].Revision != 1 {
+	if len(records) != 1 || records[0].Topic != runevents.TopicRunStateChanged || records[0].SourceModule != runcommon.ModuleID || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want typed run state revision 1", records)
 	}
 	state, _ := records[0].Payload.String(recordpayload.PayloadKeyState)
@@ -401,8 +419,8 @@ func TestServicePersistsTypedWorkspaceNotifications(t *testing.T) {
 	if records[0].Topic != workspaceevents.TopicWorkspaceCreated || workspaceTitle != "typed workspace" {
 		t.Fatalf("workspace record = %+v", records[0])
 	}
-	goalText, _ := records[1].Payload.String(recordpayload.PayloadKeyText)
-	if records[1].Topic != workspaceevents.TopicGoalDefined || goalText != "typed goal" {
+	goalHash, _ := records[1].Payload.String(recordpayload.PayloadKeyTextSHA256)
+	if _, raw := records[1].Payload.String(recordpayload.PayloadKeyText); records[1].Topic != workspaceevents.TopicGoalDefined || raw || goalHash == "" {
 		t.Fatalf("goal record = %+v", records[1])
 	}
 	if records[2].Topic != workspaceevents.TopicDoDDefined {
@@ -427,7 +445,7 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 		data  any
 	}{
 		{resultevents.TopicResultAccepted, resultevents.ResultChangedData{
-			ResultID: resultID, WorkspaceID: workspaceID, RunID: runID, State: common.ResultStateAccepted, Title: "typed result", EvidenceRefs: []string{"step-001"}, ArtifactRefs: []common.ArtifactID{"artifact-001"},
+			NotificationID: "result-notification/typed-delivery/typed-material", ResultID: resultID, WorkspaceID: workspaceID, RunID: runID, State: common.ResultStateAccepted, Title: "typed result", EvidenceRefs: []string{"step-001"}, ArtifactRefs: []common.ArtifactID{"artifact-001"},
 		}},
 	}
 	for _, item := range items {
@@ -493,7 +511,8 @@ func TestServiceDeduplicatesStableDecisionNotificationReplay(t *testing.T) {
 	data := decisionevents.TicketResolvedData{
 		NotificationID: "decision-notification/resolved/ws-decision-replayed/ticket-decision-replayed/resolution-decision-replayed",
 		Ticket: decisionevents.TicketChangedData{
-			TicketID: "ticket-decision-replayed", WorkspaceID: "ws-decision-replayed", RunID: "run-decision-replayed",
+			NotificationID: "decision-notification/created/ws-decision-replayed/ticket-decision-replayed",
+			TicketID:       "ticket-decision-replayed", WorkspaceID: "ws-decision-replayed", RunID: "run-decision-replayed",
 			State: common.DecisionTicketStateResolved,
 		},
 		ResolutionID: "resolution-decision-replayed", ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
@@ -536,7 +555,7 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 		data  any
 	}{
 		{memoryevents.TopicMemoryCreated, memoryevents.MemoryChangedData{
-			MemoryID: "memory-event-stream-typed", WorkspaceID: workspaceID, RunID: runID, MemoryType: "working", Summary: "typed memory", Tags: []string{"runtime"}, Importance: 2, Confidence: 3,
+			MemoryID: "memory-event-stream-typed", WorkspaceID: workspaceID, RunID: runID, MemoryType: "working", Summary: "typed memory", Content: "private memory content", Tags: []string{"runtime"}, Importance: 2, Confidence: 3,
 		}},
 		{memoryevents.TopicMemoryRecallRecorded, memoryevents.MemoryRecallRecordedData{
 			TraceID: "recall-event-stream-typed", WorkspaceID: workspaceID, RunID: runID, StepID: "step-001", Stage: "execution", Source: "semantic", Status: "completed", RetrievedMemoryIDs: []common.MemoryID{"memory-event-stream-typed"}, OccurredAt: "2026-07-11T00:00:00Z",
@@ -553,7 +572,7 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 		}},
 	}
 	for _, item := range items {
-		event := magicevent.NewEventWithContext(item.topic, "workorchd/appservice", memoryevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
+		event := magicevent.NewEventWithContext(item.topic, memorycommon.ModuleID, memoryevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
 		rawHub.Post(event)
 	}
 	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
@@ -573,7 +592,8 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 		t.Fatalf("memory records = %+v", records)
 	}
 	memorySummary, _ := memoryRecord.Payload.String(recordpayload.PayloadKeySummary)
-	if memorySummary != "typed memory" {
+	contentHash, _ := memoryRecord.Payload.String(recordpayload.PayloadKeyContentSHA256)
+	if _, raw := memoryRecord.Payload.String(recordpayload.PayloadKeyContent); memorySummary != "typed memory" || raw || contentHash == "" {
 		t.Fatalf("memory records = %+v", records)
 	}
 	if recallRecord == nil || recallRecord.StepID != "step-001" {
@@ -613,7 +633,7 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 		t.Fatalf("second start event stream service: %v", err)
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCreated, "blocks/run", runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
-		WorkspaceID: "ws-event-stream-idempotent", RunID: "run-event-stream-idempotent", State: common.RunStatePending,
+		WorkspaceID: "ws-event-stream-idempotent", RunID: "run-event-stream-idempotent", State: common.RunStatePending, CausationID: "run-created/run-event-stream-idempotent",
 	})
 	rawHub.Post(event)
 	deadline := time.Now().Add(2 * time.Second)
@@ -684,7 +704,7 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 	t.Cleanup(service.Stop)
 
 	event := magicevent.NewEventWithContext(runevents.TopicRunCreated, "blocks/run", runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
-		WorkspaceID: "ws-typed-appended", RunID: "run-typed-appended", GoalID: "goal-typed-appended", DoDID: "dod-typed-appended", State: common.RunStatePending,
+		WorkspaceID: "ws-typed-appended", RunID: "run-typed-appended", GoalID: "goal-typed-appended", DoDID: "dod-typed-appended", State: common.RunStatePending, CausationID: "run-created/run-typed-appended",
 	})
 	rawHub.Post(event)
 
@@ -724,7 +744,7 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 		runevents.NotificationDestination,
 		magicevent.NewHeader(),
 		ctx,
-		runevents.RunStateChangedData{WorkspaceID: "ws-append-failure", RunID: "run-append-failure", State: common.RunStatePending},
+		runevents.RunStateChangedData{WorkspaceID: "ws-append-failure", RunID: "run-append-failure", State: common.RunStatePending, CausationID: "run-created/run-append-failure"},
 	))
 	select {
 	case <-appended:
@@ -743,5 +763,149 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 	}
 	if len(records) != 1 || records[0].Revision != 1 {
 		t.Fatalf("records after retry = %+v, want one record at revision 1", records)
+	}
+}
+
+func TestServiceRejectsForgedOwnerNotificationSource(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Stop)
+	data := workspaceevents.GoalDefinedData{
+		GoalID: "goal-authenticated", WorkspaceID: "ws-authenticated", Text: "authority material",
+		DefinitionRevision: "goal:00000000000000000001:hash", LineageState: "active",
+	}
+	post := func(source string) {
+		rawHub.Post(magicevent.NewEventWithContext(
+			workspaceevents.TopicGoalDefined, source, workspaceevents.NotificationDestination,
+			magicevent.NewHeader(), ctx, data,
+		))
+	}
+	post("untrusted/module")
+	time.Sleep(20 * time.Millisecond)
+	items, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("forged source records = %+v err=%v, want none", items, err)
+	}
+	post("blocks/workspace")
+	items = waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID}, 1)
+	if len(items) != 1 || items[0].SourceModule != "blocks/workspace" {
+		t.Fatalf("authenticated records = %+v", items)
+	}
+}
+
+func TestServiceSanitizesAndBoundsPayloadBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, _ := newEventStreamTestService(t, repo)
+	secret := "must-not-cross-eventstream"
+	if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
+		ID: "event-sanitize", Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "test-1",
+		WorkspaceID: "ws-sanitize",
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("apiToken", secret),
+			workorcheventpayload.StringField("summary", strings.Repeat("x", recordpayload.MaxAuditPayloadBytes)),
+		),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	item, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-sanitize"), "event-sanitize")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(item.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > recordpayload.MaxAuditPayloadBytes || strings.Contains(string(encoded), secret) {
+		t.Fatalf("sanitized payload bytes=%d payload=%s", len(encoded), encoded)
+	}
+	redacted, _ := item.Payload.String("apiToken")
+	if redacted != "[redacted]" {
+		t.Fatalf("secret field = %q, want redacted", redacted)
+	}
+}
+
+func TestServiceRetriesTransientNotificationAppendFailure(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := memory.NewEventRecordRepository()
+	repo := &failingAppendEventRecordRepository{EventRecordRepository: baseRepo, failures: 2, err: errors.New("temporary append failure")}
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Stop)
+	rawHub.Post(magicevent.NewEventWithContext(
+		runevents.TopicRunCreated, runcommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx,
+		runevents.RunStateChangedData{WorkspaceID: "ws-retry", RunID: "run-retry", State: common.RunStatePending, CausationID: "run-created/run-retry"},
+	))
+	items := waitForEventRecords(t, baseRepo, workorchquerycontract.EventRecordQuery{WorkspaceID: "ws-retry"}, 1)
+	if len(items) != 1 || items[0].Revision != 1 || items[0].StreamPosition != 1 {
+		t.Fatalf("retried records = %+v", items)
+	}
+}
+
+func TestServiceIssuesGlobalAppendOrderAcrossWorkspaceClockSkew(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, _ := newEventStreamTestService(t, repo)
+	for _, item := range []*eventstreammodel.EventRecord{
+		{
+			ID: "event-global-1", Topic: "/test", OccurredAt: "2026-08-20T23:59:00Z",
+			SourceModule: "blocks/test", SubjectType: "global-order", SubjectID: "global-1", WorkspaceID: "ws-global-a",
+		},
+		{
+			ID: "event-global-2", Topic: "/test", OccurredAt: "2026-08-20T00:00:00Z",
+			SourceModule: "blocks/test", SubjectType: "global-order", SubjectID: "global-2", WorkspaceID: "ws-global-b",
+		},
+	} {
+		if err := service.appendRecord(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{SubjectType: "global-order"})
+	if err != nil || len(items) != 2 || items[0].ID != "event-global-1" || items[1].ID != "event-global-2" ||
+		items[0].StreamPosition != 1 || items[1].StreamPosition != 2 {
+		t.Fatalf("global order = %+v err=%v", items, err)
+	}
+	after, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{SubjectType: "global-order", CursorAfterID: "event-global-1", Limit: 1})
+	if err != nil || len(after) != 1 || after[0].ID != "event-global-2" {
+		t.Fatalf("global cursor = %+v err=%v", after, err)
+	}
+}
+
+func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, _ := newEventStreamTestService(t, repo)
+	appendWorkspaceRecord := func(id string) {
+		if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
+			ID: common.EventRecordID(id), Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: id, WorkspaceID: "ws-revision-reset",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendWorkspaceRecord("event-reset-1")
+	appendWorkspaceRecord("event-reset-2")
+	if deleted, err := service.PurgeWorkspaceEvents(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "ws-revision-reset"); err != nil || deleted != 2 {
+		t.Fatalf("purge deleted=%d err=%v", deleted, err)
+	}
+	appendWorkspaceRecord("event-reset-3")
+	item, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "event-reset-3")
+	if err != nil || item.Revision != 1 || item.StreamPosition != 3 {
+		t.Fatalf("post-purge record = %+v err=%v, want revision 1/stream position 3", item, err)
+	}
+	restarted, _ := newEventStreamTestService(t, repo)
+	if err := restarted.appendRecord(ctx, &eventstreammodel.EventRecord{
+		ID: "event-reset-4", Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "event-reset-4", WorkspaceID: "ws-revision-reset",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	item, err = repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "event-reset-4")
+	if err != nil || item.Revision != 2 || item.StreamPosition != 4 {
+		t.Fatalf("post-restart record = %+v err=%v, want revision 2/stream position 4", item, err)
 	}
 }

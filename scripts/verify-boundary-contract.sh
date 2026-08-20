@@ -212,6 +212,27 @@ EOF
   exit 1
 fi
 
+# Eventstream is audit/display infrastructure. Goal/DoD selection, effective
+# definition compilation, stale checks and definition consolidation feed SM-4
+# Runtime bootstrap or owner writes and therefore must never read EventRecord.
+eventstream_runtime_authority_matches="$({
+  source_matches 'internal/modules/blocks/eventstream|EventRecord(Reader|Lister)|workorchquerycontract\.EventRecordQuery|eventstreamevents\.EventRecordData' \
+    internal/modules/application/workorchd/biz/appservice/activationcore \
+    internal/modules/application/workorchd/biz/appservice/activationports \
+    internal/modules/application/workorchd/biz/appservice/definitionports \
+    internal/modules/application/workorchd/biz/appservice/definitionquality
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$eventstream_runtime_authority_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: EventRecord/audit data participates in Runtime
+bootstrap, definition selection/staleness, or Workspace definition writes.
+Use Workspace owner Goal/DoD revision and lineage state only.
+
+$eventstream_runtime_authority_matches
+EOF
+  exit 1
+fi
+
 numeric_projection_family_files="$(find internal/modules/application/workorchd/biz/appservice/readmodelprojection -maxdepth 1 -type f -name 'projection_family_[0-9]*.go' -print)"
 if [[ -n "$numeric_projection_family_files" ]]; then
   cat >&2 <<EOF

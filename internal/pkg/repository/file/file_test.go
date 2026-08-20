@@ -212,6 +212,75 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	}
 }
 
+func TestEventRecordRepositoryPurgeWorkspacePhysicallyCompactsPayloads(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "event-records")
+	repo := NewEventRecordRepository(root)
+	secret := "purged-workspace-secret-material"
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "unrelated-owner-state.json"), []byte(`{"preserved":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	firstPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []*eventstreammodel.EventRecord{
+		{
+			ID: "event-purge-physical", Topic: "/test", WorkspaceID: "ws-purge-physical", StreamPosition: firstPosition, Revision: 1,
+			Payload: mustFileRepositoryPayload(t, map[string]any{"content": secret + strings.Repeat("x", eventRecordPayloadInlineThreshold+1)}),
+		},
+		{
+			ID: "event-keep-physical", Topic: "/test", WorkspaceID: "ws-keep-physical", StreamPosition: secondPosition, Revision: 1,
+			Payload: mustFileRepositoryPayload(t, map[string]any{"content": "keep" + strings.Repeat("y", eventRecordPayloadInlineThreshold+1)}),
+		},
+	} {
+		if err := repo.Append(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Exercise compaction of pre-existing tombstoned data as well as active
+	// records. The purge must remove the old JSONL line and external payload.
+	if err := repo.Delete(ctx, "event-purge-physical"); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := repo.PurgeWorkspace(ctx, "ws-purge-physical"); err != nil || deleted != 0 {
+		t.Fatalf("purge deleted=%d err=%v", deleted, err)
+	}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info == nil || info.IsDir() {
+			return walkErr
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), secret) || strings.Contains(string(data), "event-purge-physical") {
+			return fmt.Errorf("purged record remains in %s", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-keep-physical"), "event-keep-physical")
+	if err != nil || kept.WorkspaceID != "ws-keep-physical" {
+		t.Fatalf("retained record = %+v err=%v", kept, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "unrelated-owner-state.json")); err != nil || string(data) != `{"preserved":true}` {
+		t.Fatalf("unrelated owner state = %q err=%v", data, err)
+	}
+	thirdPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
+	if err != nil || thirdPosition <= secondPosition {
+		t.Fatalf("post-purge stream position = %d err=%v, want > %d", thirdPosition, err, secondPosition)
+	}
+}
+
 func TestArtifactContinuationRepositoryStoresContentOutsideMetadata(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "artifact-continuations")

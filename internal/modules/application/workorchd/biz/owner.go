@@ -17,6 +17,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	eventstreamcommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -184,7 +185,7 @@ func (b *Biz) handleRuntimeDriveObserved(event magicevent.Event, _ magicevent.Re
 
 func (b *Biz) handleEventRecordAppended(event magicevent.Event, _ magicevent.Result) {
 	data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
-	if ok && b != nil && b.service != nil {
+	if ok && event.Source() == eventstreamcommon.ModuleID && data.Record.Validate() == nil && b != nil && b.service != nil {
 		b.service.RecordEventRecordAppended(event.Context(), data.Record)
 		if b.projection != nil {
 			_ = b.projection.HandleEventRecord(event.Context(), data.Record)
@@ -211,7 +212,7 @@ func (b *Biz) readWorkspaceProjectionHighWatermarks(ctx context.Context, workspa
 	if resultErr != nil {
 		return nil, resultErr
 	}
-	result, ok := data.(eventstreamevents.EventStreamCommandResult)
+	result, ok := data.(eventstreamevents.HighWatermarksResult)
 	if !ok {
 		return nil, common.ErrInvalidArgument
 	}

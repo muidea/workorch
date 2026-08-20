@@ -72,6 +72,10 @@ Last Verified: 2026-08-20
   defaults ensure 原子提交，Application/MCP 使用 owner-issued 一致 selection/full snapshot。EventHub 只传 reference-only
   `environmentRefs`，执行 owner 最后解析；Capability 以 `enabled` 为唯一可用性并保存 typed metadata/provenance，所有
   command/result concrete、list/query/aggregate 有界，Post 不得执行强写。
+- Eventstream 严格保持 audit/projection non-authority，Goal/DoD lineage、定义合并/删除与 RuntimeBootstrap 不得读取
+  EventRecord，并由静态边界扫描守卫；所有订阅校验具体 data、必要 identity 与精确 producer source，payload 在追加和读出
+  两端脱敏并有界。查询/高水位/purge 使用 concrete bounded result，Post 不执行强写；持久化全局 `StreamPosition` 支撑跨
+  workspace clock-skew、cursor 和多页 SSE replay，workspace purge 物理清理审计数据但保留其他 owner 文件及全局位置单调性。
 
 完整矩阵见 [Runtime Owner Convergence Verification Matrix](../60-verification/runtime-owner-convergence-matrix.md)。
 

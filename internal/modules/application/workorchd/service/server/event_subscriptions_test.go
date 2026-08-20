@@ -32,8 +32,9 @@ func mustServerEventPayload(t *testing.T, input map[string]any) workorcheventpay
 }
 
 func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envelope streamEvent) error {
+	sequence := serverTestEventSequence.Add(1)
 	if envelope.ID == "" {
-		envelope.ID = fmt.Sprintf("eventstream-test-%d", serverTestEventSequence.Add(1))
+		envelope.ID = fmt.Sprintf("eventstream-test-%d", sequence)
 	}
 	if envelope.Version == "" {
 		envelope.Version = recordpayload.WorkorchEventVersion
@@ -41,19 +42,35 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 	if envelope.Revision == 0 {
 		envelope.Revision = 1
 	}
+	if envelope.StreamPosition == 0 {
+		envelope.StreamPosition = int64(sequence)
+	}
+	if envelope.OccurredAt == "" {
+		envelope.OccurredAt = "2026-08-20T00:00:00Z"
+	}
+	if envelope.SourceModule == "" {
+		envelope.SourceModule = "blocks/test"
+	}
+	if envelope.SubjectType == "" {
+		envelope.SubjectType = "test"
+	}
+	if envelope.SubjectID == "" {
+		envelope.SubjectID = envelope.ID
+	}
 	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
-		ID:           common.EventRecordID(envelope.ID),
-		Version:      envelope.Version,
-		Topic:        envelope.Topic,
-		OccurredAt:   envelope.OccurredAt,
-		SourceModule: envelope.SourceModule,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  common.WorkspaceID(envelope.WorkspaceID),
-		RunID:        common.RunID(envelope.RunID),
-		StepID:       common.StepID(envelope.StepID),
-		Revision:     envelope.Revision,
-		Payload:      mustServerEventPayloadValue(envelope.Payload),
+		ID:             common.EventRecordID(envelope.ID),
+		Version:        envelope.Version,
+		Topic:          envelope.Topic,
+		OccurredAt:     envelope.OccurredAt,
+		SourceModule:   envelope.SourceModule,
+		SubjectType:    envelope.SubjectType,
+		SubjectID:      envelope.SubjectID,
+		WorkspaceID:    common.WorkspaceID(envelope.WorkspaceID),
+		RunID:          common.RunID(envelope.RunID),
+		StepID:         common.StepID(envelope.StepID),
+		StreamPosition: envelope.StreamPosition,
+		Revision:       envelope.Revision,
+		Payload:        mustServerEventPayloadValue(envelope.Payload),
 	})
 	if err != nil {
 		return err
@@ -70,6 +87,23 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 		return resultErr
 	}
 	return nil
+}
+
+func postServerTestWorkspaceState(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) {
+	hub.Post(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceStateChanged, "blocks/workspace", workspaceevents.NotificationDestination,
+		magicevent.NewHeader(), ctx, workspaceevents.WorkspaceChangedData{WorkspaceID: workspaceID, State: common.WorkspaceStateActive},
+	))
+}
+
+func postServerTestRunState(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) {
+	hub.Post(magicevent.NewEventWithContext(
+		runevents.TopicRunStateChanged, "blocks/run", runevents.NotificationDestination,
+		magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
+			WorkspaceID: workspaceID, RunID: runID, State: common.RunStateActive,
+			CausationID: "run-state/" + string(workspaceID) + "/" + string(runID),
+		},
+	))
 }
 
 func mustServerEventPayloadValue(input map[string]any) workorcheventpayload.Payload {

@@ -28,6 +28,7 @@ func mapEventRecordWithPayload(item *eventstreammodel.EventRecord, payload worko
 		WorkspaceID:    string(item.WorkspaceID),
 		RunID:          string(item.RunID),
 		StepID:         string(item.StepID),
+		StreamPosition: item.StreamPosition,
 		Revision:       item.Revision,
 		Payload:        payload.Clone(),
 		PayloadSummary: item.PayloadSummary.Clone(),

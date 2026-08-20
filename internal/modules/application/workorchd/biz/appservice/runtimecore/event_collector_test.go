@@ -30,7 +30,8 @@ func publishEventCollectorRecord(t *testing.T, hub magicevent.Hub, topic, subjec
 	}
 	record, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
 		ID: common.EventRecordID("event-" + subjectID), Version: recordpayload.WorkorchEventVersion, Topic: topic,
-		SubjectID: subjectID, RunID: common.RunID("run-1"), Payload: value,
+		OccurredAt: "2026-08-20T00:00:00Z", SourceModule: "blocks/test", SubjectType: "test",
+		SubjectID: subjectID, RunID: common.RunID("run-1"), StreamPosition: 1, Payload: value,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -10,41 +10,36 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(streamEvent) bool) []streamEvent {
+func (s *serverState) replayEventStream(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(streamEvent) bool, emit func(streamEvent) bool) bool {
 	lastEventID = strings.TrimSpace(lastEventID)
-	if s == nil || lastEventID == "" {
-		return nil
+	if s == nil || lastEventID == "" || emit == nil {
+		return true
 	}
-	seen := map[string]struct{}{}
-	ret := []streamEvent{}
-	appendEnvelope := func(envelope streamEvent) {
+	emitEnvelope := func(envelope streamEvent) bool {
 		if filter != nil && !filter(envelope) {
-			return
+			return true
 		}
-		id := strings.TrimSpace(envelope.ID)
-		if id != "" {
-			if _, ok := seen[id]; ok {
-				return
-			}
-			seen[id] = struct{}{}
-		}
-		ret = append(ret, envelope)
+		return emit(envelope)
 	}
 	// Projection notifications are not owner EventRecords. Live and reconnect
 	// replay must share the concrete projection DTO path via the in-memory
 	// buffer (writeSSEEnvelope → writeProjectionSSE). Do not reconstruct
 	// projection frames from generic event-record envelopes.
 	if !isProjectionEventStreamView(view) {
-		for _, envelope := range s.persistedReplayEnvelopes(ctx, lastEventID, workspaceID, runID, eventStreamReplayTopic(view)) {
-			appendEnvelope(envelope)
-		}
+		// Full audit replay is always read page-by-page from Eventstream
+		// persistence. The live subscription is installed before this call, so
+		// events appended during catch-up are queued without depending on the
+		// bounded process-local replay ring.
+		return s.replayPersistedEventStream(ctx, lastEventID, workspaceID, runID, eventStreamReplayTopic(view), emitEnvelope)
 	}
 	if s.eventReplay != nil {
 		for _, envelope := range s.eventReplay.After(lastEventID, filter) {
-			appendEnvelope(envelope)
+			if !emit(envelope) {
+				return false
+			}
 		}
 	}
-	return ret
+	return true
 }
 
 func eventStreamReplayTopic(view string) string {
@@ -55,28 +50,40 @@ func eventStreamReplayTopic(view string) string {
 	return ""
 }
 
-func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, topic string) []streamEvent {
+func (s *serverState) replayPersistedEventStream(ctx context.Context, lastEventID string, workspaceID string, runID string, topic string, emit func(streamEvent) bool) bool {
 	if s == nil || s.listEventRecords == nil || strings.TrimSpace(lastEventID) == "" {
-		return nil
+		return true
 	}
-	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, workorchquerycontract.EventRecordQuery{
-		WorkspaceID:    common.WorkspaceID(strings.TrimSpace(workspaceID)),
-		RunID:          common.RunID(strings.TrimSpace(runID)),
-		Topic:          strings.TrimSpace(topic),
-		CursorAfterID:  common.EventRecordID(strings.TrimSpace(lastEventID)),
-		Limit:          maxEventRecordPageLimit,
-		IncludePayload: eventStreamReplayIncludePayload(topic),
-	})
-	if err != nil || len(items) == 0 {
-		return nil
-	}
-	ret := make([]streamEvent, 0, len(items))
-	for _, item := range items {
-		if envelope := eventRecordSSEEnvelope(item); envelope.Topic != "" {
-			ret = append(ret, envelope)
+	cursor := common.EventRecordID(strings.TrimSpace(lastEventID))
+	for {
+		if err := ctx.Err(); err != nil {
+			return false
 		}
+		items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, workorchquerycontract.EventRecordQuery{
+			WorkspaceID:    common.WorkspaceID(strings.TrimSpace(workspaceID)),
+			RunID:          common.RunID(strings.TrimSpace(runID)),
+			Topic:          strings.TrimSpace(topic),
+			CursorAfterID:  cursor,
+			Limit:          maxEventRecordPageLimit,
+			IncludePayload: eventStreamReplayIncludePayload(topic),
+		})
+		if err != nil || len(items) == 0 {
+			return err == nil
+		}
+		nextCursor := cursor
+		for _, item := range items {
+			if envelope := eventRecordSSEEnvelope(item); envelope.Topic != "" && !emit(envelope) {
+				return false
+			}
+			if id := strings.TrimSpace(item.ID); id != "" {
+				nextCursor = common.EventRecordID(id)
+			}
+		}
+		if len(items) < maxEventRecordPageLimit || nextCursor == cursor {
+			return true
+		}
+		cursor = nextCursor
 	}
-	return ret
 }
 
 func eventStreamReplayIncludePayload(topic string) bool {
@@ -85,18 +92,19 @@ func eventStreamReplayIncludePayload(topic string) bool {
 
 func eventRecordSSEEnvelope(item projectioncontract.EventRecord) streamEvent {
 	return streamEvent{
-		ID:           item.ID,
-		Version:      item.Version,
-		Topic:        item.Topic,
-		OccurredAt:   item.OccurredAt,
-		SourceModule: item.SourceModule,
-		SubjectType:  item.SubjectType,
-		SubjectID:    item.SubjectID,
-		WorkspaceID:  item.WorkspaceID,
-		RunID:        item.RunID,
-		StepID:       item.StepID,
-		Revision:     item.Revision,
-		Payload:      cloneSSEPayload(item.Payload.Map()),
+		ID:             item.ID,
+		Version:        item.Version,
+		Topic:          item.Topic,
+		OccurredAt:     item.OccurredAt,
+		SourceModule:   item.SourceModule,
+		SubjectType:    item.SubjectType,
+		SubjectID:      item.SubjectID,
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		StepID:         item.StepID,
+		StreamPosition: item.StreamPosition,
+		Revision:       item.Revision,
+		Payload:        cloneSSEPayload(item.Payload.Map()),
 	}
 }
 

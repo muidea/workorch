@@ -23,11 +23,15 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspacecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
@@ -45,9 +49,11 @@ type Service struct {
 	repo          repository.EventRecordRepository
 	unsubscribers []func()
 	topics        []string
-	revisionMu    sync.Mutex
+	appendMu      sync.Mutex
 	revisions     map[common.WorkspaceID]int64
 }
+
+const eventstreamApplicationCommandSource = "application/workorchd/appservice"
 
 // Dependencies are the EventStream owner's construction inputs. Keeping this
 // in biz prevents the module lifecycle bridge from owning EventHub types.
@@ -68,28 +74,31 @@ func NewServiceWithDependencies(deps Dependencies) *Service {
 }
 
 func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
-	if s == nil || s.repo == nil {
+	if s == nil || s.repo == nil || len(workspaceIDs) == 0 || len(workspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
 		return nil, common.ErrInvalidArgument
 	}
 	revisions := map[common.WorkspaceID]int64{}
 	for _, workspaceID := range workspaceIDs {
+		workspaceID = common.WorkspaceID(strings.TrimSpace(string(workspaceID)))
 		if workspaceID == "" {
 			continue
 		}
-		revisions[workspaceID] = 0
-	}
-	items, err := s.repo.List(ctx, workorchquerycontract.EventRecordQuery{})
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item == nil {
+		if _, exists := revisions[workspaceID]; exists {
 			continue
 		}
-		current, ok := revisions[item.WorkspaceID]
-		if ok && item.Revision > current {
-			revisions[item.WorkspaceID] = item.Revision
+		bound, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+		if err != nil {
+			return nil, err
 		}
+		items, err := s.repo.List(bound, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, Limit: 1})
+		if err != nil {
+			return nil, err
+		}
+		revision := int64(0)
+		if len(items) == 1 && items[0] != nil {
+			revision = items[0].Revision
+		}
+		revisions[workspaceID] = revision
 	}
 	ret := make([]eventstreamevents.WorkspaceHighWatermark, 0, len(revisions))
 	for workspaceID, revision := range revisions {
@@ -127,11 +136,14 @@ func (s *Service) Start() error {
 }
 
 func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	// Every subscribed command is request/response. Reject Post delivery before
+	// executing reads or strong writes so purge/record commands cannot mutate
+	// state without an acknowledgement channel.
+	if result == nil {
+		return
+	}
 	if ev != nil && ev.ID() == approvalevents.TopicApprovalCommandRecordResolution {
 		response, err := s.executeRecordApprovalResolution(ev)
-		if result == nil {
-			return
-		}
 		if err != nil {
 			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 			return
@@ -140,9 +152,6 @@ func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		return
 	}
 	response, err := s.executeCommand(ev)
-	if result == nil {
-		return
-	}
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
@@ -188,58 +197,71 @@ func (s *Service) samePersistedApprovalResolution(ctx context.Context, expected 
 		current.RunID == expected.RunID && current.StepID == expected.StepID && current.Payload.Equal(expected.Payload)
 }
 
-func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventStreamCommandResult, error) {
-	if s == nil || s.repo == nil {
-		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+func (s *Service) executeCommand(ev magicevent.Event) (any, error) {
+	if s == nil || s.repo == nil || ev == nil {
+		return nil, common.ErrInvalidArgument
 	}
 	switch ev.ID() {
 	case eventstreamevents.TopicEventStreamCommandList:
 		cmd, ok := ev.Data().(eventstreamevents.ListEventsCommand)
 		if !ok {
-			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+			return nil, common.ErrInvalidArgument
 		}
-		query := cmd.Query
+		ownerQuery, err := cmd.Query.Normalized()
+		if err != nil {
+			return nil, err
+		}
+		query := repositoryEventRecordQuery(ownerQuery)
 		ctx := ev.Context()
 		if query.WorkspaceID != "" {
 			var err error
 			ctx, err = common.BindRuntimeWorkspaceContext(ctx, query.WorkspaceID)
 			if err != nil {
-				return eventstreamevents.EventStreamCommandResult{}, err
+				return nil, err
 			}
 		}
 		items, err := s.ListEvents(ctx, query)
 		if err != nil {
-			return eventstreamevents.EventStreamCommandResult{}, err
+			return nil, err
 		}
 		data := make([]eventstreamevents.EventRecordData, 0, len(items))
 		for _, item := range items {
 			converted, convertErr := eventstreamevents.EventRecordDataFromModel(item)
 			if convertErr != nil {
-				return eventstreamevents.EventStreamCommandResult{}, convertErr
+				return nil, convertErr
 			}
 			data = append(data, converted)
 		}
-		return eventstreamevents.EventStreamCommandResult{Events: data}, nil
+		return eventstreamevents.ListEventsResult{Events: data}, nil
 	case eventstreamevents.TopicEventStreamCommandHighWatermarks:
 		cmd, ok := ev.Data().(eventstreamevents.HighWatermarksCommand)
-		if !ok {
-			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		if !ok || len(cmd.WorkspaceIDs) == 0 || len(cmd.WorkspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
+			return nil, common.ErrInvalidArgument
 		}
 		items, err := s.HighWatermarks(ev.Context(), cmd.WorkspaceIDs)
-		return eventstreamevents.EventStreamCommandResult{HighWatermarks: items}, err
+		return eventstreamevents.HighWatermarksResult{HighWatermarks: items}, err
 	case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
 		cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)
-		if !ok || cmd.WorkspaceID == "" {
-			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		if !ok || cmd.WorkspaceID == "" || ev.Source() != eventstreamApplicationCommandSource {
+			return nil, common.ErrInvalidArgument
 		}
 		ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 		if err != nil {
-			return eventstreamevents.EventStreamCommandResult{}, err
+			return nil, err
 		}
 		deleted, err := s.PurgeWorkspaceEvents(ctx, cmd.WorkspaceID)
-		return eventstreamevents.EventStreamCommandResult{DeletedCount: deleted}, err
+		return eventstreamevents.PurgeWorkspaceResult{DeletedCount: deleted}, err
 	default:
-		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
+	}
+}
+
+func repositoryEventRecordQuery(query eventstreamevents.EventQuery) workorchquerycontract.EventRecordQuery {
+	return workorchquerycontract.EventRecordQuery{
+		WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic,
+		ExcludeTopics: append([]string(nil), query.ExcludeTopics...), SubjectType: query.SubjectType, SubjectID: query.SubjectID,
+		CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter, OccurredBefore: query.OccurredBefore,
+		Limit: query.Limit, IncludePayload: query.IncludePayload,
 	}
 }
 
@@ -253,7 +275,7 @@ func (s *Service) subscribeMemoryNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(memoryevents.MemoryChangedData)
-			if !ok {
+			if !ok || event.Source() != memorycommon.ModuleID || !validMemoryChangedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -262,7 +284,7 @@ func (s *Service) subscribeMemoryNotifications() {
 	}
 	s.SubscribeMatchedFunc(observerID, observerID, memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(memoryevents.MemoryRecallRecordedData)
-		if !ok {
+		if !ok || event.Source() != memorycommon.ModuleID || !validMemoryRecallRecordedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
@@ -283,7 +305,7 @@ func (s *Service) subscribeLLMNotifications() {
 	const observerID = "/llm/consumers/blocks/eventstream"
 	s.SubscribeMatchedFunc(observerID, observerID, llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(llmevents.LLMUsageRecordedData)
-		if !ok {
+		if !ok || event.Source() != llmcommon.ModuleID || !validLLMUsageRecordedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
@@ -313,7 +335,7 @@ func (s *Service) subscribeResultNotifications() {
 				return
 			}
 			data, ok := event.Data().(resultevents.ResultChangedData)
-			if !ok {
+			if !ok || !validResultChangedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -341,7 +363,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(workspaceevents.WorkspaceChangedData)
-			if !ok {
+			if !ok || event.Source() != workspacecommon.ModuleID || !validWorkspaceChangedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -350,7 +372,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	}
 	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicGoalDefined, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.GoalDefinedData)
-		if !ok {
+		if !ok || event.Source() != workspacecommon.ModuleID || !validGoalDefinedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
@@ -358,7 +380,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	})
 	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicDoDDefined, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.DoDDefinedData)
-		if !ok {
+		if !ok || event.Source() != workspacecommon.ModuleID || !validDoDDefinedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
@@ -393,7 +415,7 @@ func (s *Service) subscribeRunStateNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(runevents.RunStateChangedData)
-			if !ok {
+			if !ok || event.Source() != runcommon.ModuleID || data.Validate() != nil {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -422,7 +444,7 @@ func (s *Service) subscribeGovernanceNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(governanceevents.GovernanceData)
-			if !ok {
+			if !ok || event.Source() != governancecommon.ModuleID || !validGovernanceData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -448,7 +470,7 @@ func (s *Service) subscribeApprovalNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(approvalevents.ApprovalChangedData)
-			if !ok {
+			if !ok || event.Source() != approvalcommon.ModuleID || data.Validate() != nil {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -474,7 +496,7 @@ func (s *Service) subscribeDecisionNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketChangedData)
-			if !ok {
+			if !ok || event.Source() != decisioncommon.ModuleID || !validTicketChangedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -486,7 +508,7 @@ func (s *Service) subscribeDecisionNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketResolvedData)
-			if !ok {
+			if !ok || event.Source() != decisioncommon.ModuleID || !validTicketResolvedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -503,16 +525,66 @@ func (s *Service) subscribeDecisionNotifications() {
 	})
 }
 
+func validMemoryChangedData(data memoryevents.MemoryChangedData) bool {
+	return data.MemoryID != "" && data.WorkspaceID != ""
+}
+
+func validMemoryRecallRecordedData(data memoryevents.MemoryRecallRecordedData) bool {
+	return data.TraceID != "" && data.WorkspaceID != "" && data.RunID != "" && strings.TrimSpace(data.Status) != ""
+}
+
+func validLLMUsageRecordedData(data llmevents.LLMUsageRecordedData) bool {
+	return strings.TrimSpace(data.RequestID) != "" && data.WorkspaceID != "" && data.RunID != "" && strings.TrimSpace(data.Status) != ""
+}
+
+func validResultChangedData(data resultevents.ResultChangedData) bool {
+	return strings.TrimSpace(data.NotificationID) != "" && data.ResultID != "" && data.WorkspaceID != "" && data.RunID != "" && data.State != ""
+}
+
+func validWorkspaceChangedData(data workspaceevents.WorkspaceChangedData) bool {
+	return data.WorkspaceID != "" && data.State != ""
+}
+
+func validGoalDefinedData(data workspaceevents.GoalDefinedData) bool {
+	return data.GoalID != "" && data.WorkspaceID != "" && strings.TrimSpace(data.DefinitionRevision) != "" && strings.TrimSpace(data.LineageState) != ""
+}
+
+func validDoDDefinedData(data workspaceevents.DoDDefinedData) bool {
+	return data.DoDID != "" && data.WorkspaceID != "" && len(data.Items) > 0 && data.State != "" && strings.TrimSpace(data.DefinitionRevision) != "" && strings.TrimSpace(data.LineageState) != ""
+}
+
+func validGovernanceData(data governanceevents.GovernanceData) bool {
+	trace := data.Trace
+	return trace.ID != "" && trace.WorkspaceID != "" && trace.RunID != "" && strings.TrimSpace(trace.ItemType) != "" && strings.TrimSpace(trace.ItemID) != "" && strings.TrimSpace(trace.Status) != ""
+}
+
+func validTicketChangedData(data decisionevents.TicketChangedData) bool {
+	return strings.TrimSpace(data.NotificationID) != "" && data.TicketID != "" && data.WorkspaceID != "" && data.RunID != "" && data.State != ""
+}
+
+func validTicketResolvedData(data decisionevents.TicketResolvedData) bool {
+	return strings.TrimSpace(data.NotificationID) != "" && validTicketChangedData(data.Ticket) && data.ResolutionID != "" && strings.TrimSpace(data.ResolutionType) != ""
+}
+
 func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) {
 	err := inputErr
 	if err == nil {
-		err = s.appendRecord(event.Context(), record)
+		for attempt := 0; attempt < 3; attempt++ {
+			err = s.appendRecord(event.Context(), record)
+			if err == nil {
+				return
+			}
+			if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
+				break
+			}
+		}
 	}
 	// Result and Decision notifications carry stable owner-derived EventRecord
 	// IDs. A conflict for those identities is an idempotent replay; conflicts
 	// for any other event remain visible.
 	if errors.Is(err, common.ErrConflict) && record != nil &&
-		(strings.HasPrefix(string(record.ID), "result-notification/") || strings.HasPrefix(string(record.ID), "decision-notification/") || strings.HasPrefix(string(record.ID), "approval-notification/")) {
+		(strings.HasPrefix(string(record.ID), "result-notification/") || strings.HasPrefix(string(record.ID), "decision-notification/") || strings.HasPrefix(string(record.ID), "approval-notification/")) &&
+		s.samePersistedRecord(event.Context(), record) {
 		return
 	}
 	if err != nil {
@@ -520,10 +592,33 @@ func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstream
 	}
 }
 
+func (s *Service) samePersistedRecord(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
+	if s == nil || s.repo == nil || expected == nil || expected.ID == "" {
+		return false
+	}
+	if expected.WorkspaceID != "" {
+		bound, err := common.BindRuntimeWorkspaceContext(ctx, expected.WorkspaceID)
+		if err != nil {
+			return false
+		}
+		ctx = bound
+	}
+	current, err := s.repo.Get(ctx, expected.ID)
+	if err != nil || current == nil {
+		return false
+	}
+	return current.ID == expected.ID && current.Version == expected.Version && current.Topic == expected.Topic &&
+		current.SourceModule == expected.SourceModule && current.SubjectType == expected.SubjectType && current.SubjectID == expected.SubjectID &&
+		current.WorkspaceID == expected.WorkspaceID && current.RunID == expected.RunID && current.StepID == expected.StepID &&
+		current.Payload.Equal(expected.Payload)
+}
+
 func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
 	if s == nil || s.repo == nil || record == nil || record.Topic == "" {
 		return common.ErrInvalidArgument
 	}
+	s.appendMu.Lock()
+	defer s.appendMu.Unlock()
 	if record.ID == "" {
 		record.ID = common.EventRecordID(fmt.Sprintf("evt-%d-%d", time.Now().UTC().UnixNano(), eventRecordIDSequence.Add(1)))
 	}
@@ -533,8 +628,20 @@ func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.Eve
 	if record.OccurredAt == "" {
 		record.OccurredAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
+	record.Payload = recordpayload.SanitizeAuditPayload(record.Payload)
+	record.PayloadSummary = recordpayload.SanitizeAuditPayload(record.PayloadSummary)
+	if record.StreamPosition == 0 {
+		position, err := s.reserveStreamPosition(ctx)
+		if err != nil {
+			return err
+		}
+		record.StreamPosition = position
+	}
 	if record.WorkspaceID != "" {
 		return s.appendWorkspaceRecord(ctx, record)
+	}
+	if err := validateEventRecordForAppend(record); err != nil {
+		return err
 	}
 	if err := s.repo.Append(ctx, record); err != nil {
 		return err
@@ -542,12 +649,17 @@ func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.Eve
 	return s.publishRecordAppended(ctx, record)
 }
 
+func (s *Service) reserveStreamPosition(ctx context.Context) (int64, error) {
+	if s == nil || s.repo == nil {
+		return 0, common.ErrInvalidArgument
+	}
+	return s.repo.ReserveEventRecordStreamPosition(ctx)
+}
+
 func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
 	if s == nil || s.repo == nil || record == nil || record.WorkspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	s.revisionMu.Lock()
-	defer s.revisionMu.Unlock()
 	if s.revisions == nil {
 		s.revisions = map[common.WorkspaceID]int64{}
 	}
@@ -557,22 +669,31 @@ func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstream
 		if err != nil {
 			return err
 		}
-		items, err := s.repo.List(scopedCtx, workorchquerycontract.EventRecordQuery{WorkspaceID: record.WorkspaceID})
+		items, err := s.repo.List(scopedCtx, workorchquerycontract.EventRecordQuery{WorkspaceID: record.WorkspaceID, Limit: 1})
 		if err != nil {
 			return err
 		}
-		for _, item := range items {
-			if item != nil && item.Revision > current {
-				current = item.Revision
-			}
+		if len(items) == 1 && items[0] != nil {
+			current = items[0].Revision
 		}
 	}
 	record.Revision = current + 1
+	if err := validateEventRecordForAppend(record); err != nil {
+		return err
+	}
 	if err := s.repo.Append(ctx, record); err != nil {
 		return err
 	}
 	s.revisions[record.WorkspaceID] = record.Revision
 	return s.publishRecordAppended(ctx, record)
+}
+
+func validateEventRecordForAppend(record *eventstreammodel.EventRecord) error {
+	data, err := eventstreamevents.EventRecordDataFromModel(record)
+	if err != nil {
+		return err
+	}
+	return data.Validate()
 }
 
 func decisionTicketRecord(topic string, data decisionevents.TicketChangedData) *eventstreammodel.EventRecord {
@@ -863,19 +984,18 @@ func (s *Service) PurgeWorkspaceEvents(ctx context.Context, workspaceID common.W
 	if s == nil || s.repo == nil || workspaceID == "" {
 		return 0, common.ErrInvalidArgument
 	}
-	items, err := s.repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID})
-	if err != nil {
-		return 0, err
+	s.appendMu.Lock()
+	defer s.appendMu.Unlock()
+	deleted, err := s.repo.PurgeWorkspace(ctx, workspaceID)
+	if err == nil {
+		s.forgetWorkspaceRevision(workspaceID)
 	}
-	deleted := 0
-	for _, item := range items {
-		if item == nil || item.WorkspaceID != workspaceID {
-			continue
-		}
-		if err := s.repo.Delete(ctx, item.ID); err != nil {
-			return deleted, err
-		}
-		deleted++
+	return deleted, err
+}
+
+func (s *Service) forgetWorkspaceRevision(workspaceID common.WorkspaceID) {
+	if s == nil || workspaceID == "" {
+		return
 	}
-	return deleted, nil
+	delete(s.revisions, workspaceID)
 }

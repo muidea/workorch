@@ -6,14 +6,12 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func DefineOrConsolidateWorkspaceGoalView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, text string) (workorchmanagementcontract.Goal, error) {
-	eventRecords := readmodelports.EventRecordReader{Hub: hub}
-	item, err := DefineOrConsolidateWorkspaceGoal(ctx, hub, eventRecords, workspaceID, text)
+	item, err := DefineOrConsolidateWorkspaceGoal(ctx, hub, workspaceID, text)
 	if err != nil {
 		return workorchmanagementcontract.Goal{}, err
 	}
@@ -50,8 +48,7 @@ func ReadGoalView(ctx context.Context, hub magicevent.Hub, workspaceID common.Wo
 }
 
 func ListConsolidatedWorkspaceGoalViews(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
-	eventRecords := readmodelports.EventRecordReader{Hub: hub}
-	items, err := ListConsolidatedWorkspaceGoals(ctx, hub, eventRecords, workspaceID)
+	items, err := ListConsolidatedWorkspaceGoals(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err
 	}

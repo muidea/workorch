@@ -9,6 +9,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	eventstreamcommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 )
 
@@ -34,7 +35,7 @@ func newEventCollector(hub magicevent.Hub) *eventCollector {
 	collector.observerID = observerID
 	collector.SubscribeMatchedFunc(observerID, observerID, eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
-		if !ok || !observed.ValidWorkorchEventRecord(data.Record) {
+		if !ok || event.Source() != eventstreamcommon.ModuleID || data.Record.Validate() != nil || !observed.ValidWorkorchEventRecord(data.Record) {
 			return
 		}
 		collector.mu.Lock()

@@ -10,7 +10,6 @@ import (
 func SelectWorkspaceExecutionGoal(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error),
-	eventRecords EventRecordLister,
 	workspaceID common.WorkspaceID,
 	requestedID common.GoalID,
 ) (*workspacemodel.Goal, error) {
@@ -18,7 +17,7 @@ func SelectWorkspaceExecutionGoal(
 	if err != nil {
 		return nil, err
 	}
-	items = OrderedWorkspaceGoals(ctx, eventRecords, workspaceID, items)
+	items = OrderedWorkspaceGoals(items)
 	latest := LatestWorkspaceGoal(items)
 	if requestedID != "" {
 		for _, item := range items {
@@ -40,7 +39,6 @@ func SelectWorkspaceExecutionGoal(
 func SelectWorkspaceExecutionDoD(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error),
-	eventRecords EventRecordLister,
 	workspaceID common.WorkspaceID,
 	requestedID common.DoDID,
 ) (*workspacemodel.DoD, error) {
@@ -48,7 +46,7 @@ func SelectWorkspaceExecutionDoD(
 	if err != nil {
 		return nil, err
 	}
-	items = OrderedWorkspaceDoDs(ctx, eventRecords, workspaceID, items)
+	items = OrderedWorkspaceDoDs(items)
 	readyItems := make([]*workspacemodel.DoD, 0, len(items))
 	for _, item := range items {
 		if item != nil && (item.State == common.DoDStateReady || item.State == common.DoDStateSatisfied) {

@@ -20,6 +20,7 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
@@ -76,8 +77,9 @@ type ArtifactRepository struct {
 }
 
 type EventRecordRepository struct {
-	mu    sync.RWMutex
-	items map[string]*eventstream.EventRecord
+	mu             sync.RWMutex
+	items          map[string]*eventstream.EventRecord
+	streamPosition int64
 }
 
 func workspaceScopedKey(workspaceID common.WorkspaceID, id string) string {
@@ -927,12 +929,31 @@ func NewEventRecordRepository() *EventRecordRepository {
 func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.EventRecord) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.StreamPosition > r.streamPosition {
+		r.streamPosition = item.StreamPosition
+	}
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
 	r.items[key] = cloneEventRecord(item)
 	return nil
+}
+
+func (r *EventRecordRepository) ReserveEventRecordStreamPosition(_ context.Context) (int64, error) {
+	if r == nil {
+		return 0, common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.streamPosition == int64(^uint64(0)>>1) {
+		return 0, common.ErrConflict
+	}
+	r.streamPosition++
+	return r.streamPosition, nil
 }
 
 func (r *EventRecordRepository) Get(ctx context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
@@ -984,6 +1005,25 @@ func (r *EventRecordRepository) Delete(ctx context.Context, id common.EventRecor
 	}
 	delete(r.items, key)
 	return nil
+}
+
+// PurgeWorkspace physically removes the target workspace's audit records.
+// It is an optional repository capability used by the Eventstream owner; the
+// base repository interface remains append/get/list/delete.
+func (r *EventRecordRepository) PurgeWorkspace(_ context.Context, workspaceID common.WorkspaceID) (int, error) {
+	if r == nil || workspaceID == "" {
+		return 0, common.ErrInvalidArgument
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleted := 0
+	for key, item := range r.items {
+		if item != nil && item.WorkspaceID == workspaceID {
+			delete(r.items, key)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 func NewWorkspaceRepository() *WorkspaceRepository {
@@ -2771,12 +2811,7 @@ func listEventRecords(items map[string]*eventstream.EventRecord, query workorchq
 		}
 		ret = append(ret, cloneEventRecord(item))
 	}
-	sort.SliceStable(ret, func(i, j int) bool {
-		if ret[i].OccurredAt == ret[j].OccurredAt {
-			return string(ret[i].ID) < string(ret[j].ID)
-		}
-		return ret[i].OccurredAt < ret[j].OccurredAt
-	})
+	repository.SortEventRecords(ret, query)
 	if query.CursorAfterID != "" {
 		filtered := ret[:0]
 		for _, item := range ret {

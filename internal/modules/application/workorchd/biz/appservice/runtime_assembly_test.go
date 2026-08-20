@@ -32,19 +32,29 @@ type managedRuntimeRecordFixture struct {
 }
 
 func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record managedRuntimeRecordFixture) error {
+	if record.ID == "" {
+		record.ID = "event-" + record.SubjectID
+	}
+	if record.OccurredAt == "" {
+		record.OccurredAt = "2026-08-20T00:00:00Z"
+	}
+	if record.SourceModule == "" {
+		record.SourceModule = "blocks/run"
+	}
 	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
-		ID:           common.EventRecordID(record.ID),
-		Version:      record.Version,
-		Topic:        record.Topic,
-		OccurredAt:   record.OccurredAt,
-		SourceModule: record.SourceModule,
-		SubjectType:  record.SubjectType,
-		SubjectID:    record.SubjectID,
-		WorkspaceID:  common.WorkspaceID(record.WorkspaceID),
-		RunID:        common.RunID(record.RunID),
-		StepID:       common.StepID(record.StepID),
-		Revision:     record.Revision,
-		Payload:      mustManagedRuntimePayload(record.Payload),
+		ID:             common.EventRecordID(record.ID),
+		Version:        record.Version,
+		Topic:          record.Topic,
+		OccurredAt:     record.OccurredAt,
+		SourceModule:   record.SourceModule,
+		SubjectType:    record.SubjectType,
+		SubjectID:      record.SubjectID,
+		WorkspaceID:    common.WorkspaceID(record.WorkspaceID),
+		RunID:          common.RunID(record.RunID),
+		StepID:         common.StepID(record.StepID),
+		StreamPosition: 1,
+		Revision:       record.Revision,
+		Payload:        mustManagedRuntimePayload(record.Payload),
 	})
 	if err != nil {
 		return err

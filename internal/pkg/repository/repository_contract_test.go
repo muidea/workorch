@@ -1043,6 +1043,74 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if len(latest) != 2 || latest[0].ID != second.ID || latest[1].ID != third.ID {
 		t.Fatalf("latest events = %+v, want newest two in chronological order", latest)
 	}
+	for _, item := range []*eventstreammodel.EventRecord{
+		{
+			ID: "event-revision-1", Topic: "/revision/test", OccurredAt: "2026-04-28T23:59:00Z",
+			SourceModule: "blocks/test", SubjectType: "revision-order", SubjectID: "revision-1",
+			WorkspaceID: "ws-revision-order", RunID: "run-revision-order", Revision: 1,
+		},
+		{
+			ID: "event-revision-2", Topic: "/revision/test", OccurredAt: "2026-04-28T00:00:00Z",
+			SourceModule: "blocks/test", SubjectType: "revision-order", SubjectID: "revision-2",
+			WorkspaceID: "ws-revision-order", RunID: "run-revision-order", Revision: 2,
+		},
+	} {
+		if err := repo.Append(ctx, item); err != nil {
+			t.Fatalf("append revision-ordered event: %v", err)
+		}
+	}
+	revisionOrdered, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: "ws-revision-order", SubjectType: "revision-order"})
+	if err != nil {
+		t.Fatalf("list revision-ordered events: %v", err)
+	}
+	if len(revisionOrdered) != 2 || revisionOrdered[0].ID != "event-revision-1" || revisionOrdered[1].ID != "event-revision-2" {
+		t.Fatalf("revision-ordered events = %+v, want revision order despite clock skew", revisionOrdered)
+	}
+	afterRevisionCursor, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{
+		WorkspaceID: "ws-revision-order", SubjectType: "revision-order", CursorAfterID: "event-revision-1", Limit: 1,
+	})
+	if err != nil || len(afterRevisionCursor) != 1 || afterRevisionCursor[0].ID != "event-revision-2" {
+		t.Fatalf("revision cursor events = %+v err=%v", afterRevisionCursor, err)
+	}
+	firstPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
+	if err != nil {
+		t.Fatalf("reserve first stream position: %v", err)
+	}
+	secondPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
+	if err != nil || secondPosition <= firstPosition {
+		t.Fatalf("stream positions = %d, %d err=%v", firstPosition, secondPosition, err)
+	}
+	for _, item := range []*eventstreammodel.EventRecord{
+		{
+			ID: "event-position-1", Topic: "/position/test", OccurredAt: "2026-04-28T23:59:00Z",
+			SourceModule: "blocks/test", SubjectType: "stream-position", SubjectID: "position-1",
+			WorkspaceID: "ws-position-a", RunID: "run-position-a", StreamPosition: firstPosition, Revision: 1,
+		},
+		{
+			ID: "event-position-2", Topic: "/position/test", OccurredAt: "2026-04-28T00:00:00Z",
+			SourceModule: "blocks/test", SubjectType: "stream-position", SubjectID: "position-2",
+			WorkspaceID: "ws-position-b", RunID: "run-position-b", StreamPosition: secondPosition, Revision: 1,
+		},
+	} {
+		if err := repo.Append(ctx, item); err != nil {
+			t.Fatalf("append stream-position event: %v", err)
+		}
+	}
+	positionOrdered, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{SubjectType: "stream-position"})
+	if err != nil || len(positionOrdered) != 2 || positionOrdered[0].ID != "event-position-1" || positionOrdered[1].ID != "event-position-2" {
+		t.Fatalf("position-ordered events = %+v err=%v", positionOrdered, err)
+	}
+	afterPositionCursor, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{SubjectType: "stream-position", CursorAfterID: "event-position-1", Limit: 1})
+	if err != nil || len(afterPositionCursor) != 1 || afterPositionCursor[0].ID != "event-position-2" {
+		t.Fatalf("position cursor events = %+v err=%v", afterPositionCursor, err)
+	}
+	if _, err := repo.PurgeWorkspace(ctx, "ws-position-b"); err != nil {
+		t.Fatalf("purge highest-position workspace: %v", err)
+	}
+	thirdPosition, err := repo.ReserveEventRecordStreamPosition(ctx)
+	if err != nil || thirdPosition <= secondPosition {
+		t.Fatalf("post-purge stream position = %d err=%v, want > %d", thirdPosition, err, secondPosition)
+	}
 	if _, err := repo.Get(ctx, common.EventRecordID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing event record err = %v, want not found", err)
 	}

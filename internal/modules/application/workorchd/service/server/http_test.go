@@ -1721,24 +1721,14 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	lines, readErr := readSSELines(resp.Body)
 	waitSSEConnected(t, lines, readErr)
 
-	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
-		Topic:       workspaceevents.TopicWorkspaceStateChanged,
-		WorkspaceID: "ws-stream-replay",
-		Payload:     recordpayload.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
-	}); err != nil {
-		t.Fatalf("publish first event: %v", err)
-	}
+	postServerTestWorkspaceState(context.Background(), testStateCommandHub(state), "ws-stream-replay")
 	firstID, first := readSSEEnvelope(t, lines, readErr)
 	if firstID == "" || first.Topic != workspaceevents.TopicWorkspaceStateChanged {
 		t.Fatalf("first replay baseline = %q %+v", firstID, first)
 	}
-	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
-		Topic:       runevents.TopicRunStateChanged,
-		WorkspaceID: "ws-stream-replay",
-		RunID:       "run-replay",
-		Payload:     recordpayload.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
-	}); err != nil {
-		t.Fatalf("publish replay event: %v", err)
+	postServerTestRunState(context.Background(), testStateCommandHub(state), "ws-stream-replay", "run-replay")
+	if _, appended := readSSEEnvelope(t, lines, readErr); appended.Topic != runevents.TopicRunStateChanged || appended.RunID != "run-replay" {
+		t.Fatalf("appended replay event = %+v", appended)
 	}
 	_ = resp.Body.Close()
 
@@ -1780,24 +1770,14 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	lines, readErr := readSSELines(resp.Body)
 	waitSSEConnected(t, lines, readErr)
 
-	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
-		Topic:       workspaceevents.TopicWorkspaceStateChanged,
-		WorkspaceID: "ws-stream-query-replay",
-		Payload:     recordpayload.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
-	}); err != nil {
-		t.Fatalf("publish first event: %v", err)
-	}
+	postServerTestWorkspaceState(context.Background(), testStateCommandHub(state), "ws-stream-query-replay")
 	firstID, first := readSSEEnvelope(t, lines, readErr)
 	if firstID == "" || first.Topic != workspaceevents.TopicWorkspaceStateChanged {
 		t.Fatalf("first replay baseline = %q %+v", firstID, first)
 	}
-	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
-		Topic:       runevents.TopicRunStateChanged,
-		WorkspaceID: "ws-stream-query-replay",
-		RunID:       "run-query-replay",
-		Payload:     recordpayload.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
-	}); err != nil {
-		t.Fatalf("publish replay event: %v", err)
+	postServerTestRunState(context.Background(), testStateCommandHub(state), "ws-stream-query-replay", "run-query-replay")
+	if _, appended := readSSEEnvelope(t, lines, readErr); appended.Topic != runevents.TopicRunStateChanged || appended.RunID != "run-query-replay" {
+		t.Fatalf("appended query replay event = %+v", appended)
 	}
 	_ = resp.Body.Close()
 

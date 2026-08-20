@@ -58,10 +58,10 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		if lastEventID == "" {
 			lastEventID = strings.TrimSpace(r.URL.Query().Get("lastEventId"))
 		}
-		for _, envelope := range state.replayEventStreamEnvelopes(r.Context(), lastEventID, workspaceID, runID, streamView, filterEnvelope) {
-			if !writeSSEEnvelope(w, flusher, envelope) {
-				return
-			}
+		if !state.replayEventStream(r.Context(), lastEventID, workspaceID, runID, streamView, filterEnvelope, func(envelope streamEvent) bool {
+			return writeSSEEnvelope(w, flusher, envelope)
+		}) {
+			return
 		}
 		heartbeat := time.NewTicker(15 * time.Second)
 		defer heartbeat.Stop()

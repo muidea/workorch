@@ -16,9 +16,14 @@ func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, que
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: query.Clone()})
+	query = query.Normalized()
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventQuery{
+		WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic, ExcludeTopics: append([]string(nil), query.ExcludeTopics...),
+		SubjectType: query.SubjectType, SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID,
+		OccurredAfter: query.OccurredAfter, OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload,
+	}})
 	ownerevent.BindLane(event, eventstreamevents.Contracts(), eventstreamevents.TopicEventStreamCommandList, "event_record", "list", query.WorkspaceID, query.RunID, "")
-	response, err := ownerevent.EventStream(hub.Send(event), eventstreamevents.TopicEventStreamCommandList)
+	response, err := ownerevent.EventStream[eventstreamevents.ListEventsResult](hub.Send(event), eventstreamevents.TopicEventStreamCommandList)
 	if err != nil {
 		return nil, err
 	}

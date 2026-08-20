@@ -63,8 +63,13 @@ func (data DecisionResolutionPayloadData) EventPayload() workorcheventpayload.Pa
 	fields = append(fields,
 		workorcheventpayload.StringField(PayloadKeyResolutionID, string(data.ResolutionID)),
 		workorcheventpayload.StringField(PayloadKeyType, data.Type),
-		workorcheventpayload.ObjectField(PayloadKeyPayload, data.Payload),
 	)
+	if len(data.Payload.Fields) > 0 {
+		fields = append(fields,
+			workorcheventpayload.StringField(PayloadKeyPayloadSHA256, PayloadSHA256(data.Payload)),
+			workorcheventpayload.IntField(PayloadKeyPayloadBytes, int64(len(data.Payload.CanonicalString()))),
+		)
+	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyContinuationAction, data.ContinuationAction)
 	fields = appendOptionalPayloadString(fields, PayloadKeyResumeRunID, string(data.ResumeRunID))
 	fields = appendOptionalPayloadString(fields, PayloadKeySuccessorRunID, string(data.SuccessorRunID))
@@ -78,11 +83,11 @@ func (data ApprovalPayloadData) EventPayload() workorcheventpayload.Payload {
 	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyAction, data.Action)
 	if len(data.Context.Fields) > 0 {
-		fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyContext, data.Context))
+		fields = append(fields, workorcheventpayload.StringField(PayloadKeyContextSHA256, PayloadSHA256(data.Context)))
 	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyResolutionID, string(data.ResolutionID))
 	if len(data.ResolutionContext.Fields) > 0 {
-		fields = append(fields, workorcheventpayload.ObjectField(PayloadKeyResolutionContext, data.ResolutionContext))
+		fields = append(fields, workorcheventpayload.StringField(PayloadKeyResolutionContextSHA256, PayloadSHA256(data.ResolutionContext)))
 	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyResolvedByKind, data.ResolvedByKind)
 	fields = appendOptionalPayloadString(fields, PayloadKeyResolvedBy, data.ResolvedBy)

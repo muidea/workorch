@@ -47,7 +47,9 @@ func TestTypedEventPayloadDecodersRoundTrip(t *testing.T) {
 		SuccessorRunID:            "run-successor",
 	}
 	decodedResolution, ok := DecodeDecisionResolutionEventPayload(resolution.EventPayload())
-	if !ok || decodedResolution.ResolutionID != resolution.ResolutionID || decodedResolution.Type != resolution.Type || !decodedResolution.Payload.Equal(resolution.Payload) {
+	resolutionPayload := resolution.EventPayload()
+	resolutionHash, _ := resolutionPayload.String(PayloadKeyPayloadSHA256)
+	if !ok || decodedResolution.ResolutionID != resolution.ResolutionID || decodedResolution.Type != resolution.Type || len(decodedResolution.Payload.Fields) != 0 || resolutionHash == "" {
 		t.Fatalf("resolution round trip = %+v/%v, want %+v", decodedResolution, ok, resolution)
 	}
 
@@ -58,9 +60,12 @@ func TestTypedEventPayloadDecodersRoundTrip(t *testing.T) {
 		ResolvedByKind:    "human_operator", ResolvedBy: "application/workorchd/appservice",
 	}
 	decodedApproval, ok := DecodeApprovalEventPayload(approval.EventPayload())
+	approvalPayload := approval.EventPayload()
+	contextHash, _ := approvalPayload.String(PayloadKeyContextSHA256)
+	resolutionContextHash, _ := approvalPayload.String(PayloadKeyResolutionContextSHA256)
 	if !ok || decodedApproval.Reason != approval.Reason || decodedApproval.Action != approval.Action || decodedApproval.State != approval.State ||
 		decodedApproval.ResolutionID != approval.ResolutionID || decodedApproval.ResolvedByKind != approval.ResolvedByKind || decodedApproval.ResolvedBy != approval.ResolvedBy ||
-		!decodedApproval.Context.Equal(approval.Context) || !decodedApproval.ResolutionContext.Equal(approval.ResolutionContext) {
+		len(decodedApproval.Context.Fields) != 0 || len(decodedApproval.ResolutionContext.Fields) != 0 || contextHash == "" || resolutionContextHash == "" {
 		t.Fatalf("approval round trip = %+v/%v, want %+v", decodedApproval, ok, approval)
 	}
 }

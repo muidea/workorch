@@ -58,7 +58,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 		}}
 	})
 
-	item, err := DefineOrConsolidateWorkspaceGoal(ctx, hub, nil, workspaceID, "ship the feature")
+	item, err := DefineOrConsolidateWorkspaceGoal(ctx, hub, workspaceID, "ship the feature")
 	if err != nil {
 		t.Fatalf("DefineOrConsolidateWorkspaceGoal err = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		return workspaceevents.WorkspaceCommandResult{}
 	})
 
-	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, nil, workspaceID)
+	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, workspaceID)
 	if err != nil {
 		t.Fatalf("ListConsolidatedWorkspaceDoDs err = %v", err)
 	}

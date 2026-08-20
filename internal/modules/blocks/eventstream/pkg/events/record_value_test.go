@@ -53,3 +53,37 @@ func TestEventRecordDataClonesPayload(t *testing.T) {
 		t.Fatalf("cloned payload state = %q/%v, want running/true", state, ok)
 	}
 }
+
+func TestEventRecordDataReadBoundarySanitizesLegacyPayload(t *testing.T) {
+	input := &eventstreammodel.EventRecord{
+		ID: "event-legacy-secret",
+		Payload: workorcheventpayload.New(
+			workorcheventpayload.StringField("authorization", "Bearer legacy-secret"),
+			workorcheventpayload.StringField("summary", "safe"),
+		),
+	}
+	data, err := EventRecordDataFromModel(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorization, _ := data.Payload.String("authorization"); authorization != "[redacted]" {
+		t.Fatalf("authorization = %q, want redacted", authorization)
+	}
+	if authorization, _ := data.Model().Payload.String("authorization"); authorization != "[redacted]" {
+		t.Fatalf("round-trip authorization = %q, want redacted", authorization)
+	}
+}
+
+func TestEventRecordDataValidateRequiresOwnerAppendIdentity(t *testing.T) {
+	data := EventRecordData{
+		ID: "event-valid", Version: "workorch.event", Topic: "/test", OccurredAt: "2026-08-20T00:00:00Z",
+		SourceModule: "blocks/test", SubjectType: "test", SubjectID: "subject-valid", StreamPosition: 1,
+	}
+	if err := data.Validate(); err != nil {
+		t.Fatalf("valid event record: %v", err)
+	}
+	data.StreamPosition = 0
+	if err := data.Validate(); err == nil {
+		t.Fatal("record without stream position validated")
+	}
+}

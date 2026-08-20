@@ -11,7 +11,6 @@ import (
 func EffectiveWorkspaceDoD(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error),
-	eventRecords EventRecordLister,
 	workspaceID common.WorkspaceID,
 	selected *workspacemodel.DoD,
 ) (*workspacemodel.DoD, []map[string]any, error) {
@@ -22,7 +21,7 @@ func EffectiveWorkspaceDoD(
 	if err != nil {
 		return nil, nil, err
 	}
-	items = OrderedWorkspaceDoDs(ctx, eventRecords, workspaceID, items)
+	items = OrderedWorkspaceDoDs(items)
 	contexts := make([]map[string]any, 0, len(items))
 	mergedItems := make([]string, 0)
 	seen := map[string]struct{}{}

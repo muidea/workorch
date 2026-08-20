@@ -36,7 +36,7 @@ func ConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, workspace
 	return ConsolidateGoal(ctx, hub, workspaceID, plan.CanonicalID, plan.Text, plan.ObsoleteIDs)
 }
 
-func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID, text string) (*workspacemodel.Goal, error) {
+func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, text string) (*workspacemodel.Goal, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, common.ErrInvalidArgument
@@ -49,19 +49,19 @@ func DefineOrConsolidateWorkspaceGoal(ctx context.Context, hub magicevent.Hub, e
 	if err != nil {
 		return nil, err
 	}
-	existing = activationcore.OrderedWorkspaceGoals(ctx, eventRecords, workspaceID, existing)
+	existing = activationcore.OrderedWorkspaceGoals(existing)
 	if len(existing) > 0 {
 		return ConsolidateWorkspaceGoal(ctx, hub, workspaceID, existing, text)
 	}
 	return defineNewWorkspaceGoal(ctx, hub, workspaceID, text)
 }
 
-func ListConsolidatedWorkspaceGoals(ctx context.Context, hub magicevent.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+func ListConsolidatedWorkspaceGoals(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
 	items, err := ListGoalsByWorkspace(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	items = activationcore.OrderedWorkspaceGoals(ctx, eventRecords, workspaceID, items)
+	items = activationcore.OrderedWorkspaceGoals(items)
 	if len(items) <= 1 {
 		return items, nil
 	}

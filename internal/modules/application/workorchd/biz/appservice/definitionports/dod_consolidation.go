@@ -35,7 +35,7 @@ func ConsolidateWorkspaceDoD(ctx context.Context, hub magicevent.Hub, workspaceI
 	return ConsolidateDoD(ctx, hub, workspaceID, plan.CanonicalID, plan.Items, plan.ObsoleteIDs)
 }
 
-func DefineOrConsolidateWorkspaceDoD(ctx context.Context, hub magicevent.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID, items []string) (*workspacemodel.DoD, error) {
+func DefineOrConsolidateWorkspaceDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, items []string) (*workspacemodel.DoD, error) {
 	items = definitioncore.NormalizeDoDItems(items)
 	if len(items) == 0 {
 		return nil, common.ErrInvalidArgument
@@ -44,7 +44,7 @@ func DefineOrConsolidateWorkspaceDoD(ctx context.Context, hub magicevent.Hub, ev
 	if err != nil {
 		return nil, err
 	}
-	existing = activationcore.OrderedWorkspaceDoDs(ctx, eventRecords, workspaceID, existing)
+	existing = activationcore.OrderedWorkspaceDoDs(existing)
 	if len(existing) > 0 {
 		return ConsolidateWorkspaceDoD(ctx, hub, workspaceID, existing, items)
 	}
@@ -62,12 +62,12 @@ func DefineOrConsolidateWorkspaceDoD(ctx context.Context, hub magicevent.Hub, ev
 	return nil, common.ErrConflict
 }
 
-func ListConsolidatedWorkspaceDoDs(ctx context.Context, hub magicevent.Hub, eventRecords activationcore.EventRecordLister, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+func ListConsolidatedWorkspaceDoDs(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 	items, err := ListDoDsByWorkspace(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	items = activationcore.OrderedWorkspaceDoDs(ctx, eventRecords, workspaceID, items)
+	items = activationcore.OrderedWorkspaceDoDs(items)
 	if len(items) <= 1 {
 		return items, nil
 	}

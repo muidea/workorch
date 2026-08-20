@@ -1,6 +1,8 @@
 package recordpayload
 
 import (
+	"strings"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -71,7 +73,10 @@ func (data RunPayloadData) EventPayload() workorcheventpayload.Payload {
 }
 
 func (data GoalPayloadData) EventPayload() workorcheventpayload.Payload {
-	fields := []workorcheventpayload.Field{workorcheventpayload.StringField(PayloadKeyText, data.Text)}
+	fields := []workorcheventpayload.Field{
+		workorcheventpayload.StringField(PayloadKeyTextSHA256, SHA256String(strings.TrimSpace(data.Text))),
+		workorcheventpayload.IntField(PayloadKeyTextBytes, int64(len(data.Text))),
+	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyDefinitionRevision, data.DefinitionRevision)
 	fields = appendOptionalPayloadString(fields, PayloadKeyPreviousDefinitionHash, data.PreviousDefinitionHash)
 	fields = appendOptionalPayloadString(fields, PayloadKeyPreviousGoalID, string(data.PreviousGoalID))
@@ -80,8 +85,15 @@ func (data GoalPayloadData) EventPayload() workorcheventpayload.Payload {
 }
 
 func (data DoDPayloadData) EventPayload() workorcheventpayload.Payload {
+	normalizedItems := make([]string, 0, len(data.Items))
+	for _, item := range data.Items {
+		if item = strings.TrimSpace(item); item != "" {
+			normalizedItems = append(normalizedItems, item)
+		}
+	}
 	fields := []workorcheventpayload.Field{
-		workorcheventpayload.StringArrayField(PayloadKeyItems, data.Items),
+		workorcheventpayload.StringField(PayloadKeyItemsSHA256, SHA256String(strings.Join(normalizedItems, "\n"))),
+		workorcheventpayload.IntField(PayloadKeyItemCount, int64(len(normalizedItems))),
 		workorcheventpayload.StringField(PayloadKeyState, string(data.State)),
 	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyDefinitionRevision, data.DefinitionRevision)

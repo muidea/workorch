@@ -5,14 +5,12 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func DefineOrConsolidateWorkspaceDoDView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, items []string) (workorchmanagementcontract.DoD, error) {
-	eventRecords := readmodelports.EventRecordReader{Hub: hub}
-	item, err := DefineOrConsolidateWorkspaceDoD(ctx, hub, eventRecords, workspaceID, items)
+	item, err := DefineOrConsolidateWorkspaceDoD(ctx, hub, workspaceID, items)
 	if err != nil {
 		return workorchmanagementcontract.DoD{}, err
 	}
@@ -45,8 +43,7 @@ func ReadDoDView(ctx context.Context, hub magicevent.Hub, workspaceID common.Wor
 }
 
 func ListConsolidatedWorkspaceDoDViews(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
-	eventRecords := readmodelports.EventRecordReader{Hub: hub}
-	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, eventRecords, workspaceID)
+	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err
 	}

@@ -4,14 +4,12 @@ import (
 	"context"
 	"testing"
 
-	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
-	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -22,14 +20,6 @@ func mustActivationPayload(t *testing.T, input map[string]any) workorcheventpayl
 		t.Fatalf("decode activation payload: %v", err)
 	}
 	return payload
-}
-
-type fakeEventRecordLister struct {
-	items []*eventstreammodel.EventRecord
-}
-
-func (f fakeEventRecordLister) List(context.Context, workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
-	return append([]*eventstreammodel.EventRecord(nil), f.items...), nil
 }
 
 type fakeWorkspaceTemplateReader struct {
@@ -47,17 +37,12 @@ func (f fakeWorkspaceTemplateReader) List(context.Context) ([]*workspacemodel.Wo
 	return []*workspacemodel.WorkspaceTemplate{f.item}, nil
 }
 
-func TestOrderedWorkspaceGoalsUsesLatestEventOrder(t *testing.T) {
-	ctx := context.Background()
+func TestOrderedWorkspaceGoalsUsesOwnerRevisionNotInputOrAuditOrder(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-001")
-	first := &workspacemodel.Goal{ID: "goal-001", WorkspaceID: workspaceID, Text: "first"}
-	second := &workspacemodel.Goal{ID: "goal-002", WorkspaceID: workspaceID, Text: "second"}
+	first := &workspacemodel.Goal{ID: "goal-z", WorkspaceID: workspaceID, Text: "first", DefinitionRevision: "goal:00000000000000000001:first"}
+	second := &workspacemodel.Goal{ID: "goal-a", WorkspaceID: workspaceID, Text: "second", DefinitionRevision: "goal:00000000000000000002:second"}
 
-	items := OrderedWorkspaceGoals(ctx, fakeEventRecordLister{items: []*eventstreammodel.EventRecord{
-		{ID: "evt-001", SubjectID: string(second.ID)},
-		{ID: "evt-002", SubjectID: string(first.ID)},
-		{ID: "evt-003", SubjectID: string(second.ID)},
-	}}, workspaceID, []*workspacemodel.Goal{first, second})
+	items := OrderedWorkspaceGoals([]*workspacemodel.Goal{second, first})
 
 	if len(items) != 2 {
 		t.Fatalf("ordered goals len = %d, want 2", len(items))
@@ -75,7 +60,7 @@ func TestEffectiveWorkspaceDoDMergesReadyItems(t *testing.T) {
 
 	effective, contexts, err := EffectiveWorkspaceDoD(ctx, func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 		return []*workspacemodel.DoD{first, second}, nil
-	}, nil, workspaceID, first)
+	}, workspaceID, first)
 	if err != nil {
 		t.Fatalf("EffectiveWorkspaceDoD err = %v", err)
 	}
