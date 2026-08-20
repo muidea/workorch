@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,10 +30,10 @@ func (a *RuntimeAdapter) CapabilityState(ctx context.Context, requirementID, sub
 	initialized := err == nil
 	unstaged, staged := false, false
 	if initialized {
-		for _, change := range status.ChangedFiles {
-			unstaged = unstaged || change.Unstaged || change.Untracked
-			staged = staged || change.Staged
+		if status.Truncated {
+			return runtimecontract.RuntimeCapabilityStateSnapshot{}, fmt.Errorf("%w: Git repository state exceeds the bounded owner observation", common.ErrConflict)
 		}
+		unstaged, staged = gitStatusStateFlags(status.ChangedFiles)
 		if unstaged {
 			sequence = append(sequence, runtimecontract.RuntimeRequiredOperationVariant{RequirementID: "stage-changes", Kind: gitcommon.StepKindWrite, VariantID: gitcommon.OperationAdd})
 		}
@@ -67,7 +68,7 @@ func (a *RuntimeAdapter) CapabilityState(ctx context.Context, requirementID, sub
 	if len(sequence) > 0 {
 		disposition = runtimecontract.RuntimeCapabilityStateSequenceRequired
 	}
-	revision := strings.Join([]string{status.RepoRoot, status.HeadCommit, fmt.Sprintf("%t", initialized), fmt.Sprintf("%t", unstaged), fmt.Sprintf("%t", staged)}, "|")
+	revision := gitRepositoryStateRevision(status, initialized, unstaged, staged)
 	hash := sha256.Sum256([]byte(revision))
 	snapshot := runtimecontract.RuntimeCapabilityStateSnapshot{
 		RequirementID: requirementID, AcquisitionKey: "capability-state/" + requirementID,
@@ -78,4 +79,48 @@ func (a *RuntimeAdapter) CapabilityState(ctx context.Context, requirementID, sub
 	}
 	snapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(snapshot)
 	return snapshot, nil
+}
+
+func gitStatusStateFlags(changes []GitFileChange) (unstaged, staged bool) {
+	for _, change := range changes {
+		unstaged = unstaged || change.Unstaged || change.Untracked
+		staged = staged || change.Staged
+	}
+	return unstaged, staged
+}
+
+const (
+	gitRepositoryRevisionPrefix = "git-state-v2/repository/"
+	gitAbsentRevisionPrefix     = "git-state-v2/absent/"
+)
+
+// gitRepositoryStateRevision binds Git authority to the complete bounded
+// porcelain observation instead of only HEAD plus dirty booleans. File-owner
+// workspace-tree freshness remains a separate exact dependency.
+func gitRepositoryStateRevision(status RuntimeOperationResult, initialized, unstaged, staged bool) string {
+	rows := make([]string, 0, len(status.ChangedFiles))
+	for _, change := range status.ChangedFiles {
+		rows = append(rows, strings.Join([]string{
+			strings.TrimSpace(change.Path), strings.TrimSpace(change.OldPath), strings.TrimSpace(change.Status),
+			fmt.Sprintf("%t", change.Staged), fmt.Sprintf("%t", change.Unstaged), fmt.Sprintf("%t", change.Untracked),
+		}, "\x00"))
+	}
+	sort.Strings(rows)
+	h := sha256.New()
+	for _, value := range []string{
+		strings.TrimSpace(status.RepoRoot), strings.TrimSpace(status.HeadCommit), strings.TrimSpace(status.Branch),
+		fmt.Sprintf("%t", status.DetachedHead), fmt.Sprintf("%t", status.UnbornHead),
+		fmt.Sprintf("%t", initialized), fmt.Sprintf("%t", unstaged), fmt.Sprintf("%t", staged),
+		fmt.Sprintf("%d", status.AheadBehind.Ahead), fmt.Sprintf("%d", status.AheadBehind.Behind),
+	} {
+		_, _ = fmt.Fprintf(h, "%d:%s|", len(value), value)
+	}
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(h, "%d:%s|", len(row), row)
+	}
+	prefix := gitAbsentRevisionPrefix
+	if initialized {
+		prefix = gitRepositoryRevisionPrefix
+	}
+	return prefix + hex.EncodeToString(h.Sum(nil))
 }

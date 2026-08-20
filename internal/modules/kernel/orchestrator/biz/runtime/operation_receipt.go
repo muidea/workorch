@@ -18,12 +18,22 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	if err != nil {
 		return runtimecontract.RuntimeOperationReceipt{}, false, err
 	}
+	dispatch, active, found := operationReceiptDispatch(aggregate, dispatchID)
+	if !found {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query dispatch is not present in runtime aggregate", common.ErrConflict)
+	}
+	if _, found := candidateOperationByID(dispatch.Candidate, operationID); !found {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query operation is not sealed in dispatch", common.ErrConflict)
+	}
+	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operationID)
+	if !found || execution.ExecutionKey != strings.TrimSpace(executionKey) || execution.Fence != fence {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query does not match sealed execution key/fence", common.ErrConflict)
+	}
 	if grant != nil {
 		value := grant.Normalized()
 		if err := value.Validate(); err != nil {
 			return runtimecontract.RuntimeOperationReceipt{}, false, err
 		}
-		execution := runtimecontract.RuntimeOperationExecutionRecord{ExecutionKey: executionKey, Fence: fence}
 		persisted := governancecheck.GrantForExecution(aggregate.OperationGovernanceBindings, execution)
 		if persisted == nil || !governancecheck.SameGrant(*persisted, value) {
 			return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: governance grant does not match persisted binding", common.ErrConflict)
@@ -31,13 +41,22 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	}
 	receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, executionKey, fence)
 	if !ok {
+		// found=false is itself an execution authorization: only the exact active
+		// claimed record may proceed to an owner side effect. Sealed, stale,
+		// completed, invalidated, and fabricated identities fail closed.
+		if !active || execution.State != runtimecontract.OperationExecutionClaimed {
+			return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query execution is not active and claimed", common.ErrConflict)
+		}
 		return runtimecontract.RuntimeOperationReceipt{}, false, nil
 	}
 	if receipt.OperationID != strings.TrimSpace(operationID) {
 		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt operation does not match query", common.ErrConflict)
 	}
-	if !aggregateContainsDispatch(aggregate, dispatchID) {
-		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt dispatch is not present in runtime aggregate", common.ErrConflict)
+	if execution.State != runtimecontract.OperationExecutionOwnerCommitted && execution.State != runtimecontract.OperationExecutionEvidenceCommitted {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query execution state does not admit replay", common.ErrConflict)
+	}
+	if execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query hash does not match execution ledger", common.ErrConflict)
 	}
 	return receipt, true, nil
 }
@@ -171,15 +190,15 @@ func failureFactFromOperationReceiptFeedback(receipt runtimecontract.RuntimeOper
 	return failure
 }
 
-func aggregateContainsDispatch(aggregate RuntimeAggregate, dispatchID string) bool {
+func operationReceiptDispatch(aggregate RuntimeAggregate, dispatchID string) (SealedDispatch, bool, bool) {
 	dispatchID = strings.TrimSpace(dispatchID)
 	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.ID == dispatchID {
-		return true
+		return *aggregate.ActiveDispatch, true, true
 	}
 	for _, dispatch := range aggregate.CompletedDispatches {
 		if dispatch.ID == dispatchID {
-			return true
+			return dispatch, false, true
 		}
 	}
-	return false
+	return SealedDispatch{}, false, false
 }

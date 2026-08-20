@@ -34,6 +34,8 @@ func (a *RuntimeAdapter) runGit(ctx context.Context, repoRoot string, timeout ti
 	result := gitCommandResult{
 		Stdout:         out,
 		Stderr:         errText,
+		StdoutBytes:    int64(stdout.Len()),
+		StderrBytes:    int64(stderr.Len()),
 		ExitCode:       exitCode,
 		DurationMillis: duration.Milliseconds(),
 		Truncated:      outTruncated || errTruncated,

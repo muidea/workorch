@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
@@ -57,7 +58,7 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	command := gitStateChangingReceiptCommand(workspace, "generated.txt")
+	command := gitStateChangingReceiptCommand(t, workspace, "generated.txt")
 	first := sendGitStateChangingReceiptCommand(t, ctx, hub, command)
 	if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !first.Receipt.Changed ||
 		first.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
@@ -67,13 +68,18 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 		first.Receipt.ResourceChanges[0].OwnerModuleID != ModuleID || first.Receipt.ResourceChanges[0].AfterRevision == "" {
 		t.Fatalf("first receipt resource changes = %+v", first.Receipt.ResourceChanges)
 	}
+	if len(first.Receipt.Evidence.ContentHash) != 64 || len(first.Receipt.Evidence.EvidenceRefs) != 1 ||
+		first.Receipt.Evidence.EvidenceRefs[0] != "workorch://git/change/generated.txt" ||
+		first.Receipt.BeforeHash == "" || first.Receipt.AfterHash == "" || first.Receipt.BeforeHash == first.Receipt.AfterHash {
+		t.Fatalf("first receipt bounded Git evidence = %+v", first.Receipt)
+	}
 	if staged := gitOutputForTest(t, workspace, "diff", "--cached", "--name-only"); staged != "generated.txt" {
 		t.Fatalf("first owner effect staged = %q, want generated.txt", staged)
 	}
 
 	// Recreate the owner after the durable receipt has been committed. A new
-	// delivery with the same key/fence but different operation data must return
-	// the persisted receipt before it can alter the repository again.
+	// delivery with the same key/fence and exact sealed payload must return the
+	// persisted receipt before it can alter the repository again.
 	owner.Teardown(ctx)
 	writeFile(t, filepath.Join(workspace, "replayed.txt"), "must remain unstaged\n")
 	recreated := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true)}
@@ -81,7 +87,6 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { recreated.Teardown(ctx) })
-	command.Data.Pathspecs = []string{"replayed.txt"}
 	replayed := sendGitStateChangingReceiptCommand(t, ctx, hub, command)
 	if replayed.Receipt.ExecutionKey != first.Receipt.ExecutionKey || replayed.Receipt.AfterHash != first.Receipt.AfterHash ||
 		replayed.Receipt.Fence != first.Receipt.Fence {
@@ -92,7 +97,20 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 	}
 }
 
-func gitStateChangingReceiptCommand(workspace, pathspec string) gitevents.ExecuteOperationCommand {
+func gitStateChangingReceiptCommand(t *testing.T, workspace, pathspec string) gitevents.ExecuteOperationCommand {
+	t.Helper()
+	operationName := gitcommon.OperationAdd
+	operation := runtimecontract.RuntimeOperation{
+		ID: "git-add", Kind: runtimecontract.StepKindGitWrite, TargetRefs: []string{pathspec},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "operation", String: &operationName},
+			{Name: "pathspecs", StringList: []string{pathspec}},
+		},
+	}
+	sealed, err := gitevents.SealRuntimeOperation(operation)
+	if err != nil {
+		t.Fatalf("seal Git operation: %v", err)
+	}
 	return gitevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
@@ -104,8 +122,7 @@ func gitStateChangingReceiptCommand(workspace, pathspec string) gitevents.Execut
 			OperationID: "git-add", EvidenceKind: runtimecontract.EvidenceKindStateChange,
 			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{pathspec},
 		},
-		OperationKind: runtimecontract.StepKindGitWrite,
-		Data:          gitevents.OperationData{Operation: gitcommon.OperationAdd, Pathspecs: []string{pathspec}},
+		SealedOperation: sealed,
 	}
 }
 
@@ -124,6 +141,77 @@ func sendGitStateChangingReceiptCommand(t *testing.T, ctx context.Context, hub m
 		t.Fatalf("response type = %T", data)
 	}
 	return response
+}
+
+func TestGitOwnerExecutionRejectsPostWrongSourceAndPayloadDriftBeforeEffect(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	workspace := newTestRepo(t)
+	writeFile(t, filepath.Join(workspace, "generated.txt"), "content\n")
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true)}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	command := gitStateChangingReceiptCommand(t, workspace, "generated.txt")
+
+	owner.handleGitOperation(magicevent.NewEventWithContext(
+		gitevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	), nil)
+	assertGitIndexEmpty(t, workspace)
+
+	wrongSource := hub.Send(magicevent.NewEventWithContext(
+		gitevents.TopicExecuteOperation, "not-orchestrator", ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	))
+	if _, err := wrongSource.Get(); err == nil {
+		t.Fatal("Git execution accepted a non-Orchestrator source")
+	}
+	assertGitIndexEmpty(t, workspace)
+
+	tampered := command
+	tampered.SealedOperation.Operation.Parameters[1].StringList = []string{"other.txt"}
+	tamperedResult := hub.Send(magicevent.NewEventWithContext(
+		gitevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, tampered,
+	))
+	if _, err := tamperedResult.Get(); err == nil {
+		t.Fatal("Git execution accepted operation data that drifted from the sealed hash")
+	}
+	assertGitIndexEmpty(t, workspace)
+
+	writeFile(t, filepath.Join(workspace, "other.txt"), "must remain unstaged\n")
+	mismatchedOperation := command.SealedOperation.Operation
+	mismatchedOperation.Parameters[1].StringList = []string{"other.txt"}
+	mismatchedSeal, err := gitevents.SealRuntimeOperation(mismatchedOperation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatched := command
+	mismatched.SealedOperation = mismatchedSeal
+	mismatchedResult := hub.Send(magicevent.NewEventWithContext(
+		gitevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, mismatched,
+	))
+	if _, err := mismatchedResult.Get(); err == nil {
+		t.Fatal("Git execution accepted a sealed pathspec outside the sealed target refs")
+	}
+	assertGitIndexEmpty(t, workspace)
+}
+
+func assertGitIndexEmpty(t *testing.T, workspace string) {
+	t.Helper()
+	command := exec.Command("git", "diff", "--cached", "--name-only")
+	command.Dir = workspace
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("inspect Git index: %v", err)
+	}
+	if strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("Git index changed before execution authorization: %q", output)
+	}
 }
 
 func TestValidateCapabilityStatePredecessorReceiptsRequiresExactDurableBinding(t *testing.T) {
@@ -160,6 +248,13 @@ func TestGitReceiptResourceChangesUseOwnerObservedRepositoryRevision(t *testing.
 	}
 	if changes := gitReceiptResourceChanges(nil, runtimecontract.RuntimeCapabilityStateSnapshot{}); changes != nil {
 		t.Fatalf("invalid post-observation produced changes: %+v", changes)
+	}
+	if changes := gitReceiptResourceChanges([]runtimecontract.RuntimeCapabilityStateSnapshot{{
+		OwnerModuleID: ModuleID, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", ObservedRevision: "repo-same",
+	}}, runtimecontract.RuntimeCapabilityStateSnapshot{
+		OwnerModuleID: ModuleID, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", ObservedRevision: "repo-same",
+	}); changes != nil {
+		t.Fatalf("unchanged repository revision produced changes: %+v", changes)
 	}
 }
 
@@ -293,6 +388,144 @@ func TestGitOwnerCapabilityBoundAdmissibilityRejectsMismatchedProbeBindingAsStal
 	if !ok || response.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || response.Feedback != nil || response.Stale == nil || response.CapabilityStateBinding != capability.Snapshot.AcquisitionBinding {
 		t.Fatalf("mismatched binding probe = %#v", probeData)
 	}
+}
+
+func TestGitOwnerRechecksFileWorkspaceTreeBeforeFeasibilityAndExecution(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	store, err := NewCapabilityStateReceiptStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeRevision := "file-tree-v1"
+	fileObserver := magicevent.NewSimpleObserver(orchestratorevents.PrerequisiteCommandDestination, hub)
+	fileObserver.Subscribe(fileevents.TopicAcquireWorkspaceManifest, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.AcquireWorkspaceManifestCommand)
+		manifest := runtimecontract.WorkspaceManifest{Revision: treeRevision, TargetRefs: []string{"generated.txt"}}
+		observation := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: command.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindManifest,
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: manifest.Revision,
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				SubjectRef: "workspace_deliverable", Revision: manifest.Revision,
+			}},
+		}
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		result.Set(fileevents.AcquireWorkspaceManifestResult{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID,
+			Manifest: manifest, Observation: observation,
+		}, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicAcquireWorkspaceManifest) })
+
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: false}, nil)
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+
+	workspace := newTestRepo(t)
+	writeFile(t, filepath.Join(workspace, "generated.txt"), "sealed content\n")
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter(true), capabilityReceipts: store}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	capabilityCommand := gitevents.AcquireCapabilityStateCommand{
+		WorkspaceID: "ws-tree", RunID: "run-tree", AuthoritySnapshotID: "authority-tree",
+		PrerequisiteID: "capability-state:git", WorkspaceDeliverableDirectory: workspace,
+		CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+		AcquisitionKey: "capability-state/ws-tree/run-tree/git/0",
+	}
+	capabilityResult := hub.Send(magicevent.NewEventWithContext(
+		gitevents.TopicAcquireCapabilityState, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, capabilityCommand,
+	))
+	capabilityData, resultErr := capabilityResult.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	capability := capabilityData.(gitevents.AcquireCapabilityStateResult)
+
+	admissibilityCommand := gitevents.AcquireRuntimeOperationAdmissibilityCommand{
+		WorkspaceID: capabilityCommand.WorkspaceID, RunID: capabilityCommand.RunID,
+		AuthoritySnapshotID: capabilityCommand.AuthoritySnapshotID, PrerequisiteID: "admissibility:git",
+		OwnerModuleID: ModuleID, WorkspaceDeliverableDirectory: workspace,
+		RequiredKinds:          []string{runtimecontract.StepKindGitWrite},
+		CapabilityStateBinding: capability.Snapshot.AcquisitionBinding, MaxItems: 4,
+	}
+	admissibilityResult := hub.Send(magicevent.NewEventWithContext(
+		gitevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, admissibilityCommand,
+	))
+	admissibilityData, resultErr := admissibilityResult.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	admissibility := admissibilityData.(gitevents.AcquireRuntimeOperationAdmissibilityResult)
+	operationName := gitcommon.OperationAdd
+	operation := runtimecontract.RuntimeOperation{
+		ID: "git-add-tree", Kind: runtimecontract.StepKindGitWrite, RequiredOperationRef: "stage-changes",
+		TargetRefs: []string{"generated.txt"}, Parameters: []runtimecontract.OperationParameter{
+			{Name: "operation", String: &operationName}, {Name: "pathspecs", StringList: []string{"generated.txt"}},
+		},
+	}
+	observation := gitAdmissibilityObservation(admissibilityCommand.PrerequisiteID, admissibility.Acquisition.Admissibility, capability.Snapshot.WorkspaceTreeRevision)
+	treeRevision = "file-tree-v2"
+	probe := gitevents.ProbeRuntimeOperationFeasibilityCommand{
+		WorkspaceID: capabilityCommand.WorkspaceID, RunID: capabilityCommand.RunID,
+		Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: capabilityCommand.AuthoritySnapshotID},
+		WorkspaceDeliverableDirectory: workspace, Operation: operation,
+		Admissibility:          admissibility.Acquisition.Admissibility,
+		CapabilityStateBinding: capability.Snapshot.AcquisitionBinding, Observation: &observation,
+		CandidateManifestHash: "manifest-tree", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, operation.Kind),
+	}
+	probeResult := hub.Send(magicevent.NewEventWithContext(
+		gitevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
+		magicevent.NewHeader(), ctx, probe,
+	))
+	probeData, resultErr := probeResult.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	probeResponse := probeData.(gitevents.ProbeRuntimeOperationFeasibilityResult)
+	if probeResponse.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || probeResponse.Stale == nil ||
+		probeResponse.Stale.Domain != runtimecontract.RuntimeResourceWorkspaceTree || probeResponse.Stale.ExpectedRevision != "file-tree-v1" || probeResponse.Stale.ObservedRevision != "file-tree-v2" {
+		t.Fatalf("workspace-tree feasibility response = %+v", probeResponse)
+	}
+
+	sealed, err := gitevents.SealRuntimeOperation(operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execute := gitevents.ExecuteOperationCommand{
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-tree/run-tree/dispatch-tree/git-add-tree", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+			},
+			WorkspaceID: capabilityCommand.WorkspaceID, RunID: capabilityCommand.RunID, DispatchID: "dispatch-tree",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: capabilityCommand.AuthoritySnapshotID, RequiredOutputHash: "output-tree"},
+			OperationID: operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			WorkspaceDeliverableDirectory: workspace, TargetRefs: append([]string(nil), operation.TargetRefs...),
+		},
+		SealedOperation: sealed, CapabilityStates: []runtimecontract.RuntimeCapabilityStateSnapshot{capability.Snapshot},
+	}
+	executeResult := sendGitStateChangingReceiptCommand(t, ctx, hub, execute)
+	if executeResult.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || executeResult.Receipt.PrerequisiteStale == nil ||
+		executeResult.Receipt.PrerequisiteStale.Domain != runtimecontract.RuntimeResourceWorkspaceTree {
+		t.Fatalf("workspace-tree execution receipt = %+v", executeResult.Receipt)
+	}
+	assertGitIndexEmpty(t, workspace)
 }
 
 func TestRuntimeOperationAdmissibilityProbeUsesCurrentRepositorySnapshot(t *testing.T) {

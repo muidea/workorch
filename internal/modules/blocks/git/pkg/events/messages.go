@@ -40,11 +40,10 @@ type OperationData struct {
 
 type ExecuteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	OperationKind                      string
-	RequiredOperationRef               string
+	SealedOperation                    SealedRuntimeOperation
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
+	WorkspaceTreeObservation           *runtimecontract.RuntimePrerequisiteObservation
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
-	Data                               OperationData
 }
 
 type ExecuteOperationResult struct {

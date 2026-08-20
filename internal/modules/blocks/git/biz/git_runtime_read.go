@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
@@ -43,6 +42,7 @@ func (a *RuntimeAdapter) executeStatus(ctx context.Context, request RuntimeOpera
 	output := a.baseOutput(request, repo, gitcommon.OperationStatus, cmd, "completed")
 	output.Pathspecs = pathspecs
 	output.ChangedFiles = limitChangedFiles(files)
+	output.Truncated = output.Truncated || len(files) > maxChangedFiles
 	output.AheadBehind = aheadBehind
 	if branch != "" {
 		output.Branch = branch
@@ -61,15 +61,24 @@ func (a *RuntimeAdapter) executeDiff(ctx context.Context, request RuntimeOperati
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationDiff, repo, gitcommon.ErrorPathRejected, err)
 	}
+	ref, err := normalizeGitRevision(request.Ref)
+	if err != nil {
+		return a.rejectedResultWithRepo(request, gitcommon.OperationDiff, repo, gitcommon.ErrorInvalidRequest, err)
+	}
+	baseRef, err := normalizeGitRevision(request.BaseRef)
+	if err != nil {
+		return a.rejectedResultWithRepo(request, gitcommon.OperationDiff, repo, gitcommon.ErrorInvalidRequest, err)
+	}
 	args := []string{"diff"}
-	if ref := strings.TrimSpace(request.Ref); ref != "" {
-		if base := strings.TrimSpace(request.BaseRef); base != "" {
-			args = append(args, base+".."+ref)
+	if ref != "" {
+		args = append(args, "--end-of-options")
+		if baseRef != "" {
+			args = append(args, baseRef+".."+ref)
 		} else {
 			args = append(args, ref)
 		}
-	} else if base := strings.TrimSpace(request.BaseRef); base != "" {
-		args = append(args, base)
+	} else if baseRef != "" {
+		args = append(args, "--end-of-options", baseRef)
 	}
 	args = append(args, pathspecArgs(pathspecs)...)
 	cmd, err := a.runGit(ctx, repo.RepoRoot, timeout, maxDiffBytes, args...)
@@ -90,7 +99,10 @@ func (a *RuntimeAdapter) executeLog(ctx context.Context, request RuntimeOperatio
 		return a.rejectedResultWithRepo(request, gitcommon.OperationLog, repo, gitcommon.ErrorPathRejected, err)
 	}
 	limit, clamped := logLimit(request.Limit)
-	ref := strings.TrimSpace(request.Ref)
+	ref, err := normalizeGitRevision(request.Ref)
+	if err != nil {
+		return a.rejectedResultWithRepo(request, gitcommon.OperationLog, repo, gitcommon.ErrorInvalidRequest, err)
+	}
 	if ref == "" {
 		ref = "HEAD"
 	}
@@ -105,7 +117,7 @@ func (a *RuntimeAdapter) executeLog(ctx context.Context, request RuntimeOperatio
 		return finalizeGitResult(output, nil)
 	}
 	format := "%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s"
-	args := []string{"log", "--format=" + format, "-n", strconv.Itoa(limit), ref}
+	args := []string{"log", "--format=" + format, "-n", strconv.Itoa(limit), "--end-of-options", ref}
 	args = append(args, pathspecArgs(pathspecs)...)
 	cmd, err := a.runGit(ctx, repo.RepoRoot, timeout, maxOutputBytes, args...)
 	if err != nil {
@@ -129,7 +141,10 @@ func (a *RuntimeAdapter) executeShow(ctx context.Context, request RuntimeOperati
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationShow, repo, gitcommon.ErrorPathRejected, err)
 	}
-	ref := strings.TrimSpace(request.Ref)
+	ref, err := normalizeGitRevision(request.Ref)
+	if err != nil {
+		return a.rejectedResultWithRepo(request, gitcommon.OperationShow, repo, gitcommon.ErrorInvalidRequest, err)
+	}
 	if ref == "" {
 		ref = "HEAD"
 	}
@@ -141,7 +156,7 @@ func (a *RuntimeAdapter) executeShow(ctx context.Context, request RuntimeOperati
 		output.Summary = "git show completed with no commit because repository HEAD is unborn"
 		return finalizeGitResult(output, nil)
 	}
-	args := []string{"show", "--stat", "--summary", "--format=%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s", ref}
+	args := []string{"show", "--stat", "--summary", "--format=%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s", "--end-of-options", ref}
 	args = append(args, pathspecArgs(pathspecs)...)
 	cmd, err := a.runGit(ctx, repo.RepoRoot, timeout, maxDiffBytes, args...)
 	if err != nil {

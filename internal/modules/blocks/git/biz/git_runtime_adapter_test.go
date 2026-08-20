@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterReadStatus(t *testing.T) {
@@ -109,6 +110,26 @@ func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
 	pathspecs := result.Pathspecs
 	if len(pathspecs) != 0 {
 		t.Fatalf("pathspecs = %#v, want repository-root pathspec normalized away", result.Pathspecs)
+	}
+}
+
+func TestRuntimeAdapterReadRejectsOptionShapedRevisionBeforeGit(t *testing.T) {
+	repo := newTestRepo(t)
+	adapter := NewRuntimeAdapter(false)
+	for _, operation := range []string{gitcommon.OperationDiff, gitcommon.OperationLog, gitcommon.OperationShow} {
+		t.Run(operation, func(t *testing.T) {
+			outputPath := filepath.Join(t.TempDir(), "injected-output")
+			result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+				Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo,
+				Operation: operation, Ref: "--output=" + outputPath,
+			})
+			if err == nil || result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorInvalidRequest {
+				t.Fatalf("option-shaped ref result=%+v err=%v, want invalid request", result, err)
+			}
+			if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+				t.Fatalf("option-shaped read created %q: %v", outputPath, statErr)
+			}
+		})
 	}
 }
 
@@ -259,6 +280,30 @@ func TestRuntimeAdapterAddIgnoresLegacyDisabledFlag(t *testing.T) {
 	}
 	if result.Status != "completed" || result.Operation != gitcommon.OperationAdd {
 		t.Fatalf("output = %+v, want add completed despite legacy disabled flag", result)
+	}
+}
+
+func TestRuntimeAdapterAddReportsOnlyCurrentIndexDelta(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "already-staged.txt"), "content\n")
+	adapter := NewRuntimeAdapter(true)
+	request := RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindGitWrite, WorkspaceDeliverableDirectory: repo,
+		Operation: gitcommon.OperationAdd, Pathspecs: []string{"already-staged.txt"},
+	}
+	first, err := adapter.ExecuteOperation(context.Background(), request)
+	if err != nil || first.ZeroWork || len(first.ChangedFiles) != 1 || first.BeforeHash == first.AfterHash {
+		t.Fatalf("first add result=%+v err=%v", first, err)
+	}
+	second, err := adapter.ExecuteOperation(context.Background(), request)
+	if err != nil {
+		t.Fatalf("duplicate add: %v", err)
+	}
+	if !second.ZeroWork || len(second.ChangedFiles) != 0 || second.BeforeHash == "" || second.BeforeHash != second.AfterHash || !second.Evidence.ZeroWork {
+		t.Fatalf("duplicate add result=%+v, want zero-work with stable index revision", second)
+	}
+	if staged := gitOutputForTest(t, repo, "diff", "--cached", "--name-only"); staged != "already-staged.txt" {
+		t.Fatalf("staged files=%q, want existing staged file preserved", staged)
 	}
 }
 

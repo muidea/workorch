@@ -24,6 +24,7 @@ type RuntimeOperationExecutionRequest struct {
 	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
 	ValidationRecipes                  []runtimecontract.RuntimeValidationRecipe
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
+	WorkspaceTreeObservation           *runtimecontract.RuntimePrerequisiteObservation
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
 }
 

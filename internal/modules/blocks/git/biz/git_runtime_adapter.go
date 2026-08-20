@@ -45,6 +45,8 @@ func SupportedRuntimeOperationVariants() []runtimecontract.RuntimeOperationVaria
 type gitCommandResult struct {
 	Stdout         string
 	Stderr         string
+	StdoutBytes    int64
+	StderrBytes    int64
 	ExitCode       int
 	DurationMillis int64
 	Truncated      bool

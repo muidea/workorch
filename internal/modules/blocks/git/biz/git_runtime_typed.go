@@ -33,6 +33,8 @@ type RuntimeOperationResult struct {
 	HeadCommit         string
 	HeadCommitBefore   string
 	HeadCommitAfter    string
+	BeforeHash         string
+	AfterHash          string
 	DetachedHead       bool
 	UnbornHead         bool
 	Stdout             string
@@ -41,6 +43,8 @@ type RuntimeOperationResult struct {
 	DurationMillis     int64
 	TimeoutMillis      int64
 	Truncated          bool
+	OutputBytes        int64
+	ErrorOutputBytes   int64
 	ErrorCode          string
 	ErrorMessage       string
 	Summary            string

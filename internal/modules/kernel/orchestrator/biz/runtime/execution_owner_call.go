@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -21,6 +22,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		EvidencePolicies:                   x.aggregate.Facts.Activation.EvidencePolicies,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(x.dispatch.ValidationRecipes),
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), x.aggregate.Facts.Resources.CapabilityStates...),
+		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
 	})
 	if err == nil {
@@ -45,6 +47,23 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 	}
 	_, _ = x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID)
 	return activeDispatchOwnerCall{}, err
+}
+
+func runtimeWorkspaceManifestObservation(aggregate RuntimeAggregate) *runtimecontract.RuntimePrerequisiteObservation {
+	if aggregate.Facts.Resources.Manifest == nil {
+		return nil
+	}
+	revision := strings.TrimSpace(aggregate.Facts.Resources.Manifest.Revision)
+	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
+		observation = observation.Normalized()
+		if observation.Kind != runtimecontract.PrerequisiteKindManifest || observation.OwnerModuleID != runtimecontract.RuntimeModuleFile || observation.ContentHash != revision {
+			continue
+		}
+		value := observation
+		value.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), observation.Dependencies...)
+		return &value
+	}
+	return nil
 }
 
 func validateOwnerReceiptIdentity(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, result *RuntimeOperationExecutionResult) error {

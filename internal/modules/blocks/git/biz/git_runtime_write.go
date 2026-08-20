@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -82,21 +83,77 @@ func (a *RuntimeAdapter) executeAdd(ctx context.Context, request RuntimeOperatio
 	if err != nil {
 		return a.rejectedResultWithRepo(request, gitcommon.OperationAdd, repo, gitcommon.ErrorPathRejected, err)
 	}
+	stateRequest := request
+	stateRequest.Operation = gitcommon.OperationStatus
+	stateRequest.Pathspecs = nil
+	beforeStatus, err := a.executeStatus(ctx, stateRequest, repo, timeout)
+	if err != nil || beforeStatus.Truncated {
+		if err == nil {
+			err = fmt.Errorf("%w: Git repository state exceeds the bounded owner observation", common.ErrConflict)
+		}
+		return a.failedResultWithRepo(request, gitcommon.OperationAdd, repo, gitcommon.ErrorGitCommandFailed, err)
+	}
+	beforeUnstaged, beforeStaged := gitStatusStateFlags(beforeStatus.ChangedFiles)
+	beforeRevision := gitRepositoryStateRevision(beforeStatus, true, beforeUnstaged, beforeStaged)
 	args := append([]string{"add"}, pathspecArgs(pathspecs)...)
 	cmd, err := a.runGit(ctx, repo.RepoRoot, timeout, maxOutputBytes, args...)
 	if err != nil {
 		return a.commandFailureResult(request, repo, gitcommon.OperationAdd, cmd, classifyGitError(cmd, err), err)
 	}
+	afterStatus, err := a.executeStatus(ctx, stateRequest, repo, timeout)
+	if err != nil || afterStatus.Truncated {
+		if err == nil {
+			err = fmt.Errorf("%w: Git repository state exceeds the bounded owner observation", common.ErrConflict)
+		}
+		return a.failedResultWithRepo(request, gitcommon.OperationAdd, repo, gitcommon.ErrorGitCommandFailed, err)
+	}
+	afterUnstaged, afterStaged := gitStatusStateFlags(afterStatus.ChangedFiles)
+	afterRevision := gitRepositoryStateRevision(afterStatus, true, afterUnstaged, afterStaged)
 	staged, _ := a.stagedFiles(ctx, repo.RepoRoot, timeout)
+	changed := gitAddIndexDelta(beforeStatus.ChangedFiles, afterStatus.ChangedFiles)
 	output := a.baseOutput(request, repo, gitcommon.OperationAdd, cmd, "completed")
 	output.Pathspecs = pathspecs
 	output.StagedFiles = staged
-	output.ChangedFiles = staged
-	if len(staged) == 0 {
+	output.ChangedFiles = changed
+	output.BeforeHash = beforeRevision
+	output.AfterHash = afterRevision
+	if beforeRevision == afterRevision {
 		output.ZeroWork = true
+		output.ChangedFiles = nil
 	}
-	output.Summary = fmt.Sprintf("git add completed with %d staged file(s)", len(staged))
+	output.Summary = fmt.Sprintf("git add completed with %d index change(s)", len(output.ChangedFiles))
 	return finalizeGitResult(output, nil)
+}
+
+func gitAddIndexDelta(before, after []GitFileChange) []GitFileChange {
+	byPath := func(values []GitFileChange) map[string]GitFileChange {
+		ret := make(map[string]GitFileChange, len(values))
+		for _, value := range values {
+			ret[value.Path] = value
+		}
+		return ret
+	}
+	beforeByPath := byPath(before)
+	afterByPath := byPath(after)
+	ret := make([]GitFileChange, 0)
+	for path, current := range afterByPath {
+		previous, found := beforeByPath[path]
+		if !found || previous.Staged != current.Staged || previous.Unstaged != current.Unstaged || previous.Untracked != current.Untracked || previous.Status != current.Status || previous.OldPath != current.OldPath {
+			if current.Staged || (found && previous.Staged) {
+				ret = append(ret, current)
+			}
+		}
+	}
+	for path, previous := range beforeByPath {
+		if _, found := afterByPath[path]; !found && previous.Staged {
+			ret = append(ret, previous)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	sort.Slice(ret, func(left, right int) bool { return ret[left].Path < ret[right].Path })
+	return limitChangedFiles(ret)
 }
 
 func (a *RuntimeAdapter) executeCommit(ctx context.Context, request RuntimeOperationRequest, repo repoContext, timeout time.Duration) (RuntimeOperationResult, error) {

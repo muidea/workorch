@@ -2,8 +2,12 @@ package git
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -33,6 +37,8 @@ func (a *RuntimeAdapter) baseOutput(request RuntimeOperationRequest, repo repoCo
 		DurationMillis:   cmd.DurationMillis,
 		TimeoutMillis:    timeoutMillis,
 		Truncated:        cmd.Truncated,
+		OutputBytes:      cmd.StdoutBytes,
+		ErrorOutputBytes: cmd.StderrBytes,
 	}
 }
 
@@ -87,8 +93,58 @@ func finalizeGitResult(output RuntimeOperationResult, executeErr error) (Runtime
 		}
 	}
 	exitCode := output.ExitCode
-	output.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: output.Summary, ExitCode: &exitCode}
+	payload, _ := json.Marshal(struct {
+		Operation        string
+		Status           string
+		HeadBefore       string
+		HeadAfter        string
+		CommitHash       string
+		ChangedFiles     []GitFileChange
+		Stdout           string
+		Stderr           string
+		ExitCode         int64
+		Truncated        bool
+		OutputBytes      int64
+		ErrorOutputBytes int64
+		ZeroWork         bool
+	}{
+		Operation: output.Operation, Status: output.Status, HeadBefore: output.HeadCommitBefore,
+		HeadAfter: output.HeadCommitAfter, CommitHash: output.CommitHash,
+		ChangedFiles: output.ChangedFiles, Stdout: output.Stdout, Stderr: output.Stderr,
+		ExitCode: output.ExitCode, Truncated: output.Truncated, OutputBytes: output.OutputBytes,
+		ErrorOutputBytes: output.ErrorOutputBytes, ZeroWork: output.ZeroWork,
+	})
+	hash := sha256.Sum256(payload)
+	evidenceRefs := gitEvidenceRefs(output)
+	tags := []string{"git-operation:" + strings.TrimSpace(output.Operation)}
+	if output.Truncated {
+		tags = append(tags, "git-output-truncated")
+	}
+	output.Evidence = runtimecontract.RuntimeOperationEvidence{
+		Summary: output.Summary, ContentHash: hex.EncodeToString(hash[:]), ExitCode: &exitCode,
+		EvidenceRefs: evidenceRefs, ZeroWork: output.ZeroWork, EvidenceTags: tags,
+	}
 	return output, executeErr
+}
+
+const maxGitEvidenceRefs = 64
+
+func gitEvidenceRefs(output RuntimeOperationResult) []string {
+	refs := make([]string, 0, min(len(output.ChangedFiles)+1, maxGitEvidenceRefs))
+	if commit := strings.TrimSpace(output.CommitHash); commit != "" {
+		refs = append(refs, "workorch://git/commit/"+url.PathEscape(commit))
+	}
+	for _, change := range output.ChangedFiles {
+		path := strings.TrimSpace(change.Path)
+		if path == "" {
+			continue
+		}
+		refs = append(refs, "workorch://git/change/"+url.PathEscape(path))
+		if len(refs) == maxGitEvidenceRefs {
+			break
+		}
+	}
+	return refs
 }
 
 func stageForOperation(operation string) string {

@@ -161,7 +161,13 @@ func runtimeCWIReconciliationBindingHasGitProof(binding runtimecontract.RuntimeC
 }
 
 func gitRevisionHasRepository(revision string) bool {
-	parts := strings.Split(strings.TrimSpace(revision), "|")
+	revision = strings.TrimSpace(revision)
+	if strings.HasPrefix(revision, gitRepositoryRevisionPrefix) {
+		return true
+	}
+	// Read-only compatibility for capability receipts written before the
+	// content-bound git-state-v2 revision was introduced.
+	parts := strings.Split(revision, "|")
 	return len(parts) >= 3 && strings.TrimSpace(parts[0]) != ""
 }
 
@@ -192,7 +198,10 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	workspaceTreeRevision, err := m.acquireFileWorkspaceTreeRevision(event.Context(), command)
+	workspaceTreeRevision, err := m.acquireFileWorkspaceTreeRevision(
+		event.Context(), command.WorkspaceID, command.RunID, command.AuthoritySnapshotID,
+		"git-workspace-tree/"+command.AcquisitionKey, command.WorkspaceDeliverableDirectory,
+	)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -235,8 +244,11 @@ func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent
 // bound to the File owner's exact workspace-tree revision. Git does not hash
 // or infer that File-owned value itself; the nested typed EventHub query is a
 // read-only owner observation and never changes Runtime authority.
-func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, command gitevents.AcquireCapabilityStateCommand) (string, error) {
-	if m == nil || m.EventHub() == nil {
+func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID, prerequisiteID, deliverable string) (string, error) {
+	authoritySnapshotID = strings.TrimSpace(authoritySnapshotID)
+	prerequisiteID = strings.TrimSpace(prerequisiteID)
+	deliverable = strings.TrimSpace(deliverable)
+	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || authoritySnapshotID == "" || prerequisiteID == "" || deliverable == "" {
 		return "", common.ErrInvalidArgument
 	}
 	result := m.EventHub().Send(magicevent.NewEventWithContext(
@@ -246,8 +258,8 @@ func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, command gite
 		magicevent.NewHeader(),
 		ctx,
 		fileevents.AcquireWorkspaceManifestCommand{
-			WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID,
-			PrerequisiteID: "git-workspace-tree/" + command.AcquisitionKey, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+			WorkspaceID: workspaceID, RunID: runID, AuthoritySnapshotID: authoritySnapshotID,
+			PrerequisiteID: prerequisiteID, WorkspaceDeliverableDirectory: deliverable,
 		},
 	))
 	if result == nil {
@@ -267,10 +279,16 @@ func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, command gite
 		return "", resultErr
 	}
 	response, ok := data.(fileevents.AcquireWorkspaceManifestResult)
-	if !ok || response.Manifest.Revision == "" {
+	if !ok || response.WorkspaceID != workspaceID || response.RunID != runID ||
+		strings.TrimSpace(response.AuthoritySnapshotID) != authoritySnapshotID ||
+		strings.TrimSpace(response.Observation.PrerequisiteID) != prerequisiteID {
 		return "", fmt.Errorf("%w: File owner returned an invalid workspace-tree observation", common.ErrConflict)
 	}
-	return response.Manifest.Revision, nil
+	binding := runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: response.Manifest, Observation: response.Observation}
+	if err := binding.Validate(); err != nil {
+		return "", fmt.Errorf("%w: File owner returned an invalid workspace-tree binding: %v", common.ErrConflict, err)
+	}
+	return strings.TrimSpace(binding.Manifest.Revision), nil
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
@@ -313,6 +331,20 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 			return
 		}
 	}
+	workspaceTreeRevision := strings.TrimSpace(snapshot.WorkspaceTreeRevision)
+	manifestBinding := command.WorkspaceManifestBinding.Normalized()
+	if !manifestBinding.Empty() {
+		if err := manifestBinding.Validate(); err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+		manifestRevision := strings.TrimSpace(manifestBinding.Manifest.Revision)
+		if workspaceTreeRevision != "" && workspaceTreeRevision != manifestRevision {
+			setCapabilityError(result, fmt.Errorf("%w: Git capability and File manifest workspace-tree revisions differ", common.ErrConflict))
+			return
+		}
+		workspaceTreeRevision = manifestRevision
+	}
 	inventory, err := runtimecontract.NewRuntimeOperationAdmissibilityWithBinding(
 		command.PrerequisiteID,
 		ModuleID,
@@ -337,7 +369,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	observation := gitAdmissibilityObservation(command.PrerequisiteID, inventory, snapshot.WorkspaceTreeRevision)
+	observation := gitAdmissibilityObservation(command.PrerequisiteID, inventory, workspaceTreeRevision)
 	result.Set(gitevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
 }
 
@@ -381,9 +413,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setCapabilityError(result, err)
 		return
 	}
-	failure := m.runtimeOperationFeasibility(event.Context(), command)
-	var stale *runtimecontract.RuntimePrerequisiteStale
-	if failure != nil && failure.Code == "operation_admissibility_stale" && command.Observation != nil {
+	failure, stale := m.runtimeWorkspaceTreeFeasibility(event.Context(), command)
+	if failure == nil && stale == nil {
+		failure = m.runtimeOperationFeasibility(event.Context(), command)
+	}
+	if stale == nil && failure != nil && failure.Code == "operation_admissibility_stale" && command.Observation != nil {
 		if observed, err := m.runtimeAdapter.CapabilityState(event.Context(), command.Admissibility.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory); err == nil {
 			stale = gitAdmissibilityStale(*command.Observation, command.Admissibility, observed.ObservedRevision)
 			if stale != nil {
@@ -398,6 +432,70 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	result.Set(observation, nil)
+}
+
+// runtimeWorkspaceTreeFeasibility re-observes the File-owned workspace tree
+// for Git admission. The Git status revision is intentionally separate: a
+// repository that was already dirty can keep the same
+// porcelain rows while the contents behind an already-dirty path have changed.
+func (m *Biz) runtimeWorkspaceTreeFeasibility(ctx context.Context, command gitevents.ProbeRuntimeOperationFeasibilityCommand) (*runtimecontract.FailureFact, *runtimecontract.RuntimePrerequisiteStale) {
+	binding := strings.TrimSpace(command.CapabilityStateBinding)
+	if command.Observation == nil {
+		if binding != "" {
+			failure := runtimecontract.RuntimeOperationInfeasibleFailure(command.Operation, "operation_admissibility_stale", "runtime Git operation admissibility omitted File workspace-tree freshness")
+			return failure, nil
+		}
+		return nil, nil
+	}
+	observation := command.Observation.Normalized()
+	expected := ""
+	for _, dependency := range observation.Dependencies {
+		if dependency.Domain != runtimecontract.RuntimeResourceWorkspaceTree || dependency.OwnerModuleID != runtimecontract.RuntimeModuleFile || dependency.SubjectRef != "workspace_deliverable" {
+			continue
+		}
+		if expected != "" && expected != strings.TrimSpace(dependency.Revision) {
+			failure := runtimecontract.RuntimeOperationInfeasibleFailure(command.Operation, "operation_admissibility_stale", "runtime Git operation admissibility has conflicting File workspace-tree dependencies")
+			return failure, nil
+		}
+		expected = strings.TrimSpace(dependency.Revision)
+	}
+	if expected == "" {
+		if binding != "" {
+			failure := runtimecontract.RuntimeOperationInfeasibleFailure(command.Operation, "operation_admissibility_stale", "runtime Git operation admissibility omitted File workspace-tree freshness")
+			return failure, nil
+		}
+		return nil, nil
+	}
+	if binding != "" {
+		if binding != strings.TrimSpace(command.Admissibility.AcquisitionBinding) || m.capabilityReceipts == nil {
+			return nil, nil
+		}
+		snapshot, found, err := m.capabilityReceipts.Load(command.WorkspaceID, binding)
+		if err != nil || !found || snapshot.AcquisitionBinding != binding {
+			return nil, nil
+		}
+		if strings.TrimSpace(snapshot.WorkspaceTreeRevision) == "" || strings.TrimSpace(snapshot.WorkspaceTreeRevision) != expected {
+			failure := runtimecontract.RuntimeOperationInfeasibleFailure(command.Operation, "operation_admissibility_stale", "runtime Git capability binding and File workspace-tree dependency differ")
+			return failure, nil
+		}
+	}
+	observed, err := m.acquireFileWorkspaceTreeRevision(
+		ctx, command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID,
+		"git-feasibility-workspace-tree/"+strings.TrimSpace(command.Operation.ID), command.WorkspaceDeliverableDirectory,
+	)
+	if err != nil {
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(command.Operation, "git_workspace_tree_unavailable", err.Error())
+		return failure, nil
+	}
+	if observed == expected {
+		return nil, nil
+	}
+	return nil, &runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: observation.PrerequisiteID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: expected, ObservedRevision: observed,
+		Reason: "File workspace tree changed after Git operation admissibility was sealed",
+	}
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
@@ -524,12 +622,31 @@ func (m *Biz) runtimeOperationFeasibility(ctx context.Context, command gitevents
 }
 
 func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Result) {
+	// Execute is a strong call. A fire-and-forget Post must not reach receipt
+	// lookup, Git, or receipt commit.
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(gitevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeGitOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	data, err := gitevents.OperationDataFromRuntimeOperation(operation)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if err := validateGitOperationTargetBinding(operation, data); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -540,7 +657,7 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(gitevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
-	if stale, staleErr := m.runtimePrerequisiteStaleReceipt(event.Context(), command); staleErr != nil {
+	if stale, staleErr := m.runtimePrerequisiteStaleReceipt(event.Context(), command, operation.RequiredOperationRef); staleErr != nil {
 		setCapabilityError(result, staleErr)
 		return
 	} else if stale != nil {
@@ -554,21 +671,25 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
-		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		Kind: operation.Kind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory,
-		Operation:                  command.Data.Operation, TimeoutMillis: command.Data.TimeoutMillis, Pathspecs: command.Data.Pathspecs,
-		Ref: command.Data.Ref, BaseRef: command.Data.BaseRef, Limit: command.Data.Limit,
-		Message: command.Data.Message, ExpectedHead: command.Data.ExpectedHead, EvidencePolicies: command.EvidencePolicies,
+		Operation:                  data.Operation, TimeoutMillis: data.TimeoutMillis, Pathspecs: data.Pathspecs,
+		Ref: data.Ref, BaseRef: data.BaseRef, Limit: data.Limit,
+		Message: data.Message, ExpectedHead: data.ExpectedHead, EvidencePolicies: command.EvidencePolicies,
 	})
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.ErrorCode, operationResult.ErrorMessage, command.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, operation.Kind, operationResult.ErrorCode, operationResult.ErrorMessage, command.TargetRefs)
 	}
-	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
-	if command.OperationKind == runtimecontract.StepKindGitWrite {
+	observation := orchestratorevents.RuntimeOperationReceiptObservation{
+		ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		BeforeHash:          operationResult.BeforeHash,
+		AfterHash:           operationResult.AfterHash,
+	}
+	if operation.Kind == runtimecontract.StepKindGitWrite {
 		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
 		if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
 			observation.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
@@ -582,12 +703,57 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		}
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, observation)
+	if receipt.Feedback != nil && receipt.Feedback.OriginalDiagnostic != nil && operationResult.OutputBytes+operationResult.ErrorOutputBytes > 0 {
+		receipt.Feedback.OriginalDiagnostic.DetailsBytes = operationResult.OutputBytes + operationResult.ErrorOutputBytes
+		receipt.Feedback.OriginalDiagnostic.ContentType = "text/plain"
+		receipt.Feedback.OriginalDiagnostic.OmittedReason = "raw_git_command_output"
+		receipt.Feedback.OriginalDiagnostic.Truncated = operationResult.Truncated
+		receipt.Feedback.OriginalDiagnostic.Redacted = true
+	}
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	result.Set(gitevents.ExecuteOperationResult{Receipt: committed}, nil)
+}
+
+func validateSealedRuntimeGitOperation(event magicevent.Event, context runtimecontract.RuntimeOperationExecutionContext, sealed gitevents.SealedRuntimeOperation) (runtimecontract.RuntimeOperation, error) {
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("runtime Git operation requires Orchestrator source")
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationScope(context.WorkspaceID, context.RunID, context.DispatchID, context.Transaction, context.OperationID, context.EvidenceKind, context.WorkspaceDeliverableDirectory); err != nil {
+		return runtimecontract.RuntimeOperation{}, err
+	}
+	return sealed.ValidateForExecution(context)
+}
+
+func validateGitOperationTargetBinding(operation runtimecontract.RuntimeOperation, data gitevents.OperationData) error {
+	if operation.Kind != runtimecontract.StepKindGitWrite || strings.TrimSpace(data.Operation) != modulecommon.OperationAdd {
+		return nil
+	}
+	pathspecs, err := requiredPathspecs(data.Pathspecs)
+	if err != nil {
+		return err
+	}
+	authorized := map[string]struct{}{}
+	for _, target := range operation.TargetRefs {
+		target = strings.TrimSpace(target)
+		if target == gitWorkspaceRepositorySelector {
+			return nil
+		}
+		normalized, normalizeErr := normalizePathspec(target, false)
+		if normalizeErr != nil {
+			return fmt.Errorf("sealed Git add target %q is invalid: %w", target, normalizeErr)
+		}
+		authorized[normalized] = struct{}{}
+	}
+	for _, pathspec := range pathspecs {
+		if _, found := authorized[pathspec]; !found {
+			return fmt.Errorf("%w: sealed Git add pathspec %q is outside operation target refs", common.ErrConflict, pathspec)
+		}
+	}
+	return nil
 }
 
 // gitReceiptResourceChanges reports only revisions directly observed by the
@@ -604,14 +770,82 @@ func gitReceiptResourceChanges(before []runtimecontract.RuntimeCapabilityStateSn
 			break
 		}
 	}
+	if beforeRevision == after.ObservedRevision {
+		return nil
+	}
 	return []runtimecontract.RuntimeResourceChange{{
 		Domain: runtimecontract.RuntimeResourceRepositoryState, OwnerModuleID: ModuleID, SubjectRef: after.SubjectRef,
 		BeforeRevision: beforeRevision, AfterRevision: after.ObservedRevision,
 	}}
 }
 
-func (m *Biz) runtimePrerequisiteStaleReceipt(ctx context.Context, command gitevents.ExecuteOperationCommand) (*runtimecontract.RuntimeOperationReceipt, error) {
-	if strings.TrimSpace(command.RequiredOperationRef) == "" {
+func (m *Biz) runtimePrerequisiteStaleReceipt(ctx context.Context, command gitevents.ExecuteOperationCommand, requiredOperationRef string) (*runtimecontract.RuntimeOperationReceipt, error) {
+	expectedWorkspaceTree := ""
+	var workspaceTreeObservation runtimecontract.RuntimePrerequisiteObservation
+	if command.WorkspaceTreeObservation != nil {
+		observation := command.WorkspaceTreeObservation.Normalized()
+		if err := observation.Validate(); err != nil || observation.Kind != runtimecontract.PrerequisiteKindManifest || observation.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			return nil, fmt.Errorf("%w: sealed Git execution has an invalid File workspace-tree observation", common.ErrConflict)
+		}
+		for _, dependency := range observation.Dependencies {
+			if dependency.Domain == runtimecontract.RuntimeResourceWorkspaceTree && dependency.OwnerModuleID == runtimecontract.RuntimeModuleFile && dependency.SubjectRef == "workspace_deliverable" {
+				if expectedWorkspaceTree != "" && expectedWorkspaceTree != dependency.Revision {
+					return nil, fmt.Errorf("%w: sealed Git execution has conflicting File workspace-tree revisions", common.ErrConflict)
+				}
+				expectedWorkspaceTree = dependency.Revision
+			}
+		}
+		if expectedWorkspaceTree == "" || observation.ContentHash != expectedWorkspaceTree {
+			return nil, fmt.Errorf("%w: sealed Git execution File observation does not bind its workspace-tree revision", common.ErrConflict)
+		}
+		workspaceTreeObservation = observation
+	}
+	for _, snapshot := range command.CapabilityStates {
+		if snapshot.OwnerModuleID != ModuleID || snapshot.CapabilityStateKind != "repository_state" {
+			continue
+		}
+		snapshotRevision := strings.TrimSpace(snapshot.WorkspaceTreeRevision)
+		if snapshotRevision == "" {
+			return nil, fmt.Errorf("%w: sealed Git capability state omitted File workspace-tree revision", common.ErrConflict)
+		}
+		if expectedWorkspaceTree != "" && expectedWorkspaceTree != snapshotRevision {
+			return nil, fmt.Errorf("%w: sealed Git capability state and File workspace-tree observation differ", common.ErrConflict)
+		}
+		expectedWorkspaceTree = snapshotRevision
+		if workspaceTreeObservation.ObservationID == "" {
+			workspaceTreeObservation = gitCapabilityStateObservation(snapshot.RequirementID, snapshot)
+		}
+	}
+	if expectedWorkspaceTree != "" {
+		observed, err := m.acquireFileWorkspaceTreeRevision(
+			ctx, command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID,
+			"git-execution-workspace-tree/"+command.OperationID, command.WorkspaceDeliverableDirectory,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if observed != expectedWorkspaceTree {
+			message := "File workspace tree changed after the Git operation was sealed"
+			failure := &runtimecontract.FailureFact{
+				Class: runtimecontract.FailureClassExecutionFailure, Code: "prerequisite_stale",
+				Signature: "workspace-tree-stale:" + workspaceTreeObservation.ObservationID, Message: message,
+				TargetRefs: append([]string(nil), command.TargetRefs...),
+			}
+			receipt := m.newRuntimeOperationReceipt(
+				command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected,
+				command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: message}, failure, nil,
+				orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone},
+			)
+			receipt.PrerequisiteStale = &runtimecontract.RuntimePrerequisiteStale{
+				PrerequisiteID: workspaceTreeObservation.PrerequisiteID, ObservationID: workspaceTreeObservation.ObservationID,
+				Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				SubjectRef: "workspace_deliverable", ExpectedRevision: expectedWorkspaceTree,
+				ObservedRevision: observed, Reason: message,
+			}
+			return &receipt, nil
+		}
+	}
+	if strings.TrimSpace(requiredOperationRef) == "" {
 		return nil, nil
 	}
 	for _, snapshot := range command.CapabilityStates {
@@ -620,7 +854,7 @@ func (m *Biz) runtimePrerequisiteStaleReceipt(ctx context.Context, command gitev
 		}
 		var required *runtimecontract.RuntimeRequiredOperationVariant
 		for idx := range snapshot.RequiredOperationSequence {
-			if snapshot.RequiredOperationSequence[idx].RequirementID == command.RequiredOperationRef {
+			if snapshot.RequiredOperationSequence[idx].RequirementID == strings.TrimSpace(requiredOperationRef) {
 				value := snapshot.RequiredOperationSequence[idx]
 				required = &value
 				break

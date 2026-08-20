@@ -4,11 +4,12 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-20
 
 ## 功能范围与边界
 
-`blocks/git` 提供受控的 Git read/write 运行时能力，并返回规范化结果、变更引用、摘要、错误和 raw ref。
+`blocks/git` 提供受控的 Git read/write 运行时能力。Git-private adapter 保留有界规范化输出；跨 Owner
+只返回权威 `RuntimeOperationReceipt`，不会把 stdout、stderr、diff 或完整私有结果 DTO 暴露为第二套结果合同。
 
 ## 组件交互及合同
 
@@ -18,21 +19,35 @@ Last Verified: 2026-08-17
   与 capability-state acquisition 均使用 Git owner 定义的 concrete typed command/result。
 - Git capability-state prerequisite 的 canonical owner identity 是 `blocks/git`；profile 只能通过该 identity 请求 `repository_state`，不得使用 `git` 等 EventHub destination 别名。
 - Git capability-state receipt 是 Git owner 的 durable prerequisite evidence，按 `<repository.dataDir>/internal/workspaces/<workspaceId>/runtime/git-capability-state-receipts/` 分区；同一 workspace/acquisition key 只能对应同一快照。它不写入 deliverable，随 workspace internal directory 的受控删除一并清理。
-- Runtime Git operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner stable factual
-  category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威。
-- request 必须携带 workspace repository、run/authority/dispatch/operation identity、sealed operation 和结构化参数；
-  result 返回唯一 receipt outcome、changed refs、bounded evidence/ref 与 original diagnostic。
+- Runtime Git operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果。`ExecuteOperationCommand` 只携带
+  execution context、完整 `SealedRuntimeOperation` 与 prerequisite facts；Git 校验发送方必须是 Orchestrator、
+  payload hash、operation/target/CWI scope，并从 seal 内派生 adapter 参数，不再接受可独立漂移的 `Data`。
+- `git add` 的 pathspec 必须由同一 sealed operation 的 exact target refs（或 owner selector
+  `workspace-repository`）授权。执行前后比较完整的有界 porcelain state；已有 staged 文件不构成本次变化，
+  重复 add 返回 `no_op`，不会生成 repository resource change。
+- Git read 的 `ref/baseRef` 拒绝 option-shaped、控制字符和超长输入，并在 argv 中使用
+  `--end-of-options`；声明为 `effect=none` 的 read 不能借 ref 写文件。
+- public receipt 保留 summary、exit code、规范化内容 hash、最多 64 个 changed/commit evidence refs、
+  add 的 before/after hash 与 repository revision change。原始 stdout/stderr/diff 只留在 Git-private result；
+  失败反馈仅记录安全摘要、原始字节数、截断和 `raw_git_command_output` omitted metadata，不声称完整 raw diagnostic。
 - Orchestrator 和 Approval 流程在写操作进入本 block 前完成策略准入和必要授权。
-- workspace repository manifest 通过 File owner 的 `AcquireWorkspaceManifestCommand/Result` 获取；Git 不读取 File repository/service，也不取得 workspace tree 所有权。
-- effect 执行前后通过 Orchestrator 的 receipt query/commit concrete command 完成幂等握手，Git 只返回 repository owner fact。
+- workspace repository manifest 通过 File owner 的 `AcquireWorkspaceManifestCommand/Result` 获取；Git 对
+  workspace/run/authority/prerequisite scope 和完整 manifest binding 做精确校验，并在 operation feasibility 与
+  effect 前重新读取 File workspace-tree revision。Git 不读取 File repository/service，也不取得 workspace tree 所有权。
+- Git repository revision 使用 `git-state-v2` 对有界完整 porcelain observation 哈希；File revision 单独覆盖
+  “路径仍 dirty 但内容已变化”的 freshness。
+- effect 前后通过 Orchestrator 的 receipt query/commit concrete command 完成幂等握手。receipt query 的
+  `found=false` 只对当前 active dispatch 中 exact operation/execution-key/fence 且状态为 `claimed` 的记录成立；
+  sealed、stale、completed、invalidated 或伪造 identity 均 fail-closed。
+- execute handler 要求同步 result；误投为 `Post` 时在 receipt 查询和 Git 调用前返回，不产生副作用。
 
 ## 交互合同完整性
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/state acquisition/execute；receipt query/commit | 完整 |
-| `blocks/file` | Git → File | `AcquireWorkspaceManifestCommand/Result` | 完整；只读 typed snapshot |
-| Git repository | Git-private adapter | sealed read/write operation 与 revision observation | 完整；无任意 CLI 文本入口 |
+| `kernel/orchestrator` | 双向 | capability/admissibility/feasibility/reconciliation/state acquisition/execute；receipt query/commit | 当前生产路径完整；execute 与 receipt authorization 均为 exact sealed identity |
+| `blocks/file` | Git → File | `AcquireWorkspaceManifestCommand/Result` | 当前生产路径完整；只读 scoped binding，并在 feasibility/effect 前重验 |
+| Git repository | Git-private adapter | sealed read/write operation、bounded evidence 与 revision observation | 当前 operation catalog 完整；无任意 CLI 文本入口，raw output 不跨 Owner |
 
 ## 相关约束
 
@@ -45,12 +60,19 @@ Last Verified: 2026-08-17
 - CWI reconciliation 只返回 repository presence/revision 这一 Git fact；binding 同时要求 check、metric 或 artifact
   时必须返回 `unverifiable/git_proof_incomplete`。commit/revision 本身不能替代 semantic validation proof。
 
-## 待完善测试点
+## 测试覆盖状态
 
-- [ ] 覆盖 File manifest 缺失、stale、wrong scope/revision 时 capability state 与 operation admission fail-closed。
-- [ ] 覆盖 prerequisite receipt 在重启、重复 acquisition 和同 key 不同 snapshot 下的幂等/冲突语义。
-- [ ] 覆盖远程操作、历史改写、未声明 ref 与危险参数均不能绕过结构化 operation catalog。
-- [ ] 覆盖 workspace repository 路径逃逸、非 repository 和跨 workspace scope。
-- [ ] 覆盖 effect 后 receipt commit 前崩溃的查询重放，确认 Git 副作用不重复。
-- [ ] 覆盖 commit/revision 只能形成 repository fact，不能单独满足 semantic check/metric/artifact proof。
-- [ ] 覆盖 File/Orchestrator 返回 nil/wrong result 与 safe original diagnostic 保留。
+已覆盖：
+
+- File workspace-tree binding、dirty-content stale feasibility 与 effect 前 stale 拒绝。
+- durable capability receipt 的重启加载、重复 acquisition、同 key 不同 snapshot 冲突。
+- exact owner receipt 重放、Orchestrator active/claimed query authorization、resource-change crash/restart。
+- ref option injection、sealed payload/target drift、非 Orchestrator source、Post 强调用和重复 add no-op。
+- CWI reconciliation 仅形成 repository fact，check/metric/artifact 要求返回 unverifiable。
+
+尚待补齐：
+
+- [ ] File responder missing、nil/wrong result、wrong workspace/run/authority/prerequisite 的完整表驱动矩阵。
+- [ ] 所有未声明 remote/history-rewrite/ref 组合与不同 Git 版本的危险参数兼容矩阵。
+- [ ] workspace repository symlink/path escape、非 repository 与跨 workspace 的端到端矩阵。
+- [ ] 大型 dirty repository 的 bounded observation/evidence benchmark 与上限回归。

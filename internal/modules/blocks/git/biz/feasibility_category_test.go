@@ -7,7 +7,7 @@ import (
 )
 
 func TestOwnerFeasibilityCategoriesAreTotal(t *testing.T) {
-	wantCodes := []string{"git_repository_unavailable", "operation_admissibility_binding_unavailable", "operation_admissibility_stale", "git_operation_contract_missing", "git_operation_variant_invalid", "git_operation_variant_not_admissible"}
+	wantCodes := []string{"git_repository_unavailable", "git_workspace_tree_unavailable", "operation_admissibility_binding_unavailable", "operation_admissibility_stale", "git_operation_contract_missing", "git_operation_variant_invalid", "git_operation_variant_not_admissible"}
 	if len(ownerFeasibilityCategories) != len(wantCodes) {
 		t.Fatalf("owner feasibility registry size=%d want=%d", len(ownerFeasibilityCategories), len(wantCodes))
 	}

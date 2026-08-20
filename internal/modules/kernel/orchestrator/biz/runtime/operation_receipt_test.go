@@ -52,6 +52,13 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	sealedExecution, ok := operationExecutionRecord(sealed.ActiveDispatch.OperationExecutions, "write-1")
+	if !ok {
+		t.Fatal("sealed execution is missing")
+	}
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, "write-1", sealedExecution.ExecutionKey, 1, nil); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unclaimed receipt query err = %v, want conflict", err)
+	}
 	claimed, err := controller.claimOperationExecution(context.Background(), "ws-v2", "run-v2", "write-1")
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +66,15 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	execution, ok := operationExecutionRecord(claimed.ActiveDispatch.OperationExecutions, "write-1")
 	if !ok {
 		t.Fatal("claimed execution is missing")
+	}
+	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey, execution.Fence, nil); err != nil || found {
+		t.Fatalf("claimed receipt query found=%v err=%v, want authorized found=false", found, err)
+	}
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", "different-dispatch", "write-1", execution.ExecutionKey, execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong dispatch receipt query err = %v, want conflict", err)
+	}
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey+"-wrong", execution.Fence, nil); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("wrong execution key receipt query err = %v, want conflict", err)
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
@@ -71,6 +87,10 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	committed, first, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
 	if err != nil {
 		t.Fatal(err)
+	}
+	queried, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey, execution.Fence, nil)
+	if err != nil || !found || !runtimecontract.SameRuntimeOperationReceipt(first, queried) {
+		t.Fatalf("committed receipt query found=%v receipt=%+v err=%v", found, queried, err)
 	}
 	saves := repository.saves
 	replayed, duplicate, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)

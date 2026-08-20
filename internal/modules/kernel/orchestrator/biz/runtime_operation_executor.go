@@ -156,17 +156,16 @@ func (e eventRuntimeOperationExecutor) executeMCP(ctx context.Context, request r
 }
 
 func (e eventRuntimeOperationExecutor) executeGit(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := gitevents.OperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := gitevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := gitevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext:   runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		OperationKind:                      request.Operation.Kind,
-		RequiredOperationRef:               request.Operation.RequiredOperationRef,
+		SealedOperation:                    sealedOperation,
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), request.CapabilityStates...),
+		WorkspaceTreeObservation:           cloneRuntimePrerequisiteObservation(request.WorkspaceTreeObservation),
 		CompletedRequiredOperationReceipts: append([]runtimecontract.RuntimeRequiredOperationReceiptBinding(nil), request.CompletedRequiredOperationReceipts...),
-		Data:                               data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(gitevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleGit, magicevent.NewHeader(), ctx, command))
 	response, err := gitOperationResponse(result)
@@ -174,6 +173,15 @@ func (e eventRuntimeOperationExecutor) executeGit(ctx context.Context, request r
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	return runtimeOperationExecutionResult(request, response.Receipt), nil
+}
+
+func cloneRuntimePrerequisiteObservation(value *runtimecontract.RuntimePrerequisiteObservation) *runtimecontract.RuntimePrerequisiteObservation {
+	if value == nil {
+		return nil
+	}
+	cloned := value.Normalized()
+	cloned.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), cloned.Dependencies...)
+	return &cloned
 }
 
 func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {

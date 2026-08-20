@@ -23,6 +23,7 @@ func ownerFeasibilityCategory(failure *runtimecontract.FailureFact) runtimecontr
 
 var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibilityCategory{
 	"git_repository_unavailable":                  runtimecontract.RuntimeOwnerFeasibilityCategoryResourceAbsent,
+	"git_workspace_tree_unavailable":              runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
 	"operation_admissibility_binding_unavailable": runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
 	"operation_admissibility_stale":               runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown,
 	"git_operation_contract_missing":              runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
