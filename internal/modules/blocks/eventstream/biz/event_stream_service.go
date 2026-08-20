@@ -534,7 +534,13 @@ func validMemoryRecallRecordedData(data memoryevents.MemoryRecallRecordedData) b
 }
 
 func validLLMUsageRecordedData(data llmevents.LLMUsageRecordedData) bool {
-	return strings.TrimSpace(data.RequestID) != "" && data.WorkspaceID != "" && data.RunID != "" && strings.TrimSpace(data.Status) != ""
+	if strings.TrimSpace(data.RequestID) == "" || strings.TrimSpace(data.Status) == "" {
+		return false
+	}
+	// Setup-draft completions are process-scoped before a Workspace exists;
+	// activation-time embeddings are Workspace-scoped before a Run exists.
+	// A Run without its owning Workspace is the only invalid scope shape.
+	return data.RunID == "" || data.WorkspaceID != ""
 }
 
 func validResultChangedData(data resultevents.ResultChangedData) bool {

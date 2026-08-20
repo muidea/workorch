@@ -179,6 +179,8 @@ type ProviderContextProfile struct {
 }
 
 type ProviderCompletionResult struct {
-	Payload []byte                  `json:"payload,omitempty"`
-	Usage   *llmaudit.ProviderUsage `json:"usage,omitempty"`
+	Payload       []byte                  `json:"payload,omitempty"`
+	Usage         *llmaudit.ProviderUsage `json:"usage,omitempty"`
+	RequestBytes  int                     `json:"-"`
+	ResponseBytes int                     `json:"-"`
 }

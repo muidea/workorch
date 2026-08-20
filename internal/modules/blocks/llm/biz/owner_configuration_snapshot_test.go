@@ -32,6 +32,7 @@ func TestBizStartFreezesLLMConfigurationForCatalogAndStatus(t *testing.T) {
 	configured.AIProxy.BaseURL = server.URL
 	configured.AIProxy.APIKey = "old-key"
 	configured.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: workorchconfig.BuiltinAIProxyProviderID, ModelID: "model-a"}
+	configured.DefaultEmbedding = &workorchconfig.ProviderModelTargetConfig{ProviderID: workorchconfig.BuiltinAIProxyProviderID, ModelID: "embedding-a"}
 	expectedRevision, err := workorchconfig.LLMConfigurationRevision(configured)
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +57,7 @@ func TestBizStartFreezesLLMConfigurationForCatalogAndStatus(t *testing.T) {
 	// must retain the startup snapshot rather than rereading this variable.
 	configured.AIProxy.APIKey = "new-key"
 	configured.DefaultChat.ModelID = "model-b"
+	configured.DefaultEmbedding.ModelID = "embedding-b"
 	if _, err := owner.getCatalog(ctx, true); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +84,7 @@ func TestBizStartFreezesLLMConfigurationForCatalogAndStatus(t *testing.T) {
 	if !ok {
 		t.Fatalf("active configuration result = %T, want typed LLM result", data)
 	}
-	if status.ConfigurationRevision != expectedRevision || status.ProviderID != workorchconfig.BuiltinAIProxyProviderID {
+	if status.ConfigurationRevision != expectedRevision || status.ProviderID != workorchconfig.BuiltinAIProxyProviderID || status.DefaultChat.ModelID != "model-a" || status.DefaultEmbedding == nil || status.DefaultEmbedding.ModelID != "embedding-a" {
 		t.Fatalf("active configuration status = %+v, want startup revision", status)
 	}
 }

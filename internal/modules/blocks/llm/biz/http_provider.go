@@ -17,18 +17,10 @@ import (
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
-const maxProviderStreamLineBytes = 16 * 1024 * 1024
-const maxProviderStreamContentBytes = 8 * 1024 * 1024
-const maxProviderStreamDataEvents = 32768
-
 type providerStreamLimits struct {
 	MaxContentBytes int
 	MaxDataEvents   int
-}
-
-var defaultProviderStreamLimits = providerStreamLimits{
-	MaxContentBytes: maxProviderStreamContentBytes,
-	MaxDataEvents:   maxProviderStreamDataEvents,
+	MaxLineBytes    int
 }
 
 // ProviderHTTPStatusError preserves the provider status code across adapter
@@ -37,6 +29,91 @@ var defaultProviderStreamLimits = providerStreamLimits{
 type ProviderHTTPStatusError struct {
 	StatusCode int
 	Body       string
+}
+
+// ProviderProtocolError marks a response/framing/security defect after the
+// provider request was submitted. It carries only a stable code and byte
+// count; raw provider content remains private to this adapter.
+type ProviderProtocolError struct {
+	Code          string
+	ResponseBytes int
+}
+
+func (e *ProviderProtocolError) Error() string {
+	if e == nil || strings.TrimSpace(e.Code) == "" {
+		return "llm provider protocol error"
+	}
+	return "llm provider protocol error: " + strings.TrimSpace(e.Code)
+}
+
+func (e *ProviderProtocolError) Unwrap() error { return common.ErrInvalidArgument }
+
+func providerProtocolError(code string, responseBytes int) error {
+	return &ProviderProtocolError{Code: strings.TrimSpace(code), ResponseBytes: max(responseBytes, 0)}
+}
+
+func providerResponseBytesFromError(err error) int {
+	var protocolErr *ProviderProtocolError
+	if errors.As(err, &protocolErr) && protocolErr != nil {
+		return protocolErr.ResponseBytes
+	}
+	return 0
+}
+
+func withProviderProtocolResponseBytes(err error, responseBytes int) error {
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr == nil {
+		return err
+	}
+	return &ProviderProtocolError{Code: protocolErr.Code, ResponseBytes: max(protocolErr.ResponseBytes, responseBytes)}
+}
+
+type providerResponseLimitReader struct {
+	reader    io.Reader
+	remaining int
+	read      int
+}
+
+func newProviderResponseLimitReader(reader io.Reader, limit int) *providerResponseLimitReader {
+	return &providerResponseLimitReader{reader: reader, remaining: max(limit, 0)}
+}
+
+func (r *providerResponseLimitReader) Read(buffer []byte) (int, error) {
+	if r == nil || r.reader == nil {
+		return 0, io.EOF
+	}
+	if r.remaining <= 0 {
+		var probe [1]byte
+		n, err := r.reader.Read(probe[:])
+		r.read += n
+		if n > 0 {
+			return 0, providerProtocolError("response_byte_limit_exceeded", r.read)
+		}
+		return 0, err
+	}
+	if len(buffer) > r.remaining {
+		buffer = buffer[:r.remaining]
+	}
+	n, err := r.reader.Read(buffer)
+	r.read += n
+	r.remaining -= n
+	return n, err
+}
+
+func (r *providerResponseLimitReader) BytesRead() int {
+	if r == nil {
+		return 0
+	}
+	return r.read
+}
+
+func readBoundedProviderBody(reader io.Reader, limit int) ([]byte, int, error) {
+	limited := newProviderResponseLimitReader(reader, limit)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, limited.BytesRead(), withProviderProtocolResponseBytes(err, limited.BytesRead())
+	}
+	return body, limited.BytesRead(), nil
 }
 
 // ProviderOutputLimitError is a typed, non-transport completion outcome. The
@@ -76,12 +153,6 @@ type providerStreamGuard struct {
 }
 
 func newProviderStreamGuard(limits providerStreamLimits) *providerStreamGuard {
-	if limits.MaxContentBytes <= 0 {
-		limits.MaxContentBytes = maxProviderStreamContentBytes
-	}
-	if limits.MaxDataEvents <= 0 {
-		limits.MaxDataEvents = maxProviderStreamDataEvents
-	}
 	return &providerStreamGuard{limits: limits}
 }
 
@@ -91,7 +162,7 @@ func (g *providerStreamGuard) observeDataEvent() error {
 	}
 	g.dataEvents++
 	if g.dataEvents > g.limits.MaxDataEvents {
-		return fmt.Errorf("%w: llm provider stream incomplete: streamed response exceeded data event limit %d", common.ErrInvalidArgument, g.limits.MaxDataEvents)
+		return providerProtocolError("stream_event_limit_exceeded", 0)
 	}
 	return nil
 }
@@ -102,7 +173,7 @@ func (g *providerStreamGuard) observeDelta(delta string) error {
 	}
 	next := g.contentBytes + len(delta)
 	if next > g.limits.MaxContentBytes {
-		return fmt.Errorf("%w: llm provider stream incomplete: streamed response exceeded content byte limit %d", common.ErrInvalidArgument, g.limits.MaxContentBytes)
+		return providerProtocolError("stream_content_limit_exceeded", 0)
 	}
 	g.contentBytes = next
 	return nil
@@ -120,7 +191,7 @@ func NewHTTPProvider(config llmmodels.ProviderConfig) *HTTPProvider {
 		// The provider deadline belongs to the request context (see
 		// requestContext). A client-wide timeout races it and can return while
 		// leaving the server-side request context active.
-		client: &http.Client{},
+		client: providerHTTPClient(nil),
 	}
 }
 
@@ -132,9 +203,34 @@ func NewHTTPProviderWithClient(config llmmodels.ProviderConfig, client *http.Cli
 	// Do not mutate the caller's client. The shallow copy preserves its
 	// transport and protocol behavior while moving timeout authority to the
 	// request context consistently for both constructed and injected clients.
-	clientCopy := *client
-	clientCopy.Timeout = 0
-	return &HTTPProvider{config: config, client: &clientCopy}
+	return &HTTPProvider{config: config, client: providerHTTPClient(client)}
+}
+
+func providerHTTPClient(source *http.Client) *http.Client {
+	client := &http.Client{}
+	if source != nil {
+		copy := *source
+		client = &copy
+	}
+	client.Timeout = 0
+	previous := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req == nil || len(via) == 0 || via[0] == nil || via[0].URL == nil || req.URL == nil {
+			return providerProtocolError("redirect_identity_invalid", 0)
+		}
+		origin := via[0].URL
+		if !strings.EqualFold(origin.Scheme, req.URL.Scheme) || !strings.EqualFold(origin.Host, req.URL.Host) {
+			return providerProtocolError("cross_origin_redirect_rejected", 0)
+		}
+		if previous != nil {
+			return previous(req, via)
+		}
+		if len(via) >= 10 {
+			return providerProtocolError("redirect_limit_exceeded", 0)
+		}
+		return nil
+	}
+	return client
 }
 
 // requestContext makes the configured provider deadline part of the actual
@@ -168,6 +264,10 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 }
 
 func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	limits, err := providerCompletionResponseLimits(p.config, request)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
 	endpoint, err := responsesURL(p.config.BaseURL)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -184,11 +284,12 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
+	result := llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return result, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
@@ -196,34 +297,35 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, providerRequestError(err)
+		return result, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode)
+		return result, providerHTTPStatusError(resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, responseBytes, err := readBoundedProviderBody(resp.Body, limits.MaxWireBytes)
+	result.ResponseBytes = responseBytes
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return result, err
 	}
 	var decoded responsesResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: invalid response json: %v", common.ErrInvalidArgument, err)
+		return result, providerProtocolError("invalid_response_json", responseBytes)
 	}
 	if decoded.Error != nil {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, decoded.Error.Summary())
+		return result, providerProtocolError("response_error_object", responseBytes)
 	}
 	content := providerCompletionContent(request, decoded.Content())
+	result.Payload = []byte(content)
+	result.Usage = decoded.Usage.ProviderUsage()
 	if decoded.Status == "incomplete" && decoded.IncompleteDetails.Reason == "max_output_tokens" {
-		return llmmodels.ProviderCompletionResult{Payload: []byte(content), Usage: decoded.Usage.ProviderUsage()}, &ProviderOutputLimitError{Payload: []byte(content), Usage: decoded.Usage.ProviderUsage()}
+		return result, &ProviderOutputLimitError{Payload: []byte(content), Usage: decoded.Usage.ProviderUsage()}
 	}
 	if strings.TrimSpace(content) == "" {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: first choice content is empty", common.ErrInvalidArgument)
+		result.Payload = nil
+		return result, providerProtocolError("final_output_missing", responseBytes)
 	}
-	return llmmodels.ProviderCompletionResult{
-		Payload: []byte(content),
-		Usage:   decoded.Usage.ProviderUsage(),
-	}, nil
+	return result, nil
 }
 
 func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
@@ -234,6 +336,10 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 }
 
 func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
+	limits, err := providerCompletionResponseLimits(p.config, request)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
 	endpoint, err := responsesURL(p.config.BaseURL)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -251,11 +357,12 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
+	result := llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return result, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
@@ -263,25 +370,31 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, providerRequestError(err)
+		return result, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode)
+		return result, providerHTTPStatusError(resp.StatusCode)
 	}
-	content, usage, err := readResponsesStream(resp.Body, emit)
+	limited := newProviderResponseLimitReader(resp.Body, limits.MaxWireBytes)
+	content, usage, err := readResponsesStream(limited, emit, providerStreamLimits{
+		MaxContentBytes: limits.MaxContentBytes,
+		MaxDataEvents:   limits.MaxDataEvents,
+		MaxLineBytes:    limits.MaxLineBytes,
+	})
+	result.ResponseBytes = limited.BytesRead()
+	result.Usage = usage
 	if err != nil {
 		content = providerCompletionContent(request, content)
-		return llmmodels.ProviderCompletionResult{Payload: []byte(content), Usage: usage}, err
+		result.Payload = []byte(content)
+		return result, withProviderProtocolResponseBytes(err, result.ResponseBytes)
 	}
 	content = providerCompletionContent(request, content)
 	if strings.TrimSpace(content) == "" {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
+		return result, providerProtocolError("final_output_missing", result.ResponseBytes)
 	}
-	return llmmodels.ProviderCompletionResult{
-		Payload: []byte(content),
-		Usage:   usage,
-	}, nil
+	result.Payload = []byte(content)
+	return result, nil
 }
 
 func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
@@ -296,6 +409,10 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	if model == "" {
 		model = p.config.Model
 	}
+	responseLimit, err := providerEmbeddingResponseLimit(p.config, input)
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
 	endpoint, err := embeddingsURL(p.config.BaseURL)
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
@@ -307,11 +424,12 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
+	result := llmmodels.ProviderEmbeddingResult{ProviderID: p.config.ID, Model: model, Input: input, RequestBytes: len(payload)}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return result, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
@@ -319,30 +437,28 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, providerRequestError(err)
+		return result, providerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return llmmodels.ProviderEmbeddingResult{}, providerHTTPStatusError(resp.StatusCode)
+		return result, providerHTTPStatusError(resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, responseBytes, err := readBoundedProviderBody(resp.Body, responseLimit)
+	result.ResponseBytes = responseBytes
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return result, err
 	}
 	var decoded embeddingResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: invalid llm provider embedding response: %v", common.ErrInvalidArgument, err)
+		return result, providerProtocolError("invalid_embedding_response_json", responseBytes)
 	}
+	result.Usage = decoded.Usage.ProviderUsage()
 	vector := decoded.FirstEmbedding()
 	if len(vector) == 0 {
-		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider embedding response is empty", common.ErrInvalidArgument)
+		return result, providerProtocolError("embedding_output_missing", responseBytes)
 	}
-	return llmmodels.ProviderEmbeddingResult{
-		ProviderID: p.config.ID,
-		Model:      model,
-		Input:      input,
-		Vector:     vector,
-	}, nil
+	result.Vector = vector
+	return result, nil
 }
 
 func setBearerAuthorization(header http.Header, apiKey string) {
@@ -499,6 +615,25 @@ type embeddingResponse struct {
 	Data []struct {
 		Embedding []float64 `json:"embedding"`
 	} `json:"data"`
+	Usage embeddingUsage `json:"usage"`
+}
+
+type embeddingUsage struct {
+	PromptTokens int `json:"prompt_tokens,omitempty"`
+	InputTokens  int `json:"input_tokens,omitempty"`
+	TotalTokens  int `json:"total_tokens,omitempty"`
+}
+
+func (u embeddingUsage) ProviderUsage() *llmaudit.ProviderUsage {
+	inputTokens := max(u.PromptTokens, u.InputTokens)
+	totalTokens := u.TotalTokens
+	if totalTokens == 0 {
+		totalTokens = inputTokens
+	}
+	if inputTokens == 0 && totalTokens == 0 {
+		return nil
+	}
+	return &llmaudit.ProviderUsage{InputTokens: inputTokens, TotalTokens: totalTokens}
 }
 
 func (r embeddingResponse) FirstEmbedding() []float64 {
@@ -584,10 +719,10 @@ type responsesStreamReader struct {
 	completed bool
 }
 
-func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmaudit.ProviderUsage, error) {
+func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmaudit.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
-	stream := &responsesStreamReader{guard: newProviderStreamGuard(defaultProviderStreamLimits), emit: emit}
+	scanner.Buffer(make([]byte, 0, min(64*1024, limits.MaxLineBytes)), limits.MaxLineBytes)
+	stream := &responsesStreamReader{guard: newProviderStreamGuard(limits), emit: emit}
 	for scanner.Scan() {
 		data, ok := responsesStreamData(scanner.Text())
 		if !ok {
@@ -605,10 +740,17 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		var protocolErr *ProviderProtocolError
+		if errors.As(err, &protocolErr) {
+			return "", nil, err
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "token too long") {
+			return "", nil, providerProtocolError("stream_line_limit_exceeded", 0)
+		}
 		return "", nil, err
 	}
 	if !stream.completed {
-		return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before response.completed", common.ErrInvalidArgument)
+		return "", nil, providerProtocolError("stream_ended_before_completion", 0)
 	}
 	return stream.builder.String(), stream.usage, nil
 }
@@ -654,10 +796,10 @@ func (s *responsesStreamReader) consume(data string) (stop bool, preservePartial
 func decodeResponsesStreamEvent(data string) (responsesStreamEvent, error) {
 	var event responsesStreamEvent
 	if err := json.Unmarshal([]byte(data), &event); err != nil {
-		return responsesStreamEvent{}, fmt.Errorf("%w: invalid responses stream event: %v", common.ErrInvalidArgument, err)
+		return responsesStreamEvent{}, providerProtocolError("invalid_stream_event_json", len(data))
 	}
 	if event.Error != nil {
-		return responsesStreamEvent{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, event.Error.Summary())
+		return responsesStreamEvent{}, providerProtocolError("stream_error_object", len(data))
 	}
 	return event, nil
 }
@@ -705,7 +847,7 @@ func (s *responsesStreamReader) incompleteError(event responsesStreamEvent) erro
 	if reason == "max_output_tokens" {
 		return &ProviderOutputLimitError{Payload: []byte(s.builder.String()), Usage: s.usage}
 	}
-	return fmt.Errorf("%w: llm provider stream incomplete: %s", common.ErrInvalidArgument, reason)
+	return providerProtocolError("stream_incomplete_"+sanitizeCatalogLogValue(reason, 64), 0)
 }
 
 func (e *providerResponseError) Summary() string {

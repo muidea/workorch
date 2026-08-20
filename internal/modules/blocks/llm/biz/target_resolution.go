@@ -50,7 +50,10 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 			if !containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) {
 				return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureOperationUnsupported, Message: fmt.Sprintf("model %q does not support operation %q", target.ModelID, operation), Target: target}
 			}
-			return llmmodels.ResolvedProviderModelProfile{Target: target, Operation: operation, APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, CapabilitySource: llmmodels.CapabilitySourceAIProxyCatalog, CapabilityRevision: model.CapabilityRevision, ConfigurationRevision: configRevision}, nil
+			if !model.CapabilityReady {
+				return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: firstNonEmpty(model.UnavailableReason, "embedding model capacity is incomplete"), Target: target}
+			}
+			return deriveEmbeddingBudgetProfile(target, operation, llmcommon.ProviderSurfaceOpenAICompatibleHTTP, model.ContextWindowTokens, cfg.Budget, llmmodels.CapabilitySourceAIProxyCatalog, configRevision, model.CapabilityRevision)
 		}
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureModelNotFound, Message: fmt.Sprintf("model %q was not found in ai-proxy catalog", target.ModelID), Target: target}
 	}
@@ -121,6 +124,40 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 		Message: fmt.Sprintf("model %q was not found in ai-proxy catalog", target.ModelID),
 		Target:  target,
 	}
+}
+
+func deriveEmbeddingBudgetProfile(
+	target runtimecontract.ProviderModelTarget,
+	operation string,
+	apiSurface string,
+	contextWindowTokens int,
+	budget workorchconfig.LLMContextBudgetPolicyConfig,
+	capabilitySource string,
+	configurationRevision string,
+	existingCapabilityRevision string,
+) (llmmodels.ResolvedProviderModelProfile, error) {
+	if contextWindowTokens <= 0 || budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || budget.EstimatedTokensPerByte <= 0 {
+		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
+			Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: "embedding context capacity is incomplete", Target: target,
+		}
+	}
+	maxInputTokens := int(math.Floor(float64(contextWindowTokens) * budget.ContextUtilizationRatio))
+	maxBytesFloat := math.Floor(float64(maxInputTokens) / budget.EstimatedTokensPerByte)
+	if maxInputTokens <= 0 || maxBytesFloat <= 0 || maxBytesFloat > float64(math.MaxInt) {
+		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
+			Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: "embedding byte capacity is invalid", Target: target,
+		}
+	}
+	capabilityRev := existingCapabilityRevision
+	if capabilityRev == "" {
+		capabilityRev = capabilityRevision(target, contextWindowTokens, 0, capabilitySource+"|"+operation)
+	}
+	return llmmodels.ResolvedProviderModelProfile{
+		Target: target, Operation: operation, APISurface: apiSurface,
+		ContextWindowTokens: contextWindowTokens, MaxInputTokens: maxInputTokens,
+		EstimatedTokensPerByte: budget.EstimatedTokensPerByte, MaxRequestBytes: int(maxBytesFloat),
+		CapabilitySource: capabilitySource, CapabilityRevision: capabilityRev, ConfigurationRevision: configurationRevision,
+	}, nil
 }
 
 func deriveBudgetProfile(

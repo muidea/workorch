@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
+)
 
 type ProviderConfig struct {
 	ID                string
@@ -42,10 +46,13 @@ type ProviderEmbeddingRequest struct {
 }
 
 type ProviderEmbeddingResult struct {
-	ProviderID string    `json:"providerId"`
-	Model      string    `json:"model"`
-	Input      string    `json:"input,omitempty"`
-	Vector     []float64 `json:"vector"`
+	ProviderID    string                  `json:"providerId"`
+	Model         string                  `json:"model"`
+	Input         string                  `json:"input,omitempty"`
+	Vector        []float64               `json:"vector"`
+	Usage         *llmaudit.ProviderUsage `json:"usage,omitempty"`
+	RequestBytes  int                     `json:"-"`
+	ResponseBytes int                     `json:"-"`
 }
 
 type RedactedProviderConfig struct {

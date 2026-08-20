@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -28,12 +29,41 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 	if got := runtimeCandidateProviderFailureClass(context.DeadlineExceeded, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
 		t.Fatalf("deadline class = %s, want ordinary provider transport failure", got)
 	}
+	if got := runtimeCandidateProviderFailureClass(&ProviderProtocolError{Code: "invalid_response_json", ResponseBytes: 17}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderProtocol {
+		t.Fatalf("protocol class = %s, want provider protocol", got)
+	}
+}
+
+func TestRuntimeProviderFeedbackPreservesExplicitProtocolClass(t *testing.T) {
+	feedback, err := runtimeProviderRequestFeedback(llmevents.RequestRuntimeCandidateCommand{
+		WorkspaceID: "workspace-1", RunID: "run-1", DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "request-1", Sequence: 1, PhysicalCallID: "physical-1"},
+	}, runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassProviderProtocol, Code: "invalid_response_json",
+		Signature: "provider-protocol-invalid-json", Reason: "provider response violated the protocol contract",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryProviderProtocol || feedback.OriginalDiagnostic == nil || feedback.OriginalDiagnostic.OriginalClass != string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol) {
+		t.Fatalf("protocol feedback = %+v", feedback)
+	}
 }
 
 func TestRuntimeCandidateProviderUsesOrchestratorPhysicalCallID(t *testing.T) {
 	request := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-1", Sequence: 3, PhysicalCallID: "physical-call-3"}}
 	if got := newProviderRequestID(request); got != request.RequestIdentity.PhysicalCallID {
 		t.Fatalf("provider request ID = %q, want persisted physical call ID %q", got, request.RequestIdentity.PhysicalCallID)
+	}
+}
+
+func TestProviderAuditRequestBytesPreferAdapterWireMeasurement(t *testing.T) {
+	budget := &llmmodels.ProviderContextBudget{ActualBytes: 41}
+	if got := providerAuditRequestBytes(73, budget); got != 73 {
+		t.Fatalf("submitted request bytes = %d, want adapter wire measurement 73", got)
+	}
+	if got := providerAuditRequestBytes(0, budget); got != 41 {
+		t.Fatalf("pre-dispatch request bytes = %d, want rendered budget measurement 41", got)
 	}
 }
 

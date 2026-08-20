@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -47,6 +48,20 @@ type Dependencies struct {
 	CandidateProvider llmruntime.CandidateProvider
 	LoadLLMConfig     func() (workorchconfig.LLMConfig, error)
 }
+
+type providerExecutionMetadata struct {
+	Target    runtimecontract.ProviderModelTarget
+	Profile   llmmodels.ResolvedProviderModelProfile
+	Submitted bool
+}
+
+type providerCommandExecution struct {
+	Result llmevents.LLMCommandResult
+	Audit  *llmmodels.ProviderRequestAudit
+	Usage  *llmaudit.ProviderUsage
+}
+
+var providerCommandSequence atomic.Uint64
 
 func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps ...Dependencies) (*Biz, error) {
 	if eventHub == nil {
@@ -142,16 +157,26 @@ func (m *Biz) activeConfiguration() (workorchconfig.LLMConfig, error) {
 }
 
 func (m *Biz) activeConfigurationStatus() (llmevents.GetActiveConfigurationResult, error) {
-	if _, err := m.activeConfiguration(); err != nil {
+	configured, err := m.activeConfiguration()
+	if err != nil {
 		return llmevents.GetActiveConfigurationResult{}, err
 	}
-	return llmevents.GetActiveConfigurationResult{
+	ret := llmevents.GetActiveConfigurationResult{
 		ProviderID:            runtimecontract.BuiltinAIProxyProviderID,
 		ConfigurationRevision: m.activeLLMConfigurationRevision,
-	}, nil
+		DefaultChat:           configured.DefaultChat.ToRuntimeTarget(),
+	}
+	if configured.DefaultEmbedding != nil {
+		value := configured.DefaultEmbedding.ToRuntimeTarget()
+		ret.DefaultEmbedding = &value
+	}
+	return ret, nil
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(llmevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
@@ -186,6 +211,9 @@ func (m *Biz) Teardown(context.Context) {
 // Orchestrator owns the resulting acquire/terminal transition; this block only
 // reports a bounded, secret-free rendering outcome.
 func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
 	if !ok || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
@@ -275,6 +303,11 @@ func runtimeCandidatePreflightReason(err error) string {
 }
 
 func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.Result) {
+	// Candidate generation is a paid synchronous execute contract. A Post has
+	// no acknowledgement channel and must not reach the provider.
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 	if !ok || m.candidateProvider == nil || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
@@ -395,6 +428,8 @@ func runtimeProviderRequestFeedback(command llmevents.RequestRuntimeCandidateCom
 		category = runtimecontract.RuntimeFeedbackCategoryProviderConfiguration
 	case runtimecontract.RuntimeCandidateFailureClassProviderTransient:
 		category = runtimecontract.RuntimeFeedbackCategoryProviderTransient
+	case runtimecontract.RuntimeCandidateFailureClassProviderProtocol:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderProtocol
 	case runtimecontract.RuntimeCandidateFailureClassProvider,
 		runtimecontract.RuntimeCandidateFailureClassSchema,
 		runtimecontract.RuntimeCandidateFailureClassContract,
@@ -652,6 +687,9 @@ func providerCacheUsageAudit(usage *llmaudit.ProviderUsage) llmaudit.CacheUsage 
 }
 
 func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(llmevents.AcquireProviderCeilingCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
@@ -721,6 +759,12 @@ func setPrerequisiteMagicError(result magicevent.Result, err error) {
 }
 
 func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
+	// Every LLM topic is a synchronous query/execute contract. In particular,
+	// completion, embedding, refresh, and candidate calls must never be invoked
+	// by fire-and-forget Post delivery.
+	if result == nil {
+		return
+	}
 	switch ev.ID() {
 	case llmevents.TopicLLMCommandGetActiveConfiguration:
 		if _, ok := ev.Data().(llmevents.GetActiveConfigurationCommand); !ok {
@@ -775,8 +819,15 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		return
 	}
 
-	response, err := m.executeCommand(ev)
-	setLLMMagicResult(result, response, err)
+	execution, err := m.executeCommand(ev)
+	status := llmmodels.RuntimeCandidateStatusCompleted
+	failureClass := ""
+	if err != nil {
+		status = llmmodels.RuntimeCandidateStatusFailed
+		failureClass = string(runtimeCandidateProviderFailureClass(err, execution.Audit != nil && execution.Audit.ProviderSubmitted))
+	}
+	m.publishLLMUsageRecorded(ev.Context(), execution.Audit, execution.Usage, status, failureClass)
+	setLLMMagicResult(result, execution.Result, err)
 }
 
 func (m *Biz) validateInferenceSelection(ctx context.Context, selection runtimecontract.ProviderInferenceSelection, operation string) (runtimecontract.ProviderInferenceSelection, string, error) {
@@ -806,39 +857,149 @@ func (m *Biz) validateInferenceSelection(ctx context.Context, selection runtimec
 	return runtimecontract.ProviderInferenceSelection{}, "", common.ErrNotFound
 }
 
-func (m *Biz) executeCommand(ev magicevent.Event) (llmevents.LLMCommandResult, error) {
+func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, error) {
 	if m == nil {
-		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
+		return providerCommandExecution{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
 	case llmevents.TopicLLMCommandCompleteProvider:
 		cmd, ok := ev.Data().(llmevents.CompleteProviderCommand)
 		if !ok {
-			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
+			return providerCommandExecution{}, common.ErrInvalidArgument
 		}
 		request, err := cmd.Request.ToModel()
 		if err != nil {
-			return llmevents.LLMCommandResult{}, err
+			return providerCommandExecution{}, err
 		}
-		completion, target, err := m.completeProvider(ctx, cmd.Target, request)
+		startedAt := time.Now().UTC()
+		completion, metadata, err := m.completeProvider(ctx, cmd.Target, request)
+		audit := providerCommandAudit(request, metadata, completion.RequestBytes, completion.ResponseBytes, startedAt, time.Now().UTC(), err)
+		execution := providerCommandExecution{
+			Result: llmevents.LLMCommandResult{Target: metadata.Target, Completion: llmCompletionEventData(completion)},
+			Audit:  audit,
+			Usage:  cloneProviderUsage(completion.Usage),
+		}
 		if err != nil {
-			return llmevents.LLMCommandResult{}, err
+			execution.Result.Completion = nil
 		}
-		return llmevents.LLMCommandResult{Target: target, Completion: llmCompletionEventData(completion)}, nil
+		return execution, err
 	case llmevents.TopicLLMCommandGenerateEmbedding:
 		cmd, ok := ev.Data().(llmevents.GenerateEmbeddingCommand)
 		if !ok || strings.TrimSpace(cmd.Input) == "" {
-			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
+			return providerCommandExecution{}, common.ErrInvalidArgument
 		}
-		embedding, err := m.generateEmbedding(ctx, cmd.Target, cmd.Input)
+		startedAt := time.Now().UTC()
+		embedding, metadata, err := m.generateEmbedding(ctx, cmd.Target, cmd.Input)
+		audit := providerEmbeddingAudit(cmd, metadata, embedding.RequestBytes, embedding.ResponseBytes, startedAt, time.Now().UTC(), err)
+		execution := providerCommandExecution{
+			Result: llmevents.LLMCommandResult{Target: metadata.Target, Embedding: &embedding},
+			Audit:  audit,
+			Usage:  cloneProviderUsage(embedding.Usage),
+		}
 		if err != nil {
-			return llmevents.LLMCommandResult{}, err
+			execution.Result.Embedding = nil
 		}
-		return llmevents.LLMCommandResult{Target: cmd.Target.Normalized(), Embedding: &embedding}, nil
+		return execution, err
 	default:
-		return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
+		return providerCommandExecution{}, common.ErrInvalidArgument
 	}
+}
+
+func cloneProviderUsage(usage *llmaudit.ProviderUsage) *llmaudit.ProviderUsage {
+	if usage == nil {
+		return nil
+	}
+	ret := *usage
+	return &ret
+}
+
+func providerCommandAudit(request llmmodels.ProviderRequest, metadata providerExecutionMetadata, requestBytes, responseBytes int, startedAt, completedAt time.Time, callErr error) *llmmodels.ProviderRequestAudit {
+	status, failureClass := providerCommandAuditOutcome(callErr, metadata.Submitted)
+	budget := cloneProviderContextBudget(request.ContextBudget)
+	if budget == nil {
+		budget = providerContextBudgetFromProfile(metadata.Profile)
+	}
+	if budget != nil {
+		budget.ProviderSubmitted = metadata.Submitted
+	}
+	return &llmmodels.ProviderRequestAudit{
+		RequestID:             newProviderCommandRequestID(workorchconfig.LLMOperationResponses, startedAt),
+		WorkspaceID:           strings.TrimSpace(request.WorkspaceID),
+		RunID:                 strings.TrimSpace(request.RunID),
+		StepID:                strings.TrimSpace(request.StepID),
+		Target:                metadata.Target,
+		Operation:             workorchconfig.LLMOperationResponses,
+		CapabilityRevision:    metadata.Profile.CapabilityRevision,
+		ConfigurationRevision: metadata.Profile.ConfigurationRevision,
+		Kind:                  firstNonEmpty(strings.TrimSpace(request.Kind), "provider_completion"),
+		APISurface:            metadata.Profile.APISurface,
+		Provider:              metadata.Target.ProviderID,
+		ContextBudget:         budget,
+		ProviderSubmitted:     metadata.Submitted,
+		Status:                status,
+		FailureClass:          failureClass,
+		StartedAt:             startedAt.Format(time.RFC3339Nano),
+		CompletedAt:           completedAt.Format(time.RFC3339Nano),
+		DurationMs:            max(int(completedAt.Sub(startedAt).Milliseconds()), 0),
+		RequestBytes:          max(requestBytes, 0),
+		ResponseBytes:         max(responseBytes, providerResponseBytesFromError(callErr)),
+	}
+}
+
+func providerEmbeddingAudit(command llmevents.GenerateEmbeddingCommand, metadata providerExecutionMetadata, requestBytes, responseBytes int, startedAt, completedAt time.Time, callErr error) *llmmodels.ProviderRequestAudit {
+	status, failureClass := providerCommandAuditOutcome(callErr, metadata.Submitted)
+	budget := providerContextBudgetFromProfile(metadata.Profile)
+	if budget != nil {
+		budget.ProviderSubmitted = metadata.Submitted
+	}
+	return &llmmodels.ProviderRequestAudit{
+		RequestID:             newProviderCommandRequestID(workorchconfig.LLMOperationEmbeddings, startedAt),
+		WorkspaceID:           string(command.WorkspaceID),
+		RunID:                 string(command.RunID),
+		StepID:                strings.TrimSpace(command.StepID),
+		Target:                metadata.Target,
+		Operation:             workorchconfig.LLMOperationEmbeddings,
+		CapabilityRevision:    metadata.Profile.CapabilityRevision,
+		ConfigurationRevision: metadata.Profile.ConfigurationRevision,
+		Kind:                  "provider_embedding",
+		APISurface:            metadata.Profile.APISurface,
+		Provider:              metadata.Target.ProviderID,
+		ContextBudget:         budget,
+		ProviderSubmitted:     metadata.Submitted,
+		Status:                status,
+		FailureClass:          failureClass,
+		StartedAt:             startedAt.Format(time.RFC3339Nano),
+		CompletedAt:           completedAt.Format(time.RFC3339Nano),
+		DurationMs:            max(int(completedAt.Sub(startedAt).Milliseconds()), 0),
+		RequestBytes:          max(requestBytes, 0),
+		ResponseBytes:         max(responseBytes, providerResponseBytesFromError(callErr)),
+	}
+}
+
+func providerCommandAuditOutcome(callErr error, submitted bool) (string, string) {
+	if callErr == nil {
+		return llmmodels.RuntimeCandidateStatusCompleted, ""
+	}
+	return llmmodels.RuntimeCandidateStatusFailed, string(runtimeCandidateProviderFailureClass(callErr, submitted))
+}
+
+func providerContextBudgetFromProfile(profile llmmodels.ResolvedProviderModelProfile) *llmmodels.ProviderContextBudget {
+	if profile.Target.ProviderID == "" || profile.Target.ModelID == "" {
+		return nil
+	}
+	return &llmmodels.ProviderContextBudget{
+		ProviderID: profile.Target.ProviderID, ModelID: profile.Target.ModelID,
+		CapabilityRevision: profile.CapabilityRevision, ConfigurationRevision: profile.ConfigurationRevision,
+		ContextWindowTokens: profile.ContextWindowTokens, ProviderMaxOutputTokens: profile.ProviderMaxOutputTokens,
+		EffectiveMaxOutputTokens: profile.EffectiveMaxOutputTokens, MaxBytes: profile.MaxRequestBytes,
+		MaxTokens: profile.MaxInputTokens, MaxRequestBytes: profile.MaxRequestBytes,
+		ProfileMode: "owner_active_configuration", CapabilitySource: profile.CapabilitySource,
+	}
+}
+
+func newProviderCommandRequestID(operation string, startedAt time.Time) string {
+	return fmt.Sprintf("llm-%s-%d-%d", strings.TrimSpace(operation), startedAt.UnixNano(), providerCommandSequence.Add(1))
 }
 
 func llmCompletionEventData(completion llmmodels.ProviderCompletionResult) *llmevents.ProviderCompletionData {
@@ -868,32 +1029,42 @@ func setLLMMagicError(result magicevent.Result, err error) {
 	result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 }
 
-func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.ProviderModelTarget, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, runtimecontract.ProviderModelTarget, error) {
+func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.ProviderModelTarget, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, providerExecutionMetadata, error) {
+	metadata := providerExecutionMetadata{Target: target.Normalized()}
 	if m == nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, metadata, common.ErrInvalidArgument
 	}
-	target = target.Normalized()
+	target = metadata.Target
+	if target.ProviderID == "" && target.ModelID == "" {
+		configured, err := m.activeConfiguration()
+		if err != nil {
+			return llmmodels.ProviderCompletionResult{}, metadata, err
+		}
+		target = configured.DefaultChat.ToRuntimeTarget()
+		metadata.Target = target
+	}
 	if err := target.Validate(); err != nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
 	if model := strings.TrimSpace(request.Model); model != "" && model != target.ModelID {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: provider request model %q conflicts with target model %q", common.ErrInvalidArgument, model, target.ModelID)
+		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider request model %q conflicts with target model %q", common.ErrInvalidArgument, model, target.ModelID)
 	}
 	profile, err := m.resolveTarget(ctx, target, workorchconfig.LLMOperationResponses)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
+	metadata.Profile = profile
 	cfg, err := m.activeConfiguration()
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
 	runtime, err := ResolveProviderClient(cfg, target, profile)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
 	provider := NewProviderFromConfig(runtime)
 	if provider == nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
 	request.Model = target.ModelID
 	request.Config = llmproviderconfig.RedactedProviderConfig(runtime)
@@ -901,16 +1072,17 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 	if runtime.Capabilities.Streaming {
 		streaming, ok := provider.(StreamingProvider)
 		if !ok {
-			return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
+			return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
 		}
 		completion, err = streaming.StreamComplete(ctx, request, func(llmmodels.ProviderStreamEvent) error { return nil })
 	} else {
 		completion, err = provider.Complete(ctx, request)
 	}
+	metadata.Submitted = completion.RequestBytes > 0
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
+		return completion, metadata, err
 	}
-	return completion, target, nil
+	return completion, metadata, nil
 }
 
 func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling runtimecontract.ProviderCeiling, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
@@ -973,28 +1145,32 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	return completion, nil
 }
 
-func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.ProviderModelTarget, input string) (llmmodels.ProviderEmbeddingResult, error) {
+func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.ProviderModelTarget, input string) (llmmodels.ProviderEmbeddingResult, providerExecutionMetadata, error) {
 	target = target.Normalized()
+	metadata := providerExecutionMetadata{Target: target}
 	input = strings.TrimSpace(input)
 	if err := target.Validate(); err != nil || input == "" {
-		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+		return llmmodels.ProviderEmbeddingResult{}, metadata, common.ErrInvalidArgument
 	}
 	if m == nil {
-		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+		return llmmodels.ProviderEmbeddingResult{}, metadata, common.ErrInvalidArgument
 	}
 	profile, err := m.resolveTarget(ctx, target, "embeddings")
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return llmmodels.ProviderEmbeddingResult{}, metadata, err
 	}
+	metadata.Profile = profile
 	cfg, err := m.activeConfiguration()
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return llmmodels.ProviderEmbeddingResult{}, metadata, err
 	}
 	runtime, err := ResolveProviderClient(cfg, target, profile)
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return llmmodels.ProviderEmbeddingResult{}, metadata, err
 	}
-	return GenerateEmbedding(ctx, target.ProviderID, runtime, input)
+	result, err := GenerateEmbedding(ctx, target.ProviderID, runtime, input)
+	metadata.Submitted = result.RequestBytes > 0
+	return result, metadata, err
 }
 
 func (m *Biz) resolveTarget(ctx context.Context, target runtimecontract.ProviderModelTarget, operation string) (llmmodels.ResolvedProviderModelProfile, error) {

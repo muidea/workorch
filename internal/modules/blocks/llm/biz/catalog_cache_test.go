@@ -167,7 +167,7 @@ func TestBuildCatalogFromWireDerivesResponsesAndEmbeddingOperations(t *testing.T
 	cfg := workorchconfig.DefaultLLMConfig()
 	catalog, err := buildCatalogFromWire(aiProxyModelsResponse{Object: "list", Data: []aiProxyModelRecord{
 		{ID: "gpt-5.5", SupportedEndpoints: []string{"/v1/responses"}, ContextWindowTokens: 400000, MaxOutputTokens: 128000},
-		{ID: "intfloat/multilingual-e5-small", SupportedEndpoints: []string{"/v1/embeddings"}},
+		{ID: "intfloat/multilingual-e5-small", SupportedEndpoints: []string{"/v1/embeddings"}, ContextWindowTokens: 512},
 	}}, cfg, time.Now())
 	if err != nil {
 		t.Fatalf("build catalog: %v", err)

@@ -27,13 +27,17 @@ func workspaceExecutionDefaultsFromContext(ctx context.Context, hub magicevent.H
 	return workspaceExecutionDefaults{
 		systemDefaultSoulID:   common.SoulID(cfg.Runtime.DefaultSoulID),
 		defaultDialogLanguage: localizationcore.DefaultDialogLanguageFromContext(ctx),
-		defaultEmbeddingProviderLoader: func(context.Context) (runtimecontract.ProviderModelTarget, error) {
+		defaultEmbeddingProviderLoader: func(loaderCtx context.Context) (runtimecontract.ProviderModelTarget, error) {
 			// defaultEmbedding is optional. Empty means semantic recall is disabled and
 			// memory selection must fall back to workspace list baseline.
-			if cfg.LLM.DefaultEmbedding == nil {
+			active, queryErr := configcore.GetActiveLLMConfiguration(loaderCtx, hub)
+			if queryErr != nil {
+				return runtimecontract.ProviderModelTarget{}, queryErr
+			}
+			if active.DefaultEmbedding == nil {
 				return runtimecontract.ProviderModelTarget{}, nil
 			}
-			return cfg.LLM.DefaultEmbedding.ToRuntimeTarget(), nil
+			return active.DefaultEmbedding.Normalized(), nil
 		},
 		skillHubCatalog: skillHubCatalogForEventHub(hub),
 	}, nil

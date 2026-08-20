@@ -63,7 +63,7 @@ func TestGetActiveLLMConfigurationRequiresTypedStatusResult(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration) })
 
-	_, err := getActiveLLMConfiguration(ctx, hub)
+	_, err := GetActiveLLMConfiguration(ctx, hub)
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("error = %v, want active configuration result contract defect", err)
 	}
@@ -87,6 +87,7 @@ func TestRefreshLLMModelCatalogRequiresTypedRefreshResultAfterActiveConfiguratio
 		result.Set(llmevents.GetActiveConfigurationResult{
 			ProviderID:            workorchconfig.BuiltinAIProxyProviderID,
 			ConfigurationRevision: revision,
+			DefaultChat:           active.LLM.DefaultChat.ToRuntimeTarget(),
 		}, nil)
 	})
 	observer.Subscribe(llmevents.TopicLLMCommandRefreshProviderModelCatalog, func(_ magicevent.Event, result magicevent.Result) {

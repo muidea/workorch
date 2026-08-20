@@ -326,19 +326,20 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		} else {
 			desc.Reasoning = (llmmodels.ProviderReasoningCapability{}).Normalized()
 		}
+		hasResponses := containsOperation(ops, workorchconfig.LLMOperationResponses)
+		hasEmbeddings := containsOperation(ops, workorchconfig.LLMOperationEmbeddings)
 		switch {
-		case containsOperation(ops, workorchconfig.LLMOperationEmbeddings):
-			// Embeddings do not produce model output. Their readiness is based on
-			// the explicit /v1/embeddings route; chat token ceilings are irrelevant.
-			desc.CapabilityReady = true
-		case item.ContextWindowTokens <= 0 || item.MaxOutputTokens <= 0:
-			desc.CapabilityReady = false
-			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
-		case item.MaxOutputTokens >= item.ContextWindowTokens:
-			desc.CapabilityReady = false
-			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
 		case len(ops) == 0:
 			// No supported endpoint for a WorkOrch adapter: displayable, but not ready.
+			desc.CapabilityReady = false
+			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
+		case item.ContextWindowTokens <= 0:
+			desc.CapabilityReady = false
+			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
+		case hasResponses && (item.MaxOutputTokens <= 0 || item.MaxOutputTokens >= item.ContextWindowTokens):
+			desc.CapabilityReady = false
+			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
+		case !hasResponses && !hasEmbeddings:
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
 		default:

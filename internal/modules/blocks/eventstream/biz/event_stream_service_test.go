@@ -17,6 +17,8 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
@@ -907,5 +909,48 @@ func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
 	item, err = repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "event-reset-4")
 	if err != nil || item.Revision != 2 || item.StreamPosition != 4 {
 		t.Fatalf("post-restart record = %+v err=%v, want revision 2/stream position 4", item, err)
+	}
+}
+
+func TestLLMUsageScopeAllowsProcessAndWorkspaceBeforeRun(t *testing.T) {
+	for _, data := range []llmevents.LLMUsageRecordedData{
+		{RequestID: "setup-call", Status: "completed"},
+		{RequestID: "embedding-call", WorkspaceID: "workspace-1", Status: "completed"},
+		{RequestID: "runtime-call", WorkspaceID: "workspace-1", RunID: "run-1", Status: "completed"},
+	} {
+		if !validLLMUsageRecordedData(data) {
+			t.Fatalf("valid LLM usage scope rejected: %+v", data)
+		}
+	}
+	if validLLMUsageRecordedData(llmevents.LLMUsageRecordedData{RequestID: "orphan-run", RunID: "run-1", Status: "completed"}) {
+		t.Fatal("LLM usage accepted Run scope without Workspace")
+	}
+}
+
+func TestServicePersistsProcessAndWorkspaceScopedLLMUsage(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewEventRecordRepository()
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Stop()
+
+	for _, data := range []llmevents.LLMUsageRecordedData{
+		{RequestID: "setup-call", Operation: "responses", Status: "completed", OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
+		{RequestID: "embedding-call", WorkspaceID: "workspace-1", Operation: "embeddings", Status: "completed", OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
+	} {
+		rawHub.Post(magicevent.NewEventWithContext(
+			llmevents.TopicLLMUsageRecorded, llmcommon.ModuleID, llmevents.NotificationDestination,
+			magicevent.NewHeader(), ctx, data,
+		))
+	}
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{SubjectType: "llm_usage"}, 2)
+	scopes := map[string]common.WorkspaceID{}
+	for _, record := range records {
+		scopes[record.SubjectID] = record.WorkspaceID
+	}
+	if scopes["setup-call"] != "" || scopes["embedding-call"] != "workspace-1" {
+		t.Fatalf("persisted LLM usage scopes = %+v", scopes)
 	}
 }

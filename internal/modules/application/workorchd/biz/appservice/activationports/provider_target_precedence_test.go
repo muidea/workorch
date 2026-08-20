@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,7 +17,7 @@ import (
 
 func TestConfiguredActivationProviderSelectionUsesWorkspaceOwnerPreference(t *testing.T) {
 	workspaceDefault := runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "workspace-provider", ModelID: "workspace-model"}, ReasoningEffort: "high"}
-	got, err := configuredActivationProviderSelection(context.Background(), &workspaceDefault)
+	got, err := configuredActivationProviderSelection(context.Background(), nil, &workspaceDefault)
 	if err != nil {
 		t.Fatalf("resolve workspace target: %v", err)
 	}
@@ -24,15 +26,27 @@ func TestConfiguredActivationProviderSelectionUsesWorkspaceOwnerPreference(t *te
 	}
 }
 
-func TestConfiguredActivationProviderSelectionUsesLatestInjectedSystemDefault(t *testing.T) {
+func TestConfiguredActivationProviderSelectionUsesOwnerActiveDefault(t *testing.T) {
 	ctx := configcore.ContextWithLoader(context.Background(), func() (workorchconfig.Config, error) {
-		return workorchconfig.Config{LLM: workorchconfig.LLMConfig{DefaultChat: workorchconfig.ProviderModelTargetConfig{ProviderID: "latest-provider", ModelID: "latest-model"}}}, nil
+		return workorchconfig.Config{LLM: workorchconfig.LLMConfig{
+			DefaultChat: workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "hot-model"},
+		}}, nil
 	})
-	got, err := configuredActivationProviderSelection(ctx, nil)
+	hub := magicevent.NewHub(4)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+	observer.Subscribe(llmevents.TopicLLMCommandGetActiveConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(llmevents.GetActiveConfigurationResult{
+			ProviderID: "ai-proxy", ConfigurationRevision: "active-revision",
+			DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "active-model"},
+		}, nil)
+	})
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration) })
+	got, err := configuredActivationProviderSelection(ctx, hub, nil)
 	if err != nil {
 		t.Fatalf("resolve system default: %v", err)
 	}
-	want := runtimecontract.ProviderModelTarget{ProviderID: "latest-provider", ModelID: "latest-model"}
+	want := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "active-model"}
 	if !got.Target.Same(want) || got.ReasoningEffort != "" {
 		t.Fatalf("system target = %+v, want %+v", got, want)
 	}

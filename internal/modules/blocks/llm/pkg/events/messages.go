@@ -78,8 +78,11 @@ func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
 }
 
 type GenerateEmbeddingCommand struct {
-	Target runtimecontract.ProviderModelTarget
-	Input  string
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	StepID      string
+	Target      runtimecontract.ProviderModelTarget
+	Input       string
 }
 
 // GetActiveConfigurationCommand queries the LLM owner's immutable process
@@ -90,6 +93,8 @@ type GetActiveConfigurationCommand struct{}
 type GetActiveConfigurationResult struct {
 	ProviderID            string
 	ConfigurationRevision string
+	DefaultChat           runtimecontract.ProviderModelTarget
+	DefaultEmbedding      *runtimecontract.ProviderModelTarget
 }
 
 type GetProviderModelCatalogCommand struct{}

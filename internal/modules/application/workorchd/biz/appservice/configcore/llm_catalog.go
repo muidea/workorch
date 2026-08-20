@@ -54,7 +54,7 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchma
 	if err != nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
-	active, err := getActiveLLMConfiguration(ctx, hub)
+	active, err := GetActiveLLMConfiguration(ctx, hub)
 	if err != nil {
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
@@ -81,7 +81,7 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchma
 	return catalogSummaryFromModel(response.Catalog), nil
 }
 
-func getActiveLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmevents.GetActiveConfigurationResult, error) {
+func GetActiveLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmevents.GetActiveConfigurationResult, error) {
 	if hub == nil {
 		return llmevents.GetActiveConfigurationResult{}, common.ErrInvalidArgument
 	}
@@ -102,8 +102,11 @@ func getActiveLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmeven
 	if err != nil {
 		return llmevents.GetActiveConfigurationResult{}, err
 	}
-	if response.ProviderID != providerID || response.ConfigurationRevision == "" {
+	if response.ProviderID != providerID || response.ConfigurationRevision == "" || response.DefaultChat.Validate() != nil || response.DefaultChat.ProviderID != providerID {
 		return llmevents.GetActiveConfigurationResult{}, fmt.Errorf("%w: invalid active LLM configuration status", common.ErrInvalidArgument)
+	}
+	if response.DefaultEmbedding != nil && (response.DefaultEmbedding.Validate() != nil || response.DefaultEmbedding.ProviderID != providerID) {
+		return llmevents.GetActiveConfigurationResult{}, fmt.Errorf("%w: invalid active LLM embedding default", common.ErrInvalidArgument)
 	}
 	return response, nil
 }
@@ -196,7 +199,7 @@ func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub
 	if err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
-	active, activeErr := getActiveLLMConfiguration(ctx, hub)
+	active, activeErr := GetActiveLLMConfiguration(ctx, hub)
 	if activeErr != nil {
 		// We cannot prove the persisted configuration is active. Treat the
 		// process as restart-pending so callers cannot refresh a catalog with

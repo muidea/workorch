@@ -278,6 +278,7 @@ func TestLLMConfigurationProjectionAndCatalogRefreshUseActiveOwnerRevision(t *te
 		result.Set(llmevents.GetActiveConfigurationResult{
 			ProviderID:            workorchconfig.BuiltinAIProxyProviderID,
 			ConfigurationRevision: activeRevision,
+			DefaultChat:           active.LLM.DefaultChat.ToRuntimeTarget(),
 		}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration) })

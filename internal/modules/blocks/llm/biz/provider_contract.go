@@ -53,7 +53,7 @@ func GenerateEmbedding(ctx context.Context, providerID string, config llmmodels.
 	}
 	result, err := provider.Embed(ctx, llmmodels.ProviderEmbeddingRequest{Input: input, Model: config.Model})
 	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, err
+		return result, err
 	}
 	result.ProviderID = providerID
 	if strings.TrimSpace(result.Model) == "" {

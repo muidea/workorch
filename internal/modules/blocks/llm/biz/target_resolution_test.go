@@ -37,18 +37,18 @@ func TestResolveProviderModelTargetDerivesRequestBytesFromSelectedModel(t *testi
 	}
 }
 
-func TestResolveEmbeddingTargetDoesNotRequireChatTokenCapabilities(t *testing.T) {
+func TestResolveEmbeddingTargetDerivesByteCapacityWithoutOutputCeiling(t *testing.T) {
 	cfg := workorchconfig.DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8090"
 	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-5.5"}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "intfloat/multilingual-e5-small"}
-	catalog := &llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{Target: target, Operations: []string{workorchconfig.LLMOperationEmbeddings}, CapabilityReady: true, CapabilityRevision: "embedding-capability"}}}
+	catalog := &llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{Target: target, ContextWindowTokens: 512, Operations: []string{workorchconfig.LLMOperationEmbeddings}, CapabilityReady: true, CapabilityRevision: "embedding-capability"}}}
 	profile, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationEmbeddings)
 	if err != nil {
 		t.Fatalf("ResolveProviderModelTarget: %v", err)
 	}
-	if profile.ProviderMaxOutputTokens != 0 || profile.ContextWindowTokens != 0 {
-		t.Fatalf("embedding profile carries chat token capabilities: %+v", profile)
+	if profile.ProviderMaxOutputTokens != 0 || profile.ContextWindowTokens != 512 || profile.MaxRequestBytes <= 0 {
+		t.Fatalf("embedding profile capacity = %+v", profile)
 	}
 }
 

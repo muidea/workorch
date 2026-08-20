@@ -122,7 +122,7 @@ func TestHTTPProviderEmbedsThroughAIProxy(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}],"usage":{"prompt_tokens":4,"total_tokens":4}}`))
 	}))
 	defer server.Close()
 
@@ -133,7 +133,7 @@ func TestHTTPProviderEmbedsThroughAIProxy(t *testing.T) {
 	if gotPath != "/v1/embeddings" || gotAuthorization != "Bearer secret-value" || got.Model != "embedding-model" || got.Input != "workspace goal" {
 		t.Fatalf("request path=%q authorization=%q payload=%+v", gotPath, gotAuthorization, got)
 	}
-	if result.ProviderID != "ai-proxy" || result.Model != "embedding-model" || len(result.Vector) != 3 {
+	if result.ProviderID != "ai-proxy" || result.Model != "embedding-model" || len(result.Vector) != 3 || result.Usage == nil || result.Usage.InputTokens != 4 || result.Usage.TotalTokens != 4 {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -198,6 +198,136 @@ func TestHTTPProviderCancelsConfiguredDeadline(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderRejectsCrossOriginRedirectWithoutReplayingBody(t *testing.T) {
+	var targetCalls int
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		targetCalls++
+	}))
+	defer target.Close()
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, target.URL+r.URL.Path, status)
+			}))
+			defer origin.Close()
+
+			provider := NewHTTPProvider(testAIProxyProviderConfig(origin.URL))
+			_, completionErr := provider.Complete(context.Background(), llmProviderRequest())
+			_, embeddingErr := provider.Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal", Model: "embedding-model"})
+			for _, err := range []error{completionErr, embeddingErr} {
+				var protocolErr *ProviderProtocolError
+				if !errors.As(err, &protocolErr) || protocolErr.Code != "cross_origin_redirect_rejected" {
+					t.Fatalf("redirect error = %v, want typed cross-origin protocol rejection", err)
+				}
+			}
+		})
+	}
+	if targetCalls != 0 {
+		t.Fatalf("redirect target received %d prompt/input bodies, want zero", targetCalls)
+	}
+}
+
+func TestHTTPProviderReportsInvalidJSONAsProtocolWithActualBytes(t *testing.T) {
+	const invalid = `{"status":`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(invalid))
+	}))
+	defer server.Close()
+
+	result, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL)).Complete(context.Background(), llmProviderRequest())
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "invalid_response_json" || protocolErr.ResponseBytes != len(invalid) {
+		t.Fatalf("protocol error = %#v (%v)", protocolErr, err)
+	}
+	if result.ResponseBytes != len(invalid) {
+		t.Fatalf("response bytes = %d, want %d", result.ResponseBytes, len(invalid))
+	}
+}
+
+func TestHTTPProviderResponseLimitsDeriveFromResolvedProfile(t *testing.T) {
+	config := testAIProxyProviderConfig("")
+	config.InferenceProfile.MaxOutputTokens = 1
+	config.ContextProfile.EstimatedTokensPerByte = 1
+	limits, err := providerCompletionResponseLimits(config, llmmodels.ProviderRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", limits.MaxWireBytes+1)))
+	}))
+	defer server.Close()
+	config.BaseURL = server.URL
+
+	result, err := NewHTTPProvider(config).Complete(context.Background(), llmmodels.ProviderRequest{})
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "response_byte_limit_exceeded" {
+		t.Fatalf("response limit error = %v", err)
+	}
+	if result.ResponseBytes != limits.MaxWireBytes+1 {
+		t.Fatalf("bounded response bytes = %d, want %d", result.ResponseBytes, limits.MaxWireBytes+1)
+	}
+
+	larger := config
+	larger.InferenceProfile.MaxOutputTokens = 2
+	largerLimits, err := providerCompletionResponseLimits(larger, llmmodels.ProviderRequest{})
+	if err != nil || largerLimits.MaxContentBytes <= limits.MaxContentBytes || largerLimits.MaxDataEvents <= limits.MaxDataEvents {
+		t.Fatalf("derived limits did not grow with model output capacity: small=%+v large=%+v err=%v", limits, largerLimits, err)
+	}
+}
+
+func TestHTTPProviderStreamContentLimitDerivesFromOutputTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"abc\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
+	}))
+	defer server.Close()
+	config := testAIProxyProviderConfig(server.URL)
+	config.InferenceProfile.MaxOutputTokens = 2
+	config.ContextProfile.EstimatedTokensPerByte = 1
+
+	_, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmmodels.ProviderRequest{}, nil)
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "stream_content_limit_exceeded" {
+		t.Fatalf("stream content limit error = %v", err)
+	}
+}
+
+func TestHTTPProviderMalformedStreamEventIsProtocolFailure(t *testing.T) {
+	const malformed = `{"type":`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: " + malformed + "\n\n"))
+	}))
+	defer server.Close()
+
+	_, err := NewHTTPProvider(testAIProxyProviderConfig(server.URL)).StreamComplete(context.Background(), llmmodels.ProviderRequest{}, nil)
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "invalid_stream_event_json" || protocolErr.ResponseBytes == 0 {
+		t.Fatalf("malformed stream error = %#v (%v)", protocolErr, err)
+	}
+}
+
+func TestHTTPProviderEmbeddingResponseIsBoundedByModelInputProfile(t *testing.T) {
+	config := testAIProxyProviderConfig("")
+	config.ContextProfile.MaxRequestBytes = 1
+	limit, err := providerEmbeddingResponseLimit(config, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("0", limit+1)))
+	}))
+	defer server.Close()
+	config.BaseURL = server.URL
+
+	result, err := NewHTTPProvider(config).Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "x", Model: "embedding-model"})
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "response_byte_limit_exceeded" || result.ResponseBytes != limit+1 {
+		t.Fatalf("embedding limit result=%+v error=%v", result, err)
+	}
+}
+
 func TestAIProxyURLsNormalizeHostOnlyBase(t *testing.T) {
 	responses, err := responsesURL("http://127.0.0.1:8080")
 	if err != nil || responses != "http://127.0.0.1:8080/v1/responses" {
@@ -220,6 +350,11 @@ func testAIProxyProviderConfig(baseURL string) llmmodels.ProviderConfig {
 			Responses:         true,
 			Streaming:         true,
 			NonChatOperations: []string{"embeddings"},
+		},
+		InferenceProfile: llmmodels.ProviderInferenceProfile{MaxOutputTokens: 1024},
+		ContextProfile: llmmodels.ProviderContextProfile{
+			ContextWindowTokens: 8192, MaxInputTokens: 7168, ReservedOutputTokens: 1024,
+			MaxRequestBytes: 28672, EstimatedTokensPerByte: 0.25,
 		},
 	}
 }

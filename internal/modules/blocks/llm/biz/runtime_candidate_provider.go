@@ -85,10 +85,8 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 					budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
 				}
 			}
-			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), len(completion.Payload))
-			if budgetSnapshot != nil {
-				audit.RequestBytes = budgetSnapshot.ActualBytes
-			}
+			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), completion.ResponseBytes)
+			audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 			usage := completion.Usage
 			if usage != nil {
 				cloned := *usage
@@ -101,18 +99,16 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 			}, err
 		}
 		stale := m.providerCeilingConfigurationStale(request, err)
-		// Provider may have been contacted; mark submitted when the sealed path reached Complete.
-		// completeProviderWithSealedCeiling only returns after client construction; treat as submitted
-		// once we leave that call with a non-config error. For pre-dispatch errors ProviderSubmitted stays false.
-		submitted := isProviderDispatchAttempted(err)
+		// The protocol adapter records serialized request bytes before http.Client.Do.
+		// That factual marker avoids inferring submission from an error string.
+		submitted := completion.RequestBytes > 0
 		if budgetSnapshot != nil {
 			budgetSnapshot.ProviderSubmitted = submitted
 		}
 		failureClass := runtimeCandidateProviderFailureClass(err, submitted)
-		audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, submitted, llmmodels.RuntimeCandidateStatusFailed, string(failureClass), len(providerRequest.Schema))
-		if budgetSnapshot != nil {
-			audit.RequestBytes = budgetSnapshot.ActualBytes
-		}
+		responseBytes := max(completion.ResponseBytes, providerResponseBytesFromError(err))
+		audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, submitted, llmmodels.RuntimeCandidateStatusFailed, string(failureClass), responseBytes)
+		audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 		return llmmodels.RuntimeCandidateGenerationResult{
 			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
 			FailureClass: string(failureClass), FailureReason: err.Error(), PrerequisiteStale: stale,
@@ -124,11 +120,9 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 			budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
 		}
 	}
-	responseBytes := len(completion.Payload)
+	responseBytes := completion.ResponseBytes
 	audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusCompleted, "", responseBytes)
-	if budgetSnapshot != nil {
-		audit.RequestBytes = budgetSnapshot.ActualBytes
-	}
+	audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 	var usage *llmaudit.ProviderUsage
 	if completion.Usage != nil {
 		cloned := *completion.Usage
@@ -141,6 +135,16 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		Audit:     audit,
 		Status:    llmmodels.RuntimeCandidateStatusCompleted,
 	}, nil
+}
+
+func providerAuditRequestBytes(adapterBytes int, budget *llmmodels.ProviderContextBudget) int {
+	if adapterBytes > 0 {
+		return adapterBytes
+	}
+	if budget != nil {
+		return max(budget.ActualBytes, 0)
+	}
+	return 0
 }
 
 // providerCeilingConfigurationStale recognizes the one pre-dispatch LLM
@@ -203,6 +207,14 @@ func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecont
 		default:
 			return runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
 		}
+	}
+	var protocolErr *ProviderProtocolError
+	if errors.As(err, &protocolErr) {
+		return runtimecontract.RuntimeCandidateFailureClassProviderProtocol
+	}
+	var outputLimitErr *ProviderOutputLimitError
+	if errors.As(err, &outputLimitErr) {
+		return runtimecontract.RuntimeCandidateFailureClassProviderProtocol
 	}
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "authentication_failed") || strings.Contains(message, "invalid api key") || strings.Contains(message, "unauthorized") || strings.Contains(message, "forbidden") {
@@ -317,30 +329,4 @@ func cloneProviderContextBudget(budget *llmmodels.ProviderContextBudget) *llmmod
 	cloned.ProtectedFields = append([]string(nil), budget.ProtectedFields...)
 	cloned.IntegrityWarnings = append([]string(nil), budget.IntegrityWarnings...)
 	return &cloned
-}
-
-// isProviderDispatchAttempted reports whether a sealed completion error likely occurred after
-// the HTTP/SDK client was invoked. Pre-dispatch configuration/client errors stay unsubmitted.
-func isProviderDispatchAttempted(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	// Configuration / client construction failures never reach the network.
-	for _, marker := range []string{
-		"provider client is not configured",
-		"configuration revision",
-		"provider_configuration_drift",
-		"sealed ceiling",
-		"llm config",
-		"resolve provider",
-		"api key",
-		"baseurl",
-		"base url",
-	} {
-		if strings.Contains(message, marker) {
-			return false
-		}
-	}
-	return true
 }

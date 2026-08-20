@@ -36,7 +36,7 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		RetrievedMemoryIDs:  []string{},
 		RetrievedMemoryHits: []MemorySelectionHit{},
 	}
-	embedding, err := GenerateEmbedding(ctx, opts.Hub, target, queryText)
+	embedding, err := GenerateEmbedding(ctx, opts.Hub, opts.WorkspaceID, target, queryText)
 	if err != nil {
 		evidence.Status = "degraded"
 		evidence.Reason = err.Error()

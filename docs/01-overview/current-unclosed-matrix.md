@@ -53,6 +53,11 @@ Last Verified: 2026-08-20
   stale manifest/binding/prerequisite 继续 fail-closed；
 - Result closeout 仅保留 current unsatisfied canonical gap，当前 `Facts.Failure` 优先于历史 claimed gap；
 - provider ceiling / ExpectedDocument equality、whole-document recovery、C0～C5 stable prefix；
+- LLM owner 在 `Start()` 冻结 configuration revision/default targets；Setup Draft、fresh activation 与 embedding 不重读
+  热配置。Responses/embedding 只允许同 origin redirect，non-stream/stream/embedding response guard 均由 selected model
+  capacity 派生；非法 JSON/SSE/超限保持 `provider_protocol` 并终止 request session，不消耗 transport recovery。
+  completion/embedding/candidate 的 Post 零物理调用，每次物理调用发布 process/workspace/run typed usage audit 与实际
+  request/response byte 计量；audit 不参与 Runtime authority。
 - duplicate/stale/restart/partial-CAS/response-loss/budget/guard；
 - SM-4 startup inventory 具备 cursor visited-set、page/item hard limit，覆盖 `A → B → A` cycle 与 commands-ready handoff；
 - Run/Workspace lifecycle adapter 仅暴露 scoped snapshot `Read`，opaque Runtime aggregate read/CAS 保持独立 Run owner

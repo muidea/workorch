@@ -10,7 +10,6 @@ import (
 	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -148,7 +147,7 @@ func applyConfiguredRuntimeRepairLimit(ctx context.Context, executionContract ma
 }
 
 func resolveActivationProviderSelection(ctx context.Context, hub magicevent.Hub, workspaceDefault *runtimecontract.ProviderInferenceSelection) (runtimecontract.ProviderInferenceSelection, error) {
-	selection, err := configuredActivationProviderSelection(ctx, workspaceDefault)
+	selection, err := configuredActivationProviderSelection(ctx, hub, workspaceDefault)
 	if err != nil {
 		return runtimecontract.ProviderInferenceSelection{}, err
 	}
@@ -159,23 +158,16 @@ func resolveActivationProviderSelection(ctx context.Context, hub magicevent.Hub,
 	return validated, nil
 }
 
-func configuredActivationProviderSelection(ctx context.Context, workspaceDefault *runtimecontract.ProviderInferenceSelection) (runtimecontract.ProviderInferenceSelection, error) {
+func configuredActivationProviderSelection(ctx context.Context, hub magicevent.Hub, workspaceDefault *runtimecontract.ProviderInferenceSelection) (runtimecontract.ProviderInferenceSelection, error) {
 	var selection runtimecontract.ProviderInferenceSelection
 	if workspaceDefault != nil {
 		selection = workspaceDefault.Normalized()
 	} else {
-		cfg, err := configcore.LoadFromContext(ctx)
+		active, err := configcore.GetActiveLLMConfiguration(ctx, hub)
 		if err != nil {
 			return runtimecontract.ProviderInferenceSelection{}, err
 		}
-		selection.Target = cfg.LLM.DefaultChat.ToRuntimeTarget()
-		if selection.Target.ProviderID == "" && selection.Target.ModelID == "" {
-			cfg, err = workorchconfig.Current()
-			if err != nil {
-				return runtimecontract.ProviderInferenceSelection{}, err
-			}
-			selection.Target = cfg.LLM.DefaultChat.ToRuntimeTarget()
-		}
+		selection.Target = active.DefaultChat
 	}
 	if err := selection.Validate(); err != nil {
 		return runtimecontract.ProviderInferenceSelection{}, err

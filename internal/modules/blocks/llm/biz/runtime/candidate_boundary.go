@@ -185,6 +185,8 @@ func CandidateFailureFromError(err error) runtimecontract.RuntimeCandidateFailur
 		failure.Reason = "provider configuration failed"
 	case CandidateFailureClassProviderTransient:
 		failure.Reason = "provider request failed transiently"
+	case CandidateFailureClassProviderProtocol:
+		failure.Reason = "provider response violated the protocol contract"
 	case CandidateFailureClassProvider:
 		switch failure.Code {
 		case "provider_final_output_invalid":
@@ -258,6 +260,7 @@ const (
 	CandidateFailureClassProviderTransient      = runtimecontract.RuntimeCandidateFailureClassProviderTransient
 	CandidateFailureClassProviderAuthentication = runtimecontract.RuntimeCandidateFailureClassProviderAuthentication
 	CandidateFailureClassProviderConfiguration  = runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
+	CandidateFailureClassProviderProtocol       = runtimecontract.RuntimeCandidateFailureClassProviderProtocol
 	CandidateFailureClassInternal               = runtimecontract.RuntimeCandidateFailureClassInternal
 )
 
