@@ -100,7 +100,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
 	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
 		"binding/cwi-v2", "cwi-v2", facts.Focus.ID, facts.DefinitionRevision,
-		[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
 		[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"},
 		runtimeManagedValidationEvidencePolicy().ID, []string{"TestLSPToolExistence"},
 	)}

@@ -530,7 +530,7 @@ func MatchCoverageEvidenceBindingReceipt(binding CoverageEvidenceBinding, eviden
 			return fmt.Errorf("binding %q requires recipe %q", binding.ID, proof.ValidationRecipeID)
 		}
 		for _, required := range proof.RequiredCheckRefs {
-			if !containsString(observation.PassedChecks, required) {
+			if !RuntimeValidationCheckPassed(observation, required) {
 				return fmt.Errorf("binding %q requires passed check %q", binding.ID, required)
 			}
 		}

@@ -501,7 +501,7 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 	}
 }
 
-func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *testing.T) {
+func TestRuntimeControllerDoesNotReplayClaimedManagedValidationWithoutReplayProof(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := runtimeFactsWithManagedValidationRecipe(controllerFacts())
@@ -521,14 +521,23 @@ func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *tes
 		t.Fatal(err)
 	}
 	restarted, _ := NewRuntimeController(repository)
-	executor := &acceptingOperationExecutor{owner: restarted}
-	completed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
-	if err != nil {
-		t.Fatal(err)
+	executor := &failIfExecutedOperationExecutor{}
+	_, err = restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	var outcomeUnknown *OperationOutcomeUnknownError
+	if !errors.As(err, &outcomeUnknown) {
+		t.Fatalf("managed validation recovery err = %v, want outcome_unknown", err)
 	}
-	if executor.called != 1 || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete ||
-		completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
-		t.Fatalf("safe claimed recovery sealed=%+v completed=%+v calls=%d", sealed, completed, executor.called)
+	if executor.called {
+		t.Fatal("claimed managed validation was blindly replayed")
+	}
+	loaded, loadErr := restarted.Load(context.Background(), "ws-v2", "run-v2")
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	execution, ok := operationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, "read-1")
+	if !ok || execution.State != runtimecontract.OperationExecutionOutcomeUnknown ||
+		loaded.Facts.Recovery.OperationRecoveryAttempts != 0 || len(loaded.OperationReceipts) != 0 || len(loaded.Facts.Evidence.Accepted) != 0 {
+		t.Fatalf("managed validation recovery sealed=%+v loaded=%+v execution=%+v", sealed, loaded, execution)
 	}
 }
 

@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-20
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -171,8 +171,10 @@ provider-visible allowed operation set。SM-3 接受 document 只形成 internal
 owner operation-admissibility catalog 必须把“可调用 operation”与“当前可作为验证证明的 surface”分开。每个
 `RuntimeValidationSurface` 由对应 capability owner 在一次一致 snapshot 中声明 `ready | prerequisite_required |
 unavailable`、`direct | auxiliary | not_declared` proof applicability、input schema hash、owner-sealed input binding 或
-prerequisite lineage、check refs、effect 与 replay class；只有已经具有完整 input binding、non-durable、safe-to-replay，
-并由 owner 显式声明为 `direct` 的 `ready` surface 才能进入 `ValidationRecipeRefs`。`auxiliary`/`not_declared`、
+prerequisite lineage、check refs、effect 与 replay class；只有已经具有完整 input binding、non-durable effect、明确的
+`safe_to_replay | at_most_once | owner_managed` replay class，并由 owner 显式声明为 `direct` 的 `ready` surface 才能进入
+`ValidationRecipeRefs`。其中 `at_most_once` 只允许首次 sealed execution；claimed/no-receipt 的歧义恢复必须进入
+`outcome_unknown`，不能因 validation 身份而重放。`auxiliary`/`not_declared`、
 `prerequisite_required`/`unavailable` surface 仍随 aggregate 和 audit 持久化，但不得
 进入 provider schema、C3 ownerCatalog、correction allowed values 或 behavior probe。catalog 分类只读取 owner 本地/typed
 registry fact，不调用 provider/MCP endpoint、不创建 candidate/dispatch/receipt，也不触发状态转换；Orchestrator 不能
@@ -504,10 +506,12 @@ sealed authority + preflight ready
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
-- claimed operation 在没有 receipt 时，只能由 SM-3 返回一个只读的 recovery-budget handoff；SM-3 不得直接修改
-  SM-4 的 recovery ledger。后续 `recovery_budget_consumed` private event 由 SM-4 独立 CAS 提交预算，并以
-  `operation ID + exact persisted recovery attempt` 作为下一次安全重放的授权 fence；授权字段不属于其他 transaction
-  fact，缺失、半截或错用的 envelope 必须在 aggregate load 前拒绝。
+- claimed operation 在没有 receipt 时，只有 sealed replay class 为 `safe_to_replay | owner_managed` 或 execution 携带
+  exact owner replay proof，SM-3 才能返回只读 recovery-budget handoff；`at_most_once | unknown` 必须直接持久化
+  `outcome_unknown`，零 owner 调用且不消费 replay budget。SM-3 不得直接修改 SM-4 recovery ledger。后续
+  `recovery_budget_consumed` private event 由 SM-4 独立 CAS 提交预算，并以 `operation ID + exact persisted recovery
+  attempt` 作为下一次安全重放的授权 fence；授权字段不属于其他 transaction fact，缺失、半截或错用的 envelope 必须在
+  aggregate load 前拒绝。
 - 同一 dispatch 内 accepted receipt 造成的资源 revision 变化是内生事实：它可以使后续 SM-2 prerequisite
   observation 失效，但不得仅因此结束尚有 sealed operation 的 active dispatch。全部 operation 成功或任一
   operation rejected/stale 后，SM-3 才结算 dispatch 并交回 SM-2 reduce。
@@ -515,8 +519,8 @@ sealed authority + preflight ready
   不得重放副作用；未知、非安全重放的副作用进入 typed outcome-unknown/failure 路由。
 - effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect、sealed binding 与 owner observed effect
   联合裁决。receipt 只有同时匹配 `dispatch + operation + BindingRef + target/selector + effect + recipe/check`
-  才能获得该 CWI credit；`none`、`ephemeral_session`、`unknown`、zero-work、unrelated target 或泛化 test success
-  不能满足 durable state change 或 behavior coverage。
+  才能获得该 CWI credit；`none`、`ephemeral_session`、`unknown` 不能满足 durable state change；zero-work、
+  unrelated target、冲突 check 或泛化 test success 不能满足 validation/behavior coverage。
 - exact `ExecutionKey + Fence` receipt 重放只复用既有 receipt；no-op 的 current-run provenance 与普通无
   provenance no-op 必须分流。后者只留下 rejected/no-progress lineage，不能被重放、target 变化或文本修改伪装成
   新的 durable evidence。
@@ -572,6 +576,10 @@ projection failure 覆盖既有 terminal、重放已知 provider/durable effect�
 `need_state_change` 的 sealed candidate 至少含一个与 RequiredOutput 兼容的 durable operation；
 `need_validation` 只能含 `none` 或显式允许的 `ephemeral_session` operation。assessment 只消费当前
 Run 的 accepted evidence；assessment-only focus 不执行 executable operation。
+
+validation recipe identity 与 check identity 必须分离。binding 的 required check 只来自 current owner
+`ready + direct` surface；receipt 中某 check 只有同时出现在 passed 且不出现在 failed/skipped 时才是有效 pass。同一 check
+出现冲突 terminal outcome、只有 exit 0、只有 recipe ID 或只有非空 `PassedChecks` 均不能获得 CWI credit。
 
 operation-scoped governance 必须保存恰好一个 ticket/approval owner identity，以及 resolution、dependency、
 subject、receipt hash、ExecutionKey 与 fence binding。continue 以同一 ExecutionKey 的下一 fence 执行，owner

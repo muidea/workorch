@@ -125,9 +125,9 @@ func TestRuntimeOperationDescriptorEffectScopeInventory(t *testing.T) {
 	if !ok || !RuntimeEffectIsDurable(shell.DefaultEffectScope) {
 		t.Fatalf("shell default effect = %+v", shell)
 	}
-	// managed validation is non-mutating.
+	// managed validation is non-durable but owns an ephemeral session.
 	managed, ok := RuntimeOperationDescriptorForKind(RuntimeBlockKindManagedValidationSession)
-	if !ok || managed.DefaultEffectScope != RuntimeEffectNone {
+	if !ok || managed.DefaultEffectScope != RuntimeEffectEphemeralSession || managed.IdempotencyClass != RuntimeOperationIdempotencyAtMostOnce {
 		t.Fatalf("managed validation effect = %+v", managed)
 	}
 	// MCP tool_call defaults to unknown until capability risk narrows it.

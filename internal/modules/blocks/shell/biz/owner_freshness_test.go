@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
@@ -54,7 +55,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
-				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 			},
 			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
@@ -426,4 +427,71 @@ func sendShellStateChangingReceiptCommand(t *testing.T, ctx context.Context, hub
 		t.Fatalf("response type = %T", data)
 	}
 	return response
+}
+
+func TestShellExecuteHandlerRejectsNilResultBeforeReceiptQueryOrEffect(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	command := shellStateChangingReceiptCommand(workspace, "printf changed > generated.txt")
+	owner := &Biz{runtimeAdapter: NewRuntimeAdapter()}
+	event := magicevent.NewEventWithContext(
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	)
+	owner.handleShellOperation(event, nil)
+	if _, err := os.Stat(filepath.Join(workspace, "generated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("nil-result Shell execute changed workspace: %v", err)
+	}
+}
+
+func TestShellExecuteRejectsUntrustedSourceAndReceiptQueryFailureBeforeEffect(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	queries, commits := 0, 0
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		queries++
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "receipt authority unavailable"})
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		commits++
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "unexpected commit"})
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	workspace := t.TempDir()
+	command := shellStateChangingReceiptCommand(workspace, "printf changed > generated.txt")
+
+	spoofed := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleFile, modulecommon.ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	))
+	if _, err := spoofed.Get(); err == nil {
+		t.Fatal("Shell accepted execute command from a non-Orchestrator source")
+	}
+	if queries != 0 || commits != 0 {
+		t.Fatalf("untrusted source reached receipt authority: queries=%d commits=%d", queries, commits)
+	}
+
+	failedQuery := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+		magicevent.NewHeader(), ctx, command,
+	))
+	if _, err := failedQuery.Get(); err == nil {
+		t.Fatal("Shell ignored receipt authorization query failure")
+	}
+	if queries != 1 || commits != 0 {
+		t.Fatalf("receipt query failure crossed effect fence: queries=%d commits=%d", queries, commits)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "generated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("receipt query failure changed workspace: %v", err)
+	}
 }

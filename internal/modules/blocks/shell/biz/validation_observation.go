@@ -44,20 +44,29 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)
 	}
 	observation = observation.Normalized()
-	output.ValidationObservation = &observation
-	if !isGoTest {
+	if conflicts := runtimecontract.RuntimeValidationConflictingChecks(observation); len(conflicts) != 0 {
+		output.EvidenceQuality = string(common.EvidenceQualityInvalid)
+		output.EvidenceReason = "validation check has conflicting pass/fail/skip outcomes"
+		output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "conflicting_check_outcome")
+		output.ValidationObservation = &observation
 		return
 	}
-	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
+	if len(observation.FailedChecks) != 0 {
+		output.EvidenceQuality = string(common.EvidenceQualityInvalid)
+		if strings.TrimSpace(output.EvidenceReason) == "" {
+			output.EvidenceReason = "validation command reported failed checks"
+		}
+		output.ValidationObservation = &observation
 		return
 	}
-	if output.ExitCode == 0 && goTestObservationIsExplicitZeroWork(observation, rawOutput) {
+	if isGoTest && output.ExitCode == 0 && goTestObservationIsExplicitZeroWork(observation, rawOutput) {
 		output.ZeroWork = true
 		output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
 		if strings.TrimSpace(output.EvidenceReason) == "" {
 			output.EvidenceReason = "validation command reported no executed checks"
 		}
 		output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "zero_work")
+		output.ValidationObservation = &observation
 		return
 	}
 	if goTestObservationIsAllSkipped(observation) {
@@ -66,11 +75,20 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 			output.EvidenceReason = "all observed validation checks were skipped"
 		}
 		output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "all_skipped")
+		output.ValidationObservation = &observation
 		return
 	}
-	if output.ExitCode == 0 {
+	if output.ExitCode == 0 && !output.ZeroWork && strings.TrimSpace(output.EvidenceQuality) != string(common.EvidenceQualityInconclusive) &&
+		strings.TrimSpace(output.EvidenceQuality) != string(common.EvidenceQualityInvalid) && len(observation.PassedChecks) != 0 {
 		output.EvidenceQuality = string(common.EvidenceQualityValid)
+		proofCheck := shellValidationRecipeProofCheckRef(observation.RecipeID)
+		if proofCheck != "" {
+			observation.ExecutedChecks = append(observation.ExecutedChecks, proofCheck)
+			observation.PassedChecks = append(observation.PassedChecks, proofCheck)
+		}
+		observation = observation.Normalized()
 	}
+	output.ValidationObservation = &observation
 }
 
 // goTestObservationIsExplicitZeroWork recognizes the tool-level zero-work

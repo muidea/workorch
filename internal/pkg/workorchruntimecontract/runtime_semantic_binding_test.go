@@ -405,7 +405,17 @@ func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManife
 	manifest := semanticContractTestManifest(t)
 	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
 	shellCatalog.TargetRefs = []string{"main.go"}
-	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate", "check/validate"}
+	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate"}
+	shellCatalog.ValidationSurfaces = []RuntimeValidationSurface{{
+		ID: "recipe/validate", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+		Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "semantic-binding-input-schema", InputBindingRef: "semantic-binding-input",
+		CheckRefs: []string{"check/validate"}, ProofApplicability: RuntimeValidationProofDirect,
+		EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	shellCatalog.OperationPolicies = []RuntimeOperationPolicyFact{{
+		ID: "semantic-binding-managed-validation", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+		EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}}
 	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleShell)
 	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
 	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies,

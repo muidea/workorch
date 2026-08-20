@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,8 +27,9 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	if err := os.MkdirAll(deliverableDirectory, 0o755); err != nil {
 		return RuntimeCommandResult{}, err
 	}
+	managedValidation := shellInputHasManagedValidation(request)
 	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
-	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory, shellInputHasManagedValidation(request)); err != nil {
+	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory, managedValidation); err != nil {
 		now := time.Now().UTC()
 		output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
 		output.Status = "failed"
@@ -74,25 +76,56 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, err)
 		return finalizeShellResult(output, err)
 	}
+	if request.StateChanging || managedValidation {
+		if err := validateShellWorkspaceSymlinkScope(deliverableDirectory); err != nil {
+			now := time.Now().UTC()
+			output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
+			output.Status = "failed"
+			output.Stage = "shell_workspace_scope_rejected"
+			output.Reason = err.Error()
+			output.FailureReason = "workspace_symlink_scope_invalid"
+			attachManagedValidationResources(&output, request, 0, now, now, "failed")
+			attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, err)
+			return finalizeShellResult(output, err)
+		}
+	}
 	beforeChange := workspaceStateChangeFingerprint(ctx, deliverableDirectory, request.StateChanging)
 	beforeTargets := shellWorkspaceTargetRevisions(deliverableDirectory, request)
-	beforeWorkspace, observationErr := shellWorkspaceFileRevisions(deliverableDirectory, request.StateChanging)
+	beforeWorkspace, observationErr := shellWorkspaceFileRevisions(deliverableDirectory, request.StateChanging || managedValidation)
 	if observationErr != nil {
 		return RuntimeCommandResult{}, observationErr
+	}
+	executionDirectory := deliverableDirectory
+	if managedValidation {
+		executionDirectory, err = prepareManagedValidationSandbox(&request, deliverableDirectory)
+		if err != nil {
+			now := time.Now().UTC()
+			output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
+			output.Status = "failed"
+			output.Stage = "managed_validation_sandbox_unavailable"
+			output.Reason = err.Error()
+			output.FailureReason = "managed_validation_sandbox_unavailable"
+			attachManagedValidationResources(&output, request, 0, now, now, "failed")
+			attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, err)
+			return finalizeShellResult(output, err)
+		}
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	startedAt := time.Now().UTC()
 	cmd := exec.CommandContext(runCtx, execCommand, execArgs...)
-	cmd.Dir = deliverableDirectory
+	cmd.Dir = executionDirectory
 	cmd.Env = a.filteredEnv()
+	if managedValidation {
+		cmd.Env = managedValidationEnvironment(cmd.Env, request.ValidationScratchDirectory)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return os.ErrProcessDone
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		return terminateShellProcessGroup(cmd.Process.Pid)
 	}
 	cmd.WaitDelay = 2 * time.Second
 	stdout := newLimitedOutputBuffer(MaxCommandOutputBytes)
@@ -107,6 +140,17 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		}
 		err = cmd.Wait()
 	}
+	processCleanupErr := terminateShellProcessGroup(pid)
+	processResourceStatus := "released"
+	if runCtx.Err() == context.DeadlineExceeded {
+		processResourceStatus = "timeout"
+	}
+	if processCleanupErr != nil {
+		processResourceStatus = "cleanup_failed"
+	}
+	if err == nil && processCleanupErr != nil {
+		err = fmt.Errorf("shell process group cleanup failed: %w", processCleanupErr)
+	}
 	duration := time.Since(startedAt)
 	exitCode := 0
 	if cmd.ProcessState != nil {
@@ -114,7 +158,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	}
 	stdoutText := stdout.String()
 	stderrText := stderr.String()
-	output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
+	output := shellBaseOutput(request, command, args, executionDirectory, commandNormalization, execCommand)
 	output.Status = "completed"
 	output.Stdout = stdoutText
 	output.Stderr = sanitizeSuccessfulCommandStderr(command, args, exitCode, stdoutText, stderrText)
@@ -130,17 +174,17 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		output.MaxOutputBytes = MaxCommandOutputBytes
 	}
 	applyShellEvidencePolicies(request.EvidencePolicies, command, args, &output)
-	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID, shellInputHasManagedValidation(request))
+	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID, managedValidation)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output.Status = "timeout"
 		output.Stage = "shell_command_timeout"
-		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "timeout")
+		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, true, false, context.DeadlineExceeded)
 		return finalizeShellResult(output, context.DeadlineExceeded)
 	}
 	if err != nil {
 		output.Status = "failed"
-		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
+		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 		attachShellCommandFailureDiagnostics(&output, execCommand, err)
 		if output.FailureCode == "" && output.FailureReason == "" && output.Stage == "" {
 			output.Stage = "shell_command_failed"
@@ -150,20 +194,31 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
 		return finalizeShellResult(output, err)
 	}
+	afterWorkspace, observeErr := shellWorkspaceFileRevisions(deliverableDirectory, request.StateChanging || managedValidation)
+	if observeErr != nil {
+		err := fmt.Errorf("%w: Shell workspace observation failed: %v", common.ErrInvalidArgument, observeErr)
+		output.Status = "failed"
+		output.Stage = "shell_workspace_observation_unavailable"
+		output.FailureReason = "workspace_observation_unavailable"
+		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
+		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
+		return finalizeShellResult(output, err)
+	}
+	output.WorkspaceObservedTargetChanges = shellWorkspaceTargetChanges(beforeWorkspace, afterWorkspace)
+	if managedValidation && shellWorkspaceTargetChangesChanged(output.WorkspaceObservedTargetChanges) {
+		err := fmt.Errorf("%w: managed validation changed authoritative workspace state", common.ErrInvalidArgument)
+		output.Status = "failed"
+		output.Stage = "managed_validation_workspace_effect"
+		output.FailureReason = "managed_validation_workspace_effect"
+		output.EvidenceQuality = string(common.EvidenceQualityInvalid)
+		output.EvidenceReason = "managed validation escaped its owner-isolated workspace"
+		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
+		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
+		return finalizeShellResult(output, err)
+	}
 	if request.StateChanging {
 		afterTargets := shellWorkspaceTargetRevisions(deliverableDirectory, request)
 		output.WorkspaceTargetChanges = shellWorkspaceTargetChanges(beforeTargets, afterTargets)
-		afterWorkspace, observeErr := shellWorkspaceFileRevisions(deliverableDirectory, true)
-		if observeErr != nil {
-			err := fmt.Errorf("%w: state-changing shell command workspace observation failed: %v", common.ErrInvalidArgument, observeErr)
-			output.Status = "failed"
-			output.Stage = "shell_workspace_observation_unavailable"
-			output.FailureReason = "workspace_observation_unavailable"
-			attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
-			attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
-			return finalizeShellResult(output, err)
-		}
-		output.WorkspaceObservedTargetChanges = shellWorkspaceTargetChanges(beforeWorkspace, afterWorkspace)
 		if !shellWorkspaceTargetChangesChanged(output.WorkspaceObservedTargetChanges) {
 			err := fmt.Errorf("%w: state-changing shell command produced no observable workspace delta for its declared targets", common.ErrInvalidArgument)
 			output.Status = "failed"
@@ -178,7 +233,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 				TargetRef:     strings.TrimSpace(request.TargetRef),
 				FailureReason: "state_changing_no_workspace_delta",
 			}
-			attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
+			attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 			attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
 			return finalizeShellResult(output, err)
 		}
@@ -204,12 +259,23 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 					TargetRef:     strings.TrimSpace(request.TargetRef),
 					FailureReason: "state_changing_no_workspace_delta",
 				}
-				attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "failed")
+				attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 				attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
 				return finalizeShellResult(output, err)
 			}
 		}
 	}
-	attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), "released")
+	attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 	return finalizeShellResult(output, nil)
+}
+
+func terminateShellProcessGroup(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	err := syscall.Kill(-pid, syscall.SIGKILL)
+	if err == nil || errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }

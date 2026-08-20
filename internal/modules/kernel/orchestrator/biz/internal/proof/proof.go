@@ -61,7 +61,7 @@ func ValidationEvidenceShowsExecutableBehavior(binding runtimecontract.CoverageE
 		return false
 	}
 	for _, required := range proof.RequiredCheckRefs {
-		if !stringIncluded(observation.PassedChecks, required) {
+		if !runtimecontract.RuntimeValidationCheckPassed(observation, required) {
 			return false
 		}
 	}

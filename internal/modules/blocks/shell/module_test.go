@@ -119,17 +119,18 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = module.Stop(ctx) })
+	workspace := t.TempDir()
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
 		shellevents.ExecuteOperationCommand{
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
 				WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
-				OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
-				WorkspaceDeliverableDirectory: t.TempDir(),
+				OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindStateChange,
+				WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"typed.txt"},
 			},
-			Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf typed-shell"}, TimeoutMillis: 5000},
+			Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf typed-shell > typed.txt"}, TimeoutMillis: 5000, StateChanging: true, TargetRef: "typed.txt", TargetRefs: []string{"typed.txt"}},
 		},
 	))
 	data, magicErr := result.Get()

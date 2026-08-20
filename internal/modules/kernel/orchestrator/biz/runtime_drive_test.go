@@ -529,7 +529,7 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 							Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target},
 						},
 						RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-						RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+						RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
 						ValidationRecipeID:    recipes[coverageID],
 						DeclarationRef:        "focus-scoped-semantic/" + string(coverageID),
 					})
@@ -6074,7 +6074,7 @@ func runtimeFileShellGitSemanticProposals(coverageID common.CoverageWorkItemID) 
 	case "cwi-file":
 		return []runtimecontract.RuntimeSemanticProofProposal{
 			proposal(runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileWrite, "", runtimecontract.EvidenceKindStateChange, "", runtimecontract.RuntimeEffectWorkspaceDurable),
-			proposal(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, "", runtimecontract.EvidenceKindValidation, "fixture-main-go-created", runtimecontract.RuntimeEffectNone),
+			proposal(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, "", runtimecontract.EvidenceKindValidation, "fixture-main-go-created", runtimecontract.RuntimeEffectEphemeralSession),
 		}, nil
 	case "cwi-edit":
 		return []runtimecontract.RuntimeSemanticProofProposal{
@@ -7942,10 +7942,11 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 
 func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T) {
 	testCases := []struct {
-		name       string
-		validation bool
-		after      bool
-		match      func(runtime.RuntimeAggregate) bool
+		name           string
+		validation     bool
+		after          bool
+		outcomeUnknown bool
+		match          func(runtime.RuntimeAggregate) bool
 	}{
 		{
 			name: "claim_cas_before", validation: true,
@@ -7955,7 +7956,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			},
 		},
 		{
-			name: "claim_cas_after_execute_before", validation: true, after: true,
+			name: "claim_cas_after_execute_before", validation: true, after: true, outcomeUnknown: true,
 			match: func(aggregate runtime.RuntimeAggregate) bool {
 				return aggregate.ActiveDispatch != nil && len(aggregate.ActiveDispatch.OperationExecutions) == 1 &&
 					aggregate.ActiveDispatch.OperationExecutions[0].State == runtimecontract.OperationExecutionClaimed && len(aggregate.OperationReceipts) == 0
@@ -8115,9 +8116,10 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				t.Fatal("crash point was not reached")
 			}
 
-			// Rebuild every process-owned actor before recovery. The validation
-			// claim path may replay the sealed managed validation only after the fresh owner proves
-			// no receipt exists; the durable state-change path must consume its
+			// Rebuild every process-owned actor before recovery. A claim that was
+			// not persisted can still execute once. A persisted claimed managed
+			// validation has an ambiguous owner-call boundary and must become
+			// outcome_unknown without replay; durable state change consumes its
 			// persisted receipt without a second write.
 			workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 			if err := fileOwner.Stop(ctx); err != nil {
@@ -8166,9 +8168,32 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			}
 			if loaded.ActiveDispatch != nil {
 				loaded, err = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
+				if err != nil && !testCase.outcomeUnknown {
+					t.Fatal(err)
+				}
+			}
+			if testCase.outcomeUnknown {
+				var unknown *runtime.OperationOutcomeUnknownError
+				if !errors.As(err, &unknown) {
+					t.Fatalf("persisted managed-validation claim err=%v, want outcome_unknown", err)
+				}
+				loaded, err = restarted.Load(ctx, "ws-v2", "run-v2")
 				if err != nil {
 					t.Fatal(err)
 				}
+				if loaded.ActiveDispatch == nil {
+					t.Fatalf("outcome-unknown managed validation lost active dispatch: %+v", loaded)
+				}
+				execution, found := runtimeDriveOperationExecutionRecord(loaded.ActiveDispatch.OperationExecutions, "validate-1")
+				if !found || execution.State != runtimecontract.OperationExecutionOutcomeUnknown ||
+					len(loaded.OperationReceipts) != 0 || len(loaded.Facts.Evidence.Accepted) != 0 || loaded.Facts.Recovery.OperationRecoveryAttempts != 0 {
+					t.Fatalf("persisted managed-validation claim was not fenced: aggregate=%+v execution=%+v", loaded, execution)
+				}
+				content, readErr := os.ReadFile(filepath.Join(deliverable, "target.txt"))
+				if readErr != nil || string(content) != "old\n" {
+					t.Fatalf("outcome-unknown validation changed workspace content=%q err=%v", string(content), readErr)
+				}
+				return
 			}
 			if loaded.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 				if _, err := beginRuntimeCandidateAttemptForTest(ctx, restarted, "ws-v2", "run-v2", 0, "crash-recovery-assessment"); err != nil {
@@ -8193,9 +8218,6 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			if loaded.Decision.State != runtimecontract.ConvergenceStateComplete || len(loaded.OperationReceipts) != 1 || len(loaded.Facts.Evidence.Accepted) != 1 ||
 				loaded.EvidenceSequence != wantSequence || len(loaded.Facts.Assessments) != wantAssessments {
 				t.Fatalf("restart exactly-once aggregate=%+v", loaded)
-			}
-			if testCase.validation && testCase.after && loaded.Facts.Recovery.OperationRecoveryAttempts != 1 {
-				t.Fatalf("claimed safe recovery ledger=%+v", loaded.Facts.Recovery)
 			}
 			content, readErr := os.ReadFile(filepath.Join(deliverable, "target.txt"))
 			want := "old\n"
@@ -9096,7 +9118,7 @@ func runtimeTwoFocusSemanticResult(command llmevents.RequestRuntimeCandidateComm
 						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{sharedTarget},
 					},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
 					ValidationRecipeID:    "two-focus-validation-2", RequiredCheckRefs: []string{"two-focus-validation-2"},
 					DeclarationRef: "two-focus/cwi-2",
 				},

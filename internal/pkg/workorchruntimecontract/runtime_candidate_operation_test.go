@@ -159,8 +159,9 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 		t.Fatalf("expected stateChanging shell rejection under validation, got %v", err)
 	}
 
-	// A Shell-owner policy may bind stateChanging=false to a non-durable effect.
-	// The candidate parameter alone is not effect authority.
+	// Arbitrary shell/command is durable-only. An owner policy cannot reopen the
+	// removed stateChanging=false path; non-mutating validation must select an
+	// owner-confirmed managed recipe.
 	stateChanging = false
 	shellDeclaredReadOnly := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{
 		Operation: RuntimeOperation{
@@ -178,18 +179,19 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &stateChanging}},
 		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 	}
-	if err := shellDeclaredReadOnly.ValidateWithActivation(decision, RuntimeActivationContext{OperationPolicies: []RuntimeOperationPolicyFact{readOnlyPolicy}}); err != nil {
-		t.Fatalf("stateChanging=false shell under validation must be accepted, got %v", err)
+	if err := shellDeclaredReadOnly.ValidateWithActivation(decision, RuntimeActivationContext{OperationPolicies: []RuntimeOperationPolicyFact{readOnlyPolicy}}); err == nil ||
+		!strings.Contains(err.Error(), "requires stateChanging=true") {
+		t.Fatalf("stateChanging=false shell under validation error = %v", err)
 	}
 }
 
-func TestValidationCandidateRequiresSelectedObservableRecipe(t *testing.T) {
+func TestValidationCandidateRequiresManagedRecipeInsteadOfArbitraryShell(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedValidation)
 	decision.State = ConvergenceStateNeedValidation
 	decision.RequiredOutput = RequiredOutputContract{
-		AcceptedKinds:        []string{StepKindShellCommand},
+		AcceptedKinds:        []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
-		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}.Normalized()
 	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
@@ -206,12 +208,16 @@ func TestValidationCandidateRequiresSelectedObservableRecipe(t *testing.T) {
 		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &stateChanging}},
 		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 	}}}
-	if err := candidate.ValidateWithActivation(decision, activation); err == nil || !strings.Contains(err.Error(), `observable recipe argument "-v"`) {
-		t.Fatalf("non-observable validation candidate error = %v", err)
+	if err := candidate.ValidateWithActivation(decision, activation); err == nil || !strings.Contains(err.Error(), "requires stateChanging=true") {
+		t.Fatalf("arbitrary shell validation candidate error = %v", err)
 	}
-	candidate.Validation.Operations[0].Operation.Parameters[1].StringList = []string{"test", "-v", "./..."}
+	recipeID := "go-test-observable"
+	candidate.Validation.Operations[0].Operation = RuntimeOperation{
+		ID: "validate", Kind: RuntimeBlockKindManagedValidationSession, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters: []OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}
 	if err := candidate.ValidateWithActivation(decision, activation); err != nil {
-		t.Fatalf("observable validation candidate rejected: %v", err)
+		t.Fatalf("managed validation candidate rejected: %v", err)
 	}
 }
 

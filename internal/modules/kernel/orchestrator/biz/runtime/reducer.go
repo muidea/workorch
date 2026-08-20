@@ -701,7 +701,7 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 		AcceptedKinds:             acceptedKinds,
 		AcceptedOperationVariants: acceptedOperationVariantsForKinds(facts.Focus.AcceptedOperationVariants, acceptedKinds),
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
-		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindValidation},
 		CoverageWorkItemIDs:       facts.Focus.CoverageWorkItemIDs,
 		TargetRefs:                GroundedRepairTargets(facts),

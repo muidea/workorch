@@ -23,7 +23,7 @@ func TestCoverageEvidenceProofValidateRejectsCrossKindProofShapes(t *testing.T) 
 	}{
 		{name: "state proof cannot be non-durable", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, AllowedOperationKinds: []string{StepKindFileWrite}}},
 		{name: "validation proof cannot be durable", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/test"}},
-		{name: "validation proof requires recipe", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}}},
+		{name: "validation proof requires recipe", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}}},
 		{name: "validation proof cannot use state operation", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, AllowedOperationKinds: []string{StepKindFileWrite}, ValidationRecipeID: "recipe/test"}},
 		{name: "validation proof cannot use read-only diagnostic operation", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, AllowedOperationKinds: []string{StepKindFileRead}, ValidationRecipeID: "recipe/test"}},
 		{name: "state proof cannot use validation operation", proof: CoverageEvidenceProof{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}}},
@@ -185,7 +185,7 @@ func TestCoverageEvidenceBindingReceiptMatchDoesNotBorrowAcrossProofKinds(t *tes
 	validationOperation := RuntimeOperation{ID: "validate-main", Kind: RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"main.go"}}
 	validationReceipt := RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws/run/dispatch/validate-main", Fence: 1, OperationID: "validate-main", Outcome: RuntimeOperationOutcomeAccepted,
-		ObservedEffectScope: RuntimeEffectNone, TargetRefs: []string{"main.go"},
+		ObservedEffectScope: RuntimeEffectEphemeralSession, TargetRefs: []string{"main.go"},
 		Evidence: RuntimeOperationEvidence{
 			Summary: "validated main.go", EvidenceRefs: []string{"artifact/test-log"}, EvidenceTags: []string{"metric/tests-pass"},
 			Validation: &RuntimeValidationObservation{RecipeID: "recipe/test-main", ExecutedChecks: []string{"unit/main"}, PassedChecks: []string{"unit/main"}},
@@ -201,10 +201,16 @@ func TestCoverageEvidenceBindingReceiptMatchDoesNotBorrowAcrossProofKinds(t *tes
 		message string
 	}{
 		{name: "target", mutate: func(receipt *RuntimeOperationReceipt) { receipt.TargetRefs = []string{"other.go"} }, message: "targets"},
-		{name: "effect", mutate: func(receipt *RuntimeOperationReceipt) { receipt.ObservedEffectScope = RuntimeEffectEphemeralSession }, message: "effect"},
+		{name: "effect", mutate: func(receipt *RuntimeOperationReceipt) { receipt.ObservedEffectScope = RuntimeEffectNone }, message: "effect"},
 		{name: "recipe", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.Validation.RecipeID = "recipe/other" }, message: "recipe"},
 		{name: "check", mutate: func(receipt *RuntimeOperationReceipt) {
 			receipt.Evidence.Validation.PassedChecks = []string{"unit/other"}
+		}, message: "passed check"},
+		{name: "passed and failed check", mutate: func(receipt *RuntimeOperationReceipt) {
+			receipt.Evidence.Validation.FailedChecks = []string{"unit/main"}
+		}, message: "passed check"},
+		{name: "passed and skipped check", mutate: func(receipt *RuntimeOperationReceipt) {
+			receipt.Evidence.Validation.SkippedChecks = []string{"unit/main"}
 		}, message: "passed check"},
 		{name: "metric", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.EvidenceTags = nil }, message: "metric constraint"},
 		{name: "artifact", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.EvidenceRefs = nil }, message: "artifact ref"},
@@ -247,7 +253,7 @@ func TestCoverageEvidenceBindingManifestOnlyExposesCurrentEvidenceKind(t *testin
 		t.Fatalf("state manifest binding refs = %+v", stateManifest.Operations)
 	}
 
-	validationDecision := testCoverageBindingDecision(focus, ConvergenceStateNeedValidation, []string{RuntimeBlockKindManagedValidationSession}, []RuntimeEffectScope{RuntimeEffectNone}, EvidenceKindValidation)
+	validationDecision := testCoverageBindingDecision(focus, ConvergenceStateNeedValidation, []string{RuntimeBlockKindManagedValidationSession}, []RuntimeEffectScope{RuntimeEffectEphemeralSession}, EvidenceKindValidation)
 	validationManifest, err := BuildRuntimeCandidateContractManifest(validationDecision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatalf("validation manifest: %v", err)
@@ -391,7 +397,7 @@ func testCoverageEvidenceBinding() CoverageEvidenceBinding {
 		ID: "binding/cwi-main", CoverageWorkItemID: "cwi-main", FocusID: "focus-main", DefinitionRevision: "definition-main",
 		Proofs: []CoverageEvidenceProof{
 			{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{StepKindFileWrite}},
-			{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/test-main", RequiredCheckRefs: []string{"unit/main"}, MetricConstraints: []string{"metric/tests-pass"}, ArtifactRefs: []string{"artifact/test-log"}},
+			{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/test-main", RequiredCheckRefs: []string{"unit/main"}, MetricConstraints: []string{"metric/tests-pass"}, ArtifactRefs: []string{"artifact/test-log"}},
 		},
 		TargetRefs: []string{"main.go"}, DeclarationRef: "test/profile/main",
 	}.Normalized()

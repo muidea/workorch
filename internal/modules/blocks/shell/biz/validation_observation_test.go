@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -119,10 +120,43 @@ func TestSkipped(t *testing.T) {
 	if result.Evidence.Quality != common.EvidenceQualityValid || observation == nil {
 		t.Fatalf("validation evidence = %+v", result.Evidence)
 	}
-	if !equalValidationChecks(observation.ExecutedChecks, []string{"TestBehavior", "TestSkipped"}) ||
-		!equalValidationChecks(observation.PassedChecks, []string{"TestBehavior"}) ||
+	proofCheck := shellValidationRecipeProofCheckRef("go-test-check-observation")
+	if !equalValidationChecks(observation.ExecutedChecks, []string{"TestBehavior", "TestSkipped", proofCheck}) ||
+		!equalValidationChecks(observation.PassedChecks, []string{"TestBehavior", proofCheck}) ||
 		!equalValidationChecks(observation.SkippedChecks, []string{"TestSkipped"}) || len(observation.FailedChecks) != 0 {
 		t.Fatalf("top-level validation observation = %+v", observation)
+	}
+}
+
+func TestDefaultManagedValidationRecipeClosesItsPublishedProofCheck(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	workspace := newGoValidationWorkspace(t, "package fixture\nimport \"testing\"\nfunc TestDefaultRecipe(t *testing.T) {}\n")
+	recipe := runtimecontract.RuntimeValidationRecipe{
+		ID: "software-dev-validation-evidence", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000,
+	}
+	binding := shellTestWorkspaceManifestBinding("tree-default-validation", []string{"fixture.go", "fixture_test.go", "go.mod"})
+	surfaces := shellValidationSurfaces([]runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, binding)
+	if len(surfaces) != 1 || len(surfaces[0].CheckRefs) != 1 {
+		t.Fatalf("default validation surface = %+v", surfaces)
+	}
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspace,
+		ValidationRecipeID:            recipe.ID,
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		Command: recipe.Command, Args: recipe.Args, TimeoutMillis: recipe.TimeoutMillis,
+		TargetRefs: []string{"fixture_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
+	}
+	observation := result.ValidationObservation
+	if observation == nil || observation.RecipeID != recipe.ID ||
+		!runtimecontract.RuntimeValidationCheckPassed(*observation, surfaces[0].CheckRefs[0]) {
+		t.Fatalf("default recipe did not close published proof check: surface=%+v observation=%+v", surfaces[0], observation)
 	}
 }
 
@@ -186,10 +220,41 @@ func TestRuntimeAdapterParsesStructuredManagedValidationChecks(t *testing.T) {
 	if observation == nil {
 		t.Fatal("managed validation observation is nil")
 	}
-	if !equalValidationChecks(observation.ExecutedChecks, []string{"file/present"}) ||
-		!equalValidationChecks(observation.PassedChecks, []string{"file/present"}) ||
+	proofCheck := shellValidationRecipeProofCheckRef("file-presence-check")
+	if !equalValidationChecks(observation.ExecutedChecks, []string{"file/present", proofCheck}) ||
+		!equalValidationChecks(observation.PassedChecks, []string{"file/present", proofCheck}) ||
 		len(observation.FailedChecks) != 0 || len(observation.SkippedChecks) != 0 {
 		t.Fatalf("structured managed validation observation = %+v", observation)
+	}
+}
+
+func TestManagedValidationRejectsConflictingCheckOutcomes(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is not available")
+	}
+	for _, conflictingMarker := range []string{managedValidationCheckFailedPrefix, managedValidationCheckSkippedPrefix} {
+		t.Run(strings.TrimSuffix(conflictingMarker, "="), func(t *testing.T) {
+			workspace := t.TempDir()
+			result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+				WorkspaceDeliverableDirectory: workspace,
+				ValidationRecipeID:            "conflicting-check",
+				ManagedValidation: runtimecontract.RuntimeManagedValidation{
+					RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+				},
+				Command: "sh", Args: []string{"-c", "printf 'WORKORCH_CHECK_PASSED=check/conflict\\n" + conflictingMarker + "check/conflict\\n'"},
+			})
+			if err != nil {
+				t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
+			}
+			observation := result.ValidationObservation
+			proofCheck := shellValidationRecipeProofCheckRef("conflicting-check")
+			if result.Evidence.Quality != common.EvidenceQualityInvalid || observation == nil ||
+				len(runtimecontract.RuntimeValidationConflictingChecks(*observation)) != 1 ||
+				runtimecontract.RuntimeValidationCheckPassed(*observation, "check/conflict") ||
+				runtimecontract.RuntimeValidationCheckPassed(*observation, proofCheck) {
+				t.Fatalf("conflicting managed validation received proof credit: %+v", result)
+			}
+		})
 	}
 }
 

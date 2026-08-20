@@ -295,24 +295,24 @@ func NewRuntimeSemanticProofFeasibilityObservation(command RuntimeSemanticProofF
 }
 
 // runtimeSemanticOwnerConfirmedCheckRefs derives the canonical validation
-// identity from the addressed owner's sealed catalog. Provider proposals do
-// not carry check refs and therefore cannot influence this value.
+// identities from the addressed owner's exact ready/direct surface. Recipe
+// identity and check identity are deliberately separate: a recipe may execute
+// several tool-native checks, and the provider cannot invent either set.
 func runtimeSemanticOwnerConfirmedCheckRefs(catalog RuntimeOperationAdmissibility, recipeID string) []string {
 	recipeID = strings.TrimSpace(recipeID)
 	if recipeID == "" {
 		return nil
 	}
-	for _, recipe := range catalog.ValidationRecipes {
-		if strings.TrimSpace(recipe.ID) == recipeID {
-			return []string{recipeID}
-		}
+	surface, found := RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, recipeID)
+	if !found {
+		return nil
 	}
-	for _, value := range catalog.ValidationRecipeRefs {
-		if strings.TrimSpace(value) == recipeID {
-			return []string{recipeID}
-		}
+	surface = surface.Normalized()
+	if surface.Readiness != RuntimeValidationSurfaceReady || surface.ProofApplicability != RuntimeValidationProofDirect ||
+		!containsString(catalog.ValidationRecipeRefs, recipeID) {
+		return nil
 	}
-	return nil
+	return append([]string(nil), surface.CheckRefs...)
 }
 
 func RuntimeSemanticFeasibilityDiagnostic(ownerModuleID, code, message, expectedRevision, observedRevision string, targetRefs []string) *RuntimeOriginalDiagnostic {

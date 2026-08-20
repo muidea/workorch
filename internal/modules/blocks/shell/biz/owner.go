@@ -88,6 +88,13 @@ func (m *Biz) Teardown(context.Context) {
 // mutate Runtime coverage: the result is an owner-local current-workspace
 // observation consumed by the Orchestrator's SM-2 reducer.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(shellevents.QueryRuntimeCWIReconciliationCommand)
 	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
@@ -108,6 +115,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	allPassed := true
 	var checkRefs []string
 	var targetRefs []string
+	validationObservations := make([]runtimecontract.RuntimeValidationObservation, 0, len(recipes))
 	for _, recipe := range recipes {
 		request := RuntimeCommandRequest{
 			WorkspaceID:                   command.WorkspaceID,
@@ -140,7 +148,15 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 			if value.RecipeID != recipe.ID {
 				allPassed = false
 			}
-			checkRefs = append(checkRefs, value.PassedChecks...)
+			if len(runtimecontract.RuntimeValidationConflictingChecks(value)) != 0 {
+				allPassed = false
+			}
+			for _, check := range value.PassedChecks {
+				if runtimecontract.RuntimeValidationCheckPassed(value, check) {
+					checkRefs = append(checkRefs, check)
+				}
+			}
+			validationObservations = append(validationObservations, value)
 			targetRefs = append(targetRefs, output.TargetRefs...)
 		}
 	}
@@ -149,12 +165,15 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	// explicitly reported by the owner, and a metric/artifact constraint that
 	// this owner cannot observe remains unverifiable.
 	if len(command.Binding.RequiredCheckRefs) != 0 {
-		passed := make(map[string]struct{}, len(checkRefs))
-		for _, check := range checkRefs {
-			passed[check] = struct{}{}
-		}
 		for _, required := range command.Binding.RequiredCheckRefs {
-			if _, ok := passed[required]; !ok {
+			passed := false
+			for _, observation := range validationObservations {
+				if runtimecontract.RuntimeValidationCheckPassed(observation, required) {
+					passed = true
+					break
+				}
+			}
+			if !passed {
 				allPassed = false
 			}
 		}
@@ -228,12 +247,25 @@ func shellReconciliationObservation(command shellevents.QueryRuntimeCWIReconcili
 }
 
 func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Result) {
+	// Execute is a strong call. A fire-and-forget Post must not reach receipt
+	// authorization, the local process adapter, or receipt commit.
+	if result == nil {
+		return
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(shellevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if err := validateRuntimeShellOperationData(command); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -298,18 +330,100 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 			TargetRefs: undeclared,
 		}
 	}
-	observation := shellMutationReceiptObservation(command.Data.StateChanging, status, operationResult)
+	observation := shellMutationReceiptObservation(command.Data.StateChanging, shellInputHasManagedValidation(runtimeRequest), status, operationResult)
 	receiptTargets := operationResult.TargetRefs
 	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted && command.Data.StateChanging {
 		receiptTargets = shellObservedChangedWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, receiptTargets, evidence, failure, nil, observation)
+	if receipt.Feedback != nil && receipt.Feedback.OriginalDiagnostic != nil {
+		stdoutBytes := operationResult.StdoutBytes
+		if stdoutBytes == 0 {
+			stdoutBytes = int64(len(operationResult.Stdout))
+		}
+		stderrBytes := operationResult.StderrBytes
+		if stderrBytes == 0 {
+			stderrBytes = int64(len(operationResult.Stderr))
+		}
+		if stdoutBytes+stderrBytes > 0 {
+			receipt.Feedback.OriginalDiagnostic.DetailsBytes = stdoutBytes + stderrBytes
+			receipt.Feedback.OriginalDiagnostic.ContentType = "text/plain"
+			receipt.Feedback.OriginalDiagnostic.OmittedReason = "raw_shell_command_output"
+			receipt.Feedback.OriginalDiagnostic.Truncated = operationResult.OutputTruncated
+			receipt.Feedback.OriginalDiagnostic.Redacted = true
+		}
+	}
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	result.Set(shellevents.ExecuteOperationResult{Receipt: committed}, nil)
+}
+
+func validateRuntimeShellOperationData(command shellevents.ExecuteOperationCommand) error {
+	managed := command.Data.ManagedValidation.RuntimeManaged ||
+		strings.TrimSpace(command.Data.ManagedValidation.Kind) == runtimecontract.RuntimeBlockKindManagedValidationSession ||
+		strings.TrimSpace(command.Data.ManagedValidation.OriginalNodeKind) == runtimecontract.RuntimeBlockKindManagedValidationSession
+	if !sameShellTargetRefs(command.TargetRefs, command.Data.TargetRefs) {
+		return fmt.Errorf("runtime Shell operation data target refs do not match sealed execution context")
+	}
+	if managed {
+		if command.Data.StateChanging || strings.TrimSpace(command.Data.ValidationRecipeID) == "" ||
+			strings.TrimSpace(command.Data.Command) != "" || len(command.Data.Args) != 0 ||
+			strings.TrimSpace(command.Data.ValidationScratchDirectory) != "" || command.Data.ValidationScratchAutoCleanupSet ||
+			command.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectEphemeralSession {
+			return fmt.Errorf("runtime managed validation requires recipe-only ephemeral execution data")
+		}
+		if _, found := runtimecontract.RuntimeValidationRecipeForID(command.ValidationRecipes, command.Data.ValidationRecipeID); !found {
+			return fmt.Errorf("runtime managed validation recipe is absent from sealed owner catalog")
+		}
+		return nil
+	}
+	if !command.Data.StateChanging || strings.TrimSpace(command.Data.ValidationRecipeID) != "" ||
+		strings.TrimSpace(command.Data.Command) == "" || len(command.TargetRefs) == 0 ||
+		strings.TrimSpace(command.Data.ValidationScratchDirectory) != "" || command.Data.ValidationScratchAutoCleanupSet ||
+		command.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
+		return fmt.Errorf("runtime shell/command requires durable stateChanging execution data")
+	}
+	if strings.TrimSpace(command.Data.TargetRef) != "" && !shellStringIncluded(command.TargetRefs, command.Data.TargetRef) {
+		return fmt.Errorf("runtime Shell targetRef is outside sealed target refs")
+	}
+	return nil
+}
+
+func sameShellTargetRefs(left, right []string) bool {
+	leftSet := make(map[string]struct{}, len(left))
+	rightSet := make(map[string]struct{}, len(right))
+	for _, value := range left {
+		if value = strings.TrimSpace(value); value != "" {
+			leftSet[value] = struct{}{}
+		}
+	}
+	for _, value := range right {
+		if value = strings.TrimSpace(value); value != "" {
+			rightSet[value] = struct{}{}
+		}
+	}
+	if len(leftSet) != len(rightSet) {
+		return false
+	}
+	for value := range leftSet {
+		if _, found := rightSet[value]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func shellStringIncluded(values []string, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	for _, value := range values {
+		if strings.TrimSpace(value) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveManagedValidationRecipe is the Shell-owner boundary between a sealed
@@ -385,9 +499,17 @@ func shellValidationDiagnosticMayIdentifyImplementationEffect(class string) bool
 // File as the canonical owner of workspace targets/tree: Shell observes the
 // mutation, while Orchestrator performs the neutral intersection against File
 // and Shell prerequisites. No File service/repository is consulted here.
-func shellMutationReceiptObservation(stateChanging bool, status runtimecontract.RuntimeOperationExecutionStatus, result RuntimeCommandResult) orchestratorevents.RuntimeOperationReceiptObservation {
+func shellMutationReceiptObservation(stateChanging, managedValidation bool, status runtimecontract.RuntimeOperationExecutionStatus, result RuntimeCommandResult) orchestratorevents.RuntimeOperationReceiptObservation {
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
+	if managedValidation {
+		observation.ObservedEffectScope = runtimecontract.RuntimeEffectEphemeralSession
+		if status != runtimecontract.RuntimeOperationExecutionStatusAccepted {
+			observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
+		}
+		return observation
+	}
 	if !stateChanging {
+		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
 		return observation
 	}
 	observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown

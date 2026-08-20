@@ -43,7 +43,7 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		// validation fact that preceded it.
 		directive.SupersedesEvidenceRevision = acceptedRepairStateChangeRevision(facts, &directive, proofLineage)
 		directive.RequiredState = runtimecontract.ConvergenceStateNeedValidation
-		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
+		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}
 		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 		// A directive's allowed kinds are action-scoped authority. Carrying the
 		// durable operation inventory into the validation transaction would let

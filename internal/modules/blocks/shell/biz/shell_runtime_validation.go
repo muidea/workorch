@@ -102,8 +102,8 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		schemaHash := shellValidationRecipeSchemaHash(recipe)
 		surface := runtimemodel.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
-			CheckRefs: []string{recipe.ID}, ProofApplicability: runtimemodel.RuntimeValidationProofDirect, EffectScope: runtimemodel.RuntimeEffectNone,
-			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencySafeToReplay,
+			CheckRefs: []string{shellValidationRecipeProofCheckRef(recipe.ID)}, ProofApplicability: runtimemodel.RuntimeValidationProofDirect, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
+			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
 		}
 		switch {
@@ -121,6 +121,19 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		ret = append(ret, surface)
 	}
 	return runtimemodel.NormalizeRuntimeValidationSurfaces(ret)
+}
+
+// shellValidationRecipeProofCheckRef is the exact owner-published aggregate
+// check for one recipe execution with real, non-conflicting work. Tool-native
+// checks remain in the observation for audit, while semantic binding consumes
+// this bounded identity instead of incorrectly treating RecipeID as a check.
+func shellValidationRecipeProofCheckRef(recipeID string) string {
+	recipeID = strings.TrimSpace(recipeID)
+	if recipeID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte("shell-managed-validation-check\x00" + recipeID))
+	return "shell-validation-check-" + hex.EncodeToString(digest[:])[:20]
 }
 
 func shellValidationRecipeIDs(recipes []runtimemodel.RuntimeValidationRecipe) map[string]bool {

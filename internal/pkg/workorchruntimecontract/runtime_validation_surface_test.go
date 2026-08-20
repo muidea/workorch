@@ -99,6 +99,22 @@ func TestRuntimeOperationAdmissibilityExposesOnlyReadyValidationSurfaces(t *test
 	if got := RuntimeSelectableValidationRecipeRefs([]RuntimeValidationSurface{auxiliary}); len(got) != 0 {
 		t.Fatalf("auxiliary ready surface became selectable: %v", got)
 	}
+	atMostOnce := ready
+	atMostOnce.EffectScope = RuntimeEffectEphemeralSession
+	atMostOnce.IdempotencyClass = RuntimeOperationIdempotencyAtMostOnce
+	if got := RuntimeSelectableValidationRecipeRefs([]RuntimeValidationSurface{atMostOnce}); len(got) != 1 || got[0] != ready.ID {
+		t.Fatalf("at-most-once ephemeral validation surface was not selectable: %v", got)
+	}
+	durable := ready
+	durable.EffectScope = RuntimeEffectWorkspaceDurable
+	if got := RuntimeSelectableValidationRecipeRefs([]RuntimeValidationSurface{durable}); len(got) != 0 {
+		t.Fatalf("durable validation surface became selectable: %v", got)
+	}
+	unknownReplay := ready
+	unknownReplay.IdempotencyClass = RuntimeOperationIdempotencyUnknown
+	if got := RuntimeSelectableValidationRecipeRefs([]RuntimeValidationSurface{unknownReplay}); len(got) != 0 {
+		t.Fatalf("replay-unknown validation surface became selectable: %v", got)
+	}
 	changedApplicability := inventory
 	changedApplicability.ValidationSurfaces = append([]RuntimeValidationSurface(nil), inventory.ValidationSurfaces...)
 	changedApplicability.ValidationSurfaces[1].ProofApplicability = RuntimeValidationProofAuxiliary

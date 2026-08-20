@@ -318,17 +318,15 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "command", Type: RuntimeOperationParameterTypeString, Required: true, Description: "executable or shell binary"},
 				{Name: "args", Type: RuntimeOperationParameterTypeStringList, Description: "ordered command arguments"},
 				{Name: "timeoutMillis", Type: RuntimeOperationParameterTypeInteger, Description: "bounded execution timeout in milliseconds"},
-				{Name: "stateChanging", Type: RuntimeOperationParameterTypeBoolean, Description: "declares that the command is expected to change workspace state"},
+				{Name: "stateChanging", Type: RuntimeOperationParameterTypeBoolean, Required: true, Description: "must be true; non-mutating validation uses validation/managed_session"},
 				{Name: "verificationScope", Type: RuntimeOperationParameterTypeString, Description: "bounded verification scope"},
 				{Name: "boundedReason", Type: RuntimeOperationParameterTypeString, Description: "reason the command is bounded"},
-				{Name: "validationScratchDir", Type: RuntimeOperationParameterTypeString, Description: "step-scoped validation scratch directory"},
-				{Name: "validationScratchAutoCleanup", Type: RuntimeOperationParameterTypeBoolean, Description: "whether validation scratch is removed after execution"},
 			},
 			ForbiddenParameters: []string{"input", "output", "payload", "targetRef", "targetRefs"},
 			Rules: []string{
 				"command must be non-empty",
 				"timeoutMillis must be between 1000 and 600000 when provided",
-				"stateChanging commands must identify at least one operation targetRefs entry",
+				"stateChanging must be true and targetRefs must identify at least one workspace target",
 			},
 		}, true
 	case RuntimeBlockKindManagedValidationSession:
@@ -522,11 +520,11 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 600000) {
 			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 600000", operation.Kind)
 		}
-		stateChanging := false
-		if parameter, ok := values["stateChanging"]; ok && parameter.Boolean != nil {
-			stateChanging = *parameter.Boolean
+		stateChanging, present := parameterBoolean(values["stateChanging"])
+		if !present || !stateChanging {
+			return fmt.Errorf("kind %q requires stateChanging=true; use managed validation for non-mutating execution", operation.Kind)
 		}
-		if stateChanging && len(operation.TargetRefs) == 0 {
+		if len(operation.TargetRefs) == 0 {
 			return fmt.Errorf("kind %q state-changing command requires target refs", operation.Kind)
 		}
 	case RuntimeBlockKindManagedValidationSession:
@@ -853,6 +851,13 @@ func parameterInteger(parameter OperationParameter) (int64, bool) {
 		return 0, false
 	}
 	return *parameter.Integer, true
+}
+
+func parameterBoolean(parameter OperationParameter) (bool, bool) {
+	if parameter.Boolean == nil {
+		return false, false
+	}
+	return *parameter.Boolean, true
 }
 
 func containsString(values []string, target string) bool {

@@ -57,26 +57,28 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 func shellOperationPolicyFacts(operationKinds []string) []runtimemodel.RuntimeOperationPolicyFact {
 	ret := make([]runtimemodel.RuntimeOperationPolicyFact, 0, 2)
 	for _, raw := range operationKinds {
-		if runtimemodel.CanonicalRuntimeBlockKind(raw) != runtimemodel.StepKindShellCommand {
-			continue
-		}
-		for _, stateChanging := range []bool{false, true} {
-			effect := runtimemodel.RuntimeEffectNone
-			if stateChanging {
-				effect = runtimemodel.RuntimeEffectWorkspaceDurable
-			}
-			value := stateChanging
+		switch runtimemodel.CanonicalRuntimeBlockKind(raw) {
+		case runtimemodel.StepKindShellCommand:
+			// Arbitrary Shell commands cannot honestly claim effect=none. The
+			// public shell/command surface is therefore durable and at-most-once;
+			// non-mutating proof uses the separately managed validation surface.
+			value := true
 			ret = append(ret, runtimemodel.RuntimeOperationPolicyFact{
-				ID:            fmt.Sprintf("shell/command/state-changing/%t/v1", stateChanging),
+				ID:            "shell/command/state-changing/true/v2",
 				OwnerModuleID: runtimemodel.RuntimeModuleShell,
 				OperationKind: runtimemodel.StepKindShellCommand,
 				ParameterMatches: []runtimemodel.RuntimeOperationParameterMatch{{
 					Name: "stateChanging", Boolean: &value,
 				}},
-				EffectScope: effect, IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
+				EffectScope: runtimemodel.RuntimeEffectWorkspaceDurable, IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
+			})
+		case runtimemodel.RuntimeBlockKindManagedValidationSession:
+			ret = append(ret, runtimemodel.RuntimeOperationPolicyFact{
+				ID: "shell/managed-validation/isolated-ephemeral/v2", OwnerModuleID: runtimemodel.RuntimeModuleShell,
+				OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
+				EffectScope:   runtimemodel.RuntimeEffectEphemeralSession, IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			})
 		}
-		break
 	}
 	return runtimemodel.NormalizeRuntimeOperationPolicyFacts(ret)
 }
@@ -111,7 +113,7 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	}
 	sort.Strings(keys)
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "timeout=%s;", a.timeout)
+	_, _ = fmt.Fprintf(h, "contract=shell-policy-v2;timeout=%s;", a.timeout)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)
 	}

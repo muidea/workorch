@@ -148,16 +148,28 @@ func RuntimeReadyValidationRecipeRefs(values []RuntimeValidationSurface) []strin
 }
 
 // RuntimeSelectableValidationRecipeRefs returns the exact provider-selectable
-// proof surface. A successful/ready auxiliary probe remains audit evidence but
-// cannot be promoted into a semantic recipe or receive direct CWI credit.
+// proof surface. A successful/ready auxiliary, durable, or replay-unknown probe
+// remains audit evidence but cannot be promoted into a semantic recipe or
+// receive direct CWI credit. At-most-once validation remains selectable, but an
+// ambiguous claimed execution must converge as outcome_unknown, never replay.
 func RuntimeSelectableValidationRecipeRefs(values []RuntimeValidationSurface) []string {
 	ret := make([]string, 0, len(values))
 	for _, value := range NormalizeRuntimeValidationSurfaces(values) {
-		if value.Readiness == RuntimeValidationSurfaceReady && value.ProofApplicability == RuntimeValidationProofDirect {
+		if value.Readiness == RuntimeValidationSurfaceReady && value.ProofApplicability == RuntimeValidationProofDirect &&
+			RuntimeEffectIsNonDurable(value.EffectScope) && runtimeValidationSurfaceHasExplicitReplayPolicy(value.IdempotencyClass) {
 			ret = append(ret, value.ID)
 		}
 	}
 	return normalizeStrings(ret)
+}
+
+func runtimeValidationSurfaceHasExplicitReplayPolicy(value RuntimeOperationIdempotencyClass) bool {
+	switch NormalizeRuntimeOperationIdempotencyClass(value) {
+	case RuntimeOperationIdempotencySafeToReplay, RuntimeOperationIdempotencyAtMostOnce, RuntimeOperationIdempotencyOwnerManaged:
+		return true
+	default:
+		return false
+	}
 }
 
 func RuntimeValidationSurfaceForID(values []RuntimeValidationSurface, id string) (RuntimeValidationSurface, bool) {

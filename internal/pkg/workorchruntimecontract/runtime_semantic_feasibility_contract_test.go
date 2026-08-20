@@ -132,7 +132,19 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 		PrerequisiteID: "shell-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		TargetRefs:     []string{"main.go"}, SelectorRefs: []string{"workspace-validation-target"},
-		ValidationRecipeRefs: []string{"recipe/test"}, ObservedRevision: "shell-revision",
+		ValidationRecipeRefs: []string{"recipe/test"},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "recipe/test", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "recipe-test-schema", InputBindingRef: "recipe-test-input",
+			CheckRefs: []string{"check/test"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "recipe-test-policy", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			EffectScope:   runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "shell-revision",
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{
@@ -153,7 +165,7 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 			Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-validation-target"},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
 		ValidationRecipeID:    "recipe/test", DeclarationRef: "semantic/dod-1",
 	}
 	base := runtimecontract.RuntimeSemanticProofFeasibility{
@@ -162,7 +174,7 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
 		OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
 		Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision,
-		ValidationRecipeID: proposal.ValidationRecipeID, RequiredCheckRefs: []string{"recipe/test"},
+		ValidationRecipeID: proposal.ValidationRecipeID, RequiredCheckRefs: []string{"check/test"},
 	}
 	if err := base.ValidateForProposal(manifest, proposal); err != nil {
 		t.Fatal(err)

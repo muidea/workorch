@@ -86,8 +86,10 @@ func TestShellOwnerReconciliationAcceptsExplicitStructuredCheck(t *testing.T) {
 	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 		t.Fatalf("structured check observation status = %q, want satisfied; diagnostic=%+v observation=%+v", result.Observation.Status, result.Observation.OriginalDiagnostic, result.Observation)
 	}
-	if len(result.Observation.CheckRefs) != 1 || result.Observation.CheckRefs[0] != checkRef {
-		t.Fatalf("structured check refs = %#v, want [%q]", result.Observation.CheckRefs, checkRef)
+	proofCheck := shellValidationRecipeProofCheckRef(recipe.ID)
+	if len(result.Observation.CheckRefs) != 2 || !shellStringIncluded(result.Observation.CheckRefs, checkRef) ||
+		!shellStringIncluded(result.Observation.CheckRefs, proofCheck) {
+		t.Fatalf("structured check refs = %#v, want %q and %q", result.Observation.CheckRefs, checkRef, proofCheck)
 	}
 }
 

@@ -12,8 +12,8 @@ const (
 	DefaultCommandTimeout           = 60 * time.Second
 	MaxCommandTimeout               = 10 * time.Minute
 	MaxCommandOutputBytes           = 64 * 1024
-	maxObservedWorkspaceFiles       = 2048
-	maxObservedWorkspaceBytes int64 = 32 * 1024 * 1024
+	maxObservedWorkspaceFiles       = 8192
+	maxObservedWorkspaceBytes int64 = 256 * 1024 * 1024
 )
 
 type RuntimeAdapter struct {
@@ -27,9 +27,11 @@ func NewRuntimeAdapter() *RuntimeAdapter {
 	return &RuntimeAdapter{
 		timeout: DefaultCommandTimeout,
 		envAllowlist: map[string]struct{}{
-			"HOME":   {},
-			"PATH":   {},
-			"TMPDIR": {},
+			"GOCACHE":    {},
+			"GOMODCACHE": {},
+			"HOME":       {},
+			"PATH":       {},
+			"TMPDIR":     {},
 		},
 	}
 }

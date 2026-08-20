@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-20
 
 ## 功能范围与边界
 
@@ -127,8 +127,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   factual surface，并依赖 exact File workspace-tree revision；只有对当前 manifest 适用且静态可执行的 recipe 才进入
   confirmed set。没有 confirmed recipe 的 `validation/managed_session` 不进入 provider-visible allowed kinds，
   Orchestrator 不检查文件名、不判断 recipe 适用性。MCP 等动态 owner 同时发布 callable capability 与 typed
-  `RuntimeValidationSurface`；只有带 owner-sealed input binding、non-durable effect、safe-to-replay class，并由 owner
-  显式声明为 `direct` 的 `ready` surface 可进入 `ValidationRecipeRefs`。`auxiliary`/`not_declared`、
+  `RuntimeValidationSurface`；只有带 owner-sealed input binding、non-durable effect、明确
+  `safe_to_replay | at_most_once | owner_managed` class，并由 owner 显式声明为 `direct` 的 `ready` surface 可进入
+  `ValidationRecipeRefs`。`at_most_once` surface 的 claimed/no-receipt 恢复必须进入 `outcome_unknown`，不能因验证身份
+  盲重放。`auxiliary`/`not_declared`、
   `prerequisite_required`/`unavailable` 只保留在 aggregate/audit，不进入 provider C3/schema/correction，Orchestrator
   不解析 schema、合成输入或根据 tool 名称/描述推断 direct proof。SM-3 只请求/校验逐
   CWI 的无副作用 proposal；SM-2 通过唯一 typed
@@ -274,13 +276,16 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
 - claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。每项 operation evidence 独立 CAS 持久化；只有最后一项成功或任一项 rejected/stale 时，才在该 evidence CAS 中原子 settle dispatch。
 - current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` +
-  `BindingRef` 的 exact target/selector、recipe/check、metric/artifact 匹配联合裁决 Kind；declared Kind、candidate
-  自报 `CoverageWorkItemIDs`、非空 `PassedChecks` 或 exit code 0 都不构成 coverage authority。
+  `BindingRef` 的 exact target/selector、recipe/check、metric/artifact 匹配联合裁决 Kind；check identity 只来自 current
+  owner surface，recipe ID 不替代 check。同一 check 同时出现在 passed 与 failed/skipped 时不是 pass；declared Kind、
+  candidate 自报 `CoverageWorkItemIDs`、非空 `PassedChecks` 或 exit code 0 都不构成 coverage authority。
 - multi-operation dispatch 中，同一 dispatch receipt 造成的 prerequisite/resource revision 变化属于内生变化；可以
   退休后续 SM-2 observation，但不能仅因此清除 `ActiveDispatch`。SM-3 必须继续尚未完成且 dependency 已满足的
   sealed operation，直到全部成功或任一 operation rejected/stale 后再 settle/reduce。
-- state-changing Shell receipt 必须使用 owner 实际观察到的 changed refs/resource changes；真实变化越出 sealed
-  `TargetRefs` 时以 `undeclared_workspace_effect` 拒绝，不能通过额外 touch 一个声明目标取得 durable evidence。
+- state-changing Shell receipt 必须使用 owner 实际观察到的 changed refs/resource changes；任意 `shell/command` 只允许
+  workspace-durable、at-most-once shape，真实变化越出 sealed `TargetRefs` 时以 `undeclared_workspace_effect` 拒绝，
+  不能通过额外 touch 一个声明目标取得 durable evidence。Shell managed validation 使用 owner 临时 workspace 副本，
+  只发布 `ephemeral_session + at_most_once` receipt；其 recipe aggregate proof check 只有在真实、无冲突 pass 后出现。
 - `Facts.RepairDirective` 是同 focus 唯一 next-action 权威（INV-05）；`ReduceRuntimeStateWithDirective` 同步 directive；anti-replay evidence 不得覆盖 directive action。不存在从 failure message 推导的 repair hint 第二权威。
 - repair directive 的创建、切换和清除均属于 Orchestrator SM-2 reducer；`internal/pkg/workorchruntimecontract` 仅保存 directive DTO、校验和纯计算。`need_prerequisite` / governance wait 是同一 repair cycle 的临时 interlude，必须保留 directive；只有 accepted repair evidence、focus advance 或 terminal 才能切换或清除它。
 - LLM assessment 的 disposition、`MissingEvidenceKinds`、target refs、summary、items 和 reason 都是完整保留的

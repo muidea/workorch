@@ -43,6 +43,10 @@ Last Verified: 2026-08-20
 - File create-only write 与 revision-bound existing-target replacement；
 - File manifest-bound Shell recipe applicability、完整 ready/prerequisite-required/unavailable surface、空 confirmed recipe
   semantic filtering 与 exact tree-revision invalidation；
+- Shell 任意 command 只允许 workspace-durable + at-most-once；managed validation 在有界临时 workspace 副本中执行并以
+  ephemeral-session + at-most-once 封存，正常/timeout 均清理进程组，claimed/no-receipt 不重放。recipe 与 owner proof
+  check identity 分离，默认 recipe 可闭合其 published check，passed/failed/skipped 冲突在 owner、binding 与 assessment
+  三层一致拒绝；execute 的 nil result、producer source、sealed data 与 receipt authorization 均在进程调用前 fail-closed；
 - callable capability、validation surface readiness 与 proof applicability 分离；required-input MCP recipe 保留 typed
   prerequisite audit、零 endpoint side effect，ready auxiliary surface 也不得关闭 CWI；只有 `ready + direct` 进入 provider
   schema/C3/correction，readiness/applicability/schema/binding 变化进入 catalog snapshot identity；

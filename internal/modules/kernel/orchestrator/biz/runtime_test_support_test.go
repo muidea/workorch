@@ -728,6 +728,9 @@ func runtimeTestSemanticFixtureSpecs(t *testing.T, aggregate runtime.RuntimeAggr
 				proposal.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}
 			case runtimecontract.EvidenceKindValidation:
 				proposal.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
+				if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
+					proposal.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}
+				}
 				proposal.ValidationRecipeID = source.ValidationRecipeID
 				if proposal.ValidationRecipeID == "" {
 					proposal.ValidationRecipeID = "test-runtime-validation-recipe"
@@ -880,7 +883,22 @@ func runtimeTestSemanticFixtureCatalogs(t *testing.T, specs []runtimeTestSemanti
 		catalog.ConstraintRefs = append(catalog.ConstraintRefs, spec.constraintRefs...)
 		if proposal.ValidationRecipeID != "" {
 			catalog.ValidationRecipeRefs = append(catalog.ValidationRecipeRefs, proposal.ValidationRecipeID)
-			catalog.ValidationRecipeRefs = append(catalog.ValidationRecipeRefs, spec.validationChecks...)
+			effect := runtimecontract.RuntimeEffectNone
+			if len(proposal.RequiredEffectScopes) != 0 {
+				effect = proposal.RequiredEffectScopes[0]
+			}
+			catalog.ValidationSurfaces = append(catalog.ValidationSurfaces, runtimecontract.RuntimeValidationSurface{
+				ID: proposal.ValidationRecipeID, OwnerModuleID: proposal.OwnerModuleID, OperationKind: proposal.OperationKind,
+				Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "test-semantic-input-schema",
+				InputBindingRef: "test-semantic-input/" + proposal.ValidationRecipeID,
+				CheckRefs:       append([]string(nil), spec.validationChecks...), ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+				EffectScope: effect, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			})
+			catalog.OperationPolicies = append(catalog.OperationPolicies, runtimecontract.RuntimeOperationPolicyFact{
+				ID: "test-semantic-policy/" + proposal.ValidationRecipeID, OwnerModuleID: proposal.OwnerModuleID,
+				OperationKind: proposal.OperationKind, EffectScope: effect,
+				IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			})
 		}
 		// Publish one explicit policy fact per kind/variant. This matters when a
 		// single owner catalog mixes a discriminated kind (for example patch/apply)
@@ -1333,6 +1351,12 @@ func runtimeTestFactsWithReboundBindings(facts runtimecontract.RuntimeFacts, def
 			proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}
 		case runtimecontract.EvidenceKindValidation:
 			proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
+			for _, operationKind := range focus.AcceptedStepKinds {
+				if runtimecontract.CanonicalRuntimeBlockKind(operationKind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
+					proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}
+					break
+				}
+			}
 			proof.ValidationRecipeID = focus.ValidationRecipeID
 			proof.RequiredCheckRefs = append([]string(nil), focus.RequiredCheckRefs...)
 		}

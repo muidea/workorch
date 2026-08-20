@@ -21,13 +21,19 @@ func TestResolveExpectedEffectScopeShell(t *testing.T) {
 	if got := ResolveExpectedEffectScope(op, nil); got != RuntimeEffectWorkspaceDurable {
 		t.Fatalf("unpublished stateChanging=false shell effect = %q, want conservative durable default", got)
 	}
+	// The generic resolver remains data-driven, but the Shell owner no longer
+	// publishes this legacy policy and the operation contract below rejects the
+	// shape before a candidate can be sealed.
 	readOnlyPolicy := RuntimeOperationPolicyFact{
 		ID: "shell-read-only", OwnerModuleID: RuntimeModuleShell, OperationKind: StepKindShellCommand,
 		ParameterMatches: []RuntimeOperationParameterMatch{{Name: "stateChanging", Boolean: &falseFlag}},
 		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 	}
 	if got := ResolveExpectedEffectScope(op, []RuntimeOperationPolicyFact{readOnlyPolicy}); got != RuntimeEffectNone {
-		t.Fatalf("owner-published stateChanging=false shell effect = %q, want none", got)
+		t.Fatalf("explicit legacy stateChanging=false policy effect = %q, want none", got)
+	}
+	if err := ValidateRuntimeOperationContract(op); err == nil || !strings.Contains(err.Error(), "stateChanging=true") {
+		t.Fatalf("Shell contract accepted legacy stateChanging=false shape: %v", err)
 	}
 
 	trueFlag := true
@@ -237,7 +243,7 @@ func TestSealRejectsMutatingUnderValidation(t *testing.T) {
 	}
 }
 
-func TestSealAcceptsNonDurableShellUnderValidation(t *testing.T) {
+func TestEffectCompatibilityCannotOverrideShellOperationContract(t *testing.T) {
 	falseFlag := false
 	required := RequiredOutputContract{
 		AcceptedKinds:        []string{StepKindShellCommand},
@@ -260,7 +266,10 @@ func TestSealAcceptsNonDurableShellUnderValidation(t *testing.T) {
 		EffectScope:      RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 	}
 	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedValidation, ops, required, []RuntimeOperationPolicyFact{policy}); err != nil {
-		t.Fatalf("stateChanging=false shell under validation must pass: %v", err)
+		t.Fatalf("generic effect compatibility unexpectedly rejected explicit policy: %v", err)
+	}
+	if err := ValidateRuntimeOperationContract(ops[0]); err == nil || !strings.Contains(err.Error(), "stateChanging=true") {
+		t.Fatalf("Shell operation contract accepted legacy non-durable shape: %v", err)
 	}
 }
 

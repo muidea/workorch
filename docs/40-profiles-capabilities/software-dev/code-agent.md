@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-20
 
 ## Purpose
 
@@ -28,7 +28,8 @@ evidence requirements and allowed capability classes; it does not add a code-spe
 | inspect files | `file/list`, `file/read` | observation only |
 | create file | `file/write` or `patch/apply:file_write` | target must be absent unless owner variant explicitly carries replacement fence |
 | modify file | `file/edit` or `patch/apply:text_replace|unified_diff` | current revision/base hash required by owner contract |
-| validate | `shell/command`, `validation/managed_session` | bounded, foreground, declared target/scope |
+| validate | `validation/managed_session` | owner-sealed recipe, bounded isolated workspace copy, foreground process group |
+| bounded command state change | `shell/command` | explicit durable targets; never validation/read-only evidence |
 | inspect/version | `git/read`, `git/write:init|add|commit` | no unsupported remote/destructive variants |
 | semantic assistance | selected LSP MCP tools | auxiliary; cannot replace build/test evidence |
 

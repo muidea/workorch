@@ -51,8 +51,8 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	if descriptor.OwnerModuleID != RuntimeModuleShell {
 		t.Fatalf("managed validation owner = %q, want %s", descriptor.OwnerModuleID, RuntimeModuleShell)
 	}
-	if descriptor.DefaultEffectScope != RuntimeEffectNone {
-		t.Fatalf("managed validation effect = %q, want none", descriptor.DefaultEffectScope)
+	if descriptor.DefaultEffectScope != RuntimeEffectEphemeralSession || descriptor.IdempotencyClass != RuntimeOperationIdempotencyAtMostOnce {
+		t.Fatalf("managed validation descriptor = %+v, want ephemeral/at-most-once", descriptor)
 	}
 	if descriptor.CapabilityClass != RuntimeCapabilityClassValidation {
 		t.Fatalf("managed validation capability class = %q", descriptor.CapabilityClass)
@@ -127,9 +127,9 @@ func TestFeasibleOperationKindsIntersectAcceptedCapabilitiesAndEffect(t *testing
 		t.Fatalf("FeasibleOperationKinds = %v, want %v", got, want)
 	}
 
-	// Default shell (no stateChanging=false) remains side-effecting at resolve time.
+	// Arbitrary shell/command remains side-effecting for every admitted shape.
 	if !OperationHasWorkspaceSideEffects(RuntimeOperation{Kind: StepKindShellCommand}) {
-		t.Fatal("default shell/command must remain side-effecting until stateChanging=false")
+		t.Fatal("shell/command must remain side-effecting")
 	}
 
 	stateRequired := RequiredOutputContract{

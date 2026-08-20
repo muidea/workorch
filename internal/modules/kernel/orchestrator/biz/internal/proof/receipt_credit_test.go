@@ -35,6 +35,14 @@ func TestMatchCoverageReceiptRequiresOneExactBinding(t *testing.T) {
 	if finding.Diagnostic != "" || len(finding.CoverageWorkItemIDs) != 1 || finding.CoverageWorkItemIDs[0] != "cwi-1" {
 		t.Fatalf("exact receipt finding = %+v", finding)
 	}
+	conflicting := *receipt
+	conflictingObservation := receipt.Evidence.Validation.Clone()
+	conflictingObservation.FailedChecks = []string{"check-1"}
+	conflicting.Evidence.Validation = &conflictingObservation
+	finding = MatchCoverageReceipt(facts, operation, runtimecontract.EvidenceKindValidation, &conflicting)
+	if len(finding.CoverageWorkItemIDs) != 0 || !strings.Contains(finding.Diagnostic, "passed check") {
+		t.Fatalf("conflicting check received coverage credit: %+v", finding)
+	}
 	operation.BindingRefs = []string{binding.ID, "binding-2"}
 	finding = MatchCoverageReceipt(facts, operation, runtimecontract.EvidenceKindValidation, receipt)
 	if len(finding.CoverageWorkItemIDs) != 0 || !strings.Contains(finding.Diagnostic, "exactly one") {

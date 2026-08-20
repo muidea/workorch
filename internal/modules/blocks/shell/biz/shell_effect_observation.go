@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,9 +18,11 @@ import (
 )
 
 // shellWorkspaceFileRevisions is an owner-local, bounded observation of the
-// deliverable tree. It deliberately excludes .git: repository metadata is not
-// a workspace deliverable target. Symlinks and special files are not admitted
-// as durable Shell effects because they cannot be safely content-addressed.
+// authority-relevant workspace tree plus .git control state and symlink
+// identity. Generated directories excluded by the File-owner manifest are not
+// authority targets. Shell may not silently mutate repository metadata, and
+// managed validation uses this view to prove that its owner-isolated execution
+// did not escape back into the authoritative workspace.
 func shellWorkspaceFileRevisions(deliverableDirectory string, required bool) (map[string]string, error) {
 	if !required {
 		return nil, nil
@@ -43,13 +46,22 @@ func shellWorkspaceFileRevisions(deliverableDirectory string, required bool) (ma
 			return common.ErrInvalidArgument
 		}
 		if entry.IsDir() {
-			if rel == ".git" {
+			if shellWorkspaceObservationPathExcluded(filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !entry.Type().IsRegular() {
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, linkErr := os.Readlink(path)
+			if linkErr != nil {
+				return linkErr
+			}
+			hash := sha256.Sum256([]byte("symlink\x00" + target))
+			values[filepath.ToSlash(rel)] = "symlink:" + hex.EncodeToString(hash[:])
 			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("workspace observation cannot safely address special entry %q", filepath.ToSlash(rel))
 		}
 		info, infoErr := entry.Info()
 		if infoErr != nil {
@@ -60,18 +72,70 @@ func shellWorkspaceFileRevisions(deliverableDirectory string, required bool) (ma
 		if count > maxObservedWorkspaceFiles || totalBytes > maxObservedWorkspaceBytes {
 			return fmt.Errorf("workspace observation exceeds bounded file or byte limit")
 		}
-		data, readErr := os.ReadFile(path)
+		input, openErr := os.Open(path)
+		if openErr != nil {
+			return openErr
+		}
+		hash := sha256.New()
+		_, _ = fmt.Fprintf(hash, "mode=%o\x00", info.Mode().Perm())
+		_, readErr := io.Copy(hash, input)
+		closeErr := input.Close()
 		if readErr != nil {
 			return readErr
 		}
-		hash := sha256.Sum256(data)
-		values[filepath.ToSlash(rel)] = hex.EncodeToString(hash[:])
+		if closeErr != nil {
+			return closeErr
+		}
+		values[filepath.ToSlash(rel)] = hex.EncodeToString(hash.Sum(nil))
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return values, nil
+}
+
+// shellWorkspaceObservationPathExcluded mirrors the File-owner manifest's
+// non-authoritative generated-directory exclusions. The Shell snapshot still
+// includes .git control state: arbitrary shell/command must not hide a Git
+// metadata mutation behind a declared deliverable target.
+func shellWorkspaceObservationPathExcluded(ref string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(ref), "/") {
+		switch part {
+		case "node_modules", "vendor", "dist", "build", ".workorch-data", ".workorch-workspaces":
+			return true
+		}
+	}
+	return false
+}
+
+// validateShellWorkspaceSymlinkScope rejects links that resolve outside the
+// deliverable root before an arbitrary durable Shell command starts. Internal
+// links remain observable through their canonical in-workspace target; an
+// external link would otherwise let a sealed target mutate host state that no
+// workspace receipt can represent.
+func validateShellWorkspaceSymlinkScope(deliverableDirectory string) error {
+	root, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
+	if err != nil || root == "" {
+		return common.ErrInvalidArgument
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root || entry.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("%w: Shell workspace symlink %q cannot be resolved", common.ErrInvalidArgument, path)
+		}
+		resolved, err = filepath.Abs(resolved)
+		if err != nil || (resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator))) {
+			return fmt.Errorf("%w: Shell workspace symlink %q escapes the deliverable root", common.ErrInvalidArgument, path)
+		}
+		return nil
+	})
 }
 
 func shellWorkspaceTargetRevisions(deliverableDirectory string, request RuntimeCommandRequest) map[string]string {
@@ -245,7 +309,7 @@ func shellManagedValidationResourceID(request RuntimeCommandRequest, kind string
 func managedValidationResourcesReleased(resources []runtimemodel.RuntimeValidationResource) bool {
 	for _, resource := range resources {
 		switch strings.TrimSpace(resource.Status) {
-		case "released", "timeout", "failed":
+		case "released", "timeout":
 		default:
 			return false
 		}

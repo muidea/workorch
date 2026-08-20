@@ -175,7 +175,7 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 	executor := runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
 		receipt := runtimecontract.RuntimeOperationReceipt{
 			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
-			ObservedEffectScope: runtimecontract.RuntimeEffectNone, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
+			ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 			Evidence: runtimecontract.RuntimeOperationEvidence{
 				Summary: "fresh repair validation", Quality: common.EvidenceQualityValid,
 				Validation: &runtimecontract.RuntimeValidationObservation{
@@ -2060,9 +2060,10 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 // An owner-observed validation failure becomes FailureFact, FailureTarget,
 // rejected evidence and a fresh target prerequisite in one authority commit.
 // Exercise that transition through the production Run-owner repository: a
-// crash before the receipt CAS must not leak any of those facts, while a
-// restart can safely replay the read-only validation operation and commit the
-// complete observation exactly once.
+// crash before the receipt CAS must not leak any of those facts. Managed
+// validation is at-most-once: after its claim is durable, restart must preserve
+// atomicity by fencing the ambiguous owner call as outcome_unknown rather than
+// replaying it.
 func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -2171,7 +2172,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 		return runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
 			receipt := runtimecontract.RuntimeOperationReceipt{
 				ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
-				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 				Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "implementation check failed"},
 			}
 			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
@@ -2238,58 +2239,26 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 		t.Fatalf("receipt CAS failure partially persisted failure authority: %+v", beforeRetry)
 	}
 
-	// The owner receipt and the rejected-evidence/failure-target transition are
-	// separate CAS boundaries.  Lose the response only after the latter becomes
-	// durable: a restart must consume the committed observation, not invoke the
-	// validation owner again or reconstruct a target from diagnostics.
-	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
-		RuntimeStateRepository: repository,
-		marker:                 "failure-observation-evidence-response-loss",
-		match: func(aggregate runtime.RuntimeAggregate) bool {
-			return aggregate.ActiveDispatch == nil && len(aggregate.OperationReceipts) == 1 &&
-				len(aggregate.Facts.Evidence.Rejected) == 1 && aggregate.Facts.Failure != nil &&
-				aggregate.Facts.Resources.FailureTarget != nil &&
-				aggregate.Facts.Resources.FailureTarget.TargetObservation != nil &&
-				aggregate.Facts.Resources.FailureTarget.TargetObservation.SubjectRef == "server-a"
-		},
+	ownerCalled := false
+	_, err = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", runtimeOperationExecutorFunc(func(context.Context, runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+		ownerCalled = true
+		return runtime.RuntimeOperationExecutionResult{}, errors.New("managed validation must not be replayed")
+	}))
+	var outcomeUnknown *runtime.OperationOutcomeUnknownError
+	if !errors.As(err, &outcomeUnknown) {
+		t.Fatalf("receipt-loss restart err=%v, want outcome_unknown", err)
 	}
-	responseLost, err := runtime.NewRuntimeController(responseLossRepository)
-	if err != nil {
-		t.Fatal(err)
+	if ownerCalled {
+		t.Fatal("receipt-loss restart invoked the managed-validation owner")
 	}
-	func() {
-		defer func() {
-			if recovered := recover(); recovered != "failure-observation-evidence-response-loss" {
-				t.Fatalf("unexpected failure-observation response-loss marker: %v", recovered)
-			}
-		}()
-		_, _ = runtimeTestControllerExecuteDispatch(responseLost, ctx, "ws-v2", "run-v2", newExecutor(responseLost, false))
-		t.Fatal("expected owner failure observation response loss after durable evidence CAS")
-	}()
-	if !responseLossRepository.fired {
-		t.Fatal("failure-observation evidence response-loss CAS point was not reached")
+	persisted, err := restarted.Load(ctx, "ws-v2", "run-v2")
+	if err != nil || persisted.ActiveDispatch == nil || len(persisted.OperationReceipts) != 0 ||
+		len(persisted.Facts.Evidence.Rejected) != 0 || persisted.Facts.Failure != nil || persisted.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("receipt-loss restart partially persisted failure authority: aggregate=%+v err=%v", persisted, err)
 	}
-
-	restartedAfterResponseLoss, err := runtime.NewRuntimeController(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	persisted, err := restartedAfterResponseLoss.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || len(persisted.OperationReceipts) != 1 || len(persisted.Facts.Evidence.Rejected) != 1 || persisted.Facts.Failure == nil ||
-		persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
-		persisted.Facts.Resources.FailureTarget.TargetObservation.SubjectRef != "server-a" ||
-		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
-		len(persisted.Facts.Prerequisites.Pending) != 1 || persisted.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot ||
-		persisted.Facts.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
-		t.Fatalf("restart did not reuse committed failure observation: aggregate=%+v err=%v", persisted, err)
-	}
-	if _, err := runtimeTestControllerExecuteDispatch(restartedAfterResponseLoss, ctx, "ws-v2", "run-v2", newExecutor(restartedAfterResponseLoss, false)); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("restart replayed completed failure dispatch instead of waiting for its prerequisite: %v", err)
-	}
-	revision := persisted.StateRevision
-	replayed, receipt, err := runtimeTestControllerCommitOperationReceipt(restartedAfterResponseLoss, ctx, "ws-v2", "run-v2", sealed.Aggregate.ActiveDispatch.ID, persisted.OperationReceipts[0].Fence, persisted.OperationReceipts[0])
-	if err != nil || replayed.StateRevision != revision || !runtimecontract.SameRuntimeOperationReceipt(receipt, persisted.OperationReceipts[0]) {
-		t.Fatalf("duplicate owner receipt changed committed failure observation: aggregate=%+v receipt=%+v err=%v", replayed, receipt, err)
+	execution, found := runtimeDriveOperationExecutionRecord(persisted.ActiveDispatch.OperationExecutions, "failure-observation-read")
+	if !found || execution.State != runtimecontract.OperationExecutionOutcomeUnknown {
+		t.Fatalf("receipt-loss restart execution=%+v found=%v", execution, found)
 	}
 }
 

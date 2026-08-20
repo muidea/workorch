@@ -265,19 +265,20 @@ func init() {
 			RequiresOwnerReceipt: true,
 		},
 		{
-			// The conservative kind default is durable. The Shell owner may publish
-			// a parameter-matched non-durable policy in its current catalog.
+			// Arbitrary Shell commands are durable-only. Non-mutating validation is
+			// represented by the separately sealed managed-validation operation.
 			Kind: StepKindShellCommand, OwnerModuleID: RuntimeModuleShell,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
-			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
+			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
 			TargetCardinality: RuntimeOperationTargetCardinalityMany,
 		},
 		{
-			// Managed validation is Shell-owned non-mutating validation. Candidate kind stays
-			// validation/managed_session; dispatch routes through the Shell EventHub executor.
+			// Managed validation is Shell-owned, owner-isolated ephemeral execution.
+			// Candidate kind stays validation/managed_session; dispatch routes through
+			// the Shell EventHub executor and is never classified safe-to-replay.
 			Kind: RuntimeBlockKindManagedValidationSession, OwnerModuleID: RuntimeModuleShell,
-			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+			DefaultEffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},

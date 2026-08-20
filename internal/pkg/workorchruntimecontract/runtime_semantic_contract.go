@@ -1144,9 +1144,12 @@ func (f RuntimeSemanticProofFeasibility) ValidateForProposal(manifest RuntimeSem
 		if f.ValidationRecipeID != "" && !runtimeSemanticStringsWithin([]string{f.ValidationRecipeID}, catalog.ValidationRecipeRefs) {
 			return fmt.Errorf("feasible runtime semantic observation recipe is outside sealed owner catalog")
 		}
-		checkCatalog := append([]string(nil), catalog.ValidationRecipeRefs...)
-		for _, recipe := range catalog.ValidationRecipes {
-			checkCatalog = append(checkCatalog, recipe.ID)
+		checkCatalog := []string(nil)
+		if surface, found := RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, f.ValidationRecipeID); found {
+			surface = surface.Normalized()
+			if surface.Readiness == RuntimeValidationSurfaceReady && surface.ProofApplicability == RuntimeValidationProofDirect {
+				checkCatalog = append(checkCatalog, surface.CheckRefs...)
+			}
 		}
 		if len(f.RequiredCheckRefs) != 0 && !runtimeSemanticStringsWithin(f.RequiredCheckRefs, checkCatalog) {
 			return fmt.Errorf("feasible runtime semantic observation check is outside sealed owner catalog")

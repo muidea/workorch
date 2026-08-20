@@ -75,11 +75,11 @@ type RuntimeCommandResult struct {
 	// It remains owner-local until the Shell owner converts it to the typed
 	// receipt ResourceChanges contract.
 	WorkspaceTargetChanges []RuntimeWorkspaceTargetChange
-	// WorkspaceObservedTargetChanges is the bounded complete workspace view for
-	// a state-changing command. Unlike WorkspaceTargetChanges (which is kept
-	// for compatibility with declared-target diagnostics), this contains every
-	// observed changed regular file and lets the Shell owner reject changes that
-	// escape the sealed operation target set.
+	// WorkspaceObservedTargetChanges is the bounded authority-relevant workspace
+	// view for a state-changing command, including Git control files and symlink
+	// identity while excluding generated directories omitted by the File owner.
+	// Unlike WorkspaceTargetChanges (kept for declared-target diagnostics), it
+	// lets the Shell owner reject observed changes outside the sealed target set.
 	WorkspaceObservedTargetChanges []RuntimeWorkspaceTargetChange
 	Evidence                       runtimecontract.RuntimeOperationEvidence
 }

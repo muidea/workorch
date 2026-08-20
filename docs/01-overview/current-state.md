@@ -4,7 +4,7 @@ Status: active
 
 Type: current-fact
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-20
 
 ## Purpose
 
@@ -60,6 +60,10 @@ Application builds typed RuntimeBootstrap
 - workspace-sensitive validation catalog 由 SM-2 先绑定 File manifest revision，再由 Shell owner 对声明 recipe 发布
   `ready | prerequisite_required | unavailable` surface 并过滤当前适用 confirmed set；空 confirmed set 不向 semantic
   provider 暴露 `validation/managed_session`，non-ready surface 仍保留 aggregate/audit，后续 File tree effect 会精确退休该 catalog。
+- 任意 `shell/command` 只允许 workspace-durable、at-most-once 执行；非持久验证只能选择 owner-confirmed managed recipe。
+  managed validation 在有界临时 workspace 副本中运行并以 `ephemeral_session + at_most_once` 回执，normal/timeout 都清理
+  进程组；claimed/no-receipt 进入 `outcome_unknown` 而不重放。owner surface 发布与 recipe ID 分离的 deterministic proof
+  check，只有真实且无 passed/failed/skipped 冲突的 pass 才能匹配 binding。
 - dynamic capability catalog 区分 callable operation、validation readiness 与 proof applicability；MCP required-input tool
   仍可被合法 operation 调用，但在 owner 尚无 sealed input binding 时只记录 `prerequisite_required` surface。技术上 ready
   的 auxiliary/not-declared surface 也只保留审计；只有 `ready + direct` 进入 semantic provider 的 recipe enum/C3。LLM

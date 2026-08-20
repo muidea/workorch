@@ -177,6 +177,43 @@ func (o RuntimeValidationObservation) Clone() RuntimeValidationObservation {
 	return o
 }
 
+// RuntimeValidationCheckPassed reports an unambiguous owner-observed pass.
+// A check that is also failed or skipped is contradictory evidence and must
+// never be promoted to coverage merely because it appears in PassedChecks.
+func RuntimeValidationCheckPassed(observation RuntimeValidationObservation, checkRef string) bool {
+	observation = observation.Normalized()
+	checkRef = strings.TrimSpace(checkRef)
+	if checkRef == "" || !containsString(observation.PassedChecks, checkRef) {
+		return false
+	}
+	return !containsString(observation.FailedChecks, checkRef) && !containsString(observation.SkippedChecks, checkRef)
+}
+
+// RuntimeValidationConflictingChecks returns checks reported in more than one
+// terminal outcome set. The result is stable and owner-neutral so capability
+// owners and Runtime gates use the same contradiction rule.
+func RuntimeValidationConflictingChecks(observation RuntimeValidationObservation) []string {
+	observation = observation.Normalized()
+	states := make(map[string]uint8, len(observation.PassedChecks)+len(observation.FailedChecks)+len(observation.SkippedChecks))
+	for _, check := range observation.PassedChecks {
+		states[check] |= 1
+	}
+	for _, check := range observation.FailedChecks {
+		states[check] |= 2
+	}
+	for _, check := range observation.SkippedChecks {
+		states[check] |= 4
+	}
+	ret := make([]string, 0)
+	for check, state := range states {
+		if state != 1 && state != 2 && state != 4 {
+			ret = append(ret, check)
+		}
+	}
+	sort.Strings(ret)
+	return nilIfEmpty(ret)
+}
+
 type FailureClass string
 
 const (

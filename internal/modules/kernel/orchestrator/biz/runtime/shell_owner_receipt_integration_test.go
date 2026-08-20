@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -34,6 +35,9 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err := os.WriteFile(filepath.Join(workspaceDirectory, "implementation.go"), []byte("package fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "validation-entry.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	fileOwner, err := filebiz.New(hub, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -51,14 +55,15 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	t.Cleanup(func() { shellOwner.Teardown(ctx) })
 
+	record := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
+	script := "printf '%s\\n' '" + record + "'; exit 7"
+	policy := runtimeManagedValidationEvidencePolicy()
+	policy.CommandName = "sh"
+	policy.RecipeArgs = []string{"-c", script}
 	aggregate := validationAggregate(t)
-	// This fixture exercises the unrestricted shell/command owner boundary,
-	// not managed validation.  Remove the managed-recipe declaration inherited
-	// from the shared validation fixture so its deliberately generated failure
-	// record remains a valid non-recipe Shell operation.
-	aggregate.Facts.Activation.EvidencePolicies = nil
-	aggregate.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand}
-	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindShellCommand}
+	aggregate.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
+	aggregate.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.TargetRefs = nil
 	aggregate.Facts.Focus.TargetRole = "implementation"
 	aggregate.Facts.Focus.RequireTargetGrounding = true
@@ -67,9 +72,9 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds:        []string{runtimecontract.StepKindShellCommand},
-			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
-			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+			AcceptedKinds:        []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
 			CoverageWorkItemIDs:  aggregate.Facts.Focus.CoverageWorkItemIDs,
 		},
 	}, 0)
@@ -84,16 +89,11 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	registerRuntimeOperationReceiptOwner(t, hub, controller)
 
-	record := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
-	command := "printf '%s\\n' '" + record + "'; exit 7"
+	recipeID := policy.ID
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "validate-with-observed-target", Kind: runtimecontract.StepKindShellCommand,
+		ID: "validate-with-observed-target", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"validation-entry.sh"},
-		Parameters: []runtimecontract.OperationParameter{
-			{Name: "command", String: runtimeStringPointer("sh")},
-			{Name: "args", StringList: []string{"-c", command}},
-			{Name: "stateChanging", Boolean: runtimeBoolPointer(false)},
-		},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	sealCandidateForTest(t, repository, candidate)
 
@@ -147,8 +147,12 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 			OperationID: "validate-with-observed-target", EvidenceKind: runtimecontract.EvidenceKindValidation,
 			WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
 		},
-		TargetRole: "implementation",
-		Data:       shellevents.OperationData{Command: "sh", Args: []string{"-c", "exit 0"}},
+		TargetRole:        "implementation",
+		ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]runtimecontract.RuntimeEvidencePolicy{policy}),
+		Data: shellevents.OperationData{
+			ValidationRecipeID: recipeID, TargetRefs: []string{"replacement-entry.sh"},
+			ManagedValidation: runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		},
 	})
 	diagnostic := replayed.Receipt.Feedback.OriginalDiagnostic
 	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || diagnostic == nil || diagnostic.TargetObservation == nil ||
@@ -230,20 +234,31 @@ func TestShellOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	}
 }
 
-func runtimeBoolPointer(value bool) *bool { return &value }
-
 func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate *RuntimeAggregate, workspaceDirectory string) {
 	t.Helper()
+	manifestPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "manifest:shell-observed-target", Kind: runtimecontract.PrerequisiteKindManifest,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	manifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
+	aggregate.Facts.Resources.Manifest = &manifest.Manifest
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, manifest.Observation)
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, manifestPrerequisite)
 	prerequisite := runtimecontract.RuntimePrerequisite{
 		ID: "operation_admissibility:shell-observed-target", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
-		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand},
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
 		magicevent.NewHeader(), ctx, shellevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, WorkspaceDeliverableDirectory: workspaceDirectory,
-			RequiredKinds: prerequisite.RequiredCapabilities, MaxItems: 4,
+			RequiredKinds: prerequisite.RequiredCapabilities,
+			ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
+				aggregate.Facts.Activation.EvidencePolicies,
+			),
+			WorkspaceManifestBinding: runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: manifest.Manifest, Observation: manifest.Observation},
+			MaxItems:                 4,
 		},
 	))
 	if result == nil {
@@ -256,6 +271,14 @@ func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, h
 	response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
 	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
 		t.Fatalf("Shell operation admissibility response = %#v", data)
+	}
+	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies) {
+		if !slices.Contains(response.Acquisition.Admissibility.ValidationRecipeRefs, recipe.ID) {
+			t.Fatalf("Shell operation admissibility did not seal recipe %q: %+v", recipe.ID, response.Acquisition.Admissibility)
+		}
+		if _, found := runtimecontract.RuntimeValidationRecipeForID(response.Acquisition.Admissibility.ValidationRecipes, recipe.ID); !found {
+			t.Fatalf("Shell operation admissibility omitted executable recipe %q: %+v", recipe.ID, response.Acquisition.Admissibility)
+		}
 	}
 	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Acquisition.Admissibility)
 	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
@@ -309,8 +332,9 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory,
 			},
-			TargetRole: request.TargetRole,
-			Data:       data,
+			TargetRole:        request.TargetRole,
+			ValidationRecipes: append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
+			Data:              data,
 		},
 	))
 	if result == nil {

@@ -83,13 +83,13 @@ func TestCoverageEvidenceCreditRequiresExactSealedBindingAndOwnerReceipt(t *test
 		{ID: "cwi-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
 	}
 	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{
-		testDispatchCoverageBinding("binding/a", "cwi-a", facts.Focus.ID, facts.DefinitionRevision, runtimecontract.EvidenceKindValidation, runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeBlockKindManagedValidationSession, "recipe-a", "check-a", "main.go"),
-		testDispatchCoverageBinding("binding/b", "cwi-b", facts.Focus.ID, facts.DefinitionRevision, runtimecontract.EvidenceKindValidation, runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeBlockKindManagedValidationSession, "recipe-b", "check-b", "main.go"),
+		testDispatchCoverageBinding("binding/a", "cwi-a", facts.Focus.ID, facts.DefinitionRevision, runtimecontract.EvidenceKindValidation, runtimecontract.RuntimeEffectEphemeralSession, runtimecontract.RuntimeBlockKindManagedValidationSession, "recipe-a", "check-a", "main.go"),
+		testDispatchCoverageBinding("binding/b", "cwi-b", facts.Focus.ID, facts.DefinitionRevision, runtimecontract.EvidenceKindValidation, runtimecontract.RuntimeEffectEphemeralSession, runtimecontract.RuntimeBlockKindManagedValidationSession, "recipe-b", "check-b", "main.go"),
 	}
 	operation := runtimecontract.RuntimeOperation{ID: "validate-a", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, BindingRefs: []string{"binding/a"}, TargetRefs: []string{"main.go"}}
 	receipt := &runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws-1/run-1/dispatch/validate-a", Fence: 1, OperationID: "validate-a", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
-		ObservedEffectScope: runtimecontract.RuntimeEffectNone, TargetRefs: []string{"main.go"},
+		ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, TargetRefs: []string{"main.go"},
 		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe-a", ExecutedChecks: []string{"check-a"}, PassedChecks: []string{"check-a"}}},
 	}
 	refs, credit, diagnostic := coverageEvidenceCreditForReceipt(facts, operation, runtimecontract.EvidenceKindValidation, receipt)
@@ -314,7 +314,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 	validationBinding := runtimecontract.CoverageEvidenceBinding{
 		ID: "binding/test/focus-validation/cwi-validation", CoverageWorkItemID: "cwi-validation", FocusID: validationFocus.ID,
 		DefinitionRevision: aggregate.Facts.DefinitionRevision,
-		Proofs:             []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "test-runtime-validation-recipe"}},
+		Proofs:             []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "test-runtime-validation-recipe"}},
 		TargetRefs:         []string{"validation.txt"}, DeclarationRef: "test/receipt-driven-reopen",
 	}.Normalized()
 	validationBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(validationBinding)
