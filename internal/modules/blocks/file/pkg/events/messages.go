@@ -128,32 +128,32 @@ type PatchApplyOperationData struct {
 // owner-neutral execution scope is shared by all capability owners.
 type ExecuteFileListOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data FileListOperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteFileReadOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data FileReadOperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteFileEditOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data FileEditOperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteFileWriteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data FileWriteOperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecutePatchApplyOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data PatchApplyOperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecutePatchPreviewOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data PatchApplyOperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteOperationResult struct {

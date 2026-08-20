@@ -8,20 +8,6 @@ import (
 	"strings"
 )
 
-func lineRange(content string, startLine int, endLine int) string {
-	lines := strings.SplitAfter(content, "\n")
-	if startLine <= 0 {
-		startLine = 1
-	}
-	if endLine <= 0 || endLine > len(lines) {
-		endLine = len(lines)
-	}
-	if startLine > endLine || startLine > len(lines) {
-		return ""
-	}
-	return strings.Join(lines[startLine-1:endLine], "")
-}
-
 func replaceOccurrence(content string, oldText string, newText string, occurrence int) string {
 	if occurrence <= 0 {
 		occurrence = 1

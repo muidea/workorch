@@ -95,12 +95,25 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(fileevents.ExecuteFileListOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeFileOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation, runtimecontract.StepKindFileList)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	data, err := fileevents.FileListOperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
@@ -112,8 +125,8 @@ func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ListFiles(FileListRequest{
-		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: command.Data.Path,
-		Recursive: command.Data.Recursive, MaxEntries: command.Data.MaxEntries,
+		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: data.Path,
+		Recursive: data.Recursive, MaxEntries: data.MaxEntries,
 	})
 	status := runtimeOperationStatus(executeErr)
 	evidence := operationResult.Evidence
@@ -131,12 +144,25 @@ func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.
 }
 
 func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(fileevents.ExecuteFileReadOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeFileOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation, runtimecontract.StepKindFileRead)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	data, err := fileevents.FileReadOperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
@@ -148,8 +174,8 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ReadFile(event.Context(), FileReadRequest{
-		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: command.Data.Path, Optional: command.Data.Optional,
-		MaxBytes: command.Data.MaxBytes, StartLine: command.Data.StartLine, EndLine: command.Data.EndLine,
+		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: data.Path, Optional: data.Optional,
+		MaxBytes: data.MaxBytes, StartLine: data.StartLine, EndLine: data.EndLine,
 	})
 	status := runtimeOperationStatus(executeErr)
 	evidence := operationResult.Evidence
@@ -167,12 +193,25 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 }
 
 func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(fileevents.ExecuteFileEditOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeFileOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation, runtimecontract.StepKindFileEdit)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	data, err := fileevents.FileEditOperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
@@ -183,19 +222,31 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.Path); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
-	operationResult, executeErr := m.runtimeAdapter.ApplyFileEdit(FileEditRequest{
+	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
-		Path:               command.Data.Path, OldText: command.Data.OldText, NewText: command.Data.NewText,
-		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
-	})
+		TargetRef:          data.Path, PatchType: patchTypeTextReplace,
+		OldText: data.OldText, NewText: data.NewText, NewTextPresent: true,
+		BaseHash: data.BaseHash, Occurrence: data.Occurrence,
+		ApprovalGranted: fileApprovalGranted(command.Execution, data.Path, runtimecontract.StepKindFileEdit),
+		ReplayProof:     command.Execution.ReplayProof,
+	}
+	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, nil, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
+	var governance *runtimecontract.RuntimeGovernanceRequirement
+	if failure != nil && failure.Code == "approval_required" {
+		governance = fileApprovalRequirement(data.Path, failure.Message, runtimecontract.StepKindFileEdit)
+	}
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
@@ -205,12 +256,25 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 }
 
 func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(fileevents.ExecuteFileWriteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeFileOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation, runtimecontract.StepKindFileWrite)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	data, err := fileevents.FileWriteOperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
@@ -221,17 +285,18 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
-	if err := validatePatchApplyReplayProof(command.Execution.ReplayProof, command.OperationID, command.Data.TargetRef); err != nil {
+	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.TargetRef); err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
 	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
-		TargetRef:          command.Data.TargetRef, PatchType: "file_write",
-		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
+		TargetRef:          data.TargetRef, PatchType: patchTypeFileWrite,
+		Content: data.Content, ContentPresent: data.ContentPresent,
 		CreateOnly:      true,
-		ApprovalGranted: command.Execution.GovernanceGrant != nil,
+		ApprovalGranted: fileApprovalGranted(command.Execution, data.TargetRef, runtimecontract.StepKindFileWrite),
+		ReplayProof:     command.Execution.ReplayProof,
 	}
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
@@ -242,7 +307,7 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
 	if failure != nil && failure.Code == "approval_required" {
-		governance = fileApprovalRequirement(command.Data.TargetRef, failure.Message, runtimecontract.StepKindFileWrite)
+		governance = fileApprovalRequirement(data.TargetRef, failure.Message, runtimecontract.StepKindFileWrite)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
@@ -254,12 +319,25 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 }
 
 func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(fileevents.ExecutePatchApplyOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeFileOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation, runtimecontract.RuntimeBlockKindPatchApply)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	data, err := fileevents.PatchApplyOperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
@@ -270,15 +348,19 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.TargetRef); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
 	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
-		TargetRef:          command.Data.TargetRef, PatchType: command.Data.PatchType,
-		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
-		Diff: command.Data.Diff, OldText: command.Data.OldText, NewText: command.Data.NewText, NewTextPresent: command.Data.NewTextPresent,
-		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
-		CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
-		ApprovalGranted: command.Execution.GovernanceGrant != nil,
+		TargetRef:          data.TargetRef, PatchType: data.PatchType,
+		Content: data.Content, ContentPresent: data.ContentPresent,
+		Diff: data.Diff, OldText: data.OldText, NewText: data.NewText, NewTextPresent: data.NewTextPresent,
+		BaseHash: data.BaseHash, Occurrence: data.Occurrence,
+		CoverageTargets: data.CoverageTargets, Summary: data.Summary,
+		ApprovalGranted: fileApprovalGranted(command.Execution, data.TargetRef, runtimecontract.RuntimeBlockKindPatchApply),
 		ReplayProof:     command.Execution.ReplayProof,
 	}
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
@@ -290,7 +372,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
 	if failure != nil && failure.Code == "approval_required" {
-		governance = fileApprovalRequirement(command.Data.TargetRef, failure.Message, runtimecontract.RuntimeBlockKindPatchApply)
+		governance = fileApprovalRequirement(data.TargetRef, failure.Message, runtimecontract.RuntimeBlockKindPatchApply)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
@@ -312,7 +394,20 @@ func fileApprovalRequirement(targetRef, reason, requestedAction string) *runtime
 	}
 }
 
-func validatePatchApplyReplayProof(proof *runtimecontract.RuntimeOperationReplayProof, operationID, targetRef string) error {
+func fileApprovalGranted(execution runtimecontract.RuntimeOperationExecutionEnvelope, targetRef, requestedAction string) bool {
+	if execution.GovernanceGrant == nil {
+		return false
+	}
+	grant := execution.GovernanceGrant.Normalized()
+	targetRef = strings.TrimSpace(targetRef)
+	requestedAction = strings.TrimSpace(requestedAction)
+	requirement := fileApprovalRequirement(targetRef, "validated by File owner", requestedAction)
+	return grant.DependencyKind == string(runtimecontract.GovernanceApproval) &&
+		grant.SubjectRef == targetRef && grant.RequestedAction == requestedAction && grant.RiskLevel == "high" &&
+		grant.AuthorizationHash == runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext)
+}
+
+func validateFileReplayProof(proof *runtimecontract.RuntimeOperationReplayProof, operationID, targetRef string) error {
 	if proof == nil {
 		return nil
 	}
@@ -331,12 +426,25 @@ func validatePatchApplyReplayProof(proof *runtimecontract.RuntimeOperationReplay
 }
 
 func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	command, ok := event.Data().(fileevents.ExecutePatchPreviewOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+	operation, err := validateSealedRuntimeFileOperation(event, command.RuntimeOperationExecutionContext, command.SealedOperation, runtimecontract.RuntimeBlockKindPatchPreview)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	data, err := fileevents.PatchPreviewOperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
@@ -349,11 +457,11 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 	}
 	operationResult, executeErr := m.runtimeAdapter.PreviewPatch(PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
-		TargetRef:          command.Data.TargetRef, PatchType: command.Data.PatchType,
-		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
-		Diff: command.Data.Diff, OldText: command.Data.OldText, NewText: command.Data.NewText, NewTextPresent: command.Data.NewTextPresent,
-		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
-		CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
+		TargetRef:          data.TargetRef, PatchType: data.PatchType,
+		Content: data.Content, ContentPresent: data.ContentPresent,
+		Diff: data.Diff, OldText: data.OldText, NewText: data.NewText, NewTextPresent: data.NewTextPresent,
+		BaseHash: data.BaseHash, Occurrence: data.Occurrence,
+		CoverageTargets: data.CoverageTargets, Summary: data.Summary,
 	})
 	status := runtimeOperationStatus(executeErr)
 	evidence := operationResult.Evidence
@@ -370,6 +478,16 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 	result.Set(fileevents.ExecuteOperationResult{Receipt: committed}, nil)
 }
 
+func validateSealedRuntimeFileOperation(event magicevent.Event, context runtimecontract.RuntimeOperationExecutionContext, sealed fileevents.SealedRuntimeOperation, expectedKind string) (runtimecontract.RuntimeOperation, error) {
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("runtime File operation requires Orchestrator source")
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationScope(context.WorkspaceID, context.RunID, context.DispatchID, context.Transaction, context.OperationID, context.EvidenceKind, context.WorkspaceDeliverableDirectory); err != nil {
+		return runtimecontract.RuntimeOperation{}, err
+	}
+	return sealed.ValidateForExecution(context, expectedKind)
+}
+
 func runtimeOperationStatus(err error) runtimecontract.RuntimeOperationExecutionStatus {
 	if err != nil {
 		return runtimecontract.RuntimeOperationExecutionStatusRejected
@@ -384,6 +502,9 @@ func fileOperationEvidence(value RuntimeFileOperationResult) runtimecontract.Run
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -397,6 +518,9 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireRuntimeOperationAdmissibilityCommand)
 	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" ||
 		command.PrerequisiteID == "" || command.OwnerModuleID != ModuleID || command.WorkspaceDeliverableDirectory == "" || len(command.RequiredKinds) == 0 {
@@ -412,6 +536,9 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -445,6 +572,9 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.ProbeRuntimeSemanticProofFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -503,6 +633,9 @@ func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, comma
 }
 
 func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireWorkspaceManifestCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -520,6 +653,9 @@ func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magi
 // It verifies only the activation-sealed target surface and current tree
 // revision. It never writes Runtime coverage or interprets Goal/DoD text.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.QueryRuntimeCWIReconciliationCommand)
 	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -634,6 +770,9 @@ func fileReconciliationObservation(command fileevents.QueryRuntimeCWIReconciliat
 // verifies only the current regular workspace surface; it never derives a
 // Runtime action from the diagnostic or mutates the Runtime aggregate.
 func (m *Biz) handleConfirmRuntimeRepairSurface(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
 	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -676,6 +815,9 @@ func (m *Biz) handleConfirmRuntimeRepairSurface(event magicevent.Event, result m
 }
 
 func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireTargetSnapshotCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" || command.TargetRef == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
@@ -690,6 +832,9 @@ func (m *Biz) handleAcquireTargetSnapshot(event magicevent.Event, result magicev
 }
 
 func (m *Biz) handleAcquireRuntimeTargetSelection(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	command, ok := event.Data().(fileevents.AcquireRuntimeTargetSelectionCommand)
 	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" || command.TargetRole == "" || command.TargetSelectorRef == "" || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
 		setPrerequisiteError(result, common.ErrInvalidArgument)

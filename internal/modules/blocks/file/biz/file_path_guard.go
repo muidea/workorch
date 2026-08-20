@@ -1,8 +1,6 @@
 package file
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,16 +95,12 @@ func fileKind(info os.FileInfo) string {
 	return "file"
 }
 
-func fileHashAndBinary(path string, sampleLimit int) (string, bool) {
-	data, err := os.ReadFile(path)
+func fileHashAndBinary(path string, _ int) (string, bool) {
+	hash, binary, err := streamFileHashAndBinary(path)
 	if err != nil {
 		return "", false
 	}
-	hash := sha256.Sum256(data)
-	if len(data) > sampleLimit {
-		data = data[:sampleLimit]
-	}
-	return hex.EncodeToString(hash[:]), looksBinary(data)
+	return hash, binary
 }
 
 func looksBinary(data []byte) bool {

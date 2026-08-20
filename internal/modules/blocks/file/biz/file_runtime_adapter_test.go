@@ -655,6 +655,130 @@ func TestRuntimeAdapterReadMarksRedactedAndTruncatedContentUnsafeForPatch(t *tes
 	}
 }
 
+func TestRuntimeAdapterReadStreamsWholeHashWithinBoundedContent(t *testing.T) {
+	workspace := t.TempDir()
+	content := strings.Repeat("line\n", 20_000)
+	if err := os.WriteFile(filepath.Join(workspace, "large.txt"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewRuntimeAdapter().ReadFile(context.Background(), FileReadRequest{
+		WorkspaceDirectory: workspace, Path: "large.txt", MaxBytes: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Content) != 32 || !result.Truncated || result.ContentHash != sha256Hex([]byte(content)) || result.Size != int64(len(content)) || result.LineCount != 20_000 {
+		t.Fatalf("bounded streaming read = %+v", result)
+	}
+
+	ranged, err := NewRuntimeAdapter().ReadFile(context.Background(), FileReadRequest{
+		WorkspaceDirectory: workspace, Path: "large.txt", MaxBytes: 32, StartLine: 19_999, EndLine: 19_999,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ranged.Content != "line\n" || ranged.Truncated || ranged.ContentHash != result.ContentHash || ranged.ContentComplete {
+		t.Fatalf("late bounded range = %+v", ranged)
+	}
+}
+
+func TestRuntimeAdapterReadDetectsBinaryBeyondReturnedPrefix(t *testing.T) {
+	workspace := t.TempDir()
+	content := append([]byte(strings.Repeat("a", defaultMaxReadBytes+1)), 0xff)
+	if err := os.WriteFile(filepath.Join(workspace, "large.bin"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewRuntimeAdapter().ReadFile(context.Background(), FileReadRequest{
+		WorkspaceDirectory: workspace, Path: "large.bin", MaxBytes: 16,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Binary || !result.Truncated || result.Content != "" || result.ContentHash != sha256Hex(content) {
+		t.Fatalf("binary streaming read = %+v", result)
+	}
+}
+
+func TestFileExecuteHandlerRejectsNilResultBeforePrivateEffect(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{}, nil)
+	})
+	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+	})
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "main.txt")
+	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldText, newText := "old", "new"
+	operation := runtimecontract.RuntimeOperation{
+		ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"main.txt"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+	}
+	sealed, err := fileevents.SealRuntimeOperation(operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := fileevents.ExecuteFileEditOperationCommand{
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/edit-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			OperationID: "edit-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
+		},
+		SealedOperation: sealed,
+	}
+	event := magicevent.NewEventWithContext(fileevents.TopicExecuteFileEditOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command)
+	owner.handleFileEditOperation(event, nil)
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != "old\n" {
+		t.Fatalf("nil-result strong call changed content=%q err=%v", content, err)
+	}
+}
+
+func TestFileApprovalGrantMustMatchExactTargetAndAction(t *testing.T) {
+	requirement := fileApprovalRequirement(".env", "sensitive target", runtimecontract.StepKindFileEdit)
+	grant := runtimecontract.RuntimeOperationGovernanceGrant{
+		ResolutionID: "resolution-1", ApprovalID: "approval-1", ExecutionKey: "execution-1",
+		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(runtimecontract.GovernanceApproval),
+		SubjectRef: ".env", RequestedAction: runtimecontract.StepKindFileEdit, RiskLevel: "high",
+		AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext), GovernanceReceiptHash: "receipt-1",
+	}
+	execution := runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: grant.ExecutionKey, Fence: grant.ResumeFence, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, GovernanceGrant: &grant}
+	if !fileApprovalGranted(execution, ".env", runtimecontract.StepKindFileEdit) {
+		t.Fatal("exact File approval grant was rejected")
+	}
+	for _, mutate := range []func(*runtimecontract.RuntimeOperationGovernanceGrant){
+		func(value *runtimecontract.RuntimeOperationGovernanceGrant) {
+			value.SubjectRef = ".github/workflows/ci.yml"
+		},
+		func(value *runtimecontract.RuntimeOperationGovernanceGrant) {
+			value.RequestedAction = runtimecontract.RuntimeBlockKindPatchApply
+		},
+		func(value *runtimecontract.RuntimeOperationGovernanceGrant) { value.AuthorizationHash = "other" },
+	} {
+		drifted := grant
+		mutate(&drifted)
+		execution.GovernanceGrant = &drifted
+		if fileApprovalGranted(execution, ".env", runtimecontract.StepKindFileEdit) {
+			t.Fatalf("drifted File approval grant was accepted: %+v", drifted)
+		}
+	}
+}
+
 func TestRuntimeAdapterOptionalReadMissingFileCompletes(t *testing.T) {
 	workspace := t.TempDir()
 
@@ -1138,6 +1262,18 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 	})
 
+	patchType := patchTypeFileWrite
+	operationContent := "after\n"
+	operation := runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "patchType", String: &patchType}, {Name: "content", String: &operationContent}, {Name: "baseHash", String: &baseHash},
+		},
+	}
+	sealedOperation, err := fileevents.SealRuntimeOperation(operation)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command := fileevents.ExecutePatchApplyOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
@@ -1146,7 +1282,7 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 			OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
 			EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
 		},
-		Data: fileevents.PatchApplyOperationData{TargetRef: "README.md", PatchType: patchTypeFileWrite, Content: "after\n", ContentPresent: true, BaseHash: baseHash},
+		SealedOperation: sealedOperation,
 	}
 	send := func() magicevent.Result {
 		return hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
@@ -1173,7 +1309,6 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("external-change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command.Data.Content = "must-not-be-applied\n"
 	data, resultErr = send().Get()
 	if resultErr != nil {
 		t.Fatalf("duplicate persisted receipt: %v", resultErr)

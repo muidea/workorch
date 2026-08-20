@@ -105,3 +105,32 @@ func TestFileWriteAndPatchPreviewOperationDataFromRuntimeOperation(t *testing.T)
 		t.Fatalf("patch/preview data = %+v", preview)
 	}
 }
+
+func TestSealedRuntimeOperationBindsPayloadAndExecutionScope(t *testing.T) {
+	content := "sealed\n"
+	operation := runtimecontract.RuntimeOperation{
+		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"README.md"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
+	}
+	sealed, err := SealRuntimeOperation(operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context := runtimecontract.RuntimeOperationExecutionContext{OperationID: "write-1", TargetRefs: []string{"README.md"}}
+	validated, err := sealed.ValidateForExecution(context, runtimecontract.StepKindFileWrite)
+	if err != nil || validated.ID != operation.ID || validated.TargetRefs[0] != "README.md" {
+		t.Fatalf("validated operation=%+v err=%v", validated, err)
+	}
+
+	mutated := sealed
+	changed := "different\n"
+	mutated.Operation.Parameters[0].String = &changed
+	if _, err := mutated.ValidateForExecution(context, runtimecontract.StepKindFileWrite); err == nil {
+		t.Fatal("mutated operation payload reused the sealed hash")
+	}
+	mismatchedContext := context
+	mismatchedContext.TargetRefs = []string{"other.md"}
+	if _, err := sealed.ValidateForExecution(mismatchedContext, runtimecontract.StepKindFileWrite); err == nil {
+		t.Fatal("sealed operation accepted a different execution target")
+	}
+}

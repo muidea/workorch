@@ -157,7 +157,7 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 	// That phantom revision would invalidate the sealed admissibility snapshot
 	// even though no durable content effect occurred.
 	if apply && (!exists || !bytes.Equal(before, after)) {
-		if err := os.WriteFile(target, after, 0o644); err != nil {
+		if err := os.WriteFile(target, after, patchTargetMode(target, exists)); err != nil {
 			return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_write_failed"), err
 		}
 	}
@@ -187,7 +187,7 @@ func executeTextReplacePatch(root string, target string, req patchExecutionReque
 	}
 	after := []byte(next)
 	if apply {
-		if err := os.WriteFile(target, after, 0o644); err != nil {
+		if err := os.WriteFile(target, after, patchTargetMode(target, exists)); err != nil {
 			return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_write_failed"), err
 		}
 	}
@@ -234,12 +234,21 @@ func executeUnifiedDiffPatch(root string, target string, req patchExecutionReque
 	}
 	after := []byte(next)
 	if apply {
-		if err := os.WriteFile(target, after, 0o644); err != nil {
+		if err := os.WriteFile(target, after, patchTargetMode(target, exists)); err != nil {
 			return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_write_failed"), err
 		}
 	}
 	added, deleted := patchUnifiedDiffStats(filePatch)
 	return patchSuccessResult(req, before, after, exists, "", sha256Hex([]byte(req.Diff)), added, deleted), nil
+}
+
+func patchTargetMode(target string, exists bool) os.FileMode {
+	if exists {
+		if info, err := os.Stat(target); err == nil {
+			return info.Mode().Perm()
+		}
+	}
+	return 0o644
 }
 
 func readPatchTarget(target string) ([]byte, bool, error) {

@@ -68,13 +68,13 @@ func (e eventRuntimeOperationExecutor) ExecuteRuntimeOperation(ctx context.Conte
 }
 
 func (e eventRuntimeOperationExecutor) executeFileList(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.FileListOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileListOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileListOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileListOperationResponse(result)
@@ -85,13 +85,13 @@ func (e eventRuntimeOperationExecutor) executeFileList(ctx context.Context, requ
 }
 
 func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.FileReadOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileReadOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileReadOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileReadOperationResponse(result)
@@ -196,13 +196,13 @@ func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request
 }
 
 func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.FileEditOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileEditOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileEditOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileEditOperationResponse(result)
@@ -213,13 +213,13 @@ func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, requ
 }
 
 func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.FileWriteOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileWriteOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileWriteOperationResponse(result)
@@ -230,13 +230,13 @@ func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, req
 }
 
 func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.PatchApplyOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecutePatchApplyOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchApplyOperationResponse(result)
@@ -247,13 +247,13 @@ func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, re
 }
 
 func (e eventRuntimeOperationExecutor) executePatchPreview(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.PatchPreviewOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecutePatchPreviewOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchPreviewOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchPreviewOperationResponse(result)

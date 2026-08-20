@@ -1,10 +1,127 @@
 package events
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// SealedRuntimeOperation is the immutable File execution payload copied from
+// the Orchestrator's persisted dispatch. File derives its concrete adapter data
+// from Operation only after validating PayloadHash and the execution context;
+// there is no second caller-controlled Data value that can drift from the seal.
+type SealedRuntimeOperation struct {
+	Operation   runtimecontract.RuntimeOperation
+	PayloadHash string
+}
+
+func SealRuntimeOperation(operation runtimecontract.RuntimeOperation) (SealedRuntimeOperation, error) {
+	operation = operation.Normalized()
+	if runtimecontract.RuntimeModuleForOperationKind(operation.Kind) != runtimecontract.RuntimeModuleFile {
+		return SealedRuntimeOperation{}, fmt.Errorf("runtime operation kind %q is not owned by File", operation.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
+		return SealedRuntimeOperation{}, err
+	}
+	payload, err := json.Marshal(operation)
+	if err != nil {
+		return SealedRuntimeOperation{}, fmt.Errorf("marshal sealed File operation: %w", err)
+	}
+	// Detach pointer and slice fields before the value crosses EventHub.
+	var detached runtimecontract.RuntimeOperation
+	if err := json.Unmarshal(payload, &detached); err != nil {
+		return SealedRuntimeOperation{}, fmt.Errorf("clone sealed File operation: %w", err)
+	}
+	sum := sha256.Sum256(payload)
+	return SealedRuntimeOperation{Operation: detached, PayloadHash: hex.EncodeToString(sum[:])}, nil
+}
+
+// ValidateForExecution proves that the received File payload is the exact
+// operation sealed for this command identity. The returned operation is a
+// detached normalized copy suitable for owner-local decoding.
+func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext, expectedKind string) (runtimecontract.RuntimeOperation, error) {
+	operation := s.Operation.Normalized()
+	if operation.Kind != strings.TrimSpace(expectedKind) {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File operation kind %q does not match %q", operation.Kind, expectedKind)
+	}
+	if runtimecontract.RuntimeModuleForOperationKind(operation.Kind) != runtimecontract.RuntimeModuleFile {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed runtime operation is not owned by File")
+	}
+	if err := runtimecontract.ValidateRuntimeOperationContract(operation); err != nil {
+		return runtimecontract.RuntimeOperation{}, err
+	}
+	if operation.ID != strings.TrimSpace(context.OperationID) {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File operation identity mismatch")
+	}
+	if !sameExecutionStrings(operation.TargetRefs, context.TargetRefs) || !sameExecutionCoverage(operation.CoverageWorkItemIDs, context.CoverageWorkItemIDs) {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File operation scope mismatch")
+	}
+	payload, err := json.Marshal(operation)
+	if err != nil {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("marshal received File operation: %w", err)
+	}
+	sum := sha256.Sum256(payload)
+	expectedHash := hex.EncodeToString(sum[:])
+	actualHash := strings.TrimSpace(s.PayloadHash)
+	if len(actualHash) != len(expectedHash) || subtle.ConstantTimeCompare([]byte(actualHash), []byte(expectedHash)) != 1 {
+		return runtimecontract.RuntimeOperation{}, fmt.Errorf("sealed File operation payload hash mismatch")
+	}
+	sealed, err := SealRuntimeOperation(operation)
+	if err != nil {
+		return runtimecontract.RuntimeOperation{}, err
+	}
+	return sealed.Operation, nil
+}
+
+func sameExecutionStrings(left, right []string) bool {
+	normalize := func(values []string) []string {
+		seen := map[string]struct{}{}
+		ret := make([]string, 0, len(values))
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, found := seen[value]; found {
+				continue
+			}
+			seen[value] = struct{}{}
+			ret = append(ret, value)
+		}
+		sort.Strings(ret)
+		return ret
+	}
+	left = normalize(left)
+	right = normalize(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameExecutionCoverage(left, right []common.CoverageWorkItemID) bool {
+	leftValues := make([]string, 0, len(left))
+	for _, value := range left {
+		leftValues = append(leftValues, string(value))
+	}
+	rightValues := make([]string, 0, len(right))
+	for _, value := range right {
+		rightValues = append(rightValues, string(value))
+	}
+	return sameExecutionStrings(leftValues, rightValues)
+}
 
 func FileListOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (FileListOperationData, error) {
 	operation = operation.Normalized()

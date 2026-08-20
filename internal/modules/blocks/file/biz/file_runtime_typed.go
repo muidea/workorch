@@ -98,15 +98,6 @@ type PatchPreviewResult struct {
 	Evidence         runtimecontract.RuntimeOperationEvidence
 }
 
-type FileEditRequest struct {
-	WorkspaceDirectory string
-	Path               string
-	OldText            string
-	NewText            string
-	BaseHash           string
-	Occurrence         int64
-}
-
 type PatchApplyRequest struct {
 	WorkspaceDirectory string
 	TargetRef          string
@@ -252,7 +243,6 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 }
 
 func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) (FileReadResult, error) {
-	_ = ctx
 	if a == nil || strings.TrimSpace(request.WorkspaceDirectory) == "" || strings.TrimSpace(request.Path) == "" {
 		return FileReadResult{FailureCode: "file_read_invalid_input", FailureMessage: common.ErrInvalidArgument.Error()}, common.ErrInvalidArgument
 	}
@@ -270,46 +260,35 @@ func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) 
 	if info.IsDir() {
 		return fileReadFailure("file_read_is_directory", common.ErrInvalidArgument), common.ErrInvalidArgument
 	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return fileReadFailure("file_read_failed", err), err
-	}
-	isBinary := looksBinary(data)
-	lineCount := strings.Count(string(data), "\n")
-	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
-		lineCount++
-	}
 	maxBytes := int(request.MaxBytes)
 	if maxBytes <= 0 || maxBytes > defaultMaxReadBytes {
 		maxBytes = defaultMaxReadBytes
 	}
+	scan, err := scanBoundedFile(ctx, target, request.StartLine, request.EndLine, maxBytes)
+	if err != nil {
+		return fileReadFailure("file_read_failed", err), err
+	}
+	isBinary := scan.Binary
 	content := ""
-	truncated := false
+	truncated := scan.Truncated
 	ranged := request.StartLine > 0 || request.EndLine > 0
 	if !isBinary {
-		content = string(data)
-		if ranged {
-			content = lineRange(content, int(request.StartLine), int(request.EndLine))
-		}
-		if len(content) > maxBytes {
-			content = content[:maxBytes]
-			truncated = true
-			for !utf8.ValidString(content) && len(content) > 0 {
-				content = content[:len(content)-1]
-			}
+		content = string(scan.Content)
+		for !utf8.ValidString(content) && len(content) > 0 {
+			content = content[:len(content)-1]
 		}
 	} else {
-		truncated = len(data) > 0
+		truncated = scan.Size > 0
 	}
 	redacted := containsRuntimeRedactionMarker(content)
 	contentComplete := !isBinary && !truncated && !redacted && !ranged
 	targetRef := filepath.ToSlash(rel)
 	ret := FileReadResult{
 		Status: "completed", Stage: "file_read", Path: targetRef, TargetRef: targetRef, Exists: true,
-		Content: content, ContentHash: sha256Hex(data), Size: info.Size(),
-		ModifiedAt: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"), LineCount: int64(lineCount),
+		Content: content, ContentHash: scan.ContentHash, Size: info.Size(),
+		ModifiedAt: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"), LineCount: scan.LineCount,
 		Truncated: truncated, Binary: isBinary, Redacted: redacted, ContentComplete: contentComplete,
-		SafeForPatch: contentComplete && len(data) > 0, SafeForFileWrite: contentComplete && len(data) > 0,
+		SafeForPatch: contentComplete && scan.Size > 0, SafeForFileWrite: contentComplete && scan.Size > 0,
 	}
 	ret.Evidence = runtimecontract.RuntimeOperationEvidence{
 		Summary: "completed file/read " + targetRef, ContentHash: ret.ContentHash,
@@ -379,63 +358,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func (a *RuntimeAdapter) ApplyFileEdit(request FileEditRequest) (RuntimeFileOperationResult, error) {
-	if a == nil || strings.TrimSpace(request.WorkspaceDirectory) == "" || strings.TrimSpace(request.Path) == "" || request.OldText == "" || request.OldText == request.NewText || request.Occurrence < 0 {
-		return runtimeFileFailure("file_edit_invalid_input", common.ErrInvalidArgument, request.Path), common.ErrInvalidArgument
-	}
-	_, target, rel, err := guardedWorkspacePath(request.WorkspaceDirectory, request.Path, true)
-	if err != nil {
-		return runtimeFileFailure("file_edit_invalid_path", err, request.Path), err
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return runtimeFileFailure("file_edit_stat_failed", err, rel), err
-	}
-	if info.IsDir() {
-		return runtimeFileFailure("file_edit_is_directory", common.ErrInvalidArgument, rel), common.ErrInvalidArgument
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return runtimeFileFailure("file_edit_read_failed", err, rel), err
-	}
-	if looksBinary(data) {
-		return runtimeFileFailure("file_edit_binary_file", common.ErrInvalidArgument, rel), common.ErrInvalidArgument
-	}
-	beforeHash := sha256Hex(data)
-	if strings.TrimSpace(request.BaseHash) != "" && !strings.EqualFold(beforeHash, strings.TrimSpace(request.BaseHash)) {
-		err = fmt.Errorf("%w: file/edit baseHash mismatch", common.ErrConflict)
-		return runtimeFileFailure("file_edit_conflict", err, rel), err
-	}
-	content := string(data)
-	matchCount := strings.Count(content, request.OldText)
-	if matchCount == 0 {
-		err = fmt.Errorf("%w: file/edit oldText not found", common.ErrConflict)
-		return runtimeFileFailure("file_edit_conflict", err, rel), err
-	}
-	occurrence := int(request.Occurrence)
-	if occurrence <= 0 && matchCount != 1 {
-		err = fmt.Errorf("%w: file/edit oldText matched %d occurrences", common.ErrConflict, matchCount)
-		return runtimeFileFailure("file_edit_conflict", err, rel), err
-	}
-	if occurrence > matchCount {
-		err = fmt.Errorf("%w: file/edit occurrence %d exceeds %d matches", common.ErrConflict, occurrence, matchCount)
-		return runtimeFileFailure("file_edit_conflict", err, rel), err
-	}
-	if occurrence <= 0 {
-		occurrence = 1
-	}
-	nextContent := replaceOccurrence(content, request.OldText, request.NewText, occurrence)
-	if err := os.WriteFile(target, []byte(nextContent), info.Mode().Perm()); err != nil {
-		return runtimeFileFailure("file_edit_write_failed", err, rel), err
-	}
-	ref := filepath.ToSlash(rel)
-	afterHash := sha256Hex([]byte(nextContent))
-	return RuntimeFileOperationResult{
-		Summary: "file/edit applied", BeforeHash: beforeHash, AfterHash: afterHash, ContentHash: afterHash, TargetRefs: []string{ref},
-		EvidenceRefs: []string{"workorch://workspace/" + ref},
-	}, nil
 }
 
 func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOperationResult, error) {

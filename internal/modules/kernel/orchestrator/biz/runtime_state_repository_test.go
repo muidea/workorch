@@ -3295,9 +3295,10 @@ func TestRuntimeOperationExecutorRoutesTypedCommandToCapabilityOwner(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || captured.WorkspaceDeliverableDirectory != "/tmp/workspace" || captured.OperationID != "write-1" || captured.Data.Path != "target.txt" ||
+	sealedOperation, sealedErr := captured.SealedOperation.ValidateForExecution(captured.RuntimeOperationExecutionContext, runtimecontract.StepKindFileEdit)
+	if sealedErr != nil || response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || captured.WorkspaceDeliverableDirectory != "/tmp/workspace" || captured.OperationID != "write-1" || len(sealedOperation.TargetRefs) != 1 || sealedOperation.TargetRefs[0] != "target.txt" ||
 		len(captured.EvidencePolicies) != 1 || captured.EvidencePolicies[0].ID != "policy-1" {
-		t.Fatalf("response=%+v command=%+v", response, captured)
+		t.Fatalf("response=%+v command=%+v sealedErr=%v", response, captured, sealedErr)
 	}
 }
 

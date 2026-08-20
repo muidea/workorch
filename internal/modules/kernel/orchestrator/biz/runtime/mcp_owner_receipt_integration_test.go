@@ -584,7 +584,7 @@ type runtimeObservedFilePatchExecutor struct {
 }
 
 func (e runtimeObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
-	data, err := fileevents.PatchApplyOperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := fileevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -604,7 +604,7 @@ func (e runtimeObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.Co
 				EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 				WorkspaceDeliverableDirectory: e.deliverableDirectory,
 			},
-			Data: data,
+			SealedOperation: sealedOperation,
 		},
 	))
 	if result == nil {

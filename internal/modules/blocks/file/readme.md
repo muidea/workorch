@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-17
+Last Verified: 2026-08-20
 
 ## 功能范围与边界
 
@@ -17,13 +17,13 @@ Last Verified: 2026-08-17
 - 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权 LLM 提出一个具体 workspace-relative File target，并由同一 owner feasibility/admissibility gate 验证。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的空工作区仍返回 `absent`。
 - Runtime state-change/validation operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner
   stable factual category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威或 map。
-- request 必须携带 workspace/run/authority/dispatch/operation identity、sealed operation、path/ref 和有界输入；
+- request 必须携带 workspace/run/authority/dispatch/operation identity 与 File-owned `SealedRuntimeOperation`；该值包含从已持久化 dispatch 复制的 typed operation 及其全量 payload hash。File 先核对精确 Orchestrator source、hash、operation ID、target/CWI scope，再在 owner 内解包 path/ref 和有界输入，不接收一份可与 seal 漂移的独立执行 `Data`；
   result 返回唯一 receipt outcome、target refs、side-effect metadata、bounded evidence/ref 与 original diagnostic。
 - Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 canonical decision。
 - effect 执行前后通过 Orchestrator 定义的 receipt query/commit concrete command 完成幂等握手；File 只提交 owner observation，不直接写 Runtime aggregate。
-- 对跨越信任边界的敏感 file/write、patch/apply（密钥、`.env`、`.git`、CI workflow），File owner 先返回 `governance_required` 且不执行副作用；普通 workspace-local 文件的变更规模不构成 approval。resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证后消费该 grant 并执行，普通布尔参数或调用方声明不能绕过 approval。
+- 对跨越信任边界的敏感 file/edit、file/write、patch/apply（密钥、`.env`、`.git`、CI workflow），File owner 先返回 `governance_required` 且不执行副作用；普通 workspace-local 文件的变更规模不构成 approval。resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证，且 grant 的 subject、requested action、risk 与 authorization hash 再次匹配 File owner 预期后执行；普通布尔参数或调用方声明不能绕过 approval。
 
-- EventHub handler 只校验并复制外部 command；文件副作用只能由 File-private effect event 选择并调用 adapter。
+- 所有同步 EventHub handler 在读取、查询 receipt 或执行 effect 前拒绝 nil result；执行 handler 还要求精确 Orchestrator source。文件变更统一编译为 File-private patch effect：`file/edit` 映射为 `text_replace`，`file/write` 映射为 create-only `file_write`，公共 command 不能直接调用 mutation adapter。
 - `file/write` 是 create-only 操作，目标已存在时必须拒绝且保持原内容不变。File owner 的 operation
   admissibility catalog 因此只为该 kind 发布 `prospective_owner_target`；已有目标只能选择同一 catalog 中允许
   `exact_target | existing_owner_scope` 的 `file/edit` 或 `patch/apply` variant。实际 replacement 仍须绑定 owner
@@ -42,6 +42,7 @@ Last Verified: 2026-08-17
 
 - 所有路径必须限定在 workspace internal/deliverable 允许范围内，并防止路径逃逸。
 - 大内容必须使用摘要和 raw ref，不能进入默认事件或投影。
+- `file/read` 只保留有界内容窗口，同时以固定缓冲区流式完成全文件 hash、行数与 binary 检查；workspace manifest 同样流式计算每个文件 hash，`MaxBytes`/manifest 不按文件大小分配内存。
 - 本 block 不访问其他组件 service/repository，不拥有 Run、Result、Memory 或 coverage 状态。
 - 本 owner 私有 code 只在 File Biz 边界映射为 factual category；不得选择 correction、retry、governance、terminal
   或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
@@ -51,12 +52,17 @@ Last Verified: 2026-08-17
   unknown/semantic artifact URI、ambiguous selector 和 workspace absent 分别返回 `unverifiable` 或 `unsatisfied`，不从
   Goal/DoD、目录名或文件名猜测交付目标。
 
+## 已覆盖的关键回归
+
+- [x] `file/write` create-only、已有目标拒绝、exact revision/baseHash replacement 与各 patch variant replay proof。
+- [x] 路径逃逸、symlink、binary、redacted、truncated 与不完整 snapshot 的 fail-closed 行为。
+- [x] 敏感 `file/edit`/patch governance-before-effect、grant target/action/authorization 精确匹配，以及普通 workspace-local 大变更无需额外授权。
+- [x] effect 已发生但 receipt commit 丢失后的 owner proof 重放，以及已有 receipt 的零副作用 duplicate。
+- [x] sealed operation payload/hash、target/context 与 source 漂移在 receipt query/effect 前失败；所有强 handler 对 nil result fail-closed。
+- [x] `file/read` 有界内容、晚段 line range、全文件 hash/binary 检查，以及 manifest revision 对 content change 的失效。
+
 ## 待完善测试点
 
-- [ ] 冻结 create-only 语义：已有目标的 `file/write` 必须拒绝，并验证基于 exact revision/baseHash 的合法 replacement。
-- [ ] 覆盖路径逃逸、symlink、binary、redacted、truncated 和不完整 snapshot 均不能进入 patch/apply。
-- [ ] 覆盖敏感目标 governance fence、错误 grant、stale fence 和普通 workspace-local 修改无需额外授权。
-- [ ] 覆盖 effect 已发生但 receipt commit 前崩溃的重放，确认 query/commit 不产生重复副作用。
-- [ ] 覆盖 manifest revision 对 create/edit/delete/content change 的失效，以及不相关 internal path 不污染 deliverable revision。
-- [ ] 覆盖所有跨 owner result 的 nil/wrong type、scope/identity 不一致及有界大文件摘要。
+- [ ] 补齐 manifest revision 对 create/delete/rename 的组合失效，以及 internal/generated path 不污染 deliverable revision。
+- [ ] 对每一组 prerequisite/reconciliation 跨 owner result 补齐 wrong type、scope/identity 组合矩阵；当前 nil result 与执行 seal 已有统一守卫。
 - [ ] 增加 snapshot/manifest/patch apply 的 allocation 与大目录性能基准。
