@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -117,6 +118,51 @@ func TestValidateRuntimeOperationContractSSHUsesOnlyOpaqueOwnerRefs(t *testing.T
 	withOversizedCommand.Parameters = []OperationParameter{{Name: "sessionRef", String: &sessionRef}, {Name: "credentialRef", String: &credentialRef}, {Name: "command", String: &oversized}}
 	if err := ValidateRuntimeOperationContract(withOversizedCommand); err == nil || !strings.Contains(err.Error(), "bounded command") {
 		t.Fatalf("SSH oversized command error = %v", err)
+	}
+}
+
+func TestValidateRuntimeOperationContractWebIsBoundedAndGrantOnly(t *testing.T) {
+	query := "bounded query"
+	maxResults := int64(20)
+	valid := RuntimeOperation{
+		ID: "web-search-1", Kind: StepKindWebSearch, TargetRefs: []string{"web-target"},
+		Parameters: []OperationParameter{{Name: "query", String: &query}, {Name: "maxResults", Integer: &maxResults}},
+	}
+	if err := ValidateRuntimeOperationContract(valid); err != nil {
+		t.Fatalf("valid Web search: %v", err)
+	}
+	approvalID := "legacy-approval"
+	withLegacyApproval := valid
+	withLegacyApproval.Parameters = append(withLegacyApproval.Parameters, OperationParameter{Name: "approvalId", String: &approvalID})
+	if err := ValidateRuntimeOperationContract(withLegacyApproval); err == nil || !strings.Contains(err.Error(), `does not accept parameter "approvalId"`) {
+		t.Fatalf("legacy Web approval parameter error = %v", err)
+	}
+	oversizedQuery := strings.Repeat("q", 4097)
+	withOversizedQuery := valid
+	withOversizedQuery.Parameters = append([]OperationParameter(nil), valid.Parameters...)
+	withOversizedQuery.Parameters[0].String = &oversizedQuery
+	if err := ValidateRuntimeOperationContract(withOversizedQuery); err == nil || !strings.Contains(err.Error(), "at most 4096 bytes") {
+		t.Fatalf("oversized Web query error = %v", err)
+	}
+	tooManyResults := int64(21)
+	withTooManyResults := valid
+	withTooManyResults.Parameters = append([]OperationParameter(nil), valid.Parameters...)
+	withTooManyResults.Parameters[1].Integer = &tooManyResults
+	if err := ValidateRuntimeOperationContract(withTooManyResults); err == nil || !strings.Contains(err.Error(), "between 1 and 20") {
+		t.Fatalf("unbounded Web result count error = %v", err)
+	}
+	tooManyDomains := make([]string, 33)
+	for index := range tooManyDomains {
+		tooManyDomains[index] = fmt.Sprintf("domain-%d.example.com", index)
+	}
+	withTooManyDomains := valid
+	withTooManyDomains.Parameters = append(withTooManyDomains.Parameters, OperationParameter{Name: "domains", StringList: tooManyDomains})
+	if err := ValidateRuntimeOperationContract(withTooManyDomains); err == nil || !strings.Contains(err.Error(), "exceeds 32 entries") {
+		t.Fatalf("unbounded Web domain count error = %v", err)
+	}
+	webDescriptor, found := RuntimeOperationDescriptorForKind(StepKindWebSearch)
+	if !found || webDescriptor.IdempotencyClass != RuntimeOperationIdempotencyAtMostOnce || webDescriptor.DefaultEffectScope != RuntimeEffectNone {
+		t.Fatalf("Web execution policy = %+v", webDescriptor)
 	}
 }
 

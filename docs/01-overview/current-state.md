@@ -4,7 +4,7 @@ Status: active
 
 Type: current-fact
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -110,6 +110,10 @@ Runtime aggregate 只支持一个 current development baseline，不维护历史
 - SSH Runtime operation 只封存 opaque target/session/credential refs；endpoint、username、known_hosts 与 credential material
   在 SSH owner 启动时解析并冻结。所有远端命令先取得 exact approval grant，再由 strict host-key transport 执行，并以 owner-private
   before/after observation 形成 remote change/no-op receipt；raw stdout/stderr 不进入 aggregate/Eventstream/projection。
+- Web search/fetch 只接受 Orchestrator 的完整 sealed operation 与 exact claimed receipt authority；旧 `approvalId` 查询旁路已删除。
+  search provider redirect 限制为同 origin；fetch 由 owner 直接执行 DNS-pinned、proxy-disabled GET，并在每次 redirect follow 前
+  重验 target/grant。两类外部请求均为 `none + at_most_once`，实际内容以 8 KiB 内 summary、hash、opaque source/raw refs 进入
+  receipt evidence，raw body 与 transport endpoint/error 不进入 aggregate/Eventstream/projection。
 
 ## Component Snapshot
 

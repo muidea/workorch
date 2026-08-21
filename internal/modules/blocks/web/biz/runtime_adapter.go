@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
@@ -24,19 +23,13 @@ const (
 	policyDenied         = "denied"
 	policyApproval       = "approval_required"
 	approvalReasonPrefix = "web access requires approval"
-	approvalContextQuery = "query"
-	approvalContextURL   = "url"
 )
 
 type ProviderConfigLoader func() (string, map[string]webmodels.ProviderConfig, error)
 type ProviderConfigRevision func() uint64
 
-type ApprovalGetter interface {
-	Get(context.Context, common.ApprovalID) (*approvalmodel.Approval, error)
-}
-
-type ScopedApprovalGetter interface {
-	GetForRun(context.Context, common.ApprovalID, common.RunID) (*approvalmodel.Approval, error)
+type IPResolver interface {
+	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
 }
 
 type providerRuntimeCache struct {
@@ -51,14 +44,13 @@ type RuntimeAdapter struct {
 	providers         map[string]webmodels.ProviderConfig
 	configLoader      ProviderConfigLoader
 	configRevision    ProviderConfigRevision
-	approvals         ApprovalGetter
 	client            *http.Client
-	resolver          *net.Resolver
+	resolver          IPResolver
 	cacheMu           sync.RWMutex
 	cache             providerRuntimeCache
 }
 
-func NewRuntimeAdapter(defaultProviderID string, providers map[string]webmodels.ProviderConfig, approvals ApprovalGetter) *RuntimeAdapter {
+func NewRuntimeAdapter(defaultProviderID string, providers map[string]webmodels.ProviderConfig) *RuntimeAdapter {
 	defaultProviderID = strings.TrimSpace(defaultProviderID)
 	if defaultProviderID == "" {
 		defaultProviderID = webproviderconfig.DefaultProviderIDFromProviders(providers)
@@ -66,25 +58,23 @@ func NewRuntimeAdapter(defaultProviderID string, providers map[string]webmodels.
 	return &RuntimeAdapter{
 		defaultProviderID: defaultProviderID,
 		providers:         webproviderconfig.NormalizeProviders(providers),
-		approvals:         approvals,
 		client:            http.DefaultClient,
 		resolver:          net.DefaultResolver,
 	}
 }
 
-func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, revision ProviderConfigRevision, approvals ApprovalGetter) *RuntimeAdapter {
+func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, revision ProviderConfigRevision) *RuntimeAdapter {
 	return &RuntimeAdapter{
 		defaultProviderID: webproviderconfig.DefaultProviderID,
 		configLoader:      loader,
 		configRevision:    revision,
-		approvals:         approvals,
 		client:            http.DefaultClient,
 		resolver:          net.DefaultResolver,
 	}
 }
 
-func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[string]webmodels.ProviderConfig, approvals ApprovalGetter, client *http.Client) *RuntimeAdapter {
-	adapter := NewRuntimeAdapter(defaultProviderID, providers, approvals)
+func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[string]webmodels.ProviderConfig, client *http.Client) *RuntimeAdapter {
+	adapter := NewRuntimeAdapter(defaultProviderID, providers)
 	if client != nil {
 		adapter.client = client
 	}
@@ -95,7 +85,10 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 	if a == nil {
 		return RuntimeOperationResult{}, common.ErrInvalidArgument
 	}
-	provider, err := a.selectProviderID(request.ProviderID)
+	if strings.TrimSpace(request.WorkspaceInternalDirectory) == "" {
+		return RuntimeOperationResult{}, fmt.Errorf("%w: runtime Web execution requires workspace internal directory", common.ErrInvalidArgument)
+	}
+	provider, err := a.selectProviderID(request.ProviderID, request.Kind)
 	if err != nil {
 		return failedWebResult(request, provider, webcommon.ErrorProviderUnavailable, err), err
 	}
@@ -147,20 +140,17 @@ func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOper
 	if a == nil {
 		return common.ErrInvalidArgument
 	}
-	provider, err := a.selectProviderID(request.ProviderID)
+	provider, err := a.selectProviderID(request.ProviderID, request.Kind)
 	if err != nil {
+		return err
+	}
+	if err := validateWebOperationRequest(request); err != nil {
 		return err
 	}
 	switch strings.TrimSpace(request.Kind) {
 	case webcommon.StepKindSearch:
-		if strings.TrimSpace(request.Query) == "" {
-			return fmt.Errorf("%w: web/search query is required", common.ErrInvalidArgument)
-		}
 		return nil
 	case webcommon.StepKindFetch:
-		if strings.TrimSpace(request.URL) == "" {
-			return fmt.Errorf("%w: web/fetch url is required", common.ErrInvalidArgument)
-		}
 		if decision := a.classifyURL(ctx, request.URL, provider, true); decision.Decision == policyDenied {
 			return fmt.Errorf("%w: web/fetch URL is not allowed: %s", common.ErrInvalidArgument, strings.Join(decision.Reasons, ","))
 		}

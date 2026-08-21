@@ -450,8 +450,8 @@ export function ConfigurationPage() {
                         <Form.Item name="searchEndpoint" label="Search Endpoint" rules={[{ required: true }]}>
                           <Input placeholder="https://search-gateway.example/api/search" />
                         </Form.Item>
-                        <Form.Item name="fetchEndpoint" label="Fetch Endpoint">
-                          <Input placeholder="https://search-gateway.example/api/fetch" />
+                        <Form.Item name="fetchEndpoint" label="Legacy Fetch Endpoint（Runtime 不使用）">
+                          <Input placeholder="仅为旧配置兼容保留" />
                         </Form.Item>
                         <Form.Item
                           name="headers"
@@ -473,10 +473,10 @@ export function ConfigurationPage() {
                           <InputNumber min={1} max={20} style={{ width: '100%' }} />
                         </Form.Item>
                         <Form.Item name="maxFetchBytes" label="最大读取字节数">
-                          <InputNumber min={1024} style={{ width: '100%' }} />
+                          <InputNumber min={1024} max={1048576} style={{ width: '100%' }} />
                         </Form.Item>
                         <Form.Item name="maxRedirects" label="最大重定向次数">
-                          <InputNumber min={0} max={10} style={{ width: '100%' }} />
+                          <InputNumber min={1} max={5} style={{ width: '100%' }} />
                         </Form.Item>
                         <Form.Item name="allowDomains" label="允许域名">
                           <Select mode="tags" placeholder="example.test" />
@@ -500,7 +500,7 @@ export function ConfigurationPage() {
                           items={[
                             { key: 'apiKey', label: '已保存 API 密钥', children: selectedWebSearchProviderStatus?.apiKeyConfigured ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag> },
                             { key: 'status', label: '已保存状态', children: selectedWebSearchProviderStatus?.ready ? <Tag color="green">就绪</Tag> : <Tag color="red">{selectedWebSearchProviderStatus?.reason || '未保存'}</Tag> },
-                            { key: 'fetch', label: '读取端点', children: selectedWebSearchProviderStatus?.fetchEndpoint || '-' }
+                            { key: 'fetch', label: '旧读取端点（未使用）', children: selectedWebSearchProviderStatus?.fetchEndpoint || '-' }
                           ]}
                         />
                       </Form>

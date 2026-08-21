@@ -51,6 +51,10 @@ Last Verified: 2026-08-21
   known_hosts 与私钥权限，并在启动时冻结。所有远端命令要求 exact approval grant、strict host-key 与 before/after observation；
   changed/no-op、remote resource revision、bounded output hash/ref 均来自 owner fact，claimed/no-receipt 按 at-most-once 进入 unknown，
   persisted grant 不可通过 nil query 省略；
+- Web execute 只携带完整 sealed operation，旧 `approvalId` 与普通 Approval query 均不可绕过 operation-scoped grant。search provider
+  redirect 必须同 origin；fetch DNS classification 绑定实际 dial，proxy 禁用且 redirect target 在 follow 前重验 URL/IP/domain/grant。
+  search/fetch 均发布 `none + at_most_once`，claimed/no-receipt 不重发；实际 normalized content 以有界 summary/hash/source/raw ref
+  进入 receipt，transport URL/error/header/body 不进入 Runtime diagnostic；
 - callable capability、validation surface readiness 与 proof applicability 分离；required-input MCP recipe 保留 typed
   prerequisite audit、零 endpoint side effect，ready auxiliary surface 也不得关闭 CWI；只有 `ready + direct` 进入 provider
   schema/C3/correction，readiness/applicability/schema/binding 变化进入 catalog snapshot identity；

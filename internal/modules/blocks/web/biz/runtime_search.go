@@ -27,34 +27,30 @@ type searchResult struct {
 }
 
 func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationRequest, provider webmodels.ProviderConfig) (RuntimeOperationResult, error) {
-	query := strings.TrimSpace(request.Query)
-	if query == "" {
-		err := fmt.Errorf("%w: web/search query is required", common.ErrInvalidArgument)
+	if err := validateWebOperationRequest(request); err != nil {
 		return failedWebResult(request, provider, webcommon.ErrorInvalidRequest, err), err
 	}
-	policy := policyDecision{Decision: policyAllowed}
+	query := strings.TrimSpace(request.Query)
 	requestedMaxResults := int(request.MaxResults)
 	if requestedMaxResults <= 0 {
 		requestedMaxResults = provider.MaxResults
 	}
-	providerMaxResults := minPositive(provider.MaxResults, webproviderconfig.SystemMaxResults)
-	approvalID := request.ApprovalID
+	providerMaxResults := minPositive(provider.MaxResults, webproviderconfig.DefaultMaxResults)
+	policy := policyDecision{Decision: policyAllowed}
 	if requestedMaxResults > providerMaxResults {
 		policy = policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}}
-		required := approvalRequiredSearchResult(request, provider, query, requestedMaxResults, policy)
-		var approvalErr error
-		if request.GovernanceGrant != nil {
-			approvalID, approvalErr = validateRuntimeApprovalGrant(request.GovernanceGrant, webcommon.StepKindSearch, query, required.ApprovalContext)
-		} else if approvalID == "" {
-			return required, nil
-		} else {
-			approvalErr = a.validateApproval(ctx, approvalID, request.RunID, webcommon.StepKindSearch, provider.ID, approvalContextQuery, query, policy)
+		requirement := webSearchApprovalRequirement(provider, query, requestedMaxResults, policy)
+		if request.GovernanceGrant == nil {
+			return approvalRequiredSearchResult(request, provider, query, requestedMaxResults, policy), nil
 		}
-		if approvalErr != nil {
-			wrappedErr := fmt.Errorf("%w: %v", common.ErrInvalidArgument, approvalErr)
+		if err := validateRuntimeApprovalGrant(request.GovernanceGrant, requirement); err != nil {
+			wrappedErr := fmt.Errorf("%w: runtime Web approval grant does not match the current search policy", common.ErrConflict)
 			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, wrappedErr), wrappedErr
 		}
 		providerMaxResults = webproviderconfig.SystemMaxResults
+	} else if request.GovernanceGrant != nil {
+		err := fmt.Errorf("%w: runtime Web approval grant is stale for the current search policy", common.ErrConflict)
+		return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 	}
 	maxResults := boundedInt(requestedMaxResults, webproviderconfig.DefaultMaxResults, providerMaxResults)
 	payload := map[string]any{
@@ -77,39 +73,61 @@ func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationReq
 	}
 	var response searchGatewayResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		err = fmt.Errorf("%w: decode web/search response: %v", common.ErrInvalidArgument, err)
+		err = fmt.Errorf("%w: decode bounded Web search response", common.ErrInvalidArgument)
 		ret := failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err)
 		ret.Query, ret.DurationMillis = query, duration.Milliseconds()
 		return ret, err
 	}
-	results := make([]WebSearchResult, 0, len(response.Results))
-	for idx, item := range response.Results {
-		itemURL := strings.TrimSpace(item.URL)
-		if itemURL == "" {
-			err := fmt.Errorf("%w: web/search result url is required", common.ErrInvalidArgument)
-			return failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err), err
-		}
-		decision := a.classifyURL(ctx, itemURL, provider, false)
-		if decision.Decision != policyAllowed {
-			err := fmt.Errorf("%w: web/search result url is not allowed: %s", common.ErrInvalidArgument, strings.Join(decision.Reasons, ","))
-			return failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err), err
-		}
-		results = append(results, WebSearchResult{
-			Title: item.Title, URL: itemURL, Snippet: item.Snippet, Source: sourceForResult(item),
-			PublishedAt: item.PublishedAt, Rank: int64(idx + 1),
-			ContentHash: stableHash(item.Title, itemURL, item.Snippet, item.Source, item.PublishedAt),
-		})
+	results := make([]WebSearchResult, 0, maxResults)
+	truncated := len(response.Results) > maxResults
+	sourceRefs := make([]string, 0, maxResults)
+	for index, item := range response.Results {
 		if len(results) >= maxResults {
 			break
 		}
+		itemURL := strings.TrimSpace(item.URL)
+		decision := a.classifyURL(ctx, itemURL, provider, false)
+		if itemURL == "" || decision.Decision != policyAllowed {
+			err := fmt.Errorf("%w: Web search response contains a disallowed result URL", common.ErrInvalidArgument)
+			ret := failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, err)
+			ret.Query, ret.DurationMillis = query, duration.Milliseconds()
+			return ret, err
+		}
+		normalized, clipped := normalizeWebSearchResult(WebSearchResult{
+			Title: item.Title, URL: itemURL, Snippet: item.Snippet, Source: sourceForResult(item),
+			PublishedAt: item.PublishedAt, Rank: int64(index + 1),
+		})
+		truncated = truncated || clipped
+		results = append(results, normalized)
+		sourceRefs = append(sourceRefs, "workorch://web/source/"+stableHash(itemURL))
+	}
+	summary, summaryTruncated := buildWebSearchSummary(results)
+	truncated = truncated || summaryTruncated
+	persistedPayload := webSearchEvidencePayload{
+		ProviderID: provider.ID, Query: query, Results: results,
+		ResultCount: int64(len(results)), Truncated: truncated,
+	}
+	rawRef, evidenceHash, _, persistErr := persistWebEvidence(request.WorkspaceInternalDirectory, webcommon.StepKindSearch, persistedPayload)
+	if persistErr != nil {
+		ret := failedWebResult(request, provider, webcommon.ErrorBadGatewayResponse, persistErr)
+		ret.Query, ret.DurationMillis = query, duration.Milliseconds()
+		return ret, persistErr
+	}
+	evidenceRefs := webEvidenceRefs(rawRef, sourceRefs...)
+	tags := []string{"web/search", "content/normalized"}
+	if truncated {
+		tags = append(tags, "content/truncated")
 	}
 	ret := RuntimeOperationResult{
 		Status: "completed", Stage: "web_search", ProviderID: provider.ID, Query: query,
-		Results: results, ResultCount: int64(len(results)), Truncated: len(response.Results) > len(results),
-		ApprovalID: approvalID, DurationMillis: duration.Milliseconds(), TargetRefs: append([]string(nil), request.TargetRefs...),
+		Results: results, ResultCount: int64(len(results)), Truncated: truncated,
+		Summary: summary, ContentHash: evidenceHash, DurationMillis: duration.Milliseconds(),
+		TargetRefs: append([]string(nil), request.TargetRefs...),
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Summary: summary, ContentHash: evidenceHash, EvidenceRefs: evidenceRefs,
+			Quality: common.EvidenceQualityValid, EvidenceReason: "owner-normalized Web search evidence", EvidenceTags: tags,
+		},
 	}
-	ret.Summary = "completed web search"
-	ret.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: ret.Summary}
 	return ret, nil
 }
 

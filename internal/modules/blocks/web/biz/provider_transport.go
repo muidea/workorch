@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,13 +24,18 @@ func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider webmode
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, 0, webcommon.ErrorInvalidRequest, err
+		return nil, 0, webcommon.ErrorInvalidRequest, fmt.Errorf("%w: encode bounded Web provider request", common.ErrInvalidArgument)
+	}
+	parsedEndpoint, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || parsedEndpoint.User != nil || parsedEndpoint.Opaque != "" || parsedEndpoint.Hostname() == "" ||
+		(parsedEndpoint.Scheme != "http" && parsedEndpoint.Scheme != "https") || len(parsedEndpoint.String()) > webURLMaxBytes {
+		return nil, 0, webcommon.ErrorProviderUnavailable, fmt.Errorf("%w: Web provider endpoint is invalid", common.ErrInvalidArgument)
 	}
 	callCtx, cancel := context.WithTimeout(ctx, providerTimeout(provider))
 	defer cancel()
-	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, parsedEndpoint.String(), bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, webcommon.ErrorInvalidRequest, err
+		return nil, 0, webcommon.ErrorInvalidRequest, fmt.Errorf("%w: Web provider request is invalid", common.ErrInvalidArgument)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -46,18 +52,22 @@ func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider webmode
 		}
 	}
 	startedAt := time.Now()
-	resp, err := a.httpClient().Do(req)
+	client := a.providerHTTPClient(provider, parsedEndpoint)
+	resp, err := client.Do(req)
 	duration := time.Since(startedAt)
 	if err != nil {
-		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
-			return nil, duration, webcommon.ErrorTimeout, context.DeadlineExceeded
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
 		}
-		return nil, duration, webcommon.ErrorBadGatewayResponse, err
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			return nil, duration, webcommon.ErrorTimeout, newWebTransportError(webcommon.ErrorTimeout, "Web provider request timed out", context.DeadlineExceeded)
+		}
+		return nil, duration, webcommon.ErrorBadGatewayResponse, newWebTransportError(webcommon.ErrorBadGatewayResponse, "Web provider transport failed", err)
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if readErr != nil {
-		return nil, duration, webcommon.ErrorBadGatewayResponse, readErr
+		return nil, duration, webcommon.ErrorBadGatewayResponse, newWebTransportError(webcommon.ErrorBadGatewayResponse, "Web provider response read failed", readErr)
 	}
 	if int64(len(raw)) > maxResponseBytes {
 		return nil, duration, webcommon.ErrorContentTooLarge, fmt.Errorf("%w: web provider response exceeds max bytes", common.ErrInvalidArgument)
@@ -72,7 +82,50 @@ func providerTimeout(provider webmodels.ProviderConfig) time.Duration {
 	if provider.Timeout <= 0 {
 		return webproviderconfig.DefaultTimeout
 	}
+	if provider.Timeout > webproviderconfig.SystemMaxTimeout {
+		return webproviderconfig.SystemMaxTimeout
+	}
 	return provider.Timeout
+}
+
+func (a *RuntimeAdapter) providerHTTPClient(provider webmodels.ProviderConfig, endpoint *url.URL) *http.Client {
+	base := a.httpClient()
+	client := *base
+	baseRedirect := base.CheckRedirect
+	maxRedirects := boundedInt(provider.MaxRedirects, webproviderconfig.DefaultMaxRedirects, webproviderconfig.SystemMaxRedirects)
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if request == nil || request.URL == nil || len(via) > maxRedirects {
+			return fmt.Errorf("Web provider redirect limit exceeded")
+		}
+		if !sameWebProviderOrigin(endpoint, request.URL) {
+			return fmt.Errorf("Web provider cross-origin redirect is not allowed")
+		}
+		if baseRedirect != nil {
+			return baseRedirect(request, via)
+		}
+		return nil
+	}
+	return &client
+}
+
+func sameWebProviderOrigin(left *url.URL, right *url.URL) bool {
+	if left == nil || right == nil || !strings.EqualFold(left.Scheme, right.Scheme) || !strings.EqualFold(left.Hostname(), right.Hostname()) {
+		return false
+	}
+	return webURLPort(left) == webURLPort(right)
+}
+
+func webURLPort(value *url.URL) string {
+	if value == nil {
+		return ""
+	}
+	if port := value.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 func (a *RuntimeAdapter) httpClient() *http.Client {

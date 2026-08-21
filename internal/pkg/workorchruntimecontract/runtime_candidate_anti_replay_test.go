@@ -44,19 +44,18 @@ func TestStableRuntimeOperationShapeIgnoresSummaryMetadata(t *testing.T) {
 	}
 }
 
-func TestStableRuntimeOperationShapeIncludesApprovalAndDependencies(t *testing.T) {
+func TestStableRuntimeOperationShapeIncludesWebRequestAndDependencies(t *testing.T) {
 	query := "runtime contract"
-	approved := "approval-approved"
 	left := RuntimeOperation{
 		ID: "web-1", Kind: StepKindWebSearch, DependsOn: []string{"prepare-1"},
-		Parameters: []OperationParameter{{Name: "query", String: &query}, {Name: "approvalId", String: &approved}},
+		Parameters: []OperationParameter{{Name: "query", String: &query}},
 	}
-	otherApproval := "approval-new"
-	approvalChanged := left
-	approvalChanged.ID = "web-2"
-	approvalChanged.Parameters = []OperationParameter{{Name: "query", String: &query}, {Name: "approvalId", String: &otherApproval}}
-	if StableRuntimeOperationShape(left) == StableRuntimeOperationShape(approvalChanged) {
-		t.Fatal("approval change must create a new operation shape")
+	changedQuery := "runtime contract updates"
+	requestChanged := left
+	requestChanged.ID = "web-2"
+	requestChanged.Parameters = []OperationParameter{{Name: "query", String: &changedQuery}}
+	if StableRuntimeOperationShape(left) == StableRuntimeOperationShape(requestChanged) {
+		t.Fatal("query change must create a new operation shape")
 	}
 
 	dependencyChanged := left

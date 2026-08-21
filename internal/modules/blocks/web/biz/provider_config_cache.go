@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (a *RuntimeAdapter) selectProviderID(requestedID string) (webmodels.ProviderConfig, error) {
+func (a *RuntimeAdapter) selectProviderID(requestedID string, operationKind string) (webmodels.ProviderConfig, error) {
 	defaultID, providers, err := a.providerConfigs()
 	if err != nil {
 		return webmodels.ProviderConfig{}, err
@@ -28,6 +29,9 @@ func (a *RuntimeAdapter) selectProviderID(requestedID string) (webmodels.Provide
 			reason = "web search provider is unavailable"
 		}
 		return provider, fmt.Errorf("%w: %s", common.ErrInvalidArgument, reason)
+	}
+	if strings.TrimSpace(operationKind) == webcommon.StepKindSearch && strings.TrimSpace(provider.SearchEndpoint) == "" {
+		return provider, fmt.Errorf("%w: web search provider searchEndpoint is not configured", common.ErrInvalidArgument)
 	}
 	return provider, nil
 }

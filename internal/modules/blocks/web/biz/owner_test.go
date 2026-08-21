@@ -2,17 +2,20 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -42,12 +45,11 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 	ctx := context.Background()
 	hub := magicevent.NewHub(8)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-
-	providers := map[string]webmodels.ProviderConfig{"provider-a": {ID: "provider-a"}}
+	providers := map[string]webmodels.ProviderConfig{"provider-a": {ID: "provider-a", SearchEndpoint: "https://provider.invalid/search"}}
 	revision := uint64(1)
 	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
 		return "provider-a", providers, nil
-	}, func() uint64 { return revision }, nil)
+	}, func() uint64 { return revision })
 	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
@@ -63,22 +65,19 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 		t.Fatal(err)
 	}
 	observation := webAdmissibilityObservation(inventory.PrerequisiteID, inventory)
-
-	// A confirmed configuration revision change is the only freshness result.
-	providers = map[string]webmodels.ProviderConfig{"provider-b": {ID: "provider-b"}}
+	providers = map[string]webmodels.ProviderConfig{"provider-b": {ID: "provider-b", SearchEndpoint: "https://provider.invalid/search"}}
 	revision++
 	stale := sendWebFeasibilityProbe(t, ctx, hub, inventory, observation)
 	if stale.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || stale.Stale == nil || stale.Feedback != nil || stale.Stale.ExpectedRevision != observedRevision {
-		t.Fatalf("configuration drift response = %+v, want typed stale only", stale)
+		t.Fatalf("configuration drift response = %+v", stale)
 	}
 
-	// A configuration read failure is an ordinary owner failure, never stale.
 	owner.runtimeAdapter = NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
 		return "", nil, errors.New("configuration backend unavailable")
-	}, func() uint64 { return 1 }, nil)
+	}, func() uint64 { return 1 })
 	unavailable := sendWebFeasibilityProbe(t, ctx, hub, inventory, observation)
 	if unavailable.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible || unavailable.Stale != nil || unavailable.Feedback == nil || unavailable.Feedback.OriginalDiagnostic == nil || unavailable.Feedback.OriginalDiagnostic.OriginalCode != "web_provider_configuration_unavailable" {
-		t.Fatalf("configuration unavailable response = %+v, want ordinary failure without stale", unavailable)
+		t.Fatalf("configuration unavailable response = %+v", unavailable)
 	}
 }
 
@@ -107,63 +106,123 @@ func sendWebFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 	return response
 }
 
-func TestApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
-	const workspaceID = common.WorkspaceID("ws-web-scope")
-	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
-	rawHub := magicevent.NewHub(8)
-	approvalID := common.ApprovalID("approval-web-scope")
-	runID := common.RunID("run-web-scope")
-	var captured approvalevents.GetApprovalCommand
-	var source string
-	observer := magicevent.NewSimpleObserver(approvalevents.CommandDestination, rawHub)
-	observer.Subscribe(approvalevents.TopicApprovalCommandGet, func(ev magicevent.Event, result magicevent.Result) {
-		cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
-		if !ok {
-			t.Fatalf("command type = %T, want GetApprovalCommand", ev.Data())
-		}
-		captured, source = cmd, ev.Source()
-		result.Set(approvalevents.GetApprovalResult{Approval: &approvalmodel.Approval{ID: approvalID, WorkspaceID: workspaceID, RunID: runID, State: common.ApprovalStateApproved}}, nil)
-	})
-	t.Cleanup(func() { observer.Unsubscribe(approvalevents.TopicApprovalCommandGet); rawHub.Terminate(ctx) })
-	item, err := (webApprovalGetter{hub: rawHub}).GetForRun(ctx, approvalID, runID)
-	if err != nil {
-		t.Fatalf("GetForRun() error = %v", err)
+func TestRuntimeApprovalGrantBindsExactWebAuthorizationTarget(t *testing.T) {
+	provider := webmodels.ProviderConfig{ID: "provider-a"}
+	requirement := webSearchApprovalRequirement(provider, "release notes", 12, policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}})
+	grant := runtimeWebGrant(requirement)
+	if err := validateRuntimeApprovalGrant(grant, requirement); err != nil {
+		t.Fatalf("exact grant: %v", err)
 	}
-	if item == nil || item.ID != approvalID {
-		t.Fatalf("approval = %+v, want %s", item, approvalID)
+	changedProvider := webSearchApprovalRequirement(webmodels.ProviderConfig{ID: "provider-b"}, "release notes", 12, policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}})
+	if err := validateRuntimeApprovalGrant(grant, changedProvider); err == nil {
+		t.Fatal("grant authorized changed provider")
 	}
-	if source != ModuleID {
-		t.Fatalf("source = %q, want %q", source, ModuleID)
-	}
-	if captured.ApprovalID != approvalID || captured.WorkspaceID != workspaceID || captured.RunID != runID {
-		t.Fatalf("command = %+v, want approval/run scope", captured)
+	changedSubject := webSearchApprovalRequirement(provider, "security advisories", 12, policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}})
+	if err := validateRuntimeApprovalGrant(grant, changedSubject); err == nil {
+		t.Fatal("grant authorized changed subject")
 	}
 }
 
-func TestRuntimeApprovalGrantBindsExactWebAuthorizationTarget(t *testing.T) {
-	authorization := workorcheventpayload.New(
-		workorcheventpayload.StringField("providerId", "provider-a"),
-		workorcheventpayload.StringField("query", "release notes"),
-	)
-	grant := &runtimecontract.RuntimeOperationGovernanceGrant{
-		ResolutionID: "resolution-web-grant", ApprovalID: "approval-web-grant",
-		ExecutionKey: "execution-web-grant", GovernanceFence: 1, ResumeFence: 2,
-		DependencyKind: string(runtimecontract.GovernanceApproval), SubjectRef: "release notes",
-		RequestedAction: StepKindSearch, AuthorizationHash: runtimecontract.StableRuntimeAuthorizationContextHash(authorization),
-		GovernanceReceiptHash: "receipt-web-grant",
+func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	var providerCalls atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(searchGatewayResponse{Results: []searchResult{{Title: "Owner result", URL: "https://example.com/result", Snippet: "recoverable content"}}})
+	}))
+	defer provider.Close()
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(provider.URL)}, provider.Client())
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
 	}
-	approvalID, err := validateRuntimeApprovalGrant(grant, StepKindSearch, "release notes", authorization)
-	if err != nil || approvalID != "approval-web-grant" {
-		t.Fatalf("exact grant approvalID=%q err=%v", approvalID, err)
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	rejectQuery := atomic.Bool{}
+	installWebReceiptObserver(t, hub, &rejectQuery)
+	operation, sealed := testWebSearchOperation(t)
+	command := testWebExecuteCommand(t, operation, sealed)
+	event := magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command)
+
+	owner.handleWebOperation(event, nil)
+	if providerCalls.Load() != 0 {
+		t.Fatal("Post-style Web call reached provider")
 	}
-	changedTarget := workorcheventpayload.New(
-		workorcheventpayload.StringField("providerId", "provider-b"),
-		workorcheventpayload.StringField("query", "release notes"),
-	)
-	if _, err := validateRuntimeApprovalGrant(grant, StepKindSearch, "release notes", changedTarget); err == nil {
-		t.Fatal("grant authorized changed provider target")
+	wrongSource := hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleFile, ModuleID, magicevent.NewHeader(), ctx, command))
+	if _, err := wrongSource.Get(); err == nil || providerCalls.Load() != 0 {
+		t.Fatalf("wrong source err=%v calls=%d", err, providerCalls.Load())
 	}
-	if _, err := validateRuntimeApprovalGrant(grant, StepKindSearch, "security advisories", authorization); err == nil {
-		t.Fatal("grant authorized changed subject")
+	drifted := command
+	drifted.SealedOperation.PayloadHash = "drifted"
+	driftedResult := hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, drifted))
+	if _, err := driftedResult.Get(); err == nil || providerCalls.Load() != 0 {
+		t.Fatalf("sealed drift err=%v calls=%d", err, providerCalls.Load())
+	}
+	rejectQuery.Store(true)
+	stale := hub.Send(event)
+	if _, err := stale.Get(); err == nil || providerCalls.Load() != 0 {
+		t.Fatalf("stale receipt query err=%v calls=%d", err, providerCalls.Load())
+	}
+	rejectQuery.Store(false)
+	accepted := hub.Send(event)
+	data, err := accepted.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := data.(webevents.ExecuteOperationResult).Receipt
+	if providerCalls.Load() != 1 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || receipt.ObservedEffectScope != runtimecontract.RuntimeEffectNone || receipt.Changed ||
+		!strings.Contains(receipt.Evidence.Summary, "recoverable content") || len(receipt.Evidence.EvidenceRefs) < 2 {
+		t.Fatalf("receipt=%+v calls=%d", receipt, providerCalls.Load())
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func installWebReceiptObserver(t *testing.T, hub magicevent.Hub, rejectQuery *atomic.Bool) {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+		if rejectQuery != nil && rejectQuery.Load() {
+			result.Set(nil, &cd.Error{Code: cd.VersionConflict, Message: "stale runtime Web dispatch"})
+			return
+		}
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{}, nil)
+	})
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+	})
+}
+
+func testWebSearchOperation(t *testing.T) (runtimecontract.RuntimeOperation, webevents.SealedRuntimeOperation) {
+	t.Helper()
+	query := "owner execution"
+	operation := runtimecontract.RuntimeOperation{
+		ID: "web-search-1", Kind: runtimecontract.StepKindWebSearch, TargetRefs: []string{"web-target"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "query", String: &query}},
+	}
+	sealed, err := webevents.SealRuntimeOperation(operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return operation, sealed
+}
+
+func testWebExecuteCommand(t *testing.T, operation runtimecontract.RuntimeOperation, sealed webevents.SealedRuntimeOperation) webevents.ExecuteOperationCommand {
+	t.Helper()
+	return webevents.ExecuteOperationCommand{
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/web-search-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+			WorkspaceID: "ws-web", RunID: "run-web", DispatchID: "dispatch-web", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-web"},
+			OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
+			WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
+		},
+		SealedOperation: sealed,
 	}
 }

@@ -2,14 +2,13 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
@@ -39,7 +38,7 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) (*Bi
 	if eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), runtimeAdapter: NewRuntimeAdapterFromConfigLoaderWithRevision(loadProviderConfigsFromWorkorchConfig, workorchconfig.Revision, webApprovalGetter{hub: eventHub})}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), runtimeAdapter: NewRuntimeAdapterFromConfigLoaderWithRevision(loadProviderConfigsFromWorkorchConfig, workorchconfig.Revision)}, nil
 }
 
 func NewWithDependencies(deps Dependencies) (*Biz, error) {
@@ -76,12 +75,41 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setCapabilityError(result, fmt.Errorf("runtime Web operation requires Orchestrator source"))
+		return
+	}
 	command, ok := event.Data().(webevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if strings.TrimSpace(command.WorkspaceInternalDirectory) == "" {
+		setCapabilityError(result, fmt.Errorf("runtime Web operation requires workspace internal directory"))
+		return
+	}
+	if err := command.Execution.Validate(); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if command.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectNone {
+		setCapabilityError(result, fmt.Errorf("runtime Web operation requires sealed none effect"))
+		return
+	}
+	data, err := webevents.OperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -94,49 +122,30 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
-		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		Kind: operation.Kind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory,
-		ProviderID:                 command.Data.ProviderID, Query: command.Data.Query, Locale: command.Data.Locale, Recency: command.Data.Recency,
-		Domains: command.Data.Domains, ExcludeDomains: command.Data.ExcludeDomains, MaxResults: command.Data.MaxResults,
-		SafeSearch: command.Data.SafeSearch, ApprovalID: command.Data.ApprovalID, URL: command.Data.URL,
+		ProviderID:                 data.ProviderID, Query: data.Query, Locale: data.Locale, Recency: data.Recency,
+		Domains: data.Domains, ExcludeDomains: data.ExcludeDomains, MaxResults: data.MaxResults,
+		SafeSearch: data.SafeSearch, URL: data.URL,
 		GovernanceGrant: command.Execution.GovernanceGrant,
-		MaxBytes:        command.Data.MaxBytes, ExtractMode: command.Data.ExtractMode, TargetRefs: command.TargetRefs,
+		MaxBytes:        data.MaxBytes, ExtractMode: data.ExtractMode, TargetRefs: command.TargetRefs,
 		EvidencePolicies: command.EvidencePolicies,
 	})
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
 	var failure *runtimecontract.FailureFact
-	if executeErr != nil {
+	governance := operationResult.Governance
+	if executeErr != nil && governance == nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		message := safeWebOperationFailureMessage(operationResult.FailureCode)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, operation.Kind, operationResult.FailureCode, message, nil)
+		evidence = runtimecontract.RuntimeOperationEvidence{Summary: message}
 	}
-	var governance *runtimecontract.RuntimeGovernanceRequirement
-	if operationResult.ApprovalNeeded || (failure != nil && failure.Code == "approval_required") {
-		subject := operationResult.URL
-		if subject == "" {
-			subject = operationResult.Query
-		}
-		if subject == "" {
-			subject = command.OperationKind
-		}
-		reason := operationResult.FailureMessage
-		if reason == "" {
-			reason = "web operation requires approval before side effects"
-		}
-		governance = &runtimecontract.RuntimeGovernanceRequirement{
-			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject, Reason: reason,
-			RequestedAction: command.OperationKind, RiskLevel: "external",
-			AuthorizationContext: operationResult.ApprovalContext.Clone(),
-		}
+	if governance != nil {
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		evidence = runtimecontract.RuntimeOperationEvidence{Summary: "Web operation requires exact approval before external access"}
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
-	if runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope) {
-		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
-		if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
-			observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
-			observation.Changed = true
-		}
-	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, observation)
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
@@ -144,6 +153,23 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		return
 	}
 	result.Set(webevents.ExecuteOperationResult{Receipt: committed}, nil)
+}
+
+func safeWebOperationFailureMessage(code string) string {
+	switch strings.TrimSpace(code) {
+	case modulecommon.ErrorTimeout:
+		return "Web owner request timed out"
+	case modulecommon.ErrorProviderUnavailable:
+		return "Web owner provider is unavailable"
+	case modulecommon.ErrorContentTooLarge:
+		return "Web owner response exceeded its byte bound"
+	case modulecommon.ErrorPolicyDenied:
+		return "Web owner network policy denied the request"
+	case modulecommon.ErrorInvalidRequest:
+		return "Web owner rejected an invalid bounded request"
+	default:
+		return "Web owner request failed"
+	}
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
@@ -175,8 +201,25 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, providerIDs, []string{"configured-web-provider", "owner-execution-policy"}, revision)
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, providerIDs, []string{"configured-web-provider", "owner-network-preflight", "owner-evidence-ref", "owner-execution-policy"}, revision)
 	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{
+		{
+			ID: "operation-policy/web-search", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindWebSearch,
+			SubjectRef: "configured-web-provider", EffectScope: runtimecontract.RuntimeEffectNone,
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		},
+		{
+			ID: "operation-policy/web-fetch", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindWebFetch,
+			SubjectRef: "owner-controlled-network-target", EffectScope: runtimecontract.RuntimeEffectNone,
+			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		},
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -232,10 +275,10 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		ProviderID:                    data.ProviderID, Query: data.Query, Locale: data.Locale, Recency: data.Recency,
 		Domains: data.Domains, ExcludeDomains: data.ExcludeDomains, MaxResults: data.MaxResults, SafeSearch: data.SafeSearch,
-		ApprovalID: data.ApprovalID, URL: data.URL, MaxBytes: data.MaxBytes, ExtractMode: data.ExtractMode, TargetRefs: operation.TargetRefs,
+		URL: data.URL, MaxBytes: data.MaxBytes, ExtractMode: data.ExtractMode, TargetRefs: operation.TargetRefs,
 	})
 	if err != nil {
-		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "web_operation_infeasible", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "web_operation_infeasible", "runtime Web owner rejected the bounded operation preflight")
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -328,43 +371,4 @@ func loadProviderConfigsFromWorkorchConfig() (string, map[string]webmodels.Provi
 		return "", nil, err
 	}
 	return webproviderconfig.LoadProviderConfigs(cfg.WebSearch.DefaultProvider, cfg.WebSearchProviderValueSets())
-}
-
-type webApprovalGetter struct {
-	hub magicevent.Hub
-}
-
-func (g webApprovalGetter) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	return g.GetForRun(ctx, id, "")
-}
-
-func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if g.hub == nil || id == "" || workspaceID == "" || runID == "" {
-		return nil, common.ErrInvalidArgument
-	}
-	ev := magicevent.NewEventWithContext(
-		approvalevents.TopicApprovalCommandGet,
-		ModuleID,
-		approvalevents.CommandDestination,
-		magicevent.NewHeader(),
-		ctx,
-		approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, RunID: runID, ApprovalID: id},
-	)
-	result := g.hub.Send(ev)
-	if result == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	if err := result.Error(); err != nil {
-		return nil, err
-	}
-	data, resultErr := result.Get()
-	if resultErr != nil {
-		return nil, resultErr
-	}
-	response, ok := data.(approvalevents.GetApprovalResult)
-	if !ok || response.Approval == nil {
-		return nil, common.ErrNotFound
-	}
-	return response.Approval, nil
 }

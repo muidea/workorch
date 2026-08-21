@@ -87,6 +87,7 @@ func RuntimeOperationContractRevision() string {
 		writeHashString(h, fmt.Sprintf("%t", contract.RequireTargetRefs))
 		writeHashStrings(h, contract.ForbiddenParameters)
 		writeHashString(h, runtimeOperationDynamicParameterPolicy(contract.Kind))
+		writeHashString(h, runtimeOperationValidationPolicy(contract.Kind))
 		for _, v := range contract.Variants {
 			writeHashString(h, v.ID)
 			for _, d := range v.Discriminators {
@@ -406,25 +407,41 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			ForbiddenParameters: []string{"args", "host", "input", "password", "payload", "port", "privateKey", "privateKeyPath", "username"},
 			Rules:               []string{"targetRefs carries one opaque owner target ref", "targetRef/sessionRef/credentialRef must match one owner-published ssh-binding/<targetRef>/<sessionRef>/<credentialRef> constraint", "command is bounded to 16384 bytes", "timeoutMillis must be between 1000 and 300000"},
 		}, true
-	case StepKindWebSearch, StepKindWebFetch:
+	case StepKindWebSearch:
 		return RuntimeOperationContract{
-			Kind: CanonicalRuntimeBlockKind(kind),
+			Kind: StepKindWebSearch,
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "providerId", Type: RuntimeOperationParameterTypeString, Description: "configured provider identity"},
-				{Name: "query", Type: RuntimeOperationParameterTypeString, Description: "search query"},
+				{Name: "query", Type: RuntimeOperationParameterTypeString, Required: true, Description: "search query"},
 				{Name: "locale", Type: RuntimeOperationParameterTypeString, Description: "search locale"},
 				{Name: "recency", Type: RuntimeOperationParameterTypeString, Description: "search recency filter"},
 				{Name: "domains", Type: RuntimeOperationParameterTypeStringList, Description: "included domains"},
 				{Name: "excludeDomains", Type: RuntimeOperationParameterTypeStringList, Description: "excluded domains"},
 				{Name: "maxResults", Type: RuntimeOperationParameterTypeInteger, Description: "bounded search result count"},
 				{Name: "safeSearch", Type: RuntimeOperationParameterTypeBoolean, Description: "safe search policy"},
-				{Name: "approvalId", Type: RuntimeOperationParameterTypeString, Description: "approval identity when policy requires it"},
-				{Name: "url", Type: RuntimeOperationParameterTypeString, Description: "fetch URL"},
-				{Name: "maxBytes", Type: RuntimeOperationParameterTypeInteger, Description: "bounded fetch bytes"},
-				{Name: "extractMode", Type: RuntimeOperationParameterTypeString, Description: "provider extraction mode"},
 			},
-			ForbiddenParameters: []string{"input", "payload", "result"},
-			Rules:               []string{"web/search requires query", "web/fetch requires url", "maxResults and maxBytes must be positive when provided"},
+			ForbiddenParameters: []string{"approvalId", "extractMode", "input", "maxBytes", "payload", "result", "url"},
+			Rules: []string{
+				"query is bounded to 4096 bytes",
+				"provider/filter metadata and result count are owner-bounded",
+				"governance authorization is carried only by the sealed execution grant",
+			},
+		}, true
+	case StepKindWebFetch:
+		return RuntimeOperationContract{
+			Kind: StepKindWebFetch,
+			Parameters: []RuntimeOperationParameterContract{
+				{Name: "providerId", Type: RuntimeOperationParameterTypeString, Description: "configured policy identity"},
+				{Name: "url", Type: RuntimeOperationParameterTypeString, Required: true, Description: "fetch URL"},
+				{Name: "maxBytes", Type: RuntimeOperationParameterTypeInteger, Description: "bounded fetch bytes"},
+				{Name: "extractMode", Type: RuntimeOperationParameterTypeString, Description: "bounded owner extraction mode"},
+			},
+			ForbiddenParameters: []string{"approvalId", "domains", "excludeDomains", "input", "locale", "maxResults", "payload", "query", "recency", "result", "safeSearch"},
+			Rules: []string{
+				"url is bounded to 4096 bytes and must pass owner network preflight",
+				"provider/extraction metadata and response bytes are owner-bounded",
+				"governance authorization is carried only by the sealed execution grant",
+			},
 		}, true
 	default:
 		return RuntimeOperationContract{}, false
@@ -563,18 +580,24 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 300000", operation.Kind)
 		}
 	case StepKindWebSearch:
-		if parameterString(values["query"]) == "" {
-			return fmt.Errorf("kind %q requires query", operation.Kind)
+		if query := parameterString(values["query"]); query == "" || len(query) > 4096 {
+			return fmt.Errorf("kind %q requires a query of at most 4096 bytes", operation.Kind)
 		}
-		if limit, ok := parameterInteger(values["maxResults"]); ok && limit <= 0 {
-			return fmt.Errorf("kind %q maxResults must be positive", operation.Kind)
+		if err := validateRuntimeWebCommonParameters(operation.Kind, values); err != nil {
+			return err
+		}
+		if limit, ok := parameterInteger(values["maxResults"]); ok && (limit <= 0 || limit > 20) {
+			return fmt.Errorf("kind %q maxResults must be between 1 and 20", operation.Kind)
 		}
 	case StepKindWebFetch:
-		if parameterString(values["url"]) == "" {
-			return fmt.Errorf("kind %q requires url", operation.Kind)
+		if rawURL := parameterString(values["url"]); rawURL == "" || len(rawURL) > 4096 {
+			return fmt.Errorf("kind %q requires a URL of at most 4096 bytes", operation.Kind)
 		}
-		if limit, ok := parameterInteger(values["maxBytes"]); ok && limit <= 0 {
-			return fmt.Errorf("kind %q maxBytes must be positive", operation.Kind)
+		if err := validateRuntimeWebCommonParameters(operation.Kind, values); err != nil {
+			return err
+		}
+		if limit, ok := parameterInteger(values["maxBytes"]); ok && (limit <= 0 || limit > 1024*1024) {
+			return fmt.Errorf("kind %q maxBytes must be between 1 and 1048576", operation.Kind)
 		}
 	}
 	return nil
@@ -802,6 +825,44 @@ func runtimeOperationDynamicParameterPolicy(kind string) string {
 	default:
 		return "none"
 	}
+}
+
+// runtimeOperationValidationPolicy is part of the executable operation
+// revision. Unlike RuntimeOperationContract.Rules, this value represents
+// limits actively enforced by ValidateRuntimeOperationContract.
+func runtimeOperationValidationPolicy(kind string) string {
+	switch CanonicalRuntimeBlockKind(kind) {
+	case StepKindWebSearch, StepKindWebFetch:
+		return "web.v2:provider=128,query=4096,url=4096,metadata=64,domains=32x253,max-results=20,max-bytes=1048576,governance=execution-grant-only"
+	default:
+		return "default"
+	}
+}
+
+func validateRuntimeWebCommonParameters(kind string, values map[string]OperationParameter) error {
+	for _, field := range []string{"providerId", "locale", "recency", "extractMode"} {
+		value := parameterString(values[field])
+		limit := 64
+		if field == "providerId" {
+			limit = 128
+		}
+		if len(value) > limit {
+			return fmt.Errorf("kind %q parameter %q exceeds %d bytes", kind, field, limit)
+		}
+	}
+	for _, field := range []string{"domains", "excludeDomains"} {
+		items := values[field].StringList
+		if len(items) > 32 {
+			return fmt.Errorf("kind %q parameter %q exceeds 32 entries", kind, field)
+		}
+		for _, item := range items {
+			item = strings.TrimSpace(item)
+			if item == "" || len(item) > 253 {
+				return fmt.Errorf("kind %q parameter %q requires non-empty entries of at most 253 bytes", kind, field)
+			}
+		}
+	}
+	return nil
 }
 
 // isMCPDynamicOperationParameterScalar keeps the pure operation contract in

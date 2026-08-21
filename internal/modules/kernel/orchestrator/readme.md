@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -372,6 +372,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - SSH dispatch 只封存 opaque target/session/credential refs、bounded command 与 timeout；endpoint、username 与 credential material
   不进入 aggregate 或 EventHub。SSH owner 在 exact grant preflight 后执行 strict host-key transport，并以 owner-private 前后 observation
   形成 `remote_durable`/`no_op` 事实；Orchestrator 不从 sealed expectation 推断远端 changed。
+- Web dispatch 只向 owner 发送完整 `SealedRuntimeOperation`，不再发送可与 sealed payload 漂移的第二份 operation data，也不接受
+  `approvalId` 参数或普通 Approval 查询旁路。Web search/fetch 发布 `none + at_most_once`；owner 在 external request 前验证
+  Orchestrator source、current claimed receipt authority 与 exact grant。DNS/redirect/SSRF 判定和实际 transport dial 由 owner 绑定，
+  receipt 只返回真实有界 content summary/hash、opaque source/raw refs；请求提交后的 receipt-loss 必须由 SM-3 收敛为 unknown。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；只有当前 focus 每个 required CWI 都获得 exact binding-matched evidence 后，evidence commit 才能原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。

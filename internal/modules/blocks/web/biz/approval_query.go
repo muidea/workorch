@@ -1,111 +1,78 @@
 package web
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func approvalRequiredSearchResult(request RuntimeOperationRequest, provider webmodels.ProviderConfig, query string, maxResults int, policy policyDecision) RuntimeOperationResult {
-	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
+	requirement := webSearchApprovalRequirement(provider, query, maxResults, policy)
 	return RuntimeOperationResult{
 		Status: "blocked", Stage: "web_search", ProviderID: provider.ID, Query: query, ResultCount: int64(maxResults),
-		ApprovalNeeded: true, FailureCode: webcommon.ErrorApprovalRequired, FailureMessage: reason,
-		ApprovalContext: workorcheventpayload.New(
-			workorcheventpayload.StringField("providerId", provider.ID), workorcheventpayload.StringField("query", query),
-			workorcheventpayload.IntField("maxResults", int64(maxResults)), workorcheventpayload.StringField("policyDecision", policy.Decision),
-			workorcheventpayload.StringArrayField("policyReasons", policy.Reasons),
-		),
-		TargetRefs: append([]string(nil), request.TargetRefs...),
+		ApprovalNeeded: true, FailureCode: webcommon.ErrorApprovalRequired, FailureMessage: requirement.Reason,
+		ApprovalContext: requirement.AuthorizationContext.Clone(),
+		Governance:      &requirement,
+		TargetRefs:      append([]string(nil), request.TargetRefs...),
 	}
 }
 
 func approvalRequiredFetchResult(request RuntimeOperationRequest, provider webmodels.ProviderConfig, rawURL string, contextURL string, policy policyDecision) RuntimeOperationResult {
-	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
-	maxBytes := request.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = provider.MaxFetchBytes
-	}
+	maxBytes := boundedFetchBytes(request, provider)
+	requirement := webFetchApprovalRequirement(provider, contextURL, maxBytes, request.ExtractMode, policy)
 	return RuntimeOperationResult{
 		Status: "blocked", Stage: "web_fetch", ProviderID: provider.ID, URL: rawURL, FinalURL: contextURL,
-		ApprovalNeeded: true, FailureCode: webcommon.ErrorApprovalRequired, FailureMessage: reason,
-		ApprovalContext: workorcheventpayload.New(
-			workorcheventpayload.StringField("providerId", provider.ID), workorcheventpayload.StringField("url", contextURL),
-			workorcheventpayload.IntField("maxBytes", maxBytes), workorcheventpayload.StringField("policyDecision", policy.Decision),
+		ApprovalNeeded: true, FailureCode: webcommon.ErrorApprovalRequired, FailureMessage: requirement.Reason,
+		ApprovalContext: requirement.AuthorizationContext.Clone(),
+		Governance:      &requirement,
+		TargetRefs:      append([]string(nil), request.TargetRefs...),
+	}
+}
+
+func webSearchApprovalRequirement(provider webmodels.ProviderConfig, query string, maxResults int, policy policyDecision) runtimecontract.RuntimeGovernanceRequirement {
+	return runtimecontract.RuntimeGovernanceRequirement{
+		Kind: runtimecontract.GovernanceApproval, SubjectRef: strings.TrimSpace(query),
+		Reason:          approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ","),
+		RequestedAction: webcommon.StepKindSearch, RiskLevel: "external",
+		AuthorizationContext: workorcheventpayload.New(
+			workorcheventpayload.StringField("providerId", provider.ID), workorcheventpayload.StringField("query", strings.TrimSpace(query)),
+			workorcheventpayload.IntField("maxResults", int64(maxResults)), workorcheventpayload.StringField("policyDecision", policy.Decision),
 			workorcheventpayload.StringArrayField("policyReasons", policy.Reasons),
 		),
-		TargetRefs: []string{contextURL},
 	}
 }
 
-func (a *RuntimeAdapter) validateApproval(ctx context.Context, approvalID common.ApprovalID, runID common.RunID, action string, providerID string, contextKey string, contextValue string, policy policyDecision) error {
-	if a.approvals == nil {
-		return fmt.Errorf("approval repository is not configured")
+func webFetchApprovalRequirement(provider webmodels.ProviderConfig, targetURL string, maxBytes int64, extractMode string, policy policyDecision) runtimecontract.RuntimeGovernanceRequirement {
+	return runtimecontract.RuntimeGovernanceRequirement{
+		Kind: runtimecontract.GovernanceApproval, SubjectRef: strings.TrimSpace(targetURL),
+		Reason:          approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ","),
+		RequestedAction: webcommon.StepKindFetch, RiskLevel: "external",
+		AuthorizationContext: workorcheventpayload.New(
+			workorcheventpayload.StringField("providerId", provider.ID), workorcheventpayload.StringField("url", strings.TrimSpace(targetURL)),
+			workorcheventpayload.IntField("maxBytes", maxBytes), workorcheventpayload.StringField("extractMode", strings.TrimSpace(extractMode)),
+			workorcheventpayload.StringField("policyDecision", policy.Decision), workorcheventpayload.StringArrayField("policyReasons", policy.Reasons),
+		),
 	}
-	item, err := a.getApproval(ctx, approvalID, runID)
-	if err != nil {
+}
+
+func validateRuntimeApprovalGrant(grant *runtimecontract.RuntimeOperationGovernanceGrant, requirement runtimecontract.RuntimeGovernanceRequirement) error {
+	requirement = requirement.Normalized()
+	if err := requirement.Validate(); err != nil {
 		return err
 	}
-	if item.RunID != runID {
-		return fmt.Errorf("approval run mismatch")
+	if grant == nil {
+		return fmt.Errorf("runtime approval grant is required")
 	}
-	if item.State != common.ApprovalStateApproved {
-		return fmt.Errorf("approval is not approved")
-	}
-	if strings.TrimSpace(item.Action) != action {
-		return fmt.Errorf("approval action mismatch")
-	}
-	if !approvalContextMatches(item, providerID, contextKey, contextValue, policy) {
-		return fmt.Errorf("approval context mismatch")
+	value := grant.Normalized()
+	if value.Validate() != nil || value.ApprovalID == "" || value.TicketID != "" ||
+		value.DependencyKind != string(requirement.Kind) || value.RequestedAction != requirement.RequestedAction ||
+		value.SubjectRef != requirement.SubjectRef || value.RiskLevel != requirement.RiskLevel ||
+		value.AuthorizationHash != runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext) {
+		return fmt.Errorf("runtime approval grant does not match immutable Web authorization target")
 	}
 	return nil
-}
-
-func validateRuntimeApprovalGrant(grant *runtimecontract.RuntimeOperationGovernanceGrant, action, subject string, authorizationContext workorcheventpayload.Payload) (common.ApprovalID, error) {
-	if grant == nil || grant.Validate() != nil || grant.ApprovalID == "" || grant.TicketID != "" ||
-		strings.TrimSpace(grant.DependencyKind) != string(runtimecontract.GovernanceApproval) ||
-		strings.TrimSpace(grant.RequestedAction) != strings.TrimSpace(action) || strings.TrimSpace(grant.SubjectRef) != strings.TrimSpace(subject) ||
-		strings.TrimSpace(grant.AuthorizationHash) != runtimecontract.StableRuntimeAuthorizationContextHash(authorizationContext) {
-		return "", fmt.Errorf("runtime approval grant does not match immutable authorization target")
-	}
-	return grant.ApprovalID, nil
-}
-
-func (a *RuntimeAdapter) getApproval(ctx context.Context, approvalID common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
-	if a == nil || a.approvals == nil {
-		return nil, fmt.Errorf("approval repository is not configured")
-	}
-	if scoped, ok := a.approvals.(ScopedApprovalGetter); ok {
-		return scoped.GetForRun(ctx, approvalID, runID)
-	}
-	return a.approvals.Get(ctx, approvalID)
-}
-
-func approvalContextMatches(item *approvalmodel.Approval, providerID string, contextKey string, contextValue string, policy policyDecision) bool {
-	if item == nil {
-		return false
-	}
-	ctx := item.Context
-	providerValue, _ := ctx.String("providerId")
-	if strings.TrimSpace(providerValue) != providerID {
-		return false
-	}
-	contextFieldValue, _ := ctx.String(contextKey)
-	if strings.TrimSpace(contextFieldValue) != strings.TrimSpace(contextValue) {
-		return false
-	}
-	gotReasons, _ := ctx.StringSlice("policyReasons")
-	for _, reason := range policy.Reasons {
-		if !containsString(gotReasons, reason) {
-			return false
-		}
-	}
-	return true
 }

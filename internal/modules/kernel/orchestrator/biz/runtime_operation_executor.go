@@ -119,14 +119,13 @@ func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request r
 }
 
 func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := webevents.OperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := webevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := webevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		OperationKind:                    request.Operation.Kind,
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleWeb, magicevent.NewHeader(), ctx, command))
 	response, err := webOperationResponse(result)

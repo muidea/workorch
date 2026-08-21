@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
 `DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -585,6 +585,12 @@ operation-scoped governance 必须保存恰好一个 ticket/approval owner ident
 subject、receipt hash、ExecutionKey 与 fence binding。continue 以同一 ExecutionKey 的下一 fence 执行，owner
 必须 preflight grant；receipt query 中 persisted grant 与调用方 grant 必须同为缺失或逐字段完全一致，不能通过省略
 persisted grant 绕过治理；普通 receipt 不能绕过治理。
+
+对外 network request 若没有 end-to-end idempotency key，capability owner 必须发布 `at_most_once`，并在请求前完成
+producer、sealed payload、current claimed execution/fence 与 exact grant preflight。DNS classification 必须绑定实际 dial，
+redirect target 必须在 follow 前重新判定；请求已提交但 receipt 未提交时进入 `outcome_unknown`，不得因查询不到 receipt
+而重复外部请求。owner 可把真实外部内容规范化为独立有界 summary/hash/ref factual evidence，但 raw transport error、
+provider endpoint、credential 与无界 body 不得进入 aggregate、audit 或 projection。
 
 state-changing capability operation 的 receipt 必须由 owner 对真实 effect 做有界观察。对 workspace durable Shell
 operation，真实 changed refs 必须非空且属于 sealed `RuntimeOperation.TargetRefs`；存在未声明 changed ref、只有

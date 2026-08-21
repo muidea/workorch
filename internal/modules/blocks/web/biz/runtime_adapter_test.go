@@ -3,19 +3,41 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {
+func runtimeWebGrant(requirement runtimecontract.RuntimeGovernanceRequirement) *runtimecontract.RuntimeOperationGovernanceGrant {
+	requirement = requirement.Normalized()
+	return &runtimecontract.RuntimeOperationGovernanceGrant{
+		ResolutionID: "resolution-web", ApprovalID: "approval-web", ExecutionKey: "execution-web",
+		GovernanceFence: 1, ResumeFence: 2, DependencyKind: string(requirement.Kind),
+		SubjectRef: requirement.SubjectRef, RequestedAction: requirement.RequestedAction, RiskLevel: requirement.RiskLevel,
+		AuthorizationHash:     runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext),
+		GovernanceReceiptHash: "receipt-web",
+	}
+}
+
+func testWebProvider(endpoint string) webmodels.ProviderConfig {
+	return webmodels.ProviderConfig{
+		ID: "http", Provider: webcommon.ProviderHTTP, SearchEndpoint: endpoint,
+		Timeout: time.Second, MaxResults: 4, MaxFetchBytes: 4096, MaxRedirects: 2,
+	}
+}
+
+func TestRuntimeAdapterSearchReturnsRecoverableBoundedEvidence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
@@ -25,7 +47,7 @@ func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {
 			t.Fatalf("decode payload: %v", err)
 		}
 		if payload["query"] != "golang latest" || payload["maxResults"].(float64) != 2 {
-			t.Fatalf("payload = %+v, want query and maxResults", payload)
+			t.Fatalf("payload = %+v", payload)
 		}
 		_, _ = w.Write([]byte(`{"results":[
 			{"title":"Go Downloads","url":"https://go.dev/dl/","snippet":"Download Go","source":"go.dev"},
@@ -33,326 +55,247 @@ func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {
 		]}`))
 	}))
 	defer server.Close()
-
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			Timeout:        time.Second,
-			MaxResults:     4,
-			MaxFetchBytes:  4096,
-		},
-	}, nil, server.Client())
+	internalDirectory := t.TempDir()
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(server.URL)}, server.Client())
 
 	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-		Kind:       webcommon.StepKindSearch,
-		Query:      "golang latest",
-		MaxResults: 2,
+		Kind: webcommon.StepKindSearch, Query: "golang latest", MaxResults: 2,
+		WorkspaceInternalDirectory: internalDirectory,
 	})
 	if err != nil {
 		t.Fatalf("execute search: %v", err)
 	}
-	if result.Status != "completed" || result.Stage != "web_search" || result.ResultCount != 2 {
-		t.Fatalf("output = %+v, want completed search", result)
+	if result.Status != "completed" || result.ResultCount != 2 || !strings.Contains(result.Evidence.Summary, "Download Go") || result.Evidence.ContentHash == "" {
+		t.Fatalf("result = %+v", result)
 	}
-	results := result.Results
-	if len(results) != 2 || results[0].URL != "https://go.dev/dl/" || results[0].ContentHash == "" {
-		t.Fatalf("results = %+v, want normalized search results", result.Results)
+	if result.Evidence.Quality != common.EvidenceQualityValid || len(result.Evidence.EvidenceRefs) != 3 {
+		t.Fatalf("evidence = %+v", result.Evidence)
+	}
+	assertPersistedWebEvidence(t, internalDirectory, result.Evidence.EvidenceRefs)
+}
+
+func TestRuntimeAdapterSearchLargeResultSetRequiresExactGrantBeforeProviderCall(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"results":[{"title":"One","url":"https://example.com/1","snippet":"one"}]}`))
+	}))
+	defer server.Close()
+	provider := testWebProvider(server.URL)
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": provider}, server.Client())
+	request := RuntimeOperationRequest{
+		WorkspaceID: "ws-search", RunID: "run-search", StepID: "step-search",
+		Kind: webcommon.StepKindSearch, Query: "wide search", MaxResults: 12,
+		WorkspaceInternalDirectory: t.TempDir(),
+	}
+	blocked, err := adapter.ExecuteOperation(context.Background(), request)
+	if err == nil || blocked.Governance == nil || blocked.FailureCode != webcommon.ErrorApprovalRequired || calls.Load() != 0 {
+		t.Fatalf("blocked=%+v err=%v calls=%d", blocked, err, calls.Load())
+	}
+	request.GovernanceGrant = runtimeWebGrant(*blocked.Governance)
+	completed, err := adapter.ExecuteOperation(context.Background(), request)
+	if err != nil || completed.Status != "completed" || calls.Load() != 1 {
+		t.Fatalf("completed=%+v err=%v calls=%d", completed, err, calls.Load())
+	}
+
+	request.MaxResults = 4
+	if _, err := adapter.ExecuteOperation(context.Background(), request); err == nil || calls.Load() != 1 {
+		t.Fatalf("stale grant reached provider: err=%v calls=%d", err, calls.Load())
 	}
 }
 
-func TestRuntimeAdapterSearchLargeResultSetRequiresApproval(t *testing.T) {
-	approvals := memory.NewApprovalRepository()
-	var calls int
+func TestRuntimeAdapterFetchBlocksLoopbackUntilExactGrant(t *testing.T) {
+	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode payload: %v", err)
-		}
-		if payload["maxResults"].(float64) != 12 {
-			t.Fatalf("payload = %+v, want approved maxResults", payload)
-		}
-		_, _ = w.Write([]byte(`{"results":[
-			{"title":"One","url":"https://example.com/1","snippet":"one"},
-			{"title":"Two","url":"https://example.com/2","snippet":"two"}
-		]}`))
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><title>Private</title></head><body>bounded private content</body></html>`))
 	}))
 	defer server.Close()
-
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			Timeout:        time.Second,
-			MaxResults:     4,
-			MaxFetchBytes:  4096,
-		},
-	}, approvals, server.Client())
+	internalDirectory := t.TempDir()
+	provider := testWebProvider(server.URL)
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": provider}, server.Client())
 	request := RuntimeOperationRequest{
-		WorkspaceID: common.WorkspaceID("ws-search-approval"),
-		RunID:       common.RunID("run-search-approval"),
-		StepID:      common.StepID("run-search-approval/step-1"),
-		Kind:        webcommon.StepKindSearch,
-		Query:       "wide search",
-		MaxResults:  12,
+		WorkspaceID: "ws-fetch", RunID: "run-fetch", StepID: "step-fetch",
+		Kind: webcommon.StepKindFetch, URL: server.URL + "/private",
+		WorkspaceInternalDirectory: internalDirectory,
 	}
 	blocked, err := adapter.ExecuteOperation(context.Background(), request)
-	if err == nil {
-		t.Fatal("blocked search err = nil, want approval-required error")
+	if err == nil || blocked.Governance == nil || calls.Load() != 0 {
+		t.Fatalf("blocked=%+v err=%v calls=%d", blocked, err, calls.Load())
 	}
-	if blocked.Status != "blocked" ||
-		blocked.FailureCode != webcommon.ErrorApprovalRequired ||
-		calls != 0 {
-		t.Fatalf("blocked output/calls = %+v/%d, want approval without provider call", blocked, calls)
-	}
-	approvalQuery, _ := blocked.ApprovalContext.String("query")
-	if approvalQuery != "wide search" {
-		t.Fatalf("approvalContext = %+v, want query context", blocked.ApprovalContext)
-	}
-	approvalID := common.ApprovalID("approval-web-search")
-	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
-		ID:          approvalID,
-		WorkspaceID: request.WorkspaceID,
-		RunID:       request.RunID,
-		StepID:      request.StepID,
-		Reason:      "approve wide search",
-		Action:      webcommon.StepKindSearch,
-		Context:     blocked.ApprovalContext.Clone(),
-		State:       common.ApprovalStateApproved,
-	}); err != nil {
-		t.Fatalf("create approval: %v", err)
-	}
-	request.ApprovalID = approvalID
+	request.GovernanceGrant = runtimeWebGrant(*blocked.Governance)
 	completed, err := adapter.ExecuteOperation(context.Background(), request)
-	if err != nil {
-		t.Fatalf("approved search: %v", err)
+	if err != nil || completed.Status != "completed" || calls.Load() != 1 {
+		t.Fatalf("completed=%+v err=%v calls=%d", completed, err, calls.Load())
 	}
-	if completed.Status != "completed" ||
-		completed.ApprovalID != approvalID ||
-		completed.ResultCount != 2 ||
-		calls != 1 {
-		t.Fatalf("completed output/calls = %+v/%d, want approved search", completed, calls)
+	if !strings.Contains(completed.Evidence.Summary, "bounded private content") || len(completed.Evidence.EvidenceRefs) != 2 {
+		t.Fatalf("evidence=%+v", completed.Evidence)
+	}
+	assertPersistedWebEvidence(t, internalDirectory, completed.Evidence.EvidenceRefs)
+}
+
+func TestRuntimeAdapterFetchChecksRedirectTargetBeforeAccess(t *testing.T) {
+	var initialCalls atomic.Int64
+	var redirectedCalls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedCalls.Add(1)
+		_, _ = w.Write([]byte("must not be reached"))
+	}))
+	defer target.Close()
+	initial := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		initialCalls.Add(1)
+		http.Redirect(w, r, target.URL+"/private", http.StatusTemporaryRedirect)
+	}))
+	defer initial.Close()
+	provider := testWebProvider(initial.URL)
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": provider}, initial.Client())
+	request := RuntimeOperationRequest{
+		Kind: webcommon.StepKindFetch, URL: initial.URL + "/start", WorkspaceInternalDirectory: t.TempDir(),
+	}
+	initialPolicy := adapter.classifyURL(context.Background(), request.URL, provider, true)
+	initialRequirement := webFetchApprovalRequirement(provider, request.URL, provider.MaxFetchBytes, "", initialPolicy)
+	request.GovernanceGrant = runtimeWebGrant(initialRequirement)
+
+	blocked, err := adapter.ExecuteOperation(context.Background(), request)
+	if err == nil || blocked.Governance == nil || blocked.FinalURL != target.URL+"/private" {
+		t.Fatalf("blocked=%+v err=%v", blocked, err)
+	}
+	if initialCalls.Load() != 1 || redirectedCalls.Load() != 0 {
+		t.Fatalf("initial/redirected calls = %d/%d", initialCalls.Load(), redirectedCalls.Load())
 	}
 }
 
-func TestRuntimeAdapterFetchBlocksLoopbackUntilApproved(t *testing.T) {
-	approvals := memory.NewApprovalRepository()
+type countingResolver struct {
+	calls atomic.Int64
+	first net.IP
+	later net.IP
+}
+
+func (r *countingResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	if r.calls.Add(1) == 1 {
+		return []net.IPAddr{{IP: append(net.IP(nil), r.first...)}}, nil
+	}
+	return []net.IPAddr{{IP: append(net.IP(nil), r.later...)}}, nil
+}
+
+func TestRuntimeAdapterFetchPinsOneDNSResolutionToTransport(t *testing.T) {
+	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"url":"http://127.0.0.1/private","title":"Private","content":"ok","contentType":"text/plain","source":"local"}`))
+		calls.Add(1)
+		_, _ = w.Write([]byte("pinned response"))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			FetchEndpoint:  server.URL,
-			Timeout:        time.Second,
-			MaxFetchBytes:  4096,
-		},
-	}, approvals, server.Client())
-
-	request := RuntimeOperationRequest{
-		WorkspaceID: common.WorkspaceID("ws-1"),
-		RunID:       common.RunID("run-1"),
-		StepID:      common.StepID("run-1/step-1"),
-		Kind:        webcommon.StepKindFetch,
-		URL:         "http://127.0.0.1/private",
-	}
-	blocked, err := adapter.ExecuteOperation(context.Background(), request)
-	if err == nil {
-		t.Fatal("blocked fetch err = nil, want approval-required error")
-	}
-	if blocked.Status != "blocked" || blocked.FailureCode != webcommon.ErrorApprovalRequired || blocked.ApprovalNeeded != true {
-		t.Fatalf("blocked output = %+v, want approval required", blocked)
-	}
-	if len(blocked.ApprovalContext.Fields) == 0 {
-		t.Fatalf("approvalContext = %+v, want typed payload", blocked.ApprovalContext)
-	}
-	approvalID := common.ApprovalID("approval-web-fetch")
-	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
-		ID:          approvalID,
-		WorkspaceID: request.WorkspaceID,
-		RunID:       request.RunID,
-		StepID:      request.StepID,
-		Reason:      "approve loopback fetch",
-		Action:      webcommon.StepKindFetch,
-		Context:     blocked.ApprovalContext.Clone(),
-		State:       common.ApprovalStateApproved,
-	}); err != nil {
-		t.Fatalf("create approval: %v", err)
-	}
-	request.ApprovalID = approvalID
-	completed, err := adapter.ExecuteOperation(context.Background(), request)
-	if err != nil {
-		t.Fatalf("approved fetch: %v", err)
-	}
-	if completed.Status != "completed" || completed.Stage != "web_fetch" || completed.ApprovalID != approvalID {
-		t.Fatalf("completed output = %+v, want approved fetch", completed)
+	resolver := &countingResolver{first: net.ParseIP("127.0.0.1"), later: net.ParseIP("169.254.169.254")}
+	provider := testWebProvider(server.URL)
+	provider.AllowDomains = []string{"fetch.test"}
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": provider}, server.Client())
+	adapter.resolver = resolver
+	targetURL := strings.Replace(server.URL, "127.0.0.1", "fetch.test", 1) + "/page"
+	policy := policyDecision{Decision: policyApproval, Reasons: []string{"loopback", "plain_http"}}
+	requirement := webFetchApprovalRequirement(provider, targetURL, provider.MaxFetchBytes, "", policy)
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: webcommon.StepKindFetch, URL: targetURL, GovernanceGrant: runtimeWebGrant(requirement),
+		WorkspaceInternalDirectory: t.TempDir(),
+	})
+	if err != nil || result.Status != "completed" || calls.Load() != 1 || resolver.calls.Load() != 1 {
+		t.Fatalf("result=%+v err=%v calls=%d resolutions=%d", result, err, calls.Load(), resolver.calls.Load())
 	}
 }
 
-func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
-	approvals := memory.NewApprovalRepository()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"url":"https://93.184.216.34/source","finalUrl":"http://127.0.0.1/private","title":"Private","content":"ok","contentType":"text/plain","source":"local"}`))
-	}))
-	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			FetchEndpoint:  server.URL,
-			Timeout:        time.Second,
-			MaxFetchBytes:  4096,
-		},
-	}, approvals, server.Client())
-
-	request := RuntimeOperationRequest{
-		WorkspaceID: common.WorkspaceID("ws-final-url"),
-		RunID:       common.RunID("run-final-url"),
-		StepID:      common.StepID("run-final-url/step-1"),
-		Kind:        webcommon.StepKindFetch,
-		URL:         "https://93.184.216.34/source",
-	}
-	blocked, err := adapter.ExecuteOperation(context.Background(), request)
-	if err == nil {
-		t.Fatal("blocked final URL fetch err = nil, want approval-required error")
-	}
-	if blocked.Status != "blocked" ||
-		blocked.FailureCode != webcommon.ErrorApprovalRequired ||
-		blocked.FinalURL != "http://127.0.0.1/private" {
-		t.Fatalf("blocked output = %+v, want final URL approval requirement", blocked)
-	}
-	approvalURL, _ := blocked.ApprovalContext.String("url")
-	if approvalURL != "http://127.0.0.1/private" {
-		t.Fatalf("approvalContext = %+v, want final URL context", blocked.ApprovalContext)
-	}
-	approvalID := common.ApprovalID("approval-final-url")
-	if err := approvals.Create(context.Background(), &approvalmodel.Approval{
-		ID:          approvalID,
-		WorkspaceID: request.WorkspaceID,
-		RunID:       request.RunID,
-		StepID:      request.StepID,
-		Reason:      "approve final URL",
-		Action:      webcommon.StepKindFetch,
-		Context:     blocked.ApprovalContext.Clone(),
-		State:       common.ApprovalStateApproved,
-	}); err != nil {
-		t.Fatalf("create approval: %v", err)
-	}
-	request.ApprovalID = approvalID
-	completed, err := adapter.ExecuteOperation(context.Background(), request)
+func TestSafeFetchRedirectLimitFailsBeforeFollowingNextRequest(t *testing.T) {
+	provider := testWebProvider("https://provider.invalid/search")
+	provider.MaxRedirects = 1
+	request := RuntimeOperationRequest{Kind: webcommon.StepKindFetch, URL: "http://127.0.0.1/page", MaxBytes: 128}
+	requirement := webFetchApprovalRequirement(provider, request.URL, request.MaxBytes, "", policyDecision{Decision: policyApproval, Reasons: []string{"loopback", "plain_http"}})
+	request.GovernanceGrant = runtimeWebGrant(requirement)
+	plan := newSafeFetchPlan(NewRuntimeAdapter("http", map[string]webmodels.ProviderConfig{"http": provider}), provider, request)
+	next, err := http.NewRequestWithContext(context.Background(), http.MethodGet, request.URL, nil)
 	if err != nil {
-		t.Fatalf("approved final url fetch: %v", err)
+		t.Fatal(err)
 	}
-	if completed.Status != "completed" ||
-		completed.FinalURL != "http://127.0.0.1/private" ||
-		completed.ApprovalID != approvalID {
-		t.Fatalf("completed output = %+v, want approved final URL fetch", completed)
+	via := []*http.Request{{}, {}}
+	if err := plan.checkRedirect(next, via); err == nil || !strings.Contains(err.Error(), "redirect limit") {
+		t.Fatalf("redirect limit err=%v", err)
 	}
 }
 
 func TestRuntimeAdapterURLPolicyCoversSSRFBoundaries(t *testing.T) {
-	adapter := NewRuntimeAdapter("http", nil, nil)
-	provider := webmodels.ProviderConfig{
-		ID:           "http",
-		Provider:     webcommon.ProviderHTTP,
-		AllowDomains: []string{"example.com"},
-		DenyDomains:  []string{"blocked.example.com"},
-	}
+	adapter := NewRuntimeAdapter("http", nil)
+	provider := webmodels.ProviderConfig{ID: "http", Provider: webcommon.ProviderHTTP, AllowDomains: []string{"example.com"}, DenyDomains: []string{"blocked.example.com"}}
 	tests := []struct {
-		name             string
-		rawURL           string
-		fetch            bool
-		useDomainPolicy  bool
-		expectedDecision string
+		name, rawURL, expected string
+		fetch, domainPolicy    bool
 	}{
-		{name: "allowed domain", rawURL: "https://docs.example.com/page", fetch: false, useDomainPolicy: true, expectedDecision: policyAllowed},
-		{name: "deny domain", rawURL: "https://blocked.example.com/page", fetch: false, useDomainPolicy: true, expectedDecision: policyDenied},
-		{name: "outside allow list", rawURL: "https://other.test/page", fetch: false, useDomainPolicy: true, expectedDecision: policyDenied},
-		{name: "metadata hostname", rawURL: "https://metadata.google.internal/compute", fetch: true, expectedDecision: policyDenied},
-		{name: "metadata ip", rawURL: "http://169.254.169.254/latest/meta-data", fetch: true, expectedDecision: policyDenied},
-		{name: "loopback ipv4", rawURL: "http://127.0.0.1/private", fetch: true, expectedDecision: policyApproval},
-		{name: "loopback ipv6", rawURL: "http://[::1]/private", fetch: true, expectedDecision: policyApproval},
-		{name: "private ipv4", rawURL: "https://10.0.0.1/private", fetch: true, expectedDecision: policyApproval},
-		{name: "userinfo", rawURL: "https://user:pass@example.com/private", fetch: true, expectedDecision: policyDenied},
-		{name: "unsupported scheme", rawURL: "file:///etc/passwd", fetch: true, expectedDecision: policyDenied},
+		{name: "allowed domain", rawURL: "https://docs.example.com/page", domainPolicy: true, expected: policyAllowed},
+		{name: "deny domain", rawURL: "https://blocked.example.com/page", domainPolicy: true, expected: policyDenied},
+		{name: "outside allow list", rawURL: "https://other.test/page", domainPolicy: true, expected: policyDenied},
+		{name: "metadata hostname", rawURL: "https://metadata.google.internal/compute", fetch: true, expected: policyDenied},
+		{name: "metadata ip", rawURL: "http://169.254.169.254/latest/meta-data", fetch: true, expected: policyDenied},
+		{name: "loopback ipv4", rawURL: "http://127.0.0.1/private", fetch: true, expected: policyApproval},
+		{name: "loopback ipv6", rawURL: "http://[::1]/private", fetch: true, expected: policyApproval},
+		{name: "private ipv4", rawURL: "https://10.0.0.1/private", fetch: true, expected: policyApproval},
+		{name: "userinfo", rawURL: "https://user:pass@example.com/private", fetch: true, expected: policyDenied},
+		{name: "unsupported scheme", rawURL: "file:///etc/passwd", fetch: true, expected: policyDenied},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testProvider := provider
-			if !tt.useDomainPolicy {
-				testProvider.AllowDomains = nil
-				testProvider.DenyDomains = nil
+			if !tt.domainPolicy {
+				testProvider.AllowDomains, testProvider.DenyDomains = nil, nil
 			}
-			decision := adapter.classifyURL(context.Background(), tt.rawURL, testProvider, tt.fetch)
-			if decision.Decision != tt.expectedDecision {
-				t.Fatalf("decision = %+v, want %s", decision, tt.expectedDecision)
+			if decision := adapter.classifyURL(context.Background(), tt.rawURL, testProvider, tt.fetch); decision.Decision != tt.expected {
+				t.Fatalf("decision=%+v want=%s", decision, tt.expected)
 			}
 		})
 	}
 }
 
-func TestRuntimeAdapterProviderResponseSizeLimitIsStableError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"results":[{"title":"too-large","url":"https://example.com/large","snippet":"0123456789"}]}`))
-	}))
-	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			Timeout:        time.Second,
-			MaxResults:     2,
-			MaxFetchBytes:  16,
-		},
-	}, nil, server.Client())
-
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-		Kind:  webcommon.StepKindSearch,
-		Query: "too large",
+func TestRuntimeAdapterProviderFailuresAreBoundedAndTransportSafe(t *testing.T) {
+	t.Run("response size", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"results":[{"title":"too-large","url":"https://example.com/large","snippet":"0123456789"}]}`))
+		}))
+		defer server.Close()
+		provider := testWebProvider(server.URL)
+		provider.MaxFetchBytes = 16
+		adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": provider}, server.Client())
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "too large", WorkspaceInternalDirectory: t.TempDir()})
+		if err == nil || result.FailureCode != webcommon.ErrorContentTooLarge {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
 	})
-	if err == nil {
-		t.Fatalf("execute search err = nil, want content too large")
-	}
-	if result.Status != "failed" || result.FailureCode != webcommon.ErrorContentTooLarge {
-		t.Fatalf("output = %+v, want content_too_large", result)
-	}
-}
 
-func TestRuntimeAdapterProviderTimeoutIsStableError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(50 * time.Millisecond)
-		_, _ = w.Write([]byte(`{"results":[]}`))
-	}))
-	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			Timeout:        time.Millisecond,
-			MaxResults:     2,
-			MaxFetchBytes:  4096,
-		},
-	}, nil, server.Client())
-
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-		Kind:  webcommon.StepKindSearch,
-		Query: "timeout",
+	t.Run("timeout hides endpoint", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(50 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		}))
+		defer server.Close()
+		provider := testWebProvider(server.URL)
+		provider.Timeout = time.Millisecond
+		adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": provider}, server.Client())
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "timeout", WorkspaceInternalDirectory: t.TempDir()})
+		if err == nil || result.FailureCode != webcommon.ErrorTimeout || strings.Contains(err.Error(), server.URL) {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
 	})
-	if err == nil {
-		t.Fatalf("execute search err = nil, want timeout")
-	}
-	if result.Status != "failed" || result.FailureCode != webcommon.ErrorTimeout {
-		t.Fatalf("output = %+v, want timeout", result)
-	}
+
+	t.Run("cross origin redirect", func(t *testing.T) {
+		var targetCalls atomic.Int64
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { targetCalls.Add(1) }))
+		defer target.Close()
+		origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", target.URL)
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		}))
+		defer origin.Close()
+		adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(origin.URL)}, origin.Client())
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "redirect", WorkspaceInternalDirectory: t.TempDir()})
+		if err == nil || targetCalls.Load() != 0 || result.FailureCode != webcommon.ErrorBadGatewayResponse || strings.Contains(err.Error(), target.URL) {
+			t.Fatalf("result=%+v err=%v targetCalls=%d", result, err, targetCalls.Load())
+		}
+	})
 }
 
 func TestRuntimeAdapterSearchRejectsBadGatewayShape(t *testing.T) {
@@ -360,25 +303,10 @@ func TestRuntimeAdapterSearchRejectsBadGatewayShape(t *testing.T) {
 		_, _ = w.Write([]byte(`{"results":[{"title":"missing url"}]}`))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
-		"http": {
-			ID:             "http",
-			Provider:       webcommon.ProviderHTTP,
-			SearchEndpoint: server.URL,
-			Timeout:        time.Second,
-			MaxFetchBytes:  4096,
-		},
-	}, nil, server.Client())
-
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-		Kind:  webcommon.StepKindSearch,
-		Query: "bad shape",
-	})
-	if err == nil {
-		t.Fatalf("execute search err = nil, want bad gateway response")
-	}
-	if result.Status != "failed" || result.FailureCode != webcommon.ErrorBadGatewayResponse {
-		t.Fatalf("output = %+v, want bad gateway response", result)
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{"http": testWebProvider(server.URL)}, server.Client())
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "bad shape", WorkspaceInternalDirectory: t.TempDir()})
+	if err == nil || result.FailureCode != webcommon.ErrorBadGatewayResponse {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
@@ -391,7 +319,6 @@ func TestRuntimeAdapterReloadsProviderConfigByRevision(t *testing.T) {
 		_, _ = w.Write([]byte(`{"results":[{"title":"Second","url":"https://example.com/second","snippet":"second"}]}`))
 	}))
 	defer second.Close()
-
 	revision := uint64(1)
 	loadCount := 0
 	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
@@ -400,91 +327,70 @@ func TestRuntimeAdapterReloadsProviderConfigByRevision(t *testing.T) {
 		if revision > 1 {
 			endpoint = second.URL
 		}
-		return "http", map[string]webmodels.ProviderConfig{
-			"http": {
-				ID:             "http",
-				Provider:       webcommon.ProviderHTTP,
-				SearchEndpoint: endpoint,
-				Timeout:        time.Second,
-				MaxResults:     2,
-				MaxFetchBytes:  4096,
-			},
-		}, nil
-	}, func() uint64 {
-		return revision
-	}, nil)
+		return "http", map[string]webmodels.ProviderConfig{"http": testWebProvider(endpoint)}, nil
+	}, func() uint64 { return revision })
 	adapter.client = first.Client()
-
-	for i := 0; i < 2; i++ {
-		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-			Kind:  webcommon.StepKindSearch,
-			Query: "reload",
-		})
-		if err != nil {
-			t.Fatalf("execute search before reload: %v", err)
-		}
-		results := result.Results
-		if results[0].Title != "First" {
-			t.Fatalf("results = %+v, want cached first provider", results)
+	internalDirectory := t.TempDir()
+	for range 2 {
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "reload", WorkspaceInternalDirectory: internalDirectory})
+		if err != nil || result.Results[0].Title != "First" {
+			t.Fatalf("result=%+v err=%v", result, err)
 		}
 	}
 	if loadCount != 1 {
-		t.Fatalf("loadCount = %d, want cached config for same revision", loadCount)
+		t.Fatalf("loadCount=%d", loadCount)
 	}
-
 	revision = 2
 	adapter.client = second.Client()
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
-		Kind:  webcommon.StepKindSearch,
-		Query: "reload",
-	})
-	if err != nil {
-		t.Fatalf("execute search after reload: %v", err)
-	}
-	results := result.Results
-	if results[0].Title != "Second" || loadCount != 2 {
-		t.Fatalf("results/loadCount = %+v/%d, want reloaded second provider", results, loadCount)
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "reload", WorkspaceInternalDirectory: internalDirectory})
+	if err != nil || result.Results[0].Title != "Second" || loadCount != 2 {
+		t.Fatalf("result=%+v err=%v loadCount=%d", result, err, loadCount)
 	}
 }
 
 func TestRuntimeAdapterOperationAdmissibilityTracksConfigAndProbeAvoidsHTTP(t *testing.T) {
 	revision := uint64(1)
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1) }))
 	defer server.Close()
 	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
-		maxResults := 2
-		if revision > 1 {
-			maxResults = 3
-		}
-		return "http", map[string]webmodels.ProviderConfig{
-			"http": {ID: "http", Provider: webcommon.ProviderHTTP, SearchEndpoint: server.URL, MaxResults: maxResults, MaxFetchBytes: 4096},
-		}, nil
-	}, func() uint64 { return revision }, nil)
+		provider := testWebProvider(server.URL)
+		provider.MaxResults = int(revision) + 1
+		return "http", map[string]webmodels.ProviderConfig{"http": provider}, nil
+	}, func() uint64 { return revision })
 	adapter.client = server.Client()
-
 	ids, firstRevision, err := adapter.OperationAdmissibility()
-	if err != nil || len(ids) != 1 || ids[0] != "http" || firstRevision == "" {
-		t.Fatalf("first admissibility = ids=%v revision=%q err=%v", ids, firstRevision, err)
+	if err != nil || len(ids) != 1 || firstRevision == "" {
+		t.Fatalf("ids=%v revision=%q err=%v", ids, firstRevision, err)
 	}
 	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "runtime", ProviderID: "http"}); err != nil {
-		t.Fatalf("probe configured web search: %v", err)
+		t.Fatal(err)
 	}
-	if requests != 0 {
-		t.Fatalf("probe contacted web provider %d times", requests)
+	if requests.Load() != 0 {
+		t.Fatalf("probe requests=%d", requests.Load())
 	}
 	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindFetch, URL: "http://169.254.169.254/latest", ProviderID: "http"}); err == nil {
-		t.Fatal("probe accepted denied metadata fetch URL")
-	}
-	if requests != 0 {
-		t.Fatalf("invalid probe contacted web provider %d times", requests)
+		t.Fatal("metadata URL passed probe")
 	}
 	revision++
 	_, secondRevision, err := adapter.OperationAdmissibility()
 	if err != nil || secondRevision == firstRevision {
-		t.Fatalf("admissibility revision did not follow config revision: first=%q second=%q err=%v", firstRevision, secondRevision, err)
+		t.Fatalf("first=%q second=%q err=%v", firstRevision, secondRevision, err)
 	}
+}
+
+func assertPersistedWebEvidence(t *testing.T, internalDirectory string, refs []string) {
+	t.Helper()
+	for _, ref := range refs {
+		const prefix = "workorch://web/evidence/"
+		if !strings.HasPrefix(ref, prefix) {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(internalDirectory, "web", "evidence", strings.TrimPrefix(ref, prefix)+".json"))
+		if err != nil || !strings.Contains(string(raw), webEvidenceSchemaVersion) {
+			t.Fatalf("persisted evidence ref=%q err=%v raw=%q", ref, err, raw)
+		}
+		return
+	}
+	t.Fatalf("no persisted Web evidence ref in %v", refs)
 }

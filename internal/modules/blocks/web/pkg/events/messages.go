@@ -1,7 +1,6 @@
 package events
 
 import (
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -13,7 +12,6 @@ type OperationData struct {
 	Domains, ExcludeDomains            []string
 	MaxResults                         int64
 	SafeSearch                         bool
-	ApprovalID                         common.ApprovalID
 	URL                                string
 	MaxBytes                           int64
 	ExtractMode                        string
@@ -21,8 +19,7 @@ type OperationData struct {
 
 type ExecuteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	OperationKind string
-	Data          OperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteOperationResult struct {

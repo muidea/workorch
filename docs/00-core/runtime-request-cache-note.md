@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -68,6 +68,8 @@ request 应按 cacheability 从高到低组织：
 - Goal / DoD 不被压缩
 - capability contract 声明式稳定
 - 当前失败、当前进展、latest validation、memory recall、requested action 位于易变尾部
+- external capability receipt 只允许把 owner-normalized bounded summary/hash 放入易变 evidence tail；raw payload 仅以
+  opaque C5 ref 保留，不得展开为 raw provider body、transport endpoint 或 diagnostic。
 - current focus 的 active rejected operation shapes、shape hash、failure lineage 与 admissible operation kinds 位于 C3/C4 易变尾部，不得进入 C2
 - C3 的 operation kind、parameter、effect、coverage 与 target policy 只能由 persisted
   `RuntimeCandidateContractManifest` 渲染；不得从 owner inventory、profile 或错误文本重新拼装第二份合同

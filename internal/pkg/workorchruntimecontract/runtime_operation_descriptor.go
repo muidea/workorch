@@ -311,13 +311,13 @@ func init() {
 		},
 		{
 			Kind: StepKindWebSearch, OwnerModuleID: RuntimeModuleWeb,
-			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindWebFetch, OwnerModuleID: RuntimeModuleWeb,
-			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},

@@ -23,7 +23,6 @@ type RuntimeOperationRequest struct {
 	ExcludeDomains                []string
 	MaxResults                    int64
 	SafeSearch                    bool
-	ApprovalID                    common.ApprovalID
 	GovernanceGrant               *runtimecontract.RuntimeOperationGovernanceGrant
 	URL                           string
 	MaxBytes                      int64
@@ -50,7 +49,6 @@ type RuntimeOperationResult struct {
 	Size            int64
 	ResultCount     int64
 	Truncated       bool
-	ApprovalID      common.ApprovalID
 	ApprovalNeeded  bool
 	DurationMillis  int64
 	FailureCode     string
@@ -58,6 +56,7 @@ type RuntimeOperationResult struct {
 	TargetRefs      []string
 	Results         []WebSearchResult
 	ApprovalContext workorcheventpayload.Payload
+	Governance      *runtimecontract.RuntimeGovernanceRequirement
 	Evidence        runtimecontract.RuntimeOperationEvidence
 }
 

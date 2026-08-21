@@ -12,6 +12,7 @@ import (
 const (
 	DefaultProviderID    = "default-http"
 	DefaultTimeout       = 20 * time.Second
+	SystemMaxTimeout     = 60 * time.Second
 	DefaultMaxResults    = 8
 	SystemMaxResults     = 20
 	DefaultMaxFetchBytes = int64(256 * 1024)
@@ -34,7 +35,7 @@ func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[str
 			FetchEndpoint:  strings.TrimSpace(values["fetchEndpoint"]),
 			APIKey:         strings.TrimSpace(values["apiKey"]),
 			Headers:        headersFromValues(values),
-			Timeout:        durationValue(values["timeout"], DefaultTimeout),
+			Timeout:        boundedDurationValue(values["timeout"], DefaultTimeout, SystemMaxTimeout),
 			MaxResults:     boundedIntValue(values["maxResults"], DefaultMaxResults, SystemMaxResults),
 			MaxFetchBytes:  boundedInt64Value(values["maxFetchBytes"], DefaultMaxFetchBytes, SystemMaxFetchBytes),
 			MaxRedirects:   boundedIntValue(values["maxRedirects"], DefaultMaxRedirects, SystemMaxRedirects),
@@ -78,6 +79,8 @@ func NormalizeProviders(providers map[string]webmodels.ProviderConfig) map[strin
 		}
 		if provider.Timeout <= 0 {
 			provider.Timeout = DefaultTimeout
+		} else if provider.Timeout > SystemMaxTimeout {
+			provider.Timeout = SystemMaxTimeout
 		}
 		provider.MaxResults = boundedInt(provider.MaxResults, DefaultMaxResults, SystemMaxResults)
 		provider.MaxFetchBytes = boundedInt64(provider.MaxFetchBytes, DefaultMaxFetchBytes, SystemMaxFetchBytes)
@@ -131,6 +134,14 @@ func durationValue(raw string, fallback time.Duration) time.Duration {
 	value, err := time.ParseDuration(strings.TrimSpace(raw))
 	if err != nil || value <= 0 {
 		return fallback
+	}
+	return value
+}
+
+func boundedDurationValue(raw string, fallback time.Duration, max time.Duration) time.Duration {
+	value := durationValue(raw, fallback)
+	if max > 0 && value > max {
+		return max
 	}
 	return value
 }

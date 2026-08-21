@@ -4,7 +4,7 @@ Status: active
 
 Type: verification-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -58,6 +58,10 @@ Last Verified: 2026-08-16
   owner 只发布 current typed catalog，Orchestrator SM-2 只消费事实。assessment claim、successful operation、旧 catalog
   或历史 recipe 都不得满足 postcondition。
 - capability execute command/result 必须来自接收 Owner 的 `pkg/events`；receipt 只返回 factual outcome/effect/evidence。
+- Web execute 必须先验证 Orchestrator producer、完整 sealed operation、current claimed receipt fence 与 exact grant；Post、payload drift、
+  stale execution 和 grant drift 均为零 network call。search redirect 限制同 origin；fetch DNS 地址必须绑定实际 dial，redirect 在 follow
+  前重验且有 hard limit。search/fetch 都是 `none + at_most_once`，receipt evidence 必须携带真实有界 summary/hash/source/raw ref，
+  receipt-loss 不得重复外部 request。
 
 ### Idempotency, Restart and Budgets
 
