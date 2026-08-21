@@ -283,7 +283,6 @@ def decision_payload(user_content: str, expected_server_id: str) -> dict[str, An
                 "parameters": [
                     {"name": "serverId", "string": server_id},
                     {"name": "tool", "string": tool},
-                    {"name": "input.path", "string": "."},
                 ],
             }]
         }
@@ -370,6 +369,8 @@ def self_test() -> None:
         raise AssertionError(f"MCP operation did not use C3 binding-only authorization: {validation}")
     if operation.get("targetRefs") is not None or operation["parameters"][0].get("string") != "mcp-test":
         raise AssertionError(f"MCP operation did not preserve selector-only target contract: {validation}")
+    if [item.get("name") for item in operation["parameters"]] != ["serverId", "tool"]:
+        raise AssertionError(f"MCP operation invented input outside the sealed empty schema: {validation}")
 
     assessment = decision_payload(
         _prompt(

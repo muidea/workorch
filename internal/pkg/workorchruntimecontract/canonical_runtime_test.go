@@ -44,6 +44,56 @@ func TestRuntimeTargetSelectionEmptyWorkspaceScopeRequiresProfileBinding(t *test
 	}
 }
 
+func TestRuntimeOperationAdmissibilityKeepsVariantlessKindIndependent(t *testing.T) {
+	inventory := RuntimeOperationAdmissibility{
+		OwnerModuleID:  RuntimeModuleShell,
+		OperationKinds: []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession},
+		OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+			Kind: StepKindShellCommand,
+			AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+				RuntimeOperationTargetPolicyExactTarget,
+				RuntimeOperationTargetPolicyExistingOwnerScope,
+			},
+		}},
+		TargetRefs:   []string{"runtime-validation-source.txt"},
+		SelectorRefs: []string{"workspace-validation-target"},
+	}
+
+	allowed, selectors, _, factFound, err := RuntimeOperationAdmissibilityAllowsTargetPolicy(
+		inventory,
+		RuntimeBlockKindManagedValidationSession,
+		"",
+		RuntimeOperationTargetPolicyExactTarget,
+	)
+	if err != nil || !allowed || factFound || len(selectors) != 1 || selectors[0] != "workspace-validation-target" {
+		t.Fatalf("managed-validation target policy = allowed:%t selectors:%v factFound:%t err:%v", allowed, selectors, factFound, err)
+	}
+}
+
+func TestRuntimeOperationAdmissibilityStaticVariantStillRequiresOwnerFact(t *testing.T) {
+	inventory := RuntimeOperationAdmissibility{
+		OwnerModuleID:  RuntimeModuleFile,
+		OperationKinds: []string{StepKindFileWrite, StepKindFileRead},
+		OperationVariants: []RuntimeOperationAdmissibilityVariant{{
+			Kind: StepKindFileRead,
+			AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+				RuntimeOperationTargetPolicyExactTarget,
+			},
+		}},
+		TargetRefs: []string{"main.go"},
+	}
+
+	allowed, _, _, factFound, err := RuntimeOperationAdmissibilityAllowsTargetPolicy(
+		inventory,
+		StepKindFileWrite,
+		"file_write",
+		RuntimeOperationTargetPolicyExactTarget,
+	)
+	if err != nil || allowed || factFound {
+		t.Fatalf("missing static variant fact = allowed:%t factFound:%t err:%v", allowed, factFound, err)
+	}
+}
+
 func TestRuntimeDecisionStateMatrix(t *testing.T) {
 	tests := []struct {
 		name          string

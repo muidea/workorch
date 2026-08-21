@@ -29,6 +29,34 @@ func TestPayloadJSONBoundaryUsesObjectShape(t *testing.T) {
 	}
 }
 
+func TestPayloadJSONBoundaryPreservesNestedEmptyObject(t *testing.T) {
+	payload, err := FromMap(map[string]any{
+		"schema": map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromMap: %v", err)
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if string(raw) != `{"schema":{"properties":{},"type":"object"}}` {
+		t.Fatalf("payload JSON = %s, want nested empty object", raw)
+	}
+
+	var decoded Payload
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !decoded.Equal(payload) {
+		t.Fatalf("decoded payload = %+v, want %+v", decoded, payload)
+	}
+}
+
 func TestPayloadJSONBoundaryRejectsNonObject(t *testing.T) {
 	for _, raw := range []string{"null", `[]`, `"text"`} {
 		var payload Payload

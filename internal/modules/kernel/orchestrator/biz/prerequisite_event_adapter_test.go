@@ -71,7 +71,7 @@ func TestAcquireTargetSnapshotPrerequisiteUsesTypedEventHubContract(t *testing.T
 	defer file.Stop(ctx)
 
 	workspace := t.TempDir()
-	content := "module example.com/gateway\n\ngo 1.24\n"
+	content := "module example.com/gateway\n\ngo 1.26\n"
 	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

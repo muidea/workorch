@@ -6,7 +6,7 @@ Also used as `AGENTS.md` (multi-agent shared guidelines). Prefer editing this fi
 
 ## Project Structure & Module Organization
 
-WorkOrch is a Go service (`github.com/muidea/workorch`, Go 1.24.x) with an embedded Web console and TUI-first CLI. Single `go.mod`; “multi-module” means directory/ownership boundaries, not multiple Go modules.
+WorkOrch is a Go service (`github.com/muidea/workorch`, Go 1.26.x) with an embedded Web console and TUI-first CLI. Single `go.mod`; “multi-module” means directory/ownership boundaries, not multiple Go modules.
 
 | Path | Role |
 | --- | --- |

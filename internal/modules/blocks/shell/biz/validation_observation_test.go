@@ -262,7 +262,7 @@ func newGoValidationWorkspace(t *testing.T, testSource string) string {
 	t.Helper()
 	workspace := t.TempDir()
 	for name, content := range map[string]string{
-		"go.mod":          "module example.com/workorch-validation-fixture\n\ngo 1.24\n",
+		"go.mod":          "module example.com/workorch-validation-fixture\n\ngo 1.26\n",
 		"fixture.go":      "package fixture\n",
 		"fixture_test.go": testSource,
 	} {

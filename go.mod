@@ -1,6 +1,6 @@
 module github.com/muidea/workorch
 
-go 1.24.13
+go 1.26.7
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -51,7 +51,7 @@ require (
 	github.com/yuin/goldmark v1.7.13 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/net v0.47.0
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/term v0.38.0

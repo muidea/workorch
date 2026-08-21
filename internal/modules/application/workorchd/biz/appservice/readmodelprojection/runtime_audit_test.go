@@ -125,8 +125,11 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 			Operation: runtimecontract.RuntimeOperation{ID: "validate-audit", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, BindingRefs: []string{binding.ID}, TargetRefs: []string{"main.go"}},
 		}}}},
+		OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
+			OperationID: "validate-audit", ExecutionKey: "exec/ws-audit/run-audit/original-dispatch/validate-audit", Fence: 2,
+		}},
 	}}, OperationReceipts: []runtimecontract.RuntimeOperationReceipt{{
-		ExecutionKey: "exec/ws-audit/run-audit/dispatch-audit/validate-audit", Fence: 1, OperationID: "validate-audit",
+		ExecutionKey: "exec/ws-audit/run-audit/original-dispatch/validate-audit", Fence: 2, OperationID: "validate-audit",
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone, TargetRefs: []string{"main.go"},
 		Evidence: runtimecontract.RuntimeOperationEvidence{EvidenceRefs: []string{"artifact/audit"}, EvidenceTags: []string{"metric/audit"}, Validation: observation},
 	}}}}
@@ -149,6 +152,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 	}
 	dispatch := audit.Dispatches[0]
 	if dispatch.ID != "dispatch-audit" || len(dispatch.Operations) != 1 || dispatch.Operations[0].ID != "validate-audit" ||
+		dispatch.Operations[0].ExecutionKey != "exec/ws-audit/run-audit/original-dispatch/validate-audit" || dispatch.Operations[0].Fence != 2 ||
 		len(dispatch.Operations[0].BindingRefs) != 1 || dispatch.Operations[0].BindingRefs[0] != binding.ID || dispatch.Operations[0].TargetRefs[0] != "main.go" {
 		t.Fatalf("sealed operation audit projection = %+v", dispatch)
 	}

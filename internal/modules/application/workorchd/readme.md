@@ -17,6 +17,7 @@ Last Verified: 2026-08-21
 - HTTP server 退出时发布只含数据的 `ServiceStoppedData` notification；process service 在 framework `Run` 前建立 observer，并在自身维护 local wait state。EventHub 不传退出 channel、server 或 error object。`WorkspaceRunRequestedCommand` / `WorkspaceRunRequestedResult` 用于 scheduler 请求；embedded CLI facade 使用按操作拆分的具体 command/result，例如 `CLIWorkspaceCreateCommand` / `CLIWorkspaceCreateResult`，不存在通用 `CLICommand` / `CLIResult`。
 - `biz/execution.UseCase` 是 HTTP 异步 admission 与 Workorchd typed scheduler 同步 admission 的共同入口。它只规范化 request identity/scope、使用 framework `BackgroundRoutine`、提交 Workspace owner typed intent，并把 queued/owner outcome 交给 Biz-owned execution observation；同一 workspace/request 的 HTTP 重复请求只在有界进程窗口内 coalesce，持久化幂等仍归 owner；它不拥有 retry、Resume successor 或 lifecycle target state。
 - `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 upsert/queued/accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，server 仅接收独立的 transport diagnostics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
+- Runtime audit 的 sealed-operation 视图只投影 operation identity、binding、`ExecutionKey` 与 `Fence` 等只读关联字段，使 governance continuation 后的 accepted receipt 仍按聚合中保存的原始 logical execution identity 精确核对；它不投影 operation 参数，不生成 dispatch，也不得作为 reducer/capability 可执行 authority。
 - HTTP、SSE 和 remote adapter 使用应用层 DTO；组件间 EventHub 传输不得复用 HTTP DTO。
 - MCP 管理列表通过 owner 的 cursor/limit concrete result 分页，并要求所有页面保持同一 `RegistryRevision`；fresh activation
   用一次 `ReadSelectionSnapshotCommand` 同时取得并验证 selected Server/Capability。管理 DTO 只公开 `environmentRefs`，不接受、缓存或投影 credential 明文。
@@ -106,6 +107,7 @@ Last Verified: 2026-08-21
 - [x] activation Memory selection 执行 candidate/final item、type quota、byte/token hard limit；完整 selection evidence 深拷贝后进入 sealed Runtime activation，并与最终 Memory identity 精确匹配。
 - [x] Skill Registry 使用 concrete create/get/bounded-list result 并由 owner 签发 canonical provenance；SkillHub Catalog 保持独立来源，activation 在 LLM C3 前执行 Skill 数量、instruction/metadata byte budget 与 UTF-8 裁剪。
 - [x] Runtime execution-budget的source-ledger聚合、active wait/terminal projection分离与只读clone路径。
+- [x] Runtime audit 对 sealed operation 显式投影 `ExecutionKey + Fence`，覆盖 governance resume 后 evidence dispatch 与原始 logical execution identity 不同的 receipt 核对，同时保持参数和可执行 authority 不出投影。
 - [x] Workspace directory resolver 对空输入生成隔离的 `.workorch-workspaces/<workspace-id>`，规范化显式相对/绝对
   目录并拒绝相对逃逸或不安全 workspace path segment。
 

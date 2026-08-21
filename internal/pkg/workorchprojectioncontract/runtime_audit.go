@@ -238,10 +238,12 @@ type RuntimeAuditDispatch struct {
 }
 
 type RuntimeAuditSealedOperation struct {
-	ID          string   `json:"id,omitempty"`
-	Kind        string   `json:"kind,omitempty"`
-	BindingRefs []string `json:"bindingRefs,omitempty"`
-	TargetRefs  []string `json:"targetRefs,omitempty"`
+	ID           string   `json:"id,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	ExecutionKey string   `json:"executionKey,omitempty"`
+	Fence        uint64   `json:"fence,omitempty"`
+	BindingRefs  []string `json:"bindingRefs,omitempty"`
+	TargetRefs   []string `json:"targetRefs,omitempty"`
 }
 
 // RuntimeAuditOperationReceipt is structured, already-judged capability-owner

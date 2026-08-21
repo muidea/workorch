@@ -269,7 +269,11 @@ func (value Value) Any() any {
 	case ValueFloat:
 		return value.Float
 	case ValueObject:
-		return Payload{Fields: value.Object}.Map()
+		mapped := Payload{Fields: value.Object}.Map()
+		if mapped == nil {
+			return map[string]any{}
+		}
+		return mapped
 	case ValueArray:
 		ret := make([]any, 0, len(value.Array))
 		for _, item := range value.Array {

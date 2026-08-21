@@ -810,11 +810,11 @@ func RuntimeOperationAdmissibilityAllowsTargetPolicy(inventory RuntimeOperationA
 	if found {
 		return runtimeOperationAdmissibilityVariantAllowsTargetPolicy(fact, policy), append([]string(nil), fact.SelectorRefs...), append([]string(nil), fact.ConstraintRefs...), true, nil
 	}
-	// A catalog that publishes variant facts is an explicit discriminated
-	// authority surface.  Missing the selected kind/variant must fail closed;
-	// the broad kind-level selector/constraint union cannot be used to fill the
-	// gap (especially for prospective creation).
-	if len(inventory.OperationVariants) != 0 {
+	// A static-variant operation always requires its exact owner fact. Variant
+	// facts for another operation kind in the same owner catalog are unrelated:
+	// they must not suppress the explicit target/selector inventory of a
+	// variant-less kind such as managed validation.
+	if contract, contractFound := RuntimeOperationContractForKind(kind); contractFound && len(contract.Variants) != 0 {
 		return false, nil, nil, false, nil
 	}
 	// Existing/exact scope may still use a non-discriminated owner catalog.

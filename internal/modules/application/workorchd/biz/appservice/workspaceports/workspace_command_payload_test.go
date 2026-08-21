@@ -27,6 +27,7 @@ type workspaceCommandTestHub struct {
 	raw       magicevent.Hub
 	observers map[string]magicevent.SimpleObserver
 	captured  map[string][]any
+	sources   map[string][]string
 }
 
 func newWorkspaceCommandTestHub(t *testing.T) *workspaceCommandTestHub {
@@ -36,6 +37,7 @@ func newWorkspaceCommandTestHub(t *testing.T) *workspaceCommandTestHub {
 		raw:       raw,
 		observers: map[string]magicevent.SimpleObserver{},
 		captured:  map[string][]any{},
+		sources:   map[string][]string{},
 	}
 	t.Cleanup(func() { raw.Terminate(context.Background()) })
 	return ret
@@ -49,6 +51,7 @@ func (h *workspaceCommandTestHub) subscribe(destination string, topic string, ha
 	}
 	observer.Subscribe(topic, func(ev magicevent.Event, result magicevent.Result) {
 		h.captured[topic] = append(h.captured[topic], ev.Data())
+		h.sources[topic] = append(h.sources[topic], ev.Source())
 		data, err := handler(ev.Data())
 		if err != nil {
 			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
@@ -56,6 +59,59 @@ func (h *workspaceCommandTestHub) subscribe(destination string, topic string, ha
 		}
 		result.Set(data, nil)
 	})
+}
+
+func (h *workspaceCommandTestHub) source(t *testing.T, topic string, index int) string {
+	t.Helper()
+	items := h.sources[topic]
+	if index < 0 || index >= len(items) {
+		t.Fatalf("captured source for topic %s index %d not found; count=%d", topic, index, len(items))
+	}
+	return items[index]
+}
+
+func TestSubmitDefinitionAdmissionCandidateUsesRuntimeAuthoritySource(t *testing.T) {
+	ctx := context.Background()
+	testHub := newWorkspaceCommandTestHub(t)
+	candidate := (workspacemodel.DefinitionAdmissionCandidate{
+		SchemaVersion:     workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent,
+		WorkspaceID:       "ws-definition-admission-source",
+		CandidateID:       "workspace-definition",
+		CandidateRevision: 1,
+		GoalInput: workspacemodel.DefinitionCandidateItem{
+			CandidateItemRef: "goal:goal-source",
+			Text:             "verify definition admission source",
+			SourceIdentity:   "goal:goal-source@revision-1",
+		},
+		DoDInputs: []workspacemodel.DefinitionCandidateItem{{
+			CandidateItemRef: "dod:dod-source:item:000001",
+			Text:             "candidate is accepted",
+			SourceIdentity:   "dod:dod-source@revision-1",
+		}},
+		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{
+			TemplateRef: "template-source", Revision: "template:revision-1", SnapshotHash: "template-hash",
+		},
+		AdmissionCompilerVersion:          workspacemodel.DefinitionAdmissionCompilerVersionCurrent,
+		ResolvedProjectWorkspaceDirectory: "/tmp/workorch/ws-definition-admission-source",
+		ProposedRelationInputs: []workspacemodel.DefinitionProposedRelationInput{{
+			RelationRef: "terminal-all-of", RelationKind: "all_of",
+			SourceItemRefs: []string{"dod:dod-source:item:000001"}, TargetItemRefs: []string{"goal:goal-source"},
+		}},
+	}).WithHash()
+	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, func(data any) (any, error) {
+		command := data.(workspaceevents.SubmitDefinitionAdmissionCandidateCommand)
+		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{
+			Candidate:   command.Candidate,
+			Disposition: workspaceevents.DefinitionAdmissionCandidateCreated,
+		}, nil
+	})
+
+	if _, err := SubmitDefinitionAdmissionCandidate(ctx, testHub.raw, candidate, 0); err != nil {
+		t.Fatalf("SubmitDefinitionAdmissionCandidate: %v", err)
+	}
+	if got := testHub.source(t, workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, 0); got != "application/workorchd" {
+		t.Fatalf("definition admission source = %q, want application/workorchd", got)
+	}
 }
 
 func (h *workspaceCommandTestHub) command(t *testing.T, topic string, index int) any {

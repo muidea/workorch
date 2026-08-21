@@ -362,14 +362,14 @@ func runtimeAuditDispatches(state runtimecontract.RuntimeStateRecord) []projecti
 		ret = append(ret, projectioncontract.RuntimeAuditDispatch{
 			ID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID, State: string(dispatch.State),
 			CandidateHash: dispatch.CandidateHash, CompletedOperations: len(dispatch.CompletedOperationIDs),
-			Operations: runtimeAuditSealedOperations(dispatch.Candidate),
+			Operations: runtimeAuditSealedOperations(dispatch.Candidate, dispatch.OperationExecutions),
 		})
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
 	return ret
 }
 
-func runtimeAuditSealedOperations(candidate runtimecontract.RuntimeCandidate) []projectioncontract.RuntimeAuditSealedOperation {
+func runtimeAuditSealedOperations(candidate runtimecontract.RuntimeCandidate, executions []runtimecontract.RuntimeOperationExecutionRecord) []projectioncontract.RuntimeAuditSealedOperation {
 	operations := make([]runtimecontract.RuntimeOperation, 0)
 	if candidate.StateChange != nil {
 		for _, item := range candidate.StateChange.Operations {
@@ -381,16 +381,28 @@ func runtimeAuditSealedOperations(candidate runtimecontract.RuntimeCandidate) []
 			operations = append(operations, item.Operation)
 		}
 	}
+	executionByOperationID := make(map[string]runtimecontract.RuntimeOperationExecutionRecord, len(executions))
+	for _, raw := range executions {
+		execution := raw.Normalized()
+		if execution.OperationID != "" {
+			executionByOperationID[execution.OperationID] = execution
+		}
+	}
 	ret := make([]projectioncontract.RuntimeAuditSealedOperation, 0, len(operations))
 	for _, raw := range operations {
 		operation := raw.Normalized()
 		if operation.ID == "" {
 			continue
 		}
-		ret = append(ret, projectioncontract.RuntimeAuditSealedOperation{
+		item := projectioncontract.RuntimeAuditSealedOperation{
 			ID: operation.ID, Kind: operation.Kind, BindingRefs: append([]string(nil), operation.BindingRefs...),
 			TargetRefs: append([]string(nil), operation.TargetRefs...),
-		})
+		}
+		if execution, found := executionByOperationID[operation.ID]; found {
+			item.ExecutionKey = execution.ExecutionKey
+			item.Fence = execution.Fence
+		}
+		ret = append(ret, item)
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
 	return ret

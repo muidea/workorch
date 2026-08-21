@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 WorkOrch is a local-first workspace orchestration service. Users define a Goal and Definition of Done (DoD), activate a
 workspace execution, observe convergence, and manage LLM, MCP, memory and governance resources through a TUI-first CLI
@@ -52,7 +52,7 @@ process-level shell and is not an additional framework unit. The reviewed respon
 
 ## Prerequisites
 
-- Go 1.24.x
+- Go 1.26.x
 - Node.js and npm for rebuilding the embedded console
 - an ai-proxy-compatible endpoint when exercising real LLM flows
 

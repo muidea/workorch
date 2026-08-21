@@ -232,12 +232,19 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProofPerEvidenceKind(t *testin
 
 func TestRuntimeSemanticDocumentAllowsIndependentProofsForOneCWI(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
+	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession})
 	shellCatalog.SelectorRefs = []string{"file/workspace-relative-create"}
 	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate"}
+	shellCatalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{
+		Kind: StepKindShellCommand,
+		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
+			RuntimeOperationTargetPolicyExactTarget,
+			RuntimeOperationTargetPolicyExistingOwnerScope,
+		},
+	}}
 	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
 	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleShell)
-	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
+	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindShellCommand, RuntimeBlockKindManagedValidationSession)
 	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, shellCatalog)
 	manifest = sealSemanticTestManifest(t, manifest)

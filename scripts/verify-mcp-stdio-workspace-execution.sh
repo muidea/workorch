@@ -281,6 +281,45 @@ PY
   return 1
 }
 
+wait_pending_approval() {
+  local workspace_id="$1"
+  local run_id="$2"
+  local output="$3"
+  local approval_id=""
+  local deadline=$((SECONDS + 120))
+
+  while (( SECONDS <= deadline )); do
+    get_json "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$run_id" "$output"
+    approval_id="$(python3 - "$output" "$workspace_id" "$run_id" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+workspace_id, run_id = sys.argv[2:]
+matches = [
+    item for item in (data.get("approvals") or [])
+    if item.get("workspaceId") == workspace_id
+    and item.get("runId") == run_id
+    and item.get("state") == "pending"
+    and item.get("id")
+]
+if len(matches) == 1:
+    print(matches[0]["id"])
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+      echo "$approval_id"
+      return 0
+    }
+    sleep 0.5
+  done
+
+  echo "MCP operation did not materialize one pending approval within 120s for workspace $workspace_id run $run_id" >&2
+  cat "$output" >&2 || true
+  return 1
+}
+
 upsert_json() {
   local collection_url="$1"
   local resource_url="$2"
@@ -721,6 +760,26 @@ post_activation_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/executi
   "$TMP_DIR/activation.json"
 run_id="$(wait_activation_run "$workspace_id" "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]
+
+approval_id="$(wait_pending_approval "$workspace_id" "$run_id" "$TMP_DIR/approvals-pending.json")"
+[[ -n "$approval_id" ]]
+post_json "$BASE_URL/api/v1/workorch/approvals/$approval_id/approve?workspaceId=$workspace_id" \
+  '{}' \
+  "$TMP_DIR/approval-approved.json"
+python3 - "$TMP_DIR/approval-approved.json" "$approval_id" "$workspace_id" "$run_id" <<'PY'
+import json
+import sys
+
+approval = json.load(open(sys.argv[1], encoding="utf-8")).get("approval") or {}
+expected_id, workspace_id, run_id = sys.argv[2:]
+if (
+    approval.get("id") != expected_id
+    or approval.get("workspaceId") != workspace_id
+    or approval.get("runId") != run_id
+    or approval.get("state") != "approved"
+):
+    raise SystemExit(f"approval response does not match the pending MCP dispatch: {approval}")
+PY
 
 wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/run-status.json"
 get_json "$(run_api_url "$workspace_id" "$run_id" "snapshot")" "$TMP_DIR/snapshot.json"

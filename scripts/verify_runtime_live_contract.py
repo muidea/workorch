@@ -85,11 +85,12 @@ def _includes_all(actual: Any, required: Any) -> bool:
     return _string_set(required).issubset(_string_set(actual))
 
 
-def _receipt_matches_dispatch_operation(receipt: dict[str, Any], dispatch_id: str, operation_id: str) -> bool:
-    execution_key = receipt.get("executionKey")
-    if not isinstance(execution_key, str) or not execution_key:
+def _receipt_matches_sealed_operation(receipt: dict[str, Any], operation: dict[str, Any]) -> bool:
+    execution_key = operation.get("executionKey")
+    fence = operation.get("fence")
+    if not isinstance(execution_key, str) or not execution_key or not isinstance(fence, int) or fence < 1:
         return False
-    return execution_key.endswith(f"/{dispatch_id}/{operation_id}")
+    return receipt.get("executionKey") == execution_key and receipt.get("fence") == fence
 
 
 def coverage_binding_chain_errors(audit: Any, require_complete: bool) -> list[str]:
@@ -140,7 +141,14 @@ def coverage_binding_chain_errors(audit: Any, require_complete: bool) -> list[st
             continue
         dispatch_id = dispatch["id"]
         for operation in dispatch.get("operations") or []:
-            if not isinstance(operation, dict) or not operation.get("id") or not operation.get("kind"):
+            if (
+                not isinstance(operation, dict)
+                or not operation.get("id")
+                or not operation.get("kind")
+                or not operation.get("executionKey")
+                or not isinstance(operation.get("fence"), int)
+                or operation.get("fence") < 1
+            ):
                 errors.append(f"dispatch {dispatch_id} has malformed sealed operation")
                 continue
             key = (dispatch_id, operation["id"])
@@ -217,7 +225,7 @@ def coverage_binding_chain_errors(audit: Any, require_complete: bool) -> list[st
                 if isinstance(receipt, dict)
                 and receipt.get("operationId") == operation_id
                 and receipt.get("outcome") == "accepted"
-                and _receipt_matches_dispatch_operation(receipt, dispatch_id, operation_id)
+                and _receipt_matches_sealed_operation(receipt, operation)
             ]
             if not owner_receipts:
                 errors.append(f"evidence {value['id']} lacks accepted owner receipt for {dispatch_id}/{operation_id}")
@@ -504,8 +512,8 @@ def _self_test() -> None:
         },
         "candidateAttempts": [{"authorityContractId": "contract-1", "authoritySnapshotId": "authority-1", "state": "accepted", "stablePrefixHash": "prefix-1"}],
         "dispatches": [{"id": "dispatch-1", "authoritySnapshotId": "authority-1", "state": "committed", "operations": [
-            {"id": "write-1", "kind": "file/write", "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
-            {"id": "validate-1", "kind": "shell/command", "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
+            {"id": "write-1", "kind": "file/write", "executionKey": "exec/ws-1/run-1/dispatch-1/write-1", "fence": 1, "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
+            {"id": "validate-1", "kind": "shell/command", "executionKey": "exec/ws-1/run-1/dispatch-1/validate-1", "fence": 1, "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
         ]}],
         "grounding": {"prerequisiteObservations": [{"prerequisiteId": "manifest", "ownerModuleId": "blocks/file", "observationId": "obs-1", "dependencies": [{"domain": "workspace_tree", "ownerModuleId": "blocks/file", "subjectRef": "workspace", "revision": "tree-1"}]}], "providerCeiling": {"providerId": "ai-proxy", "modelId": "model-1", "contextWindowTokens": 128000, "providerMaxOutputTokens": 16384, "effectiveMaxOutputTokens": 16384, "maxInputTokens": 111616, "maxBytes": 446464, "capabilityRevision": "capability-1", "configurationRevision": "configuration-1"}},
         "repair": {"repairAttempts": 0, "validationOnlyRetries": 0, "noProgressCount": 0, "terminalDeliveryAttempts": 0},
@@ -522,6 +530,15 @@ def _self_test() -> None:
     }
     if errors := runtime_audit_errors(valid_audit, "ws-1", "run-1", True):
         raise AssertionError(f"valid Runtime audit rejected: {errors}")
+    governed_audit = json.loads(json.dumps(valid_audit))
+    governed_operation = governed_audit["dispatches"][0]["operations"][1]
+    governed_operation["executionKey"] = "exec/ws-1/run-1/original-dispatch/validate-1"
+    governed_operation["fence"] = 2
+    governed_receipt = governed_audit["operationReceipts"][1]
+    governed_receipt["executionKey"] = governed_operation["executionKey"]
+    governed_receipt["fence"] = governed_operation["fence"]
+    if errors := runtime_audit_errors(governed_audit, "ws-1", "run-1", True):
+        raise AssertionError(f"governance-resumed execution identity rejected: {errors}")
     valid_trace = {"providerId": "ai-proxy", "model": "model-1", "contextBudget": {"providerId": "ai-proxy", "modelId": "model-1", "capabilityRevision": "capability-1", "configurationRevision": "configuration-1", "maxBytes": 446464, "maxRequestBytes": 446464, "maxTokens": 111616, "estimatedOutputTokens": 16384, "overBudget": False}}
     if errors := provider_ceiling_trace_errors(valid_audit, [valid_trace]):
         raise AssertionError(f"matching sealed provider ceiling trace rejected: {errors}")

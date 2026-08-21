@@ -11,12 +11,17 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+// Definition admission is part of the application Runtime authority path,
+// matching execution-intent and clarification ingress. It must not use the
+// generic CRUD/read-port source identity.
+const definitionAdmissionSourceModule = "application/workorchd"
+
 func SubmitDefinitionAdmissionCandidate(ctx context.Context, hub magicevent.Hub, candidate workspacemodel.DefinitionAdmissionCandidate, expectedRevision uint64) (workspaceevents.SubmitDefinitionAdmissionCandidateResult, error) {
 	if hub == nil || candidate.WorkspaceID == "" {
 		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
 	}
 	candidate = candidate.WithHash()
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.SubmitDefinitionAdmissionCandidateCommand{Candidate: candidate, ExpectedCandidateRevision: expectedRevision})
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate, definitionAdmissionSourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.SubmitDefinitionAdmissionCandidateCommand{Candidate: candidate, ExpectedCandidateRevision: expectedRevision})
 	ownerevent.BindLane(event, workspaceevents.Contracts(), event.ID(), "workspace", string(candidate.WorkspaceID), candidate.WorkspaceID, "", "")
 	value, err := ownerevent.WorkspaceOwner[workspaceevents.SubmitDefinitionAdmissionCandidateResult](hub.Send(event), event.ID())
 	if err != nil {
@@ -32,7 +37,7 @@ func PromoteDefinitionAdmissionCandidate(ctx context.Context, hub magicevent.Hub
 	if hub == nil || candidate.WorkspaceID == "" {
 		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.PromoteDefinitionAdmissionCandidateCommand{
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate, definitionAdmissionSourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.PromoteDefinitionAdmissionCandidateCommand{
 		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,
 		CandidateHash: candidate.CandidateHash, AdmissionResult: admission, BlockingTicketID: blockingTicketID,
 	})
@@ -54,7 +59,7 @@ func AcknowledgeWorkspaceDefinitionClarification(ctx context.Context, hub magice
 	if hub == nil || command.WorkspaceID == "" {
 		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandAcknowledgeDefinitionClarification, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandAcknowledgeDefinitionClarification, definitionAdmissionSourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), event.ID(), "workspace", string(command.WorkspaceID), command.WorkspaceID, "", "")
 	return ownerevent.WorkspaceOwner[workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult](hub.Send(event), event.ID())
 }

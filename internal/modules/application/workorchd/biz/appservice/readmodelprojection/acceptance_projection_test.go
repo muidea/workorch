@@ -117,6 +117,8 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		projection.Audit.Grounding.TargetSelection == nil || projection.Audit.Grounding.TargetSelection.SelectorOwnerRef != "profile-1" || len(projection.Audit.Grounding.PrerequisiteObservations) != 1 ||
 		len(projection.Audit.Grounding.TargetSnapshots) != 1 || projection.Audit.Grounding.TargetSnapshots[0].ContentHash != "content-1" || projection.Audit.Grounding.ProviderCeiling == nil ||
 		projection.Audit.Grounding.ProviderCeiling.EffectiveMaxOutputTokens != 16384 || projection.Audit.Grounding.ProviderCeiling.MaxBytes != 446464 ||
+		len(projection.Audit.Dispatches) != 1 || len(projection.Audit.Dispatches[0].Operations) != 1 ||
+		projection.Audit.Dispatches[0].Operations[0].ExecutionKey != "exec-1" || projection.Audit.Dispatches[0].Operations[0].Fence != 1 ||
 		len(projection.Audit.OperationReceipts) != 2 {
 		t.Fatalf("runtime audit = %+v", projection.Audit)
 	}
