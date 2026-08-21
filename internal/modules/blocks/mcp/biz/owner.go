@@ -195,12 +195,33 @@ func mcpReconciliationObservation(command mcpevents.QueryRuntimeCWIReconciliatio
 }
 
 func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setCapabilityError(result, fmt.Errorf("runtime MCP operation requires Orchestrator source"))
+		return
+	}
 	command, ok := event.Data().(mcpevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if err := command.Execution.Validate(); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation, sealedAuthorization, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	data, err := mcpevents.OperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -211,30 +232,81 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(mcpevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
-	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
+	request := RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
-		Kind: command.OperationKind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		Kind: operation.Kind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory: command.WorkspaceInternalDirectory, TargetRefs: command.TargetRefs,
 		TargetRole: command.TargetRole,
-		Data:       command.Data, EvidencePolicies: command.EvidencePolicies,
-	})
+		Data:       data, EvidencePolicies: command.EvidencePolicies,
+	}
+	authorized, err := m.runtimeAdapter.authorizeRuntimeOperation(event.Context(), request, sealedAuthorization)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if err := m.runtimeAdapter.probeAuthorizedOperation(request, authorized); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	governance, err := mcpApprovalRequirement(operation, command.SealedOperation.PayloadHash, sealedAuthorization, authorized)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if governance != nil && command.Execution.GovernanceGrant == nil {
+		receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs,
+			runtimecontract.RuntimeOperationEvidence{Summary: "MCP capability requires approval before execution"}, nil, governance,
+			orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectGovernanceOnly})
+		committed, commitErr := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+		if commitErr != nil {
+			setCapabilityError(result, commitErr)
+			return
+		}
+		result.Set(mcpevents.ExecuteOperationResult{Receipt: committed}, nil)
+		return
+	}
+	if governance != nil {
+		if err := validateMCPApprovalGrant(command.Execution.GovernanceGrant, *governance); err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+	}
+	if err := prepareMCPEvidenceStore(command.WorkspaceInternalDirectory); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operationResult, executeErr := m.runtimeAdapter.executeAuthorizedOperation(event.Context(), request, authorized)
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
-	evidence := operationResult.Evidence
+	evidence, evidenceErr := buildMCPOperationEvidence(command.WorkspaceInternalDirectory, operation.Kind, sealedAuthorization, operationResult)
+	if evidenceErr != nil && executeErr == nil {
+		executeErr = evidenceErr
+		operationResult.FailureCode = "mcp_evidence_persist_failed"
+	}
+	if evidenceErr != nil {
+		evidence = runtimecontract.RuntimeOperationEvidence{Summary: "MCP operation did not produce persistable owner evidence"}
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, mcpFailureTargets(operationResult), mcpFailureTargetObservation(operationResult))
+		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, operation.Kind, operationResult.FailureCode, safeMCPFailureMessage(operationResult.FailureCode), mcpFailureTargets(operationResult), mcpFailureTargetObservation(operationResult))
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
 	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
-		if capabilities, capabilityErr := m.runtimeAdapter.EffectiveCapabilities(event.Context()); capabilityErr == nil {
-			if capability, found := findEffectiveMCPCapability(capabilities, command.Data.ServerID, command.Data.Tool); found {
-				observation.ObservedEffectScope = runtimecontract.NormalizeRuntimeEffectScope(runtimecontract.RuntimeEffectScope(capability.EffectScope))
-			}
+		scope, changed, beforeHash, afterHash, resourceChanges, effectErr := mcpReceiptEffectObservation(operationResult, sealedAuthorization)
+		if effectErr != nil {
+			status = runtimecontract.RuntimeOperationExecutionStatusRejected
+			operationResult.FailureCode = "mcp_effect_observation_invalid"
+			failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, operation.Kind, operationResult.FailureCode, safeMCPFailureMessage(operationResult.FailureCode), command.TargetRefs)
+		} else {
+			observation.ObservedEffectScope = scope
+			observation.Changed = changed
+			observation.NoOp = runtimecontract.RuntimeEffectIsDurable(sealedAuthorization.Policy.EffectScope) && !changed
+			observation.BeforeHash = beforeHash
+			observation.AfterHash = afterHash
+			observation.ResourceChanges = resourceChanges
 		}
-		observation.Changed = runtimecontract.RuntimeEffectIsDurable(observation.ObservedEffectScope)
 	}
-	attachMCPToolValidationObservation(&evidence, status, command.OperationKind, command.EvidenceKind, command.Data.ServerID, command.Data.Tool)
+	attachMCPToolValidationObservation(&evidence, status, operation.Kind, command.EvidenceKind, data.ServerID, data.Tool, sealedAuthorization.ValidationSurface)
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, nil, observation)
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
@@ -292,10 +364,19 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, catalogSnapshot.ServerIDs, []string{"configured-mcp-server", "owner-execution-policy"}, catalogSnapshot.Revision)
+	inventory, err := buildRuntimeMCPAdmissibility(command.PrerequisiteID, command.RequiredKinds, catalogSnapshot)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
+	}
+	observation := mcpAdmissibilityObservation(command.PrerequisiteID, inventory)
+	result.Set(mcpevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
+}
+
+func buildRuntimeMCPAdmissibility(prerequisiteID string, requiredKinds []string, catalogSnapshot runtimeMCPAdmissibilitySnapshot) (runtimecontract.RuntimeOperationAdmissibility, error) {
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(prerequisiteID, ModuleID, requiredKinds, nil, catalogSnapshot.ServerIDs, []string{"configured-mcp-server", "owner-execution-policy"}, catalogSnapshot.Revision)
+	if err != nil {
+		return runtimecontract.RuntimeOperationAdmissibility{}, err
 	}
 	inventory.ValidationRecipeRefs = append([]string(nil), catalogSnapshot.ValidationRecipes...)
 	inventory.ValidationSurfaces = runtimecontract.NormalizeRuntimeValidationSurfaces(catalogSnapshot.ValidationSurfaces)
@@ -303,11 +384,9 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	inventory.OperationPolicies = runtimeMCPOperationPolicies(inventory.MCPCapabilities, inventory.OperationKinds)
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {
-		setCapabilityError(result, err)
-		return
+		return runtimecontract.RuntimeOperationAdmissibility{}, err
 	}
-	observation := mcpAdmissibilityObservation(command.PrerequisiteID, inventory)
-	result.Set(mcpevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
+	return inventory, nil
 }
 
 func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontract.RuntimeMCPCapabilityContext {
@@ -342,26 +421,42 @@ func runtimeMCPOperationPolicies(capabilities []runtimecontract.RuntimeMCPCapabi
 	ret := make([]runtimecontract.RuntimeOperationPolicyFact, 0, len(capabilities))
 	for _, capability := range capabilities {
 		capability = runtimecontract.SealMCPCapabilityEffect(capability)
-		if !capability.Enabled || capability.OperationKind != runtimecontract.StepKindMCPToolCall || capability.ID == "" || capability.ServerID == "" || strings.TrimSpace(capability.Name) == "" {
+		if !capability.Enabled || capability.ID == "" || capability.ServerID == "" || strings.TrimSpace(capability.Name) == "" {
 			continue
 		}
 		if _, allowed := allowedKinds[capability.OperationKind]; !allowed {
 			continue
 		}
 		serverID := string(capability.ServerID)
-		tool := capability.Name
-		ret = append(ret, runtimecontract.RuntimeOperationPolicyFact{
-			ID:            "operation-policy/" + string(capability.ID),
-			OwnerModuleID: ModuleID,
-			OperationKind: capability.OperationKind,
-			SubjectRef:    string(capability.ID),
-			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
-				{Name: "serverId", String: &serverID},
-				{Name: "tool", String: &tool},
-			},
-			EffectScope:      runtimecontract.RuntimeEffectScope(capability.EffectScope),
-			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass),
-		})
+		appendPolicy := func(suffix, field, value string) {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return
+			}
+			id := "operation-policy/" + string(capability.ID)
+			if suffix != "" {
+				id += "/" + suffix
+			}
+			ret = append(ret, runtimecontract.RuntimeOperationPolicyFact{
+				ID: id, OwnerModuleID: ModuleID, OperationKind: capability.OperationKind, SubjectRef: string(capability.ID),
+				ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{{Name: "serverId", String: &serverID}, {Name: field, String: &value}},
+				EffectScope:      runtimecontract.RuntimeEffectScope(capability.EffectScope), IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass),
+			})
+		}
+		switch capability.OperationKind {
+		case runtimecontract.StepKindMCPToolCall:
+			appendPolicy("", "tool", capability.Name)
+		case runtimecontract.StepKindMCPResourceRead:
+			resource := capability.URI
+			if strings.TrimSpace(resource) == "" {
+				resource = capability.Name
+			}
+			appendPolicy("uri", "uri", resource)
+			appendPolicy("resource-uri", "resourceUri", resource)
+		case runtimecontract.StepKindMCPPromptGet:
+			appendPolicy("prompt", "prompt", capability.Name)
+			appendPolicy("name", "name", capability.Name)
+		}
 	}
 	return runtimecontract.NormalizeRuntimeOperationPolicyFacts(ret)
 }
@@ -414,10 +509,20 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
-	err = m.runtimeAdapter.ProbeOperation(event.Context(), RuntimeOperationRequest{
+	sealed, err := mcpevents.SealRuntimeOperation(operation, command.Admissibility)
+	if err != nil {
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_capability_not_admissible", err.Error())
+		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
+		return
+	}
+	request := RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID("probe/" + operation.ID), Kind: operation.Kind,
 		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory, TargetRefs: operation.TargetRefs, Data: data,
-	})
+	}
+	authorized, err := m.runtimeAdapter.authorizeRuntimeOperation(event.Context(), request, sealed.Authorization)
+	if err == nil {
+		err = m.runtimeAdapter.probeAuthorizedOperation(request, authorized)
+	}
 	if err != nil {
 		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_prerequisite_unavailable", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
@@ -472,11 +577,9 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the ready direct-proof owner catalog", "", revision, nil))
 		return
 	}
-	// A semantic behavior probe is intentionally narrower than an operation
-	// dispatch. It may invoke a tool only when the MCP registry owner has
-	// explicitly declared that invocation non-durable and safe to replay. This
-	// keeps probe execution owner-local without creating a hidden durable effect
-	// or a second operation-receipt path before SM-2 seals a binding.
+	// SM-2 feasibility is a catalog/schema/input-binding fact only. Effect and
+	// replay declarations constrain whether the surface may be sealed, but never
+	// authorize a transport call before an SM-3 dispatch exists.
 	effect := runtimecontract.NormalizeRuntimeEffectScope(runtimecontract.RuntimeEffectScope(capability.EffectScope))
 	idempotency := runtimecontract.NormalizeRuntimeOperationIdempotencyClass(runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass))
 	if !runtimecontract.RuntimeEffectIsNonDurable(effect) || idempotency != runtimecontract.RuntimeOperationIdempotencySafeToReplay {
@@ -496,9 +599,20 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 			return
 		}
 	}
-	// Re-check the owner-local catalog revision immediately before the behavior
-	// probe so a registry update cannot produce a feasible fact from a stale
-	// snapshot (and, importantly, cannot invoke the endpoint).
+	if probeErr := m.runtimeAdapter.ProbeOperation(event.Context(), RuntimeOperationRequest{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		StepID: common.StepID("semantic-preflight/" + command.FeasibilityBatchID + "/" + string(command.Proposal.CoverageWorkItemID)),
+		Kind:   runtimecontract.StepKindMCPToolCall, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+		TargetRefs: runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal),
+		Data:       mcpevents.OperationData{ServerID: serverID, Tool: tool},
+	}); probeErr != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_semantic_proof_unavailable", "MCP semantic transport preflight is unavailable", "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
+		return
+	}
+	// Re-check the owner-local catalog revision immediately before publishing the
+	// fact so a registry update cannot produce a feasible observation from a
+	// stale snapshot. No endpoint or process is touched in this path.
 	verifiedSnapshot, verifyErr := m.runtimeAdapter.runtimeOperationAdmissibilitySnapshot(event.Context())
 	if verifyErr != nil {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
@@ -509,27 +623,6 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, verifiedSnapshot.Revision, nil,
 			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime MCP semantic catalog changed during owner proof acquisition", revision, verifiedSnapshot.Revision, nil))
 		return
-	}
-	if recipeID := strings.TrimSpace(command.Proposal.ValidationRecipeID); recipeID != "" {
-		probeErr := m.probeSemanticValidationRecipe(event.Context(), command, serverID, tool)
-		if probeErr != nil {
-			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_semantic_proof_unavailable", probeErr.Error(), "", revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)))
-			return
-		}
-		// The probe itself is owner-local and side-effect bounded, but its receipt
-		// must still be tied to the same catalog revision that authorized it.
-		observedAfterProbe, revisionErr := m.runtimeAdapter.runtimeOperationAdmissibilitySnapshot(event.Context())
-		if revisionErr != nil {
-			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_catalog_unavailable", revisionErr.Error(), revision, "", nil))
-			return
-		}
-		if observedAfterProbe.Revision != revision {
-			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, observedAfterProbe.Revision, nil,
-				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime MCP semantic catalog changed during owner behavior probe", revision, observedAfterProbe.Revision, nil))
-			return
-		}
 	}
 	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
 }
@@ -551,7 +644,7 @@ func mcpSemanticCatalogUnavailableCode(err error) string {
 }
 
 // validateMCPBehaviorProbeSchema is deliberately conservative.  A semantic
-// behavior probe has no provider-authored input values, so it may only invoke
+// behavior probe has no provider-authored input values, so it may only admit
 // a capability whose sealed schema is a well-formed object and whose complete
 // schema (including simple combinators) has no required input.  This is an
 // owner-local safety gate: malformed schemas become typed unavailable facts,
@@ -634,49 +727,6 @@ func inspectMCPBehaviorProbeSchemaNode(schema workorcheventpayload.Payload, path
 		}
 	}
 	return requiresInput, nil
-}
-
-// probeSemanticValidationRecipe executes one bounded, owner-local MCP behavior
-// probe. It is deliberately not an EventHub operation and does not persist a
-// receipt: this is a factual feasibility observation before SM-2 binding seal.
-// Its caller has already fenced effect/idempotency and required input schema.
-func (m *Biz) probeSemanticValidationRecipe(ctx context.Context, command mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand, serverID, tool string) error {
-	if m == nil || m.runtimeAdapter == nil || strings.TrimSpace(serverID) == "" || strings.TrimSpace(tool) == "" {
-		return common.ErrInvalidArgument
-	}
-	request := RuntimeOperationRequest{
-		WorkspaceID:                   command.WorkspaceID,
-		RunID:                         command.RunID,
-		StepID:                        common.StepID("semantic-probe/" + command.FeasibilityBatchID + "/" + string(command.Proposal.CoverageWorkItemID)),
-		Kind:                          runtimecontract.StepKindMCPToolCall,
-		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
-		TargetRefs:                    runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal),
-		Data: mcpevents.OperationData{
-			ServerID: serverID,
-			Tool:     tool,
-		},
-	}
-	if err := m.runtimeAdapter.ProbeOperation(ctx, request); err != nil {
-		return fmt.Errorf("MCP behavior probe preflight failed: %w", err)
-	}
-	operationResult, err := m.runtimeAdapter.ExecuteOperation(ctx, request)
-	evidence := operationResult.Evidence
-	status := runtimecontract.RuntimeOperationExecutionStatusRejected
-	if err == nil && operationResult.Status == "completed" {
-		status = runtimecontract.RuntimeOperationExecutionStatusAccepted
-	}
-	attachMCPToolValidationObservation(&evidence, status, runtimecontract.StepKindMCPToolCall, runtimecontract.EvidenceKindValidation, serverID, tool)
-	if err != nil {
-		return fmt.Errorf("MCP behavior probe failed: %w", err)
-	}
-	if operationResult.Status != "completed" || evidence.Validation == nil {
-		return fmt.Errorf("MCP behavior probe did not produce an accepted validation observation")
-	}
-	// Check identity is owner-derived by attachMCPToolValidationObservation
-	// (the executable recipe itself).  The provider proposal is intentionally
-	// not consulted here: RequiredCheckRefs is not provider authority and must
-	// never be echoed into a feasibility decision.
-	return nil
 }
 
 func parseMCPValidationRecipe(recipe string) (string, string, error) {

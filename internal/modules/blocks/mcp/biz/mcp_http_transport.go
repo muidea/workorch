@@ -66,7 +66,7 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request Runti
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	startedAt := time.Now().UTC()
-	resp, err := a.client.Do(httpReq)
+	resp, err := mcpHTTPClient(a.client).Do(httpReq)
 	duration := time.Since(startedAt)
 	if err != nil {
 		stage := failedStage(spec)
@@ -79,17 +79,45 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request Runti
 		return finalizeMCPResult(output, err)
 	}
 	defer resp.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMCPResponseBytes+1))
 	if readErr != nil {
 		output := failureOutput(spec, failedStage(spec), readErr)
 		output.StatusCode = int64(resp.StatusCode)
 		output.DurationMillis = duration.Milliseconds()
 		return finalizeMCPResult(output, readErr)
 	}
+	if len(raw) > maxMCPResponseBytes {
+		err := fmt.Errorf("MCP response exceeds owner output limit")
+		output := failureOutput(spec, failedStage(spec), err)
+		output.StatusCode = int64(resp.StatusCode)
+		output.DurationMillis = duration.Milliseconds()
+		output.FailureCode = "mcp_output_too_large"
+		return finalizeMCPResult(output, err)
+	}
 	responsePayload, streamEvents := parseHTTPResponsePayload(raw, resp.Header.Get("Content-Type"), spec.Stream)
 	output := successOutput(spec, server, duration, responsePayload)
 	output.StatusCode = int64(resp.StatusCode)
 	output.StreamEvents = append([]MCPStreamEvent(nil), streamEvents...)
+	if len(responsePayload.JSON) == 0 || len(streamEvents) > maxMCPStreamEvents {
+		err := fmt.Errorf("MCP provider returned an invalid bounded protocol response")
+		output.Status = "failed"
+		output.Stage = failedStage(spec)
+		output.FailureCode = "mcp_protocol_invalid"
+		output.FailureMessage = err.Error()
+		output.Diagnostics = capabilityFailureDiagnostics(spec)
+		return finalizeMCPResult(output, err)
+	}
+	for _, event := range streamEvents {
+		if len(event.Payload.JSON) == 0 {
+			err := fmt.Errorf("MCP stream contained an invalid protocol event")
+			output.Status = "failed"
+			output.Stage = failedStage(spec)
+			output.FailureCode = "mcp_protocol_invalid"
+			output.FailureMessage = err.Error()
+			output.Diagnostics = capabilityFailureDiagnostics(spec)
+			return finalizeMCPResult(output, err)
+		}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err := fmt.Errorf("mcp endpoint returned status %d", resp.StatusCode)
 		output.Status = "failed"
@@ -108,4 +136,29 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request Runti
 		return finalizeMCPResult(output, err)
 	}
 	return finalizeMCPResult(output, nil)
+}
+
+func mcpHTTPClient(base *http.Client) *http.Client {
+	if base == nil {
+		base = http.DefaultClient
+	}
+	client := *base
+	previous := base.CheckRedirect
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if len(via) == 0 {
+			return nil
+		}
+		if len(via) >= 5 {
+			return fmt.Errorf("MCP redirect limit exceeded")
+		}
+		origin := via[0].URL
+		if request.URL.Scheme != origin.Scheme || request.URL.Host != origin.Host {
+			return fmt.Errorf("MCP cross-origin redirect is not allowed")
+		}
+		if previous != nil {
+			return previous(request, via)
+		}
+		return nil
+	}
+	return &client
 }

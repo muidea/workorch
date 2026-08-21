@@ -98,14 +98,18 @@ func firstCapabilityInputTarget(spec operationSpec) string {
 
 func normalizedCapabilityInputTarget(value string) string {
 	text := strings.TrimSpace(value)
-	if text == "" || strings.Contains(text, "://") {
-		return text
+	if text == "" || len(text) > 512 || strings.Contains(text, "://") || filepath.IsAbs(text) {
+		return ""
 	}
 	text = filepath.ToSlash(text)
 	for strings.HasPrefix(text, "./") {
 		text = strings.TrimPrefix(text, "./")
 	}
-	return strings.Trim(text, "/")
+	text = strings.Trim(text, "/")
+	if text == "" || text == ".." || strings.HasPrefix(text, "../") || strings.Contains(strings.ToLower(text), "credential") || strings.Contains(strings.ToLower(text), "secret") {
+		return ""
+	}
+	return text
 }
 
 func parseHTTPResponsePayload(raw []byte, contentType string, requestedStream bool) (MCPResponsePayload, []MCPStreamEvent) {
@@ -121,19 +125,22 @@ func parseHTTPResponsePayload(raw []byte, contentType string, requestedStream bo
 
 func parseStreamEvents(raw []byte) []MCPStreamEvent {
 	lines := bytes.Split(raw, []byte{'\n'})
-	events := make([]MCPStreamEvent, 0, len(lines))
+	events := make([]MCPStreamEvent, 0, min(len(lines), maxMCPStreamEvents+1))
 	var sseData []string
-	flushSSE := func() {
+	flushSSE := func() bool {
 		if len(sseData) == 0 {
-			return
+			return false
 		}
 		events = append(events, MCPStreamEvent{Payload: parseResponsePayload([]byte(strings.Join(sseData, "\n")))})
 		sseData = nil
+		return len(events) > maxMCPStreamEvents
 	}
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(string(line))
 		if trimmed == "" {
-			flushSSE()
+			if flushSSE() {
+				return events
+			}
 			continue
 		}
 		if strings.HasPrefix(trimmed, ":") || strings.HasPrefix(trimmed, "event:") {
@@ -143,8 +150,13 @@ func parseStreamEvents(raw []byte) []MCPStreamEvent {
 			sseData = append(sseData, strings.TrimSpace(strings.TrimPrefix(trimmed, "data:")))
 			continue
 		}
-		flushSSE()
+		if flushSSE() {
+			return events
+		}
 		events = append(events, MCPStreamEvent{Payload: parseResponsePayload([]byte(trimmed))})
+		if len(events) > maxMCPStreamEvents {
+			return events
+		}
 	}
 	flushSSE()
 	return events
@@ -174,17 +186,26 @@ func toolResultError(spec operationSpec, result MCPResponsePayload) error {
 	if err := json.Unmarshal(result.JSON, &payload); err != nil || !payload.IsError {
 		return nil
 	}
-	message := ""
-	for _, item := range payload.Content {
-		if strings.TrimSpace(item.Text) != "" {
-			message = strings.TrimSpace(item.Text)
-			break
-		}
+	return fmt.Errorf("mcp tool returned an error result")
+}
+
+func safeMCPFailureMessage(code string) string {
+	switch strings.TrimSpace(code) {
+	case "mcp_output_too_large":
+		return "MCP response exceeded the owner output limit"
+	case "mcp_protocol_invalid":
+		return "MCP provider returned an invalid protocol response"
+	case "mcp_effect_observation_invalid":
+		return "MCP provider did not return the sealed owner effect observation"
+	case "mcp_evidence_persist_failed":
+		return "MCP owner could not persist bounded operation evidence"
+	case "mcp_operation_timeout", "tool_call_timeout", "resource_read_timeout", "prompt_get_timeout":
+		return "MCP operation exceeded the configured owner timeout"
+	case "tool_call_failed", "resource_read_failed", "prompt_get_failed":
+		return "MCP provider rejected or failed the requested operation"
+	default:
+		return "MCP operation failed before producing admissible evidence"
 	}
-	if message == "" {
-		message = "mcp tool returned isError=true"
-	}
-	return fmt.Errorf("mcp tool %s failed: %s", spec.Tool, message)
 }
 
 func finalizeMCPResult(output RuntimeOperationResult, executeErr error) (RuntimeOperationResult, error) {
@@ -192,7 +213,7 @@ func finalizeMCPResult(output RuntimeOperationResult, executeErr error) (Runtime
 		output.FailureMessage = executeErr.Error()
 	}
 	if executeErr != nil {
-		output.FailureCode = firstMCPNonEmpty(output.Stage, "mcp_operation_failed")
+		output.FailureCode = firstMCPNonEmpty(output.FailureCode, output.Stage, "mcp_operation_failed")
 		// A request target is diagnostic context, not an observed failing
 		// implementation target. Only an explicit structured target returned by
 		// the failing MCP capability may cross this owner boundary as a failure

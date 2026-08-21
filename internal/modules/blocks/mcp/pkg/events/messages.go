@@ -16,9 +16,8 @@ type OperationData struct {
 
 type ExecuteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	OperationKind string
-	TargetRole    string
-	Data          OperationData
+	SealedOperation SealedRuntimeOperation
+	TargetRole      string
 }
 
 type ExecuteOperationResult struct {

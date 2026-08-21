@@ -136,15 +136,17 @@ func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request r
 }
 
 func (e eventRuntimeOperationExecutor) executeMCP(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := mcpevents.OperationDataFromRuntimeOperation(request.Operation)
+	if request.OwnerCatalog == nil {
+		return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("runtime MCP execution requires persisted owner catalog")
+	}
+	sealedOperation, err := mcpevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		OperationKind:                    request.Operation.Kind,
+		SealedOperation:                  sealedOperation,
 		TargetRole:                       request.TargetRole,
-		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(mcpevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleMCP, magicevent.NewHeader(), ctx, command))
 	response, err := mcpOperationResponse(result)

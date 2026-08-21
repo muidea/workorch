@@ -376,6 +376,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `approvalId` 参数或普通 Approval 查询旁路。Web search/fetch 发布 `none + at_most_once`；owner 在 external request 前验证
   Orchestrator source、current claimed receipt authority 与 exact grant。DNS/redirect/SSRF 判定和实际 transport dial 由 owner 绑定，
   receipt 只返回真实有界 content summary/hash、opaque source/raw refs；请求提交后的 receipt-loss 必须由 SM-3 收敛为 unknown。
+- MCP dispatch 同样只向 owner 发送完整 `SealedRuntimeOperation`；Orchestrator adapter 从 persisted MCP admissibility
+  选择 exact Capability/policy 并绑定 catalog/Registry revision、完整参数、effect/idempotency 与 validation surface。
+  MCP owner 的 SM-2 feasibility 零 endpoint/process side effect；SM-3 external call 前重验 producer、claimed receipt
+  authority、current Registry revision、Server/Capability/allowlist/schema/policy 与 exact approval grant。tool/resource/prompt
+  输出只以 owner-private bounded hash/raw ref 进入 receipt；durable effect 必须有真实 changed/no-op revision observation，
+  不能从 capability 声明回显 `Changed=true`。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；只有当前 focus 每个 required CWI 都获得 exact binding-matched evidence 后，evidence commit 才能原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。
@@ -511,7 +517,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - operation-scoped governance continue 保持原 ExecutionKey，通过 CAS 将 governance fence `N` 推进到 resume fence `N+1`；typed grant 必须绑定唯一 ticket/approval、resolution、dependency、subject、requested action、authorization hash 与治理 receipt hash。各 concrete owner 在 receipt preflight 时验证 grant，禁止复用 `Receipt(K,N)=governance_required` 作为普通 evidence。
 - receipt query 对 persisted governance grant 执行严格 presence parity：调用方省略已持久化 grant、无 binding 时额外附加 grant、或任一字段
   漂移均 conflict，并在 capability side effect 前返回。
-- File/Git/MCP/Shell/SSH/Web execute Result 只返回 owner-persisted `RuntimeOperationReceipt`；EventID、operation/evidence identity 与 source ref 由 Orchestrator 从 sealed dispatch/operation contract 纯派生，capability owner 不回显或重建第二套证据身份。
+- File/Git/MCP/Shell/SSH/Web execute Result 只返回 owner-persisted `RuntimeOperationReceipt`；Runtime EventID、
+  operation/evidence identity 与 authority source ref 由 Orchestrator 从 sealed dispatch/operation contract 纯派生，
+  capability owner 不回显或重建第二套 Runtime 身份。owner 可在 receipt evidence 内提供内容寻址的 opaque
+  source/raw ref 与 hash 作为 factual payload locator，但它们不是 Runtime EventID 或第二份 evidence authority。
 - operation-scoped governance candidate 必须保留 suspended binding 的 dependency kind/subject/authorization target；
   不得把 persisted `approval/configuration/external` 退化为默认 `decision`，否则 ticket/approval 无法回绑 source operation。
 - `runtime_governance` resolution committed 后，Orchestrator 先持久化 governance evidence 并发布 immutable

@@ -24,6 +24,7 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), x.aggregate.Facts.Resources.CapabilityStates...),
 		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
+		OwnerCatalog:                       runtimeOwnerCatalogForOperation(x.aggregate.Facts.Resources.OperationAdmissibilities, operation),
 	})
 	if err == nil {
 		return activeDispatchOwnerCall{result: result, flow: activeDispatchExecutionReady}, nil
@@ -47,6 +48,15 @@ func (x *activeDispatchExecution) callOperationOwner(operation runtimecontract.R
 	}
 	_, _ = x.component.markOperationExecutionOutcomeUnknown(x.ctx, x.workspaceID, x.runID, operation.ID)
 	return activeDispatchOwnerCall{}, err
+}
+
+func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation) *runtimecontract.RuntimeOperationAdmissibility {
+	owner := runtimecontract.RuntimeModuleForOperationKind(operation.Kind)
+	catalog, found := runtimeOperationAdmissibilityForKind(values, owner, operation.Kind)
+	if !found {
+		return nil
+	}
+	return &catalog
 }
 
 func runtimeWorkspaceManifestObservation(aggregate RuntimeAggregate) *runtimecontract.RuntimePrerequisiteObservation {

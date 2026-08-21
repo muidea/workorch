@@ -68,6 +68,10 @@ Application builds typed RuntimeBootstrap
   仍可被合法 operation 调用，但在 owner 尚无 sealed input binding 时只记录 `prerequisite_required` surface。技术上 ready
   的 auxiliary/not-declared surface 也只保留审计；只有 `ready + direct` 进入 semantic provider 的 recipe enum/C3。LLM
   projection 不暴露 non-selectable identity、owner-private binding/schema/effect 或 executable recipe 内容。
+- MCP semantic/operation feasibility 只读取同一 Registry revision 并执行静态 prerequisite 校验，零 endpoint/process
+  side effect。SM-3 execute 将完整 operation 与 exact Capability/policy/catalog revision 封印；owner 在 transport 前重验
+  claimed receipt authority、current Registry、schema/effect/idempotency 与 approval grant。provider output 只以 owner-private
+  bounded hash/raw ref 进入 receipt，durable changed/no-op 必须来自 typed effect observation，不能由声明推断。
 - profile 可以声明 owner-neutral postcondition，例如 `validation_preparation` 要求 Shell 当前 catalog 存在 selectable
   managed-validation surface。Workorchd 只编译该声明，Shell 只发布 typed catalog，Orchestrator SM-2 只在 sealed proof
   其余条件均成立后检查 `ready + direct` current fact；assessment claim 或一次成功 File patch 不能替代该事实。

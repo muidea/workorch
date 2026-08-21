@@ -247,6 +247,29 @@ func stdioLaunchConfig(server *mcpmodel.Server, request RuntimeOperationRequest)
 	return command, expandWorkspaceStringSlice(server.Args, request), env, nil
 }
 
+// probeStdioLaunchCommand validates only launch metadata that is safe to
+// inspect during SM-2. Environment references are checked structurally here
+// and resolved only by stdioLaunchConfig immediately before SM-3 execution.
+func probeStdioLaunchCommand(server *mcpmodel.Server) (string, error) {
+	if server == nil {
+		return "", common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(server.Endpoint) != "" {
+		command, _, err := parseStdioEndpoint(server.Endpoint)
+		return command, err
+	}
+	command := strings.TrimSpace(server.Command)
+	if command == "" {
+		return "", fmt.Errorf("%w: stdio MCP server requires endpoint or command", common.ErrInvalidArgument)
+	}
+	for _, reference := range server.Env {
+		if !registryevents.ValidEnvironmentReference(strings.TrimSpace(reference)) {
+			return "", fmt.Errorf("%w: invalid MCP environment reference", common.ErrInvalidArgument)
+		}
+	}
+	return command, nil
+}
+
 func stdioSessionKey(workspaceID common.WorkspaceID, serverID string) string {
 	if workspaceID == "" {
 		return strings.TrimSpace(serverID)

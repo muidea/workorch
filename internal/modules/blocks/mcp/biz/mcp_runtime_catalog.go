@@ -68,33 +68,52 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 		return string(orderedServers[i].ID) < string(orderedServers[j].ID)
 	})
 	ids := make([]string, 0, len(orderedServers))
-	serverAllowedTools := make(map[string]map[string]struct{}, len(orderedServers))
+	type allowedSurfaces struct {
+		tools     map[string]struct{}
+		resources map[string]struct{}
+		prompts   map[string]struct{}
+	}
+	serverAllowed := make(map[string]allowedSurfaces, len(orderedServers))
 	for _, server := range orderedServers {
 		if server == nil || !server.Enabled || strings.TrimSpace(string(server.ID)) == "" {
 			continue
 		}
 		ids = append(ids, string(server.ID))
-		allowed := make(map[string]struct{}, len(server.AllowedTools))
+		allowed := allowedSurfaces{
+			tools: make(map[string]struct{}, len(server.AllowedTools)), resources: make(map[string]struct{}, len(server.AllowedResources)),
+			prompts: make(map[string]struct{}, len(server.AllowedPrompts)),
+		}
 		for _, tool := range server.AllowedTools {
 			if tool = strings.TrimSpace(tool); tool != "" {
-				allowed[tool] = struct{}{}
+				allowed.tools[tool] = struct{}{}
 			}
 		}
-		serverAllowedTools[string(server.ID)] = allowed
+		for _, resource := range server.AllowedResources {
+			if resource = strings.TrimSpace(resource); resource != "" {
+				allowed.resources[resource] = struct{}{}
+			}
+		}
+		for _, prompt := range server.AllowedPrompts {
+			if prompt = strings.TrimSpace(prompt); prompt != "" {
+				allowed.prompts[prompt] = struct{}{}
+			}
+		}
+		serverAllowed[string(server.ID)] = allowed
 	}
 	if len(ids) == 0 {
 		return runtimeMCPAdmissibilitySnapshot{}, fmt.Errorf("%w: no enabled mcp server is available", common.ErrNotFound)
 	}
 	persistedCapabilities := make([]*mcpmodel.Capability, 0, len(registry.Capabilities))
 	for _, capability := range registry.Capabilities {
-		if capability == nil || !capability.Enabled || capability.Kind != mcpmodel.CapabilityKindTool ||
+		if capability == nil || !capability.Enabled ||
 			strings.TrimSpace(string(capability.ID)) == "" || strings.TrimSpace(string(capability.ServerID)) == "" ||
 			strings.TrimSpace(capability.Name) == "" || strings.TrimSpace(capability.Name) != capability.Name ||
 			strings.TrimSpace(capability.EffectScope) == string(runtimecontract.RuntimeEffectUnknown) ||
 			strings.TrimSpace(capability.IdempotencyClass) == string(runtimecontract.RuntimeOperationIdempotencyUnknown) {
 			continue
 		}
-		if _, enabled := serverAllowedTools[string(capability.ServerID)][capability.Name]; !enabled {
+		allowed, serverEnabled := serverAllowed[string(capability.ServerID)]
+		if !serverEnabled || !mcpCapabilityAllowed(capability, allowed.tools, allowed.resources, allowed.prompts) {
 			continue
 		}
 		persistedCapabilities = append(persistedCapabilities, capability)
@@ -120,6 +139,9 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 	})
 	surfaces := make([]runtimecontract.RuntimeValidationSurface, 0, len(persistedCapabilities))
 	for _, capability := range persistedCapabilities {
+		if capability.Kind != mcpmodel.CapabilityKindTool {
+			continue
+		}
 		surface := runtimeMCPValidationSurface(capability)
 		surfaces = append(surfaces, surface)
 	}
@@ -131,6 +153,29 @@ func (a *RuntimeAdapter) runtimeOperationAdmissibilitySnapshot(ctx context.Conte
 		Capabilities:       mcpmodel.CloneCapabilities(persistedCapabilities),
 		Revision:           registryRevision,
 	}, nil
+}
+
+func mcpCapabilityAllowed(capability *mcpmodel.Capability, tools, resources, prompts map[string]struct{}) bool {
+	if capability == nil {
+		return false
+	}
+	switch capability.Kind {
+	case mcpmodel.CapabilityKindTool:
+		_, found := tools[strings.TrimSpace(capability.Name)]
+		return found
+	case mcpmodel.CapabilityKindResource:
+		ref := strings.TrimSpace(capability.URI)
+		if ref == "" {
+			ref = strings.TrimSpace(capability.Name)
+		}
+		_, found := resources[ref]
+		return found
+	case mcpmodel.CapabilityKindPrompt:
+		_, found := prompts[strings.TrimSpace(capability.Name)]
+		return found
+	default:
+		return false
+	}
 }
 
 func runtimeMCPValidationSurface(capability *mcpmodel.Capability) runtimecontract.RuntimeValidationSurface {

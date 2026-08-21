@@ -3292,17 +3292,36 @@ func TestRuntimeOperationExecutorPassesFocusTargetRoleToMCPOwner(t *testing.T) {
 	t.Cleanup(func() { mcpObserver.Unsubscribe(mcpevents.TopicExecuteOperation) })
 
 	serverID, tool := "server-a", "lookup.references"
+	capabilityID := common.MCPCapabilityID("server-a:tool:lookup.references")
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ObservedRevision: "mcp-registry-v1",
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
+			ID: capabilityID, ServerID: common.MCPServerID(serverID), Kind: "tool", Name: tool, Enabled: true, Status: "enabled",
+			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "mcp-policy", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: string(capabilityID),
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}},
+			EffectScope:      runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	response, err := (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtime.RuntimeOperationExecutionRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1"}, TargetRole: "implementation",
+		Execution: runtimecontract.RuntimeOperationExecutionRecord{OperationID: "mcp-1", ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
 		Operation: runtimecontract.RuntimeOperation{
 			ID: "mcp-1", Kind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			Parameters: []runtimecontract.OperationParameter{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}},
-		}, EvidenceKind: runtimecontract.EvidenceKindValidation,
+		}, EvidenceKind: runtimecontract.EvidenceKindValidation, OwnerCatalog: &catalog,
 	})
+	sealedOperation, sealedAuthorization, sealedErr := captured.SealedOperation.ValidateForExecution(captured.RuntimeOperationExecutionContext)
+	sealedData, dataErr := mcpevents.OperationDataFromRuntimeOperation(sealedOperation)
 	if err != nil || response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || captured.TargetRole != "implementation" ||
-		captured.Data.ServerID != "server-a" || captured.Data.Tool != "lookup.references" {
-		t.Fatalf("response=%+v command=%+v err=%v", response, captured, err)
+		sealedErr != nil || dataErr != nil || sealedData.ServerID != "server-a" || sealedData.Tool != "lookup.references" ||
+		sealedAuthorization.Capability.ID != capabilityID {
+		t.Fatalf("response=%+v command=%+v err=%v sealedErr=%v dataErr=%v", response, captured, err, sealedErr, dataErr)
 	}
 }
 

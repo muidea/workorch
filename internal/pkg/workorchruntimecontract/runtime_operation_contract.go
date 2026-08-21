@@ -555,6 +555,9 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		if parameterString(values["serverId"]) == "" {
 			return fmt.Errorf("kind %q requires serverId", operation.Kind)
 		}
+		if err := validateRuntimeMCPParameters(operation, values); err != nil {
+			return err
+		}
 		switch operation.Kind {
 		case StepKindMCPToolCall:
 			if parameterString(values["tool"]) == "" {
@@ -832,11 +835,61 @@ func runtimeOperationDynamicParameterPolicy(kind string) string {
 // limits actively enforced by ValidateRuntimeOperationContract.
 func runtimeOperationValidationPolicy(kind string) string {
 	switch CanonicalRuntimeBlockKind(kind) {
+	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
+		return "mcp.v2:fixed=4096,dynamic=64x16384,dynamic-name=128,total-string=131072,sealed-owner-catalog"
 	case StepKindWebSearch, StepKindWebFetch:
 		return "web.v2:provider=128,query=4096,url=4096,metadata=64,domains=32x253,max-results=20,max-bytes=1048576,governance=execution-grant-only"
 	default:
 		return "default"
 	}
+}
+
+func validateRuntimeMCPParameters(operation RuntimeOperation, values map[string]OperationParameter) error {
+	const (
+		maxDynamicCount = 64
+		maxDynamicName  = 128
+		maxDynamicValue = 16 * 1024
+		maxTotalStrings = 128 * 1024
+	)
+	if len(operation.Parameters) > maxDynamicCount+8 {
+		return fmt.Errorf("kind %q exceeds the bounded MCP parameter count", operation.Kind)
+	}
+	fixedLimits := map[string]int{"serverId": 256, "tool": 256, "prompt": 256, "name": 256, "uri": 4096, "resourceUri": 4096, "summary": 4096}
+	totalStrings := 0
+	for name, limit := range fixedLimits {
+		if value := parameterRawString(values[name]); len(value) > limit {
+			return fmt.Errorf("kind %q parameter %q exceeds %d bytes", operation.Kind, name, limit)
+		} else {
+			totalStrings += len(value)
+		}
+	}
+	dynamicCount := 0
+	for _, parameter := range operation.Parameters {
+		name := strings.TrimSpace(parameter.Name)
+		if !isMCPDynamicOperationParameter(operation.Kind, name) {
+			continue
+		}
+		dynamicCount++
+		var suffix string
+		if operation.Kind == StepKindMCPToolCall {
+			suffix = strings.TrimSpace(strings.TrimPrefix(name, "input."))
+		} else {
+			suffix = strings.TrimSpace(strings.TrimPrefix(name, "arguments."))
+		}
+		if suffix == "" || len(suffix) > maxDynamicName {
+			return fmt.Errorf("kind %q dynamic parameter %q has an invalid bounded name", operation.Kind, name)
+		}
+		if parameter.String != nil {
+			if len(*parameter.String) > maxDynamicValue {
+				return fmt.Errorf("kind %q dynamic parameter %q exceeds %d bytes", operation.Kind, name, maxDynamicValue)
+			}
+			totalStrings += len(*parameter.String)
+		}
+	}
+	if dynamicCount > maxDynamicCount || totalStrings > maxTotalStrings {
+		return fmt.Errorf("kind %q exceeds bounded MCP input budget", operation.Kind)
+	}
+	return nil
 }
 
 func validateRuntimeWebCommonParameters(kind string, values map[string]OperationParameter) error {

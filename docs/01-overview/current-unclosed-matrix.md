@@ -58,6 +58,11 @@ Last Verified: 2026-08-21
 - callable capability、validation surface readiness 与 proof applicability 分离；required-input MCP recipe 保留 typed
   prerequisite audit、零 endpoint side effect，ready auxiliary surface 也不得关闭 CWI；只有 `ready + direct` 进入 provider
   schema/C3/correction，readiness/applicability/schema/binding 变化进入 catalog snapshot identity；
+- MCP SM-2 feasibility 只核对 owner catalog/schema/input binding 与本地静态 prerequisite，不能执行 tool/resource/prompt。
+  SM-3 concrete command 绑定 complete operation、exact Capability/policy/catalog revision 且无第二份 mutable Data；producer、
+  active+claimed receipt authority、current Registry/allowlist/schema/effect/idempotency 与 exact approval grant 均在 transport
+  前 fail-closed。tool/resource/prompt 输出经 owner-private byte/event guard 写入 content-addressed raw ref；durable changed/no-op
+  只接受 typed before/after/resource observation，receipt-loss 按 sealed replay class 收敛；
 - profile owner-fact postcondition 只由 current capability catalog 满足；Workorchd 只编译、capability owner 只发布事实、
   Orchestrator SM-2 只在其余 proof 完整时判定/有界重开，assessment claim 不得越权关闭；accepted no-progress operation
   shape 跨同一 CWI successor focus 保留，SM-3 在第二次副作用前拒绝重放；

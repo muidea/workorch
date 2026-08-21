@@ -101,13 +101,15 @@ func readJSONRPCResponseWithContext(ctx context.Context, reader *bufio.Reader, e
 
 func readJSONRPCResponse(reader *bufio.Reader, expectedID int) (jsonRPCResponse, []MCPStreamEvent, error) {
 	events := []MCPStreamEvent{}
+	totalBytes := 0
 	for {
-		line, err := reader.ReadBytes('\n')
+		line, err := readBoundedJSONRPCLine(reader, maxMCPResponseBytes)
 		if err != nil {
 			return jsonRPCResponse{}, events, err
 		}
-		if len(line) > 1<<20 {
-			return jsonRPCResponse{}, events, fmt.Errorf("%w: mcp stdio response line exceeds 1MiB", common.ErrInvalidArgument)
+		totalBytes += len(line)
+		if totalBytes > maxMCPResponseBytes {
+			return jsonRPCResponse{}, events, fmt.Errorf("%w: mcp stdio response exceeds owner output limit", common.ErrInvalidArgument)
 		}
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -119,12 +121,37 @@ func readJSONRPCResponse(reader *bufio.Reader, expectedID int) (jsonRPCResponse,
 		}
 		if jsonRPCIDMatches(response.ID, expectedID) {
 			if response.Error != nil {
-				return response, events, fmt.Errorf("mcp json-rpc error %d: %s", response.Error.Code, response.Error.Message)
+				return response, events, fmt.Errorf("mcp json-rpc returned an error response")
 			}
 			return response, events, nil
 		}
 		if response.Method != "" {
+			if len(events) == maxMCPStreamEvents {
+				return jsonRPCResponse{}, events, fmt.Errorf("%w: mcp stdio notification count exceeds owner limit", common.ErrInvalidArgument)
+			}
 			events = append(events, MCPStreamEvent{Method: response.Method, Params: append(json.RawMessage(nil), response.Params...)})
+		}
+	}
+}
+
+func readBoundedJSONRPCLine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
+	if reader == nil || maxBytes <= 0 {
+		return nil, common.ErrInvalidArgument
+	}
+	line := make([]byte, 0, min(reader.Size(), maxBytes))
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(line)+len(fragment) > maxBytes {
+			return nil, fmt.Errorf("%w: mcp stdio response line exceeds owner output limit", common.ErrInvalidArgument)
+		}
+		line = append(line, fragment...)
+		switch err {
+		case nil:
+			return line, nil
+		case bufio.ErrBufferFull:
+			continue
+		default:
+			return nil, err
 		}
 	}
 }

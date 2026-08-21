@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -257,6 +258,96 @@ func TestRuntimeAdapterCollectsHTTPStreamEvents(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterRejectsOversizedAndUnboundedHTTPResponses(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		body        func() string
+		wantCode    string
+	}{
+		{
+			name: "oversized response",
+			body: func() string {
+				return `{"content":"` + strings.Repeat("x", maxMCPResponseBytes) + `"}`
+			},
+			wantCode: "mcp_output_too_large",
+		},
+		{
+			name: "too many stream events", contentType: "text/event-stream",
+			body: func() string {
+				return strings.Repeat("data: {\"delta\":\"x\"}\n\n", maxMCPStreamEvents+1)
+			},
+			wantCode: "mcp_protocol_invalid",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.contentType != "" {
+					w.Header().Set("Content-Type", tc.contentType)
+				}
+				_, _ = w.Write([]byte(tc.body()))
+			}))
+			defer server.Close()
+			adapter := NewRuntimeAdapter(newMCPService(t, mcpmodel.Server{
+				ID: "mcp-bounded-response", Transport: "http", Endpoint: server.URL,
+				Enabled: true, AllowedTools: []string{"inspect"}, TimeoutMillis: 1000,
+			}))
+			result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+				Kind: runtimecontract.StepKindMCPToolCall,
+				Data: mcpevents.OperationData{ServerID: "mcp-bounded-response", Tool: "inspect", Stream: tc.contentType != ""},
+			})
+			if err == nil || result.FailureCode != tc.wantCode {
+				t.Fatalf("bounded MCP response result=%+v err=%v, want code %q", result, err, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestRuntimeAdapterRejectsCrossOriginRedirectBeforeForwardingPayload(t *testing.T) {
+	var destinationCalls atomic.Int32
+	destination := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		destinationCalls.Add(1)
+	}))
+	defer destination.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", destination.URL+"/capture")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+	adapter := NewRuntimeAdapter(newMCPService(t, mcpmodel.Server{
+		ID: "mcp-redirect", Transport: "http", Endpoint: origin.URL,
+		Enabled: true, AllowedTools: []string{"inspect"}, TimeoutMillis: 1000,
+	}))
+	result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindMCPToolCall,
+		Data: mcpevents.OperationData{ServerID: "mcp-redirect", Tool: "inspect", Input: []runtimecontract.OperationParameter{mcpStringArgument("secret", "owner-private-input")}},
+	})
+	if err == nil || destinationCalls.Load() != 0 || result.Status != "failed" {
+		t.Fatalf("cross-origin MCP redirect result=%+v err=%v destinationCalls=%d", result, err, destinationCalls.Load())
+	}
+}
+
+func TestReadJSONRPCResponseRejectsOversizedLineAndNotificationCount(t *testing.T) {
+	t.Run("oversized line", func(t *testing.T) {
+		reader := bufio.NewReader(strings.NewReader(strings.Repeat("x", maxMCPResponseBytes+1) + "\n"))
+		if _, _, err := readJSONRPCResponse(reader, 1); err == nil || !strings.Contains(err.Error(), "output limit") {
+			t.Fatalf("oversized stdio response error = %v", err)
+		}
+	})
+	t.Run("notification count", func(t *testing.T) {
+		var input strings.Builder
+		for index := 0; index <= maxMCPStreamEvents; index++ {
+			input.WriteString(`{"jsonrpc":"2.0","method":"progress","params":{"value":1}}`)
+			input.WriteByte('\n')
+		}
+		reader := bufio.NewReader(strings.NewReader(input.String()))
+		if _, _, err := readJSONRPCResponse(reader, 1); err == nil || !strings.Contains(err.Error(), "notification count") {
+			t.Fatalf("unbounded stdio notifications error = %v", err)
+		}
+	})
+}
+
 func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +374,7 @@ func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
 		Kind: "mcp/tool_call",
 		Data: mcpevents.OperationData{ServerID: "mcp-http-tool-error", Tool: "repo.summary"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "missing argument path") {
+	if err == nil || err.Error() != "mcp tool returned an error result" || strings.Contains(err.Error(), "missing argument path") {
 		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
 	}
 	if result.Status != "failed" || result.Stage != "mcp_tool_call_failed" {
@@ -319,7 +410,7 @@ func TestRuntimeAdapterFailureDiagnosticsKeepToolInputAsContextOnly(t *testing.T
 		Kind: "mcp/tool_call",
 		Data: mcpevents.OperationData{ServerID: "mcp-http-tool-target", Tool: "lookup.references", Input: []runtimecontract.OperationParameter{mcpStringArgument("path", "src/symbol.go"), mcpIntegerArgument("line", 1), mcpIntegerArgument("col", 13)}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "column is beyond end of line") {
+	if err == nil || err.Error() != "mcp tool returned an error result" || strings.Contains(err.Error(), "column is beyond end of line") {
 		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
 	}
 	diagnostics := result.Diagnostics
@@ -359,7 +450,7 @@ func TestRuntimeAdapterFailureDiagnosticsUseExplicitResponseFailureTargets(t *te
 			Input: []runtimecontract.OperationParameter{mcpStringArgument("path", "validation-entry.go")},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "implementation failure") {
+	if err == nil || err.Error() != "mcp tool returned an error result" || strings.Contains(err.Error(), "implementation failure") {
 		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
 	}
 	if result.Diagnostics.TargetRef != "validation-entry.go" {
@@ -764,7 +855,7 @@ func TestRuntimeAdapterFailsStdioToolResultError(t *testing.T) {
 		Kind: "mcp/tool_call",
 		Data: mcpevents.OperationData{ServerID: "mcp-stdio-tool-error", Tool: "repo.summary"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "stdio tool failed") {
+	if err == nil || err.Error() != "mcp tool returned an error result" || strings.Contains(err.Error(), "stdio tool failed") {
 		t.Fatalf("ExecuteOperation err = %v, want stdio MCP tool result error", err)
 	}
 	if result.Status != "failed" || result.Stage != "mcp_tool_call_failed" {

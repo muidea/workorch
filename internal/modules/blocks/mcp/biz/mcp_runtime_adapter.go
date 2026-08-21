@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -64,6 +65,13 @@ type operationSpec struct {
 	TargetRole string
 }
 
+type authorizedRuntimeOperation struct {
+	spec             operationSpec
+	server           *mcpmodel.Server
+	capability       *mcpmodel.Capability
+	registryRevision string
+}
+
 func NewRuntimeAdapter(service serverGetter) *RuntimeAdapter {
 	return NewRuntimeAdapterWithHTTPClient(service, http.DefaultClient)
 }
@@ -106,6 +114,90 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 	}
 }
 
+// authorizeRuntimeOperation resolves one immutable Registry aggregate and
+// verifies the exact capability selected by the sealed Runtime catalog. It is
+// the last owner-local preflight before any endpoint/process action.
+func (a *RuntimeAdapter) authorizeRuntimeOperation(ctx context.Context, request RuntimeOperationRequest, authorization mcpevents.RuntimeExecutionAuthorization) (authorizedRuntimeOperation, error) {
+	spec, err := parseOperationSpec(request)
+	if err != nil {
+		return authorizedRuntimeOperation{}, err
+	}
+	if a == nil || a.service == nil {
+		return authorizedRuntimeOperation{}, common.ErrInvalidArgument
+	}
+	reader, ok := a.service.(registrySnapshotGetter)
+	if !ok {
+		return authorizedRuntimeOperation{}, &runtimecontract.RuntimeCapabilityCatalogUnavailableError{OwnerModuleID: ModuleID, SubjectRef: "mcp_capability_catalog", Reason: "owner_unavailable"}
+	}
+	snapshot, revision, err := reader.RegistrySnapshot(ctx)
+	if err != nil {
+		return authorizedRuntimeOperation{}, err
+	}
+	if snapshot == nil || strings.TrimSpace(revision) == "" || strings.TrimSpace(revision) != strings.TrimSpace(authorization.RegistryRevision) {
+		return authorizedRuntimeOperation{}, fmt.Errorf("%w: sealed MCP registry revision is stale", common.ErrConflict)
+	}
+	var server *mcpmodel.Server
+	for _, item := range snapshot.Servers {
+		if item != nil && item.ID == authorization.Capability.ServerID {
+			server = mcpmodel.CloneServer(item)
+			break
+		}
+	}
+	var capability *mcpmodel.Capability
+	for _, item := range snapshot.Capabilities {
+		if item != nil && item.ID == authorization.Capability.ID {
+			capability = mcpmodel.CloneCapability(item)
+			break
+		}
+	}
+	if server == nil || capability == nil || !capability.Enabled {
+		return authorizedRuntimeOperation{}, fmt.Errorf("%w: sealed MCP capability is unavailable", common.ErrNotFound)
+	}
+	if err := validateServerPolicy(server, spec); err != nil {
+		return authorizedRuntimeOperation{}, err
+	}
+	current := runtimeMCPCapabilityContexts([]*mcpmodel.Capability{capability})
+	if len(current) != 1 || !sameRuntimeMCPCapabilityAuthorization(current[0], authorization.Capability) {
+		return authorizedRuntimeOperation{}, fmt.Errorf("%w: sealed MCP capability metadata is stale", common.ErrConflict)
+	}
+	if authorization.Policy.SubjectRef != string(capability.ID) || authorization.Policy.EffectScope != runtimecontract.RuntimeEffectScope(capability.EffectScope) ||
+		authorization.Policy.IdempotencyClass != runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass) {
+		return authorizedRuntimeOperation{}, fmt.Errorf("%w: sealed MCP operation policy is stale", common.ErrConflict)
+	}
+	if err := validateMCPOperationInputSchema(capability, spec); err != nil {
+		return authorizedRuntimeOperation{}, err
+	}
+	return authorizedRuntimeOperation{spec: spec, server: server, capability: capability, registryRevision: revision}, nil
+}
+
+func sameRuntimeMCPCapabilityAuthorization(left, right runtimecontract.RuntimeMCPCapabilityContext) bool {
+	left = runtimecontract.SealMCPCapabilityEffect(left)
+	right = runtimecontract.SealMCPCapabilityEffect(right)
+	return left.ID == right.ID && left.ServerID == right.ServerID && left.Kind == right.Kind && left.OperationKind == right.OperationKind &&
+		left.Name == right.Name && left.URI == right.URI && left.Enabled == right.Enabled && left.Status == right.Status &&
+		left.EffectScope == right.EffectScope && left.IdempotencyClass == right.IdempotencyClass &&
+		left.ApprovalPolicy == right.ApprovalPolicy && left.RiskLevel == right.RiskLevel
+}
+
+func (a *RuntimeAdapter) executeAuthorizedOperation(ctx context.Context, request RuntimeOperationRequest, authorized authorizedRuntimeOperation) (RuntimeOperationResult, error) {
+	if a == nil || authorized.server == nil || authorized.capability == nil || authorized.registryRevision == "" {
+		return failedResult(authorized.spec, unavailableStage(authorized.spec), common.ErrInvalidArgument), common.ErrInvalidArgument
+	}
+	var result RuntimeOperationResult
+	var err error
+	switch strings.ToLower(strings.TrimSpace(authorized.server.Transport)) {
+	case "http", "https":
+		result, err = a.executeHTTPOperation(ctx, request, authorized.server, authorized.spec)
+	case "stdio":
+		result, err = a.executeStdioOperation(ctx, request, authorized.server, authorized.spec)
+	default:
+		err = fmt.Errorf("%w: unsupported mcp transport %q", common.ErrInvalidArgument, authorized.server.Transport)
+		result = failedResult(authorized.spec, unsupportedTransportStage(authorized.spec), err)
+	}
+	result.OwnerRevision = authorized.registryRevision
+	return result, err
+}
+
 // ProbeOperation validates the selected MCP server and its local transport
 // launch prerequisites without creating a stdio session or sending an HTTP
 // request. Runtime uses it before dispatch seal; execution remains the only
@@ -125,6 +217,13 @@ func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOper
 	if err := validateServerPolicy(server, spec); err != nil {
 		return err
 	}
+	return probeMCPServerTransport(server, request)
+}
+
+func probeMCPServerTransport(server *mcpmodel.Server, request RuntimeOperationRequest) error {
+	if server == nil {
+		return common.ErrInvalidArgument
+	}
 	switch strings.ToLower(strings.TrimSpace(server.Transport)) {
 	case "http", "https":
 		endpoint := strings.TrimSpace(server.Endpoint)
@@ -136,7 +235,7 @@ func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOper
 		}
 		return nil
 	case "stdio":
-		command, _, _, err := stdioLaunchConfig(server, request)
+		command, err := probeStdioLaunchCommand(server)
 		if err != nil {
 			return err
 		}
@@ -155,4 +254,11 @@ func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOper
 	default:
 		return fmt.Errorf("%w: unsupported mcp transport %q", common.ErrInvalidArgument, server.Transport)
 	}
+}
+
+func (a *RuntimeAdapter) probeAuthorizedOperation(request RuntimeOperationRequest, authorized authorizedRuntimeOperation) error {
+	if a == nil || authorized.server == nil || authorized.capability == nil {
+		return common.ErrInvalidArgument
+	}
+	return probeMCPServerTransport(authorized.server, request)
 }

@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -69,11 +69,25 @@ Selection and use are different facts:
 Resume/recovery reuses the sealed activation/catalog observation. Workspace or registry changes affect a later fresh
 activation and cannot rewrite an active Run.
 
+SM-2 catalog acquisition and feasibility are strictly static. They may read one Registry aggregate, validate the bounded
+input schema and inspect local HTTP/stdio launch prerequisites, but they do not contact an MCP endpoint, start a process,
+sample tool behavior, create a receipt or otherwise execute an operation. A `safe_to_replay` declaration does not turn a
+feasibility probe into SM-3 execution authority.
+
 ## Runtime Execution
 
 `blocks/mcp` owns the concrete `ExecuteOperationCommand/Result` topic and performs transport/session/tool/resource/prompt
-work. It validates scope, selected capability, effect/idempotency metadata and approval fact required by the sealed dispatch.
-It returns factual resource/operation outcomes and safe diagnostics only.
+work. Orchestrator's typed event adapter seals the complete persisted operation together with the selected owner-catalog
+snapshot, exact Capability and operation policy; there is no independently mutable execution `Data` copy. Before transport,
+the owner verifies Orchestrator source, current claimed execution key/fence, payload hash, current Registry revision, exact
+enabled Server/Capability/allowlist/schema/effect/idempotency and any exact operation-scoped approval grant. A missing receipt
+is executable only when Orchestrator's receipt query has already proved that this exact execution is active and claimed.
+
+The result crosses EventHub only as one `RuntimeOperationReceipt`. Provider output and stream events are bounded and stored as
+owner-private content-addressed evidence; the receipt carries a safe summary, SHA-256 and opaque evidence/capability refs, not
+the raw response, endpoint, credential or transport diagnostic. A durable capability must return a typed `workorchEffect`
+observation with matching scope, changed/no-op revisions and bounded resource changes. The owner never derives `Changed=true`
+from Registry metadata alone.
 
 It must not:
 
@@ -88,6 +102,10 @@ Risk and approval policy are declarative inputs. Whether a specific dispatch nee
 Runtime/governance contract. Approval owner records the authorization result; MCP owner consumes only the typed immutable
 fact needed for the operation. The UI may correlate approval and capability projections but cannot decide authorization.
 
+The MCP requirement binds the exact Capability, complete operation payload hash, catalog/Registry/capability revision,
+effect and idempotency. A stale, reused or differently scoped grant fails before any network/process action. The owner may
+return `governance_required`; it cannot create, approve, reject or resolve the Approval itself.
+
 ## Projection Rules
 
 Catalog pages may show display name, kind, server, risk, approval policy, stage hints, enabled and provenance. Run pages should
@@ -98,8 +116,10 @@ distinguish:
 - accepted evidence/result/artifact;
 - related governance fact.
 
-Large MCP payloads use validated raw refs. Projection summaries and Eventstream records must not contain credentials,
-unbounded tool output or live client/session objects.
+HTTP/stdio output is limited to 1 MiB and 128 stream/notification events; invalid or oversized protocol data is rejected
+rather than silently truncated. HTTP redirects are bounded and same-origin only, so operation payloads are not forwarded to a
+different host. Large MCP payloads use validated owner-private raw refs. Projection summaries and Eventstream records must
+not contain credentials, endpoints, raw provider errors, unbounded tool output or live client/session objects.
 
 ## Verification
 

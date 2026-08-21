@@ -31,6 +31,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
+	workorcheventpayload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -368,10 +369,11 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatalf("persisted MCP validation dispatch is unavailable for duplicate delivery: %+v", persisted.CompletedDispatches)
 				}
 				beforeDuplicateRevision := persisted.StateRevision
+				ownerCatalog, _ := runtimeFileBackedOperationAdmissibility(t, persisted, runtimecontract.RuntimeModuleMCP, runtimecontract.StepKindMCPToolCall)
 				duplicate, duplicateErr := (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtime.RuntimeOperationExecutionRequest{
 					WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealedValidation.ID, Transaction: sealedValidation.Transaction,
 					Operation: sealedValidation.Candidate.Validation.Operations[0].Operation, Execution: sealedValidation.OperationExecutions[0],
-					EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: persisted.Facts.Focus.TargetRole,
+					EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: persisted.Facts.Focus.TargetRole, OwnerCatalog: &ownerCatalog,
 				})
 				if duplicateErr != nil || duplicate.Receipt.ExecutionKey != persisted.OperationReceipts[0].ExecutionKey || duplicate.Receipt.Fence != persisted.OperationReceipts[0].Fence {
 					t.Fatalf("duplicate MCP delivery did not reuse owner receipt result=%+v err=%v", duplicate, duplicateErr)
@@ -776,6 +778,13 @@ func (g runtimeFileBackedMCPServerGetter) RegistrySnapshot(context.Context) (*mc
 		Kind: mcpmodel.CapabilityKindTool, Name: "lookup.references", Enabled: true,
 		EffectScope:      string(runtimecontract.RuntimeEffectNone),
 		IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		Schema: workorcheventpayload.New(
+			workorcheventpayload.StringField("type", "object"),
+			workorcheventpayload.ObjectField("properties", workorcheventpayload.New(
+				workorcheventpayload.ObjectField("path", workorcheventpayload.New(workorcheventpayload.StringField("type", "string"))),
+			)),
+			workorcheventpayload.BoolField("additionalProperties", false),
+		),
 	}}
 	return &mcpmodel.RegistrySnapshot{Servers: mcpmodel.CloneServers([]*mcpmodel.Server{g.server}), Capabilities: capabilities}, "test-mcp-registry-" + string(g.server.ID), nil
 }

@@ -20,9 +20,9 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// RSO-25 owner behavior-probe matrix.  The probe is an owner-local fact
-// acquisition: it may invoke only an explicitly non-durable, safe-to-replay
-// tool and it must never enter the operation receipt/evidence path.
+// RSO-25 owner semantic-feasibility matrix. The read lane verifies only the
+// catalog, schema/input binding and local transport prerequisites; it never
+// invokes an MCP endpoint or enters the operation receipt/evidence path.
 func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 	ctx := context.Background()
 
@@ -58,7 +58,7 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			endpoint:         server.URL,
 			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityFeasible,
 			wantReadiness:    runtimecontract.RuntimeValidationSurfaceReady,
-			wantEndpointCall: 1,
+			wantEndpointCall: 0,
 		},
 		{
 			name:             "safe ephemeral session replayable succeeds",
@@ -68,7 +68,7 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			endpoint:         server.URL,
 			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityFeasible,
 			wantReadiness:    runtimecontract.RuntimeValidationSurfaceReady,
-			wantEndpointCall: 1,
+			wantEndpointCall: 0,
 		},
 		{
 			name:          "durable capability is unavailable",
@@ -172,15 +172,14 @@ func TestMCPOwnerSemanticBehaviorProbeMatrix(t *testing.T) {
 			wantCode:      "mcp_semantic_proof_unavailable",
 		},
 		{
-			name:             "preflight execution failure is unavailable",
+			name:             "remote endpoint behavior is not sampled during feasibility",
 			effect:           runtimecontract.RuntimeEffectNone,
 			idempotency:      runtimecontract.RuntimeOperationIdempotencySafeToReplay,
 			schema:           mcpBehaviorProbeSchema(t, nil),
 			endpoint:         server.URL + "/fail",
-			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityInfeasible,
+			wantStatus:       runtimecontract.RuntimeSemanticFeasibilityFeasible,
 			wantReadiness:    runtimecontract.RuntimeValidationSurfaceReady,
-			wantCode:         "mcp_semantic_proof_unavailable",
-			wantEndpointCall: 1,
+			wantEndpointCall: 0,
 		},
 		{
 			name:          "preflight endpoint failure is unavailable",

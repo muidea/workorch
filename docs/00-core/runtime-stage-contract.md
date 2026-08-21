@@ -202,6 +202,9 @@ workspace/run/definition/seed identity、完整 CWI 覆盖、template/profile �
 通过 private internal event 原子封存 `CoverageEvidenceBinding`、`RuntimeCWIReconciliationContract`、binding set/hash
 与 lineage。`internal/pkg/workorchruntimecontract` 只负责 DTO、规范化、校验、稳定 hash 和纯 evaluator helper；
 它不读取工作区、不调用 EventHub，也不决定 retry、terminal、coverage 或 lifecycle。
+动态 capability owner 的 feasibility 也只能核对 owner-issued catalog/schema/input binding 与本地静态 prerequisite；
+即使 capability 声明 non-durable 或 `safe_to_replay`，SM-2 仍不得调用 endpoint、启动 provider process 或采样 operation
+结果。外部行为事实只能来自已持久化 SM-3 dispatch 的 owner receipt。
 
 所有 fresh restart 都经过同一 persisted semantic planning、owner feasibility 与 SM-2 seal 主线；activation 不得直接
 携带 sealed semantic contract，也不得在普通 Workspace 创建/编辑流程暴露 Runtime JSON 必填项。
@@ -506,6 +509,11 @@ sealed authority + preflight ready
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
+- concrete capability adapter 必须从 persisted prerequisite 中选取与 operation owner/kind 精确匹配的完整 owner
+  admissibility snapshot，并把 complete operation payload、catalog/revision、exact owner subject、effect/idempotency 与
+  适用 validation surface 绑定到 owner-defined sealed execute command。owner 在副作用前重验 current owner revision、
+  subject/schema/policy、producer、claimed receipt authority 与 exact grant；任何 independently mutable data copy、
+  missing catalog 或 stale revision 都必须 fail-closed。
 - claimed operation 在没有 receipt 时，只有 sealed replay class 为 `safe_to_replay | owner_managed` 或 execution 携带
   exact owner replay proof，SM-3 才能返回只读 recovery-budget handoff；`at_most_once | unknown` 必须直接持久化
   `outcome_unknown`，零 owner 调用且不消费 replay budget。SM-3 不得直接修改 SM-4 recovery ledger。后续
@@ -596,6 +604,9 @@ state-changing capability operation 的 receipt 必须由 owner 对真实 effect
 operation，真实 changed refs 必须非空且属于 sealed `RuntimeOperation.TargetRefs`；存在未声明 changed ref、只有
 unknown effect 或 zero-work 时不能形成 accepted durable evidence。owner observation 只返回 typed receipt，不得
 解释 Goal/DoD 或选择下一 Runtime action。
+远端 durable capability 同样不能把 sealed expectation 或 catalog 声明回显为观察结果；它必须返回 owner 校验过的
+changed/no-op、before/after revision 与 bounded resource changes。缺失或冲突 observation 不能形成 accepted durable
+receipt；外部请求已提交而 receipt 未持久化时仍按 sealed replay class 进入安全恢复或 `outcome_unknown`。
 
 ## LLM request、cache 与上下文
 

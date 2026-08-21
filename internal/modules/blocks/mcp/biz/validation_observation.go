@@ -20,14 +20,17 @@ func attachMCPToolValidationObservation(
 	evidence *runtimecontract.RuntimeOperationEvidence,
 	status runtimecontract.RuntimeOperationExecutionStatus,
 	operationKind, evidenceKind, serverID, tool string,
+	surface *runtimecontract.RuntimeValidationSurface,
 ) {
 	if evidence == nil || status != runtimecontract.RuntimeOperationExecutionStatusAccepted ||
 		runtimecontract.CanonicalRuntimeBlockKind(operationKind) != runtimecontract.StepKindMCPToolCall ||
-		strings.TrimSpace(evidenceKind) != runtimecontract.EvidenceKindValidation {
+		strings.TrimSpace(evidenceKind) != runtimecontract.EvidenceKindValidation || surface == nil {
 		return
 	}
 	recipeID := runtimecontract.RuntimeMCPToolValidationRecipeID(serverID, tool)
-	if recipeID == "" {
+	value := surface.Normalized()
+	if recipeID == "" || value.ID != recipeID || value.OwnerModuleID != ModuleID || value.OperationKind != runtimecontract.StepKindMCPToolCall ||
+		value.Readiness != runtimecontract.RuntimeValidationSurfaceReady || value.ProofApplicability != runtimecontract.RuntimeValidationProofDirect || value.InputBindingRef == "" {
 		return
 	}
 	evidence.Quality = common.EvidenceQualityValid

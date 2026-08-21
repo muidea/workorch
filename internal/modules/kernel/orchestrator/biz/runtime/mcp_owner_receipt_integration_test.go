@@ -25,6 +25,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	workorcheventpayload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -181,7 +182,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
 	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
-	addCurrentMCPFailureObservationFreshness(t, &aggregate, catalogRevision)
+	addObservedMCPOperationAdmissibilityFixture(t, ctx, hub, &aggregate, catalogRevision)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
@@ -248,7 +249,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 
-	if _, err := controller.executeActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: t.TempDir()}); err != nil {
+	if _, err := controller.executeActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: t.TempDir(), internalDirectory: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	persisted, err := controller.Load(ctx, "ws-1", "run-1")
@@ -462,7 +463,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation || persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Validation == nil {
 		t.Fatalf("reacquired aggregate did not seal a validation candidate: %+v", persisted)
 	}
-	persisted, err = controller.executeActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	persisted, err = controller.executeActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: workspaceDirectory, internalDirectory: t.TempDir()})
 	if err != nil || calls != 2 || persisted.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || persisted.Facts.Repair.LastProgressRevision != "" {
 		t.Fatalf("accepted validation did not enter assessment without clearing progress: calls=%d action=%s repair=%+v err=%v", calls, persisted.Decision.State, persisted.Facts.Repair, err)
 	}
@@ -494,16 +495,30 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	dispatch := persisted.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
+	var replayOperation runtimecontract.RuntimeOperation
+	for _, candidateOperation := range candidateRuntimeOperations(dispatch.Candidate) {
+		if candidateOperation.ID == "mcp-validate" {
+			replayOperation = candidateOperation
+			break
+		}
+	}
+	replayCatalog, found := runtimeOperationAdmissibilityForKind(persisted.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleMCP, runtimecontract.StepKindMCPToolCall)
+	if replayOperation.ID == "" || !found {
+		t.Fatal("persisted MCP operation or owner catalog is missing")
+	}
+	replaySealed, err := mcpevents.SealRuntimeOperation(replayOperation, replayCatalog)
+	if err != nil {
+		t.Fatal(err)
+	}
 	replayed := sendObservedMCPExecution(t, ctx, hub, mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
-			OperationID: "mcp-validate", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-			TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
+			OperationID: replayOperation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), replayOperation.CoverageWorkItemIDs...),
+			TargetRefs: append([]string(nil), replayOperation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
 		},
-		OperationKind: runtimecontract.StepKindMCPToolCall,
-		TargetRole:    "implementation",
-		Data:          mcpevents.OperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []runtimecontract.OperationParameter{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
+		SealedOperation: replaySealed,
+		TargetRole:      "implementation",
 	})
 	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Feedback == nil ||
 		replayed.Receipt.Feedback.OriginalDiagnostic == nil || replayed.Receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
@@ -528,6 +543,14 @@ func (g runtimeMCPServerGetter) RegistrySnapshot(context.Context) (*mcpmodel.Reg
 		ID:       common.MCPCapabilityID(string(g.server.ID) + ":tool:lookup.references"),
 		ServerID: g.server.ID, Kind: mcpmodel.CapabilityKindTool, Name: "lookup.references", Enabled: true,
 		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		ValidationProofApplicability: mcpmodel.ValidationProofApplicabilityNotDeclared,
+		Schema: workorcheventpayload.New(
+			workorcheventpayload.StringField("type", "object"),
+			workorcheventpayload.ObjectField("properties", workorcheventpayload.New(
+				workorcheventpayload.ObjectField("path", workorcheventpayload.New(workorcheventpayload.StringField("type", "string"))),
+			)),
+			workorcheventpayload.BoolField("additionalProperties", false),
+		),
 	}}
 	return &mcpmodel.RegistrySnapshot{Servers: mcpmodel.CloneServers([]*mcpmodel.Server{g.server}), Capabilities: capabilities}, "test-mcp-registry-" + string(g.server.ID), nil
 }
@@ -537,10 +560,14 @@ func runtimeStringPointer(value string) *string { return &value }
 type runtimeObservedMCPExecutor struct {
 	hub                  magicevent.Hub
 	deliverableDirectory string
+	internalDirectory    string
 }
 
 func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
-	data, err := mcpevents.OperationDataFromRuntimeOperation(request.Operation)
+	if request.OwnerCatalog == nil {
+		return RuntimeOperationExecutionResult{}, fmt.Errorf("MCP owner catalog is missing")
+	}
+	sealedOperation, err := mcpevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -552,11 +579,10 @@ func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context,
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory,
+				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory, WorkspaceInternalDirectory: e.internalDirectory,
 			},
-			OperationKind: request.Operation.Kind,
-			TargetRole:    request.TargetRole,
-			Data:          data,
+			SealedOperation: sealedOperation,
+			TargetRole:      request.TargetRole,
 		}))
 	if result == nil {
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("MCP owner returned no execution result")
@@ -729,6 +755,46 @@ func addObservedFileOperationAdmissibilityFixture(
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
 		ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
+	})
+}
+
+func addObservedMCPOperationAdmissibilityFixture(
+	t *testing.T,
+	ctx context.Context,
+	hub magicevent.Hub,
+	aggregate *RuntimeAggregate,
+	expectedRevision string,
+) {
+	t.Helper()
+	if aggregate == nil || aggregate.Decision.AuthoritySnapshot.ID == "" {
+		t.Fatal("aggregate must have sealed authority before MCP preflight")
+	}
+	prerequisiteID := "operation_admissibility:mcp"
+	result := hub.Send(magicevent.NewEventWithContext(
+		mcpevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
+		magicevent.NewHeader(), ctx, mcpevents.AcquireRuntimeOperationAdmissibilityCommand{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+			PrerequisiteID: prerequisiteID, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{runtimecontract.StepKindMCPToolCall}, MaxItems: 4,
+		},
+	))
+	if result == nil {
+		t.Fatal("MCP owner returned no operation admissibility result")
+	}
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	response, ok := data.(mcpevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Admissibility.SnapshotID == "" || response.Acquisition.Observation.ObservationID == "" ||
+		response.Acquisition.Admissibility.ObservedRevision != expectedRevision {
+		t.Fatalf("MCP operation admissibility response = %#v", data)
+	}
+	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Acquisition.Admissibility)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
+		ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleMCP, RequiredCapabilities: []string{runtimecontract.StepKindMCPToolCall},
 	})
 }
 

@@ -14,6 +14,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorcheventpayload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -81,10 +82,11 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	capability := testMCPToolCapability("mcp-observed-target", "lookup.references", mcpmodel.ValidationProofApplicabilityDirect)
 	owner.runtimeAdapter = NewRuntimeAdapter(staticMCPServerGetter{server: &mcpmodel.Server{
 		ID: "mcp-observed-target", Name: "observed target", Transport: "http", Endpoint: server.URL,
 		Enabled: true, AllowedTools: []string{"lookup.references"}, TimeoutMillis: 1000,
-	}})
+	}, capabilities: []*mcpmodel.Capability{capability}})
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +115,15 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 
+	operation := runtimecontract.RuntimeOperation{
+		ID: "validate-entry", Kind: runtimecontract.StepKindMCPToolCall,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "serverId", String: stringPointer("mcp-observed-target")}, {Name: "tool", String: stringPointer("lookup.references")},
+			{Name: "input.path", String: stringPointer("validation-entry.go")},
+		},
+	}
+	sealed := sealMCPTestOperation(t, owner.runtimeAdapter, operation)
 	command := mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
@@ -122,17 +133,13 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 			OperationID: "validate-entry", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
-			EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
+			EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
 		},
-		OperationKind: runtimecontract.StepKindMCPToolCall,
-		TargetRole:    "implementation",
-		Data: mcpevents.OperationData{
-			ServerID: "mcp-observed-target", Tool: "lookup.references",
-			Input: []runtimecontract.OperationParameter{{Name: "path", String: stringPointer("validation-entry.go")}},
-		},
+		SealedOperation: sealed,
+		TargetRole:      "implementation",
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		mcpevents.TopicExecuteOperation, "mcp-owner-test", ModuleID,
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
 		magicevent.NewHeader(), ctx, command,
 	))
 	if result == nil {
@@ -172,7 +179,7 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		t.Fatalf("MCP owner receipt lost scoped original feedback: %+v", response.Receipt.Feedback)
 	}
 	duplicateResult := hub.Send(magicevent.NewEventWithContext(
-		mcpevents.TopicExecuteOperation, "mcp-owner-test", ModuleID,
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
 		magicevent.NewHeader(), ctx, command,
 	))
 	duplicateData, duplicateErr := duplicateResult.Get()
@@ -203,10 +210,11 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	capability := testMCPToolCapability("mcp-validation", "repo.summary", mcpmodel.ValidationProofApplicabilityDirect)
 	owner.runtimeAdapter = NewRuntimeAdapter(staticMCPServerGetter{server: &mcpmodel.Server{
 		ID: "mcp-validation", Name: "validation", Transport: "http", Endpoint: server.URL,
 		Enabled: true, AllowedTools: []string{"repo.summary"}, TimeoutMillis: 1000,
-	}})
+	}, capabilities: []*mcpmodel.Capability{capability}})
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +235,14 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 
+	operation := runtimecontract.RuntimeOperation{
+		ID: "mcp-summary", Kind: runtimecontract.StepKindMCPToolCall,
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "serverId", String: stringPointer("mcp-validation")}, {Name: "tool", String: stringPointer("repo.summary")},
+			{Name: "input.path", String: stringPointer(".")},
+		},
+	}
+	sealed := sealMCPTestOperation(t, owner.runtimeAdapter, operation)
 	command := mcpevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
@@ -235,16 +251,12 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 			},
 			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
-			OperationID: "mcp-summary", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
+			OperationID: "mcp-summary", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(), WorkspaceInternalDirectory: t.TempDir(),
 		},
-		OperationKind: runtimecontract.StepKindMCPToolCall,
-		Data: mcpevents.OperationData{
-			ServerID: "mcp-validation", Tool: "repo.summary",
-			Input: []runtimecontract.OperationParameter{{Name: "path", String: stringPointer(".")}},
-		},
+		SealedOperation: sealed,
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		mcpevents.TopicExecuteOperation, "mcp-owner-test", ModuleID,
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
 		magicevent.NewHeader(), ctx, command,
 	))
 	if result == nil {
@@ -258,7 +270,7 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 	if !ok {
 		t.Fatalf("MCP owner result type = %T", data)
 	}
-	recipeID := runtimecontract.RuntimeMCPToolValidationRecipeID(command.Data.ServerID, command.Data.Tool)
+	recipeID := runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-validation", "repo.summary")
 	assertMCPToolValidationObservation(t, response.Receipt, recipeID)
 	assertMCPToolValidationObservation(t, committed, recipeID)
 }
@@ -278,7 +290,7 @@ func TestMCPToolValidationObservationDoesNotCreditOtherMCPShapes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			evidence := runtimecontract.RuntimeOperationEvidence{}
-			attachMCPToolValidationObservation(&evidence, tc.status, tc.operation, tc.evidenceKind, "mcp-validation", "repo.summary")
+			attachMCPToolValidationObservation(&evidence, tc.status, tc.operation, tc.evidenceKind, "mcp-validation", "repo.summary", nil)
 			if evidence.Validation != nil || evidence.Quality != "" {
 				t.Fatalf("non-proof MCP shape received validation observation: %+v", evidence)
 			}
@@ -297,3 +309,36 @@ func assertMCPToolValidationObservation(t *testing.T, receipt runtimecontract.Ru
 }
 
 func stringPointer(value string) *string { return &value }
+
+func testMCPToolCapability(serverID common.MCPServerID, tool string, applicability string) *mcpmodel.Capability {
+	return &mcpmodel.Capability{
+		ID: common.MCPCapabilityID(string(serverID) + ":tool:" + tool), ServerID: serverID,
+		Kind: mcpmodel.CapabilityKindTool, Name: tool, Enabled: true,
+		EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		ValidationProofApplicability: applicability,
+		Schema: workorcheventpayload.New(
+			workorcheventpayload.StringField("type", "object"),
+			workorcheventpayload.ObjectField("properties", workorcheventpayload.New(
+				workorcheventpayload.ObjectField("path", workorcheventpayload.New(workorcheventpayload.StringField("type", "string"))),
+			)),
+			workorcheventpayload.BoolField("additionalProperties", false),
+		),
+	}
+}
+
+func sealMCPTestOperation(t *testing.T, adapter *RuntimeAdapter, operation runtimecontract.RuntimeOperation) mcpevents.SealedRuntimeOperation {
+	t.Helper()
+	snapshot, err := adapter.runtimeOperationAdmissibilitySnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := buildRuntimeMCPAdmissibility("mcp-test-catalog", []string{operation.Kind}, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := mcpevents.SealRuntimeOperation(operation, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
+}

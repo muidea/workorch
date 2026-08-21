@@ -70,6 +70,40 @@ func TestValidateRuntimeOperationContractMCPDynamicInputRequiresScalarValue(t *t
 	}
 }
 
+func TestValidateRuntimeOperationContractMCPDynamicInputIsBounded(t *testing.T) {
+	base := []OperationParameter{
+		{Name: "serverId", String: strPtr("mcp-lsp-bridge")},
+		{Name: "tool", String: strPtr("lsp_definition")},
+	}
+	oversized := strings.Repeat("x", 16*1024+1)
+	operation := RuntimeOperation{
+		ID: "op-1", Kind: StepKindMCPToolCall,
+		Parameters: append(append([]OperationParameter(nil), base...), OperationParameter{Name: "input.source", String: &oversized}),
+	}
+	if err := ValidateRuntimeOperationContract(operation); err == nil || !strings.Contains(err.Error(), "exceeds 16384 bytes") {
+		t.Fatalf("oversized MCP dynamic value error = %v", err)
+	}
+
+	tooMany := RuntimeOperation{ID: "op-1", Kind: StepKindMCPToolCall, Parameters: append([]OperationParameter(nil), base...)}
+	for index := 0; index < 65; index++ {
+		value := "x"
+		tooMany.Parameters = append(tooMany.Parameters, OperationParameter{Name: fmt.Sprintf("input.field%d", index), String: &value})
+	}
+	if err := ValidateRuntimeOperationContract(tooMany); err == nil || !strings.Contains(err.Error(), "bounded MCP") {
+		t.Fatalf("unbounded MCP dynamic count error = %v", err)
+	}
+
+	longName := "input." + strings.Repeat("n", 129)
+	value := "x"
+	badName := RuntimeOperation{
+		ID: "op-1", Kind: StepKindMCPToolCall,
+		Parameters: append(append([]OperationParameter(nil), base...), OperationParameter{Name: longName, String: &value}),
+	}
+	if err := ValidateRuntimeOperationContract(badName); err == nil || !strings.Contains(err.Error(), "invalid bounded name") {
+		t.Fatalf("unbounded MCP dynamic name error = %v", err)
+	}
+}
+
 func TestValidateRuntimeOperationContractFileWriteRequiresTargetAndContent(t *testing.T) {
 	target := "README.md"
 	content := ""

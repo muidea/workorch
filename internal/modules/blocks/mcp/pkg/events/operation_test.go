@@ -1,9 +1,13 @@
 package events
 
 import (
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"bytes"
+	"encoding/json"
 	"slices"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestOwnerContractAndOperationMapper(t *testing.T) {
@@ -23,5 +27,49 @@ func TestOwnerContractAndOperationMapper(t *testing.T) {
 	}
 	if data.ServerID != server || data.Tool != tool || len(data.Input) != 1 || data.Input[0].Name != "path" || data.Input[0].String == nil || *data.Input[0].String != path {
 		t.Fatalf("data=%+v", data)
+	}
+}
+
+func TestSealedRuntimeOperationBindsOwnerCatalogAndExecutionScope(t *testing.T) {
+	serverID, tool := "server-a", "lookup"
+	operation := runtimecontract.RuntimeOperation{
+		ID: "mcp-1", Kind: runtimecontract.StepKindMCPToolCall, TargetRefs: []string{"main.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}},
+	}
+	capabilityID := common.MCPCapabilityID("capability-a")
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ObservedRevision: "registry-v1",
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
+			ID: capabilityID, ServerID: common.MCPServerID(serverID), Kind: "tool", Name: tool,
+			Enabled: true, Status: "enabled", EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "mcp-policy", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: string(capabilityID),
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{{Name: "serverId", String: &serverID}, {Name: "tool", String: &tool}},
+			EffectScope:      runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	sealed, err := SealRuntimeOperation(operation, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context := runtimecontract.RuntimeOperationExecutionContext{
+		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws/run/dispatch/mcp-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+		OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),
+	}
+	got, authorization, err := sealed.ValidateForExecution(context)
+	if err != nil || got.ID != operation.ID || authorization.Capability.ID != capabilityID || authorization.RegistryRevision != "registry-v1" {
+		t.Fatalf("operation=%+v authorization=%+v err=%v", got, authorization, err)
+	}
+	drifted := sealed
+	drifted.Authorization.Policy.EffectScope = runtimecontract.RuntimeEffectRemoteDurable
+	if _, _, err := drifted.ValidateForExecution(context); err == nil {
+		t.Fatal("sealed MCP operation accepted authorization drift")
+	}
+	wire, err := json.Marshal(ExecuteOperationCommand{RuntimeOperationExecutionContext: context, SealedOperation: sealed})
+	if err != nil || bytes.Contains(wire, []byte(`"Data"`)) {
+		t.Fatalf("sealed MCP command wire=%s err=%v", wire, err)
 	}
 }
