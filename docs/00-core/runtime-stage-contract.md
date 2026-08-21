@@ -583,7 +583,8 @@ validation recipe identity 与 check identity 必须分离。binding 的 require
 
 operation-scoped governance 必须保存恰好一个 ticket/approval owner identity，以及 resolution、dependency、
 subject、receipt hash、ExecutionKey 与 fence binding。continue 以同一 ExecutionKey 的下一 fence 执行，owner
-必须 preflight grant；普通 receipt 不能绕过治理。
+必须 preflight grant；receipt query 中 persisted grant 与调用方 grant 必须同为缺失或逐字段完全一致，不能通过省略
+persisted grant 绕过治理；普通 receipt 不能绕过治理。
 
 state-changing capability operation 的 receipt 必须由 owner 对真实 effect 做有界观察。对 workspace durable Shell
 operation，真实 changed refs 必须非空且属于 sealed `RuntimeOperation.TargetRefs`；存在未声明 changed ref、只有

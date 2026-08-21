@@ -7,14 +7,16 @@ import (
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 
+// OperationData contains only authority-safe refs and the sealed executable
+// payload. Endpoint and credential material are resolved inside the SSH owner.
 type OperationData struct {
-	Host, Username, Password, PrivateKey, PrivateKeyPath, Command string
-	Port, TimeoutMillis                                           int64
+	TargetRef, SessionRef, CredentialRef, Command string
+	TimeoutMillis                                 int64
 }
 
 type ExecuteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	Data OperationData
+	SealedOperation SealedRuntimeOperation
 }
 
 type ExecuteOperationResult struct {

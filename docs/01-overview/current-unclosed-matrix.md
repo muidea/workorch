@@ -4,7 +4,7 @@ Status: active
 
 Type: current-work-index
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -47,6 +47,10 @@ Last Verified: 2026-08-20
   ephemeral-session + at-most-once 封存，正常/timeout 均清理进程组，claimed/no-receipt 不重放。recipe 与 owner proof
   check identity 分离，默认 recipe 可闭合其 published check，passed/failed/skipped 冲突在 owner、binding 与 assessment
   三层一致拒绝；execute 的 nil result、producer source、sealed data 与 receipt authorization 均在进程调用前 fail-closed；
+- SSH aggregate/EventHub 只携带 opaque target/session/credential refs；owner-private 配置限制相对路径、symlink containment、
+  known_hosts 与私钥权限，并在启动时冻结。所有远端命令要求 exact approval grant、strict host-key 与 before/after observation；
+  changed/no-op、remote resource revision、bounded output hash/ref 均来自 owner fact，claimed/no-receipt 按 at-most-once 进入 unknown，
+  persisted grant 不可通过 nil query 省略；
 - callable capability、validation surface readiness 与 proof applicability 分离；required-input MCP recipe 保留 typed
   prerequisite audit、零 endpoint side effect，ready auxiliary surface 也不得关闭 CWI；只有 `ready + direct` 进入 provider
   schema/C3/correction，readiness/applicability/schema/binding 变化进入 catalog snapshot identity；

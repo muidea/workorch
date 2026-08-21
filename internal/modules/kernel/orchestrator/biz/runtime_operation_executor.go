@@ -102,13 +102,13 @@ func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, requ
 }
 
 func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := sshevents.OperationDataFromRuntimeOperation(request.Operation)
+	sealedOperation, err := sshevents.SealRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := sshevents.ExecuteOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
-		Data:                             data,
+		SealedOperation:                  sealedOperation,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleSSH, magicevent.NewHeader(), ctx, command))
 	response, err := sshOperationResponse(result)

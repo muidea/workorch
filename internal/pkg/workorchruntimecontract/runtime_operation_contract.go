@@ -398,17 +398,13 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		return RuntimeOperationContract{
 			Kind: StepKindSSHCommand,
 			Parameters: []RuntimeOperationParameterContract{
-				{Name: "host", Type: RuntimeOperationParameterTypeString, Required: true, Description: "remote host"},
-				{Name: "port", Type: RuntimeOperationParameterTypeInteger, Description: "remote SSH port"},
-				{Name: "username", Type: RuntimeOperationParameterTypeString, Required: true, Description: "remote username"},
-				{Name: "password", Type: RuntimeOperationParameterTypeString, Description: "password credential"},
-				{Name: "privateKey", Type: RuntimeOperationParameterTypeString, Description: "inline private key credential"},
-				{Name: "privateKeyPath", Type: RuntimeOperationParameterTypeString, Description: "workspace-relative or absolute private key path"},
+				{Name: "sessionRef", Type: RuntimeOperationParameterTypeString, Required: true, Description: "opaque SSH owner session identity selected from an ssh-binding constraint fact"},
+				{Name: "credentialRef", Type: RuntimeOperationParameterTypeString, Required: true, Description: "opaque SSH owner credential identity selected from the same ssh-binding constraint fact"},
 				{Name: "command", Type: RuntimeOperationParameterTypeString, Required: true, Description: "bounded remote command"},
 				{Name: "timeoutMillis", Type: RuntimeOperationParameterTypeInteger, Description: "bounded timeout in milliseconds"},
 			},
-			ForbiddenParameters: []string{"args", "input", "payload"},
-			Rules:               []string{"port must be in 1..65535", "one password/privateKey/privateKeyPath credential is required", "timeoutMillis must be between 1000 and 300000"},
+			ForbiddenParameters: []string{"args", "host", "input", "password", "payload", "port", "privateKey", "privateKeyPath", "username"},
+			Rules:               []string{"targetRefs carries one opaque owner target ref", "targetRef/sessionRef/credentialRef must match one owner-published ssh-binding/<targetRef>/<sessionRef>/<credentialRef> constraint", "command is bounded to 16384 bytes", "timeoutMillis must be between 1000 and 300000"},
 		}, true
 	case StepKindWebSearch, StepKindWebFetch:
 		return RuntimeOperationContract{
@@ -557,15 +553,11 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			}
 		}
 	case StepKindSSHCommand:
-		port := int64(22)
-		if value, ok := parameterInteger(values["port"]); ok {
-			port = value
-		}
-		if port <= 0 || port > 65535 || parameterString(values["host"]) == "" || parameterString(values["username"]) == "" || parameterString(values["command"]) == "" {
-			return fmt.Errorf("kind %q requires host, username, command and a valid port", operation.Kind)
-		}
-		if parameterString(values["password"]) == "" && parameterString(values["privateKey"]) == "" && parameterString(values["privateKeyPath"]) == "" {
-			return fmt.Errorf("kind %q requires an SSH credential", operation.Kind)
+		sessionRef := parameterString(values["sessionRef"])
+		credentialRef := parameterString(values["credentialRef"])
+		command := parameterString(values["command"])
+		if !validRuntimeOpaqueSSHRef(sessionRef) || !validRuntimeOpaqueSSHRef(credentialRef) || len(command) == 0 || len(command) > 16*1024 || !validRuntimeOpaqueSSHRef(operation.TargetRefs[0]) {
+			return fmt.Errorf("kind %q requires canonical owner refs and a bounded command", operation.Kind)
 		}
 		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 300000) {
 			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 300000", operation.Kind)
@@ -586,6 +578,22 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		}
 	}
 	return nil
+}
+
+func validRuntimeOpaqueSSHRef(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) == 0 || len(value) > 64 || value[0] == '-' {
+		return false
+	}
+	for index := range value {
+		character := value[index]
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || (index > 0 && (character == '_' || character == '-')) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateRuntimeOperationTargetCardinality(operation RuntimeOperation, cardinality RuntimeOperationTargetCardinality) error {

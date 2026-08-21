@@ -369,6 +369,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   不解析 owner message，也不把 exact target 改写成虚构的 prospective target。目标内容 revision 仍由后续 owner
   snapshot/preflight 与 candidate manifest 绑定，LLM 不提供 revision authority。
 - sealed candidate 通过接收 owner 自有 concrete execute command/result 按 operation kind 投递到 File、Git、Shell、MCP、Web 或 SSH owner；跨组件 concrete result 只包含具体 operation/transaction、唯一 receipt outcome、stable factual category、完整安全 original diagnostic 和 evidence，不保留 `Status + Receipt.Outcome` 双权威。
+- SSH dispatch 只封存 opaque target/session/credential refs、bounded command 与 timeout；endpoint、username 与 credential material
+  不进入 aggregate 或 EventHub。SSH owner 在 exact grant preflight 后执行 strict host-key transport，并以 owner-private 前后 observation
+  形成 `remote_durable`/`no_op` 事实；Orchestrator 不从 sealed expectation 推断远端 changed。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
 - RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；只有当前 focus 每个 required CWI 都获得 exact binding-matched evidence 后，evidence commit 才能原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。
@@ -502,6 +505,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - resolution 必须携带并匹配已绑定的唯一 ticket/approval identity；不存在绑定、同一 dispatch 绑定不同 owner
   identity、或 dependency/authorization target 漂移都必须返回 conflict。
 - operation-scoped governance continue 保持原 ExecutionKey，通过 CAS 将 governance fence `N` 推进到 resume fence `N+1`；typed grant 必须绑定唯一 ticket/approval、resolution、dependency、subject、requested action、authorization hash 与治理 receipt hash。各 concrete owner 在 receipt preflight 时验证 grant，禁止复用 `Receipt(K,N)=governance_required` 作为普通 evidence。
+- receipt query 对 persisted governance grant 执行严格 presence parity：调用方省略已持久化 grant、无 binding 时额外附加 grant、或任一字段
+  漂移均 conflict，并在 capability side effect 前返回。
 - File/Git/MCP/Shell/SSH/Web execute Result 只返回 owner-persisted `RuntimeOperationReceipt`；EventID、operation/evidence identity 与 source ref 由 Orchestrator 从 sealed dispatch/operation contract 纯派生，capability owner 不回显或重建第二套证据身份。
 - operation-scoped governance candidate 必须保留 suspended binding 的 dependency kind/subject/authorization target；
   不得把 persisted `approval/configuration/external` 退化为默认 `decision`，否则 ticket/approval 无法回绑 source operation。

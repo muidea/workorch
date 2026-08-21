@@ -2,19 +2,23 @@ package ssh
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"hash"
 )
 
 type limitedOutputBuffer struct {
 	limit int
 	total int
 	buf   bytes.Buffer
+	hash  hash.Hash
 }
 
 func newLimitedOutputBuffer(limit int) *limitedOutputBuffer {
 	if limit <= 0 {
 		limit = MaxCommandOutputBytes
 	}
-	return &limitedOutputBuffer{limit: limit}
+	return &limitedOutputBuffer{limit: limit, hash: sha256.New()}
 }
 
 func (b *limitedOutputBuffer) Write(p []byte) (int, error) {
@@ -23,6 +27,9 @@ func (b *limitedOutputBuffer) Write(p []byte) (int, error) {
 	}
 	written := len(p)
 	b.total += len(p)
+	if b.hash != nil {
+		_, _ = b.hash.Write(p)
+	}
 	if b.buf.Len() >= b.limit {
 		return written, nil
 	}
@@ -50,4 +57,11 @@ func (b *limitedOutputBuffer) TotalBytes() int {
 		return 0
 	}
 	return b.total
+}
+
+func (b *limitedOutputBuffer) ContentHash() string {
+	if b == nil || b.hash == nil {
+		return hashSSHBytes(nil)
+	}
+	return hex.EncodeToString(b.hash.Sum(nil))
 }

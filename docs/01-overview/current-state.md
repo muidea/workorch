@@ -107,6 +107,9 @@ Runtime aggregate 只支持一个 current development baseline，不维护历史
 - Skill 只以 activation-time sealed snapshot 进入 volatile C3：WorkOrch Registry 与 SkillHub Catalog 使用不同 typed
   provenance，最多 5 项，instruction 单项 8 KiB/总计 24 KiB，metadata 总计 16 KiB。LLM/Orchestrator 不直读
   Registry/Catalog，也不在请求或 drive 阶段重新选择、裁剪或提升 Skill 到 C0～C2。
+- SSH Runtime operation 只封存 opaque target/session/credential refs；endpoint、username、known_hosts 与 credential material
+  在 SSH owner 启动时解析并冻结。所有远端命令先取得 exact approval grant，再由 strict host-key transport 执行，并以 owner-private
+  before/after observation 形成 remote change/no-op receipt；raw stdout/stderr 不进入 aggregate/Eventstream/projection。
 
 ## Component Snapshot
 

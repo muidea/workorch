@@ -29,13 +29,16 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	if !found || execution.ExecutionKey != strings.TrimSpace(executionKey) || execution.Fence != fence {
 		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: receipt query does not match sealed execution key/fence", common.ErrConflict)
 	}
+	persistedGrant := governancecheck.GrantForExecution(aggregate.OperationGovernanceBindings, execution)
+	if (persistedGrant == nil) != (grant == nil) {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: governance grant presence does not match persisted binding", common.ErrConflict)
+	}
 	if grant != nil {
 		value := grant.Normalized()
 		if err := value.Validate(); err != nil {
 			return runtimecontract.RuntimeOperationReceipt{}, false, err
 		}
-		persisted := governancecheck.GrantForExecution(aggregate.OperationGovernanceBindings, execution)
-		if persisted == nil || !governancecheck.SameGrant(*persisted, value) {
+		if !governancecheck.SameGrant(*persistedGrant, value) {
 			return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: governance grant does not match persisted binding", common.ErrConflict)
 		}
 	}

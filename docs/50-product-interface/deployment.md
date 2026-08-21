@@ -4,7 +4,7 @@ Status: active
 
 Type: product-interface
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
 ## Build And Run
 
@@ -35,6 +35,13 @@ not the documented CLI selection mechanism.
 
 Canonical LLM config is ai-proxy-only: `llm.aiProxy`, `llm.defaultChat`, optional `llm.defaultEmbedding`, and `llm.budget`.
 Secrets should be injected through a protected generated config or secret mount; public configuration responses are redacted.
+
+SSH execution is optional and defaults to an empty catalog. Configure `[ssh.targets]`, `[ssh.sessions]` and
+`[ssh.credentials]` as one closed catalog. Runtime uses only opaque target/session/credential refs; host, username, known-hosts
+identity and credential material remain in the SSH owner. Credentials must use an environment reference or a relative private-key
+file under `ssh.secretsDirectory`; inline passwords/private keys and arbitrary Runtime key paths are unsupported. Relative files
+are resolved beneath the selected configuration directory at process start, and configuration changes require restart. The exact
+schema and permission rules are maintained in the [SSH component contract](../../internal/modules/blocks/ssh/readme.md).
 
 ## Data Layout
 

@@ -282,14 +282,14 @@ func operationStringListParameter(parameters []OperationParameter, name string) 
 }
 
 func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
-	host := "example.com"
-	user := "runner"
+	sessionRef := "session-a"
+	credentialRef := "credential-a"
 	command := "uname -a"
 	sshOp := RuntimeOperation{
-		ID: "ssh-1", Kind: StepKindSSHCommand,
+		ID: "ssh-1", Kind: StepKindSSHCommand, TargetRefs: []string{"target-a"},
 		Parameters: []OperationParameter{
-			{Name: "host", String: &host},
-			{Name: "username", String: &user},
+			{Name: "sessionRef", String: &sessionRef},
+			{Name: "credentialRef", String: &credentialRef},
 			{Name: "command", String: &command},
 		},
 	}
@@ -337,9 +337,9 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 
 	sshCandidate := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{
 		Operation: RuntimeOperation{
-			ID: "ssh-val", Kind: StepKindSSHCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			ID: "ssh-val", Kind: StepKindSSHCommand, TargetRefs: []string{"target-a"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			Parameters: []OperationParameter{
-				{Name: "host", String: &host}, {Name: "username", String: &user}, {Name: "command", String: &command},
+				{Name: "sessionRef", String: &sessionRef}, {Name: "credentialRef", String: &credentialRef}, {Name: "command", String: &command},
 			},
 		},
 	}}}}

@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -47,7 +47,7 @@ Last Verified: 2026-08-16
 
 - 订阅合同 owner 定义的 **具体** EventHub command；Runtime capability operation command/result 由接收 block 定义
 - 执行外部 side effect 或 provider interaction（capability）/ 持久化 owner 状态（stateful）
-- 返回 typed result、有界摘要、raw ref、具体 failure
+- 返回 typed result、有界摘要、安全的 content-addressed ref（仅在 owner 合同允许时携带 raw ref）与具体 failure
 
 block **不** 拥有：
 
@@ -85,7 +85,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 | shell command | `blocks/shell` | exitCode + bounded stdout/stderr + factual failure/diagnostic；evidence quality 仍归 Orchestrator |
 | mcp tool/resource/prompt | `blocks/mcp` | 查询 mcpregistry 后调用；不注入 registry service |
 | web search/fetch | `blocks/web` | 候选发现与正文抓取 |
-| ssh command | `blocks/ssh` | 受限远端执行 |
+| ssh command | `blocks/ssh` | opaque owner refs、exact approval、strict host identity 与前后 observation |
 | target snapshot / manifest preflight | `blocks/file` 等 | prerequisite / capability preflight via typed commands |
 
 约束：
@@ -123,7 +123,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 | `file` | path/ref/hash/conflicts/approvalRequired/affectedFiles/target snapshot |
 | `git` | operation/branch/head/changedFiles/summary |
 | `web` | query/url/provider/resultCount/contentHash |
-| `ssh` | host/session/exitCode/bounded preview |
+| `ssh` | opaque target/session/credential refs、exitCode/duration、bounded full-output hash、before/after remote revision |
 
 统一约束：
 

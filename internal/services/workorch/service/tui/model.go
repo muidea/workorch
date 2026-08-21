@@ -2835,8 +2835,8 @@ func failureMessageFromPayload(payload map[string]any) string {
 		}
 	}
 	reason := firstPayloadString(payload, "reason", "Reason", "error", "Error", "failureReason", "FailureReason", backend.PayloadKeyReason, backend.PayloadKeyFailureReason)
-	if sshMissingCredentialFailure(reason) {
-		return "SSH 命令缺少 password 或 privateKey/privateKeyPath，请补充凭证后重试。"
+	if sshOwnerBindingFailure(reason) {
+		return "SSH target/session/credential 引用未配置或未绑定，请在 SSH owner 配置中补齐并重启。"
 	}
 	if isTransientFailureText(reason) {
 		if hint := firstPayloadString(payload, "resolutionHint", "ResolutionHint"); strings.TrimSpace(hint) != "" {
@@ -2847,11 +2847,11 @@ func failureMessageFromPayload(payload map[string]any) string {
 	return strings.TrimSpace(reason)
 }
 
-func sshMissingCredentialFailure(value string) bool {
+func sshOwnerBindingFailure(value string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(value))
-	return strings.Contains(normalized, "ssh/command") &&
-		strings.Contains(normalized, "requires password") &&
-		strings.Contains(normalized, "privatekey")
+	return strings.Contains(normalized, "ssh") &&
+		(strings.Contains(normalized, "owner refs are unavailable or not bound") ||
+			strings.Contains(normalized, "requires canonical owner refs"))
 }
 
 func isTransientFailureText(value string) bool {

@@ -7,150 +7,187 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRuntimeAdapterExecutesPasswordSSHThroughShellCommand(t *testing.T) {
+func TestRuntimeAdapterExecutesPasswordSSHWithStrictHostIdentityAndObservation(t *testing.T) {
 	toolsDir := t.TempDir()
 	captureFile := filepath.Join(toolsDir, "capture.txt")
+	stateFile := filepath.Join(toolsDir, "remote-state")
 	writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
-	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\n{\n  echo \"args=$*\"\n  echo \"askpass=$SSH_ASKPASS\"\n  echo \"askpass_require=$SSH_ASKPASS_REQUIRE\"\n  echo \"password=$($SSH_ASKPASS)\"\n} > \""+captureFile+"\"\necho remote-output\n")
+	writeExecutable(t, filepath.Join(toolsDir, "ssh"), fakeObservedSSHScript(captureFile, stateFile, true))
 	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	adapter := NewRuntimeAdapterWithTimeout(5 * time.Second)
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
-		WorkspaceID:   "ws-ssh",
-		RunID:         "run-ssh",
-		StepID:        "run-ssh/ssh-1",
-		Host:          "192.168.19.231",
-		Port:          22,
-		Username:      "fedquery",
-		Password:      "yuxiang",
-		Command:       "hostname; lscpu",
-		TimeoutMillis: 5000,
-	})
+	adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_PASSWORD", "test-password")
+	result, err := adapter.ExecuteOperation(context.Background(), testRuntimeCommandRequest("mutate-state"))
 	if err != nil {
 		t.Fatalf("execute ssh command: %v", err)
 	}
-	if result.Status != "completed" ||
-		result.AuthMethod != "password" ||
-		result.Stdout != "remote-output\n" ||
-		result.Command != "hostname; lscpu" {
-		t.Fatalf("output = %+v, want completed password ssh command", result)
+	if result.Status != "completed" || !result.Changed || result.ObservedScope != runtimecontract.RuntimeEffectRemoteDurable ||
+		result.BeforeHash == result.AfterHash || result.OutputHash == "" || result.StdoutBytes != int64(len("remote-output\n")) {
+		t.Fatalf("result = %+v, want observed remote change and bounded output metadata", result)
 	}
 	captured := readFile(t, captureFile)
 	for _, want := range []string{
-		"-p 22",
-		"-o BatchMode=no",
-		"-o NumberOfPasswordPrompts=1",
-		"fedquery@192.168.19.231 hostname; lscpu",
-		"askpass_require=force",
-		"password=yuxiang",
+		"-F /dev/null", "StrictHostKeyChecking=yes", "UserKnownHostsFile=", "GlobalKnownHostsFile=/dev/null", "IdentitiesOnly=yes",
+		"-o BatchMode=no", "askpass_require=force", "password=test-password", "operator@example.internal mutate-state",
 	} {
 		if !strings.Contains(captured, want) {
 			t.Fatalf("captured = %q, want %q", captured, want)
 		}
 	}
+	if strings.Contains(captured, "StrictHostKeyChecking=no") {
+		t.Fatalf("captured = %q, strict host identity was disabled", captured)
+	}
 }
 
-func TestRuntimeAdapterExecutesPrivateKeySSHThroughShellCommand(t *testing.T) {
+func TestRuntimeAdapterExecutesPrivateKeyWithoutExposingConfiguredPath(t *testing.T) {
 	toolsDir := t.TempDir()
 	captureFile := filepath.Join(toolsDir, "capture.txt")
-	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\necho \"args=$*\" > \""+captureFile+"\"\necho key-output\n")
+	stateFile := filepath.Join(toolsDir, "remote-state")
+	writeExecutable(t, filepath.Join(toolsDir, "ssh"), fakeObservedSSHScript(captureFile, stateFile, false))
 	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	adapter := NewRuntimeAdapterWithTimeout(5 * time.Second)
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
-		WorkspaceID:   "ws-ssh",
-		RunID:         "run-ssh",
-		StepID:        "run-ssh/ssh-1",
-		Host:          "example.internal",
-		Username:      "fedquery",
-		PrivateKey:    "test-private-key",
-		Command:       "hostname",
-		TimeoutMillis: 5000,
-	})
+	adapter := configuredPrivateKeyRuntimeAdapter(t)
+	result, err := adapter.ExecuteOperation(context.Background(), testRuntimeCommandRequest("mutate-state"))
 	if err != nil {
 		t.Fatalf("execute ssh command: %v", err)
 	}
-	if result.Status != "completed" ||
-		result.AuthMethod != "private_key" ||
-		result.Stdout != "key-output\n" {
-		t.Fatalf("output = %+v, want completed private key ssh command", result)
+	if result.Status != "completed" || !result.Changed || result.OutputHash == "" {
+		t.Fatalf("result = %+v, want observed private-key execution", result)
 	}
 	captured := readFile(t, captureFile)
-	for _, want := range []string{"-i ", "-o BatchMode=yes", "fedquery@example.internal hostname"} {
+	for _, want := range []string{"-i ", "-o BatchMode=yes", "PreferredAuthentications=publickey", "operator@example.internal mutate-state"} {
 		if !strings.Contains(captured, want) {
 			t.Fatalf("captured = %q, want %q", captured, want)
 		}
 	}
+	if strings.Contains(captured, "identity-source") {
+		t.Fatalf("configured private-key path crossed into ssh argv: %q", captured)
+	}
 }
 
-func TestRuntimeAdapterBoundsSSHCommandOutput(t *testing.T) {
+func TestRuntimeAdapterBoundsAndHashesFullSSHCommandOutput(t *testing.T) {
 	toolsDir := t.TempDir()
-	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\nyes x | head -c 70000\n")
+	stateFile := filepath.Join(toolsDir, "remote-state")
+	writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
+	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"observe-state\" ]; then if [ -f \""+stateFile+"\" ]; then echo after; else echo before; fi; exit 0; fi\ntouch \""+stateFile+"\"\nyes x | head -c 70000\n")
 	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	adapter := NewRuntimeAdapterWithTimeout(5 * time.Second)
-	result, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
-		WorkspaceID:   "ws-ssh",
-		RunID:         "run-ssh",
-		StepID:        "run-ssh/ssh-1",
-		Host:          "example.internal",
-		Username:      "fedquery",
-		PrivateKey:    "test-private-key",
-		Command:       "large-output",
-		TimeoutMillis: 5000,
-	})
+	adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_PASSWORD", "test-password")
+	result, err := adapter.ExecuteOperation(context.Background(), testRuntimeCommandRequest("large-output"))
 	if err != nil {
 		t.Fatalf("execute ssh command: %v", err)
 	}
-	if len([]byte(result.Stdout)) != MaxCommandOutputBytes {
-		t.Fatalf("stdout bytes = %d, want %d", len([]byte(result.Stdout)), MaxCommandOutputBytes)
+	if !result.OutputTruncated || !result.StdoutTruncated || result.StdoutBytes != 70000 || result.OutputHash == "" {
+		t.Fatalf("result = %+v, want full byte count/hash with bounded transport", result)
 	}
-	if !result.OutputTruncated || !result.StdoutTruncated {
-		t.Fatalf("output = %+v, want stdout truncation metadata", result)
-	}
-	if result.StdoutBytes != 70000 {
-		t.Fatalf("stdoutBytes = %v, want 70000", result.StdoutBytes)
+	if strings.Contains(result.Evidence.Summary, strings.Repeat("x", 32)) {
+		t.Fatalf("raw output entered evidence: %+v", result.Evidence)
 	}
 }
 
-func TestRuntimeAdapterRejectsMissingAuthentication(t *testing.T) {
-	adapter := NewRuntimeAdapter()
-	_, err := adapter.ExecuteOperation(context.Background(), RuntimeCommandRequest{
-		WorkspaceID: "ws-ssh",
-		RunID:       "run-ssh",
-		StepID:      "run-ssh/ssh-1",
-		Host:        "127.0.0.1",
-		Username:    "fedquery",
-		Command:     "hostname",
-	})
-	if err == nil || !strings.Contains(err.Error(), "password or privateKey") {
-		t.Fatalf("err = %v, want missing authentication error", err)
+func TestRuntimeAdapterNoOpUsesActualRemoteObservation(t *testing.T) {
+	toolsDir := t.TempDir()
+	captureFile := filepath.Join(toolsDir, "capture.txt")
+	stateFile := filepath.Join(toolsDir, "remote-state")
+	writeExecutable(t, filepath.Join(toolsDir, "setsid"), "#!/bin/sh\nexec \"$@\"\n")
+	writeExecutable(t, filepath.Join(toolsDir, "ssh"), fakeObservedSSHScript(captureFile, stateFile, true))
+	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_PASSWORD", "test-password")
+	result, err := adapter.ExecuteOperation(context.Background(), testRuntimeCommandRequest("true"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed || result.ObservedScope != runtimecontract.RuntimeEffectNone || !result.Evidence.ZeroWork || result.BeforeHash != result.AfterHash {
+		t.Fatalf("result = %+v, want factual no-op", result)
 	}
 }
 
-func TestRuntimeAdapterProbeValidatesLocalPrerequisitesWithoutSSHExecution(t *testing.T) {
+func TestRuntimeAdapterProbeResolvesOwnerRefsWithoutSSHExecution(t *testing.T) {
 	toolsDir := t.TempDir()
 	marker := filepath.Join(toolsDir, "ssh-called")
 	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\ntouch \""+marker+"\"\n")
 	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	adapter := NewRuntimeAdapter()
-	if err := adapter.ProbeOperation(RuntimeCommandRequest{
-		WorkspaceID: "ws-ssh", RunID: "run-ssh", StepID: "probe/ssh-1",
-		Host: "example.internal", Username: "operator", Password: "secret", Command: "hostname", TimeoutMillis: 5000,
-	}); err != nil {
+	adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_PASSWORD", "test-password")
+	if err := adapter.ProbeOperation(testRuntimeCommandRequest("hostname")); err != nil {
 		t.Fatalf("probe valid ssh command: %v", err)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("probe started ssh command: stat err=%v", err)
 	}
-	if err := adapter.ProbeOperation(RuntimeCommandRequest{
-		Host: "example.internal", Username: "operator", PrivateKeyPath: "missing-key", Command: "hostname",
-	}); err == nil {
-		t.Fatal("probe accepted missing private key path")
+	invalid := testRuntimeCommandRequest("hostname")
+	invalid.CredentialRef = "other-credential"
+	if err := adapter.ProbeOperation(invalid); err == nil {
+		t.Fatal("probe accepted an unbound credential ref")
 	}
+}
+
+func configuredPasswordRuntimeAdapter(t *testing.T, envName, secret string) *RuntimeAdapter {
+	t.Helper()
+	t.Setenv(envName, secret)
+	return configuredRuntimeAdapter(t, workorchconfig.SSHCredentialConfig{PasswordEnv: envName})
+}
+
+func configuredPrivateKeyRuntimeAdapter(t *testing.T) *RuntimeAdapter {
+	t.Helper()
+	return configuredRuntimeAdapter(t, workorchconfig.SSHCredentialConfig{PrivateKeyFile: "identity-source"})
+}
+
+func configuredRuntimeAdapter(t *testing.T, credential workorchconfig.SSHCredentialConfig) *RuntimeAdapter {
+	t.Helper()
+	configDir := t.TempDir()
+	secretsDir := filepath.Join(configDir, "ssh")
+	if err := os.Mkdir(secretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "known_hosts"), []byte("example.internal ssh-ed25519 AAAATEST\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if credential.PrivateKeyFile != "" {
+		if err := os.WriteFile(filepath.Join(secretsDir, credential.PrivateKeyFile), []byte("test-private-key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adapter, err := NewRuntimeAdapterFromConfig(workorchconfig.SSHConfig{
+		DefaultTimeout: "5s", SecretsDirectory: "ssh",
+		Targets: map[string]workorchconfig.SSHTargetConfig{
+			"target-a": {Host: "example.internal", Port: 22, KnownHostsFile: "known_hosts", ObservationRef: "state", ObservationCommand: "observe-state"},
+		},
+		Sessions: map[string]workorchconfig.SSHSessionConfig{
+			"session-a": {TargetRef: "target-a", Username: "operator", CredentialRefs: []string{"credential-a"}},
+		},
+		Credentials: map[string]workorchconfig.SSHCredentialConfig{"credential-a": credential},
+	}, configDir, os.LookupEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(adapter.Close)
+	return adapter
+}
+
+func testRuntimeCommandRequest(command string) RuntimeCommandRequest {
+	return RuntimeCommandRequest{
+		WorkspaceID: "ws-ssh", RunID: "run-ssh", StepID: "run-ssh/ssh-1",
+		TargetRef: "target-a", SessionRef: "session-a", CredentialRef: "credential-a", Command: command, TimeoutMillis: 5000,
+	}
+}
+
+func fakeObservedSSHScript(captureFile, stateFile string, password bool) string {
+	passwordCapture := ""
+	if password {
+		passwordCapture = "echo \"askpass_require=$SSH_ASKPASS_REQUIRE\" >> \"" + captureFile + "\"\necho \"password=$($SSH_ASKPASS)\" >> \"" + captureFile + "\"\n"
+	}
+	return "#!/bin/sh\n" +
+		"echo \"args=$*\" >> \"" + captureFile + "\"\n" + passwordCapture +
+		"last=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\n" +
+		"if [ \"$last\" = \"observe-state\" ]; then if [ -f \"" + stateFile + "\" ]; then echo after; else echo before; fi; exit 0; fi\n" +
+		"if [ \"$last\" = \"mutate-state\" ]; then touch \"" + stateFile + "\"; echo remote-output; exit 0; fi\n" +
+		"if [ \"$last\" = \"true\" ]; then exit 0; fi\nexit 2\n"
 }
 
 func writeExecutable(t *testing.T, path string, content string) {
@@ -168,3 +205,5 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(content)
 }
+
+var _ = time.Second

@@ -6,39 +6,34 @@ import (
 )
 
 type RuntimeCommandRequest struct {
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	StepID                        common.StepID
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Host                          string
-	Port                          int64
-	Username                      string
-	Password                      string
-	PrivateKey                    string
-	PrivateKeyPath                string
-	Command                       string
-	TimeoutMillis                 int64
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	WorkspaceID      common.WorkspaceID
+	RunID            common.RunID
+	StepID           common.StepID
+	TargetRef        string
+	SessionRef       string
+	CredentialRef    string
+	Command          string
+	TimeoutMillis    int64
+	EvidencePolicies []runtimecontract.RuntimeEvidencePolicy
 }
 
 type RuntimeCommandResult struct {
 	Status          string
-	Host            string
-	Port            int64
-	Username        string
-	Command         string
-	Stdout          string
-	Stderr          string
+	TargetRef       string
+	ObservationRef  string
 	ExitCode        int64
 	DurationMillis  int64
 	TimeoutMillis   int64
-	AuthMethod      string
 	OutputTruncated bool
 	StdoutTruncated bool
 	StderrTruncated bool
 	StdoutBytes     int64
 	StderrBytes     int64
+	OutputHash      string
+	BeforeHash      string
+	AfterHash       string
+	Changed         bool
+	ObservedScope   runtimecontract.RuntimeEffectScope
 	FailureCode     string
 	FailureMessage  string
 	Evidence        runtimecontract.RuntimeOperationEvidence

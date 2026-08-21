@@ -284,9 +284,10 @@ func init() {
 		},
 		{
 			Kind: StepKindSSHCommand, OwnerModuleID: RuntimeModuleSSH,
-			DefaultEffectScope: RuntimeEffectRemoteDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
-			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
+			DefaultEffectScope: RuntimeEffectRemoteDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
+			TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			// Dynamic tool calls remain unknown until an owner policy fact

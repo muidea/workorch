@@ -91,6 +91,35 @@ func TestValidateRuntimeOperationContractFileWriteRequiresTargetAndContent(t *te
 	}
 }
 
+func TestValidateRuntimeOperationContractSSHUsesOnlyOpaqueOwnerRefs(t *testing.T) {
+	sessionRef, credentialRef, command := "session-a", "credential-a", "uname -a"
+	valid := RuntimeOperation{
+		ID: "ssh-1", Kind: StepKindSSHCommand, TargetRefs: []string{"target-a"},
+		Parameters: []OperationParameter{{Name: "sessionRef", String: &sessionRef}, {Name: "credentialRef", String: &credentialRef}, {Name: "command", String: &command}},
+	}
+	if err := ValidateRuntimeOperationContract(valid); err != nil {
+		t.Fatalf("valid SSH owner-ref operation: %v", err)
+	}
+	host := "example.internal"
+	withEndpoint := valid
+	withEndpoint.Parameters = append(withEndpoint.Parameters, OperationParameter{Name: "host", String: &host})
+	if err := ValidateRuntimeOperationContract(withEndpoint); err == nil || !strings.Contains(err.Error(), `does not accept parameter "host"`) {
+		t.Fatalf("SSH endpoint parameter error = %v", err)
+	}
+	endpointRef := "https://example.internal"
+	withEndpointRef := valid
+	withEndpointRef.TargetRefs = []string{endpointRef}
+	if err := ValidateRuntimeOperationContract(withEndpointRef); err == nil || !strings.Contains(err.Error(), "canonical owner refs") {
+		t.Fatalf("SSH endpoint-shaped target ref error = %v", err)
+	}
+	oversized := strings.Repeat("x", 16*1024+1)
+	withOversizedCommand := valid
+	withOversizedCommand.Parameters = []OperationParameter{{Name: "sessionRef", String: &sessionRef}, {Name: "credentialRef", String: &credentialRef}, {Name: "command", String: &oversized}}
+	if err := ValidateRuntimeOperationContract(withOversizedCommand); err == nil || !strings.Contains(err.Error(), "bounded command") {
+		t.Fatalf("SSH oversized command error = %v", err)
+	}
+}
+
 func TestValidateRuntimeOperationContractRejectsCandidateClaimedShellFailureTargets(t *testing.T) {
 	command := "go"
 	err := ValidateRuntimeOperationContract(RuntimeOperation{

@@ -71,3 +71,11 @@ requireHumanFor = ['secret_access', 'external_write', 'destructive_operation', '
 [governance.budget]
 maxConsecutiveFailures = 2
 maxRepeatedSamePrompt = 1
+
+[ssh]
+defaultTimeout = '30s'
+secretsDirectory = 'ssh'
+
+[ssh.targets]
+[ssh.sessions]
+[ssh.credentials]

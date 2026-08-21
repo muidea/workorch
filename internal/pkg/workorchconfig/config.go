@@ -30,6 +30,7 @@ type Config struct {
 	LLM          LLMConfig        `json:"llm" toml:"llm"`
 	WebSearch    WebSearchConfig  `json:"webSearch" toml:"webSearch"`
 	Governance   GovernanceConfig `json:"governance" toml:"governance"`
+	SSH          SSHConfig        `json:"ssh" toml:"ssh"`
 }
 
 type ServerConfig struct {
@@ -272,10 +273,28 @@ func Current() (Config, error) {
 	if err := loadSection("governance", &cfg.Governance); err != nil {
 		return Config{}, err
 	}
+	if err := loadSection("ssh", &cfg.SSH); err != nil {
+		return Config{}, err
+	}
 	if err := normalizeConfig(&cfg); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// CurrentSSH loads only the owner-private SSH section. Capability startup must
+// not depend on unrelated mutable application sections such as LLM settings.
+func CurrentSSH() (SSHConfig, error) {
+	if !configuration.IsConfigManagerInitialized() {
+		if err := configuration.InitDefaultConfigManager(""); err != nil {
+			return SSHConfig{}, err
+		}
+	}
+	var cfg SSHConfig
+	if err := loadSection("ssh", &cfg); err != nil {
+		return SSHConfig{}, err
+	}
+	return NormalizeSSHConfig(cfg)
 }
 
 // Persisted returns the configuration that will be loaded by the next process
@@ -425,6 +444,11 @@ func normalizeConfig(cfg *Config) error {
 		return err
 	}
 	cfg.LLM = llm
+	ssh, err := NormalizeSSHConfig(cfg.SSH)
+	if err != nil {
+		return err
+	}
+	cfg.SSH = ssh
 	return nil
 }
 

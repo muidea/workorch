@@ -2,6 +2,8 @@ package ssh
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,51 @@ import (
 	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestSSHOwnerAdmissibilityPublishesOnlyOpaqueTargetsAndAtMostOncePolicy(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	adapter := configuredPasswordRuntimeAdapter(t, "WORKORCH_TEST_SSH_PASSWORD", "test-password")
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	command := sshevents.AcquireRuntimeOperationAdmissibilityCommand{
+		WorkspaceID: "ws-ssh", RunID: "run-ssh", AuthoritySnapshotID: "authority-ssh", PrerequisiteID: "admissibility-ssh",
+		OwnerModuleID: ModuleID, WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{StepKindCommand}, MaxItems: 4,
+	}
+	result := hub.Send(magicevent.NewEventWithContext(sshevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := data.(sshevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok {
+		t.Fatalf("response type = %T", data)
+	}
+	inventory := response.Acquisition.Admissibility
+	if len(inventory.TargetRefs) != 1 || inventory.TargetRefs[0] != "target-a" || len(inventory.OperationPolicies) != 1 ||
+		inventory.OperationPolicies[0].EffectScope != runtimecontract.RuntimeEffectRemoteDurable ||
+		inventory.OperationPolicies[0].IdempotencyClass != runtimecontract.RuntimeOperationIdempotencyAtMostOnce || len(inventory.OperationVariants) != 1 ||
+		!containsSSHRef(inventory.ConstraintRefs, "ssh-binding/target-a/session-a/credential-a") {
+		t.Fatalf("SSH admissibility = %+v", inventory)
+	}
+	probe := sendSSHFeasibilityProbe(t, ctx, hub, inventory, response.Acquisition.Observation)
+	if probe.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probe.Feedback != nil || probe.Stale != nil {
+		t.Fatalf("configured opaque SSH binding probe = %+v, want feasible", probe)
+	}
+	wire, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	for _, prohibited := range []string{"example.internal", "operator", "test-password"} {
+		if strings.Contains(string(wire), prohibited) {
+			t.Fatalf("SSH admissibility exposed private owner data %q: %s", prohibited, wire)
+		}
+	}
+}
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
@@ -49,7 +96,7 @@ func TestSSHOwnerProbeReturnsTypedStaleBeforeAnyNetworkOperationWhenPolicyChange
 	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	observation := sshAdmissibilityObservation(inventory.PrerequisiteID, inventory)
-	adapter.timeout = 7 * time.Second // owner-observed policy revision drift
+	adapter.revision = "ssh-policy-drifted" // simulated next-process owner policy
 
 	response := sendSSHFeasibilityProbe(t, ctx, hub, inventory, observation)
 	if response.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || response.Stale == nil || response.Feedback != nil || response.Stale.ExpectedRevision != inventory.ObservedRevision || response.Stale.ObservedRevision != adapter.admissibilityRevision() {
@@ -87,7 +134,7 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 	}
 	manifest.OwnerCatalogs = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
-	adapter.timeout = 7 * time.Second
+	adapter.revision = "ssh-policy-drifted"
 	result := hub.Send(magicevent.NewEventWithContext(
 		sshevents.TopicProbeRuntimeSemanticProofFeasibility,
 		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
@@ -109,9 +156,8 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 
 func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) sshevents.ProbeRuntimeOperationFeasibilityResult {
 	t.Helper()
-	host := "example.invalid"
-	username := "operator"
-	password := "secret"
+	sessionRef := "session-a"
+	credentialRef := "credential-a"
 	command := "uname -a"
 	result := hub.Send(magicevent.NewEventWithContext(
 		sshevents.TopicProbeRuntimeOperationFeasibility,
@@ -121,8 +167,8 @@ func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-ssh-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
 			CandidateManifestHash: "manifest-ssh-freshness", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, StepKindCommand),
-			Operation: runtimecontract.RuntimeOperation{ID: "ssh-command", Kind: StepKindCommand, Parameters: []runtimecontract.OperationParameter{
-				{Name: "host", String: &host}, {Name: "username", String: &username}, {Name: "password", String: &password}, {Name: "command", String: &command},
+			Operation: runtimecontract.RuntimeOperation{ID: "ssh-command", Kind: StepKindCommand, TargetRefs: []string{"target-a"}, Parameters: []runtimecontract.OperationParameter{
+				{Name: "sessionRef", String: &sessionRef}, {Name: "credentialRef", String: &credentialRef}, {Name: "command", String: &command},
 			}},
 		},
 	))

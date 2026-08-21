@@ -305,6 +305,10 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		"write-1", execution.ExecutionKey, execution.Fence+1, grant); err != nil || found {
 		t.Fatalf("authorized resume receipt preflight found=%v err=%v", found, err)
 	}
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,
+		"write-1", execution.ExecutionKey, execution.Fence+1, nil); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("omitted persisted governance grant err=%v, want conflict", err)
+	}
 	driftedGrant := grant.Normalized()
 	driftedGrant.SubjectRef = "other.txt"
 	if _, _, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", continued.Aggregate.ActiveDispatch.ID,

@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -12,6 +13,7 @@ import (
 	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -32,7 +34,11 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) (*Bi
 	if eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), runtimeAdapter: NewRuntimeAdapter()}, nil
+	adapter, err := newConfiguredRuntimeAdapter()
+	if err != nil {
+		return nil, err
+	}
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), runtimeAdapter: adapter}, nil
 }
 
 func (m *Biz) Start() error {
@@ -56,16 +62,44 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(sshevents.TopicProbeRuntimeOperationFeasibility)
 	m.UnsubscribeFunc(sshevents.TopicProbeRuntimeSemanticProofFeasibility)
-	m.runtimeAdapter = nil
+	if m.runtimeAdapter != nil {
+		m.runtimeAdapter.Close()
+		m.runtimeAdapter = nil
+	}
 }
 
 func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if event == nil || event.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		setCapabilityError(result, fmt.Errorf("runtime SSH operation requires Orchestrator source"))
+		return
+	}
 	command, ok := event.Data().(sshevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if err := orchestratorevents.ValidateRuntimeOperationScope(command.WorkspaceID, command.RunID, command.DispatchID, command.Transaction, command.OperationID, command.EvidenceKind, command.WorkspaceDeliverableDirectory); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if err := command.Execution.Validate(); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	operation, err := command.SealedOperation.ValidateForExecution(command.RuntimeOperationExecutionContext)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	if command.Execution.ExpectedEffectScope != runtimecontract.RuntimeEffectRemoteDurable {
+		setCapabilityError(result, fmt.Errorf("runtime SSH operation requires sealed remote_durable effect"))
+		return
+	}
+	data, err := sshevents.OperationDataFromRuntimeOperation(operation)
+	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -76,13 +110,27 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(sshevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	requirement := sshApprovalRequirement(data)
+	if command.Execution.GovernanceGrant == nil {
+		receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusRejected, command.TargetRefs,
+			runtimecontract.RuntimeOperationEvidence{Summary: "SSH remote command requires approval before execution"}, nil, requirement,
+			orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectGovernanceOnly})
+		committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+		if err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+		result.Set(sshevents.ExecuteOperationResult{Receipt: committed}, nil)
+		return
+	}
+	if !sshApprovalGranted(command.Execution, *requirement) {
+		setCapabilityError(result, fmt.Errorf("runtime SSH approval grant does not match sealed owner authorization"))
+		return
+	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeCommandRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
-		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
-		WorkspaceInternalDirectory:    command.WorkspaceInternalDirectory,
-		Host:                          command.Data.Host, Port: command.Data.Port, Username: command.Data.Username,
-		Password: command.Data.Password, PrivateKey: command.Data.PrivateKey, PrivateKeyPath: command.Data.PrivateKeyPath,
-		Command: command.Data.Command, TimeoutMillis: command.Data.TimeoutMillis, EvidencePolicies: command.EvidencePolicies,
+		TargetRef: data.TargetRef, SessionRef: data.SessionRef, CredentialRef: data.CredentialRef,
+		Command: data.Command, TimeoutMillis: data.TimeoutMillis, EvidencePolicies: command.EvidencePolicies,
 	})
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
@@ -91,18 +139,69 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindSSHCommand, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
-	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
-		observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
-		observation.Changed = runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope)
+	observation := orchestratorevents.RuntimeOperationReceiptObservation{
+		ObservedEffectScope: operationResult.ObservedScope, Changed: operationResult.Changed,
+		NoOp:       status == runtimecontract.RuntimeOperationExecutionStatusAccepted && !operationResult.Changed,
+		BeforeHash: operationResult.BeforeHash, AfterHash: operationResult.AfterHash,
+	}
+	if operationResult.Changed && operationResult.BeforeHash != "" && operationResult.AfterHash != "" {
+		observation.ResourceChanges = []runtimecontract.RuntimeResourceChange{{
+			Domain: runtimecontract.RuntimeResourceRemoteResource, OwnerModuleID: ModuleID,
+			SubjectRef:     data.TargetRef + "/" + operationResult.ObservationRef,
+			BeforeRevision: operationResult.BeforeHash, AfterRevision: operationResult.AfterHash,
+		}}
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, observation)
+	attachSSHOutputDiagnostic(&receipt, operationResult)
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	result.Set(sshevents.ExecuteOperationResult{Receipt: committed}, nil)
+}
+
+func sshApprovalRequirement(data sshevents.OperationData) *runtimecontract.RuntimeGovernanceRequirement {
+	commandHash := hashSSHBytes([]byte(strings.TrimSpace(data.Command)))
+	return &runtimecontract.RuntimeGovernanceRequirement{
+		Kind: runtimecontract.GovernanceApproval, SubjectRef: strings.TrimSpace(data.TargetRef),
+		Reason:          "SSH remote command requires explicit approval before any network side effect",
+		RequestedAction: runtimecontract.StepKindSSHCommand, RiskLevel: "external_high",
+		AuthorizationContext: workorcheventpayload.New(
+			workorcheventpayload.StringField("targetRef", strings.TrimSpace(data.TargetRef)),
+			workorcheventpayload.StringField("sessionRef", strings.TrimSpace(data.SessionRef)),
+			workorcheventpayload.StringField("credentialRef", strings.TrimSpace(data.CredentialRef)),
+			workorcheventpayload.StringField("operationKind", runtimecontract.StepKindSSHCommand),
+			workorcheventpayload.StringField("commandHash", commandHash),
+			workorcheventpayload.IntField("timeoutMillis", data.TimeoutMillis),
+		),
+	}
+}
+
+func sshApprovalGranted(execution runtimecontract.RuntimeOperationExecutionEnvelope, requirement runtimecontract.RuntimeGovernanceRequirement) bool {
+	if execution.GovernanceGrant == nil {
+		return false
+	}
+	grant := execution.GovernanceGrant.Normalized()
+	requirement = requirement.Normalized()
+	return grant.Validate() == nil && grant.TicketID == "" && grant.ApprovalID != "" &&
+		grant.DependencyKind == string(requirement.Kind) && grant.SubjectRef == requirement.SubjectRef &&
+		grant.RequestedAction == requirement.RequestedAction && grant.RiskLevel == requirement.RiskLevel &&
+		grant.AuthorizationHash == runtimecontract.StableRuntimeAuthorizationContextHash(requirement.AuthorizationContext)
+}
+
+func attachSSHOutputDiagnostic(receipt *runtimecontract.RuntimeOperationReceipt, result RuntimeCommandResult) {
+	if receipt == nil || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil || result.OutputHash == "" {
+		return
+	}
+	diagnostic := receipt.Feedback.OriginalDiagnostic
+	diagnostic.DetailsRef = "workorch://ssh/evidence/" + result.OutputHash
+	diagnostic.DetailsHash = result.OutputHash
+	diagnostic.DetailsBytes = result.StdoutBytes + result.StderrBytes
+	diagnostic.ContentType = "application/vnd.workorch.ssh-output-metadata"
+	diagnostic.OmittedReason = "raw_ssh_command_output"
+	diagnostic.Truncated = result.OutputTruncated
+	diagnostic.Redacted = true
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
@@ -129,8 +228,35 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, nil, []string{"remote-host-parameter", "owner-execution-policy"}, m.runtimeAdapter.admissibilityRevision())
+	if m.runtimeAdapter == nil || len(m.runtimeAdapter.targets) > command.MaxItems {
+		setCapabilityError(result, fmt.Errorf("runtime SSH owner inventory exceeds bounded request"))
+		return
+	}
+	targetRefs := m.runtimeAdapter.targetRefs(command.MaxItems)
+	bindingRefs := m.runtimeAdapter.bindingConstraintRefs(command.MaxItems)
+	if len(bindingRefs) != len(m.runtimeAdapter.bindingConstraintRefs(runtimecontract.RuntimeOwnerInventoryItemsMaxCount)) {
+		setCapabilityError(result, fmt.Errorf("runtime SSH owner binding inventory exceeds bounded request"))
+		return
+	}
+	constraintRefs := append([]string{"owner-resolved-refs", "strict-host-identity", "approval-before-side-effect", "remote-before-after-observation", "owner-execution-policy"}, bindingRefs...)
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, targetRefs, nil,
+		constraintRefs, m.runtimeAdapter.admissibilityRevision())
 	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+		Kind:                  runtimecontract.StepKindSSHCommand,
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		ConstraintRefs:        append([]string(nil), constraintRefs...),
+	}}
+	inventory.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{{
+		ID: "operation-policy/ssh-command", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindSSHCommand,
+		SubjectRef: "configured-ssh-target", EffectScope: runtimecontract.RuntimeEffectRemoteDurable,
+		IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -174,11 +300,16 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
+	if !containsSSHRef(command.Admissibility.TargetRefs, data.TargetRef) ||
+		!containsSSHRef(command.Admissibility.ConstraintRefs, sshBindingConstraintRef(data.TargetRef, data.SessionRef, data.CredentialRef)) {
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "ssh_owner_binding_unavailable", "runtime ssh operation refs are outside the sealed owner catalog")
+		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
+		return
+	}
 	err = m.runtimeAdapter.ProbeOperation(RuntimeCommandRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID("probe/" + operation.ID),
-		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
-		Host:                          data.Host, Port: data.Port, Username: data.Username, Password: data.Password,
-		PrivateKey: data.PrivateKey, PrivateKeyPath: data.PrivateKeyPath, Command: data.Command, TimeoutMillis: data.TimeoutMillis,
+		TargetRef: data.TargetRef, SessionRef: data.SessionRef, CredentialRef: data.CredentialRef,
+		Command: data.Command, TimeoutMillis: data.TimeoutMillis,
 	})
 	if err != nil {
 		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "ssh_prerequisite_unavailable", err.Error())
