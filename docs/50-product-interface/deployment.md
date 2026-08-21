@@ -1,6 +1,6 @@
 # WorkOrch Deployment
 
-Status: active
+Status: normative
 
 Type: product-interface
 
@@ -36,12 +36,14 @@ not the documented CLI selection mechanism.
 Canonical LLM config is ai-proxy-only: `llm.aiProxy`, `llm.defaultChat`, optional `llm.defaultEmbedding`, and `llm.budget`.
 Secrets should be injected through a protected generated config or secret mount; public configuration responses are redacted.
 
-SSH execution is optional and defaults to an empty catalog. Configure `[ssh.targets]`, `[ssh.sessions]` and
-`[ssh.credentials]` as one closed catalog. Runtime uses only opaque target/session/credential refs; host, username, known-hosts
-identity and credential material remain in the SSH owner. Credentials must use an environment reference or a relative private-key
-file under `ssh.secretsDirectory`; inline passwords/private keys and arbitrary Runtime key paths are unsupported. Relative files
-are resolved beneath the selected configuration directory at process start, and configuration changes require restart. The exact
-schema and permission rules are maintained in the [SSH component contract](../../internal/modules/blocks/ssh/readme.md).
+The LLM owner freezes its active configuration during process startup. Management writes update persisted configuration only;
+when persisted and active revisions differ, the projection reports `restartRequired`. Catalog refresh must not inject persisted
+changes into the active owner, and an already sealed Run never changes provider selection on Resume.
+
+SSH execution is optional and defaults to an empty catalog。`[ssh.targets]`、`[ssh.sessions]`与`[ssh.credentials]`构成一个closed
+catalog；Runtime只使用opaque refs。credential只能引用environment或`ssh.secretsDirectory`下的relative private-key file，
+不支持inline password/private key或任意key path；owner在process start解析并冻结配置，变更需要restart。exact schema和权限
+规则见[SSH component contract](../../internal/modules/blocks/ssh/readme.md)。
 
 ## Data Layout
 
@@ -64,8 +66,7 @@ backend at `/var/lib/workorch/.workorch-data`.
 The builder copies `web/consoleassets`, caches `go mod download`, and accepts `WORKORCH_DOCKER_GOPROXY` plus
 `WORKORCH_DOCKER_BUILD_NETWORK` overrides for constrained build networks. The container verifier uses Workspace/Goal/DoD plus
 `execution-activations`, asserts removed Run mutations return `404`, and verifies ephemeral and mounted file-backed modes.
-Both modes passed on 2026-08-16; see the
-[closure record](../90-archive/records/runtime-contract-drift-code-closure-record-2026-08-16.md).
+Both modes are enforced by the current container verifier; dated run records are intentionally not retained in `docs/`.
 
 ## Operational Checks
 

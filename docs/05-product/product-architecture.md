@@ -1,81 +1,76 @@
 # WorkOrch Product Architecture
 
-Status: active
+Status: normative
 
 Type: product-architecture
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
-## Architecture View
+## Product Interaction View
 
 ```text
-TUI / Web / HTTP client
-        |
-        v
-workorchd application composition and projection
-        |
-        v  typed EventHub command/result
-Workspace owner -> Run owner -> Orchestrator
-                                |        |
-                                |        +-> Decision / Approval owners
-                                +----------> capability owners
-                                |
-                                v
-                         Result -> Workspace -> Run
+user through TUI / Web / API
+  -> edit Workspace candidate or submit owner intent
+  -> workorchd composes typed use case
+  -> sole owner validates and persists
+  -> Runtime/capability/governance owners converge
+  -> owner facts become projection
+  -> user observes progress, blocker and formal Result
 ```
 
-箭头表示 typed command/result 或终态 delivery，不表示跨 owner repository/service 调用。
+本图描述产品交互，不定义代码层或状态机。framework unit、1+4+17 与依赖方向见
+[Module Architecture](../30-module-architecture/overview.md)；SM-1～SM-4 见 [Runtime Core](../00-core/overview.md)。
 
-## Layers And Responsibilities
+## User-Owned Inputs And Observable Resources
 
-| Layer | Code | Responsibility | Must not |
-| --- | --- | --- | --- |
-| Entry/process | `application/workorch`, `internal/services/workorch` | mode、CLI/TUI、local/remote backend、process lifecycle | 拥有业务状态 |
-| Runtime initiator | `internal/initiators/workorchruntime` | repository provider/factory | 导出 EventHub、policy 或 bootstrap |
-| Application module | `internal/modules/application/workorchd` | HTTP/SSE、typed bootstrap composition、projection | drive Runtime 或创建 successor |
-| Stateful owners | Workspace、Run、Result、Decision、Approval、Memory、Skill、Soul、MCP Registry、Eventstream | owner-local model、repository 与 lifecycle | 接受跨 owner direct mutation |
-| Kernel modules | Orchestrator、Governance、System | Runtime convergence、governance policy、startup defaults coordination | 接管其他 owner 状态机 |
-| Capability blocks | LLM、File、Git、Shell、SSH、Web、MCP | concrete typed operation 与事实回执 | 选择下一步或接纳证据 |
-| Shared contracts | `internal/pkg/*contract` | stable typed value/event contracts | 承载 owner service locator |
-
-## Runtime Ownership
-
-| Machine | Sole owner | Product meaning |
+| Product resource | User action | Authority result |
 | --- | --- | --- |
-| SM-1 | Run | pending/active/blocked/terminal lifecycle 与 restart replacement transaction |
-| SM-2 | Orchestrator | authority/focus convergence |
-| SM-3 | Orchestrator | candidate、feasibility、sealed dispatch transaction |
-| SM-4 | Orchestrator | drive/recovery 和 terminal delivery sequencing |
+| Workspace Definition | edit Template、Goal、DoD、optional directory | Workspace-owned immutable admission candidate and promoted startup input |
+| Execution | submit `resume|restart` intent | Run owner lifecycle/replacement plus Orchestrator convergence |
+| Governance | answer Decision/Approval | corresponding owner resolution; no client auto-Resume |
+| Context resources | manage Soul、Skill、Memory、MCP registry and model selection | each resource owner revision/snapshot |
+| Progress/outcome | inspect three-axis coverage/evidence/assessment、wait、budget、artifact、Result | read-only derived views of owner/aggregate facts |
 
-Workspace owner 负责定义与 active Run 绑定；Result owner 负责 formal outcome；Decision/Approval owner 负责各自治理
-lifecycle。它们通过 concrete event contract 协作，不共享状态机写权限。
+User text、UI state、HTTP response、Eventstream and projection never become Runtime authority by themselves。
 
-## Primary Flows
+## Fresh Execution
 
-### Fresh Execution
+1. User submits exact Template、Goal/DoD and resolved/default directory as pre-seal candidate。
+2. Pure admission accepts complete `all_of` only；explicit ambiguity returns a blocking clarification ticket and no Run。
+3. Workspace owner promotion seals startup input；corrected ticket lineage becomes eligible only after Decision resolution and Workspace acknowledgement。
+4. User explicitly submits execution intent；workorchd composes typed bootstrap from eligible owner state。
+5. Run owner activates SM-1；Orchestrator drives SM-2/3/4；capability owner executes only sealed operation。
+6. Orchestrator accepts matching evidence and seals terminal；Result→Workspace→Run owners acknowledge in order。
 
-1. 用户保存 Workspace、Goal、DoD 和必要资源选择。
-2. workorchd 构造 typed `RuntimeBootstrap`，提交 workspace execution `resume` intent。
-3. Workspace owner 解析当前定义；Run owner 幂等创建或激活 Run。
-4. Orchestrator 从 aggregate drive SM-2/3/4；capability owner 执行 sealed operation。
-5. Orchestrator 接纳证据、推进 focus，并密封终态。
-6. Result、Workspace、Run 按 owner acknowledgement 顺序完成投递。
+Manual authoring does not require setup-draft LLM。After startup seal，bounded Runtime LLM processing is allowed but cannot
+rewrite inputs、choose action、grant credit or decide terminal。
 
-### Resume
+执行期 semantic processing 若发现隐含 one-of、undeclared prerequisite 或 Definition ambiguity，只能形成 Run-scoped
+runtime-definition clarification ticket。受影响 focus 在新 operation 前停止；客户端不能回答该票据以继续 predecessor。
+用户必须提交修正后的 all-of candidate 并显式 Restart，随后由 Run/Decision owner 的专用 replacement command/result
+把 ticket 与 `ReplacementIntent` 绑定。current Run 不扩图、不修改 Definition，也不吸收修正后的 revision。
 
-`resume` 只对当前 Workspace 的 active/recoverable Run 发出继续意图；recovery 从 aggregate 重新 drive，调用方不提供
-目标 revision、next action 或 authority patch。
+运行中的不可推进状态必须对用户明确区分：真实外部选择/授权进入 governance wait；具有 exact condition、trigger/deadline
+和 budget 的暂时条件进入 recoverable runtime wait；其余合同、guard 或预算不安全情况进入 typed failure。客户端不提供
+clear wait、force retry、budget top-up 或用普通 Resume 解除这些状态。
 
-### Restart
+## Resume And Restart
 
-`restart` 由 Workspace owner 转交 Run owner。Run owner持久化 predecessor 的 `ReplacementIntent`；待 predecessor
-终态 delivery 完整确认后创建 successor。Application 不保存 continuation queue，也不在 projection 中推断 successor。
+`resume` only continues the Workspace-selected active/recoverable Run from its original aggregate、Definition and sealed
+provider/context selection。Caller does not supply revision、next action or authority patch。
 
-## Read And Write Boundaries
+`restart` requires a fresh eligible startup input。Run owner persists predecessor `ReplacementIntent`；only after predecessor
+terminal delivery is complete may its private reducer create the successor。Application/projection does not queue、infer or
+pre-create successor。
 
-- write path：入口 → typed command → sole owner → owner-local event/state change。
-- read path：owner facts → workorchd projection/SSE → TUI/Web/client。
-- Eventstream 是审计日志；projection 是可重建读模型；两者都不是 authority source。
-- repository 只由对应 owner 使用；同 owner 内部可以直接组合 Biz/Repo。
+成功不是 operation、artifact 或全部 CWI 执行结束的别名。产品 Result 必须逐 requirement/CWI 展示独立的 coverage、evidence
+和 assessment，并引用 current accepted evidence 与实际依赖的 owner revision set；required item 的 `indeterminate` 不能进入
+successful closeout。Result owner只保存 Orchestrator 已裁决的密封 closeout。
 
-组件逐项核对见 [component documentation alignment](../01-overview/component-documentation-alignment.md)。
+## Read And Write Semantics
+
+- write：interface → workorchd use case → receiving-owner concrete EventHub command → owner-local event/repository；
+- read：owner facts/reads → workorchd detached projection/SSE → interface；
+- Eventstream is audit only；projection can rebuild/cache but cannot repair formal state；
+- command acknowledgement means accepted for processing；final progress/outcome comes from owner projection；
+- each interface exposes the same business semantics regardless of local/remote transport。

@@ -1,6 +1,6 @@
 # Software-Dev LSP Bridge Integration
 
-Status: active
+Status: normative
 
 Type: profile-capability
 

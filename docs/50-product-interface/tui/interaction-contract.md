@@ -1,10 +1,19 @@
 # WorkOrch TUI Interaction Contract
 
-Status: active
+Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
+
+## Mode And Authority
+
+TUI 是默认 binary mode。local mode embeds WorkOrch units and shared backend/EventHub，不启动或调用本地 HTTP server；
+`--remote <base-url>` 通过同一 port interfaces 使用 HTTP/SSE backend。两种模式只提交 Workspace、execution、resource
+和 governance intent并消费 projection；TUI 不拥有 Runtime、Run lifecycle 或 resource state。
+
+启动选择顺序为：current directory 精确匹配的 Workspace、configured last-active Workspace、无选择。前两项均未命中时
+必须等待用户选择或创建，不能静默创建 Workspace。
 
 ## Layout
 
@@ -17,11 +26,12 @@ Input is evaluated in this order:
 
 | Current context | Bare text behavior |
 | --- | --- |
+| runtime-definition clarification | keep the typed blocker and show revise/restart remediation; bare text emits no resolution or Resume |
 | blocking Decision | resolve the current Ticket with the text |
 | blocking Approval | parse approve/reject; keep waiting when ambiguous |
 | no active Workspace | show an error |
 | active Workspace with active Run | request `resume`; text remains transcript only and is not a Runtime patch |
-| active Workspace without active Run | save/submit the text as a new Goal and begin execution flow |
+| active Workspace without active Run | edit/submit a new Definition admission candidate; do not bypass all-of admission or auto-start |
 
 Slash commands take precedence over bare text.
 
@@ -51,6 +61,8 @@ activation; it does not directly create or select a successor.
 
 Normal TUI creation uses `/workspace create <title> --template <template-id> [--dir <path>]`. Template is required; when
 `--dir` is omitted, the application resolves and creates the default `.workorch-workspaces/<workspace-id>` directory.
+Goal、DoD 和 template admission完成且 activation eligible 后，用户仍需显式执行 intent。Static clarification必须显示
+typed violation 与 `BlockingTicketID`；TUI 不提供 one-of branch selection 或“确认后放行”。
 
 ## Keyboard
 
@@ -79,6 +91,11 @@ Normal TUI creation uses `/workspace create <title> --template <template-id> [--
 - successful resolution clears the prompt and waits for owner continuation facts;
 - the TUI does not submit an extra Resume after resolution.
 
+Run-scoped runtime-definition clarification是专用例外：prompt显示gap、offending refs与`revise_definition_and_restart`，不把裸文本、
+`/decision answer`、batch resolution或`/run resume`解释为合法resolution。用户必须用`/goal`、`/dod`形成新的all-of candidate，
+待admission eligible后显式`/run restart`；TUI不关闭ticket、不构造replacement binding，也不预创建successor。pre-seal
+clarification同样只能通过修正candidate收口，不能“确认one-of”。
+
 ## Model Selection
 
 `/model` selects an ai-proxy model for the Workspace; `/model reasoning` updates the complete selection with a reasoning effort;
@@ -90,3 +107,15 @@ selection; a changed selection applies to a fresh activation, not an in-place Re
 `/result`, `/artifacts`, `/patches`, `/steps`, `/timeline`, `/coverage`, `/memory`, `/status` expose compact projection views.
 Artifact continuation content and raw provider/event payloads are not expanded by default. These views cannot trigger owner
 state transitions.
+
+`/coverage`按requirement/CWI分别展示coverage、assessment和evidence；`partially_covered`或`indeterminate`不能渲染为
+完成。`/status`可以展示recoverable wait的safe reason、condition、next eligible drive/deadline和budget摘要，但不把它
+当作Decision/Approval prompt，也不提供强制retry、clear wait、补预算或自动Resume。`/result`展示closeout lineage、
+accepted evidence、artifact、known limitations和applicable owner revision摘要。
+
+## Non-Goals
+
+- no daemon-launching `--local` mode or CLI-only lifecycle implementation；
+- no raw-event-stream-first main UI；
+- no caller-selected Run state、successor identity or `ExecutionContextPatch`；
+- no fixed polling loop or display state reflected back into owner state。

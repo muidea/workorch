@@ -1,6 +1,6 @@
 # WorkOrch Repository Structure
 
-Status: active
+Status: normative
 
 Type: module-architecture
 
@@ -28,7 +28,7 @@ internal/
   services/workorch/                   process CLI/TUI/session; not a framework unit
 web/workorch-console/                  React console source
 web/consoleassets/                     generated embedded assets
-docs/                                  current documentation and archive
+docs/                                  current normative documentation only
 config/                                runtime configuration
 scripts/                               verification and operational helpers
 ```
@@ -74,26 +74,15 @@ readme.md       component interaction and implementation contract
 
 Shared packages不能成为隐藏的状态 owner、service locator 或 map-based authority bridge。
 
-## Dependency Direction
-
-```text
-entry/process -> application composition -> typed EventHub contracts -> owner units
-owner unit -> its own model/repository
-orchestrator -> typed capability/governance commands -> corresponding owners
-owners -> immutable facts/events -> projection/audit consumers
-```
-
-同 owner 内部允许直接组合 Biz/Repo。跨 owner 只允许 EventHub + concrete typed command/result；禁止 sibling repository、
-direct service、generic envelope/reflect bridge 和 callback alias。
-
 ## Generated And Runtime Data
 
 - `web/consoleassets` 由 console build 生成并嵌入二进制。
 - `.workorch-data`、`.workorch-workspaces`、`bin` 和 `node_modules` 不提交。
-- archive 文档不约束当前目录结构；当前事实以本文件、组件 `readme.md` 和源码为准。
+- 当前事实以本文件、组件 `readme.md` 和源码为准；历史结构通过 Git 查询，不在 `docs/` 复制维护。
 
 ## References
 
 - [Architecture overview](architecture-overview.md)
+- [Block boundaries](block-boundaries.md)
 - [Component alignment](../01-overview/component-documentation-alignment.md)
 - [Runtime contract](../00-core/runtime-stage-contract.md)

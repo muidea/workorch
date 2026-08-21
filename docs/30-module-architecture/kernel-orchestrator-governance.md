@@ -1,143 +1,86 @@
-# Kernel Orchestrator / Governance Architecture
+# Kernel Module Boundaries
 
-Status: active
+Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
 ## Purpose
 
-本文说明 `kernel/orchestrator` 与 `kernel/governance` 的实现落点和边界。Runtime 语义以
-[Runtime Stage Contract](../00-core/runtime-stage-contract.md)、
-[Orchestrator README](../../internal/modules/kernel/orchestrator/readme.md) 和
-`internal/pkg/workorchruntimecontract` 为准。
+本文定义 `kernel/orchestrator`、`kernel/governance` 与 `kernel/system` 三个 Module 的闭环职责和跨 owner
+边界。Runtime 状态语义由 [Runtime Stage Contract](../00-core/runtime-stage-contract.md) 定义；组件内部结构、topic、
+Command/Result 与私有 mutation route 由各组件 `readme.md` 和源码定义。
 
-## Orchestrator Ownership
-
-Orchestrator is the sole semantic owner of SM-2, SM-3 and SM-4:
-
-- facts, authority input/snapshot/transaction and canonical `ConvergenceState`;
-- definition-generation semantic plan, feasibility merge, binding/reconciliation seal;
-- prerequisite acquisition and freshness lineage;
-- candidate request session, bounded attempt/correction and sealed dispatch transaction;
-- operation receipt/evidence, assessment and governance binding/resolution;
-- bounded drive/recovery, sealed terminal outcome and delivery ledger.
-
-It does not own SM-1 Run lifecycle, Workspace definition/active slot, Result lifecycle, capability side effects, Decision or
-Approval state.
-
-## Internal Mutation Architecture
-
-Every external command/result/notification is first mapped to a private `RuntimeInternalEvent`. The only mutation path is:
-
-```text
-typed external fact
-  -> submitRuntimeInternalEvent
-  -> RuntimeController.ApplyInternalEvent
-  -> one package-private fact-family route
-  -> owner-private reducer/component
-  -> RuntimeTransitionCoordinator.Commit
-  -> Run owner expected-revision CAS of opaque RuntimeStateRecord
-```
-
-The internal event is not an EventHub envelope or public registry. Fact kind classification is exhaustive and each kind maps
-to exactly one activation/authority/transaction/delivery family. No handler may bypass the transition coordinator or create a
-second aggregate mutation/CAS entry.
-
-## Drive Loop
-
-```text
-Run owner notification / recovery inventory
-  -> load current-baseline aggregate
-  -> acquire bounded drive lease/singleflight
-  -> reducer derives one canonical state
-       need_prerequisite -> owner observation -> internal event -> CAS
-       need_state_change | need_validation | need_assessment
-         -> candidate request session -> seal -> capability/assessment -> evidence -> CAS
-       need_governance -> sealed ticket request -> persisted wait -> resolution evidence -> CAS
-       complete | failed -> sealed terminal -> Result -> Workspace -> Run delivery acknowledgements
-  -> stop on wait/terminal; otherwise require persisted revision progress within guard
-```
-
-SM-2 chooses the next canonical state but never executes an operation. SM-3 executes only an already selected/sealed
-transaction and never chooses the next action. SM-4 re-drives/delivers but never rebuilds authority.
-
-## Cross-Owner Contracts
-
-| Interaction | Contract owner/boundary |
-| --- | --- |
-| Run aggregate read/CAS/inventory | Run block `pkg/events`; payload opaque to Run |
-| Workspace snapshot/terminal release | Workspace block typed contracts |
-| LLM ceiling/preflight/candidate | LLM block `pkg/events`; factual result only |
-| File/Git/Shell/SSH/Web/MCP execution | each capability block defines its own concrete command/result |
-| Decision/Approval/Memory | corresponding state owner concrete commands |
-| Result terminal persistence | Result owner consumes sealed terminal delivery material |
-| Orchestrator observations | immutable drive/projection notification; never mutation authority |
-
-No cross-owner service/repository, generic callback/envelope, JSON/reflect bridge or `map[string]any` authority rebuild is
-allowed.
-
-## Start, Resume And Restart
-
-- Start/Resume admission belongs to Run owner SM-1; Orchestrator only consumes the resulting immutable Run fact.
-- Resume carries scope only and reloads the same aggregate/sealed selection.
-- Governance resolution returns through Decision owner to Orchestrator; application does not issue Resume.
-- Current-baseline Restart is Run-owned `ReplacementIntent`; Orchestrator only seals/delivers predecessor administrative
-  terminal material and never creates the successor.
-- Non-current aggregate/restart fails closed before provider/capability work; no in-place schema migration occurs.
-
-Repeated notification, resolution, drive or acknowledgment must not duplicate candidate attempt, side effect, evidence,
-terminal Result or replacement lineage.
-
-## Governance Module
-
-`kernel/governance` owns governance policy evaluation and `AutoGovernanceTrace` coordination. It may combine typed
-Workspace/Run/Decision/Approval/Memory/Orchestrator facts through EventHub, but it cannot:
-
-- mutate another owner's ticket/approval/Run/Result state;
-- bypass Orchestrator evidence/coverage/required-output gates;
-- decide candidate/sealed dispatch or create successor Run;
-- maintain a process-local policy state that conflicts with persisted facts.
-
-`blocks/decision` owns DecisionTicket/Resolution. `blocks/approval` owns pending→approved/rejected authorization. Each uses
-its own private reducer and repository transaction.
-
-## Authority And Persistence
-
-| Data | Semantic owner | Physical persistence |
+| Module | Closed responsibility | Must not |
 | --- | --- | --- |
-| Bootstrap/Definition/Activation seed | created by application, sealed with Run | Run owner |
-| authority/focus/binding/evidence/candidate/delivery ledgers | Orchestrator | opaque `RuntimeStateRecord` CAS via Run owner |
-| Run lifecycle/lineage/ReplacementIntent | Run owner | Run repository |
-| Decision/Approval | respective owner | respective repository |
-| accepted/rejected formal outcome | Result owner receives Orchestrator seal | Result/Artifact repositories |
-| EventRecord/projection | Eventstream/workorchd derived surfaces | audit/projection stores only |
+| Orchestrator | SM-2/SM-3/SM-4 Runtime convergence | own SM-1 or another resource lifecycle |
+| Governance | governance policy and auto-governance coordination | mutate Decision/Approval/Run/Result state |
+| System | startup-default coordination across resource owners | become Template/Soul/MCP Registry owner |
 
-Result owner records the already-judged terminal outcome; it does not rerun acceptance. Run owner validates Runtime record
-envelope/scope/revision only; it does not decode Orchestrator facts.
+三个 Module 使用同一 EventHub 与 owner-defined concrete contracts。使用 Hub 的逻辑留在各自 `biz/`；`module.go`
+只做 framework lifecycle 接线，protocol adapter 不持有 Hub。Module 不取得 sibling owner repository、service、adapter
+或可变资源句柄。
 
-## Implementation Locations
+## Orchestrator Boundary
 
-| Path | Responsibility |
+Orchestrator 是 SM-2、SM-3、SM-4 的唯一语义 owner，负责：
+
+- authority/focus、semantic reconciliation、binding、evidence、assessment 与 terminal decision；
+- request session、candidate evaluation、sealed dispatch 与 operation receipt transaction；
+- bounded drive/recovery、governance wait 与 Result→Workspace→Run delivery ledger。
+
+所有外部 typed fact 必须先成为 Orchestrator 私有 internal event，再经唯一 transition coordinator 提交同一 aggregate
+mutation。Run owner 只通过 concrete EventHub contract 提供 opaque Runtime record 的 expected-revision CAS；它不解释
+Orchestrator aggregate。私有 internal event、reducer family 和 mutation route 不是公共 EventHub envelope。
+
+Orchestrator 不拥有 SM-1、Workspace Definition/active slot、Result lifecycle、Decision/Approval 状态或 capability side
+effect。SM-2 选择 canonical convergence state但不执行 operation；SM-3 只执行已经选择并密封的 transaction；SM-4
+只从 persisted aggregate 再 drive 和投递，不从 projection/history 重建 authority。
+
+## Governance Boundary
+
+Governance Module 组合 Decision、Approval、Run、Workspace、Memory 与 Orchestrator 的 typed facts，执行治理策略评估、
+自动解决、升级和阻塞，并只维护自身 `AutoGovernanceTrace` 协调状态。
+
+- Decision owner 独占 DecisionTicket/Resolution；Approval owner 独占 authorization lifecycle。
+- Governance 只能向相应 owner 提交具体 resolve command，不能直接修改 ticket、Approval、Run、Result 或 Runtime aggregate。
+- Runtime continuation/terminal 仍由 Orchestrator 消费 owner resolution fact 后裁决；application 和 Governance 都不发送
+  隐式 Resume。
+- Runtime Definition clarification不接受Governance auto-resolution、普通continue/fail或replan policy；Orchestrator只负责
+  dedicated open dispatch，ticket只能由Run owner已持久化的replacement intent经Decision owner专用合同收口。
+- 无法满足策略或权限时必须升级或阻塞，不能用 process-local policy state 覆盖 persisted owner facts。
+
+## System Boundary
+
+System Module 在 framework dependencies 就绪后，按确定顺序向 Soul、Workspace Template 与 MCP Registry owner 发送各自
+定义的同步 ensure command。它只协调启动，不拥有默认资源内容或 repository。
+
+- 默认资源的 schema、校验、去重和持久化由接收 owner 负责。
+- missing/wrong result 或任一 owner failure 必须使启动失败，不能静默跳过或建立 System-owned defaults store。
+- ensure 必须 owner-idempotent；重放同一 concrete command 不能覆盖有效用户资源。
+- System 不参与运行期治理、Run 调度、Runtime drive 或状态修复。
+
+## Cross-Owner Handoffs
+
+| Interaction | Contract boundary |
 | --- | --- |
-| `orchestrator/biz/runtime` | reducer/controller components, private event families, transactions/invariants |
-| `orchestrator/biz` | EventHub adapters, drive shell, owner/capability calls, projection observations |
-| `orchestrator/pkg/events` | public Orchestrator drive/governance/evidence/observation contracts |
-| `orchestrator/pkg/models` | EvidenceRecord owner model |
-| `governance/biz` | governance policy/trace owner logic |
+| Runtime aggregate read/CAS/inventory | Run owner `pkg/events`; payload opaque to Run |
+| Workspace snapshot/activation/terminal release | Workspace owner concrete contracts |
+| provider ceiling/request result | LLM owner factual Command/Result |
+| File/Git/Shell/SSH/Web/MCP execution | corresponding capability-owner Command/Result |
+| governance request/resolution | Decision or Approval owner contracts |
+| Runtime Definition clarification | dedicated persisted Orchestrator dispatch and Decision/Run replacement-resolution contracts |
+| formal terminal persistence | Result owner consumes sealed already-judged material |
+| audit/projection observation | immutable notification only; never mutation authority |
 
-Orchestrator's `service` directory has no production facade; external components interact through EventHub contracts.
+Repeated notification、resolution、drive、ensure 或 delivery acknowledgement 必须保持 owner-local idempotency，不得重复
+candidate attempt、side effect、evidence、Result、successor 或默认资源。
 
-## Verification
+## Implementation Sources
 
-- `go test ./internal/modules/kernel/orchestrator/... -count=1`;
-- `go test ./internal/modules/kernel/governance/... -count=1`;
-- `make verify-boundary-contract`;
-- [Runtime Owner Convergence Matrix](../60-verification/runtime-owner-convergence-matrix.md).
-
-## Related Documents
-
-- [Architecture Overview](architecture-overview.md)
-- [Capability Adapters](blocks-runtime-adapters.md)
-- [Workspace / Run / Result](blocks-workspace-run-result.md)
+- [Orchestrator implementation contract](../../internal/modules/kernel/orchestrator/readme.md)
+- [Governance implementation contract](../../internal/modules/kernel/governance/readme.md)
+- [System implementation contract](../../internal/modules/kernel/system/readme.md)
+- [Block Boundaries](block-boundaries.md)
+- [Core Runtime Verification](../00-core/runtime/verification.md)

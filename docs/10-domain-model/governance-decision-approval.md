@@ -1,10 +1,10 @@
 # Governance Decision / Approval Domain Model
 
-Status: active
+Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
 ## Ownership
 
@@ -24,6 +24,9 @@ States：`open`、`resolved`、`superseded`。
 Runtime guard、重复合同失败、repair/provider budget 耗尽或 invariant violation 是系统终止原因，不应为了延长运行
 而创建人工 Ticket。
 
+`recoverable_runtime_wait`表示无需人类业务选择的typed恢复条件，不创建Decision/Approval，也不转换SM-1 blocker。
+若所谓恢复实际缺少condition、trigger/deadline或budget，必须fail-closed，不能降级为人工ticket。
+
 ## Resolution
 
 Decision 的通用模型支持 `provide_missing_info`、`reject_current_path` 和 `replan` resolution type，并保留 payload、
@@ -37,6 +40,18 @@ continuation action、resume/successor references。对现行 Runtime governance
 通用 `replan` 字段不授权 application 创建 successor。重新按新 definition 执行必须走独立的 Workspace `restart`
 intent 与 Run-owned `ReplacementIntent` transaction。
 
+Definition clarification使用受限的Decision ticket class，不继承上述通用resolution行为：
+
+- pre-seal ticket只能由corrected all-of candidate的admission/promotion事实驱动
+  `ResolveWorkspaceDefinitionClarificationByAdmissionCommand/Result`，再由Workspace owner acknowledgement释放activation；
+- Run-scoped ticket的required action固定为`revise_definition_and_restart`，不接受人工/自动`continue|fail|replan`。只有Run
+  owner已持久化matching replacement intent后，才能提交
+  `ResolveRuntimeDefinitionClarificationByReplacementCommand/Result`；该resolution不产生Runtime continuation fact。
+
+客户端与Governance module均不能代发这些owner-to-owner command。完整scope、binding与crash-window合同见
+[Workspace Definition Clarification](../00-core/definition-convergence/clarification.md)和
+[Runtime Definition Clarification](../00-core/definition-convergence/runtime-clarification.md)。
+
 ## Approval
 
 Approval 表达 capability operation 的风险授权。主要字段为 identity/scope、reason/action、typed context、state、
@@ -45,6 +60,8 @@ auto-governance audit 与时间/actor。
 States：`pending`、`approved`、`rejected`、`superseded`。
 
 批准只解除 matching governed operation 的 gate；它不密封 dispatch、不执行副作用，也不接纳 operation evidence。
+authorization target在创建后不可被resolution payload覆盖；Runtime Approval只接受Orchestrator producer创建和提交typed
+principal resolution，workspace/run/operation/fence/grant任一漂移都不能释放当前gate。
 
 ## Runtime Flow
 

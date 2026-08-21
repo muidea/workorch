@@ -1,65 +1,35 @@
-# WorkOrch Module Architecture Overview
+# WorkOrch Module Architecture
 
-Status: active
+Status: normative
 
-Type: module-architecture
+Type: module-architecture-index
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Purpose
 
-本目录说明当前代码单元的职责、依赖、owner 边界和 Runtime 参与方式。它不保存阶段性拆分计划或历史迁移
-checklist。
+本目录只说明 framework unit、process service、focused package、owner storage 与 protocol/read-model 的代码落点。
+正式组件 topic、command/result、owned state 和内部交互以对应 unit `readme.md` 为实现 SoT。
 
-## Production Mainline
+## Topics
 
-```text
-workorchd typed bootstrap + Workspace execution intent
-  -> Workspace owner definition/scope admission
-  -> Run owner SM-1 + opaque RuntimeStateRecord CAS
-  -> Orchestrator SM-2/SM-3/SM-4 DriveRuntime
-  -> concrete capability owner operation
-  -> Orchestrator evidence/terminal seal
-  -> Result -> Workspace -> Run owner-local delivery
-```
+| Topic | Contract |
+| --- | --- |
+| stable layers, owner map and dependency direction | [Architecture Overview](architecture-overview.md) |
+| physical 1+4+17 inventory and package placement | [Repository Structure](repository-structure.md) |
+| application use-case composition | [Application Workorchd](application-workorchd.md) |
+| Orchestrator/Governance/System module boundaries | [Kernel Modules](kernel-orchestrator-governance.md) |
+| all resource and capability Block boundary pattern | [Block Boundaries](block-boundaries.md) |
+| owner persistence and derived read-model separation | [Storage And Read Model](storage-readmodel.md) |
+| exact registered unit and README mapping | [Component Contract Inventory](../01-overview/component-documentation-alignment.md) |
 
-Current-baseline Restart uses Run-owned `ReplacementIntent`; successor creation occurs only after predecessor terminal
-delivery acknowledgment. Application, Workspace and Orchestrator cannot create or link it early.
+## Architecture Rules
 
-## Reading Order
+- 1 Initiator、4 Modules、17 Blocks 是当前 framework unit baseline；`internal/services/workorch` 是 process shell，不是 Module。
+- Module 组合多个 owner contract 完成业务闭环；Block 只拥有一个资源聚合或技术能力；Initiator 只提供一种无业务状态基础设施能力。
+- 使用 EventHub 的 Module/Block 在自身 `biz/` 内嵌 Base；`module.go` 只接线，protocol `service/` 不持有 Hub。
+- 跨 owner runtime I/O 使用接收 owner 定义的 concrete typed EventHub contract；禁止 service/repository 直连和通用 envelope。
+- application composes use cases/projection but does not drive Runtime or write another owner's state。
 
-1. [Architecture Overview](architecture-overview.md)
-2. [Repository Structure](repository-structure.md)
-3. [Application Workorchd](application-workorchd.md)
-4. [Kernel Orchestrator / Governance](kernel-orchestrator-governance.md)
-5. [Workspace / Run / Result](blocks-workspace-run-result.md)
-6. [Capability Adapters](blocks-runtime-adapters.md)
-7. [Kernel Context / Capability](kernel-context-capability.md)
-8. [LLM Provider Assembly](llm-provider-assembly.md)
-9. [Storage And Read Model](storage-readmodel.md)
-
-The reviewed per-unit definition is maintained in
-[Component Documentation Alignment](../01-overview/component-documentation-alignment.md). Historical view-model and
-projection closure designs are archived and no longer part of this reading order.
-
-## Boundary Rules
-
-- Owner state transition is selected only by that owner's private reducer/internal event.
-- Cross-owner interaction uses EventHub plus a concrete receiving/producing owner command/result/data.
-- Application composes use cases and projections; it is not a Runtime/Run/Workspace/Result owner.
-- Capability blocks execute side effects and return facts; they do not judge evidence or terminal state.
-- Eventstream and projection are read/audit surfaces, never Runtime replay or owner repair authority.
-- Profile/template/Soul/MCP-specific policy stays outside the business-neutral kernel reducer.
-- Removed StagePacket/NextAction/graph-dispatch/context-patch paths are not supported authority. Static boundary checks reject
-  them from active provider resources, verifiers and authority packages; read-only compatibility projection is not a second
-  runtime path.
-
-## Documentation Layers
-
-- business objects: `docs/10-domain-model`;
-- execution sequence: `docs/20-runtime-flow`;
-- code placement and dependency: this directory;
-- feature/profile behavior: `docs/40-profiles-capabilities`;
-- API/TUI/Web: `docs/50-product-interface`;
-- acceptance: `docs/60-verification`;
-- history: `docs/90-archive`.
+产品语义见 `05-product`，对象见 `10-domain-model`，Runtime 顺序与验证见 `00-core`，组件实现边界见本目录，
+profile/capability 验证见 `40-profiles-capabilities`，接口与部署验收见 `50-product-interface`。

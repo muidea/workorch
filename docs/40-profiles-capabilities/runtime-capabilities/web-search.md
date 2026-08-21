@@ -1,6 +1,6 @@
 # Web Search And Fetch Capability
 
-Status: active
+Status: normative
 
 Type: profile-capability
 

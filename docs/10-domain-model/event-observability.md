@@ -1,10 +1,10 @@
 # Event And Observability Domain Model
 
-Status: active
+Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-21
 
 ## Event Record
 
@@ -14,16 +14,26 @@ Last Verified: 2026-08-16
 - source module 与 subject type/ID；
 - Workspace/Run/Step scope；
 - source revision；
+- owner-issued全局单调`StreamPosition`与workspace-local revision；`OccurredAt`不参与cursor顺序；
 - typed payload、redacted/compact summary 与可选 payload reference。
 
 EventHub message 是 owner 间同步 typed command/result；EventRecord 是可持久化审计事实。二者用途不同，不能把
 Eventstream 当作命令总线或 Runtime 恢复源。
+
+`StreamPosition`允许预留空洞但在restart/purge后不复用；workspace purge可重置该workspace local revision并物理删除其
+audit records，却不能回退全局position或影响其它owner files。query/high-watermark/purge均使用concrete bounded result；
+Post不执行强写，payload在append与read两端脱敏和限界。
 
 ## Projection
 
 workorchd 从 typed owner reads 与 owner events维护 Workspace overview、Run detail、coverage、task progress、timeline、
 result/artifact、memory recall 和 governance 等展示模型。projection 可以失效后重建，并使用 owner revision/CAS fence
 抵御乱序刷新。
+
+coverage read model必须分别展示coverage、assessment和evidence状态；`partially_covered`、`indeterminate`与
+`stale_or_superseded`不能被一个progress percentage或overall status覆盖。每项投影绑定workspace/run/Definition、Runtime
+state revision和实际依赖的owner revision set/hash。稳定对象与派生规则见
+[Result Closeout And Requirement Projection](result-closeout.md)。
 
 projection 不拥有：
 
@@ -51,6 +61,10 @@ projection 不拥有：
 
 服务可暴露 health、metrics、scheduler admission、provider request audit 和 cache diagnostics。这些信号用于运行诊断
 和验证，不参与 reducer 输入，除非相应 owner 通过明确 typed contract 将事实提交给 Orchestrator。
+
+observability可以展示recoverable wait的reason、condition、next eligible drive/deadline和budget guard，以及
+`RuntimeExecutionBudgetView`各dimension的limit、confirmed、unknown/reserved、remaining和exhausted。metrics/provider billing
+只能用于观察，不能修正消费ledger、解除wait或驱动Runtime。
 
 ## Invariants
 

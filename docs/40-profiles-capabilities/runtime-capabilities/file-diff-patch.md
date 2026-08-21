@@ -1,10 +1,10 @@
 # File Diff And Patch Capability
 
-Status: active
+Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Purpose
 
@@ -85,7 +85,7 @@ failure mode—valid first create followed by repeated create-only `file/write` 
 
 ## Related Documents
 
-- [Planning And Execution](../../20-runtime-flow/planning-execution-flow.md)
-- [Capability Adapter Architecture](../../30-module-architecture/blocks-runtime-adapters.md)
-- [Runtime Owner Convergence Matrix](../../60-verification/runtime-owner-convergence-matrix.md)
+- [Planning And Execution](../../00-core/runtime/flows/planning-execution.md)
+- [Block Boundaries](../../30-module-architecture/block-boundaries.md)
+- [Core Runtime Verification](../../00-core/runtime/verification.md)
 - [File Block README](../../../internal/modules/blocks/file/readme.md)

@@ -1,6 +1,6 @@
 # Software-Dev Goal Coverage And DoD
 
-Status: active
+Status: normative
 
 Type: profile-capability
 

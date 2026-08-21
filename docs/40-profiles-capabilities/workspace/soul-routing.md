@@ -1,10 +1,10 @@
 # Workspace Soul Routing
 
-Status: active
+Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Purpose
 
@@ -79,8 +79,10 @@ imply that changing Workspace settings mutates a running Run.
 
 ## Related Documents
 
-- [Context / Capability / Memory](../../10-domain-model/context-capability-memory.md)
-- [Context Assembly Flow](../../20-runtime-flow/context-assembly-flow.md)
-- [Kernel Context / Capability](../../30-module-architecture/kernel-context-capability.md)
+- [Instruction Assets](../../10-domain-model/instruction-assets.md)
+- [Capability Catalog](../../10-domain-model/capability-catalog.md)
+- [Memory](../../10-domain-model/memory.md)
+- [Context Assembly Flow](../../00-core/runtime-request-context-assembly.md)
+- [Block Boundaries](../../30-module-architecture/block-boundaries.md)
 - [Service API](../../50-product-interface/service-api.md)
-- [Built-in Templates And Souls](../builtin-templates-and-souls.md)
+- [Built-in Default Resources](builtin-default-resources.md)

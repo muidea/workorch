@@ -30,20 +30,28 @@ Module/Block shape: `module.go` / `plugin.go`, `biz/` (orchestrator has `biz/run
 
 - Cross-owner I/O: EventHub + concrete typed command/result only (no cross-owner service/repo, no `map[string]any` into authority).
 - Forbidden production surfaces: StagePacket, NextAction, DispatchNextStep, ExecutionContextPatch, auto replan successor, and map-based authority rebuild.
-- Fresh restart bootstrap seals only the Goal/DoD Definition seed and template/profile/capability policy refs. A bounded SM-3
-  semantic-plan document may propose per-CWI proof; capability owners return feasibility; only an SM-2 private internal event may
-  seal `CoverageEvidenceBinding` and the reconciliation contract before operation candidate/dispatch.
+- Workspace owner first persists a pre-seal `DefinitionAdmissionCandidate`; pure admission accepts complete `all_of` semantics
+  only. Unsupported one-of/ambiguity opens a blocking clarification ticket and cannot create a Run. Promotion seals Goal/DoD,
+  template/profile policy snapshot, resolved project directory and `StartupInputHash`; all Start/Restart ingresses require an
+  eligible `WorkspaceActivationAdmission`.
+- A bounded SM-3 semantic-plan document may propose per-CWI proof after startup input is sealed; capability owners return
+  feasibility; only an SM-2 private internal event may seal `CoverageEvidenceBinding` and the reconciliation contract before
+  operation candidate/dispatch. Runtime LLM processing may not modify the sealed startup input.
 - Normal TUI/Web workspace setup requires template, Goal and DoD. It must produce a resolved workspace directory, but the
   directory input is optional: blank input resolves to `.workorch-workspaces/<workspace-id>`. It must not require raw
   `contextHints`/`evidencePolicies`, target, recipe, check, metric or artifact JSON from the user.
 
 ### Documentation authority
 
-1. Design contract: `docs/00-core/runtime-stage-contract.md` (neutral Runtime semantics; four state machines)
+1. Design entry: `docs/00-core/overview.md`; Runtime contract index: `docs/00-core/runtime-stage-contract.md`
 2. Implementation SoT: `internal/modules/kernel/orchestrator/readme.md` + `internal/pkg/workorchruntimecontract`
-3. Fact entry: `docs/01-overview/current-state.md`
-4. Open work only: `docs/70-roadmap/active/overview.md`, `docs/01-overview/current-unclosed-matrix.md`
-5. Archived plans under `docs/90-archive/` must not constrain new implementation
+3. Design baseline: `docs/01-overview/current-state.md` (normative summary, not implementation-progress tracking)
+4. Focused product/domain/architecture/profile/interface contracts under `docs/05-*` through `docs/50-*`
+5. Runtime flows and verification stay with the Core/Profile/Interface subject whose contract they explain or prove; the
+   cross-subject verification map is `docs/README.md#verification-by-subject`
+
+`docs/` contains current normative design only. Implementation plans, candidate designs, closure diaries, dated records and
+other intermediate documents are invalid as design authority and must not be maintained there; use Git history for recovery.
 
 LLM request / cache / budget: also read `docs/00-core/runtime-request-cache-note.md`.
 

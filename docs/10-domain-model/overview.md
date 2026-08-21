@@ -1,10 +1,10 @@
 # WorkOrch Domain Model Overview
 
-Status: active
+Status: normative
 
 Type: domain-model-index
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Purpose
 
@@ -16,9 +16,12 @@ Runtime 调度模型。
 | Group | Formal owners | Document |
 | --- | --- | --- |
 | Definition | Workspace / Goal / DoD：`blocks/workspace` | [workspace-goal-dod.md](workspace-goal-dod.md) |
-| Execution and outcome | Run：`blocks/run`; Runtime authority：Orchestrator; Result/Artifact：`blocks/result` | [run-step-result-artifact.md](run-step-result-artifact.md) |
+| Execution and outcome | Run：`blocks/run`; Runtime authority：Orchestrator; Result/Artifact：`blocks/result` | [run-result-artifact.md](run-result-artifact.md) |
+| Result closeout | Orchestrator裁决；Result保存；workorchd投影 | [result-closeout.md](result-closeout.md) |
 | Governance | Decision：`blocks/decision`; Approval：`blocks/approval`; policy：Governance | [governance-decision-approval.md](governance-decision-approval.md) |
-| Context and capability resources | Soul、Skill、MCP Registry、Memory 及 capability owners | [context-capability-memory.md](context-capability-memory.md) |
+| Instruction assets | Soul / Skill owners | [instruction-assets.md](instruction-assets.md) |
+| Capability resources | MCP Registry and capability owners | [capability-catalog.md](capability-catalog.md) |
+| Memory | Memory owner | [memory.md](memory.md) |
 | Audit and read side | Eventstream owner 与 workorchd projection | [event-observability.md](event-observability.md) |
 
 ## Cross-Layer Rules

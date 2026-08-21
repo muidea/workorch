@@ -1,95 +1,87 @@
 # Workspace Setup Draft Session
 
-Status: active
+Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Purpose
 
-Setup draft session is an application/UI aid for turning a multi-turn conversation into a proposed Workspace Goal and DoD.
-It is not a Workspace owner aggregate, Runtime activation, Run or recovery state machine.
+Setup draft session 是可选的 application/UI authoring aid，用于把多轮对话整理成候选 Workspace Goal/DoD。它不是
+Workspace owner aggregate、Definition admission、Runtime activation、Run 或 recovery state machine。具体 HTTP 路由由
+[Service Command API](../../50-product-interface/service-api.md) 定义。
 
-## Current Surface
+## Draft Semantics
 
-| Method | Path | Behavior |
-| --- | --- | --- |
-| `POST` | `/api/v1/workorch/workspace-setup-draft-sessions` | create an in-process session; returns `201` |
-| `POST` | `/api/v1/workorch/workspace-setup-draft-sessions/:id/messages` | append one user message and generate a revision |
-| `POST` | `/api/v1/workorch/workspace-setup-draft-sessions/:id/regenerate` | regenerate using current messages/draft; body may be empty |
+Draft session 是 process-local、可丢失的临时会话。它可以接收 Template、标题/描述、可选目录、dialog language、用户
+消息和上一版草案，输出有界的：
 
-The server keeps sessions in a mutex-protected in-process map. They are lost at process restart and must never be treated as
-durable Workspace, Goal or DoD state.
+- Goal 文本和 DoD items；
+- assumptions、clarifying questions、warnings；
+- confidence、needs-clarification、generation summary 与来源标记。
 
-## Inputs And Outputs
+Template/Soul 内容可以作为有界生成上下文。LLM 输出必须经过 strict draft parse/normalization，且只更新当前临时
+草案；它不写 Workspace、Goal、DoD、Decision 或 Run owner 状态。
 
-Session creation accepts:
+普通 setup 可以完全手工 authoring。只有用户显式启用 assisted draft 时才调用 authoring LLM；这一选择不限制 startup
+input 封存后的 Runtime LLM processing。
 
-- optional `templateId`;
-- `title` and/or `description` (at least one must be present);
-- optional `deliverableDirectory`;
-- optional `dialogLanguage`.
+## Hierarchical Assistance
 
-A message request accepts `content`, optional updated workspace/template fields, optional current `draft`, and optional
-`dialogLanguage`. The normalized draft contains only:
+大量 Goal/DoD 的 authoring 采用有界逐级处理：
 
-- `goalText`;
-- `doDItems`;
-- `assumptions`;
-- `clarifyingQuestions`;
-- `warnings`;
-- `confidence`, `needsClarification` and `generationSummary`;
-- provenance flags for template context and previous-draft use.
+1. Template、用户分组、semantic role 和 requires/provides 形成确定性局部分区；
+2. 组内请求读取 exact item text 并产生草案关系；
+3. 跨组请求先比较 bounded manifest/hash，只为候选关系端点重新加载 exact text；
+4. UI 展示依赖、priority/cost、disposition、假设和 cycle/missing warning；
+5. 用户明确采用后才把选中字段复制到正式 setup form。
 
-Template and Soul content may be included as bounded generation context. The LLM completion is parsed as a strict draft
-object and merged with the revision baseline; it does not write owner repositories.
+raw draft、数组/ID 顺序和自然语言先后关系都没有 authority。authoring schema/UI 不得提供 `one_of`/`any_of` 作为
+合法 relation；provider 返回这些 token 时只能形成不可采用 diagnostic。deterministic compile 仍有歧义时必须进入
+Workspace clarification，不能自动择支、改写为 all-of、要求 Runtime JSON 或绕过 blocking ticket。
 
-## Confirmation Boundary
+## Adoption Boundary
 
-Applying a draft is a separate product action:
+采用草案与生成草案是两个独立动作：
 
-1. create Workspace using title/directory/template;
-2. create or update formal Goal through Workspace owner;
-3. create or update formal DoD through Workspace owner;
-4. configure Workspace Soul bindings/LLM selection when needed;
-5. submit `execution-activations` with `intent=resume|restart`.
+```text
+temporary draft
+  -> user selects and applies fields to setup form
+  -> Workspace owner persists DefinitionAdmissionCandidate
+  -> pure all-of admission
+  -> admitted promotion or blocking clarification ticket
+  -> activation eligibility
+  -> later explicit execution intent
+```
 
-No draft-session endpoint performs those steps automatically. The UI must show which values are still proposals and require
-explicit confirmation before formal writes.
+只有 Workspace owner command 持久化的 candidate 才进入 admission。只有 exact-current `admitted_all_of` outcome 可以
+promotion 为 formal Definition/startup input；草案 endpoint 不得自动 promotion、Start、Restart 或创建 ticket resolution。
 
 ## Runtime Boundary
 
-Draft sessions never contain or generate:
+Draft session 不包含或生成：
 
-- `RuntimeBootstrap`, Runtime focus, target, recipe, check or evidence binding;
-- provider request history, candidate attempts or repair state;
-- selected Memory/capability evidence;
-- `executionContext` / `ExecutionContextPatch`;
-- Run ID, target Run state or replacement successor identity.
+- `RuntimeBootstrap`、Runtime focus、target、recipe、check 或 evidence binding；
+- provider request history、candidate attempt、repair 或 governance continuation state；
+- Run ID、target Run state、replacement/successor identity；
+- `executionContext` / `ExecutionContextPatch` 或 selected Memory/capability evidence。
 
-After confirmation, workorchd builds `RuntimeBootstrap.Activation` from canonical owner state. That typed activation may
-contain frozen Soul content, Skill instructions, MCP capability metadata, Memories, provider selection and execution policy;
-none of these are draft-session state.
+用户采用草案、完成 admission/promotion 并显式提交 execution intent 后，workorchd 才从 canonical owner state 组装 typed
+activation。它可以封存 Soul、Skill、MCP、Memory、provider selection 和 execution policy，但这些都不是 draft-session state。
 
-## UI Rules
+## Interface Rules
 
-- manual and assisted setup can share the same form values without silently clearing user input;
-- show Goal/DoD draft, assumptions, questions and warnings before “apply to form”;
-- do not imply that an LLM draft is already a formal definition or accepted evidence;
-- do not show runtime progress, recall traces, provider retries or raw authority data in the setup step;
-- failure may fall back to manual editing, but must not manufacture a successful draft.
-
-## Verification
-
-- server route and multi-turn merge tests live in `internal/modules/application/workorchd/service/server/http_test.go`;
-- strict parse/normalization/generator tests live in
-  `internal/modules/application/workorchd/biz/appservice/setupdraft`;
-- deployed template/Soul/setup behavior is covered by `make verify-workspace-template-soul`.
+- manual 与 assisted authoring 可以共享 editable form，但不得静默覆盖未采用的用户输入；
+- UI 必须在“apply to form”前展示 proposal、assumptions、questions 和 warnings；
+- draft 不得被显示为 formal Definition、accepted evidence 或 activation eligibility；
+- admission violation 必须显示 typed code 与 `BlockingTicketID`，且不能由确认草案绕过；
+- generation failure 可以回到 manual editing，但不得制造成功草案或 owner acknowledgement。
 
 ## Related Documents
 
-- [Service API](../../50-product-interface/service-api.md)
-- [Built-in Templates And Souls](../builtin-templates-and-souls.md)
-- [Soul Routing](soul-routing.md)
-- [TUI Requirements](../../50-product-interface/tui/requirements.md)
+- [Definition Admission](../../00-core/definition-convergence/definition-admission.md)
+- [Workspace Clarification](../../00-core/definition-convergence/clarification.md)
+- [Service Command API](../../50-product-interface/service-api.md)
+- [TUI Interaction Contract](../../50-product-interface/tui/interaction-contract.md)
+- [Built-in Default Resources](builtin-default-resources.md)

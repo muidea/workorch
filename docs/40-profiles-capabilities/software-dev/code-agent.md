@@ -1,10 +1,10 @@
 # Software-Dev Code Agent Profile
 
-Status: active
+Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## Purpose
 

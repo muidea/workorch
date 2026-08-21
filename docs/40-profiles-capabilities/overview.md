@@ -1,10 +1,10 @@
 # WorkOrch Profiles And Capabilities
 
-Status: active
+Status: normative
 
 Type: profile-capability-index
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-18
 
 ## Purpose
 
@@ -19,17 +19,12 @@ Last Verified: 2026-08-16
 - Orchestrator只消费编译后的 typed manifest/binding/facts，不按 profile ID 或业务术语分支。
 - workorchd负责从 owner snapshots组装 bootstrap，不解释 Runtime 下一步。
 
-## Contents
+## Topics
 
-- [Built-in templates and Souls](builtin-templates-and-souls.md)
-- Workspace：[setup draft](workspace/setup-draft-session.md)、[Soul routing](workspace/soul-routing.md)、
-  [default Soul resources](workspace/soul-md-default-resource.md)
-- Runtime capabilities：[file](runtime-capabilities/file-diff-patch.md)、
-  [git](runtime-capabilities/builtin-git-tool.md)、[web](runtime-capabilities/web-search.md)
-- MCP：[capability management](mcp/capability-management.md)
-- Software development：[code agent](software-dev/code-agent.md)、
-  [Goal/DoD evidence](software-dev/goal-coverage-and-dod.md)、
-  [LSP bridge](software-dev/lsp-bridge-integration.md)
+- [Workspace authoring and built-in Template/Soul resources](workspace/overview.md)
+- [Runtime capabilities](runtime-capabilities/overview.md)
+- [MCP profile and catalog behavior](mcp.md)
+- [Software-development profile](software-dev/overview.md)
 
 ## Invariants
 

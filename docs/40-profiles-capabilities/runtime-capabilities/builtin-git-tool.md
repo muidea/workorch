@@ -1,6 +1,6 @@
 # Built-In Git Capability
 
-Status: active
+Status: normative
 
 Type: profile-capability
 
