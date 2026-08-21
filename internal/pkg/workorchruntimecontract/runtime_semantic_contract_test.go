@@ -8,7 +8,7 @@ import (
 )
 
 func TestRuntimeDefinitionSeedIsStableAndContainsNoProofAuthority(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver",
 		DoDID: "dod-1", DoDDefinition: "1. works", CapabilityContract: []string{StepKindFileEdit},
 	}
@@ -63,7 +63,7 @@ func TestRuntimeDefinitionSeedHashKeepsReopenEncodingAndAddsPrerequisiteIdentity
 }
 
 func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver",
 		DoDID: "dod-1", DoDDefinition: "works",
 		CapabilityContract: []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession, RuntimeBlockKindDecisionRequest},
@@ -139,7 +139,7 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 }
 
 func TestCompileRuntimeSemanticPlanManifestOmitsSettledPrerequisiteFromProviderOrder(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver", DoDID: "dod-1", DoDDefinition: "works",
 		CapabilityContract: []string{StepKindFileWrite},
 	}
@@ -697,7 +697,7 @@ func semanticContractTestProposal(id common.CoverageWorkItemID) RuntimeSemanticP
 // DTO that could hide a missing lineage invariant.
 func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 	t.Helper()
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-history", GoalID: "goal-history", GoalDefinition: "deliver",
 		DoDID: "dod-history", DoDDefinition: "works", CapabilityContract: []string{StepKindFileWrite},
 	}

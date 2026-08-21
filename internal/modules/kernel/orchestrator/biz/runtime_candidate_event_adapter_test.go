@@ -108,7 +108,7 @@ func TestRequestRuntimeCandidateRejectsExpectedDocumentHashDrift(t *testing.T) {
 
 func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandidateCommand {
 	t.Helper()
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 		CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 	}
@@ -214,7 +214,7 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-provider-failure", Sequence: 1, PhysicalCallID: "candidate-call-provider-failure"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 	}))
 	if err != nil {
@@ -295,7 +295,7 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-complete-schema", Sequence: 1, PhysicalCallID: "candidate-call-complete-schema"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 	}))
 	if err != nil {
@@ -346,7 +346,7 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-stale", Sequence: 1, PhysicalCallID: "candidate-call-stale"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 	}))
 	if err != nil {
@@ -386,7 +386,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "physical-call-1"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 	}
 	base = withOperationsExpectedDocument(t, base)
@@ -443,7 +443,7 @@ func TestRequestRuntimeCandidateRejectsManifestAuthorityDriftBeforeEventHub(t *t
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-manifest-drift", Sequence: 1, PhysicalCallID: "candidate-call-manifest-drift"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1", CandidateManifest: manifest,
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateContext:  candidateContext,
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not match sealed authority") {
@@ -466,7 +466,7 @@ func TestRequestRuntimeCandidateRejectsIncompleteRequestSessionIdentity(t *testi
 				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 				WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: identity.logical, Sequence: identity.sequence, PhysicalCallID: identity.physical},
 				Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-				DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+				DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 				CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 			})
 			if !errors.Is(err, common.ErrInvalidArgument) {
@@ -509,7 +509,7 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 		CapabilityRevision:       "capability-1",
 		ConfigurationRevision:    "config-1",
 	}
-	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}}
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, candidateContext.Activation.ExecutionContract)
 	response, err := PreflightRuntimeCandidate(ctx, hub, llmevents.PreflightRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
@@ -576,7 +576,7 @@ func TestPreflightRuntimeCandidateOverBudgetPublishesSecretFreeAuditWithoutProvi
 		ConfigurationRevision: "config-1",
 	}
 	const secret = "preflight-secret-must-not-reach-audit"
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: secret,
 		DoDID: "dod-1", DoDDefinition: secret, CapabilityContract: []string{"patch/apply"},
 	}
@@ -714,7 +714,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-mcp", Sequence: 1, PhysicalCallID: "candidate-call-mcp"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-mcp",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindManagedValidationSession}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, context), CandidateContext: context,
 	}))
 	if err != nil {
@@ -751,7 +751,7 @@ func TestRequestRuntimeCandidateRejectsRetryWithoutPreviousFailure(t *testing.T)
 	_, err := RequestRuntimeCandidate(ctx, hub, llmevents.RequestRuntimeCandidateCommand{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContextForDecision(decision)), CandidateContext: candidateContextForDecision(decision),
 	})
 	if err == nil {
@@ -769,7 +769,7 @@ func TestRequestRuntimeCandidateRejectsDivergentSealedContextBeforeEventHub(t *t
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		WorkspaceID:  "ws-1", RunID: "run-1", RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-divergent", Sequence: 1, PhysicalCallID: "candidate-call-divergent"},
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContext), CandidateContext: candidateContext,
 	}))
 	if err == nil || !strings.Contains(err.Error(), "required state") {

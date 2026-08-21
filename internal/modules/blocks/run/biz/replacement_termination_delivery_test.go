@@ -28,6 +28,20 @@ func (r *conflictOnceRunRepository) CompareAndSwap(ctx context.Context, item *ru
 	return r.RunRepository.CompareAndSwap(ctx, item, revision)
 }
 
+type conflictByRunIDRepository struct {
+	*memory.RunRepository
+	runID     common.RunID
+	remaining int
+}
+
+func (r *conflictByRunIDRepository) CompareAndSwap(ctx context.Context, item *runmodel.Run, revision uint64) error {
+	if item != nil && item.ID == r.runID && r.remaining > 0 {
+		r.remaining--
+		return common.ErrConflict
+	}
+	return r.RunRepository.CompareAndSwap(ctx, item, revision)
+}
+
 func TestReplacementTerminationDeliveryPersistsConcreteAcknowledgement(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -164,14 +178,119 @@ func TestReplacementTerminationDeliveryRejectsWrongResultAndKeepsPendingEvidence
 	}
 }
 
+func TestReplacementTerminalDeliveryRecoversEverySuccessorPersistenceCutPoint(t *testing.T) {
+	tests := []struct {
+		name       string
+		failRunID  common.RunID
+		failCount  int
+		wantLinked bool
+	}{
+		{name: "terminal delivery persisted before successor create"},
+		{name: "successor created before predecessor linkage", failRunID: "run-001", failCount: 8},
+		{name: "predecessor linked before successor activation", failRunID: "run-002", failCount: 3, wantLinked: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-cut-point")
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(context.Background()) })
+			baseRuns := memory.NewRunRepository()
+			predecessor := terminalReplacementTestRun(t, "ws-cut-point", "restart-cut-point")
+			if err := baseRuns.Create(ctx, predecessor); err != nil {
+				t.Fatal(err)
+			}
+
+			if test.failRunID != "" {
+				faultingRuns := &conflictByRunIDRepository{
+					RunRepository: baseRuns, runID: test.failRunID, remaining: test.failCount,
+				}
+				faultingOwner := New()
+				if err := faultingOwner.Configure(Dependencies{Runs: faultingRuns, EventHub: hub}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := faultingOwner.materializeReplacementAfterTerminalDelivery(ctx, predecessor, predecessor.TerminalDelivery.TerminalDeliveryID); err == nil {
+					t.Fatal("fault-injected materialization unexpectedly completed")
+				}
+				stored, err := baseRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if gotLinked := stored.ReplacementIntent.SuccessorRunID != ""; gotLinked != test.wantLinked {
+					t.Fatalf("pre-restart successor linkage = %t, want %t; intent=%+v", gotLinked, test.wantLinked, stored.ReplacementIntent)
+				}
+				successor, err := baseRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, "run-002")
+				if err != nil || successor.State != common.RunStatePending {
+					t.Fatalf("persisted cut-point successor = %+v err=%v", successor, err)
+				}
+			}
+
+			restartedOwner := New()
+			if err := restartedOwner.Configure(Dependencies{Runs: baseRuns, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			restartedOwner.recoverPendingWorkspaceExecutionSuccessors()
+
+			items, err := baseRuns.ListByWorkspaceID(ctx, predecessor.WorkspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 2 {
+				t.Fatalf("recovery created %d Runs, want predecessor plus one successor: %+v", len(items), items)
+			}
+			storedPredecessor, err := baseRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			successorID := storedPredecessor.ReplacementIntent.SuccessorRunID
+			if successorID != "run-002" || storedPredecessor.Lineage.SuccessorRunID != successorID || storedPredecessor.ReplacementIntent.State != runmodel.ReplacementIntentSuccessorCreated {
+				t.Fatalf("recovered predecessor lineage = %+v intent=%+v", storedPredecessor.Lineage, storedPredecessor.ReplacementIntent)
+			}
+			successor, err := baseRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, successorID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if successor.State != common.RunStateActive || successor.Lineage.PredecessorRunID != predecessor.ID || successor.ActivationRequestID != "restart-cut-point" {
+				t.Fatalf("recovered successor = %+v", successor)
+			}
+
+			// Repeating startup recovery must not create or reactivate another Run.
+			restartedOwner.recoverPendingWorkspaceExecutionSuccessors()
+			items, err = baseRuns.ListByWorkspaceID(ctx, predecessor.WorkspaceID)
+			if err != nil || len(items) != 2 {
+				t.Fatalf("duplicate recovery Runs = %+v err=%v", items, err)
+			}
+		})
+	}
+}
+
+func terminalReplacementTestRun(t *testing.T, workspaceID common.WorkspaceID, requestID string) *runmodel.Run {
+	t.Helper()
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	terminal := &runtimecontract.RuntimeTerminalDeliveryIdentity{
+		WorkspaceID: workspaceID, RunID: "run-001", TerminalDeliveryID: "terminal-cut-point",
+	}
+	return &runmodel.Run{
+		ID: "run-001", WorkspaceID: workspaceID, GoalID: "goal-old", DoDID: "dod-old",
+		DefinitionRevision: "def-old", StartupInputHash: "startup-old", State: common.RunStateSuperseded,
+		Lineage: runmodel.RunLineage{LineageState: "superseded"}, TerminalDelivery: terminal,
+		ReplacementIntent: &runmodel.ReplacementIntent{
+			RequestID: requestID, WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1",
+			DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+			Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "workspace execution restart/" + requestID,
+			ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+			State:               runmodel.ReplacementIntentPending,
+		},
+	}
+}
+
 func replacementTerminationTestRun(workspaceID common.WorkspaceID, successorRunID, predecessorRunID common.RunID, requestID string) *runmodel.Run {
-	bootstrap := runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "def-1"}}
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "def-1"}}
 	item := &runmodel.Run{
 		ID: predecessorRunID, WorkspaceID: workspaceID, State: common.RunStateActive,
 		Lineage: runmodel.RunLineage{SuccessorRunID: successorRunID, LineageState: "active"},
 	}
 	item.ReplacementIntent = &runmodel.ReplacementIntent{
-		RequestID: requestID, WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", Bootstrap: &bootstrap,
+		RequestID: requestID, WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
 		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "workspace execution restart/" + requestID,
 		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		State:               runmodel.ReplacementIntentSuccessorCreated, SuccessorRunID: successorRunID, TerminalDeliveryID: "terminal-before-ack",

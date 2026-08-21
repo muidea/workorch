@@ -198,6 +198,48 @@ EOF
   exit 1
 fi
 
+workorchd_server_owner_implementation_matches="$({
+  source_matches '"github.com/muidea/workorch/internal/modules/(blocks|kernel)/[^\"]+/(biz|service)(/|\")' \
+    internal/modules/application/workorchd/service/server
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_server_owner_implementation_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workorchd transport imports another owner Biz,
+service, or capability executor implementation. Transport may consume only
+application DTOs/ports and read-only owner contract values.
+
+$workorchd_server_owner_implementation_matches
+EOF
+  exit 1
+fi
+
+workorchd_run_ports_shape="$(sed -n '/^type RunPorts struct {/,/^}/p' internal/modules/application/workorchd/service/server/application_ports.go)"
+workorchd_run_mutation_ports="$(grep -E '^[[:space:]]+[A-Z][A-Za-z0-9_]*[[:space:]]' <<<"$workorchd_run_ports_shape" | grep -v -E '^[[:space:]]+(Read|List)[A-Za-z0-9_]*[[:space:]]' || true)"
+if [[ -n "$workorchd_run_mutation_ports" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: ApplicationPorts.Run must remain read-only; Run
+lifecycle mutation enters through Workspace execution admission only.
+
+$workorchd_run_mutation_ports
+EOF
+  exit 1
+fi
+
+workorchd_run_authority_matches="$({
+  find internal/modules/application/workorchd -type f -name '*.go' ! -name '*_test.go' ! -path '*/biz/testkit/*' -print0 |
+    xargs -0 -r grep -n -E -- '(^|[^*[:alnum:]_])((runmodel\.)?ReplacementIntent|runmodel\.Run)[[:space:]]*\{' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_run_authority_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workorchd constructs Run or ReplacementIntent
+owner state. Application may compile a typed bootstrap and submit Workspace
+execution admission, but successor/replacement materialization belongs to Run.
+
+$workorchd_run_authority_matches
+EOF
+  exit 1
+fi
+
 workorchd_server_compatibility_state_matches="$({
   source_matches 'sharedSession|runtimeSessionErr|hasSharedSession|withSharedSession|compatRead|workspaceProjectionObserver|workspaceProjectionLifecycle|manageWorkspaceProjectionLifecycle|newWorkspaceProjectionManager|productionWiring' \
     internal/modules/application/workorchd/service/server
@@ -2474,11 +2516,17 @@ fi
 # configuration field after its behavior disappears creates a false contract.
 legacy_llm_output_config_pattern='MaxPatchContentBytes|MaxGraphBytes|MaxGraphFileWrites|SchemaInvalidLargePreviewThreshold|MaxArtifactChunkBytes|MaxArtifactPlanAttempts|MaxArtifactReplanAttempts|maxPatchContentBytes|maxGraphBytes|maxGraphFileWrites|schemaInvalidLargePreviewThreshold|maxArtifactChunkBytes|maxArtifactPlanAttempts|maxArtifactReplanAttempts'
 legacy_llm_output_config_matches="$(
-	grep -R -Hn -E \
-		--include='*.go' --include='*.toml' --include='*.ts' --include='*.tsx' \
-		--exclude='*_test.go' -- "$legacy_llm_output_config_pattern" \
-		internal config web/workorch-console/src \
-		|| true
+	# Scan the repository contract surface, including non-ignored new files in
+	# the worktree, without treating ignored runtime-local configuration (for
+	# example config/application.toml) as versioned product authority.
+	while IFS= read -r -d '' repository_file; do
+		case "$repository_file" in
+			*_test.go) ;;
+			*.go|*.toml|*.ts|*.tsx)
+				grep -Hn -E -- "$legacy_llm_output_config_pattern" "$repository_file" || true
+				;;
+		esac
+	done < <(git ls-files -z --cached --others --exclude-standard -- internal config web/workorch-console/src)
 )"
 if [[ -n "$legacy_llm_output_config_matches" ]]; then
 	echo "boundary contract violation: a retired graph/artifact LLM output setting was reintroduced" >&2

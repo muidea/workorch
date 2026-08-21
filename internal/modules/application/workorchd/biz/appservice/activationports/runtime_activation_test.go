@@ -16,8 +16,8 @@ import (
 )
 
 func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
-	defaultSoul := &soulmodel.Soul{ID: "soul-default", Name: "default", SoulMD: "default instructions"}
-	executionSoul := &soulmodel.Soul{ID: "soul-execution", Name: "execution", SoulMD: "execution instructions"}
+	defaultSoul := &soulmodel.Soul{ID: "soul-default", Revision: 1, ContentHash: "soul-default-hash", SourceProvenance: "test", Name: "default", SoulMD: "default instructions"}
+	executionSoul := &soulmodel.Soul{ID: "soul-execution", Revision: 1, ContentHash: "soul-execution-hash", SourceProvenance: "test", Name: "execution", SoulMD: "execution instructions"}
 	selectedSkill := workorchmanagementcontract.Skill{
 		ID: "skill-1", Name: "skill", Version: "v1", Instruction: "skill instructions",
 		Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal,
@@ -186,6 +186,67 @@ func TestRuntimeActivationContextBoundsSkillHubInstructionBeforeC3(t *testing.T)
 		activation.SkillContextBudget == nil || activation.SkillContextBudget.TruncatedSkills != 1 ||
 		activation.Skills[0].Provenance.ContentHash != skill.ContentHash {
 		t.Fatalf("bounded Skill activation = %+v budget=%+v", activation.Skills, activation.SkillContextBudget)
+	}
+}
+
+func TestRuntimeActivationContextDetachesSoulMCPAndProfileSnapshots(t *testing.T) {
+	defaultSoul := &soulmodel.Soul{
+		ID: "soul-detached", Revision: 3, ContentHash: "soul-hash-3", SourceProvenance: "test",
+		SoulMD: "sealed instructions", AllowedSkillRefs: []string{"skill-original"},
+	}
+	stageSoul := &soulmodel.Soul{
+		ID: "soul-stage-detached", Revision: 4, ContentHash: "soul-stage-hash-4", SourceProvenance: "test",
+		SoulMD: "sealed stage instructions", AllowedMCPServerRefs: []string{"server-original"},
+	}
+	serverIDs := []string{"server-original"}
+	capability := &mcpmodel.Capability{
+		ID: "cap-detached", ServerID: "server-original", Kind: "tool", Name: "read", Enabled: true,
+		Tags: []string{"tag-original"}, StageHints: []string{"execution"}, EffectScope: "none", IdempotencyClass: "safe_to_replay",
+	}
+	acceptedKinds := []any{"mcp/tool_call"}
+	executionContract := map[string]any{
+		"profileContracts": map[string]any{
+			"detached-profile": map[string]any{
+				"evidenceRequirements": []any{map[string]any{
+					"id": "proof", "scope": "deliverable", "evidenceRole": "primary_state_change",
+					"acceptedStepKinds": acceptedKinds,
+				}},
+			},
+		},
+	}
+	activation, err := RuntimeActivationContext(
+		runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model"}},
+		"en", defaultSoul, map[string]*soulmodel.Soul{"execution": stageSoul},
+		appmodelcore.SoulRouting{Bindings: map[string]appmodelcore.SoulRoutingBinding{"execution": {SoulID: string(stageSoul.ID), Source: "workspace_stage_binding"}}},
+		nil, serverIDs, []*mcpmodel.Capability{capability}, nil, nil, nil, executionContract,
+		runtimecontract.RuntimeContinuationContext{},
+	)
+	if err != nil {
+		t.Fatalf("RuntimeActivationContext: %v", err)
+	}
+
+	defaultSoul.AllowedSkillRefs[0] = "skill-registry-mutated"
+	stageSoul.AllowedMCPServerRefs[0] = "server-registry-mutated"
+	serverIDs[0] = "server-list-mutated"
+	capability.Tags[0] = "tag-catalog-mutated"
+	capability.StageHints[0] = "planning"
+	acceptedKinds[0] = "file/write"
+	if activation.DefaultSoul.AllowedSkillRefs[0] != "skill-original" ||
+		activation.StageSoulBindings[0].Soul.AllowedMCPServerRefs[0] != "server-original" ||
+		activation.MCPServerIDs[0] != "server-original" ||
+		activation.MCPCapabilities[0].Tags[0] != "tag-original" ||
+		activation.MCPCapabilities[0].StageHints[0] != "execution" ||
+		activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].AcceptedStepKinds[0] != "mcp/tool_call" {
+		t.Fatalf("activation snapshot changed after Registry/Catalog mutation: %+v", activation)
+	}
+
+	sealed := activation.Clone()
+	activation.DefaultSoul.AllowedSkillRefs[0] = "activation-mutated"
+	activation.MCPCapabilities[0].Tags[0] = "activation-capability-mutated"
+	activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].AcceptedStepKinds[0] = "activation-profile-mutated"
+	if sealed.DefaultSoul.AllowedSkillRefs[0] != "skill-original" || sealed.MCPCapabilities[0].Tags[0] != "tag-original" ||
+		sealed.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].AcceptedStepKinds[0] != "mcp/tool_call" {
+		t.Fatalf("sealed Runtime activation clone shares mutable DTO storage: %+v", sealed)
 	}
 }
 

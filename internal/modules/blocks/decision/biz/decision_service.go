@@ -130,7 +130,7 @@ func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontra
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
-	if ticket.DecisionKind == "runtime_governance" {
+	if ticket.DecisionKind == "runtime_governance" || ticket.DefinitionClarification != nil {
 		return nil, nil, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
@@ -211,7 +211,7 @@ func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Contex
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, false, common.ErrNotFound
 	}
-	if ticket.DecisionKind == "runtime_governance" {
+	if ticket.DecisionKind == "runtime_governance" || ticket.DefinitionClarification != nil {
 		return nil, nil, false, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {

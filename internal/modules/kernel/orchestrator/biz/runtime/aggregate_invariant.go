@@ -23,6 +23,12 @@ func (a RuntimeAggregate) Validate() error {
 	if err := validateRuntimeAggregateSM3CandidateTransaction(a); err != nil {
 		return err
 	}
+	if err := validateRuntimeAggregateExecutionBudget(a); err != nil {
+		return err
+	}
+	if err := validateRuntimeAggregateRecoverableWaits(a); err != nil {
+		return err
+	}
 	if err := validateRuntimeAggregateGovernanceLedgers(a); err != nil {
 		return err
 	}
@@ -36,6 +42,51 @@ func (a RuntimeAggregate) Validate() error {
 		return err
 	}
 	return validateRuntimeAggregateCrossMachineFences(a)
+}
+
+func validateRuntimeAggregateRecoverableWaits(a RuntimeAggregate) error {
+	seen := make(map[string]struct{}, len(a.RecoverableWaits))
+	active := 0
+	for _, raw := range a.RecoverableWaits {
+		wait := raw.Clone()
+		if err := wait.Validate(a.ExecutionBudget); err != nil {
+			return fmt.Errorf("runtime aggregate recoverable wait: %w", err)
+		}
+		if _, duplicate := seen[wait.WaitID]; duplicate {
+			return fmt.Errorf("runtime aggregate recoverable wait %q is duplicated", wait.WaitID)
+		}
+		seen[wait.WaitID] = struct{}{}
+		if !wait.Active() {
+			continue
+		}
+		active++
+		if wait.WorkspaceID != a.Facts.WorkspaceID || wait.RunID != a.Facts.RunID || wait.DefinitionRevision != a.Facts.DefinitionRevision ||
+			wait.AuthorityTransactionID != runtimecontract.StableAuthorityContractID(a.Facts.WorkspaceID, a.Facts.RunID, a.Decision.AuthorityTransaction()) {
+			return fmt.Errorf("active runtime recoverable wait does not match current authority")
+		}
+		allocation, _ := runtimecontract.RuntimeBudgetAllocationForID(a.ExecutionBudget.Allocations, wait.BudgetAllocationID)
+		if (wait.Status == runtimecontract.RuntimeRecoverableWaitWaiting || wait.Status == runtimecontract.RuntimeRecoverableWaitProbeClaimed) &&
+			allocation.State != runtimecontract.RuntimeBudgetAllocationReserved && allocation.State != runtimecontract.RuntimeBudgetAllocationUnknown {
+			return fmt.Errorf("active runtime recoverable wait requires a reserved or unknown probe allocation")
+		}
+	}
+	if active > 1 {
+		return fmt.Errorf("runtime aggregate has multiple active recoverable waits")
+	}
+	if active != 0 && (isTerminalConvergenceState(a.Decision.State) || a.Termination != nil) {
+		return fmt.Errorf("terminal runtime aggregate cannot retain an active recoverable wait")
+	}
+	return nil
+}
+
+func validateRuntimeAggregateExecutionBudget(a RuntimeAggregate) error {
+	if err := a.ExecutionBudget.Validate(); err != nil {
+		return fmt.Errorf("runtime aggregate execution budget: %w", err)
+	}
+	if !runtimecontract.SameRuntimeExecutionBudgetPolicy(a.ExecutionBudget.Policy, a.Facts.ExecutionBudgetPolicy) {
+		return fmt.Errorf("runtime aggregate execution budget policy does not match activation facts")
+	}
+	return nil
 }
 
 func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
@@ -122,6 +173,9 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeCandidateRequestSessions(a.CandidateRequestSessions); err != nil {
 		return err
 	}
+	if err := validateRuntimeDefinitionClarificationAggregate(a); err != nil {
+		return err
+	}
 	if err := validateRuntimeCandidateAttemptSessionBindings(a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
 		return err
 	}
@@ -132,6 +186,46 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 		return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
 	}
 	return validateAcceptedCandidateDispatchBindings(a)
+}
+
+func validateRuntimeDefinitionClarificationAggregate(a RuntimeAggregate) error {
+	if a.DefinitionClarification == nil {
+		return nil
+	}
+	if err := a.DefinitionClarification.Validate(); err != nil {
+		return fmt.Errorf("runtime Definition clarification: %w", err)
+	}
+	clarification := a.DefinitionClarification.Clone()
+	definition := a.Definition.Normalized()
+	if clarification.Observation.WorkspaceID != a.Facts.WorkspaceID || clarification.Observation.RunID != a.Facts.RunID ||
+		clarification.Observation.DefinitionRevision != definition.Revision || clarification.Observation.StartupInputHash != definition.StartupInputHash ||
+		a.Decision.State != runtimecontract.ConvergenceStateNeedGovernance ||
+		!sameRuntimeStrings(a.Decision.RequiredOutput.Normalized().AcceptedKinds, []string{runtimecontract.RuntimeDefinitionClarificationRequiredOutputKind}) ||
+		a.ActiveDispatch != nil {
+		return fmt.Errorf("runtime Definition clarification aggregate binding mismatch")
+	}
+	if clarification.Dispatch != nil && clarification.Dispatch.AuthoritySnapshotID != a.Decision.AuthoritySnapshot.ID {
+		return fmt.Errorf("runtime Definition clarification dispatch authority mismatch")
+	}
+	for _, session := range a.CandidateRequestSessions {
+		if session.LogicalRequestID == clarification.Observation.LogicalRequestID && session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete &&
+			session.Transaction.AuthoritySnapshotID == clarification.Observation.AuthoritySnapshotID {
+			return nil
+		}
+	}
+	return fmt.Errorf("runtime Definition clarification has no complete semantic request session")
+}
+
+func sameRuntimeStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRuntimeCandidateAttemptSessionBindings(attempts []runtimecontract.RuntimeCandidateAttemptRecord, sessions []runtimecontract.RuntimeCandidateRequestSession) error {

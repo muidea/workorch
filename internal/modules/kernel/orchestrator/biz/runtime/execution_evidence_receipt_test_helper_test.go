@@ -12,6 +12,17 @@ import (
 // same explicit binding shape produced by activationcore in production.
 func runtimeTestEnsureCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggregate) {
 	t.Helper()
+	if aggregate == nil {
+		t.Fatal("nil Runtime aggregate fixture")
+	}
+	aggregate.Facts = aggregate.Facts.Normalized()
+	if aggregate.ExecutionBudget.Policy.PolicyRevision == "" {
+		ledger, err := runtimecontract.NewRuntimeExecutionBudgetLedger(aggregate.Facts.ExecutionBudgetPolicy)
+		if err != nil {
+			t.Fatalf("initialize test execution budget: %v", err)
+		}
+		aggregate.ExecutionBudget = ledger
+	}
 	runtimeTestSealCurrentFocusBindings(t, aggregate)
 	runtimeTestEnsureSemanticPlanningLedger(t, aggregate)
 	runtimeTestSealCanonicalCWILedger(t, aggregate)
@@ -558,7 +569,7 @@ func runtimeTestSemanticCoverageOrder(seed runtimecontract.RuntimeDefinitionSeed
 
 func reduceRuntimeStateFixture(t *testing.T, facts runtimecontract.RuntimeFacts, prior *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeDecision, error) {
 	t.Helper()
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	return ReduceRuntimeState(facts, prior)
 }
 

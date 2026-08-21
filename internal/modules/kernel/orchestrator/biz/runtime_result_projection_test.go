@@ -1374,7 +1374,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 
 func TestRuntimeResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1"},
+		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID:        "ws-1",
@@ -1414,7 +1414,7 @@ func TestRuntimeResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 
 func TestRuntimeResultProjectionBuildsStructuredRejectedCloseout(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID:        "ws-1",
@@ -1481,7 +1481,7 @@ func TestRuntimeResultProjectionBuildsStructuredRejectedCloseout(t *testing.T) {
 
 func TestRuntimeResultProjectionExcludesSettledClaimedGapFromTerminalFailure(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1",
@@ -1532,7 +1532,7 @@ func containsRuntimeResultString(values []string, wanted string) bool {
 
 func TestRuntimeResultProjectionPackagesLedgerEvidenceBeforeAssessment(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "runtime-evidence-00000000000000000002",

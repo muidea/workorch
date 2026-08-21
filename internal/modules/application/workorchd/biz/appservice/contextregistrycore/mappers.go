@@ -12,6 +12,9 @@ func MapSoul(item *soulmodel.Soul) workorchmanagementcontract.Soul {
 	}
 	return workorchmanagementcontract.Soul{
 		ID:                          string(item.ID),
+		Revision:                    item.Revision,
+		ContentHash:                 item.ContentHash,
+		SourceProvenance:            item.SourceProvenance,
 		Name:                        item.Name,
 		Description:                 item.Description,
 		BusinessDomains:             CloneStrings(item.BusinessDomains),

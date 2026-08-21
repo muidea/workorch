@@ -2,6 +2,9 @@ package activationcore
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -130,7 +133,7 @@ func TestActiveRunDefinitionContextStale(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-001", WorkspaceID: workspaceID, GoalID: goal.ID, DoDID: dod.ID,
 		DefinitionRevision: "goal:goal-001|dod:dod-001",
-		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "goal:goal-001|dod:dod-001", GoalID: goal.ID, GoalDefinition: goal.Text,
 			DoDID: dod.ID, DoDDefinition: "1. tests pass", CapabilityContract: []string{"shell/command"},
 		}},
@@ -364,5 +367,39 @@ func TestDefinitionChangeImpactUsesCurrentModelRevisionWhenEventProjectionLags(t
 		revisions[0]["source"] != "current_definition_model" ||
 		revisions[0]["previousDefinitionHash"] != "goal:previous" {
 		t.Fatalf("goal definitionRevisions = %+v, want current model revision marker", revisions)
+	}
+}
+
+func TestCumulativeDefinitionContextCarriesIdentityInsteadOfCopyingStableBodies(t *testing.T) {
+	const count = 512
+	goalContexts := make([]map[string]any, 0, count)
+	dodContexts := make([]map[string]any, 0, count)
+	stableGoalBody := "stable-goal-body:" + strings.Repeat("g", 32*1024)
+	stableDoDBody := "stable-dod-body:" + strings.Repeat("d", 32*1024)
+	for index := 0; index < count; index++ {
+		goalContexts = append(goalContexts, map[string]any{
+			"id": fmt.Sprintf("goal-%04d", index), "text": stableGoalBody,
+		})
+		dodContexts = append(dodContexts, map[string]any{
+			"id": fmt.Sprintf("dod-%04d", index), "items": []any{stableDoDBody},
+		})
+	}
+	goal := &workspacemodel.Goal{ID: "goal-0511", WorkspaceID: "ws-large-definition", Text: "effective goal"}
+	dod := &workspacemodel.DoD{ID: "dod-0511", WorkspaceID: goal.WorkspaceID, Items: []string{"effective DoD"}}
+	values := []map[string]any{
+		CurrentWorkspaceDefinitionRevisionContext(goal, goalContexts, dod, dodContexts),
+		DefinitionChangeImpactFromDefinitions(goal, goalContexts, nil, dod, dodContexts, nil),
+	}
+	for index, value := range values {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal bounded definition context %d: %v", index, err)
+		}
+		if strings.Contains(string(encoded), "stable-goal-body") || strings.Contains(string(encoded), "stable-dod-body") {
+			t.Fatalf("definition context %d copied stable Goal/DoD bodies", index)
+		}
+		if len(encoded) > 128*1024 {
+			t.Fatalf("definition context %d = %d bytes, want identity-only bounded projection", index, len(encoded))
+		}
 	}
 }

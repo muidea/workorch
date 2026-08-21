@@ -90,6 +90,9 @@ type WorkspaceTemplate struct {
 
 type Soul struct {
 	ID                          string   `json:"id"`
+	Revision                    uint64   `json:"revision"`
+	ContentHash                 string   `json:"contentHash"`
+	SourceProvenance            string   `json:"sourceProvenance"`
 	Name                        string   `json:"name"`
 	Description                 string   `json:"description,omitempty"`
 	BusinessDomains             []string `json:"businessDomains,omitempty"`

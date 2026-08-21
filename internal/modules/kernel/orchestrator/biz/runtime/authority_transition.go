@@ -189,7 +189,7 @@ func activeFailureTargetRequirements(facts runtimecontract.RuntimeFacts) []runti
 // requestTermination CAS-persists an administrative termination record on an active V2
 // aggregate (INV-08). SM-1 may project cancelled/superseded only after this record exists.
 
-func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult) (RuntimeAggregate, error) {
+func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult, recoverableWaitProbe ...*runtimecontract.RuntimeRecoverableWaitProbeObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -201,14 +201,15 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept prerequisite results", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	probeObservation := firstRuntimeRecoverableWaitProbeObservation(recoverableWaitProbe)
+	if _, _, waiting := currentRuntimeRecoverableWait(aggregate.RecoverableWaits); waiting && probeObservation == nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: active recoverable wait requires a matching probe observation", common.ErrConflict)
+	}
 	previousFocusID := aggregate.Facts.Focus.ID
 	semanticCatalogRefreshPending := semanticCatalogPrerequisitePending(aggregate, result.PrerequisiteID)
-	// A prerequisite ID is stable across re-acquisition. It is therefore not
-	// sufficient to match only the pending ID here: a response started before a
-	// durable resource change can otherwise satisfy the newly-pending instance
-	// after that change invalidated the original observation. The persisted
-	// invalidation records are the authoritative freshness fence; never accept
-	// a result whose owner observation still reports the superseded revision.
+	// Validate the concrete owner fact before consuming a recovery probe. A
+	// stale/mismatched result cannot spend the current wait allocation, even if
+	// its observation timestamp is already beyond the deadline.
 	if err := validatePrerequisiteResultFreshness(result, aggregate.PrerequisiteInvalidations); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -216,6 +217,31 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if probeObservation != nil {
+		if result.Observation == nil || result.Observation.ObservationID != probeObservation.OwnerResultHash {
+			return RuntimeAggregate{}, fmt.Errorf("%w: recoverable wait probe observation does not bind the prerequisite result", common.ErrConflict)
+		}
+		expired, confirmErr := confirmRecoverableWaitProbe(&aggregate, *probeObservation)
+		if confirmErr != nil {
+			return RuntimeAggregate{}, confirmErr
+		}
+		if expired {
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			return aggregate, nil
+		}
+	}
+	// A prerequisite ID is stable across re-acquisition. It is therefore not
+	// sufficient to match only the pending ID here: a response started before a
+	// durable resource change can otherwise satisfy the newly-pending instance
+	// after that change invalidated the original observation. The persisted
+	// invalidation records are the authoritative freshness fence; never accept
+	// a result whose owner observation still reports the superseded revision.
 	aggregate.Facts = facts
 	semanticGenerationRetired := false
 	// A receipt-driven owner catalog change can invalidate the sealed semantic
@@ -277,4 +303,11 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func firstRuntimeRecoverableWaitProbeObservation(values []*runtimecontract.RuntimeRecoverableWaitProbeObservation) *runtimecontract.RuntimeRecoverableWaitProbeObservation {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[0]
 }

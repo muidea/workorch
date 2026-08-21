@@ -10,10 +10,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext) (*runtimecontract.RuntimeBootstrap, error) {
+func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, startupInputHash string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext) (*runtimecontract.RuntimeBootstrap, error) {
 	definitionRevision = strings.TrimSpace(definitionRevision)
+	startupInputHash = strings.TrimSpace(startupInputHash)
 	if goal == nil || dod == nil || goal.ID == "" || dod.ID == "" || goal.WorkspaceID == "" || goal.WorkspaceID != dod.WorkspaceID ||
-		strings.TrimSpace(goal.Text) == "" || len(dod.Items) == 0 || definitionRevision == "" {
+		strings.TrimSpace(goal.Text) == "" || len(dod.Items) == 0 || definitionRevision == "" || startupInputHash == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	if activation.ExecutionContract.AcceptanceSlicePolicy == nil {
@@ -32,7 +33,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		return nil, err
 	}
 	definition := runtimecontract.RuntimeDefinitionContext{
-		Revision: definitionRevision, GoalID: goal.ID, GoalDefinition: goal.Text,
+		StartupInputHash: startupInputHash, Revision: definitionRevision, GoalID: goal.ID, GoalDefinition: goal.Text,
 		DoDID: dod.ID, DoDDefinition: strings.Join(dodLines, "\n"),
 	}
 	// Goal/DoD compilation declares the required role and bounded discovery
@@ -129,6 +130,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	// owner resource-change refreshes and stale/no-progress recovery have
 	// separate typed allowances; Resume only reads this sealed policy.
 	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
+	executionBudgetPolicy := runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(convergencePolicy, recoveryPolicy)
 	bootstrap := runtimecontract.RuntimeBootstrap{
 		SchemaVersion:          runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Activation:             activation,
@@ -141,6 +143,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		StateChangeRequirement: stateChangeRequirement,
 		ConvergencePolicy:      convergencePolicy,
 		RecoveryPolicy:         recoveryPolicy,
+		ExecutionBudgetPolicy:  executionBudgetPolicy,
 	}
 	bootstrap = bootstrap.Normalized()
 	if err := bootstrap.Validate(); err != nil {

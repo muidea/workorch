@@ -246,7 +246,7 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 	bootstrap, err := activationcore.RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver bounded inventory fixture"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"verified deliverable"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil {
 		t.Fatal(err)

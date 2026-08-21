@@ -85,7 +85,7 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 		FailureMessage: "hunk context mismatch", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 		Revision: "runtime-evidence-00000000000000000004", CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 		Revision: "runtime-evidence-00000000000000000003", TargetRefs: []string{"entry_test.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000003"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 		Revision: "runtime-evidence-00000000000000000004", TargetRefs: []string{"implementation.go"}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
 	facts.EvidenceRevision = "runtime-evidence-00000000000000000004"
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)
 	if err != nil {
 		t.Fatal(err)

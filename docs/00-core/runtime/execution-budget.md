@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -128,7 +128,7 @@ allocation 的合法迁移为：
 
 ```text
 no allocation -> reserved
-reserved -> confirmed | released | unknown | exhausted
+reserved -> confirmed | released | unknown
 unknown -> confirmed | released | exhausted
 confirmed | released | exhausted -> terminal value
 ```
@@ -138,6 +138,11 @@ confirmed | released | exhausted -> terminal value
 - owner 返回 matching typed usage/receipt 后才可 `confirmed`；确认量超过 reservation/max increment 必须 fail-closed 并保留
   owner fact供审计，不能静默截断。
 - external outcome 或消费发生性未知时进入 `unknown`，随后只允许 exact reconciliation 或本合同定义的 bounded wait。
+- exact reconciliation 明确证明 physical consumption 未发生时，必须在同一 aggregate value 中删除 unknown fact、把
+  allocation 改为 `released` 并把 reconciliation 改为 `released`；reconciliation 仍无法确定时记录 `still_unknown`，不得
+  释放余额；deadline/guard 终态失败时改为 `exhausted + failed` 并继续把 unknown amount 计入不可用余额。
+- allocation 创建前发现 limit 不足时直接返回 typed exhaustion 且不创建 allocation；`exhausted` 不是把尚未执行的
+  `reserved` reservation 伪造成已消费，而是 unknown consumption 无法再安全恢复的终态。
 - allocation 不得在 confirmed 后 top-up、改 dimension、换 logical identity 或重新打开。
 
 ## Owner Fact Join Contract

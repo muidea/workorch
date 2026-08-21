@@ -56,6 +56,21 @@ func (m *Biz) Start() error {
 	}
 	m.topics = append(m.topics, decisionevents.TopicOpenRuntimeGovernanceRequest)
 	m.SubscribeFunc(decisionevents.TopicOpenRuntimeGovernanceRequest, m.handleRuntimeGovernanceRequest)
+	for _, topic := range definitionClarificationTopics() {
+		switch topic {
+		case decisionevents.TopicOpenWorkspaceDefinitionClarification:
+			m.SubscribeFunc(topic, m.handleOpenWorkspaceDefinitionClarification)
+		case decisionevents.TopicReconcileWorkspaceDefinitionClarificationCandidate:
+			m.SubscribeFunc(topic, m.handleReconcileWorkspaceDefinitionClarification)
+		case decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission:
+			m.SubscribeFunc(topic, m.handleResolveWorkspaceDefinitionClarification)
+		case decisionevents.TopicOpenRuntimeDefinitionClarification:
+			m.SubscribeFunc(topic, m.handleOpenRuntimeDefinitionClarification)
+		case decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement:
+			m.SubscribeFunc(topic, m.handleResolveRuntimeDefinitionClarification)
+		}
+		m.topics = append(m.topics, topic)
+	}
 	m.topics = append(m.topics, decisionevents.TopicAcquireRuntimeCapabilities)
 	m.SubscribeFunc(decisionevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	if err := m.startRuntimeGovernanceProposalReconciliation(); err != nil {

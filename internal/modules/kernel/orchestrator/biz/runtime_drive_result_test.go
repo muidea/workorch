@@ -30,6 +30,12 @@ func TestRuntimeDriveResultDerivesItsOnlyValidDispositionFromSealedFacts(t *test
 			r.State = runtimecontract.ConvergenceStateNeedGovernance
 			r.BlockingTicketID = common.TicketID("ticket-drive-result")
 		}},
+		{name: "recoverable wait", mutate: func(r *orchestratorevents.DriveRuntimeResult) {
+			r.State = runtimecontract.ConvergenceStateNeedPrerequisite
+			r.RecoverableWait = &runtimecontract.RuntimeRecoverableWaitView{
+				WaitID: "wait-drive-result", Status: runtimecontract.RuntimeRecoverableWaitWaiting, StateRevision: r.StateRevision,
+			}
+		}},
 		{name: "terminal state without detail", wantErr: true, mutate: func(r *orchestratorevents.DriveRuntimeResult) {
 			r.State = runtimecontract.ConvergenceStateComplete
 		}},
@@ -43,6 +49,13 @@ func TestRuntimeDriveResultDerivesItsOnlyValidDispositionFromSealedFacts(t *test
 			r.State = runtimecontract.ConvergenceStateFailed
 			r.Terminal = &runtimecontract.RuntimeTerminalDecision{Code: "failed", Summary: "failed"}
 			r.BlockingTicketID = common.TicketID("ticket-drive-result")
+		}},
+		{name: "recoverable and governance wait", wantErr: true, mutate: func(r *orchestratorevents.DriveRuntimeResult) {
+			r.State = runtimecontract.ConvergenceStateNeedGovernance
+			r.BlockingTicketID = common.TicketID("ticket-drive-result")
+			r.RecoverableWait = &runtimecontract.RuntimeRecoverableWaitView{
+				WaitID: "wait-drive-result", Status: runtimecontract.RuntimeRecoverableWaitWaiting, StateRevision: r.StateRevision,
+			}
 		}},
 	}
 	for _, test := range tests {

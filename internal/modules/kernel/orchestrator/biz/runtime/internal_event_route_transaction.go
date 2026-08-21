@@ -37,7 +37,9 @@ func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, e
 		RuntimeInternalEventGovernanceDispatchSealed,
 		RuntimeInternalEventCandidateRejected,
 		RuntimeInternalEventOperationReceiptObserved,
-		RuntimeInternalEventDispatchExecutionRequested:
+		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventDefinitionClarificationDispatchSealed,
+		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return c.applyCandidateDispatchTransactionInternalEvent(ctx, event)
 	case RuntimeInternalEventGovernanceResolutionObserved:
 		return c.applyGovernanceResolutionTransactionInternalEvent(ctx, event)
@@ -125,32 +127,32 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		if event.Transaction.RequestOutcome == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.recordCandidateRequestTransportOutcome(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.RequestOutcome)
+		aggregate, err := c.planning.recordCandidateRequestTransportOutcome(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.RequestOutcome, event.Transaction.ProviderBudgetObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestRecoveryRequired:
 		if event.Transaction.ProviderDocumentOutcome == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.recordCandidateRequestRecoveryRequired(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.ProviderDocumentOutcome)
+		aggregate, err := c.planning.recordCandidateRequestRecoveryRequired(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.ProviderDocumentOutcome, event.Transaction.ProviderBudgetObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateDocumentObserved:
-		aggregate, err := c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID)
+		aggregate, err := c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, event.Transaction.ProviderBudgetObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestStaleObserved:
 		if event.Transaction.Stale == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.Stale)
+		aggregate, err := c.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.Stale, event.Transaction.ProviderBudgetObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestTerminated:
 		if event.Transaction.RequestOutcome == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.terminateCandidateRequestSession(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.RequestOutcome)
+		aggregate, err := c.planning.terminateCandidateRequestSession(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.RequestOutcome, event.Transaction.ProviderBudgetObservation)
 		result.Aggregate = aggregate
 		return result, err
 	default:
@@ -239,6 +241,17 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.candidateDispatch.executeActiveDispatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Executor, event.Transaction.RecoveryOperationID, event.Transaction.RecoveryBudgetAttempt)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventDefinitionClarificationDispatchSealed:
+		aggregate, err := c.candidateDispatch.sealRuntimeDefinitionClarificationDispatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventDefinitionClarificationRequestObserved:
+		if event.Transaction.DefinitionClarificationRequest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.bindRuntimeDefinitionClarificationRequest(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.DefinitionClarificationRequest)
 		result.Aggregate = aggregate
 		return result, err
 	default:

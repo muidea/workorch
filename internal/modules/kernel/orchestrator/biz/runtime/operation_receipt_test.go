@@ -67,6 +67,11 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	if !ok {
 		t.Fatal("claimed execution is missing")
 	}
+	claimedBudget, err := runtimecontract.BuildRuntimeExecutionBudgetView(claimed.Facts.WorkspaceID, claimed.Facts.RunID, claimed.StateRevision, claimed.ExecutionBudget, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeExecutionDimension(t, claimedBudget, runtimecontract.RuntimeBudgetDimensionCapabilityOperation, 0, 1, 0)
 	if _, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey, execution.Fence, nil); err != nil || found {
 		t.Fatalf("claimed receipt query found=%v err=%v, want authorized found=false", found, err)
 	}
@@ -88,6 +93,11 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	committedBudget, err := runtimecontract.BuildRuntimeExecutionBudgetView(committed.Facts.WorkspaceID, committed.Facts.RunID, committed.StateRevision, committed.ExecutionBudget, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeExecutionDimension(t, committedBudget, runtimecontract.RuntimeBudgetDimensionCapabilityOperation, 1, 0, 0)
 	queried, found, err := controller.QueryOperationReceipt(context.Background(), "ws-v2", "run-v2", claimed.ActiveDispatch.ID, "write-1", execution.ExecutionKey, execution.Fence, nil)
 	if err != nil || !found || !runtimecontract.SameRuntimeOperationReceipt(first, queried) {
 		t.Fatalf("committed receipt query found=%v receipt=%+v err=%v", found, queried, err)

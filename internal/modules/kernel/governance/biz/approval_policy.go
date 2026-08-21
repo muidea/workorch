@@ -126,6 +126,7 @@ func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.
 		ret.reason = "auto approval confidence below threshold"
 		return ret
 	}
+	ret.policyBlocked = ""
 	ret.budgetAfter = resolvedCount + 1
 	return ret
 }

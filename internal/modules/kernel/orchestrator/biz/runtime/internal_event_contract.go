@@ -45,7 +45,8 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
-		RuntimeInternalEventRepairSurfaceConfirmationObserved:
+		RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		RuntimeInternalEventDefinitionGapObserved:
 		return runtimeInternalEventPayloadAuthority, true
 
 	case RuntimeInternalEventSemanticPlanRequestStarted,
@@ -74,7 +75,9 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventCandidateRejected,
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
-		RuntimeInternalEventDispatchExecutionRequested:
+		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventDefinitionClarificationDispatchSealed,
+		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return runtimeInternalEventPayloadTransaction, true
 
 	case RuntimeInternalEventReconciliationRequested,
@@ -85,6 +88,11 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,
 		RuntimeInternalEventDriveLeaseRecovered,
+		RuntimeInternalEventRecoverableWaitOpened,
+		RuntimeInternalEventRecoverableWaitProbeDue,
+		RuntimeInternalEventRecoverableWaitProbeDeferred,
+		RuntimeInternalEventRecoverableWaitExhausted,
+		RuntimeInternalEventRecoverableWaitRetired,
 		RuntimeInternalEventTerminationRequested:
 		return runtimeInternalEventPayloadDelivery, true
 	default:
@@ -201,7 +209,8 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
-		RuntimeInternalEventRepairSurfaceConfirmationObserved:
+		RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		RuntimeInternalEventDefinitionGapObserved:
 		metadata.StateMachine = eventcontract.StateMachineSM2
 
 	case RuntimeInternalEventSemanticPlanRequestStarted,
@@ -229,7 +238,9 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventCandidateRejected,
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
-		RuntimeInternalEventDispatchExecutionRequested:
+		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventDefinitionClarificationDispatchSealed,
+		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		metadata.StateMachine = eventcontract.StateMachineSM3
 
 	case RuntimeInternalEventReconciliationRequested,
@@ -241,6 +252,11 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,
 		RuntimeInternalEventDriveLeaseRecovered,
+		RuntimeInternalEventRecoverableWaitOpened,
+		RuntimeInternalEventRecoverableWaitProbeDue,
+		RuntimeInternalEventRecoverableWaitProbeDeferred,
+		RuntimeInternalEventRecoverableWaitExhausted,
+		RuntimeInternalEventRecoverableWaitRetired,
 		RuntimeInternalEventTerminationRequested:
 		metadata.StateMachine = eventcontract.StateMachineSM4
 
@@ -276,14 +292,17 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventOperationReceiptObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
-		RuntimeInternalEventTerminalDeliveryAcknowledged:
+		RuntimeInternalEventTerminalDeliveryAcknowledged,
+		RuntimeInternalEventDefinitionGapObserved,
+		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		metadata.SourcePolicy = eventcontract.SourcePolicyOwnerFact
 		metadata.CanonicalFeedback = true
 	}
 
 	switch kind {
 	case RuntimeInternalEventCandidateSealed,
-		RuntimeInternalEventGovernanceDispatchSealed:
+		RuntimeInternalEventGovernanceDispatchSealed,
+		RuntimeInternalEventDefinitionClarificationDispatchSealed:
 		metadata.IdentityPolicy = eventcontract.IdentityPolicyRuntimeDispatch
 	case RuntimeInternalEventOperationReceiptObserved,
 		RuntimeInternalEventValidationFailureObserved,

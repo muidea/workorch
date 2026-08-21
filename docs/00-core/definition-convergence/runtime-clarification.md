@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## Scope
 
@@ -124,10 +124,13 @@ command；LLM 不携带或生成 WorkspaceID、RunID、authority、ticket、repl
    administrative supersede 和 predecessor `Result -> Workspace -> Run` delivery；只有 delivery 完成后才创建 successor。successor 使用新
    startup-input contract，不继承 predecessor scheduling contract、binding、credit、LLM document 或 context expansion；
    predecessor 的既有 owner effects 只能由 successor reconciliation 重新观察，不能直接继承 credit；
-12. `stale` 不是可重试成功。`ticket_already_bound` 必须返回 Decision 已封存的 current intent identity/hash：Run owner 若有
-   matching persisted intent，直接恢复该 intent 的 acknowledgement；若 current intent 不同，则 CAS 退休本次 intent 并恢复已绑定
-   intent。`scope_mismatch` 必须把本次 intent CAS 为 `clarification_resolution_rejected` 并返回 typed conflict；只有用户再次显式
-   Restart、且 Run owner 已退休 rejected intent 后才能创建新 intent。稳定 stale 不进入 retry budget，也不得永久停留在
+12. `stale` 不是可重试成功。matching persisted intent 在 Decision owner 必须走 `duplicate` 并返回同一 resolution；
+   `ticket_already_bound` 因此只表示 Decision 已封存的 current intent identity/hash 与 Run 提交的 owner fact 不同。Run 将
+   本次 intent、current identity/hash 与 exact conflict binding CAS 为 `clarification_resolution_rejected` 并 fail-closed；它不能
+   从 Decision-owned两个hash重建另一个Run-owned bootstrap，也不能用新Restart覆盖该invariant breach，恢复必须先通过显式
+   owner-data repair找回原fact。`scope_mismatch` 同样把本次intent CAS为`clarification_resolution_rejected`并返回typed
+   conflict；只有该 conflict 类型允许用户以不同 RequestID 再次显式 Restart，并由 Run owner 把旧 rejected intent 移入
+   immutable retirement history 后创建新 intent。稳定 stale 不进入 retry budget，也不得永久停留在
    `pending_clarification_resolution`；
 13. crash 发生在 intent CAS、Decision resolution 或 Run acknowledgement 任一边界时，SM-1/owner recovery 只重放 exact
    command/result identity；Decision 已收口但 Run 未 ack 时 duplicate join 后继续，Decision 未收口时 predecessor 保持 governed

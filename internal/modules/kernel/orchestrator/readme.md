@@ -23,6 +23,31 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - reasoning effort参与 activation/ceiling identity，但不改变 stable prefix、CWI、focus、预算、retry或 action
 - Orchestrator 只校验 identity/revision/ceiling 完整性，不解释 ai-proxy、模型品牌或 effort语义
 
+provider-ceiling acquisition 的 typed timeout/temporary failure是当前唯一已实现的 bounded recoverable-wait组合。
+SM-2/SM-4 在同一 aggregate 中封存 exact `AcquireProviderCeilingCommand` hash、condition、deadline、attempt guard 与
+`recovery_probe` allocation；普通 drive/Resume 只返回只读 wait，只有 matching due `RuntimeDriveLease` generation 可以
+先 CAS claim 再重发相同 probe。matching ceiling result与 prerequisite fact、probe consumption和
+`condition_satisfied`在一次 CAS 中提交；transient unknown保留相同 physical identity等待 reconciliation，deadline或
+non-transient contract failure分别封存 typed expired/exhausted terminal，不创建 Decision/Approval。
+
+## Runtime execution budget
+
+- fresh activation 把 `RuntimeExecutionBudgetPolicy` 与 convergence/recovery policy 一起封存；Resume只读取既有 policy，
+  Restart由successor fresh policy重新开始，不复制predecessor消费。
+- provider request、semantic generation/correction、whole-document recovery、candidate correction、reasoning effort、
+  capability operation与recovery probe都先在授权 external call/effect 的同一 CAS 中创建 exact allocation，再通过
+  provider usage、owner receipt或probe result确认；unknown只能以相同 logical/physical identity reconciliation。
+- submitted provider session 的任何 outcome/document/terminal transition 都必须结算同一 logical/physical allocation；
+  observation identity 漂移时零状态变化，owner 已确认调用但未返回可靠 usage 时只把 token 量保守记为 unknown，不能遗留
+  reserved allocation。operation governance continuation 是新的物理 effect，resume dispatch 与新 fence allocation 必须同一 CAS。
+- operation recovery 与 same-focus repair 已分别由 SM-4 `Facts.Recovery` 和 SM-2 `Facts.Repair` 独占计数。统一预算层禁止
+  为这两个 dimension再创建 allocation/consumption；`RuntimeExecutionBudgetView`只把这两个权威子账本与其余
+  execution ledger确定性汇总，避免第二份消费权威。
+- `confirmed/reserved/unknown/remaining/exhausted`只读视图绑定aggregate revision、active wait和terminal code；
+  projection、metrics、Web/TUI均不能top-up、清零、释放allocation或驱动恢复。
+- unknown reconciliation 的 matching owner proof 只允许原子进入 confirmed/released/still_unknown/exhausted；failed
+  reconciliation 必须绑定 exhausted allocation并继续保守占用unknown amount，不能把超时解释为未发生消费。
+
 ### Current development baseline 与 provider output contract
 
 当前 Runtime schema 只维护一个无版本号的开发基线。开发调试阶段不维护历史 schema migration 或多版本 reducer；不兼容变化直接更新
@@ -202,7 +227,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   authentication/configuration/transient/protocol；它不得跨 EventHub 返回 `RuntimeCandidateFailure` 或完整文档的
   schema/contract 裁决。Orchestrator adapter 必须先穷举校验 scope、authority、owner、category/class 与
   typed document disposition/content/feedback/stale 互斥关系，再在 SM-3 owner-private 边界重建内部 failure fact。
-  `incomplete_document` 只提交 SM-4 owner-private request-recovery fact；下一 physical call 必须从头请求同一 sealed
+  `incomplete_document` 只提交 SM-4 owner-private request-recovery fact；transport retry 与 incomplete recovery 都必须推进
+  persisted request-session physical sequence，使下一 physical call 使用新 `PhysicalCallID`，并从头请求同一 sealed
   expected document，禁止跨 owner 携带 partial bytes、拼接 raw suffix 或消耗 candidate correction budget。
   provider request 的 request ID/status 只保存在 sealed `ProviderRequestAuditView`，EventHub Result 不再重复携带未消费的
   `RequestID/Status`。
@@ -390,7 +416,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   密封 terminal 与 result payload，并创建 terminal delivery fact；Result owner 自行持久化 accepted/rejected outcome，
   Workspace owner 自行释放 active run，Run owner 自行进入 terminal。Result block 不参与 acceptance 裁决。Result、Workspace、
   Run 三段 SM-4 delivery 只携带同一 sealed `TerminalOutcome`；禁止另传 `FailureReason` 覆盖 code/summary，Run owner 仅在
-  private reducer 中从 outcome 派生自身持久化展示原因。terminal closeout 只投影仍未满足 CWI 的 canonical
+  private reducer 中从 outcome 派生自身持久化展示原因。current-schema terminal closeout 还绑定 StartupInputHash、
+  aggregate revision、逐 requirement/CWI coverage/assessment/evidence 三轴、accepted evidence union、deliverable refs、
+  known limitations 与实际依赖的 owner revision set，并封存 canonical closeout hash；completed 要求每项 covered、satisfied
+  且至少一条 accepted evidence。legacy projection字段只保持既有读兼容。terminal closeout 只投影仍未满足 CWI 的 canonical
   assessment gap；已满足 CWI 的 producer claimed gap 仅留在 assessment audit，不得成为 MissingEvidence/TargetRefs
   或 top failure。失败摘要优先使用当前 `Facts.Failure`，其次为 current active/formal gap，最后才使用 terminal
   code/recovery lineage。
@@ -423,6 +452,12 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   保留 audit，不能进入 provider 或直接关闭 CWI。若存在 `ready + direct` alternative，后续 planning 继续使用同一 canonical
   catalog；没有合法 proof alternative 时才由既有 SM-2/SM-3 bounded fail-closed 规则终结。未来若自动获取输入，必须
   先由对应 owner 新增 concrete typed acquisition command/result，不能由 Orchestrator 或 LLM 猜参数。
+- semantic planning发现 Definition 本身存在无法由owner fact补齐的typed gap时，SM-2先持久化
+  `RuntimeDefinitionClarificationGap`，SM-3再封存唯一 clarification dispatch并通过Decision专用
+  `OpenRuntimeDefinitionClarificationCommand/Result`创建 blocker。ticket、StartupInputHash、Definition revision、authority、
+  focus、semantic request/document与dispatch必须逐字段一致；existing Run不接收文本patch或普通governance continuation。
+  解决只能由Run owner先持久化successor `ReplacementIntent`，再用Decision专用replacement resolution回绑；重复/重启复用
+  同一identity，stale或另一replacement fail-closed。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。Result 强制绑定 workspace/run/resolution scope，并保留正交的 `committed | stale_diagnostic | duplicate` CAS 提交事实；它不携带自由文本 diagnostic/reason/failure，也不得由 convergence state 猜测提交事实。
 - Decision owner 通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Approval owner
   通过 `CommitRuntimeGovernanceApprovalResolutionCommand` 只提交 approval resolution。Orchestrator 从 persisted
@@ -463,6 +498,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `ExecutionKey + Fence`，不重放 owner side effect。
 - candidate attempt 只投影为 SM-3 contract attempt；read model 的 repair loop、ineffective retry 和 repair budget 必须来自 `Facts.Repair` 与当前 failure，不得把历史 candidate retry 当成当前 focus repair。
 - prerequisite freshness 只有一条有界的 stale/no-progress `prerequisite_refresh` ledger。owner accepted receipt 的真实资源变更是正常进展：它原子退休精确相交的 observation、持久化 invalidation record，但不扣减 recovery budget。capability-state acquisition key 的代际仅由同一 `PrerequisiteID` 的 persisted invalidation records 推导；因此资源变更会重查 owner 而不会重放旧 receipt，且无关 prerequisite、provider、CAS 与 delivery 记账都不能改变 key。
+- 同一 prerequisite 已被 invalidation record 退休的 observation/revision 不得以延迟、乱序或 ABA 回滚重现的形式重新进入
+  current authority；即使资源内容回到历史形态，owner 也必须发布新的 opaque generation/revision。semantic manifest 的内容
+  hash 可以在资源回滚后重现，但只能绑定新的 logical request generation，不能复用旧 owner observation 或 active request。
 - application projection 消费 Orchestrator immutable drive observation；Eventstream 当前不直接订阅 Orchestrator topic，Runtime 只消费同步 typed operation result 推进状态。
 - workspace/run purge 时，Orchestrator 只删除自身 ToolCall/Patch/ValidationResult/Evidence/Coverage/ArtifactContinuation/MemoryTrace；Step 与 RuntimeCheckpoint 必须通过带 WorkspaceID/RunID 的 Run owner purge command 删除，Orchestrator 不持有其 repository。
 
@@ -565,18 +603,28 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - [x] create-only 目标重开与 revision-bound existing-target replacement；已有目标不能重复走 `file/write` create。
 - [x] effect/receipt/evidence CAS、owner response loss 与 Result → Workspace → Run 三段 delivery ack 前后崩溃恢复。
 - [x] provider transport、operation recovery、CAS reload、governance wait 与 terminal delivery 的独立预算/guard。
-- [x] startup inventory 多页成功、任意 cursor cycle、页数/条目上限、nil/wrong result、不兼容 schema 与
-  commands-ready handoff。
+- [x] execution-budget allocation-before-effect、provider/operation consumption、unknown reconciliation，以及SM-2 repair/
+  SM-4 operation-recovery source-ledger的只读统一投影和duplicate/restart不重复消费。
+- [x] provider-ceiling bounded recoverable wait的open/due claim/transient defer/exact satisfaction/expire/exhaust/retire、
+  stale lease、fresh-process recovery与projection隔离。
+- [x] runtime Definition clarification gap/dispatch/Decision ticket与Run replacement resolution的exact binding、duplicate和stale gate。
+- [x] startup inventory 多页成功、任意 cursor cycle、页数/条目上限、nil/wrong result、不兼容 schema，以及
+  commands-ready 首次/重复 handoff。
 - [x] forbidden production surface、generic effect/prerequisite compiler 的 capability-neutrality，以及 Run/Workspace
   snapshot reader 只读表面的静态/反射边界。
 - [x] Memory adapter get 强制传播 WorkspaceID；trace 全量恢复/清理按 concrete bounded result 逐页读取，并检测空页游标、重复游标、页数和条目 hard limit。
 - [x] Skill activation 的 typed provenance/budget invariant，以及 Orchestrator/LLM 不导入 Skill owner、repository 或
   EventHub topic 的静态边界。
+- [x] 全量 owner-private fact 的 SM-2/SM-3/SM-4 分类、唯一 payload route、malformed pre-CAS gate，以及单 aggregate/
+  mutation kernel 边界；Orchestrator 不拥有 SM-1 transition，也不存在跨 owner state setter。
+- [x] 64 CWI 的依赖闭包按 provider order 分成 16 个四项 batch，current focus fence 与后续公平 drain 不按 ID 或
+  Definition `Order` 重排；proof-batch provider projection 只携带相关 coverage，C0～C5 stable prefix/context 分层保持不变。
+- [x] owner fact 的 missing、stale、duplicate、out-of-order、rollback/reappearance（ABA）、新 generation 与无关
+  prerequisite 组合矩阵；semantic manifest hash 回滚重现仍由新 logical request 隔离。
+- [x] `BenchmarkRuntimeAggregateInvariantValidation64CWI`、`BenchmarkRuntimeLongFocusQueueProjection64CWI`、
+  `BenchmarkRuntimeSemanticManifestRendering64CWI` 与 `BenchmarkRuntimeDriveLoopReduction64CWI` 均报告 allocation/CPU。
 
-## 待完善测试点
+## 收口结论
 
-- [ ] 补齐 SM-1～SM-4 跨围栏矩阵：每个外部 fact 只能进入对应 internal event/reducer，禁止跨 owner 目标 state setter。
-- [ ] 覆盖大量 Goal/DoD 的语义依赖排序、分批 focus、公平推进和 C0～C5 context budget，确认不按 ID/序号排序。
-- [ ] 补齐 owner fact 的 stale、duplicate、out-of-order、rollback/reappearance 组合矩阵；现有 freshness 回归只覆盖
-  精确依赖退休、部分 stale/duplicate 与 restart，不应把组合矩阵标为完成。
-- [ ] 增加大 aggregate、长 focus queue、manifest rendering、invariant validation 和 drive loop 的 allocation/CPU benchmark。
+当前没有与本实现合同对应的可执行待完善项。真实 provider、远端 endpoint、外部网络抖动等环境事实继续作为 deployed
+verification 执行，不改变 Runtime 的 owner、状态机与 fail-closed code contract。

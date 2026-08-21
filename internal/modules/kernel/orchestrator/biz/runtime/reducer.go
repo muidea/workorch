@@ -327,6 +327,12 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return decision, true, err
 	case runtimecontract.FailureClassOperationOutcomeUnknown:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "operation_outcome_unknown", failure.Message), true, nil
+	case runtimecontract.FailureClassExecutionBudgetExhausted:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "execution_budget_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassRecoverableWaitExpired:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "recoverable_wait_expired", failure.Message), true, nil
+	case runtimecontract.FailureClassRecoverableWaitExhausted:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "recoverable_wait_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassRuntimeContractMisalignment:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "runtime_contract_defect", failure.Message), true, nil
 	case runtimecontract.FailureClassProviderProtocol:

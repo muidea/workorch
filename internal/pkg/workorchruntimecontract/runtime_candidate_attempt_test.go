@@ -177,14 +177,19 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	facts = facts.Normalized()
+	executionBudget, err := NewRuntimeExecutionBudgetLedger(facts.ExecutionBudgetPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	record := RuntimeStateRecord{
 		SchemaVersion: RuntimeStateSchemaVersionCurrent,
 		StateRevision: 1,
-		Definition: RuntimeDefinitionContext{
+		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: facts.DefinitionRevision, GoalID: "goal-1", GoalDefinition: "goal",
 			DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"},
 		},
-		Facts: facts, SemanticPlanning: semanticPlanning, Decision: decision,
+		Facts: facts, SemanticPlanning: semanticPlanning, ExecutionBudget: executionBudget, Decision: decision,
 		CandidateAttempts: []RuntimeCandidateAttemptRecord{{
 			AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction),
 			Transaction:         transaction,

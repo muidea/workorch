@@ -10,11 +10,13 @@ import (
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -27,6 +29,95 @@ func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtim
 	return authorization
 }
 
+func gitFileManifestResponse(command fileevents.AcquireWorkspaceManifestCommand) fileevents.AcquireWorkspaceManifestResult {
+	manifest := runtimecontract.WorkspaceManifest{Revision: "file-tree-v1", TargetRefs: []string{"main.go"}}
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: command.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindManifest,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: manifest.Revision,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Revision: manifest.Revision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	return fileevents.AcquireWorkspaceManifestResult{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID,
+		Manifest: manifest, Observation: observation,
+	}
+}
+
+func TestGitFileWorkspaceTreeResponderMatrixFailsClosed(t *testing.T) {
+	tests := []struct {
+		name       string
+		terminate  bool
+		responder  func(magicevent.Event, magicevent.Result)
+		wantResult bool
+	}{
+		{name: "valid", wantResult: true, responder: func(event magicevent.Event, result magicevent.Result) {
+			result.Set(gitFileManifestResponse(event.Data().(fileevents.AcquireWorkspaceManifestCommand)), nil)
+		}},
+		{name: "missing responder"},
+		{name: "nil result", terminate: true},
+		{name: "owner error", responder: func(_ magicevent.Event, result magicevent.Result) {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "injected File failure", Cause: common.ErrConflict})
+		}},
+		{name: "wrong result type", responder: func(_ magicevent.Event, result magicevent.Result) { result.Set("wrong", nil) }},
+		{name: "wrong workspace", responder: func(event magicevent.Event, result magicevent.Result) {
+			response := gitFileManifestResponse(event.Data().(fileevents.AcquireWorkspaceManifestCommand))
+			response.WorkspaceID = "ws-other"
+			result.Set(response, nil)
+		}},
+		{name: "wrong run", responder: func(event magicevent.Event, result magicevent.Result) {
+			response := gitFileManifestResponse(event.Data().(fileevents.AcquireWorkspaceManifestCommand))
+			response.RunID = "run-other"
+			result.Set(response, nil)
+		}},
+		{name: "wrong authority", responder: func(event magicevent.Event, result magicevent.Result) {
+			response := gitFileManifestResponse(event.Data().(fileevents.AcquireWorkspaceManifestCommand))
+			response.AuthoritySnapshotID = "authority-other"
+			result.Set(response, nil)
+		}},
+		{name: "wrong prerequisite", responder: func(event magicevent.Event, result magicevent.Result) {
+			response := gitFileManifestResponse(event.Data().(fileevents.AcquireWorkspaceManifestCommand))
+			response.Observation.PrerequisiteID = "prerequisite-other"
+			response.Observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(response.Observation)
+			result.Set(response, nil)
+		}},
+		{name: "invalid manifest binding", responder: func(event magicevent.Event, result magicevent.Result) {
+			response := gitFileManifestResponse(event.Data().(fileevents.AcquireWorkspaceManifestCommand))
+			response.Manifest.Revision = "file-tree-other"
+			result.Set(response, nil)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(8)
+			if test.terminate {
+				hub.Terminate(ctx)
+			} else {
+				t.Cleanup(func() { hub.Terminate(ctx) })
+			}
+			if test.responder != nil {
+				observer := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+				observer.Subscribe(fileevents.TopicAcquireWorkspaceManifest, test.responder)
+				t.Cleanup(func() { observer.Unsubscribe(fileevents.TopicAcquireWorkspaceManifest) })
+			}
+			owner := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+			revision, err := owner.acquireFileWorkspaceTreeRevision(ctx, "ws-1", "run-1", "authority-1", "prerequisite-1", t.TempDir())
+			if test.wantResult {
+				if err != nil || revision != "file-tree-v1" {
+					t.Fatalf("revision=%q err=%v", revision, err)
+				}
+				return
+			}
+			if err == nil || revision != "" {
+				t.Fatalf("revision=%q err=%v, want fail closed", revision, err)
+			}
+		})
+	}
+}
+
 func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecreation(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -36,7 +127,11 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
 		receipt, found := receipts[command.ExecutionKey]
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
 	})
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)

@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "documentKind", "manifestHash", "planStep", "proposals", "schemaVersion"}
+	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "proposals", "resultKind", "schemaVersion"}
 	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRef"}
 )
@@ -289,9 +289,12 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 		return "", err
 	}
 	coverageIDs := make([]string, 0, len(manifest.CoverageItems))
+	definitionRefs := make([]string, 0, len(manifest.CoverageItems)*2)
 	for _, item := range manifest.CoverageItems {
 		coverageIDs = append(coverageIDs, string(item.ID))
+		definitionRefs = append(definitionRefs, string(item.ID), item.SourceID)
 	}
+	definitionRefs = normalizeStrings(definitionRefs)
 	policies := make([]string, 0, len(manifest.AllowedTargetPolicies))
 	for _, policy := range manifest.AllowedTargetPolicies {
 		policies = append(policies, string(policy))
@@ -339,6 +342,10 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			"schemaVersion":            map[string]any{"const": RuntimeSemanticPlanDocumentSchemaCurrent},
 			"manifestHash":             map[string]any{"const": manifest.Hash},
 			"definitionSeedHash":       map[string]any{"const": manifest.DefinitionSeedHash},
+			"resultKind":               map[string]any{"const": RuntimeDefinitionGapResultKind},
+			"gapKind":                  map[string]any{"type": "string", "enum": RuntimeDefinitionClarificationGapKinds()},
+			"offendingItemRefs":        stringEnumArraySchemaWithMaximum(definitionRefs, RuntimeDefinitionClarificationMaxOffendingRefs, 1),
+			"diagnosticMessage":        map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeDefinitionClarificationMaxDiagnosticBytes},
 			"planStep":                 map[string]any{"enum": []string{string(RuntimeSemanticPlanStepCoverageOrder), string(RuntimeSemanticPlanStepProofBatch)}},
 			"batchId":                  map[string]any{"type": "string"},
 			"batchSequence":            map[string]any{"type": "integer", "minimum": 0},
@@ -556,11 +563,12 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 	properties["planStep"] = map[string]any{"const": string(step)}
 	switch step {
 	case RuntimeSemanticPlanStepCoverageOrder:
-		schema["required"] = []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"}
+		normalRequired := []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "coverageOrder", "proposals"}
 		delete(properties, "batchId")
 		delete(properties, "batchSequence")
 		delete(properties, "batchCoverageWorkItemIds")
 		properties["proposals"] = map[string]any{"type": "array", "maxItems": 0}
+		attachRuntimeDefinitionGapSchemaForRequest(schema, normalRequired, nil)
 	case RuntimeSemanticPlanStepProofBatch:
 		batchID = strings.TrimSpace(batchID)
 		batchCoverageIDs = normalizeOrderedCoverageWorkItemIDs(batchCoverageIDs)
@@ -582,7 +590,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 		properties["batchSequence"] = map[string]any{"const": batchSequence}
 		properties["batchCoverageWorkItemIds"] = map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "uniqueItems": true, "items": map[string]any{"type": "string", "enum": coverageIDs}}
 		delete(properties, "coverageOrder")
-		schema["required"] = []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "batchId", "batchSequence", "batchCoverageWorkItemIds", "proposals"}
+		normalRequired := []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "batchId", "batchSequence", "batchCoverageWorkItemIds", "proposals"}
 		proposals, ok := properties["proposals"].(map[string]any)
 		if !ok {
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposals are missing")
@@ -598,11 +606,35 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposal properties are missing")
 		}
 		itemProperties["coverageWorkItemId"] = map[string]any{"type": "string", "enum": coverageIDs}
+		attachRuntimeDefinitionGapSchemaForRequest(schema, normalRequired, []string{"batchId", "batchSequence", "batchCoverageWorkItemIds"})
 	default:
 		return "", fmt.Errorf("runtime semantic plan has invalid request step %q", step)
 	}
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err
+}
+
+func attachRuntimeDefinitionGapSchemaForRequest(schema map[string]any, normalRequired, gapBatchRequired []string) {
+	commonRequired := []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep"}
+	gapRequired := append(append([]string(nil), commonRequired...), "resultKind", "gapKind", "offendingItemRefs", "diagnosticMessage")
+	gapRequired = append(gapRequired, gapBatchRequired...)
+	schema["required"] = commonRequired
+	schema["anyOf"] = []any{
+		map[string]any{
+			"required": normalRequired,
+			"not":      map[string]any{"required": []string{"resultKind"}},
+		},
+		map[string]any{
+			"required": gapRequired,
+			"properties": map[string]any{
+				"resultKind": map[string]any{"const": RuntimeDefinitionGapResultKind},
+			},
+			"not": map[string]any{"anyOf": []any{
+				map[string]any{"required": []string{"coverageOrder"}},
+				map[string]any{"required": []string{"proposals"}},
+			}},
+		},
+	}
 }
 
 func stringArraySchema() map[string]any {
@@ -635,6 +667,17 @@ func stringEnumArraySchemaWithMinimum(values []string, minimum int) map[string]a
 	schema := stringEnumArraySchema(values)
 	schema["minItems"] = minimum
 	schema["maxItems"] = minimum
+	schema["uniqueItems"] = true
+	return schema
+}
+
+func stringEnumArraySchemaWithMaximum(values []string, maximum, minimum int) map[string]any {
+	schema := stringEnumArraySchema(values)
+	if maximum > len(values) {
+		maximum = len(values)
+	}
+	schema["minItems"] = minimum
+	schema["maxItems"] = maximum
 	schema["uniqueItems"] = true
 	return schema
 }

@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -45,6 +45,6 @@ Last Verified: 2026-08-20
 - [x] Soul 与 WorkspaceTemplate ensure 成功、MCP Registry 缺席后的部分启动可在 owner 就绪后重试收敛。
 - [x] owner 级 memory/file backend 的重复 ensure、部分默认值已存在及 System 重复 Start 均保留内置 ID 上的用户修改，同时补齐缺失默认资源。
 
-## 待完善测试点
+## 收口结论
 
 当前没有与本合同对应的可执行缺口。System 层只观察 EventHub command/result，因此部分启动与重试集成测试无需按 repository backend 重复；create-if-missing 与非覆盖语义已在各 owner 上同时覆盖 memory/file backend。同一 owner 的 state-lane command 由 EventHub 串行处理，repository Create 冲突仍要求二次读取到资源后才能收敛为成功。

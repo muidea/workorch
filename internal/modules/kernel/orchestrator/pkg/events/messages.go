@@ -24,6 +24,10 @@ type PurgeRunCommand struct {
 type DriveRuntimeCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
+	// RecoveryLeaseGeneration is an SM-4 private scheduler credential. A
+	// normal Start/Resume leaves it zero and therefore cannot claim or execute
+	// a persisted recoverable-wait probe.
+	RecoveryLeaseGeneration uint64
 	// ReconciliationRequestID/Generation are set only for an accepted Run
 	// continuation.  They are persisted by the Orchestrator before ordinary
 	// candidate driving, so a resume always re-observes the current workspace.
@@ -43,6 +47,7 @@ type DriveRuntimeResult struct {
 	State               runtimecontract.ConvergenceState
 	BlockingTicketID    common.TicketID
 	BlockingApprovalID  common.ApprovalID
+	RecoverableWait     *runtimecontract.RuntimeRecoverableWaitView
 	Terminal            *runtimecontract.RuntimeTerminalDecision
 }
 

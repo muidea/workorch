@@ -72,6 +72,18 @@ func runtimePreflightFeedbackForTest(t *testing.T, command llmevents.PreflightRu
 
 func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
 	t.Helper()
+	if aggregate.ExecutionBudget.Policy.PolicyRevision == "" {
+		policy := aggregate.Facts.ExecutionBudgetPolicy
+		if policy.PolicyRevision == "" {
+			policy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(aggregate.Facts.ConvergencePolicy, aggregate.Facts.RecoveryPolicy)
+			aggregate.Facts.ExecutionBudgetPolicy = policy
+		}
+		ledger, err := runtimecontract.NewRuntimeExecutionBudgetLedger(policy)
+		if err != nil {
+			t.Fatalf("initialize test Runtime execution budget: %v", err)
+		}
+		aggregate.ExecutionBudget = ledger
+	}
 	if aggregate.Facts.Resources.ProviderCeiling == nil {
 		aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 			Selection:                aggregate.Facts.Activation.ProviderSelection,
@@ -1261,6 +1273,9 @@ func runtimeTestNormalizeStrings(values []string) []string {
 // semantic plan may later bind. The historical name is retained for existing
 // test callers, but a fresh bootstrap intentionally carries no proof binding.
 func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap) runtimecontract.RuntimeBootstrap {
+	if bootstrap.ExecutionBudgetPolicy.PolicyRevision == "" {
+		bootstrap.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy)
+	}
 	for focusIndex := range bootstrap.Focuses {
 		focus := &bootstrap.Focuses[focusIndex]
 		if len(focus.CoverageWorkItemIDs) == 0 {

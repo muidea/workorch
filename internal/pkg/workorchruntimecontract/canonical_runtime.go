@@ -558,8 +558,11 @@ type RuntimeFacts struct {
 	StateChange            RuntimeStateChangeLedger
 	ConvergencePolicy      RuntimeConvergencePolicy
 	RecoveryPolicy         RuntimeRecoveryPolicy
-	Recovery               RuntimeRecoveryLedger
-	Repair                 RuntimeRepairLedger
+	// ExecutionBudgetPolicy is the fresh-activation-sealed policy. Consumption
+	// remains in the Orchestrator aggregate sub-ledger, never in owner facts.
+	ExecutionBudgetPolicy RuntimeExecutionBudgetPolicy
+	Recovery              RuntimeRecoveryLedger
+	Repair                RuntimeRepairLedger
 	// RepairDirective is the single persisted next-action authority for the current
 	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
 	// action selection (INV-05).
@@ -1502,6 +1505,11 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.StateChange = f.StateChange.Normalized()
 	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
 	f.RecoveryPolicy = f.RecoveryPolicy.Normalized()
+	if strings.TrimSpace(f.ExecutionBudgetPolicy.PolicyRevision) == "" {
+		f.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(f.ConvergencePolicy, f.RecoveryPolicy)
+	} else {
+		f.ExecutionBudgetPolicy = f.ExecutionBudgetPolicy.Normalized()
+	}
 	f.Recovery = f.Recovery.Normalized()
 	f.Repair = f.Repair.Normalized()
 	f.FreshnessReacquireCoverage = normalizeCoverageWorkItemIDs(f.FreshnessReacquireCoverage)
@@ -1575,6 +1583,12 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if err := f.RecoveryPolicy.Validate(); err != nil {
 		return fmt.Errorf("runtime facts recovery policy: %w", err)
+	}
+	if err := f.ExecutionBudgetPolicy.Validate(); err != nil {
+		return fmt.Errorf("runtime facts execution budget policy: %w", err)
+	}
+	if err := ValidateRuntimeExecutionBudgetPolicySources(f.ExecutionBudgetPolicy, f.ConvergencePolicy, f.RecoveryPolicy); err != nil {
+		return fmt.Errorf("runtime facts execution budget policy: %w", err)
 	}
 	if err := f.Recovery.Validate(f.RecoveryPolicy); err != nil {
 		return fmt.Errorf("runtime facts recovery ledger: %w", err)

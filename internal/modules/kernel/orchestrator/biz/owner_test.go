@@ -180,6 +180,21 @@ func TestGMMR3StartupRecoveryWaitsForRunCommandsReady(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("startup drive was not released by Run commands-ready fact")
 	}
+	for _, causationID := range []string{"run-owner-commands-ready", "run-owner-commands-ready-duplicate"} {
+		deps.CommandHub.Post(magicevent.NewEventWithContext(
+			runevents.TopicRunRuntimeCommandsReady,
+			runevents.CommandDestination,
+			runevents.NotificationDestination,
+			magicevent.NewHeader(),
+			context.Background(),
+			runevents.RuntimeCommandsReadyData{CausationID: causationID},
+		))
+	}
+	select {
+	case <-background.scheduled:
+		t.Fatal("duplicate Run commands-ready fact released startup recovery twice")
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 func TestGMMR2StartupPreCWILedgerSchemaMarksRunFreshActivationWithoutDrive(t *testing.T) {

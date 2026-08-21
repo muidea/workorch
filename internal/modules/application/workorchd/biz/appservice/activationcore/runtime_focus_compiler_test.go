@@ -248,7 +248,7 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "build a gopls service"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 32 {
 		t.Fatalf("broad semantic planning seed bootstrap=%+v err=%v", bootstrap, err)

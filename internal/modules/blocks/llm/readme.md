@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -41,7 +41,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 9. incomplete/transient/authentication/configuration/protocol/submission-unknown 等只返回本边界 factual category 与
    safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
    非法 2xx JSON、非法 SSE framing/event、响应超限与跨 origin redirect 属于 `provider_protocol`，不得消费
-   Orchestrator transport recovery budget；显式 protocol class 在 feedback 转换中不得改写为 internal。
+   Orchestrator transport recovery budget；显式 protocol class 在 feedback 转换中不得改写为 internal。`http.Client.Do`
+   返回的 endpoint-bearing `url.Error` 或自定义 transport error 必须先收敛为稳定的 timeout/cancel/DNS/TLS/network code，
+   原始 error 文本不得离开 provider adapter。
 10. complete document 只返回 strict decoded candidate/diagnostic。audit-safe original diagnostic 与 provider-safe
     field-violation projection 分开生成，任一转换都不得覆盖另一份；raw provider body/prompt/credential/endpoint
     不进入 Runtime aggregate、eventstream、projection、memory 或后续 request。
@@ -62,12 +64,20 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     provenance、original/truncated instruction identity 与 activation-time byte budget；LLM 不读取 Skill repository/catalog、
     不重新选择或裁剪 Skill，也不把 Skill material 移入 C0～C2。缺失/漂移的 provenance 或 budget 在 Runtime
     invariant/request 前置校验中 fail-closed。
-15. completion、embedding、catalog refresh 与 Runtime candidate 都是同步强调用。handler 必须先确认非空
+15. Soul guidance 同样只消费 Run owner 封存的 stage snapshot，并要求 owner-issued revision、content hash 与 source
+    provenance 完整；LLM 不回查 Soul catalog，也不能用同 ID 的较新内容改写既有 Run 的 C3。planning 与
+    execution/validation/decision 继续按 sealed stage binding 隔离。
+16. completion、embedding、catalog refresh 与 Runtime candidate 都是同步强调用。handler 必须先确认非空
     `magicevent.Result`，`Post` 不得触发 catalog refresh 或任何物理 provider 请求。
-16. 每次物理 completion、embedding 与 Runtime candidate 调用都发布一条 bounded `LLMUsageRecordedData`；preflight
+17. 每次物理 completion、embedding 与 Runtime candidate 调用都发布一条 bounded `LLMUsageRecordedData`；preflight
     同样发布 `ProviderSubmitted=false` audit。request/response bytes 来自 adapter 实际 wire 计量，失败时不得用 schema
     长度替代。setup draft 可为 process scope，activation embedding 可为 workspace scope，Runtime 为 workspace/run scope；
     RunID 不得脱离 WorkspaceID。
+18. `AcquireProviderCeilingCommand` 的timeout/temporary error只是一项owner factual failure；LLM不自行retry或创建wait。
+    Orchestrator若封存bounded recoverable wait，后续probe仍必须使用相同workspace/run/authority、selection、minimum bytes与
+    canonical request hash。matching result返回detached ceiling fact；stale selection/revision或非typed diagnostic不能解除wait。
+19. Runtime provider result携带的typed usage只确认LLM owner实际观察到的physical call/token消费；无可靠usage时保持
+    unknown，LLM、audit、billing或metrics均不能回写Orchestrator execution-budget allocation。
 
 ## EventHub 合同
 
@@ -108,14 +118,16 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] Responses/embedding 跨 origin 307/308 在重发 body 前拒绝，空 API key 不发送 Authorization。
 - [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
   refresh 后 sealed revision 不漂移。
+- [x] provider-ceiling transient failure的exact recoverable-wait probe、普通drive/伪造lease零额外调用与matching result恢复。
 - [x] C0～C2 stable prefix、C3～C5 volatile tail、未声明 JSON Schema 能力时省略 provider format，以及 strict decoder
   拒绝非法 complete document。
+- [x] completion、stream、embedding 的 deadline/cancel/DNS/TLS/generic transport，以及 400/401/429/503、malformed 2xx
+  矩阵均确认不泄漏 raw body、prompt、credential、endpoint 或 transport detail；redirect protocol identity 保持 typed。
+- [x] 1M-token capacity limit arithmetic、4096-event SSE 与 8192-dimension embedding decode benchmark 已建立；基准机
+  分别为 0 alloc、约 9.3ms/2.1MB、约 1.6ms/325KB，用于后续性能漂移比较，不改变模型派生 hard guard。
 
-## 待完善测试点
+## Deployed verification
 
-- [ ] 补齐所有 transport SDK/HTTP error variant 的 raw body、prompt、credential、endpoint 非泄漏组合矩阵；当前覆盖
-  status body 脱敏、provider-safe correction、usage payload 与主要 protocol failure。
-- [ ] 增加超大 model capacity、长 SSE 和 embedding vector 的 allocation/CPU benchmark；现有 benchmark 主要覆盖
-  Runtime candidate rendering。
-- [ ] 在 deployed real-provider 验收中覆盖 submission-unknown、native usage/cache usage 和 context-too-large 的供应商差异；
-  LLM owner 仍只报告 factual outcome，不自行选择 retry/correction/terminal。
+- 真实 provider 的 submission-unknown、native usage/cache usage 与 context-too-large 差异只能在部署验收中观察；仓库内
+  HTTP adapter 已覆盖对应 typed factual contract 与模拟响应，真实凭证/endpoint 不进入 CI。该项是环境验收，不是当前
+  code-closure 缺口；LLM owner 在任何供应商差异下仍不得自行选择 retry/correction/terminal。

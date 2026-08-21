@@ -4,8 +4,53 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// ValidateQueryRuntimeOperationReceiptResult validates the complete typed
+// query response before a capability owner treats Found=false as execution
+// authorization or reuses a persisted receipt. A malformed or stale response
+// is a cross-owner identity conflict, never an implicit "not found" result.
+func ValidateQueryRuntimeOperationReceiptResult(result QueryRuntimeOperationReceiptResult, executionKey string, fence uint64, operationID string) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+	executionKey = strings.TrimSpace(executionKey)
+	operationID = strings.TrimSpace(operationID)
+	if executionKey == "" || fence == 0 || operationID == "" {
+		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
+	}
+	if result.Found != (result.Receipt != nil) {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: runtime receipt query found/receipt mismatch", common.ErrConflict)
+	}
+	if !result.Found {
+		return runtimecontract.RuntimeOperationReceipt{}, false, nil
+	}
+	receipt := result.Receipt.Clone()
+	if err := receipt.Validate(); err != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: runtime receipt query returned invalid receipt: %v", common.ErrConflict, err)
+	}
+	if receipt.ExecutionKey != executionKey || receipt.Fence != fence || receipt.OperationID != operationID {
+		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("%w: runtime receipt query identity mismatch", common.ErrConflict)
+	}
+	return receipt, true, nil
+}
+
+// ValidateCommitRuntimeOperationReceiptResult ensures the receipt returned by
+// the Runtime owner is exactly the owner fact submitted for this transaction.
+// StateRevision is intentionally not interpreted by capability owners.
+func ValidateCommitRuntimeOperationReceiptResult(result CommitRuntimeOperationReceiptResult, expected runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
+	expected = expected.Normalized()
+	if err := expected.Validate(); err != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
+	}
+	receipt := result.Receipt.Clone()
+	if err := receipt.Validate(); err != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: runtime receipt commit returned invalid receipt: %v", common.ErrConflict, err)
+	}
+	if !runtimecontract.SameRuntimeOperationReceipt(receipt, expected) {
+		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: runtime receipt commit identity or payload mismatch", common.ErrConflict)
+	}
+	return receipt, nil
+}
 
 // AttachRuntimeOperationReceiptFeedback binds the owner-authored failure to
 // the workspace/run/authority/dispatch scope before the receipt crosses the

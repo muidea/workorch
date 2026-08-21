@@ -24,10 +24,20 @@ func NewService(souls repository.SoulRepository) *Service {
 }
 
 func (s *Service) CreateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
+	return s.createSoul(ctx, cmd, soulmodel.SoulSourceUserManaged)
+}
+
+func (s *Service) createSoul(ctx context.Context, cmd soulevents.CreateSoulCommand, provenance string) (*soulmodel.Soul, error) {
 	item, err := normalizedSoulFromCommand(cmd)
 	if err != nil {
 		return nil, err
 	}
+	item.Revision = 1
+	item.SourceProvenance = strings.TrimSpace(provenance)
+	if !soulmodel.ValidSoulSourceProvenance(item.SourceProvenance) {
+		return nil, common.ErrInvalidArgument
+	}
+	item.ContentHash = soulmodel.StableSoulContentHash(item)
 	if err := s.souls.Create(ctx, item); err != nil {
 		return nil, err
 	}
@@ -39,6 +49,17 @@ func (s *Service) UpdateSoul(ctx context.Context, cmd soulevents.CreateSoulComma
 	if err != nil {
 		return nil, err
 	}
+	current, err := s.GetSoul(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	item.Revision = current.Revision
+	item.SourceProvenance = current.SourceProvenance
+	item.ContentHash = soulmodel.StableSoulContentHash(item)
+	if item.ContentHash == current.ContentHash {
+		return current, nil
+	}
+	item.Revision++
 	if err := s.souls.Update(ctx, item); err != nil {
 		return nil, err
 	}
@@ -162,6 +183,14 @@ func normalizedStoredSoul(item *soulmodel.Soul) (*soulmodel.Soul, error) {
 	value, err := normalizeAndValidateSoul(item)
 	if err != nil {
 		return nil, fmt.Errorf("%w: stored Soul violates owner invariant", common.ErrConflict)
+	}
+	if value.Revision == 0 && value.ContentHash == "" && value.SourceProvenance == "" {
+		value.Revision = 1
+		value.SourceProvenance = soulmodel.SoulSourceLegacyOwned
+		value.ContentHash = soulmodel.StableSoulContentHash(value)
+	}
+	if value.Revision == 0 || !soulmodel.ValidSoulSourceProvenance(value.SourceProvenance) || value.ContentHash != soulmodel.StableSoulContentHash(value) {
+		return nil, fmt.Errorf("%w: stored Soul revision/content identity mismatch", common.ErrConflict)
 	}
 	return value, nil
 }

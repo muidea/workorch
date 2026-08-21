@@ -9,7 +9,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -34,6 +34,18 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 	}
 
 	expectedRevision := aggregate.StateRevision
+	var observation *runtimecontract.RuntimeProviderBudgetObservation
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+		observation, err = candidateRequestBudgetObservationForTransition(session, runtimecontract.RuntimeProviderConsumptionUnknown, budgetObservation...)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+	} else if firstRuntimeProviderBudgetObservation(budgetObservation) != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate request budget was already settled", common.ErrConflict)
+	}
+	if _, err := applyCandidateRequestBudgetObservation(&aggregate, observation); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
 	if err != nil {
 		return RuntimeAggregate{}, err

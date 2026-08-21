@@ -384,7 +384,7 @@ func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *t
 		facts.Focus.ProspectiveTargetRef = "runtime-validation-source.txt"
 		facts.Focus.RequireTargetGrounding = true
 		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
-		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 
 		catalog := runtimecontract.RuntimeOperationAdmissibility{
 			PrerequisiteID: "file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -528,7 +528,7 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
-	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: facts.DefinitionRevision})
 
 	advanced, err := advanceSatisfiedCoverageFocus(facts)
 	if err != nil {

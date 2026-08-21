@@ -1,8 +1,13 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +35,63 @@ func TestApplicationPortsValidateCoversEveryTypedPort(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRunApplicationPortsRemainReadOnly(t *testing.T) {
+	typeOfRunPorts := reflect.TypeOf(RunPorts{})
+	for index := 0; index < typeOfRunPorts.NumField(); index++ {
+		field := typeOfRunPorts.Field(index)
+		if !strings.HasPrefix(field.Name, "Read") && !strings.HasPrefix(field.Name, "List") {
+			t.Errorf("ApplicationPorts.Run.%s is not a read-only operation", field.Name)
+		}
+	}
+}
+
+func TestApplicationPortGroupsMapUnknownErrorsWithoutTransportLeak(t *testing.T) {
+	tests := []struct {
+		group string
+		port  string
+		path  string
+	}{
+		{group: "Workspace", port: "ReadWorkspace", path: "/api/v1/workorch/workspaces/ws-port-error"},
+		{group: "Definition", port: "ListGoals", path: "/api/v1/workorch/workspaces/ws-port-error/goals"},
+		{group: "Run", port: "ListRuns", path: "/api/v1/workorch/runs?workspaceId=ws-port-error"},
+		{group: "Governance", port: "ReadDecision", path: "/api/v1/workorch/decisions/ticket-port-error"},
+		{group: "Registry", port: "ListSouls", path: "/api/v1/workorch/souls"},
+		{group: "Memory", port: "SearchMemory", path: "/api/v1/workorch/memory?workspaceId=ws-port-error"},
+		{group: "Configuration", port: "ReadConfigurationWithCatalog", path: "/api/v1/workorch/configuration"},
+	}
+	secret := errors.New("owner transport failed: credential=must-not-leak")
+	for _, test := range tests {
+		t.Run(test.group, func(t *testing.T) {
+			ports := completeApplicationPorts(t)
+			applicationPortValue := reflect.ValueOf(&ports).Elem().FieldByName(test.group).FieldByName(test.port)
+			if !applicationPortValue.IsValid() || applicationPortValue.Kind() != reflect.Func {
+				t.Fatalf("ApplicationPorts.%s.%s is unavailable", test.group, test.port)
+			}
+			applicationPortValue.Set(reflect.MakeFunc(applicationPortValue.Type(), func([]reflect.Value) []reflect.Value {
+				results := make([]reflect.Value, applicationPortValue.Type().NumOut())
+				for index := range results {
+					results[index] = reflect.Zero(applicationPortValue.Type().Out(index))
+				}
+				results[len(results)-1] = reflect.ValueOf(secret)
+				return results
+			}))
+			state := newServerStateWithApplicationPorts(normalizeConfig(Config{Backend: "memory"}), ports, nil, nil)
+			recorder := httptest.NewRecorder()
+			newMuxWithStateNoStart(state).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, test.path, nil))
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
+			}
+			var response errorResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if response.Error != "internal server error" || strings.Contains(recorder.Body.String(), "credential") {
+				t.Fatalf("unsafe transport error = %+v body=%s", response, recorder.Body.String())
+			}
+		})
 	}
 }
 

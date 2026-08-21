@@ -24,6 +24,7 @@ type WorkspaceExecutionIntentCommand struct {
 	GoalID             common.GoalID
 	DoDID              common.DoDID
 	DefinitionRevision string
+	StartupInputHash   string
 	Priority           int
 	Bootstrap          *runtimecontract.RuntimeBootstrap
 }
@@ -32,6 +33,7 @@ func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCo
 	c.RequestID = strings.TrimSpace(c.RequestID)
 	c.Kind = runtimecontract.RuntimeExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
+	c.StartupInputHash = strings.TrimSpace(c.StartupInputHash)
 	if c.Bootstrap != nil {
 		clone := c.Bootstrap.Clone()
 		c.Bootstrap = &clone
@@ -41,8 +43,8 @@ func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCo
 
 func (c WorkspaceExecutionIntentCommand) Validate() error {
 	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RequestID == "" || c.GoalID == "" || c.DoDID == "" || c.DefinitionRevision == "" {
-		return fmt.Errorf("%w: workspace execution selection requires scope, request and definition identity", common.ErrInvalidArgument)
+	if c.WorkspaceID == "" || c.RequestID == "" {
+		return fmt.Errorf("%w: workspace execution selection requires scope and request identity", common.ErrInvalidArgument)
 	}
 	switch c.Kind {
 	case runtimecontract.RuntimeExecutionIntentResume:
@@ -50,14 +52,14 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 			return fmt.Errorf("%w: resume selection requires selected run and no replacement bootstrap", common.ErrInvalidArgument)
 		}
 	case runtimecontract.RuntimeExecutionIntentRestart:
-		if c.RunID != "" || c.Bootstrap == nil {
+		if c.RunID != "" || c.Bootstrap == nil || c.GoalID == "" || c.DoDID == "" || c.DefinitionRevision == "" || c.StartupInputHash == "" {
 			return fmt.Errorf("%w: restart selection requires no predecessor run and one replacement bootstrap", common.ErrInvalidArgument)
 		}
 		if err := c.Bootstrap.Validate(); err != nil {
 			return fmt.Errorf("%w: restart bootstrap: %v", common.ErrInvalidArgument, err)
 		}
 		definition := c.Bootstrap.Definition.Normalized()
-		if definition.GoalID != c.GoalID || definition.DoDID != c.DoDID || definition.Revision != c.DefinitionRevision {
+		if definition.GoalID != c.GoalID || definition.DoDID != c.DoDID || definition.Revision != c.DefinitionRevision || definition.StartupInputHash != c.StartupInputHash {
 			return fmt.Errorf("%w: restart bootstrap definition does not match workspace selection", common.ErrConflict)
 		}
 	default:

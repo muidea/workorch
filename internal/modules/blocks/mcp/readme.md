@@ -27,7 +27,8 @@ Last Verified: 2026-08-21
   Orchestrator receipt authorization、当前 Registry revision、enabled Server/Capability、allowlist、exact kind/name/URI、
   bounded input schema、effect/idempotency 与 exact approval grant。任一漂移均在 transport 前 fail-closed。
 - receipt query 的 `Found=false` 只有 Orchestrator 已证明当前 execution 仍为 active+claimed 且 grant parity 精确匹配时
-  才是执行许可；MCP owner 不把普通“未找到 receipt”解释为授权。已提交的 exact receipt 重放只返回既有事实。
+  才是执行许可；MCP owner 不把普通“未找到 receipt”解释为授权。已提交的 exact receipt 重放只返回既有事实；query 的
+  Found/Receipt 一致性与 identity、commit 的完整 receipt equality 由 capability owners 共享的 typed validator fail-closed 校验。
 - approval policy 来自 exact Capability（缺失时使用同一 Server snapshot 的 default）；typed requirement 绑定 capability、
   operation payload hash、catalog/Registry/capability revision、effect 与 idempotency。MCP owner 不创建或解决 Approval。
 

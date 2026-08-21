@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -749,6 +750,126 @@ func TestFileExecuteHandlerRejectsNilResultBeforePrivateEffect(t *testing.T) {
 	}
 }
 
+func TestFileReceiptBoundaryRejectsMalformedCrossOwnerResults(t *testing.T) {
+	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
+		ExecutionKey: "exec/ws-1/run-1/dispatch-1/op-1", Fence: 2, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+	}
+	valid := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationID: "op-1",
+		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "no change"},
+	}
+	ownerError := &cd.Error{Code: cd.Unexpected, Message: "injected owner failure", Cause: errors.New("injected owner failure")}
+
+	t.Run("query", func(t *testing.T) {
+		wrongKey := valid
+		wrongKey.ExecutionKey = "exec/other"
+		wrongFence := valid
+		wrongFence.Fence++
+		wrongOperation := valid
+		wrongOperation.OperationID = "op-other"
+		invalid := valid
+		invalid.Outcome = "invalid"
+		for _, test := range []struct {
+			name      string
+			data      any
+			ownerErr  *cd.Error
+			wantFound bool
+			wantErr   bool
+		}{
+			{name: "authorized absent", data: orchestratorevents.QueryRuntimeOperationReceiptResult{}},
+			{name: "exact", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Found: true, Receipt: &valid}, wantFound: true},
+			{name: "wrong result type", data: "wrong", wantErr: true},
+			{name: "owner error", ownerErr: ownerError, wantErr: true},
+			{name: "found without receipt", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Found: true}, wantErr: true},
+			{name: "receipt while absent", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &valid}, wantErr: true},
+			{name: "invalid receipt", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Found: true, Receipt: &invalid}, wantErr: true},
+			{name: "wrong execution key", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Found: true, Receipt: &wrongKey}, wantErr: true},
+			{name: "wrong fence", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Found: true, Receipt: &wrongFence}, wantErr: true},
+			{name: "wrong operation", data: orchestratorevents.QueryRuntimeOperationReceiptResult{Found: true, Receipt: &wrongOperation}, wantErr: true},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				ctx := context.Background()
+				hub := magicevent.NewHub(8)
+				t.Cleanup(func() { hub.Terminate(ctx) })
+				owner, err := New(hub, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+				observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(_ magicevent.Event, result magicevent.Result) {
+					result.Set(test.data, test.ownerErr)
+				})
+				t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt) })
+
+				receipt, found, err := owner.queryRuntimeOperationReceipt(ctx, "ws-1", "run-1", "dispatch-1", valid.OperationID, execution)
+				if test.wantErr {
+					if err == nil || found {
+						t.Fatalf("found=%v receipt=%+v err=%v, want fail closed", found, receipt, err)
+					}
+					return
+				}
+				if err != nil || found != test.wantFound {
+					t.Fatalf("found=%v receipt=%+v err=%v", found, receipt, err)
+				}
+			})
+		}
+	})
+
+	t.Run("commit", func(t *testing.T) {
+		for _, test := range []struct {
+			name     string
+			response func(runtimecontract.RuntimeOperationReceipt) (any, *cd.Error)
+			wantErr  bool
+		}{
+			{name: "exact", response: func(receipt runtimecontract.RuntimeOperationReceipt) (any, *cd.Error) {
+				return orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt, StateRevision: 7}, nil
+			}},
+			{name: "wrong result type", response: func(runtimecontract.RuntimeOperationReceipt) (any, *cd.Error) { return "wrong", nil }, wantErr: true},
+			{name: "owner error", response: func(runtimecontract.RuntimeOperationReceipt) (any, *cd.Error) { return nil, ownerError }, wantErr: true},
+			{name: "missing receipt", response: func(runtimecontract.RuntimeOperationReceipt) (any, *cd.Error) {
+				return orchestratorevents.CommitRuntimeOperationReceiptResult{}, nil
+			}, wantErr: true},
+			{name: "wrong identity", response: func(receipt runtimecontract.RuntimeOperationReceipt) (any, *cd.Error) {
+				receipt.ExecutionKey = "exec/other"
+				return orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt}, nil
+			}, wantErr: true},
+			{name: "payload drift", response: func(receipt runtimecontract.RuntimeOperationReceipt) (any, *cd.Error) {
+				receipt.Evidence.Summary = "different"
+				return orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt}, nil
+			}, wantErr: true},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				ctx := context.Background()
+				hub := magicevent.NewHub(8)
+				t.Cleanup(func() { hub.Terminate(ctx) })
+				owner, err := New(hub, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+				observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+					command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+					data, responseErr := test.response(command.Receipt)
+					result.Set(data, responseErr)
+				})
+				t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt) })
+
+				receipt, err := owner.commitRuntimeOperationReceipt(ctx, "ws-1", "run-1", "authority-1", "dispatch-1", execution, valid)
+				if test.wantErr {
+					if err == nil {
+						t.Fatalf("receipt=%+v err=nil, want fail closed", receipt)
+					}
+					return
+				}
+				if err != nil || !runtimecontract.SameRuntimeOperationReceipt(receipt, valid) {
+					t.Fatalf("receipt=%+v err=%v", receipt, err)
+				}
+			})
+		}
+	})
+}
+
 func TestFileApprovalGrantMustMatchExactTargetAndAction(t *testing.T) {
 	requirement := fileApprovalRequirement(".env", "sensitive target", runtimecontract.StepKindFileEdit)
 	grant := runtimecontract.RuntimeOperationGovernanceGrant{
@@ -875,6 +996,70 @@ func TestAcquireWorkspaceManifestRevisionTracksContent(t *testing.T) {
 	}
 	if second.Revision == first.Revision {
 		t.Fatalf("manifest revision did not change with content: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestAcquireWorkspaceManifestRevisionTracksDeliverableTopologyOnly(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := NewRuntimeAdapter()
+	write := func(ref, content string) {
+		t.Helper()
+		path := filepath.Join(workspace, filepath.FromSlash(ref))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := func() runtimecontract.WorkspaceManifest {
+		t.Helper()
+		value, err := adapter.AcquireWorkspaceManifest(workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+
+	write("a.txt", "a\n")
+	baseline := manifest()
+	if len(baseline.TargetRefs) != 1 || baseline.TargetRefs[0] != "a.txt" || baseline.Revision == "" {
+		t.Fatalf("baseline manifest = %+v", baseline)
+	}
+
+	write("b.txt", "b\n")
+	created := manifest()
+	if created.Revision == baseline.Revision || !reflect.DeepEqual(created.TargetRefs, []string{"a.txt", "b.txt"}) {
+		t.Fatalf("create did not invalidate manifest: baseline=%+v created=%+v", baseline, created)
+	}
+	if err := os.Remove(filepath.Join(workspace, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	deleted := manifest()
+	if deleted.Revision != baseline.Revision || !reflect.DeepEqual(deleted.TargetRefs, baseline.TargetRefs) {
+		t.Fatalf("delete did not restore manifest: baseline=%+v deleted=%+v", baseline, deleted)
+	}
+
+	if err := os.Rename(filepath.Join(workspace, "a.txt"), filepath.Join(workspace, "renamed.txt")); err != nil {
+		t.Fatal(err)
+	}
+	renamed := manifest()
+	if renamed.Revision == baseline.Revision || !reflect.DeepEqual(renamed.TargetRefs, []string{"renamed.txt"}) {
+		t.Fatalf("rename did not invalidate manifest: baseline=%+v renamed=%+v", baseline, renamed)
+	}
+	if err := os.Rename(filepath.Join(workspace, "renamed.txt"), filepath.Join(workspace, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if restored := manifest(); restored.Revision != baseline.Revision || !reflect.DeepEqual(restored.TargetRefs, baseline.TargetRefs) {
+		t.Fatalf("rename-back did not restore manifest: baseline=%+v restored=%+v", baseline, restored)
+	}
+
+	for _, ref := range []string{".workorch-data/runtime.json", ".git/HEAD", "node_modules/generated.js", "vendor/cache.go", "dist/bundle.js", "build/output.bin"} {
+		write(ref, "generated\n")
+	}
+	generated := manifest()
+	if generated.Revision != baseline.Revision || !reflect.DeepEqual(generated.TargetRefs, baseline.TargetRefs) {
+		t.Fatalf("owner-internal/generated paths polluted deliverable manifest: baseline=%+v generated=%+v", baseline, generated)
 	}
 }
 
@@ -1241,7 +1426,11 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
 		receipt, found := receipts[command.ExecutionKey]
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
 	})
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		commitCalls++

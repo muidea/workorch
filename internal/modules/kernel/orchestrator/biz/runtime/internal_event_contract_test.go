@@ -54,6 +54,43 @@ func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T
 	}
 }
 
+// TestRuntimeInternalFactsStayWithinStateMachineFences makes the SM-1~SM-4
+// ownership split executable. Orchestrator never owns an SM-1 transition; its
+// activation input and authority facts reduce through SM-2, candidate/dispatch
+// transactions through SM-3, and delivery/recovery through SM-4. The one
+// transaction-shaped exception is candidate-request recovery: its payload
+// retains the exact request identity, while the transition itself belongs to
+// the SM-4 recovery ledger.
+func TestRuntimeInternalFactsStayWithinStateMachineFences(t *testing.T) {
+	kinds, _, _ := runtimeInternalEventSourceFacts(t)
+	for name, kind := range kinds {
+		payloadClass, ok := runtimeInternalFactPayloadClass(kind)
+		if !ok {
+			t.Fatalf("runtime internal fact %s has no payload class", name)
+		}
+		metadata, ok := runtimeInternalFactMetadata(kind)
+		if !ok {
+			t.Fatalf("runtime internal fact %s has no state-machine metadata", name)
+		}
+		if metadata.StateMachine == eventcontract.StateMachineSM1 {
+			t.Fatalf("Orchestrator internal fact %s attempts to own an SM-1 transition", name)
+		}
+
+		want := map[runtimeInternalEventPayloadClass]eventcontract.StateMachine{
+			runtimeInternalEventPayloadActivation:  eventcontract.StateMachineSM2,
+			runtimeInternalEventPayloadAuthority:   eventcontract.StateMachineSM2,
+			runtimeInternalEventPayloadTransaction: eventcontract.StateMachineSM3,
+			runtimeInternalEventPayloadDelivery:    eventcontract.StateMachineSM4,
+		}[payloadClass]
+		if kind == RuntimeInternalEventCandidateRequestRecoveryRequired {
+			want = eventcontract.StateMachineSM4
+		}
+		if metadata.StateMachine != want {
+			t.Fatalf("runtime internal fact %s (%s payload) is classified as %s, want %s", name, payloadClass, metadata.StateMachine, want)
+		}
+	}
+}
+
 func TestRuntimeInternalEventDispatcherRoutesEveryKindToExactlyOnePayloadFamily(t *testing.T) {
 	kinds, _, _ := runtimeInternalEventSourceFacts(t)
 	fileSet := token.NewFileSet()

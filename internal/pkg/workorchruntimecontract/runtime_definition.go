@@ -18,6 +18,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	execution = execution.Normalized()
 	h := sha256.New()
 	writeHashString(h, "runtime-candidate-contract")
+	writeHashString(h, definition.StartupInputHash)
 	writeHashString(h, definition.Revision)
 	writeHashString(h, string(definition.GoalID))
 	writeHashString(h, definition.GoalDefinition)
@@ -184,6 +185,10 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 // RuntimeDefinitionContext 是 Runtime 初始化时封存的 Goal/DoD 定义输入。
 // 后续 candidate request 和 restart recovery 只能读取该持久化快照，不能临时重建或替换。
 type RuntimeDefinitionContext struct {
+	// StartupInputHash binds the formal Goal/DoD, Template snapshot and resolved
+	// project directory promoted by the Workspace owner. It is immutable for the
+	// lifetime of one Run and Resume must never replace it.
+	StartupInputHash   string
 	Revision           string
 	GoalID             common.GoalID
 	GoalDefinition     string
@@ -194,6 +199,7 @@ type RuntimeDefinitionContext struct {
 }
 
 func (c RuntimeDefinitionContext) Normalized() RuntimeDefinitionContext {
+	c.StartupInputHash = strings.TrimSpace(c.StartupInputHash)
 	c.Revision = strings.TrimSpace(c.Revision)
 	c.GoalDefinition = strings.TrimSpace(c.GoalDefinition)
 	c.DoDDefinition = strings.TrimSpace(c.DoDDefinition)
@@ -207,7 +213,7 @@ func (c RuntimeDefinitionContext) Normalized() RuntimeDefinitionContext {
 
 func (c RuntimeDefinitionContext) Validate() error {
 	c = c.Normalized()
-	if c.Revision == "" || c.GoalID == "" || c.DoDID == "" {
+	if c.StartupInputHash == "" || c.Revision == "" || c.GoalID == "" || c.DoDID == "" {
 		return fmt.Errorf("runtime definition context requires revision, goal and DoD identity")
 	}
 	if c.GoalDefinition == "" || c.DoDDefinition == "" {
@@ -233,7 +239,7 @@ func (c RuntimeDefinitionContext) Clone() RuntimeDefinitionContext {
 func SameRuntimeDefinitionContext(left RuntimeDefinitionContext, right RuntimeDefinitionContext) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.Revision != right.Revision || left.GoalID != right.GoalID || left.GoalDefinition != right.GoalDefinition ||
+	if left.StartupInputHash != right.StartupInputHash || left.Revision != right.Revision || left.GoalID != right.GoalID || left.GoalDefinition != right.GoalDefinition ||
 		left.DoDID != right.DoDID || left.DoDDefinition != right.DoDDefinition || len(left.CapabilityContract) != len(right.CapabilityContract) ||
 		!SameRuntimeDefinitionChangeImpact(left.ChangeImpact, right.ChangeImpact) {
 		return false

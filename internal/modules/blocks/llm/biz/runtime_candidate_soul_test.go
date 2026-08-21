@@ -14,10 +14,10 @@ func TestRuntimeCandidateUsesStageSoulToFilterSharedActivationContext(t *testing
 		runtimecontract.RuntimeSkillContext{ID: "skill-validation", Name: "validation", Instruction: "validate"},
 	)
 	activation := runtimecontract.RuntimeActivationContext{
-		DefaultSoul: &runtimecontract.RuntimeSoulContext{ID: "soul-default", AllowedSkillRefs: []string{"*"}},
+		DefaultSoul: &runtimecontract.RuntimeSoulContext{ID: "soul-default", Revision: 1, ContentHash: "soul-default-hash", SourceProvenance: "test", AllowedSkillRefs: []string{"*"}},
 		StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{
-			{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", AllowedSkillRefs: []string{"skill-execution"}}},
-			{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", AllowedSkillRefs: []string{"skill-validation"}}},
+			{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Revision: 1, ContentHash: "soul-execution-hash", SourceProvenance: "test", AllowedSkillRefs: []string{"skill-execution"}}},
+			{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Revision: 1, ContentHash: "soul-validation-hash", SourceProvenance: "test", AllowedSkillRefs: []string{"skill-validation"}}},
 		},
 		Skills: skills, SkillContextBudget: budget,
 	}.Normalized()

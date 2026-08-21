@@ -32,7 +32,9 @@ func TestProductionTransportDoesNotImportRuntimeSessionEventHubOrRootAppservice(
 			importPath := strings.Trim(spec.Path.Value, "\"")
 			if strings.HasSuffix(importPath, "/biz/appservice/runtimecore") ||
 				strings.HasSuffix(importPath, "/magicCommon/event") ||
-				strings.HasSuffix(importPath, "/modules/application/workorchd/biz/appservice") {
+				strings.HasSuffix(importPath, "/modules/application/workorchd/biz/appservice") ||
+				((strings.Contains(importPath, "/internal/modules/blocks/") || strings.Contains(importPath, "/internal/modules/kernel/")) &&
+					(strings.Contains(importPath, "/biz") || strings.Contains(importPath, "/service"))) {
 				t.Errorf("production transport %s imports forbidden runtime boundary %q", filepath.Base(path), importPath)
 			}
 		}

@@ -193,7 +193,11 @@ func registerShellModuleReceiptOwner(t *testing.T, hub magicevent.Hub) {
 	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
 		receipt, found := receipts[command.ExecutionKey]
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
 	})
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)

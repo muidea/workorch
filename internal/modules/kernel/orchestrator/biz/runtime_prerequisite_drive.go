@@ -10,7 +10,6 @@ import (
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
-	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -38,6 +37,9 @@ func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime
 			}
 			result, resolveErr := m.resolveRuntimePrerequisite(ctx, aggregate, workspace.DeliverableDirectory, workspace.InternalDirectory, prerequisite)
 			if resolveErr != nil {
+				if prerequisite.Kind == runtimecontract.PrerequisiteKindProviderCeiling && runtimeRecoverableWaitEligibleError(resolveErr) {
+					return m.openRuntimeProviderCeilingRecoverableWait(ctx, aggregate, prerequisite)
+				}
 				return runtime.RuntimeAggregate{}, resolveErr
 			}
 			committed, commitErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
@@ -173,18 +175,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 		}
 		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, ValidationScratch: facts.Resources.ValidationScratch, Observation: &observation}, nil
 	case runtimecontract.PrerequisiteKindProviderCeiling:
-		facts, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, m.EventHub(), aggregate.Facts, llmevents.AcquireProviderCeilingCommand{
-			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
-			PrerequisiteID: prerequisite.ID, Selection: aggregate.Facts.Activation.ProviderSelection, MinimumBytes: prerequisite.MinimumBytes,
-		})
-		if err != nil {
-			return runtime.PrerequisiteResult{}, err
-		}
-		observation, ok := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, prerequisite.ID)
-		if !ok {
-			return runtime.PrerequisiteResult{}, fmt.Errorf("provider ceiling prerequisite %q did not return an observation", prerequisite.ID)
-		}
-		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, ProviderCeiling: facts.Resources.ProviderCeiling, Observation: &observation}, nil
+		return m.acquireRuntimeProviderCeilingPrerequisite(ctx, aggregate, prerequisite)
 	case runtimecontract.PrerequisiteKindCapability:
 		if prerequisite.OwnerModuleID == "" {
 			return runtime.PrerequisiteResult{}, fmt.Errorf("runtime capability prerequisite %q has no owner module", prerequisite.ID)

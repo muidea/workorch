@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,12 +117,26 @@ func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
 func TestRuntimeAdapterReadRejectsOptionShapedRevisionBeforeGit(t *testing.T) {
 	repo := newTestRepo(t)
 	adapter := NewRuntimeAdapter(false)
-	for _, operation := range []string{gitcommon.OperationDiff, gitcommon.OperationLog, gitcommon.OperationShow} {
-		t.Run(operation, func(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		operation string
+		ref       string
+		baseRef   string
+	}{
+		{name: "diff ref option", operation: gitcommon.OperationDiff, ref: "--output={output}"},
+		{name: "diff base option", operation: gitcommon.OperationDiff, baseRef: "--output={output}"},
+		{name: "log ref option", operation: gitcommon.OperationLog, ref: "--output={output}"},
+		{name: "show ref option", operation: gitcommon.OperationShow, ref: "--output={output}"},
+		{name: "control character", operation: gitcommon.OperationDiff, ref: "HEAD\n--output={output}"},
+		{name: "oversized", operation: gitcommon.OperationShow, ref: strings.Repeat("a", maxGitRevisionBytes+1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			outputPath := filepath.Join(t.TempDir(), "injected-output")
+			ref := strings.ReplaceAll(test.ref, "{output}", outputPath)
+			baseRef := strings.ReplaceAll(test.baseRef, "{output}", outputPath)
 			result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
 				Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo,
-				Operation: operation, Ref: "--output=" + outputPath,
+				Operation: test.operation, Ref: ref, BaseRef: baseRef,
 			})
 			if err == nil || result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorInvalidRequest {
 				t.Fatalf("option-shaped ref result=%+v err=%v, want invalid request", result, err)
@@ -130,6 +145,27 @@ func TestRuntimeAdapterReadRejectsOptionShapedRevisionBeforeGit(t *testing.T) {
 				t.Fatalf("option-shaped read created %q: %v", outputPath, statErr)
 			}
 		})
+	}
+}
+
+func TestRuntimeAdapterRejectsUndeclaredRemoteAndHistoryRewriteOperations(t *testing.T) {
+	repo := newTestRepo(t)
+	adapter := NewRuntimeAdapter(true)
+	head := gitOutputForTest(t, repo, "rev-parse", "HEAD")
+	for _, operation := range []string{"push", "pull", "fetch", "remote", "rebase", "reset", "checkout", "merge", "cherry-pick", "revert", "clean", "rm", "tag"} {
+		for _, kind := range []string{runtimecontract.StepKindGitRead, runtimecontract.StepKindGitWrite} {
+			t.Run(kind+"/"+operation, func(t *testing.T) {
+				result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+					Kind: kind, WorkspaceDeliverableDirectory: repo, Operation: operation,
+				})
+				if err == nil || result.Status != "rejected" || result.ErrorCode != gitcommon.ErrorOperationDenied {
+					t.Fatalf("operation=%q kind=%q result=%+v err=%v", operation, kind, result, err)
+				}
+				if current := gitOutputForTest(t, repo, "rev-parse", "HEAD"); current != head {
+					t.Fatalf("undeclared operation changed HEAD: got=%q want=%q", current, head)
+				}
+			})
+		}
 	}
 }
 
@@ -469,6 +505,77 @@ func TestRuntimeAdapterFailsOutsideGitRepository(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterRejectsParentAndExternalGitControlRepositories(t *testing.T) {
+	adapter := NewRuntimeAdapter(true)
+
+	t.Run("parent repository", func(t *testing.T) {
+		parent := newTestRepo(t)
+		nested := filepath.Join(parent, "nested-workspace")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+			Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: nested, Operation: gitcommon.OperationStatus,
+		})
+		if err == nil || result.ErrorCode != gitcommon.ErrorNotGitRepository {
+			t.Fatalf("parent repository result=%+v err=%v", result, err)
+		}
+	})
+
+	for _, markerKind := range []string{"gitdir-file", "gitdir-symlink"} {
+		t.Run(markerKind, func(t *testing.T) {
+			external := newTestRepo(t)
+			workspace := t.TempDir()
+			if err := exec.Command("git", "-C", external, "config", "core.worktree", workspace).Run(); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(workspace, ".git")
+			if markerKind == "gitdir-file" {
+				if err := os.WriteFile(marker, []byte("gitdir: "+filepath.Join(external, ".git")+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Symlink(filepath.Join(external, ".git"), marker); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(workspace, "outside-control.txt"), "must not stage\n")
+			result, err := adapter.ExecuteOperation(context.Background(), RuntimeOperationRequest{
+				Kind: runtimecontract.StepKindGitWrite, WorkspaceDeliverableDirectory: workspace,
+				Operation: gitcommon.OperationAdd, Pathspecs: []string{"outside-control.txt"},
+			})
+			if err == nil || result.ErrorCode != gitcommon.ErrorNotGitRepository {
+				t.Fatalf("external git control result=%+v err=%v", result, err)
+			}
+			cmd := exec.Command("git", "--git-dir", filepath.Join(external, ".git"), "diff", "--cached", "--name-only")
+			output, commandErr := cmd.Output()
+			if commandErr != nil || strings.TrimSpace(string(output)) != "" {
+				t.Fatalf("external index changed: output=%q err=%v", output, commandErr)
+			}
+		})
+	}
+}
+
+func TestRuntimeAdapterStagesWorkspaceSymlinkIdentityWithoutFollowingTarget(t *testing.T) {
+	repo := newTestRepo(t)
+	external := filepath.Join(t.TempDir(), "external.txt")
+	writeFile(t, external, "outside\n")
+	if err := os.Symlink(external, filepath.Join(repo, "external-link")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewRuntimeAdapter(true).ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindGitWrite, WorkspaceDeliverableDirectory: repo,
+		Operation: gitcommon.OperationAdd, Pathspecs: []string{"external-link"},
+	})
+	if err != nil || result.Status != "completed" {
+		t.Fatalf("stage symlink result=%+v err=%v", result, err)
+	}
+	if content, readErr := os.ReadFile(external); readErr != nil || string(content) != "outside\n" {
+		t.Fatalf("outside target changed: content=%q err=%v", content, readErr)
+	}
+	if staged := gitOutputForTest(t, repo, "ls-files", "-s", "external-link"); !strings.HasPrefix(staged, "120000 ") {
+		t.Fatalf("staged entry=%q, want symlink identity", staged)
+	}
+}
+
 func TestRuntimeAdapterCommitRejectsDetachedHead(t *testing.T) {
 	repo := newTestRepo(t)
 	runGitForTest(t, repo, "checkout", "--detach", "HEAD")
@@ -568,6 +675,32 @@ func TestRuntimeAdapterDiffLargeOutputIsTruncated(t *testing.T) {
 	}
 	if result.Status != "completed" || result.Truncated != true {
 		t.Fatalf("output = %+v, want completed truncated diff", result)
+	}
+	if len(result.Stdout) > maxDiffBytes+len(gitTruncatedOutputMarker) || result.OutputBytes <= maxDiffBytes || len(result.Evidence.EvidenceRefs) > maxGitEvidenceRefs {
+		t.Fatalf("diff output is not bounded: retained=%d total=%d refs=%d", len(result.Stdout), result.OutputBytes, len(result.Evidence.EvidenceRefs))
+	}
+}
+
+func TestRuntimeAdapterLargeDirtyRepositoryObservationAndEvidenceAreBounded(t *testing.T) {
+	repo := newTestRepo(t)
+	for idx := range 900 {
+		name := filepath.Join(repo, "dirty", strings.Repeat("x", 64), fmt.Sprintf("file-%04d.txt", idx))
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, name, "dirty\n")
+	}
+	result, err := NewRuntimeAdapter(false).ExecuteOperation(context.Background(), RuntimeOperationRequest{
+		Kind: runtimecontract.StepKindGitRead, WorkspaceDeliverableDirectory: repo, Operation: gitcommon.OperationStatus,
+	})
+	if err != nil || result.Status != "completed" || !result.Truncated {
+		t.Fatalf("large dirty status result=%+v err=%v", result, err)
+	}
+	if len(result.Stdout) > maxOutputBytes+len(gitTruncatedOutputMarker) || result.OutputBytes <= maxOutputBytes {
+		t.Fatalf("status output is not bounded: retained=%d total=%d", len(result.Stdout), result.OutputBytes)
+	}
+	if len(result.ChangedFiles) > maxChangedFiles || len(result.Evidence.EvidenceRefs) > maxGitEvidenceRefs {
+		t.Fatalf("bounded collections changed=%d refs=%d", len(result.ChangedFiles), len(result.Evidence.EvidenceRefs))
 	}
 }
 

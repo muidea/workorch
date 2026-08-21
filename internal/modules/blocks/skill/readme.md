@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -71,7 +71,10 @@ Application 可以在 activation 选择阶段合并两类候选，但必须保�
 - [x] 静态边界确认 Orchestrator/LLM 不导入 Skill owner、不引用 `SkillRepository` 或 Skill EventHub topic；LLM C3
   只渲染 sealed Skill snapshot/budget。
 
-真正待完善：
+闭合验证：
 
-- [ ] 增加 file backend 的旧版无 provenance 数据升级/拒绝策略端到端验证；当前 owner 对这类记录明确 fail-closed。
-- [ ] 增加真实 Run restart 回归，确认 Registry/SkillHub 后续变更不改变已持久化的 activation snapshot。
+- [x] file backend 的旧版无 provenance 数据通过真实 owner get/list command 一致返回冲突，且不会隐式升级或改写原文件。
+- [x] 真实 file-backed Run restart 同时封存 Registry 与 SkillHub snapshot；修改两类 catalog DTO、caller bootstrap 并重启
+  Run owner 后，exact replay 命中同一 Run，instruction、trigger 与 provenance 均保持原值。
+
+当前没有与本合同对应的已知可执行缺口。

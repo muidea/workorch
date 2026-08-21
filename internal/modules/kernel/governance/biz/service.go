@@ -170,6 +170,9 @@ func (s *Service) Start() error {
 		const observerID = "/decision/consumers/kernel/governance"
 		s.SubscribeMatchedFunc(observerID, observerID, decisionevents.TopicTicketCreated, func(event magicevent.Event, _ magicevent.Result) {
 			if data, ok := event.Data().(decisionevents.TicketChangedData); ok {
+				if data.DecisionKind == "workspace_definition_clarification" || data.DecisionKind == "runtime_definition_clarification" {
+					return
+				}
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processTicketCreated(workCtx, data)
 				})

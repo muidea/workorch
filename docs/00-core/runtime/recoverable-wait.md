@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## Purpose And Ownership
 
@@ -134,6 +134,8 @@ fresh-process reload 必须：
 
 crash 位于 owner command 发送后、result commit 前时，re-drive 必须复用 sealed probe identity。owner 不能证明该 probe/effect
 未发生时，状态保持 unknown 并受 deadline/budget约束，禁止盲目再次产生 physical call/effect。
+matching reconciliation 仍不能确定消费时必须持久化 `still_unknown` owner result；deadline/guard 终态失败时原子封存
+`exhausted` allocation 与 `failed` reconciliation，并继续在 budget projection 中保守计入 unknown amount。
 
 ## Projection
 

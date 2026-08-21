@@ -209,6 +209,17 @@ func (c *authorityComponent) commitGovernanceResolution(ctx context.Context, res
 		if resumeErr != nil {
 			return EvidenceCommitResult{}, resumeErr
 		}
+		resumeExecution, found := operationExecutionRecord(resume.OperationExecutions, binding.OperationID)
+		if !found || resumeExecution.State != runtimecontract.OperationExecutionClaimed || resumeExecution.Fence != binding.Grant.ResumeFence {
+			return EvidenceCommitResult{}, fmt.Errorf("governance resume operation has no exact claimed execution")
+		}
+		// Governance continuation authorizes a new physical owner effect. Reserve
+		// its exact ExecutionKey/Fence budget in the same SM-3 CAS that publishes
+		// the resume dispatch; the prior governance-required receipt has already
+		// consumed the allocation for the earlier fence.
+		if err := reserveRuntimeOperationExecutionBudget(&aggregate, resumeExecution, resumeExecution.Fence); err != nil {
+			return EvidenceCommitResult{}, err
+		}
 		aggregate.ActiveDispatch = &resume
 	}
 	aggregate.StateRevision++

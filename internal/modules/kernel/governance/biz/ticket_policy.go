@@ -44,6 +44,11 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		ret.policyBlocked = "invalid_ticket"
 		return ret
 	}
+	if ticket.DefinitionClarification != nil || ticket.DecisionKind == "workspace_definition_clarification" || ticket.DecisionKind == "runtime_definition_clarification" {
+		ret.policyBlocked = "definition_clarification_requires_owner_contract"
+		ret.reason = "Definition clarification can only be resolved by corrected admission or a Run-owned replacement intent"
+		return ret
+	}
 	decisionKind := strings.TrimSpace(ticket.DecisionKind)
 	if !decisioncommon.IsSupportedResolutionType(decisionKind) {
 		ret.policyBlocked = "unsupported_decision_kind"

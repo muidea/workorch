@@ -6,6 +6,7 @@ import (
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -93,16 +94,31 @@ func (m *Biz) runtimeEnsureCandidateRequestWithExpected(ctx context.Context, agg
 	return terminal.Aggregate, runtimecontract.RuntimeCandidateRequestSession{}, terminalErr
 }
 
-func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, outcome *runtimecontract.RuntimeCandidateRequestOutcome, stale *runtimecontract.RuntimePrerequisiteStale) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, RequestOutcome: outcome, Stale: stale}})
+func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, outcome *runtimecontract.RuntimeCandidateRequestOutcome, stale *runtimecontract.RuntimePrerequisiteStale, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, RequestOutcome: outcome, Stale: stale, ProviderBudgetObservation: firstRuntimeProviderBudgetObservation(budgetObservation)}})
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeCandidateRequestRecoveryRequired(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (runtime.RuntimeAggregate, error) {
+func (m *Biz) runtimeCandidateRequestRecoveryRequired(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidateRequestRecoveryRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderDocumentOutcome: &outcome},
+		Kind: runtime.RuntimeInternalEventCandidateRequestRecoveryRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderDocumentOutcome: &outcome, ProviderBudgetObservation: firstRuntimeProviderBudgetObservation(budgetObservation)},
 	})
 	return result.Aggregate, err
+}
+
+func firstRuntimeProviderBudgetObservation(values []*runtimecontract.RuntimeProviderBudgetObservation) *runtimecontract.RuntimeProviderBudgetObservation {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[0]
+}
+
+func runtimeProviderBudgetObservation(logicalRequestID, physicalCallID string, status runtimecontract.RuntimeProviderConsumptionStatus, usage *llmaudit.ProviderUsage) (*runtimecontract.RuntimeProviderBudgetObservation, error) {
+	value, err := runtimecontract.NewRuntimeProviderBudgetObservation(logicalRequestID, physicalCallID, status, usage)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 func (m *Biz) runtimeCandidateDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate *runtimecontract.RuntimeCandidate, failure *runtimecontract.RuntimeCandidateFailure) (runtime.RuntimeInternalEventResult, error) {
@@ -157,4 +173,50 @@ func (m *Biz) runtimeRecoverDriveLease(ctx context.Context, workspaceID common.W
 		return runtimecontract.RuntimeDriveLease{}, result.LeaseChanged, err
 	}
 	return result.DriveLease.Clone(), result.LeaseChanged, err
+}
+
+func (m *Biz) runtimeOpenRecoverableWait(ctx context.Context, wait runtimecontract.RuntimeRecoverableWaitRecord) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventRecoverableWaitOpened, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: wait.WorkspaceID, RunID: wait.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoverableWait: &wait},
+	})
+	return result.Aggregate, err
+}
+
+func (m *Biz) runtimeClaimRecoverableWaitProbe(ctx context.Context, aggregate runtime.RuntimeAggregate, waitID string, leaseGeneration uint64, now string) (runtime.RuntimeAggregate, bool, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventRecoverableWaitProbeDue, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoverableWaitID: waitID, LeaseGeneration: leaseGeneration, LeaseNow: now},
+	})
+	return result.Aggregate, result.LeaseClaimed, err
+}
+
+func (m *Biz) runtimeDeferRecoverableWaitProbe(ctx context.Context, aggregate runtime.RuntimeAggregate, waitID, now string) (runtime.RuntimeAggregate, error) {
+	probeResultHash := runtimecontract.StableRuntimeRecoverableWaitProbeUnknownHash(waitID, runtimeRecoverableWaitProbeRequestHash(aggregate, waitID))
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventRecoverableWaitProbeDeferred, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoverableWaitID: waitID, RecoverableWaitProbeResultHash: probeResultHash, LeaseNow: now},
+	})
+	return result.Aggregate, err
+}
+
+func (m *Biz) runtimeExhaustRecoverableWait(ctx context.Context, aggregate runtime.RuntimeAggregate, waitID, code string) (runtime.RuntimeAggregate, error) {
+	probeResultHash := runtimecontract.StableRuntimeRecoverableWaitProbeUnknownHash(waitID, runtimeRecoverableWaitProbeRequestHash(aggregate, waitID))
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventRecoverableWaitExhausted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoverableWaitID: waitID, RecoverableWaitProbeResultHash: probeResultHash, Reason: code},
+	})
+	return result.Aggregate, err
+}
+
+func runtimeRecoverableWaitProbeRequestHash(aggregate runtime.RuntimeAggregate, waitID string) string {
+	for _, wait := range aggregate.RecoverableWaits {
+		if wait.WaitID == waitID {
+			return wait.ProbeRequestHash
+		}
+	}
+	return ""
+}
+
+func (m *Biz) runtimeRetireRecoverableWait(ctx context.Context, aggregate runtime.RuntimeAggregate, waitID string) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventRecoverableWaitRetired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoverableWaitID: waitID},
+	})
+	return result.Aggregate, err
 }

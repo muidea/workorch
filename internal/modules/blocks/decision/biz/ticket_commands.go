@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"sort"
+	"strings"
 
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -77,10 +78,10 @@ func paginateDecisionTickets(items []*decisionmodel.Ticket, cursor string, limit
 		visible = append(visible, item)
 	}
 	sort.Slice(visible, func(i, j int) bool {
-		return decisionevents.TicketCursor(visible[i]) < decisionevents.TicketCursor(visible[j])
+		return compareDecisionTicketOrder(visible[i], visible[j]) < 0
 	})
 	start := 0
-	for start < len(visible) && decisionevents.TicketCursor(visible[start]) <= cursor {
+	for start < len(visible) && compareDecisionTicketToCursor(visible[start], cursor) <= 0 {
 		start++
 	}
 	end := start + limit
@@ -93,6 +94,50 @@ func paginateDecisionTickets(items []*decisionmodel.Ticket, cursor string, limit
 		next = decisionevents.TicketCursor(page[len(page)-1])
 	}
 	return page, next, nil
+}
+
+func compareDecisionTicketOrder(left *decisionmodel.Ticket, right *decisionmodel.Ticket) int {
+	if left == nil || right == nil {
+		switch {
+		case left == nil && right == nil:
+			return 0
+		case left == nil:
+			return -1
+		default:
+			return 1
+		}
+	}
+	if value := strings.Compare(string(left.WorkspaceID), string(right.WorkspaceID)); value != 0 {
+		return value
+	}
+	if value := strings.Compare(string(left.RunID), string(right.RunID)); value != 0 {
+		return value
+	}
+	return strings.Compare(string(left.ID), string(right.ID))
+}
+
+func compareDecisionTicketToCursor(item *decisionmodel.Ticket, cursor string) int {
+	if cursor == "" {
+		return 1
+	}
+	workspaceID, remainder, ok := strings.Cut(cursor, "\x00")
+	if !ok {
+		return strings.Compare(decisionevents.TicketCursor(item), cursor)
+	}
+	runID, ticketID, ok := strings.Cut(remainder, "\x00")
+	if !ok || strings.Contains(ticketID, "\x00") {
+		return strings.Compare(decisionevents.TicketCursor(item), cursor)
+	}
+	if item == nil {
+		return strings.Compare("", cursor)
+	}
+	if value := strings.Compare(string(item.WorkspaceID), workspaceID); value != 0 {
+		return value
+	}
+	if value := strings.Compare(string(item.RunID), runID); value != 0 {
+		return value
+	}
+	return strings.Compare(string(item.ID), ticketID)
 }
 
 func (m *Biz) executePurgeWorkspaceCommand(ctx context.Context, data any) (decisionevents.PurgeWorkspaceDecisionsResult, error) {

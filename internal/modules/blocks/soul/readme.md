@@ -4,19 +4,19 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
-`blocks/soul` 是 Soul catalog 的唯一 owner。正式状态仅包括 Soul identity、名称/描述、business domains、`SoulMD`
-guidance，以及 Skill、MCP server、MCP capability、capability category、tool kind 五组 context-selection allowlist。
+`blocks/soul` 是 Soul catalog 的唯一 owner。正式状态包括 Soul identity、monotonic revision、content hash、source
+provenance、名称/描述、business domains、`SoulMD` guidance，以及 Skill、MCP server、MCP capability、capability
+category、tool kind 五组 context-selection allowlist。
 
 下列内容不属于 Soul owner 状态：
 
 - stage binding 与 template stage-policy refs 由 Workspace/template/Application activation 组合；
 - capability 是否存在、server/capability 归属、stage readiness 由 MCP Registry 或相应 capability owner 提供 typed fact；
 - effect、replay、risk 与 approval authority 由 capability/governance 合同提供；
-- Soul 当前没有 revision、content hash 或 source provenance 字段，因此不得把这些能力写成已实现合同。
 
 Soul allowlist 只约束 activation 选择和 provider-visible stage context，不产生 Runtime operation authority。SM-2/SM-3
 仍只能从 template/profile 声明、capability owner fact 与 sealed manifest 获得授权。
@@ -59,6 +59,9 @@ Soul allowlist 只约束 activation 选择和 provider-visible stage context，�
   表示该类别不允许进入当前 stage context。
 - create/update/default seed 写入规范化对象；get/list 对 repository 数据重新校验并 detached clone，非法存量数据
   fail-closed 为 conflict。
+- create 从 revision 1 开始并签发稳定 content hash；相同内容 update 零写/零 revision，内容变化单调递增且保留 source
+  provenance。builtin seed 标记 `builtin_seed`，用户创建标记 `user_managed`；完整 legacy record 读取时投影为
+  revision 1/`legacy_owner_upgrade`，部分缺失的 revision metadata fail-closed。
 - 本 block 只访问 Soul repository，不调度 Runtime block、不修改 Run 或 Result 状态。
 - core Runtime 不得按 Soul ID、名称或显示文本写死业务分支；Soul guidance 不得覆盖 Goal、DoD、sealed manifest、
   stage contract、Runtime policy 或 requiredOutput。
@@ -76,9 +79,13 @@ Soul allowlist 只约束 activation 选择和 provider-visible stage context，�
 - [x] execution Soul 优先于 default Soul；MCP capability/server/category 绑定校验；planning 与
   execution/validation/decision provider C3 使用对应 stage Soul，Skill/MCP context 不跨 stage 泄漏。
 - [x] Orchestrator 不直接查询 Soul；既有 Run 只消费持久化 activation snapshot，Registry 后续变化不改写当前 Run。
+- [x] Soul revision/content hash/source provenance 的 create、same-content noop、changed-content increment、builtin seed 与 legacy projection。
+- [x] 接近 96 KiB aggregate 上限的 Soul normalization/get、总量越界拒绝，以及 250/450 条多页 Application 管理读取的
+  顺序/cursor 正确性与 allocation/CPU benchmark。
 
-## 待完善测试点
+## 扩展准入条件
 
-- [ ] 若未来为 approval/artifact 新增 provider 或 capability 执行入口，必须先定义对应 stage 的 typed 输入与
-  allowlist projection，再将其从“仅封存 binding”提升为完整消费合同。
-- [ ] 增加接近 96 KiB Soul catalog 和多页 Application 管理读取的 allocation/CPU benchmark。
+- 当前没有已知的本地可执行合同或测试缺口。
+- approval/artifact 当前没有 provider 或 capability 执行入口，因此不存在待补实现。未来若新增此类入口，必须先定义对应
+  stage 的 typed 输入、allowlist projection 与消费回归，再将其从“仅封存 binding”提升为完整合同；该条件不能反向宣称
+  当前已支持相应执行语义。

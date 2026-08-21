@@ -23,6 +23,7 @@ type RuntimeBootstrap struct {
 	StateChangeRequirement RuntimeRunStateChangeRequirement
 	ConvergencePolicy      RuntimeConvergencePolicy
 	RecoveryPolicy         RuntimeRecoveryPolicy
+	ExecutionBudgetPolicy  RuntimeExecutionBudgetPolicy
 }
 
 func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
@@ -36,6 +37,11 @@ func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 	b.StateChangeRequirement = b.StateChangeRequirement.Normalized()
 	b.ConvergencePolicy = b.ConvergencePolicy.Normalized()
 	b.RecoveryPolicy = b.RecoveryPolicy.Normalized()
+	if strings.TrimSpace(b.ExecutionBudgetPolicy.PolicyRevision) == "" {
+		b.ExecutionBudgetPolicy = RuntimeExecutionBudgetPolicyForRuntimePolicies(b.ConvergencePolicy, b.RecoveryPolicy)
+	} else {
+		b.ExecutionBudgetPolicy = b.ExecutionBudgetPolicy.Normalized()
+	}
 	return b
 }
 
@@ -60,6 +66,12 @@ func (b RuntimeBootstrap) Validate() error {
 		return err
 	}
 	if err := b.RecoveryPolicy.Validate(); err != nil {
+		return err
+	}
+	if err := b.ExecutionBudgetPolicy.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeExecutionBudgetPolicySources(b.ExecutionBudgetPolicy, b.ConvergencePolicy, b.RecoveryPolicy); err != nil {
 		return err
 	}
 	if len(b.Focuses) == 0 {
@@ -205,15 +217,16 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 		WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: b.Definition.Revision,
 		DefinitionSeed: b.DefinitionSeed.Clone(), DefinitionFocuses: CompileRuntimeDefinitionFocuses(b.Focuses),
 		EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
-		RemainingFocuses:  append([]CoverageFocus(nil), b.Focuses[1:]...),
-		Activation:        b.Activation.Clone(),
-		StateChange:       NewRuntimeStateChangeLedger(b.StateChangeRequirement),
-		ConvergencePolicy: b.ConvergencePolicy.Normalized(),
-		RecoveryPolicy:    b.RecoveryPolicy.Normalized(),
-		Recovery:          RuntimeRecoveryLedger{},
-		Repair:            RuntimeRepairLedger{},
-		Coverage:          InitialRuntimeCoverageFacts(b.CoverageItems),
-		Slices:            append([]RuntimeAcceptanceSlice(nil), b.Slices...),
+		RemainingFocuses:      append([]CoverageFocus(nil), b.Focuses[1:]...),
+		Activation:            b.Activation.Clone(),
+		StateChange:           NewRuntimeStateChangeLedger(b.StateChangeRequirement),
+		ConvergencePolicy:     b.ConvergencePolicy.Normalized(),
+		RecoveryPolicy:        b.RecoveryPolicy.Normalized(),
+		ExecutionBudgetPolicy: b.ExecutionBudgetPolicy.Clone(),
+		Recovery:              RuntimeRecoveryLedger{},
+		Repair:                RuntimeRepairLedger{},
+		Coverage:              InitialRuntimeCoverageFacts(b.CoverageItems),
+		Slices:                append([]RuntimeAcceptanceSlice(nil), b.Slices...),
 	}
 	return InitializeRuntimeCWILedgerForActivation(facts)
 }
@@ -227,7 +240,8 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 		len(left.Requirements) != len(right.Requirements) ||
 		left.StateChangeRequirement.Required != right.StateChangeRequirement.Required ||
 		!sameCoverageWorkItemIDs(left.StateChangeRequirement.CoverageWorkItemIDs, right.StateChangeRequirement.CoverageWorkItemIDs) ||
-		left.ConvergencePolicy != right.ConvergencePolicy || left.RecoveryPolicy != right.RecoveryPolicy {
+		left.ConvergencePolicy != right.ConvergencePolicy || left.RecoveryPolicy != right.RecoveryPolicy ||
+		!SameRuntimeExecutionBudgetPolicy(left.ExecutionBudgetPolicy, right.ExecutionBudgetPolicy) {
 		return false
 	}
 	for idx := range left.Focuses {

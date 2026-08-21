@@ -28,6 +28,17 @@ func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request RuntimeOperati
 	if !samePath(deliverable, rootAbs) {
 		return repoContext{}, fmt.Errorf("%w: git repository root must match workspace deliverable directory", common.ErrInvalidArgument)
 	}
+	if marker, markerErr := os.Lstat(filepath.Join(deliverable, ".git")); markerErr == nil && marker.Mode()&os.ModeSymlink != 0 {
+		return repoContext{}, fmt.Errorf("%w: workspace git control directory must not be a symlink", common.ErrInvalidArgument)
+	}
+	gitDir, err := a.gitOutput(ctx, rootAbs, timeout, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return repoContext{}, err
+	}
+	gitDir = strings.TrimSpace(gitDir)
+	if gitDir == "" || !pathInsideRoot(rootAbs, gitDir) {
+		return repoContext{}, fmt.Errorf("%w: git control directory must remain inside workspace deliverable directory", common.ErrInvalidArgument)
+	}
 	bare, err := a.gitOutput(ctx, rootAbs, timeout, "rev-parse", "--is-bare-repository")
 	if err != nil {
 		return repoContext{}, err
@@ -58,6 +69,25 @@ func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request RuntimeOperati
 		DetachedHead:         detachedHead,
 		UnbornHead:           head == "",
 	}, nil
+}
+
+func pathInsideRoot(root, target string) bool {
+	rootAbs, rootErr := filepath.Abs(root)
+	targetAbs, targetErr := filepath.Abs(target)
+	if rootErr != nil || targetErr != nil {
+		return false
+	}
+	if value, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootAbs = value
+	}
+	if value, err := filepath.EvalSymlinks(targetAbs); err == nil {
+		targetAbs = value
+	}
+	relative, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
 }
 
 func (a *RuntimeAdapter) existingRepoContext(ctx context.Context, request RuntimeOperationRequest, deliverable string, timeout time.Duration) (repoContext, bool, error) {

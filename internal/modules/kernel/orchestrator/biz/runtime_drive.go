@@ -210,6 +210,36 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	if runtimeConvergenceTerminal(aggregate.Decision.State) {
 		return terminalRuntimeDriveTransition(aggregate), nil
 	}
+	if wait, pendingRetirement := runtimeRecoverableWaitPendingRetirement(aggregate); pendingRetirement {
+		updated, retireErr := m.runtimeRetireRecoverableWait(ctx, aggregate, wait.WaitID)
+		if retireErr != nil {
+			return runtimeDriveTransitionOutcome{}, retireErr
+		}
+		if updated.StateRevision <= previousRevision {
+			return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime recoverable wait retirement made no persisted progress at revision %d", previousRevision)}
+		}
+		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
+	}
+	if _, waiting := runtimeCurrentRecoverableWait(aggregate); waiting {
+		return m.driveRuntimeRecoverableWait(ctx, aggregate, command.RecoveryLeaseGeneration)
+	}
+	if aggregate.DefinitionClarification != nil {
+		if aggregate.DefinitionClarification.Request != nil {
+			result, resultErr := runtimeDefinitionClarificationWaitDriveResult(aggregate)
+			if resultErr != nil {
+				return runtimeDriveTransitionOutcome{}, resultErr
+			}
+			return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}, nil
+		}
+		updated, driveErr := m.driveRuntimeDefinitionClarification(ctx, aggregate)
+		if driveErr != nil {
+			return runtimeDriveTransitionOutcome{}, driveErr
+		}
+		if updated.StateRevision <= previousRevision {
+			return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime Definition clarification made no persisted progress at revision %d", previousRevision)}
+		}
+		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
+	}
 	if !runtime.SemanticOperationAuthorityReady(aggregate) && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
 		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousConvergence)
 	}
@@ -231,6 +261,22 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 		return runtimeDriveTransitionOutcome{}, err
 	}
 	return finishRuntimeConvergenceTransition(updated, previousRevision, previousConvergence)
+}
+
+func (m *Biz) driveRuntimeDefinitionClarification(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
+	if aggregate.DefinitionClarification == nil {
+		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	state := aggregate.DefinitionClarification.Clone()
+	if state.Dispatch == nil {
+		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:        runtime.RuntimeInternalEventDefinitionClarificationDispatchSealed,
+			Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{},
+		})
+		return updated.Aggregate, err
+	}
+	return m.prepareRuntimeDefinitionClarificationRequest(ctx, aggregate)
 }
 
 func runtimeConvergenceTerminal(state runtimecontract.ConvergenceState) bool {
@@ -283,6 +329,10 @@ func (m *Biz) advanceRuntimeConvergence(ctx context.Context, aggregate runtime.R
 }
 
 func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, previousRevision uint64, previousConvergence string) (runtimeDriveTransitionOutcome, error) {
+	if _, waiting := runtimeCurrentRecoverableWait(aggregate); waiting {
+		result, err := runtimeRecoverableWaitDriveResult(aggregate)
+		return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}, err
+	}
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance && aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Governance != nil {
 		result, err := runtimeGovernedWaitDriveResult(aggregate)
 		if err != nil {
@@ -378,6 +428,8 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 		return err
 	}
 	switch {
+	case result.RecoverableWait != nil:
+		return &runtimeRecoverableWaitPendingError{Wait: result.RecoverableWait.Clone()}
 	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
 		run, loadErr := (runSnapshotReader{hub: m.EventHub()}).Read(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
@@ -412,6 +464,9 @@ func runtimeTerminalDriveResult(aggregate runtime.RuntimeAggregate) orchestrator
 }
 
 func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchestratorevents.DriveRuntimeResult, error) {
+	if aggregate.DefinitionClarification != nil {
+		return runtimeDefinitionClarificationWaitDriveResult(aggregate)
+	}
 	if aggregate.ActiveDispatch == nil {
 		return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("governed Runtime wait has no active dispatch")
 	}
@@ -431,11 +486,33 @@ func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchest
 	return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("governed Runtime wait has no bound owner request")
 }
 
+func runtimeDefinitionClarificationWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchestratorevents.DriveRuntimeResult, error) {
+	if aggregate.DefinitionClarification == nil || aggregate.DefinitionClarification.Dispatch == nil || aggregate.DefinitionClarification.Request == nil ||
+		aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {
+		return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("runtime Definition clarification wait is not fully bound")
+	}
+	state := aggregate.DefinitionClarification.Clone()
+	return orchestratorevents.DriveRuntimeResult{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
+		DefinitionRevision:  aggregate.Facts.DefinitionRevision,
+		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+		DispatchID:          state.Dispatch.DispatchID, State: aggregate.Decision.State,
+		BlockingTicketID: state.Request.TicketID,
+	}, nil
+}
+
 func validateRuntimeDriveResult(result orchestratorevents.DriveRuntimeResult) error {
 	if result.WorkspaceID == "" || result.RunID == "" || result.StateRevision == 0 || result.AuthoritySnapshotID == "" || result.State == "" {
 		return fmt.Errorf("invalid Runtime drive result")
 	}
 	switch {
+	case result.RecoverableWait != nil:
+		wait := result.RecoverableWait
+		if result.Terminal != nil || result.BlockingTicketID != "" || result.BlockingApprovalID != "" ||
+			result.State != runtimecontract.ConvergenceStateNeedPrerequisite || wait.WaitID == "" || !waitStatusActive(wait.Status) || wait.StateRevision != result.StateRevision {
+			return fmt.Errorf("invalid recoverable-wait Runtime drive result")
+		}
 	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
 		hasTicket := result.BlockingTicketID != ""
 		hasApproval := result.BlockingApprovalID != ""
@@ -450,6 +527,10 @@ func validateRuntimeDriveResult(result orchestratorevents.DriveRuntimeResult) er
 		return fmt.Errorf("invalid Runtime drive result state %q", result.State)
 	}
 	return nil
+}
+
+func waitStatusActive(status runtimecontract.RuntimeRecoverableWaitStatus) bool {
+	return status == runtimecontract.RuntimeRecoverableWaitWaiting || status == runtimecontract.RuntimeRecoverableWaitProbeClaimed
 }
 
 func setRuntimeDriveResult(result magicevent.Result, response orchestratorevents.DriveRuntimeResult, err error) {

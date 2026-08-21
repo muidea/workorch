@@ -726,6 +726,12 @@ func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
 func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	aggregate.Facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 3}
+	aggregate.Facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(aggregate.Facts.ConvergencePolicy, aggregate.Facts.RecoveryPolicy)
+	ledger, err := runtimecontract.NewRuntimeExecutionBudgetLedger(aggregate.Facts.ExecutionBudgetPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.ExecutionBudget = ledger
 	aggregate.Facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
 		TargetRef: "main.go", Content: "package main\n", ContentHash: "old-hash", ContentState: runtimecontract.SnapshotContentStateComplete,
 	}}
@@ -1060,7 +1066,7 @@ func validationAggregate(t *testing.T) RuntimeAggregate {
 }
 
 func dispatchDefinition() runtimecontract.RuntimeDefinitionContext {
-	return runtimecontract.RuntimeDefinitionContext{
+	return runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal",
 		DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"},
 	}

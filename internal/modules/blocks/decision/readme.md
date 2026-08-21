@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-21
 
 ## 组件类型与职责
 
@@ -16,6 +16,16 @@ Last Verified: 2026-08-19
 Orchestrator 与各资源 owner。
 
 ## 写入与恢复合同
+
+- Definition clarification 不复用普通 `EnsureResolvedCommand` 或 Runtime governance envelope。pre-seal Workspace 路径使用
+  dedicated open/reconcile-candidate/resolve-by-admission command/result；execution-time 路径使用 dedicated runtime open 与
+  Run-owner resolve-by-replacement command/result。generic resolver、auto-governance policy 和 continuation action 均拒绝这两类 ticket。
+- 静态 invalid candidate ticket 绑定完整 candidate revision/hash、typed violation、canonical signature bytes/hash 与修改动作；
+  新 invalid revision 先建立确定性新 ticket，再以 `definition_candidate_revision_superseded` 幂等退休旧 ticket。新 candidate
+  admitted 后只记录 `definition_candidate_adjusted` resolution，Workspace owner acknowledgement 才决定 activation eligibility。
+- Runtime clarification ticket 绑定 Run、Definition/StartupInput、authority、focus、semantic request/document 与 clarification
+  dispatch。只有 `blocks/run` 已持久化的 replacement intent 可以绑定 resolution；重复 command 返回相同 resolution/binding
+  hash，scope mismatch 或另一 intent 返回 typed stale/conflict，不生成 Runtime continuation。
 
 - Runtime governance ticket 的唯一创建入口是 `OpenRuntimeGovernanceRequestCommand/Result`。Decision 在任何
   repository 访问前同时校验 EventHub source 必须为 `kernel/orchestrator`，并用 command `WorkspaceID` 绑定已有
@@ -72,7 +82,7 @@ Orchestrator 与各资源 owner。
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | 双向 | sealed Runtime governance open、typed resolution commit、Decision evidence record | 充分且必要；source/scope fail-closed，Decision 不代写 Runtime |
 | `application/workorchd` / `kernel/governance` | consumer → Decision | concrete scoped query/page、普通/Runtime ticket resolution | 充分且必要；无全量后分页、无 repository/service 注入 |
-| `blocks/run` | 间接消费 | Orchestrator 持久化的 immutable governance wait/continuation fact | 充分；Decision 不直接迁移 SM-1 或 Resume Run |
+| `blocks/run` | 双向受限 | dedicated runtime-definition replacement resolution；普通 governance 仍经 Orchestrator fact | 充分；clarification ack 不迁移 SM-1、不生成 continuation |
 | `blocks/eventstream` | Decision → Eventstream | created/resolved typed notification + stable NotificationID | 充分；Eventstream 幂等记录，projection 不参与 authority |
 | workspace cleanup | Application → Decision | workspace-scoped aggregate purge | 充分；不暴露 Ticket/Resolution 独立删除 |
 
@@ -96,9 +106,14 @@ Orchestrator 与各资源 owner。
 - workspace aggregate purge 的部分失败 tombstone、public read 隔离和 reconciliation 完成。
 - concrete result type、显式全局 scope、默认/最大 limit、composite cursor continuation、跨 workspace 重复 ID 和深拷贝。
 - stable Decision notification identity 与 Eventstream duplicate append 去重。
+- Workspace invalid-candidate replacement、admission resolution，以及 Runtime replacement resolution 的 exact duplicate、scope mismatch、orphan-resolution recovery。
 
-## 待完善测试点
+## 闭合验证
 
-- [ ] 在 file backend 上加入真实进程 kill/fault injection，覆盖 proposal、delivery marker 和 aggregate purge 的每个 fsync
-  切点；当前内存故障注入与 file repository 回归已分别覆盖语义和持久化格式。
-- [ ] 增加 100k Ticket inventory/page 的 benchmark；单页上限、consumer page/cursor cycle guard 已有功能回归。
+- [x] file backend 使用独立 helper process 在原子 owner 写入完成后执行真实 SIGKILL，覆盖 pending proposal、formal
+  Resolution 已写、finalize 后双 delivery marker、purge tombstone 与 Resolution 已删六个切点；每个切点都由新 owner
+  实例从持久化状态幂等收敛。
+- [x] `BenchmarkDecisionTicketInventoryPage100K` 固定 100k Ticket inventory/page 基准；分页排序改为 typed composite-field
+  比较，避免在 sort comparison 中反复拼接 cursor。单次基准分配由百万级降到仅 page clone/visible index 所需的有界分配。
+
+当前没有与本合同对应的已知可执行缺口。

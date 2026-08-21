@@ -24,6 +24,9 @@ const (
 	FailureClassRuntimeInvariantDefect    FailureClass = "runtime_invariant_defect"
 	FailureClassProjectionDeliveryFailure FailureClass = "projection_delivery_failure"
 	FailureClassEffectMismatch            FailureClass = "effect_mismatch"
+	FailureClassExecutionBudgetExhausted  FailureClass = "execution_budget_exhausted"
+	FailureClassRecoverableWaitExpired    FailureClass = "recoverable_wait_expired"
+	FailureClassRecoverableWaitExhausted  FailureClass = "recoverable_wait_exhausted"
 )
 
 // NormalizeFailureClass trims the class string.

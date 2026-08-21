@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,6 +40,29 @@ type ProviderHTTPStatusError struct {
 type ProviderProtocolError struct {
 	Code          string
 	ResponseBytes int
+}
+
+// ProviderTransportError is the audit-safe boundary for errors returned by
+// http.Client.Do. Standard url.Error values include the requested endpoint,
+// while custom transports may include credentials or request fragments. Only
+// a stable category crosses the provider adapter boundary.
+type ProviderTransportError struct {
+	Code  string
+	cause error
+}
+
+func (e *ProviderTransportError) Error() string {
+	if e == nil || strings.TrimSpace(e.Code) == "" {
+		return "llm provider transport error"
+	}
+	return "llm provider transport error: " + strings.TrimSpace(e.Code)
+}
+
+func (e *ProviderTransportError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
 }
 
 func (e *ProviderProtocolError) Error() string {
@@ -250,10 +276,35 @@ func (p *HTTPProvider) requestContext(ctx context.Context) (context.Context, con
 }
 
 func providerRequestError(err error) error {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("llm provider request timeout: %w", err)
+	if err == nil {
+		return nil
 	}
-	return err
+	var protocolErr *ProviderProtocolError
+	if errors.As(err, &protocolErr) && protocolErr != nil {
+		return &ProviderProtocolError{Code: protocolErr.Code, ResponseBytes: protocolErr.ResponseBytes}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("llm provider request timeout: %w", context.DeadlineExceeded)
+	}
+	if errors.Is(err, context.Canceled) {
+		return &ProviderTransportError{Code: "request_canceled", cause: context.Canceled}
+	}
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostnameError x509.HostnameError
+	var certificateError x509.CertificateInvalidError
+	var recordHeaderError tls.RecordHeaderError
+	if errors.As(err, &unknownAuthority) || errors.As(err, &hostnameError) || errors.As(err, &certificateError) || errors.As(err, &recordHeaderError) {
+		return &ProviderTransportError{Code: "tls_verification_failed"}
+	}
+	var dnsError *net.DNSError
+	if errors.As(err, &dnsError) {
+		return &ProviderTransportError{Code: "dns_resolution_failed"}
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return &ProviderTransportError{Code: "network_timeout"}
+	}
+	return &ProviderTransportError{Code: "request_failed"}
 }
 
 func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {

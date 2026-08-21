@@ -25,22 +25,25 @@ type CreateWorkspaceCommand struct {
 // They preserve the owner result information without exposing repository
 // models or map-backed mutable state across the component boundary.
 type Workspace struct {
-	Revision             uint64
-	ID                   common.WorkspaceID
-	Title                string
-	Description          string
-	DeliverableDirectory string
-	InternalDirectory    string
-	State                common.WorkspaceState
-	ActiveRunID          common.RunID
-	TemplateID           string
-	ProfileID            string
-	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
-	DefaultSoulID        common.SoulID
-	SoulBindings         []soulbinding.Binding
-	ContextHints         workorcheventpayload.Payload
-	EvidencePolicies     []workorcheventpayload.Payload
-	TerminalDelivery     *runtimecontract.RuntimeTerminalDeliveryIdentity
+	Revision                      uint64
+	ID                            common.WorkspaceID
+	Title                         string
+	Description                   string
+	DeliverableDirectory          string
+	InternalDirectory             string
+	State                         common.WorkspaceState
+	ActiveRunID                   common.RunID
+	TemplateID                    string
+	ProfileID                     string
+	DefaultLLMSelection           *runtimecontract.ProviderInferenceSelection
+	DefaultSoulID                 common.SoulID
+	SoulBindings                  []soulbinding.Binding
+	ContextHints                  workorcheventpayload.Payload
+	EvidencePolicies              []workorcheventpayload.Payload
+	DefinitionAdmissionCandidates []workspacemodel.DefinitionAdmissionCandidate
+	StartupInput                  *workspacemodel.WorkspaceStartupInputContract
+	ActivationAdmission           *workspacemodel.WorkspaceActivationAdmission
+	TerminalDelivery              *runtimecontract.RuntimeTerminalDeliveryIdentity
 }
 
 type WorkspaceTemplate struct {
@@ -153,6 +156,58 @@ type EnsureWorkspaceTemplateDefaultsResult struct {
 	Ensured bool
 }
 
+type SubmitDefinitionAdmissionCandidateCommand struct {
+	Candidate                 workspacemodel.DefinitionAdmissionCandidate
+	ExpectedCandidateRevision uint64
+}
+
+type DefinitionAdmissionCandidateDisposition string
+
+const (
+	DefinitionAdmissionCandidateCreated   DefinitionAdmissionCandidateDisposition = "created"
+	DefinitionAdmissionCandidateDuplicate DefinitionAdmissionCandidateDisposition = "duplicate"
+)
+
+type SubmitDefinitionAdmissionCandidateResult struct {
+	Candidate   workspacemodel.DefinitionAdmissionCandidate
+	Disposition DefinitionAdmissionCandidateDisposition
+}
+
+type PromoteDefinitionAdmissionCandidateCommand struct {
+	WorkspaceID       common.WorkspaceID
+	CandidateID       string
+	CandidateRevision uint64
+	CandidateHash     string
+	AdmissionResult   workspacemodel.DefinitionAdmissionResult
+	BlockingTicketID  common.TicketID
+}
+
+type PromoteDefinitionAdmissionCandidateResult struct {
+	DefinitionRevision                string
+	StartupInputHash                  string
+	CandidateItemToItemRefMappingHash string
+	StartupInput                      workspacemodel.WorkspaceStartupInputContract
+	ActivationAdmission               workspacemodel.WorkspaceActivationAdmission
+	Duplicate                         bool
+}
+
+type AcknowledgeWorkspaceDefinitionClarificationResolutionCommand struct {
+	WorkspaceID           common.WorkspaceID
+	CandidateID           string
+	CandidateRevision     uint64
+	CandidateHash         string
+	BlockingTicketID      common.TicketID
+	ResolutionID          common.ResolutionID
+	ResolutionBindingHash string
+	DefinitionRevision    string
+	StartupInputHash      string
+}
+
+type AcknowledgeWorkspaceDefinitionClarificationResolutionResult struct {
+	ActivationAdmission workspacemodel.WorkspaceActivationAdmission
+	Transitioned        bool
+}
+
 type WorkspaceChangedData struct {
 	WorkspaceID          common.WorkspaceID
 	Title                string
@@ -224,6 +279,9 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[EnsureWorkspaceTemplateDefaultsCommand, EnsureWorkspaceTemplateDefaultsResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandEnsureDefaults).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[RuntimeTerminalDeliveryFact, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceFactTerminalDelivery).MessageContract(),
+		eventcontract.CommandTopic[SubmitDefinitionAdmissionCandidateCommand, SubmitDefinitionAdmissionCandidateResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate).MessageContract(),
+		eventcontract.CommandTopic[PromoteDefinitionAdmissionCandidateCommand, PromoteDefinitionAdmissionCandidateResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate).MessageContract(),
+		eventcontract.CommandTopic[AcknowledgeWorkspaceDefinitionClarificationResolutionCommand, AcknowledgeWorkspaceDefinitionClarificationResolutionResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandAcknowledgeDefinitionClarification).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicWorkspaceCreated,

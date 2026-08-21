@@ -149,12 +149,18 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 		RepairSurfaceConfirmations:  cloneRuntimeRepairSurfaceConfirmations(aggregate.RepairSurfaceConfirmations),
 		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(aggregate.CandidateRequestSessions),
 		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...),
+		ExecutionBudget:             aggregate.ExecutionBudget.Clone(),
+		RecoverableWaits:            cloneRuntimeRecoverableWaits(aggregate.RecoverableWaits),
 		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
 		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), aggregate.GovernanceResolutions...),
 		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(aggregate.OperationGovernanceBindings),
 		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(aggregate.OperationReceipts),
 		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...),
 		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
+	}
+	if aggregate.DefinitionClarification != nil {
+		value := aggregate.DefinitionClarification.Clone()
+		ret.DefinitionClarification = &value
 	}
 	if aggregate.DriveLease != nil {
 		lease := aggregate.DriveLease.Clone()
@@ -190,12 +196,18 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		RepairSurfaceConfirmations:  cloneRuntimeRepairSurfaceConfirmations(record.RepairSurfaceConfirmations),
 		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),
 		CandidateAttempts:           append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
+		ExecutionBudget:             record.ExecutionBudget.Clone(),
+		RecoverableWaits:            cloneRuntimeRecoverableWaits(record.RecoverableWaits),
 		GovernanceRequests:          append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
 		GovernanceResolutions:       append([]runtimecontract.RuntimeGovernanceResolutionRecord(nil), record.GovernanceResolutions...),
 		OperationGovernanceBindings: cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
 		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
 		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), record.DeliveryAcknowledgements...),
 		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
+	}
+	if record.DefinitionClarification != nil {
+		value := record.DefinitionClarification.Clone()
+		ret.DefinitionClarification = &value
 	}
 	if record.DriveLease != nil {
 		lease := record.DriveLease.Clone()
@@ -214,6 +226,17 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		ret.CompletedDispatches[idx] = runtimeDispatchFromRecord(record.CompletedDispatches[idx])
 	}
 	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), record.Diagnostics...)
+	return ret
+}
+
+func cloneRuntimeRecoverableWaits(values []runtimecontract.RuntimeRecoverableWaitRecord) []runtimecontract.RuntimeRecoverableWaitRecord {
+	if values == nil {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeRecoverableWaitRecord, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
 	return ret
 }
 

@@ -69,6 +69,29 @@ func (c *RuntimeController) applyDeliveryInternalEvent(ctx context.Context, even
 			result.DriveLease = &lease
 		}
 		return result, err
+	case RuntimeInternalEventRecoverableWaitOpened:
+		if event.Delivery.RecoverableWait == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.driveDelivery.openRecoverableWait(ctx, *event.Delivery.RecoverableWait)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventRecoverableWaitProbeDue:
+		aggregate, claimed, err := c.driveDelivery.claimRecoverableWaitProbe(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoverableWaitID, event.Delivery.LeaseGeneration, event.Delivery.LeaseNow)
+		result.Aggregate, result.LeaseClaimed = aggregate, claimed
+		return result, err
+	case RuntimeInternalEventRecoverableWaitProbeDeferred:
+		aggregate, err := c.driveDelivery.deferRecoverableWaitProbe(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoverableWaitID, event.Delivery.LeaseNow, event.Delivery.RecoverableWaitProbeResultHash)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventRecoverableWaitExhausted:
+		aggregate, err := c.driveDelivery.exhaustRecoverableWait(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoverableWaitID, event.Delivery.RecoverableWaitProbeResultHash, event.Delivery.Reason)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventRecoverableWaitRetired:
+		aggregate, err := c.driveDelivery.retireRecoverableWait(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoverableWaitID)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventTerminationRequested:
 		aggregate, err := c.driveDelivery.requestTermination(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.TerminationKind, event.Delivery.RequestedBy, event.Delivery.Reason)
 		result.Aggregate = aggregate

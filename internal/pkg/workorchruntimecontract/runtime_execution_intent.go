@@ -50,6 +50,9 @@ const (
 	RuntimeExecutionIntentReasonNewRunActivated                RuntimeExecutionIntentReason = "new_run_activated"
 	RuntimeExecutionIntentReasonPredecessorSupersedeRequested  RuntimeExecutionIntentReason = "predecessor_supersede_requested"
 	RuntimeExecutionIntentReasonDevelopmentDataIncompatible    RuntimeExecutionIntentReason = "development_data_incompatible"
+	RuntimeExecutionIntentReasonDefinitionAdmissionMissing     RuntimeExecutionIntentReason = "definition_admission_missing"
+	RuntimeExecutionIntentReasonDefinitionAdmissionMismatch    RuntimeExecutionIntentReason = "definition_admission_mismatch"
+	RuntimeExecutionIntentReasonDefinitionClarificationPending RuntimeExecutionIntentReason = "definition_clarification_pending"
 )
 
 // RuntimeExecutionIntentAdmission is the immutable, owner-neutral admission
@@ -107,11 +110,11 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 			valid = true
 		}
 	case RuntimeExecutionIntentFreshActivationRequired:
-		valid = reason == RuntimeExecutionIntentReasonRuntimeStateIncompatible || reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing
+		valid = reason == RuntimeExecutionIntentReasonRuntimeStateIncompatible || reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMismatch
 	case RuntimeExecutionIntentDefinitionChanged:
 		valid = reason == RuntimeExecutionIntentReasonDefinitionChanged
 	case RuntimeExecutionIntentGovernanceRequired:
-		valid = reason == RuntimeExecutionIntentReasonGovernancePending
+		valid = reason == RuntimeExecutionIntentReasonGovernancePending || reason == RuntimeExecutionIntentReasonDefinitionClarificationPending
 	case RuntimeExecutionIntentDataResetRequired:
 		valid = reason == RuntimeExecutionIntentReasonDevelopmentDataIncompatible
 	}
@@ -153,6 +156,12 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "predecessor supersede requested"
 	case RuntimeExecutionIntentReasonDevelopmentDataIncompatible:
 		return "persisted development data is incompatible with the current Runtime baseline"
+	case RuntimeExecutionIntentReasonDefinitionAdmissionMissing:
+		return "Workspace definition has not completed pre-seal admission"
+	case RuntimeExecutionIntentReasonDefinitionAdmissionMismatch:
+		return "restart bootstrap does not match the admitted Workspace startup input"
+	case RuntimeExecutionIntentReasonDefinitionClarificationPending:
+		return "Workspace definition clarification is pending an exact owner acknowledgement"
 	default:
 		return ""
 	}

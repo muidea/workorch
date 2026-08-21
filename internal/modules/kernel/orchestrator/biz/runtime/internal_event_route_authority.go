@@ -33,7 +33,8 @@ func (c *RuntimeController) applyAuthorityInternalEvent(ctx context.Context, eve
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
-		RuntimeInternalEventRepairSurfaceConfirmationObserved:
+		RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		RuntimeInternalEventDefinitionGapObserved:
 		return c.applyAuthorityConvergenceInternalEvent(ctx, event)
 	default:
 		return unsupportedRuntimeInternalEvent(event.Kind)
@@ -139,7 +140,7 @@ func (c *RuntimeController) applyAuthorityConvergenceInternalEvent(ctx context.C
 		if event.Authority.PrerequisiteResult == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.authority.commitPrerequisite(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.PrerequisiteResult)
+		aggregate, err := c.authority.commitPrerequisite(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.PrerequisiteResult, event.Authority.RecoverableWaitProbeObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisitesReadOnlyStaleObserved:
@@ -195,6 +196,13 @@ func (c *RuntimeController) applyAuthorityConvergenceInternalEvent(ctx context.C
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.authority.recordRepairSurfaceConfirmation(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.RepairSurfaceConfirmation)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventDefinitionGapObserved:
+		if event.Authority.DefinitionGap == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.authority.observeRuntimeDefinitionGap(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.DefinitionGap)
 		result.Aggregate = aggregate
 		return result, err
 	default:

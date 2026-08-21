@@ -41,7 +41,11 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// durable Eventstream resolution record handshake. MCP Registry adds two
 	// bounded concrete reads so activation and execution consume one
 	// revision-consistent selection/full aggregate instead of joining lists.
-	const expectedProductionTopicCount = 265
+	// Definition admission adds three Workspace-owner commands. Dedicated
+	// clarification adds five Decision-owner commands: static open/reconcile/
+	// admission-resolution and Runtime open/replacement-resolution. These eight
+	// contracts deliberately replace implicit setup/governance mutations.
+	const expectedProductionTopicCount = 273
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
 	}

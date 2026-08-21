@@ -220,6 +220,44 @@ func TestUseCaseSynchronousSubmissionUsesTypedOwnerOutcome(t *testing.T) {
 	}
 }
 
+func TestValidateOwnerOutcomeRejectsEveryAdmissionScopeMismatch(t *testing.T) {
+	command := workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID: "ws-owner-outcome-scope",
+		Intent:      "resume",
+		RequestID:   "req-owner-outcome-scope",
+	}
+	valid := workorchdevents.WorkspaceRunRequestedResult{
+		WorkspaceID: command.WorkspaceID,
+		RequestID:   command.RequestID,
+		Kind:        runtimecontract.RuntimeExecutionIntentResume,
+		Outcome:     runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+		Reason:      runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+	}
+	if err := validateOwnerOutcome(command, valid); err != nil {
+		t.Fatalf("valid owner outcome: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*workorchdevents.WorkspaceRunRequestedResult)
+	}{
+		{name: "workspace", mutate: func(outcome *workorchdevents.WorkspaceRunRequestedResult) { outcome.WorkspaceID = "ws-other" }},
+		{name: "request", mutate: func(outcome *workorchdevents.WorkspaceRunRequestedResult) { outcome.RequestID = "req-other" }},
+		{name: "intent kind", mutate: func(outcome *workorchdevents.WorkspaceRunRequestedResult) {
+			outcome.Kind = runtimecontract.RuntimeExecutionIntentRestart
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outcome := valid
+			tt.mutate(&outcome)
+			if err := validateOwnerOutcome(command, outcome); !errors.Is(err, workorchcommon.ErrConflict) {
+				t.Fatalf("scope mismatch error = %v, want ErrConflict", err)
+			}
+		})
+	}
+}
+
 func TestUseCaseCoalescesDuplicateAsyncRequestIdentity(t *testing.T) {
 	background := task.NewBackgroundRoutine(4)
 	t.Cleanup(func() { background.Shutdown(context.Background()) })
@@ -315,5 +353,37 @@ func TestUseCaseRejectsInvalidIntentBeforeQueue(t *testing.T) {
 	}
 	if err := useCase.Close(context.Background()); err != nil {
 		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestUseCaseCloseFailsClosedForSynchronousAndAsynchronousAdmission(t *testing.T) {
+	background := task.NewBackgroundRoutine(2)
+	t.Cleanup(func() { background.Shutdown(context.Background()) })
+	projection := &recordingProjection{}
+	submitter := &recordingSubmitter{}
+	useCase := New(submitter, projection, background)
+	if err := useCase.Close(context.Background()); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := useCase.Close(context.Background()); err != nil {
+		t.Fatalf("duplicate close: %v", err)
+	}
+	command := workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID: "ws-closed-admission", Intent: "resume", RequestID: "req-closed-admission",
+	}
+	if _, err := useCase.SubmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, workorchcommon.ErrConflict) {
+		t.Fatalf("synchronous admission after Close = %v, want ErrConflict", err)
+	}
+	if _, err := useCase.EnqueueWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, workorchcommon.ErrConflict) {
+		t.Fatalf("asynchronous admission after Close = %v, want ErrConflict", err)
+	}
+	submitter.mu.Lock()
+	submits := len(submitter.commands)
+	submitter.mu.Unlock()
+	projection.mu.Lock()
+	queued, outcomes, rejected := len(projection.queued), len(projection.outcomes), len(projection.rejected)
+	projection.mu.Unlock()
+	if submits != 0 || queued != 0 || outcomes != 0 || rejected != 0 {
+		t.Fatalf("closed admission side effects = submits:%d queued:%d outcomes:%d rejected:%d", submits, queued, outcomes, rejected)
 	}
 }

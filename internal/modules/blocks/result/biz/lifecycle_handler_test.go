@@ -102,6 +102,64 @@ func TestTerminalDeliveryRecoversDraftAndPartialArtifactMaterialization(t *testi
 	}
 }
 
+func TestTerminalDeliveryPreservesFormalCloseoutArtifactHashAndMapsChildProjection(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	results := memory.NewResultRepository()
+	artifacts := memory.NewArtifactRepository()
+	biz, err := New(hub, nil, Dependencies{Results: results, Artifacts: artifacts, EventHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sourceRef common.ArtifactID = "workorch://artifact/formal-report"
+	command := terminalDeliveryFixture("delivery-formal-closeout", []common.ArtifactID{sourceRef})
+	revisions := (runtimecontract.RuntimeOwnerRevisionSet{DefinitionRevision: command.DefinitionRevision, Entries: []runtimecontract.RuntimeOwnerRevisionRef{{
+		OwnerKind: "capability", OwnerInstanceID: "blocks/file", ResourceKind: "workspace_tree", ResourceID: string(command.WorkspaceID), Revision: "tree-2", DependencyHash: "dependency-hash-1",
+	}}}).WithHash()
+	closeout := runtimecontract.RuntimeResultCloseout{
+		SchemaVersion: runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
+		CloseoutID:    "closeout-formal-artifact", StartupInputHash: "startup-formal-artifact", DefinitionRevision: command.DefinitionRevision, RuntimeStateRevision: 7,
+		TerminalOutcome: command.Outcome,
+		RequirementOutcomes: []runtimecontract.RuntimeRequirementOutcome{{
+			RequirementRef: "requirement-1", SourceItemRef: "dod-item-1", CoverageWorkItemID: "cwi-1", DefinitionRevision: command.DefinitionRevision,
+			CoverageState: runtimecontract.RuntimeRequirementCovered, AssessmentState: runtimecontract.RuntimeRequirementSatisfied,
+			EvidenceItems:        []runtimecontract.RuntimeRequirementEvidenceItem{{EvidenceRef: "evidence-1", BindingRef: "binding-1", State: runtimecontract.RuntimeRequirementEvidenceAccepted, OwnerRevisionSetHash: revisions.SetHash}},
+			AcceptedEvidenceRefs: []string{"evidence-1"}, OwnerRevisionSetHash: revisions.SetHash,
+		}},
+		AcceptedEvidenceRefs: []string{"evidence-1"}, OwnerRevisionSet: revisions, ArtifactRefs: []common.ArtifactID{sourceRef},
+		RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
+	}
+	closeout = closeout.WithCloseoutHash()
+	sealedHash := closeout.CloseoutHash
+	command.Material.RuntimeCloseout = &closeout
+	drifted := command
+	driftedCloseout := closeout.Normalized()
+	driftedCloseout.TerminalOutcome = runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindFailed, Code: "failed", Summary: "different terminal authority"}
+	driftedCloseout = driftedCloseout.WithCloseoutHash()
+	drifted.Material.RuntimeCloseout = &driftedCloseout
+	if _, err := biz.applyTerminalDelivery(ctx, drifted); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("mismatched formal closeout terminal err=%v, want conflict", err)
+	}
+
+	created, err := biz.applyTerminalDelivery(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Result == nil || created.Result.RuntimeCloseout == nil || created.Result.RuntimeCloseout.CloseoutHash != sealedHash ||
+		len(created.Result.RuntimeCloseout.ArtifactRefs) != 1 || created.Result.RuntimeCloseout.ArtifactRefs[0] != sourceRef ||
+		len(created.Result.ArtifactRefs) != 1 || created.Result.ArtifactRefs[0] == sourceRef {
+		t.Fatalf("formal closeout/projected artifacts = %+v", created.Result)
+	}
+	if err := created.Result.RuntimeCloseout.Validate(); err != nil {
+		t.Fatalf("stored formal closeout no longer validates: %v", err)
+	}
+	children, err := artifacts.ListByResult(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), created.Result.ID)
+	if err != nil || len(children) != 1 || children[0].SourceRef != string(sourceRef) || children[0].ID != created.Result.ArtifactRefs[0] {
+		t.Fatalf("formal closeout artifact child = %+v err=%v", children, err)
+	}
+}
+
 func TestTerminalDeliveryReplayReemitsStableNotification(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

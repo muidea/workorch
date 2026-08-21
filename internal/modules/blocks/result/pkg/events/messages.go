@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
@@ -166,6 +167,16 @@ func CloneResult(item *resultmodel.Result) *resultmodel.Result {
 	cloned.SummaryDetail = cloneResultSummary(item.SummaryDetail)
 	if item.RuntimeCloseout != nil {
 		closeout := *item.RuntimeCloseout
+		closeout.RequirementOutcomes = append([]runtimecontract.RuntimeRequirementOutcome(nil), item.RuntimeCloseout.RequirementOutcomes...)
+		for idx := range closeout.RequirementOutcomes {
+			closeout.RequirementOutcomes[idx].MissingEvidenceKinds = append([]string(nil), closeout.RequirementOutcomes[idx].MissingEvidenceKinds...)
+			closeout.RequirementOutcomes[idx].EvidenceItems = append([]runtimecontract.RuntimeRequirementEvidenceItem(nil), closeout.RequirementOutcomes[idx].EvidenceItems...)
+			closeout.RequirementOutcomes[idx].AcceptedEvidenceRefs = append([]string(nil), closeout.RequirementOutcomes[idx].AcceptedEvidenceRefs...)
+		}
+		closeout.AcceptedEvidenceRefs = append([]string(nil), item.RuntimeCloseout.AcceptedEvidenceRefs...)
+		closeout.DeliverableRefs = append([]string(nil), item.RuntimeCloseout.DeliverableRefs...)
+		closeout.KnownLimitations = append([]string(nil), item.RuntimeCloseout.KnownLimitations...)
+		closeout.OwnerRevisionSet.Entries = append([]runtimecontract.RuntimeOwnerRevisionRef(nil), item.RuntimeCloseout.OwnerRevisionSet.Entries...)
 		closeout.SatisfiedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.SatisfiedCoverageWorkItemIDs...)
 		closeout.UnsatisfiedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.UnsatisfiedCoverageWorkItemIDs...)
 		closeout.MissingEvidenceKinds = append([]string(nil), item.RuntimeCloseout.MissingEvidenceKinds...)

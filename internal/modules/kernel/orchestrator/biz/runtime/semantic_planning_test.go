@@ -53,6 +53,45 @@ func (r *semanticResponseLossRepository) Save(ctx context.Context, aggregate Run
 	return nil
 }
 
+func TestSemanticPlanActiveCoverageFairlyDrainsLargeProviderOrder(t *testing.T) {
+	const coverageCount = 64
+	providerOrder := make([]common.CoverageWorkItemID, 0, coverageCount)
+	for index := 0; index < coverageCount; index++ {
+		prefix := "z"
+		if index%2 != 0 {
+			prefix = "a"
+		}
+		providerOrder = append(providerOrder, common.CoverageWorkItemID(fmt.Sprintf("cwi-%s-%02d", prefix, index)))
+	}
+	order := runtimecontract.RuntimeSemanticPlanDocument{
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: append([]common.CoverageWorkItemID(nil), providerOrder...),
+	}
+	facts := runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{
+		ID: "focus-current", CoverageWorkItemIDs: []common.CoverageWorkItemID{providerOrder[17]},
+	}}
+	if active := SemanticPlanActiveCoverageIDsForDrive(facts, order, providerOrder); len(active) != 1 || active[0] != providerOrder[17] {
+		t.Fatalf("current focus lost its authority fence: active=%v", active)
+	}
+
+	// Once the execution focus is no longer in pending semantic lineage, the
+	// fallback cursor must take the first remaining provider-authored identity.
+	// Repeating that projection proves every item advances exactly once without
+	// lexical-ID sorting or starvation.
+	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-retired-current"}
+	pending := append([]common.CoverageWorkItemID(nil), providerOrder...)
+	for index, want := range providerOrder {
+		active := SemanticPlanActiveCoverageIDsForDrive(facts, order, pending)
+		if len(active) != 1 || active[0] != want {
+			t.Fatalf("provider-order cursor %d = %v, want %s", index, active, want)
+		}
+		pending = pending[1:]
+	}
+	if active := SemanticPlanActiveCoverageIDsForDrive(facts, order, pending); len(active) != 0 {
+		t.Fatalf("drained provider order retained active coverage: %v", active)
+	}
+}
+
 func TestRuntimeSemanticPlanningPrivateTransitionSequenceIsPersistedAndIdempotent(t *testing.T) {
 	controller, repository, aggregate := newSemanticPlanningController(t)
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)

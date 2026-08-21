@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -37,7 +38,7 @@ func ensureSoulDefaults(ctx context.Context, service *Service, defaults []workor
 		} else if !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
-		_, err = service.CreateSoul(ctx, cmd)
+		_, err = service.createSoul(ctx, cmd, soulmodel.SoulSourceBuiltinSeed)
 		if err != nil {
 			if !errors.Is(err, common.ErrConflict) {
 				return err

@@ -3989,6 +3989,20 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	}
 	cloned.ContextHints = item.ContextHints.Clone()
 	cloned.EvidencePolicies = workorcheventpayload.CloneSlice(item.EvidencePolicies)
+	if item.DefinitionAdmissionCandidates != nil {
+		cloned.DefinitionAdmissionCandidates = make([]workspace.DefinitionAdmissionCandidate, len(item.DefinitionAdmissionCandidates))
+		for idx := range item.DefinitionAdmissionCandidates {
+			cloned.DefinitionAdmissionCandidates[idx] = item.DefinitionAdmissionCandidates[idx].Clone()
+		}
+	}
+	if item.StartupInput != nil {
+		value := item.StartupInput.Clone()
+		cloned.StartupInput = &value
+	}
+	if item.ActivationAdmission != nil {
+		value := item.ActivationAdmission.Normalized()
+		cloned.ActivationAdmission = &value
+	}
 	return &cloned
 }
 
@@ -4006,24 +4020,7 @@ func cloneDoD(item *workspace.DoD) *workspace.DoD {
 }
 
 func cloneRun(item *run.Run) *run.Run {
-	cloned := *item
-	if item.ReplacementIntent != nil {
-		intent := *item.ReplacementIntent
-		if item.ReplacementIntent.Bootstrap != nil {
-			bootstrap := item.ReplacementIntent.Bootstrap.Clone()
-			intent.Bootstrap = &bootstrap
-		}
-		cloned.ReplacementIntent = &intent
-	}
-	if item.RuntimeBootstrap != nil {
-		bootstrap := item.RuntimeBootstrap.Clone()
-		cloned.RuntimeBootstrap = &bootstrap
-	}
-	if item.RuntimeState != nil {
-		state := item.RuntimeState.Clone()
-		cloned.RuntimeState = &state
-	}
-	return &cloned
+	return run.CloneRun(item)
 }
 
 func cloneStep(item *run.Step) *run.Step {

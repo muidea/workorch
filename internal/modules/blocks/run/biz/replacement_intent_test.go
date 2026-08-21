@@ -2,9 +2,11 @@ package run
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -25,7 +27,8 @@ func TestPersistReplacementIntentKeepsSuccessorAbsent(t *testing.T) {
 	bootstrap := restartTestBootstrap(t, predecessor.WorkspaceID)
 	intent := runmodel.ReplacementIntent{
 		RequestID: "restart-1", WorkspaceID: "ws-restart", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1",
-		Bootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+		StartupInputHash: "startup-input-test",
+		Bootstrap:        &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: runmodel.ReplacementIntentPending,
 	}
 	if err := biz.persistReplacementIntent(ctx, predecessor, intent); err != nil {
@@ -53,13 +56,95 @@ func TestPersistReplacementIntentKeepsSuccessorAbsent(t *testing.T) {
 	}
 }
 
+func TestPersistReplacementIntentRetiresOnlyRejectedClarificationOnExplicitNewRequest(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-restart")
+	runs := memory.NewRunRepository()
+	biz := New()
+	if err := biz.Configure(Dependencies{Runs: runs, EventHub: magicevent.NewHub(16)}); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := restartTestBootstrap(t, "ws-restart")
+	predecessor := &runmodel.Run{
+		ID: "run-001", WorkspaceID: "ws-restart", DefinitionRevision: "def-old", StartupInputHash: "startup-old",
+		State: common.RunStateBlockedOnDecision, BlockingTicketID: "runtime-definition-clarification:ticket-1",
+	}
+	first := replacementIntentFromCommand(runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: predecessor.WorkspaceID, RequestID: "restart-1", GoalID: "goal-1", DoDID: "dod-1",
+		DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	})
+	first = replacementIntentForPredecessor(first, predecessor)
+	first.State = runmodel.ReplacementIntentClarificationResolutionRejected
+	first.ClarificationResolutionBindingHash = "scope-mismatch-binding"
+	first.ClarificationConflictKind = "scope_mismatch"
+	predecessor.ReplacementIntent = &first
+	if err := runs.Create(ctx, predecessor); err != nil {
+		t.Fatal(err)
+	}
+
+	second := replacementIntentFromCommand(runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: predecessor.WorkspaceID, RequestID: "restart-2", GoalID: "goal-1", DoDID: "dod-1",
+		DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	})
+	second = replacementIntentForPredecessor(second, predecessor)
+	if err := biz.persistReplacementIntent(ctx, predecessor, second); err != nil {
+		t.Fatalf("retire rejected clarification intent: %v", err)
+	}
+	stored, err := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReplacementIntent == nil || stored.ReplacementIntent.RequestID != second.RequestID || len(stored.RetiredReplacementIntents) != 1 || stored.RetiredReplacementIntents[0].RequestID != first.RequestID || stored.RetiredReplacementIntents[0].State != runmodel.ReplacementIntentClarificationResolutionRejected {
+		t.Fatalf("replacement retirement lineage = %+v active=%+v", stored.RetiredReplacementIntents, stored.ReplacementIntent)
+	}
+	if err := biz.persistReplacementIntent(ctx, stored, first); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("retired RequestID was reused: %v", err)
+	}
+	third := second
+	third.RequestID = "restart-3"
+	third.ReplacementIntentID = "runtime-definition-replacement/restart-3"
+	third.Reason = "workspace execution restart/restart-3"
+	third.ReplacementIntentHash = runmodel.StableReplacementIntentHash(third)
+	if err := biz.persistReplacementIntent(ctx, stored, third); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("pending clarification intent was superseded: %v", err)
+	}
+
+	boundCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-bound-conflict")
+	boundPredecessor := &runmodel.Run{
+		ID: "run-bound", WorkspaceID: "ws-bound-conflict", DefinitionRevision: "def-old", StartupInputHash: "startup-old",
+		State: common.RunStateBlockedOnDecision, BlockingTicketID: "runtime-definition-clarification:ticket-bound",
+	}
+	boundConflict := replacementIntentFromCommand(runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: boundPredecessor.WorkspaceID, RequestID: "restart-bound-1", GoalID: "goal-1", DoDID: "dod-1",
+		DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	})
+	boundConflict = replacementIntentForPredecessor(boundConflict, boundPredecessor)
+	boundConflict.State = runmodel.ReplacementIntentClarificationResolutionRejected
+	boundConflict.ClarificationResolutionBindingHash = "ticket-bound-binding"
+	boundConflict.ClarificationConflictKind = "ticket_already_bound"
+	boundConflict.ConflictingReplacementIntentID = "runtime-definition-replacement/restart-original"
+	boundConflict.ConflictingReplacementIntentHash = "replacement-hash-original"
+	boundPredecessor.ReplacementIntent = &boundConflict
+	if err := runs.Create(boundCtx, boundPredecessor); err != nil {
+		t.Fatal(err)
+	}
+	retry := replacementIntentFromCommand(runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: boundPredecessor.WorkspaceID, RequestID: "restart-bound-2", GoalID: "goal-1", DoDID: "dod-1",
+		DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
+	})
+	retry = replacementIntentForPredecessor(retry, boundPredecessor)
+	if err := biz.persistReplacementIntent(boundCtx, boundPredecessor, retry); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("ticket-already-bound invariant breach was overwritten: %v", err)
+	}
+}
+
 func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-restart")
 	runs := memory.NewRunRepository()
 	bootstrap := restartTestBootstrap(t, "ws-restart")
 	intent := runmodel.ReplacementIntent{
 		RequestID: "restart-1", WorkspaceID: "ws-restart", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1",
-		Bootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+		StartupInputHash: "startup-input-test",
+		Bootstrap:        &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: runmodel.ReplacementIntentPending,
 	}
 	predecessor := &runmodel.Run{
@@ -123,7 +208,7 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 
 func restartTestBootstrap(t *testing.T, workspaceID common.WorkspaceID) runtimecontract.RuntimeBootstrap {
 	t.Helper()
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "def-1", GoalID: "goal-1", GoalDefinition: "finish goal",
 		DoDID: "dod-1", DoDDefinition: "produce evidence", CapabilityContract: []string{runtimecontract.StepKindFileEdit},
 	}

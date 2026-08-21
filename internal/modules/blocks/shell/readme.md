@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -57,7 +57,8 @@ raw diagnostic 留在 Shell-private adapter；receipt 只携带有界、脱敏�
 - effect 前的 Orchestrator receipt query 同时是 exact sealed-dispatch authorization：只有当前
   `workspace/run/dispatch/operation/ExecutionKey/Fence` 仍处于 claimed 且无 receipt 时才允许执行。已有 exact receipt 只重放
   receipt；找不到授权、查询错误或 stale fence 均零进程调用。managed validation 在 claimed/no-receipt 重启时进入
-  `outcome_unknown`，不会以“验证只读”为由盲重放。Shell 不以进程退出状态代写 Runtime 状态。
+  `outcome_unknown`，不会以“验证只读”为由盲重放。Found/Receipt 一致性、query identity 与 commit 完整 receipt equality
+  由 capability owners 共享的 typed validator 校验。Shell 不以进程退出状态代写 Runtime 状态。
 
 ## 交互合同完整性
 

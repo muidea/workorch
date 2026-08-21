@@ -100,7 +100,8 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
-		RuntimeInternalEventRepairSurfaceConfirmationObserved:
+		RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		RuntimeInternalEventDefinitionGapObserved:
 		return c.applyAuthorityInternalEvent(ctx, event)
 
 	case RuntimeInternalEventSemanticPlanRequestStarted,
@@ -129,7 +130,9 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventCandidateRejected,
 		RuntimeInternalEventGovernanceResolutionObserved,
 		RuntimeInternalEventOperationReceiptObserved,
-		RuntimeInternalEventDispatchExecutionRequested:
+		RuntimeInternalEventDispatchExecutionRequested,
+		RuntimeInternalEventDefinitionClarificationDispatchSealed,
+		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return c.applyTransactionInternalEvent(ctx, event)
 
 	case RuntimeInternalEventReconciliationRequested,
@@ -140,6 +143,11 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,
 		RuntimeInternalEventDriveLeaseRecovered,
+		RuntimeInternalEventRecoverableWaitOpened,
+		RuntimeInternalEventRecoverableWaitProbeDue,
+		RuntimeInternalEventRecoverableWaitProbeDeferred,
+		RuntimeInternalEventRecoverableWaitExhausted,
+		RuntimeInternalEventRecoverableWaitRetired,
 		RuntimeInternalEventTerminationRequested:
 		return c.applyDeliveryInternalEvent(ctx, event)
 	default:

@@ -44,10 +44,7 @@ func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID comm
 	if !ok {
 		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("runtime receipt query returned invalid result type %T", data)
 	}
-	if !response.Found || response.Receipt == nil {
-		return runtimecontract.RuntimeOperationReceipt{}, false, nil
-	}
-	return response.Receipt.Clone(), true, nil
+	return orchestratorevents.ValidateQueryRuntimeOperationReceiptResult(response, execution.ExecutionKey, execution.Fence, operationID)
 }
 
 // commitRuntimeOperationReceipt is owned by the capability Biz. It sends the
@@ -89,7 +86,7 @@ func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID com
 	if !ok {
 		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("runtime receipt commit returned invalid result type %T", data)
 	}
-	return response.Receipt.Clone(), nil
+	return orchestratorevents.ValidateCommitRuntimeOperationReceiptResult(response, receipt)
 }
 
 func (m *Biz) newRuntimeOperationReceipt(execution runtimecontract.RuntimeOperationExecutionEnvelope, operationID string, status runtimecontract.RuntimeOperationExecutionStatus, targetRefs []string, evidence runtimecontract.RuntimeOperationEvidence, failure *runtimecontract.FailureFact, governance *runtimecontract.RuntimeGovernanceRequirement, observation orchestratorevents.RuntimeOperationReceiptObservation) runtimecontract.RuntimeOperationReceipt {

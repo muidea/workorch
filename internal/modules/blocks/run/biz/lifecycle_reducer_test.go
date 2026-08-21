@@ -514,7 +514,7 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 // rebase used when an unrelated SM-1/model write wins the repository race.
 func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) {
 	ctx := context.Background()
-	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{
@@ -560,7 +560,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 
 func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	ctx := context.Background()
-	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
 	currentState := runtimecontract.RuntimeStateRecord{

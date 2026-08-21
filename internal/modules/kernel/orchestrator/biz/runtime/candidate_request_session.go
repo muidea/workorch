@@ -137,6 +137,9 @@ func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session does not accept a physical call", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	if err := reserveCandidateRequestExecutionBudget(&aggregate, session, sequence, physicalCallID); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = true
 	aggregate.CandidateRequestSessions[idx].LastPhysicalCallID = physicalCallID
 	aggregate.StateRevision++
@@ -152,7 +155,7 @@ func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context
 // recordCandidateRequestTransportOutcome preserves transient provider failure
 // separately from candidate attempts and repair. The next physical call uses
 // the same logical ID and the same sequence after recovery budget accounting.
-func (c *planningTransactionComponent) recordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) recordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -176,10 +179,23 @@ func (c *planningTransactionComponent) recordCandidateRequestTransportOutcome(ct
 		return RuntimeAggregate{}, fmt.Errorf("%w: provider transport outcome does not match submitted call", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	observation, err := candidateRequestBudgetObservationForTransition(session, runtimecontract.RuntimeProviderConsumptionUnknown, budgetObservation...)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if _, err := applyCandidateRequestBudgetObservation(&aggregate, observation); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	updated := &aggregate.CandidateRequestSessions[idx]
 	updated.State = runtimecontract.RuntimeCandidateRequestSessionTransportPending
 	updated.LastOutcome = outcome
 	updated.ProviderSubmitted = false
+	// A transport retry is a new physical provider call even though it keeps
+	// the same logical request and sealed expected document. Advance the
+	// physical sequence so its allocation and usage cannot alias the prior
+	// call's terminal budget fact.
+	updated.NextSequence++
+	updated.TransportOutcomes++
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -194,7 +210,7 @@ func (c *planningTransactionComponent) recordCandidateRequestTransportOutcome(ct
 // document fact as SM-4 recovery authority. The next call starts the same
 // sealed expected document from the beginning; no raw suffix is retained or
 // assembled into Runtime authority.
-func (c *planningTransactionComponent) recordCandidateRequestRecoveryRequired(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) recordCandidateRequestRecoveryRequired(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -221,6 +237,13 @@ func (c *planningTransactionComponent) recordCandidateRequestRecoveryRequired(ct
 		return RuntimeAggregate{}, fmt.Errorf("%w: incomplete provider document does not match submitted expected document", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	observation, err := candidateRequestBudgetObservationForTransition(session, runtimecontract.RuntimeProviderConsumptionConfirmed, budgetObservation...)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if _, err := applyCandidateRequestBudgetObservation(&aggregate, observation); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	updated := &aggregate.CandidateRequestSessions[idx]
 	updated.State = runtimecontract.RuntimeCandidateRequestSessionRecoveryPending
 	updated.NextSequence++
@@ -241,7 +264,7 @@ func (c *planningTransactionComponent) recordCandidateRequestRecoveryRequired(ct
 // completeCandidateRequestDocument commits only the fact that an opaque,
 // complete document is now available in the Orchestrator-owned content store.
 // Candidate attempt allocation remains a separate subsequent transition.
-func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -261,6 +284,13 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 		return RuntimeAggregate{}, fmt.Errorf("%w: complete candidate document does not match submitted call", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	observation, err := candidateRequestBudgetObservationForTransition(session, runtimecontract.RuntimeProviderConsumptionConfirmed, budgetObservation...)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if _, err := applyCandidateRequestBudgetObservation(&aggregate, observation); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	updated := &aggregate.CandidateRequestSessions[idx]
 	updated.State = runtimecontract.RuntimeCandidateRequestSessionDocumentComplete
 	updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete}
@@ -278,7 +308,7 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 // terminateCandidateRequestSession closes non-candidate provider outcomes.
 // The caller separately records the typed SM-2 failure fact; this method never
 // reduces authority, changes a budget, or opens governance by itself.
-func (c *planningTransactionComponent) terminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) terminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -301,6 +331,13 @@ func (c *planningTransactionComponent) terminateCandidateRequestSession(ctx cont
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session is already closed", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
+	observation, err := candidateRequestBudgetObservationForTransition(session, runtimecontract.RuntimeProviderConsumptionUnknown, budgetObservation...)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if _, err := applyCandidateRequestBudgetObservation(&aggregate, observation); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	aggregate.CandidateRequestSessions[idx].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 	aggregate.CandidateRequestSessions[idx].LastOutcome = outcome
 	aggregate.StateRevision++
@@ -311,6 +348,48 @@ func (c *planningTransactionComponent) terminateCandidateRequestSession(ctx cont
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func firstRuntimeProviderBudgetObservation(values []*runtimecontract.RuntimeProviderBudgetObservation) *runtimecontract.RuntimeProviderBudgetObservation {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[0]
+}
+
+// candidateRequestBudgetObservationForTransition makes every submitted
+// provider call leave a terminal budget fact. Production supplies the exact
+// owner observation; owner-private compatibility callers without usage data
+// are conservatively normalized to the requested fallback status instead of
+// leaking a reserved allocation. A supplied observation must bind the exact
+// submitted logical/physical identity.
+func candidateRequestBudgetObservationForTransition(session runtimecontract.RuntimeCandidateRequestSession, fallback runtimecontract.RuntimeProviderConsumptionStatus, values ...*runtimecontract.RuntimeProviderBudgetObservation) (*runtimecontract.RuntimeProviderBudgetObservation, error) {
+	session = session.Clone()
+	provided := firstRuntimeProviderBudgetObservation(values)
+	if !session.ProviderSubmitted {
+		if provided != nil {
+			return nil, fmt.Errorf("%w: provider budget observation has no submitted call", common.ErrConflict)
+		}
+		return nil, nil
+	}
+	if session.LogicalRequestID == "" || session.LastPhysicalCallID == "" {
+		return nil, fmt.Errorf("%w: submitted candidate request has incomplete budget identity", common.ErrConflict)
+	}
+	if provided == nil {
+		observation, err := runtimecontract.NewRuntimeProviderBudgetObservation(session.LogicalRequestID, session.LastPhysicalCallID, fallback, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &observation, nil
+	}
+	observation := provided.Clone()
+	if err := observation.Validate(); err != nil {
+		return nil, err
+	}
+	if observation.LogicalRequestID != session.LogicalRequestID || observation.PhysicalCallID != session.LastPhysicalCallID {
+		return nil, fmt.Errorf("%w: provider budget observation does not match submitted candidate request", common.ErrConflict)
+	}
+	return &observation, nil
 }
 
 func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKind runtimecontract.RuntimeProviderDocumentKind) error {

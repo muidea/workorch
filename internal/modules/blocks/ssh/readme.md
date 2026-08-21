@@ -79,7 +79,8 @@ source、scope、operation ID、target/CWI scope 与 payload hash。强调用没
 ## 治理、执行与回执
 
 1. SSH 先通过 receipt query 验证当前 active claimed `ExecutionKey + Fence`。有 persisted governance binding 时，查询必须携带
-   完全相同的 grant；省略、附加或漂移均 conflict。
+   完全相同的 grant；省略、附加或漂移均 conflict。Found/Receipt 一致性、query identity 与 commit 完整 receipt equality
+   由 capability owners 共享的 typed validator 校验。
 2. 每个远端命令都要求 `GovernanceApproval`。不可变 authorization context 绑定 target/session/credential refs、
    operation kind、command hash 与 timeout；未获 grant 时只提交 `governance_required` receipt，零网络调用。
 3. grant 必须精确匹配 approval identity、subject、action、risk 和 authorization hash，随后 SSH 才解析 owner-private endpoint
@@ -118,4 +119,8 @@ source、scope、operation ID、target/CWI scope 与 payload hash。强调用没
 - [x] governance missing/drift、wrong producer、nil result、active receipt authorization 与 persisted grant 省略均 fail-closed。
 - [x] before/after changed、no-op、bounded output/hash/ref、resource change 与 raw-output omission。
 - [x] at-most-once claimed recovery、owner receipt response-loss replay由 Orchestrator 通用 SM-3 回归覆盖。
-- [ ] 真实 OpenSSH endpoint 的 host-key rotation、网络抖动、cancel/timeout 作为 deployed verification 执行；不改变上述 code contract。
+
+## Deployed verification
+
+真实 OpenSSH endpoint 的 host-key rotation、网络抖动、cancel/timeout 属于部署环境验收，不是当前 code contract
+缺口；验证结果不得放宽上述 host-key、at-most-once、receipt 或 fail-closed 约束。

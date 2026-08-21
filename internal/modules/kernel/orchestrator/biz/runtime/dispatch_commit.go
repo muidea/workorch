@@ -97,10 +97,19 @@ type RuntimeAggregate struct {
 	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for File-owner
 	// repair-surface facts.  It is separate from generic event IDs so owner
 	// confirmation idempotency cannot become a global event index.
-	RepairSurfaceConfirmations  []runtimecontract.RuntimeRepairSurfaceConfirmationRecord
-	Diagnostics                 []runtimecontract.RuntimeDiagnosticRecord
-	CandidateRequestSessions    []runtimecontract.RuntimeCandidateRequestSession
-	CandidateAttempts           []runtimecontract.RuntimeCandidateAttemptRecord
+	RepairSurfaceConfirmations []runtimecontract.RuntimeRepairSurfaceConfirmationRecord
+	Diagnostics                []runtimecontract.RuntimeDiagnosticRecord
+	CandidateRequestSessions   []runtimecontract.RuntimeCandidateRequestSession
+	CandidateAttempts          []runtimecontract.RuntimeCandidateAttemptRecord
+	// ExecutionBudget is the sole Orchestrator-owned allocation/consumption
+	// sub-ledger. Owner usage and receipts join it through typed private facts.
+	ExecutionBudget runtimecontract.RuntimeExecutionBudgetLedger
+	// RecoverableWaits are the bounded SM-2/3/4 wait lineage; timers and Run
+	// lifecycle never own or infer these records.
+	RecoverableWaits []runtimecontract.RuntimeRecoverableWaitRecord
+	// DefinitionClarification is the dedicated semantic-gap transaction. It is
+	// neither an operation/governance candidate nor a generic dependency.
+	DefinitionClarification     *runtimecontract.RuntimeDefinitionClarificationState
 	GovernanceRequests          []runtimecontract.RuntimeGovernanceRequestRecord
 	GovernanceResolutions       []runtimecontract.RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []runtimecontract.RuntimeOperationGovernanceBinding

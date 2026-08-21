@@ -9652,7 +9652,7 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 1 || calls[0].RequestIdentity.PhysicalCallID != calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil {
+	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 2 || calls[0].RequestIdentity.PhysicalCallID == calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil {
 		t.Fatalf("transport retry did not preserve request identity and candidate budget: calls=%+v aggregate=%+v", calls, completed)
 	}
 }

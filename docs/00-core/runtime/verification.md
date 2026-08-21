@@ -160,6 +160,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 不出现 `active + nonterminal + no scheduled drive`，也不使用人工 Resume 作为恢复机制。
 - current-baseline Restart 必须先 CAS predecessor `ReplacementIntent`，再完成 Result→Workspace→Run terminal delivery，
   最后由 Run-private reducer 幂等创建/激活唯一 successor；其他组件不能提前创建或链接；
+- terminal delivery 已提交、successor 已创建但 lineage 未提交、lineage 已提交但 successor 尚未激活三个 restart cut point
+  均必须在进程重启后收敛到同一 successor，重复 recovery 不得再次创建或激活；
 - non-current predecessor 返回 `data_reset_required`，不写 replacement intent、不调用 provider/capability；
 - 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
   `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。

@@ -2,6 +2,7 @@ package governance
 
 import (
 	"context"
+	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -25,7 +26,7 @@ type eventTicketReader struct {
 
 func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: id})
@@ -37,7 +38,10 @@ func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisi
 	if response.Ticket == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Ticket, nil
+	if response.Ticket.ID != id || response.Ticket.WorkspaceID != workspaceID {
+		return nil, ownerResultIdentityError(decisionevents.TopicDecisionCommandGetTicket, fmt.Sprintf("ticket %s/%s", response.Ticket.WorkspaceID, response.Ticket.ID))
+	}
+	return decisionmodel.CloneTicket(response.Ticket), nil
 }
 
 type eventApprovalReader struct {
@@ -45,7 +49,7 @@ type eventApprovalReader struct {
 }
 
 func (r eventApprovalReader) GetScoped(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" || runID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, RunID: runID, ApprovalID: id})
@@ -57,7 +61,10 @@ func (r eventApprovalReader) GetScoped(ctx context.Context, workspaceID common.W
 	if response.Approval == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Approval, nil
+	if response.Approval.ID != id || response.Approval.WorkspaceID != workspaceID || response.Approval.RunID != runID {
+		return nil, ownerResultIdentityError(approvalevents.TopicApprovalCommandGet, fmt.Sprintf("approval %s/%s/%s", response.Approval.WorkspaceID, response.Approval.RunID, response.Approval.ID))
+	}
+	return approvalmodel.CloneApproval(response.Approval), nil
 }
 
 type eventRunReader struct {
@@ -66,7 +73,7 @@ type eventRunReader struct {
 
 func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
@@ -78,11 +85,14 @@ func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run
 	if response.Run == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Run, nil
+	if response.Run.ID != id || response.Run.WorkspaceID != workspaceID {
+		return nil, ownerResultIdentityError(runevents.TopicRunCommandGet, fmt.Sprintf("run %s/%s", response.Run.WorkspaceID, response.Run.ID))
+	}
+	return runmodel.CloneRun(response.Run), nil
 }
 
 func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
@@ -94,7 +104,10 @@ func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common
 	if response.Run == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Run, nil
+	if response.Run.ID != id || response.Run.WorkspaceID != workspaceID {
+		return nil, ownerResultIdentityError(runevents.TopicRunCommandGet, fmt.Sprintf("run %s/%s", response.Run.WorkspaceID, response.Run.ID))
+	}
+	return runmodel.CloneRun(response.Run), nil
 }
 
 func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
@@ -108,7 +121,12 @@ func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	return response.Runs, nil
+	for idx, item := range response.Runs {
+		if item == nil || item.ID == "" || item.WorkspaceID == "" {
+			return nil, ownerResultIdentityError(runevents.TopicRunCommandList, fmt.Sprintf("run item %d", idx))
+		}
+	}
+	return runmodel.CloneRuns(response.Runs), nil
 }
 
 type eventWorkspaceReader struct {
@@ -117,7 +135,7 @@ type eventWorkspaceReader struct {
 
 func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetGoal, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id})
@@ -129,12 +147,15 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 	if response.Goal == nil {
 		return nil, common.ErrNotFound
 	}
+	if response.Goal.ID != id || response.Goal.WorkspaceID != workspaceID {
+		return nil, ownerResultIdentityError(workspaceevents.TopicWorkspaceCommandGetGoal, fmt.Sprintf("goal %s/%s", response.Goal.WorkspaceID, response.Goal.ID))
+	}
 	return workspacemodel.CloneGoal(response.Goal), nil
 }
 
 func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id})
@@ -146,6 +167,9 @@ func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*wor
 	if response.DoD == nil {
 		return nil, common.ErrNotFound
 	}
+	if response.DoD.ID != id || response.DoD.WorkspaceID != workspaceID {
+		return nil, ownerResultIdentityError(workspaceevents.TopicWorkspaceCommandGetDoD, fmt.Sprintf("dod %s/%s", response.DoD.WorkspaceID, response.DoD.ID))
+	}
 	return workspacemodel.CloneDoD(response.DoD), nil
 }
 
@@ -154,7 +178,7 @@ type eventMemoryReader struct {
 }
 
 func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
-	if r.send == nil {
+	if r.send == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, governancecommon.ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID, Limit: 200})
@@ -163,5 +187,14 @@ func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID co
 	if err != nil {
 		return nil, err
 	}
-	return response.Items, nil
+	for idx, item := range response.Items {
+		if item == nil || item.ID == "" || item.WorkspaceID != workspaceID {
+			return nil, ownerResultIdentityError(memoryevents.TopicMemoryCommandListByWorkspace, fmt.Sprintf("memory item %d", idx))
+		}
+	}
+	return memorymodel.CloneMemoryItems(response.Items), nil
+}
+
+func ownerResultIdentityError(topic string, identity string) error {
+	return fmt.Errorf("%w: event %s returned mismatched owner identity %s", common.ErrConflict, topic, identity)
 }

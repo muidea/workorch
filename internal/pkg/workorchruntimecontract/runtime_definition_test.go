@@ -3,7 +3,7 @@ package workorchruntimecontract
 import "testing"
 
 func TestRuntimeDefinitionContextNormalizesCapabilityContract(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: " definition-1 ", GoalID: "goal-1", GoalDefinition: " goal ",
 		DoDID: "dod-1", DoDDefinition: " dod ", CapabilityContract: []string{"shell/command", "file/write", "shell/command"},
 	}.Normalized()
@@ -26,7 +26,7 @@ func TestRuntimeStateRejectsDefinitionRevisionMismatch(t *testing.T) {
 	}
 	record := RuntimeStateRecord{
 		StateRevision: 1,
-		Definition: RuntimeDefinitionContext{
+		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "other-definition", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"},
 		},
 		Facts: facts, Decision: decision,
@@ -37,7 +37,7 @@ func TestRuntimeStateRejectsDefinitionRevisionMismatch(t *testing.T) {
 }
 
 func TestRuntimeCandidatePrefixChangesWithExecutionContract(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 	}
 	optional := StableRuntimeCandidatePrefixHashWithExecutionContract(definition, RuntimeExecutionContract{StateChangePolicy: RuntimeStateChangeAllowedButNotRequired})
@@ -51,7 +51,7 @@ func TestRuntimeCandidatePrefixChangesWithExecutionContract(t *testing.T) {
 }
 
 func TestRuntimeCandidatePrefixChangesWithOperationContractRevision(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 	}
 	base := RuntimeExecutionContract{OperationContractRevision: "operation-contract-a"}
@@ -63,7 +63,7 @@ func TestRuntimeCandidatePrefixChangesWithOperationContractRevision(t *testing.T
 }
 
 func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"git/write"},
 	}
 	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{
@@ -93,7 +93,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 }
 
 func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndProspectiveTarget(t *testing.T) {
-	definition := RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}}
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}}
 	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{
 		ID: "profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 			ID: "initial-deliverable", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "deliverable",
@@ -118,7 +118,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileTargetSelectorAndProspectiveTar
 }
 
 func TestRuntimeCandidatePrefixChangesWithProfileDeclaredSelectorBinding(t *testing.T) {
-	definition := RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}}
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}}
 	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{
 		ID: "profile-lsp", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{
 			ID: "implementation", Scope: "deliverable", RequireTargetGrounding: true, TargetRole: "implementation",
@@ -136,7 +136,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileDeclaredSelectorBinding(t *test
 }
 
 func TestRuntimeCandidatePrefixChangesWithCoverageDependency(t *testing.T) {
-	definition := RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write", "validation/managed_session"}}
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write", "validation/managed_session"}}
 	base := RuntimeExecutionContract{ProfileContracts: []RuntimeProfileContract{{
 		ID: "profile", CoverageDependencies: []RuntimeCoverageDependency{{ID: "source-refresh", SourceScope: "deliverable", SourceRequirementID: "source", DependentScope: "deliverable", DependentRequirementID: "validation", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}},
 	}}}
@@ -150,7 +150,7 @@ func TestRuntimeCandidatePrefixChangesWithCoverageDependency(t *testing.T) {
 }
 
 func TestRuntimeCandidatePrefixChangesWithTemplateStagePolicy(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 	}
 	base := RuntimeExecutionContract{TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaCurrent, Stages: []RuntimeTemplateStage{{
@@ -165,7 +165,7 @@ func TestRuntimeCandidatePrefixChangesWithTemplateStagePolicy(t *testing.T) {
 }
 
 func TestRuntimeCandidatePrefixChangesWithSealedValidationAndSlicePolicies(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/read"},
 	}
 	base := RuntimeExecutionContract{
@@ -188,7 +188,7 @@ func TestRuntimeCandidatePrefixChangesWithSealedValidationAndSlicePolicies(t *te
 }
 
 func TestRuntimeCandidatePrefixChangesWithDefinitionChangeImpact(t *testing.T) {
-	definition := RuntimeDefinitionContext{
+	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-2", GoalDefinition: "goal", DoDID: "dod-2", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 		ChangeImpact: &RuntimeDefinitionChangeImpact{
 			Version: RuntimeDefinitionChangeImpactVersionCurrent, Changed: true, Policy: "cumulative", RequiredPreExecutionAssessment: true,

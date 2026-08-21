@@ -1,6 +1,7 @@
 package events
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -13,6 +14,91 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func validOwnerReceiptResultFixture() runtimecontract.RuntimeOperationReceipt {
+	return runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 2, OperationID: "op-1",
+		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "no change"},
+	}
+}
+
+func TestValidateQueryRuntimeOperationReceiptResultRejectsMalformedAndStaleIdentity(t *testing.T) {
+	valid := validOwnerReceiptResultFixture()
+	wrongExecution := valid
+	wrongExecution.ExecutionKey = "exec/other"
+	wrongFence := valid
+	wrongFence.Fence++
+	wrongOperation := valid
+	wrongOperation.OperationID = "op-other"
+	invalid := valid
+	invalid.Outcome = "invalid"
+
+	tests := []struct {
+		name      string
+		result    QueryRuntimeOperationReceiptResult
+		wantFound bool
+		wantErr   bool
+	}{
+		{name: "authorized not found", result: QueryRuntimeOperationReceiptResult{}},
+		{name: "exact persisted receipt", result: QueryRuntimeOperationReceiptResult{Found: true, Receipt: &valid}, wantFound: true},
+		{name: "found without receipt", result: QueryRuntimeOperationReceiptResult{Found: true}, wantErr: true},
+		{name: "receipt while not found", result: QueryRuntimeOperationReceiptResult{Receipt: &valid}, wantErr: true},
+		{name: "invalid receipt", result: QueryRuntimeOperationReceiptResult{Found: true, Receipt: &invalid}, wantErr: true},
+		{name: "wrong execution key", result: QueryRuntimeOperationReceiptResult{Found: true, Receipt: &wrongExecution}, wantErr: true},
+		{name: "wrong fence", result: QueryRuntimeOperationReceiptResult{Found: true, Receipt: &wrongFence}, wantErr: true},
+		{name: "wrong operation", result: QueryRuntimeOperationReceiptResult{Found: true, Receipt: &wrongOperation}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			receipt, found, err := ValidateQueryRuntimeOperationReceiptResult(test.result, valid.ExecutionKey, valid.Fence, valid.OperationID)
+			if test.wantErr {
+				if !errors.Is(err, common.ErrConflict) || found {
+					t.Fatalf("found=%v receipt=%+v err=%v, want conflict", found, receipt, err)
+				}
+				return
+			}
+			if err != nil || found != test.wantFound {
+				t.Fatalf("found=%v receipt=%+v err=%v", found, receipt, err)
+			}
+			if found && !runtimecontract.SameRuntimeOperationReceipt(receipt, valid) {
+				t.Fatalf("receipt=%+v, want %+v", receipt, valid)
+			}
+		})
+	}
+}
+
+func TestValidateCommitRuntimeOperationReceiptResultRequiresExactReceipt(t *testing.T) {
+	valid := validOwnerReceiptResultFixture()
+	invalid := valid
+	invalid.Outcome = "invalid"
+	drifted := valid
+	drifted.Evidence.Summary = "different"
+
+	for _, test := range []struct {
+		name    string
+		result  CommitRuntimeOperationReceiptResult
+		wantErr bool
+	}{
+		{name: "exact", result: CommitRuntimeOperationReceiptResult{Receipt: valid, StateRevision: 7}},
+		{name: "missing", result: CommitRuntimeOperationReceiptResult{}, wantErr: true},
+		{name: "invalid", result: CommitRuntimeOperationReceiptResult{Receipt: invalid}, wantErr: true},
+		{name: "payload drift", result: CommitRuntimeOperationReceiptResult{Receipt: drifted}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			receipt, err := ValidateCommitRuntimeOperationReceiptResult(test.result, valid)
+			if test.wantErr {
+				if !errors.Is(err, common.ErrConflict) {
+					t.Fatalf("receipt=%+v err=%v, want conflict", receipt, err)
+				}
+				return
+			}
+			if err != nil || !runtimecontract.SameRuntimeOperationReceipt(receipt, valid) {
+				t.Fatalf("receipt=%+v err=%v", receipt, err)
+			}
+		})
+	}
+}
 
 func TestCapabilityOperationResultCarriesOnlyReceiptIdentity(t *testing.T) {
 	results := []reflect.Type{

@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-19
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -25,8 +25,13 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
   持久化最终状态。Runtime 的 failed/cancelled/superseded terminal outcome 均形成 rejected Result，不开放外围状态
   更新命令。
 - terminal material 的顶层 `ArtifactRefs` 是允许引用集合；summary、coverage 与 closeout 中的 artifact ref 必须属于
-  该集合。owner 将每个 raw ref 物化为 canonical child Artifact ID，raw ref 只保存在 `URI`/`SourceRef`，正文不进入
-  EventHub。Artifact scope 必须与父 Result 的 workspace/run/result 完全一致。
+  该集合。owner 将每个 raw ref 物化为 canonical child Artifact ID，并只在 Result 顶层、summary 与 coverage 投影中
+  改写为 child ID；formal closeout 保留其 hash 已封存的 raw ref，child 的 `URI`/`SourceRef` 提供二者映射。正文不进入
+  EventHub，Artifact scope 必须与父 Result 的 workspace/run/result 完全一致。
+- current-schema formal closeout 绑定 `CloseoutID + StartupInputHash + DefinitionRevision + RuntimeStateRevision + TerminalOutcome`
+  并逐 requirement/CWI 保存 coverage、assessment、evidence 三个独立状态。accepted evidence 必须给出 owner revision-set
+  hash；顶层 accepted refs 必须等于逐项 accepted union，完整 closeout 以 canonical hash 防漂移。`completed` 不接受
+  uncovered、unsatisfied、indeterminate 或无 accepted evidence 的 requirement；Result owner只校验封存完整性，不重新授予 credit。
 - Result 删除是可重试的聚合删除：先删除聚合根，再清理全部正式子 Artifact；中途失败后可从 orphan cleanup 继续。
   单独 Artifact delete 只允许清理父 Result 已不存在的 orphan，不能使一个仍存在的 Result 留下悬空引用。
 
@@ -77,7 +82,11 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 - Result/Artifact scope、父引用、聚合级联删除、orphan delete 与 file backend 跨 workspace ResultID 隔离。
 - concrete command/result 类型、默认/最大分页、cursor continuation/cycle guard 和 query clone 隔离。
 - stable Eventstream dedupe、nested artifact reference closure、terminal material isolation 与 allocation benchmark。
+- formal closeout identity/hash、三轴 requirement outcome、accepted-evidence union、owner revision set 与 indeterminate-success 拒绝。
+- 1,024 组 unique evidence/artifact refs 的 normalization/hash、canonical child mapping、重排稳定性、输入隔离与
+  toolchain-relative allocation growth guard；同时保留 hash 与 Result mapping 的独立 allocation benchmark。
 
-## 待完善测试点
+## 当前验证结论
 
-- [ ] 增加 1,000+ evidence/artifact ref 的性能阈值测试；当前 benchmark 只观测常规 slice，不把机器相关数值设为合同。
+- 当前没有已知的本地可执行合同或测试缺口；性能守卫只约束引用规模增长不得出现异常的超线性 allocation，
+  不把特定机器 wall-clock 或绝对 alloc 数写成业务合同。

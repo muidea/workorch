@@ -467,7 +467,7 @@ func TestGoalDoDManager_DefinitionRevisionIsMonotonicAcrossContentReversion(t *t
 	currentRevision := workspacepkgcontracts.ExecutionDefinitionRevision(string(goalA2.ID), goalA2.DefinitionRevision, string(dodA2.ID), dodA2.DefinitionRevision)
 	staleRestart := workspaceevents.WorkspaceExecutionIntentCommand{
 		Kind: runtimecontract.RuntimeExecutionIntentRestart,
-		Bootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{
+		Bootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			GoalID: goalA.ID, DoDID: dodA.ID, Revision: staleRevision,
 		}},
 	}

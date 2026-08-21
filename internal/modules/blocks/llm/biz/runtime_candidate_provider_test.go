@@ -288,7 +288,15 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	if !strings.Contains(authority, `"batchId":"batch-1"`) || !strings.Contains(authority, `"batchSequence":0`) || !strings.Contains(authority, `"coverageItems":[{"ID":"cwi-001"`) || !strings.Contains(providerRequest.Schema, `"planStep":{"const":"proof_batch"}`) {
 		t.Fatalf("proof batch lost current authority: schema=%s authority=%s", providerRequest.Schema, authority)
 	}
-	if strings.Contains(providerRequest.Schema, `"coverageOrder"`) || !strings.Contains(authority, "Do not return coverageOrder") {
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(providerRequest.Schema), &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("proof batch schema has no top-level properties: %s", providerRequest.Schema)
+	}
+	if _, exposesCoverageOrder := properties["coverageOrder"]; exposesCoverageOrder || !strings.Contains(authority, "Do not return coverageOrder") {
 		t.Fatalf("proof batch repeated SM-3 coverage order: schema=%s authority=%s", providerRequest.Schema, authority)
 	}
 }
@@ -389,14 +397,14 @@ func TestRuntimeSemanticPlanProviderRejectsMixedDocumentFields(t *testing.T) {
 
 func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver a bounded artifact",
 		DoDID: "dod-1", DoDDefinition: "the artifact works", CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: target},
-		StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{{Stage: "planning", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-planning", Instructions: "planning-soul-guidance"}}},
+		StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{{Stage: "planning", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-planning", Revision: 1, ContentHash: "soul-planning-hash", SourceProvenance: "test", Instructions: "planning-soul-guidance"}}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()},
 	}
 	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "the artifact works", Order: 1}}
@@ -592,10 +600,10 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			DialogLanguage:    "zh-CN",
-			DefaultSoul:       &runtimecontract.RuntimeSoulContext{ID: "soul-default", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
+			DefaultSoul:       &runtimecontract.RuntimeSoulContext{ID: "soul-default", Revision: 1, ContentHash: "soul-default-hash", SourceProvenance: "test", Instructions: "default-only-soul" + strings.Repeat("d", 22*1024)},
 			StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{
-				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024), AllowedSkillRefs: []string{"*"}}},
-				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
+				{Stage: "execution", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-execution", Revision: 1, ContentHash: "soul-execution-hash", SourceProvenance: "test", Instructions: "execution-only-soul" + strings.Repeat("e", 22*1024), AllowedSkillRefs: []string{"*"}}},
+				{Stage: "validation", Soul: runtimecontract.RuntimeSoulContext{ID: "soul-validation", Revision: 1, ContentHash: "soul-validation-hash", SourceProvenance: "test", Instructions: "validation-only-soul" + strings.Repeat("v", 13*1024)}},
 			},
 			Skills: runtimeSkills, SkillContextBudget: skillBudget,
 			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
@@ -658,7 +666,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 		ChangeImpact: &runtimecontract.RuntimeDefinitionChangeImpact{
 			Version: runtimecontract.RuntimeDefinitionChangeImpactVersionCurrent, Changed: true, Policy: "cumulative", RequiredPreExecutionAssessment: true,
@@ -914,7 +922,7 @@ func TestRuntimeProviderContractRequiresCompleteCompactBoundedOutput(t *testing.
 }
 
 func TestValidateRuntimeCandidateContextIntegrityRejectsProtectedContextLoss(t *testing.T) {
-	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", DoDID: "dod-1"}
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", DoDID: "dod-1"}
 	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
 		Focus:         runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
@@ -1113,7 +1121,7 @@ func TestRuntimeCandidateContextProjectionPreservesTargetGroundingInVolatileAuth
 			t.Fatalf("volatile target-grounding context lost %s: %s", required, encoded)
 		}
 	}
-	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod"}
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod"}
 	base := runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{ID: "profile"}}}
 	before := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, base)
 	context.Focus.TargetRefs = []string{"different.go"}
@@ -1766,7 +1774,7 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-scope", GoalID: "goal-scope", GoalDefinition: "goal", DoDID: "dod-scope", DoDDefinition: "dod"}
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-scope", GoalID: "goal-scope", GoalDefinition: "goal", DoDID: "dod-scope", DoDDefinition: "dod"}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
 	request, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
@@ -1966,7 +1974,7 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)

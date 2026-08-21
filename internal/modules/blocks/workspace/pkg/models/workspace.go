@@ -24,6 +24,11 @@ type Workspace struct {
 	SoulBindings         map[string]common.SoulID
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
+	// DefinitionAdmissionCandidates is immutable owner history. The current
+	// candidate is the highest revision in one CandidateID lineage.
+	DefinitionAdmissionCandidates []DefinitionAdmissionCandidate
+	StartupInput                  *WorkspaceStartupInputContract
+	ActivationAdmission           *WorkspaceActivationAdmission
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity

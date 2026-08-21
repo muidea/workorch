@@ -6,6 +6,14 @@ func CloneAcceptanceProjection(item AcceptanceProjection) AcceptanceProjection {
 	item.Slices = cloneAcceptanceSlices(item.Slices)
 	item.CurrentFocus = cloneCoverageFocus(item.CurrentFocus)
 	item.Budget = cloneConvergenceBudget(item.Budget)
+	if item.ExecutionBudget != nil {
+		value := item.ExecutionBudget.Clone()
+		item.ExecutionBudget = &value
+	}
+	if item.RecoverableWait != nil {
+		value := item.RecoverableWait.Clone()
+		item.RecoverableWait = &value
+	}
 	item.RepairDirective = cloneRuntimeRepairDirective(item.RepairDirective)
 	item.CapabilityStates = cloneRuntimeCapabilityStates(item.CapabilityStates)
 	item.Governance = append([]RuntimeGovernanceState(nil), item.Governance...)

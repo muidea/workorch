@@ -700,6 +700,7 @@ func (m *Biz) runScheduledRuntimeDrive(ctx context.Context, request scheduledRun
 	defer m.finishScheduledRuntimeDrive(ctx, request, &retry, &freshActivationRequired)
 	err := m.driveAndProjectRuntimeLockedWithCommand(ctx, orchestratorevents.DriveRuntimeCommand{
 		WorkspaceID: request.workspaceID, RunID: request.runID,
+		RecoveryLeaseGeneration: request.leaseGeneration,
 		ReconciliationRequestID: request.reconciliationRequestID, ReconciliationGeneration: request.reconciliationGeneration,
 	})
 	if err == nil || errors.Is(err, context.Canceled) {
@@ -724,6 +725,22 @@ func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request sc
 	var fresh *runtimeFreshActivationRequiredError
 	if errors.As(err, &fresh) {
 		return nil, true
+	}
+	var recoverableWait *runtimeRecoverableWaitPendingError
+	if errors.As(err, &recoverableWait) {
+		delay := time.Second
+		if dueAt, parseErr := time.Parse(time.RFC3339Nano, recoverableWait.Wait.NextEligibleAt); parseErr == nil {
+			delay = time.Until(dueAt)
+			if delay <= 0 {
+				delay = time.Millisecond
+			}
+		}
+		return &runtimeRecoveryLeaseRequest{
+			Reason:           runtimecontract.RuntimeDriveLeaseReasonRecoverableWait,
+			FailureSignature: "recoverable-wait/" + recoverableWait.Wait.WaitID,
+			Delay:            delay,
+			Source:           request.source,
+		}, false
 	}
 	var persisted *runtimePersistedDrivePendingError
 	if errors.As(err, &persisted) {
@@ -1141,9 +1158,15 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 	var outcomeUnknown *runtime.OperationOutcomeUnknownError
 	var casConflict *runtime.RuntimeCASConflictError
 	var semanticRejection *runtime.RuntimeSemanticRejectionError
+	var executionBudgetExhausted *runtimecontract.RuntimeBudgetExhaustedError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
+	case errors.As(err, &executionBudgetExhausted):
+		return runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionBudgetExhausted, Code: "execution_budget_exhausted",
+			Signature: "execution-budget-exhausted/" + string(executionBudgetExhausted.Dimension), Message: msg,
+		}
 	case errors.As(err, &capabilityCatalogUnavailable):
 		return runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassCapabilityUnavailable, Code: "mcp_capability_catalog_unavailable",

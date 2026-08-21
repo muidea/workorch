@@ -455,7 +455,7 @@ func runtimeSoulContext(item *soulmodel.Soul) *runtimecontract.RuntimeSoulContex
 		return nil
 	}
 	return &runtimecontract.RuntimeSoulContext{
-		ID: item.ID, Name: item.Name, Description: item.Description,
+		ID: item.ID, Revision: item.Revision, ContentHash: item.ContentHash, SourceProvenance: item.SourceProvenance, Name: item.Name, Description: item.Description,
 		BusinessDomains: append([]string(nil), item.BusinessDomains...), Instructions: item.SoulMD,
 		AllowedSkillRefs:            append([]string(nil), item.AllowedSkillRefs...),
 		AllowedMCPServerRefs:        append([]string(nil), item.AllowedMCPServerRefs...),

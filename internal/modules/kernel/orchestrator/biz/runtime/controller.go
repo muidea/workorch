@@ -101,6 +101,10 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	executionBudget, err := runtimecontract.NewRuntimeExecutionBudgetLedger(facts.ExecutionBudgetPolicy)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -110,6 +114,7 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 		Definition:       definition,
 		Facts:            facts,
 		SemanticPlanning: semanticPlanning,
+		ExecutionBudget:  executionBudget,
 		Decision:         decision,
 	}
 	if err := aggregate.Validate(); err != nil {

@@ -69,4 +69,8 @@ estimatedTokensPerByte = 0.25
 		t.Fatalf("production setup: %v", err)
 	}
 	owner.Stop(ctx)
+	owner.Stop(ctx)
+	if owner.execution != nil || owner.service != nil || owner.projection != nil || owner.runtime != nil || owner.workspaceGate != nil || owner.cliDispatcher != nil {
+		t.Fatalf("duplicate Stop retained application lifecycle state: %+v", owner)
+	}
 }

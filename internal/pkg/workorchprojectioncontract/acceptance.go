@@ -5,17 +5,19 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // AcceptanceProjection is the complete owner-neutral acceptance and Runtime
 // audit read model. It owns no Runtime transition or evidence admission.
 type AcceptanceProjection struct {
-	ActiveSliceID    string                   `json:"activeSliceId,omitempty"`
-	Slices           []AcceptanceSlice        `json:"slices,omitempty"`
-	CurrentFocus     *CoverageFocus           `json:"currentFocus,omitempty"`
-	Budget           *ConvergenceBudget       `json:"budget,omitempty"`
-	RepairDirective  *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
-	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
-	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
-	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
-	SemanticPlanning *RuntimeSemanticPlanning `json:"semanticPlanning,omitempty"`
-	Audit            *RuntimeAudit            `json:"audit,omitempty"`
-	Summary          AcceptanceSummary        `json:"summary"`
+	ActiveSliceID    string                                      `json:"activeSliceId,omitempty"`
+	Slices           []AcceptanceSlice                           `json:"slices,omitempty"`
+	CurrentFocus     *CoverageFocus                              `json:"currentFocus,omitempty"`
+	Budget           *ConvergenceBudget                          `json:"budget,omitempty"`
+	ExecutionBudget  *runtimecontract.RuntimeExecutionBudgetView `json:"executionBudget,omitempty"`
+	RecoverableWait  *runtimecontract.RuntimeRecoverableWaitView `json:"recoverableWait,omitempty"`
+	RepairDirective  *RuntimeRepairDirective                     `json:"repairDirective,omitempty"`
+	CapabilityStates []RuntimeCapabilityState                    `json:"capabilityStates,omitempty"`
+	Governance       []RuntimeGovernanceState                    `json:"governance,omitempty"`
+	Operations       []RuntimeOperationStatus                    `json:"operations,omitempty"`
+	SemanticPlanning *RuntimeSemanticPlanning                    `json:"semanticPlanning,omitempty"`
+	Audit            *RuntimeAudit                               `json:"audit,omitempty"`
+	Summary          AcceptanceSummary                           `json:"summary"`
 }
 
 // AcceptanceSlice is the owner-neutral read projection of one Runtime

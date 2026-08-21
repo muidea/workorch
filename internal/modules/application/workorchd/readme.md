@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -22,6 +22,11 @@ Last Verified: 2026-08-20
   用一次 `ReadSelectionSnapshotCommand` 同时取得并验证 selected Server/Capability。管理 DTO 只公开 `environmentRefs`，不接受、缓存或投影 credential 明文。
 - `biz/runtimeComponent` 是 Workorchd 内唯一长生命周期 runtime session owner；`runtimeApplicationPorts` 只保存借用函数，不复制 Session 指针，并通过 `ApplicationPorts` 向 Biz/use case 提供短生命周期借用，`service/server` 不接触 `runtimecore.Session`。`ManagedRuntime` 的 Eventstream 订阅、有限缓存与释放仍由 `biz/appservice/runtimecore` 实现，但其构造和关闭只由该组件持有；`pkg/observed` 仅保存快照 DTO 与纯映射，不提供 owner action、snapshot facade 或跨 owner service adapter；生产 bootstrap 不暴露 owner repository。
 - workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`，并将它封装进 workspace-scoped restart intent；Workspace owner 校验 definition/scope 后再把 typed intent 交给 Run owner，Application 不直接发送 Run create command。
+- RuntimeBootstrap 编译前，application 先把 exact Goal、DoD、Template snapshot 与 resolved workspace directory 组装为
+  Workspace-owned immutable `DefinitionAdmissionCandidate`。pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
+  `one_of/any_of/quorum/threshold/first_success` 或 unresolved declared prerequisite 通过 Decision owner 专用 typed ticket
+  fail-closed。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
+  Decision resolution → Workspace acknowledgement(eligible)，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef + targetSelectorSubjectRef` 封存为 File target-selection scope。空 workspace 的 scope 只表示该 profile 已授权 File owner 接受一个后续的具体 workspace-relative 创建目标；它不从 Goal/DoD 或目录名猜文件路径，且不绕过 File owner 的 operation admissibility/feasibility。
 - activation 将每个 DoD item 标记为需要 typed assessment，并按 profile contract 的 required acceptance dimension/deliverable expectation 追加稳定 focus；primary state-change 优先于 supplemental evidence，同一 `scope + id` 只生成一个 baseline item。
 - activation 可以把 profile 的 `RuntimeOwnerFactRequirement` 编译进 immutable DefinitionFocus；例如 software-dev
@@ -31,6 +36,11 @@ Last Verified: 2026-08-20
 - RuntimeBootstrap 的 typed activation context 直接保存 dialog language、默认及 stage Soul 内容快照、Skill、MCP server/capability 选择、Memory、evidence policy，以及 state-change、capability-usage、typed validation、profile acceptance/deliverable/evidence、acceptance-slice、template stage policy execution contract。Skill 明确区分 WorkOrch Registry 与外部 SkillHub Catalog provenance，并在进入 Run bootstrap 前封存最多 5 项、单项 instruction 8 KiB、instruction 总计 24 KiB、metadata 总计 16 KiB 的 C3 byte budget；只有 instruction 可做确定性 UTF-8 裁剪，来源身份与原始长度随 snapshot 保存。Memory 同时封存 bounded candidate/selected/excluded、quota、score/hit 与 byte/token budget provenance；这些 provenance 只解释 context selection，不参与 SM-2 credit。application 将系统 repair limit 和 matched validation retry limit 封存进新 Run convergence policy，Orchestrator 不读取 template map。
 - acceptance compiler 对 focus 总数执行中立上限门禁。software-dev profile 的 `direct_validation` 分组每个 slice 最多 4 个 work item，全部 focus 最多 64 个；slice 只约束 presentation/candidate context，每个 CWI 仍生成独立 focus，不能据此声称减少 assessment 循环。
 - RuntimeBootstrap 的 typed definition context 保存 definition change impact，包括累积 Goal/DoD identity、原位修订记录、pre-execution assessment 要求与中立 strategy requirements；该快照直接进入 LLM C1。
+- Runtime definition context 同时保存 Workspace owner 签发的 `StartupInputHash`。Restart 必须与 current eligible admission
+  精确匹配；Resume 不读取最新 Goal/DoD，也不把后续 candidate/promotion 注入既有 Run。
+- activation同时封存与repair/recovery source policy一致的`RuntimeExecutionBudgetPolicy`。read-model从opaque Runtime
+  aggregate纯派生`RuntimeExecutionBudgetView`与active `RuntimeRecoverableWaitView`，明确区分recoverable wait、
+  governance blocker和terminal；Application、HTTP、SSE、Web/TUI不提供retry-now、clear wait、top-up或预算回写入口。
 - Biz 启动 workspace projection 后再启动 HTTP；Stop 先关闭 execution admission，再优雅关闭 transport，随后关闭 projection 并等待已接收后台任务，最后关闭 runtime session。不再运行禁止的 inactive-running workspace recovery，也不注册 stale-Step watchdog timer。
 - Decision/Approval HTTP resolve 只提交对应 owner command 并刷新投影，不发布 Run Resume；Runtime Decision resolution 由 Decision owner 通过 typed EventHub command 直接提交 Orchestrator。
 - 生产路径不存在 run-scoped Start/Resume mutation 或直达 Run owner 的 scheduler command；唯一 execution ingress 是
@@ -52,7 +62,7 @@ Last Verified: 2026-08-20
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `blocks/workspace` | Application → Workspace | definition/template CRUD、execution intent、terminal/read model query | 完整；Workspace owner 决定 definition 与 active slot |
+| `blocks/workspace` | Application → Workspace | definition/template CRUD、candidate admission/promotion/ack、execution intent、terminal/read model query | 完整；Workspace owner 决定 startup input、eligibility 与 active slot |
 | `blocks/run` | Application → Run | Run/snapshot/status/关联资源读取；显式 workspace purge 的 owner cleanup | 完整；`RunPorts` 只读，execution intent 不直达 Run owner |
 | `kernel/orchestrator` | Application → Orchestrator | Runtime read/drive observation、受限 purge/management query | 完整；不持有 drive/reducer |
 | `blocks/llm` | Application → LLM | active config、catalog、refresh、selection validation、通用 completion/embedding | 完整；不直连 ai-proxy |
@@ -95,12 +105,24 @@ Last Verified: 2026-08-20
 - [x] 生产 transport AST 扫描确认 `service/server` 不导入或保存 EventHub、runtime Session、root appservice 兼容状态；聚合边界校验禁止 workorchd 生产代码直接导入 repository。
 - [x] activation Memory selection 执行 candidate/final item、type quota、byte/token hard limit；完整 selection evidence 深拷贝后进入 sealed Runtime activation，并与最终 Memory identity 精确匹配。
 - [x] Skill Registry 使用 concrete create/get/bounded-list result 并由 owner 签发 canonical provenance；SkillHub Catalog 保持独立来源，activation 在 LLM C3 前执行 Skill 数量、instruction/metadata byte budget 与 UTF-8 裁剪。
+- [x] Runtime execution-budget的source-ledger聚合、active wait/terminal projection分离与只读clone路径。
+- [x] Workspace directory resolver 对空输入生成隔离的 `.workorch-workspaces/<workspace-id>`，规范化显式相对/绝对
+  目录并拒绝相对逃逸或不安全 workspace path segment。
 
-真正待完善：
+闭合验证：
 
-- [ ] 为七组 `ApplicationPorts` 补齐跨组的 nil/wrong owner result、scope mismatch 与 transport-safe error mapping 表驱动覆盖。
-- [ ] 覆盖 owner 持久化幂等的端到端重放，以及 execution use case 关闭后同步/异步 admission 均 fail-closed。
-- [ ] 覆盖完整 Stop 顺序：admission → transport → projection/background tasks → runtime session，并在真实 Setup 后验证重复 Stop 幂等。
-- [ ] 覆盖大 cumulative Goal/DoD 下 activation context budget 不全量复制稳定上下文。
-- [ ] 扩展生产静态边界扫描：禁止 `ApplicationPorts.Run` 引入 mutation，禁止 transport 直接导入 owner Biz/service 或 capability executor，并固定 Application 不创建 `ReplacementIntent` 或 successor。
-- [ ] 覆盖 activation 中 Soul/MCP/profile DTO 深拷贝，以及 Registry/Catalog 后续更新不改变已 sealed Run 的真实 restart 集成路径。
+- [x] concrete owner response decoder 矩阵覆盖 nil、wrong concrete result 与 owner error cause；七组 `ApplicationPorts`
+  的代表 HTTP 路由覆盖 transport-safe error mapping，workspace/request/intent 以及现有 owner read/mutation 测试覆盖
+  scope mismatch 并 fail-closed。
+- [x] Run owner 的 file-backed restart 重放跨 owner restart 仍只保留一个 `ActivationRequestID` 对应的 Run；changed
+  payload 冲突。execution use case 关闭后同步/异步 admission 均 fail-closed 且无 side effect。
+- [x] AST 顺序测试固定 Stop 为 admission → transport → projection/background tasks → runtime session；真实 Setup
+  后重复 Stop 幂等并清空所有生命周期引用。
+- [x] 512 份、单份 32 KiB 的 cumulative Goal/DoD 压力用例确认 activation 只传 identity/revision，不复制稳定正文，
+  definition change context 保持有界。
+- [x] 生产静态边界扫描禁止 `ApplicationPorts.Run` 引入 mutation，禁止 transport 导入其他 owner Biz/service 或
+  capability executor，并禁止 Application 构造 `ReplacementIntent`、Run successor。
+- [x] Soul/MCP/profile 的 DTO 与 activation clone 深拷贝已覆盖；file-backed 真实 restart admission 在 Run owner
+  重启、Registry/Catalog/caller DTO 更新后仍读取原 sealed snapshot，exact replay 命中同一 Run。
+
+当前没有已知的 executable contract gap；新增接口或 owner 交互必须同时扩展上述边界与回归矩阵。

@@ -21,6 +21,15 @@ func Workspace(item *workspaceevents.Workspace) *workspacemodel.Workspace {
 		DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(item.SoulBindings),
 		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
+	ret.DefinitionAdmissionCandidates = cloneAdmissionCandidates(item.DefinitionAdmissionCandidates)
+	if item.StartupInput != nil {
+		value := item.StartupInput.Clone()
+		ret.StartupInput = &value
+	}
+	if item.ActivationAdmission != nil {
+		value := item.ActivationAdmission.Normalized()
+		ret.ActivationAdmission = &value
+	}
 	if item.DefaultLLMSelection != nil {
 		value := *item.DefaultLLMSelection
 		ret.DefaultLLMSelection = &value
@@ -66,6 +75,15 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 		return nil
 	}
 	ret := &workspaceevents.Workspace{Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory, State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.FromSoulIDMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+	ret.DefinitionAdmissionCandidates = cloneAdmissionCandidates(item.DefinitionAdmissionCandidates)
+	if item.StartupInput != nil {
+		value := item.StartupInput.Clone()
+		ret.StartupInput = &value
+	}
+	if item.ActivationAdmission != nil {
+		value := item.ActivationAdmission.Normalized()
+		ret.ActivationAdmission = &value
+	}
 	if item.DefaultLLMSelection != nil {
 		value := *item.DefaultLLMSelection
 		ret.DefaultLLMSelection = &value
@@ -73,6 +91,17 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 	if item.TerminalDelivery != nil {
 		value := *item.TerminalDelivery
 		ret.TerminalDelivery = &value
+	}
+	return ret
+}
+
+func cloneAdmissionCandidates(items []workspacemodel.DefinitionAdmissionCandidate) []workspacemodel.DefinitionAdmissionCandidate {
+	if items == nil {
+		return nil
+	}
+	ret := make([]workspacemodel.DefinitionAdmissionCandidate, len(items))
+	for idx := range items {
+		ret[idx] = items[idx].Clone()
 	}
 	return ret
 }

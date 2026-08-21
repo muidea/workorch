@@ -254,13 +254,17 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resu
 
 func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, accepted bool, evidenceRefs []string) *runtimecontract.RuntimeResultCloseout {
 	closeout := runtimecontract.RuntimeResultCloseout{
-		SchemaVersion:      runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
-		DefinitionRevision: aggregate.Facts.DefinitionRevision,
-		EvidenceRefs:       append([]string(nil), evidenceRefs...),
-		ArtifactRefs:       runtimeTerminalArtifactRefs(aggregate.Facts),
-		OperationOutcomes:  runtimeOperationCloseouts(aggregate),
-		RecoveryPolicy:     aggregate.Facts.RecoveryPolicy.Normalized(),
-		RecoveryLedger:     aggregate.Facts.Recovery,
+		SchemaVersion:        runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
+		CloseoutID:           runtimeCloseoutID(aggregate),
+		StartupInputHash:     aggregate.Definition.Normalized().StartupInputHash,
+		DefinitionRevision:   aggregate.Facts.DefinitionRevision,
+		RuntimeStateRevision: aggregate.StateRevision,
+		TerminalOutcome:      terminalOutcomeForAggregate(aggregate),
+		EvidenceRefs:         append([]string(nil), evidenceRefs...),
+		ArtifactRefs:         runtimeTerminalArtifactRefs(aggregate.Facts),
+		OperationOutcomes:    runtimeOperationCloseouts(aggregate),
+		RecoveryPolicy:       aggregate.Facts.RecoveryPolicy.Normalized(),
+		RecoveryLedger:       aggregate.Facts.Recovery,
 	}
 	accumulator := newRuntimeCloseoutAccumulator(accepted)
 	// The persisted coverage ledger is the sole current-schema closure authority.
@@ -277,8 +281,158 @@ func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, accepted bool, ev
 	if !accepted {
 		accumulator.applyTerminalFailure(&closeout, aggregate)
 	}
-	value := closeout.Normalized()
+	closeout.OwnerRevisionSet = runtimeCloseoutOwnerRevisionSet(aggregate)
+	closeout.RequirementOutcomes = runtimeRequirementOutcomes(aggregate, closeout.OwnerRevisionSet)
+	for _, outcome := range closeout.RequirementOutcomes {
+		closeout.AcceptedEvidenceRefs = append(closeout.AcceptedEvidenceRefs, outcome.AcceptedEvidenceRefs...)
+	}
+	closeout.DeliverableRefs = runtimeCloseoutDeliverableRefs(aggregate)
+	value := closeout.WithCloseoutHash()
 	return &value
+}
+
+func runtimeCloseoutID(aggregate runtime.RuntimeAggregate) string {
+	return "runtime-closeout/" + string(aggregate.Facts.WorkspaceID) + "/" + string(aggregate.Facts.RunID) + "/" + aggregate.Decision.AuthoritySnapshot.ID
+}
+
+func runtimeCloseoutOwnerRevisionSet(aggregate runtime.RuntimeAggregate) runtimecontract.RuntimeOwnerRevisionSet {
+	set := runtimecontract.RuntimeOwnerRevisionSet{DefinitionRevision: aggregate.Facts.DefinitionRevision}
+	for _, evidence := range aggregate.Facts.Evidence.Accepted {
+		dependencyHash := strings.TrimSpace(evidence.ContentHash)
+		if dependencyHash == "" {
+			dependencyHash = "runtime-evidence-dependency/" + string(evidence.ID) + "/" + evidence.Revision
+		}
+		set.Entries = append(set.Entries, runtimecontract.RuntimeOwnerRevisionRef{
+			OwnerKind: "runtime_authority", OwnerInstanceID: runtimecontract.RuntimeModuleOrchestrator,
+			ResourceKind: "accepted_evidence", ResourceID: string(evidence.ID), SnapshotID: evidence.AuthoritySnapshotID,
+			Revision: evidence.Revision, DependencyHash: dependencyHash,
+		})
+	}
+	return set.WithHash()
+}
+
+func runtimeRequirementOutcomes(aggregate runtime.RuntimeAggregate, ownerSet runtimecontract.RuntimeOwnerRevisionSet) []runtimecontract.RuntimeRequirementOutcome {
+	requiredAssessment := map[common.CoverageWorkItemID]bool{}
+	requiredKinds := map[common.CoverageWorkItemID][]string{}
+	for _, focus := range aggregate.Facts.DefinitionFocuses {
+		for _, id := range focus.CoverageWorkItemIDs {
+			requiredAssessment[id] = requiredAssessment[id] || focus.RequireAssessment
+			requiredKinds[id] = append(requiredKinds[id], focus.RequiredEvidenceKinds...)
+		}
+	}
+	assessmentByCWI := map[common.CoverageWorkItemID]runtimecontract.RuntimeAssessmentFact{}
+	for _, assessment := range aggregate.Facts.Assessments {
+		for _, id := range assessment.CoverageWorkItemIDs {
+			assessmentByCWI[id] = assessment
+		}
+	}
+	ret := make([]runtimecontract.RuntimeRequirementOutcome, 0, len(aggregate.Facts.Coverage))
+	for _, coverage := range aggregate.Facts.Coverage {
+		outcome := runtimecontract.RuntimeRequirementOutcome{
+			RequirementRef: coverage.SourceScope + "/" + coverage.SourceID, SourceItemRef: coverage.SourceID,
+			CoverageWorkItemID: coverage.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+			OwnerRevisionSetHash: ownerSet.SetHash,
+		}
+		if outcome.RequirementRef == "/" || outcome.RequirementRef == "" {
+			outcome.RequirementRef = string(coverage.ID)
+		}
+		if outcome.SourceItemRef == "" {
+			outcome.SourceItemRef = string(coverage.ID)
+		}
+		switch coverage.State {
+		case runtimecontract.RuntimeCoverageItemStateSatisfied:
+			outcome.CoverageState = runtimecontract.RuntimeRequirementCovered
+		case runtimecontract.RuntimeCoverageItemStateOpen:
+			if len(coverage.EvidenceRefs) != 0 {
+				outcome.CoverageState = runtimecontract.RuntimeRequirementPartiallyCovered
+			} else {
+				outcome.CoverageState = runtimecontract.RuntimeRequirementUncovered
+			}
+		default:
+			outcome.CoverageState = runtimecontract.RuntimeRequirementUncovered
+		}
+		assessment, hasAssessment := assessmentByCWI[coverage.ID]
+		if !hasAssessment && !requiredAssessment[coverage.ID] && coverage.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+			outcome.AssessmentState = runtimecontract.RuntimeRequirementSatisfied
+		} else if !hasAssessment {
+			outcome.AssessmentState = runtimecontract.RuntimeRequirementUnassessed
+		} else {
+			switch assessment.Disposition {
+			case runtimecontract.AssessmentDispositionSatisfied:
+				outcome.AssessmentState = runtimecontract.RuntimeRequirementSatisfied
+			case runtimecontract.AssessmentDispositionTerminalRejection:
+				outcome.AssessmentState = runtimecontract.RuntimeRequirementUnsatisfied
+			default:
+				outcome.AssessmentState = runtimecontract.RuntimeRequirementIndeterminate
+				outcome.AssessmentReasonCode = "assessment_evidence_incomplete"
+				if assessment.Gap != nil {
+					outcome.MissingEvidenceKinds = append(outcome.MissingEvidenceKinds, assessment.Gap.MissingEvidenceKinds...)
+					if assessment.Gap.FailureCode != "" {
+						outcome.AssessmentReasonCode = assessment.Gap.FailureCode
+					}
+				}
+			}
+		}
+		outcome.MissingEvidenceKinds = append(outcome.MissingEvidenceKinds, requiredKinds[coverage.ID]...)
+		outcome.EvidenceItems = runtimeRequirementEvidenceItems(aggregate.Facts.Evidence, coverage, ownerSet.SetHash)
+		for _, item := range outcome.EvidenceItems {
+			if item.State == runtimecontract.RuntimeRequirementEvidenceAccepted {
+				outcome.AcceptedEvidenceRefs = append(outcome.AcceptedEvidenceRefs, item.EvidenceRef)
+			}
+		}
+		outcome = outcome.Normalized()
+		if outcome.AssessmentState != runtimecontract.RuntimeRequirementIndeterminate {
+			outcome.MissingEvidenceKinds = nil
+		}
+		ret = append(ret, outcome)
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].CoverageWorkItemID < ret[j].CoverageWorkItemID })
+	return ret
+}
+
+func runtimeRequirementEvidenceItems(ledger runtimecontract.EvidenceLedger, coverage runtimecontract.RuntimeCoverageItemFact, ownerSetHash string) []runtimecontract.RuntimeRequirementEvidenceItem {
+	ret := make([]runtimecontract.RuntimeRequirementEvidenceItem, 0)
+	appendLedger := func(values []runtimecontract.EvidenceFact, state runtimecontract.RuntimeRequirementEvidenceState) {
+		for _, evidence := range values {
+			if !runtimeEvidenceAppliesToCoverage(evidence, coverage) {
+				continue
+			}
+			bindingRef := ""
+			if len(evidence.BindingRefs) != 0 {
+				bindingRef = evidence.BindingRefs[0]
+			}
+			item := runtimecontract.RuntimeRequirementEvidenceItem{EvidenceRef: string(evidence.ID), BindingRef: bindingRef, State: state, ReasonCode: evidence.FailureCode}
+			if state == runtimecontract.RuntimeRequirementEvidenceAccepted {
+				item.OwnerRevisionSetHash = ownerSetHash
+			}
+			ret = append(ret, item)
+		}
+	}
+	appendLedger(ledger.Accepted, runtimecontract.RuntimeRequirementEvidenceAccepted)
+	appendLedger(ledger.Rejected, runtimecontract.RuntimeRequirementEvidenceRejected)
+	return ret
+}
+
+func runtimeEvidenceAppliesToCoverage(evidence runtimecontract.EvidenceFact, coverage runtimecontract.RuntimeCoverageItemFact) bool {
+	for _, id := range evidence.CoverageWorkItemIDs {
+		if id == coverage.ID {
+			return true
+		}
+	}
+	for _, ref := range coverage.EvidenceRefs {
+		if ref == string(evidence.ID) || ref == evidence.SourceRef {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeCloseoutDeliverableRefs(aggregate runtime.RuntimeAggregate) []string {
+	refs := make([]string, 0)
+	for _, focus := range aggregate.Facts.DefinitionFocuses {
+		refs = append(refs, focus.ArtifactRefs...)
+	}
+	return refs
 }
 
 type runtimeCloseoutAccumulator struct {

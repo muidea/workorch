@@ -16,7 +16,7 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	bootstrap := RuntimeBootstrap{
 		SchemaVersion: RuntimeStateSchemaVersionCurrent,
-		Definition: RuntimeDefinitionContext{
+		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 			CapabilityContract: []string{"file/edit", "shell/command"},
 		},
@@ -90,7 +90,7 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
 		SchemaVersion:     RuntimeStateSchemaVersionCurrent,
-		Definition:        RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
+		Definition:        RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
 		Activation:        RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		Focuses:           []CoverageFocus{{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
 		Slices:            []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
@@ -123,7 +123,7 @@ func TestRuntimeBootstrapRequirementScopeIsPartOfIdentityAndEquality(t *testing.
 func TestRuntimeBootstrapRejectsSharedCoverageFocus(t *testing.T) {
 	bootstrap := RuntimeBootstrap{
 		SchemaVersion: RuntimeStateSchemaVersionCurrent,
-		Definition: RuntimeDefinitionContext{
+		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 		},
 		Activation: RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},

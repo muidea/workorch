@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
@@ -20,7 +20,7 @@ Last Verified: 2026-08-20
 - request 必须携带 workspace/run/authority/dispatch/operation identity 与 File-owned `SealedRuntimeOperation`；该值包含从已持久化 dispatch 复制的 typed operation 及其全量 payload hash。File 先核对精确 Orchestrator source、hash、operation ID、target/CWI scope，再在 owner 内解包 path/ref 和有界输入，不接收一份可与 seal 漂移的独立执行 `Data`；
   result 返回唯一 receipt outcome、target refs、side-effect metadata、bounded evidence/ref 与 original diagnostic。
 - Orchestrator 负责 state-changing admission、approval、evidence quality、coverage binding 和 canonical decision。
-- effect 执行前后通过 Orchestrator 定义的 receipt query/commit concrete command 完成幂等握手；File 只提交 owner observation，不直接写 Runtime aggregate。
+- effect 执行前后通过 Orchestrator 定义的 receipt query/commit concrete command 完成幂等握手；File 只提交 owner observation，不直接写 Runtime aggregate。query 的 `Found/Receipt` 必须一致，已找到的 receipt 必须精确匹配 operation/execution/fence；commit 返回值必须与提交的完整 receipt 相同，否则作为跨 owner conflict fail closed。该校验由六个 capability owner 共用同一 typed event-contract helper。
 - 对跨越信任边界的敏感 file/edit、file/write、patch/apply（密钥、`.env`、`.git`、CI workflow），File owner 先返回 `governance_required` 且不执行副作用；普通 workspace-local 文件的变更规模不构成 approval。resume 只在 exact `ExecutionKey + next Fence` 的 typed grant 经 Orchestrator preflight 验证，且 grant 的 subject、requested action、risk 与 authorization hash 再次匹配 File owner 预期后执行；普通布尔参数或调用方声明不能绕过 approval。
 
 - 所有同步 EventHub handler 在读取、查询 receipt 或执行 effect 前拒绝 nil result；执行 handler 还要求精确 Orchestrator source。文件变更统一编译为 File-private patch effect：`file/edit` 映射为 `text_replace`，`file/write` 映射为 create-only `file_write`，公共 command 不能直接调用 mutation adapter。
@@ -60,9 +60,10 @@ Last Verified: 2026-08-20
 - [x] effect 已发生但 receipt commit 丢失后的 owner proof 重放，以及已有 receipt 的零副作用 duplicate。
 - [x] sealed operation payload/hash、target/context 与 source 漂移在 receipt query/effect 前失败；所有强 handler 对 nil result fail-closed。
 - [x] `file/read` 有界内容、晚段 line range、全文件 hash/binary 检查，以及 manifest revision 对 content change 的失效。
+- [x] manifest revision 对 create/delete/rename 的组合失效与还原；`.workorch-data`、`.git`、`node_modules`、`vendor`、`dist`、`build` 不进入 deliverable manifest。
+- [x] File 唯一消费的跨 owner result（receipt query/commit）覆盖 wrong type、owner error、Found/Receipt 不一致、invalid/stale identity 与 payload drift；prerequisite/reconciliation 是 File 生产、Orchestrator 消费的 concrete result，不在 File 内反向解码。
+- [x] snapshot 大文件、400 文件 manifest 与大文件 patch replay 均有 allocation benchmark；bounded read、500-entry manifest 上限与 replay 零二次写由回归测试约束。
 
-## 待完善测试点
+## 当前验证结论
 
-- [ ] 补齐 manifest revision 对 create/delete/rename 的组合失效，以及 internal/generated path 不污染 deliverable revision。
-- [ ] 对每一组 prerequisite/reconciliation 跨 owner result 补齐 wrong type、scope/identity 组合矩阵；当前 nil result 与执行 seal 已有统一守卫。
-- [ ] 增加 snapshot/manifest/patch apply 的 allocation 与大目录性能基准。
+- 当前没有已知的本地可执行合同或测试缺口；真实文件系统差异继续作为 deployed verification 观察项，不改变上述 owner 合同。

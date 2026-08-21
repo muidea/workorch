@@ -9,6 +9,7 @@ import (
 // It cannot carry an executor, request transport state or delivery ledger.
 type RuntimeInternalAuthorityPayload struct {
 	ReconciliationBatch *runtimecontract.RuntimeCWIReconciliationBatch
+	DefinitionGap       *runtimecontract.RuntimeDefinitionGapObservation
 
 	SemanticFeasibility *runtimecontract.RuntimeSemanticProofFeasibility
 	SemanticDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic
@@ -25,11 +26,12 @@ type RuntimeInternalAuthorityPayload struct {
 	SemanticCoverageOrder     []common.CoverageWorkItemID
 	SemanticOrderManifestHash string
 
-	PrerequisiteResult  *PrerequisiteResult
-	Stale               *runtimecontract.RuntimePrerequisiteStale
-	FeasibilityFact     *runtimecontract.RuntimeFeasibilityFact
-	FailureFact         *runtimecontract.FailureFact
-	CloseActiveDispatch bool
+	PrerequisiteResult              *PrerequisiteResult
+	RecoverableWaitProbeObservation *runtimecontract.RuntimeRecoverableWaitProbeObservation
+	Stale                           *runtimecontract.RuntimePrerequisiteStale
+	FeasibilityFact                 *runtimecontract.RuntimeFeasibilityFact
+	FailureFact                     *runtimecontract.FailureFact
+	CloseActiveDispatch             bool
 
 	Attempt                   int
 	OwnerFeasibility          *runtimecontract.RuntimeOwnerFeasibilityObservation
@@ -64,4 +66,5 @@ const (
 	RuntimeInternalEventGovernanceRequestObserved            RuntimeInternalEventKind = "governance_request_observed"
 	RuntimeInternalEventValidationFailureObserved            RuntimeInternalEventKind = "validation_failure_observed"
 	RuntimeInternalEventRepairSurfaceConfirmationObserved    RuntimeInternalEventKind = "repair_surface_confirmation_observed"
+	RuntimeInternalEventDefinitionGapObserved                RuntimeInternalEventKind = "runtime_definition_gap_observed"
 )

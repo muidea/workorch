@@ -235,6 +235,12 @@ func (c RuntimeTerminalDeliveryFact) Validate() error {
 	if c.Material.WorkspaceID != c.WorkspaceID || c.Material.RunID != c.RunID {
 		return fmt.Errorf("%w: result material scope does not match terminal delivery", common.ErrConflict)
 	}
+	if c.Material.RuntimeCloseout != nil && c.Material.RuntimeCloseout.CloseoutID != "" {
+		closeout := c.Material.RuntimeCloseout.Normalized()
+		if closeout.DefinitionRevision != c.DefinitionRevision || closeout.TerminalOutcome != c.Outcome {
+			return fmt.Errorf("%w: formal runtime closeout does not match terminal delivery authority", common.ErrConflict)
+		}
+	}
 	return nil
 }
 

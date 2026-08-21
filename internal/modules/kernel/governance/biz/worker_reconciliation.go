@@ -2,6 +2,7 @@ package governance
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
+
+const governanceRecoveryInventoryMaxItems = 100_000
 
 func (s *Service) startGovernanceWorker(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) error {
 	if s.background != nil {
@@ -75,7 +78,7 @@ func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 				if err := s.reconcileIncompleteTraces(workCtx); err != nil {
 					return
 				}
-				s.reconcileBlockedRuns(workCtx)
+				_ = s.reconcileBlockedRuns(workCtx)
 			})
 		case <-ctx.Done():
 			return
@@ -401,12 +404,18 @@ func (s *Service) reconcileIncompleteTraces(ctx context.Context) error {
 	if s == nil || s.traces == nil {
 		return common.ErrInvalidArgument
 	}
-	items, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{})
+	items, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{Limit: governanceRecoveryInventoryMaxItems + 1})
 	if err != nil {
 		return err
 	}
+	if len(items) > governanceRecoveryInventoryMaxItems {
+		return fmt.Errorf("%w: governance trace recovery inventory exceeds %d items", common.ErrConflict, governanceRecoveryInventoryMaxItems)
+	}
 	latest := map[string]*governancemodel.AutoGovernanceTrace{}
 	for _, item := range items {
+		if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" || strings.TrimSpace(item.ItemType) == "" || strings.TrimSpace(item.ItemID) == "" {
+			return fmt.Errorf("%w: governance trace recovery inventory contains an invalid owner fact", common.ErrConflict)
+		}
 		if !isIncompleteGovernanceTrace(item) {
 			continue
 		}
@@ -576,17 +585,20 @@ func (s *Service) blockIncompleteTrace(ctx context.Context, trace *governancemod
 	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, reason)
 }
 
-func (s *Service) reconcileBlockedRuns(ctx context.Context) {
+func (s *Service) reconcileBlockedRuns(ctx context.Context) error {
 	if s == nil || s.runs == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	runs, err := s.runs.List(ctx)
 	if err != nil {
-		return
+		return err
+	}
+	if len(runs) > governanceRecoveryInventoryMaxItems {
+		return fmt.Errorf("%w: Run recovery inventory exceeds %d items", common.ErrConflict, governanceRecoveryInventoryMaxItems)
 	}
 	for _, item := range runs {
 		if item == nil || item.WorkspaceID == "" {
-			continue
+			return fmt.Errorf("%w: Run recovery inventory contains an invalid owner fact", common.ErrConflict)
 		}
 		workspaceCtx, scopeErr := common.BindRuntimeWorkspaceContext(ctx, item.WorkspaceID)
 		if scopeErr != nil {
@@ -603,4 +615,5 @@ func (s *Service) reconcileBlockedRuns(ctx context.Context) {
 			}
 		}
 	}
+	return nil
 }

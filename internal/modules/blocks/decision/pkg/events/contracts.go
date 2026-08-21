@@ -21,8 +21,15 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionCommandPurgeWorkspace,
 		TopicDecisionCommandRecordEvidence,
 		TopicOpenRuntimeGovernanceRequest,
+		TopicOpenWorkspaceDefinitionClarification,
+		TopicReconcileWorkspaceDefinitionClarificationCandidate,
+		TopicResolveWorkspaceDefinitionClarificationByAdmission,
+		TopicOpenRuntimeDefinitionClarification,
+		TopicResolveRuntimeDefinitionClarificationByReplacement,
 	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicAcquireRuntimeCapabilities)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOpenRuntimeGovernanceRequest)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOpenRuntimeDefinitionClarification)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicResolveRuntimeDefinitionClarificationByReplacement)
 	return ret
 }

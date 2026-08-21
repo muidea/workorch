@@ -146,6 +146,9 @@ func TestCommitAssessmentFailsClosedAfterOwnerFactReplanBudget(t *testing.T) {
 		Reason: runtimeCWIReopenReasonOwnerFactPostcondition,
 	}}
 	repository.aggregate.Facts.ConvergencePolicy.MaxRepairAttemptsPerFocus = 1
+	policy := runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(repository.aggregate.Facts.ConvergencePolicy, repository.aggregate.Facts.RecoveryPolicy)
+	repository.aggregate.Facts.ExecutionBudgetPolicy = policy
+	repository.aggregate.ExecutionBudget.Policy = policy
 	if err := repository.aggregate.Validate(); err != nil {
 		t.Fatalf("owner-fact budget fixture is invalid: %v", err)
 	}

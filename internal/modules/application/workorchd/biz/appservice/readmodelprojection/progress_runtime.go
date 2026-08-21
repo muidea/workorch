@@ -69,11 +69,37 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		ret.FailureSignature = strings.TrimSpace(facts.Failure.Signature)
 		ret.FailureMessage = strings.TrimSpace(facts.Failure.Message)
 	}
+	if state.ExecutionBudget.Policy.PolicyRevision != "" {
+		activeWaitID := ""
+		if wait, found := activeRuntimeRecoverableWait(state.RecoverableWaits); found {
+			activeWaitID = wait.WaitID
+			if view, viewErr := runtimecontract.RuntimeRecoverableWaitProjection(wait, state.StateRevision); viewErr == nil {
+				ret.RecoverableWait = &view
+			}
+		}
+		terminalCode := ""
+		if state.Decision.Terminal != nil {
+			terminalCode = strings.TrimSpace(state.Decision.Terminal.Code)
+		}
+		if view, err := runtimecontract.BuildRuntimeExecutionBudgetView(facts.WorkspaceID, facts.RunID, state.StateRevision, state.ExecutionBudget, activeWaitID, terminalCode, runtimecontract.RuntimeExecutionBudgetSourceUsageFromFacts(facts)); err == nil {
+			ret.ExecutionBudget = &view
+		}
+	}
 	ret.PrerequisiteRefreshUsed = facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
 	ret.PrerequisiteRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
 	ret.PrerequisiteInvalidations = mapPrerequisiteRefreshInvalidations(state.PrerequisiteInvalidations)
 	ret.PrerequisiteRefreshState = runtimePrerequisiteRefreshState(facts, ret.PrerequisiteInvalidations)
 	return ret
+}
+
+func activeRuntimeRecoverableWait(values []runtimecontract.RuntimeRecoverableWaitRecord) (runtimecontract.RuntimeRecoverableWaitRecord, bool) {
+	for _, raw := range values {
+		wait := raw.Clone()
+		if wait.Active() {
+			return wait, true
+		}
+	}
+	return runtimecontract.RuntimeRecoverableWaitRecord{}, false
 }
 
 func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalidations []projectioncontract.RuntimePrerequisiteRefreshInvalidation) string {

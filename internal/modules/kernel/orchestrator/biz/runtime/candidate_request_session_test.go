@@ -207,14 +207,14 @@ func TestRuntimeCandidateRequestSessionTransportAndTerminalOutcomesAreAttemptFre
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || len(pending.CandidateAttempts) != 0 || pending.Facts.Repair.RepairAttempts != 0 {
+	if pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].NextSequence != 2 || pending.CandidateRequestSessions[0].TransportOutcomes != 1 || len(pending.CandidateAttempts) != 0 || pending.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("transport pending aggregate = %+v", pending)
 	}
 	duplicate, err := controller.recordCandidateRequestTransportOutcome(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-timeout", transient)
 	if err != nil || duplicate.StateRevision != pending.StateRevision {
 		t.Fatalf("duplicate transport = %+v err=%v", duplicate, err)
 	}
-	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-auth"); err != nil {
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-auth"); err != nil {
 		t.Fatal(err)
 	}
 	terminal, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication, Code: "authentication_failed", Signature: "auth"})

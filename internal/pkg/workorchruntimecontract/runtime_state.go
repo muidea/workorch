@@ -142,8 +142,17 @@ type RuntimeStateRecord struct {
 	Diagnostics                []RuntimeDiagnosticRecord
 	// CandidateRequestSessions record provider I/O before a complete candidate
 	// exists. They are not candidate attempts and cannot authorize a dispatch.
-	CandidateRequestSessions    []RuntimeCandidateRequestSession
-	CandidateAttempts           []RuntimeCandidateAttemptRecord
+	CandidateRequestSessions []RuntimeCandidateRequestSession
+	CandidateAttempts        []RuntimeCandidateAttemptRecord
+	// ExecutionBudget is persisted opaquely by Run; only Orchestrator reducers
+	// allocate, consume, reconcile or derive its read-only view.
+	ExecutionBudget RuntimeExecutionBudgetLedger
+	// RecoverableWaits are Orchestrator-owned bounded wait records. Run stores
+	// them opaquely; only one record may be active for a Runtime aggregate.
+	RecoverableWaits []RuntimeRecoverableWaitRecord
+	// DefinitionClarification is the dedicated persisted gap observation,
+	// sealed dispatch and Decision-owner request binding.
+	DefinitionClarification     *RuntimeDefinitionClarificationState
 	GovernanceRequests          []RuntimeGovernanceRequestRecord
 	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
@@ -386,6 +395,37 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := ValidateRuntimeCandidateRequestSessions(r.CandidateRequestSessions); err != nil {
 		return err
+	}
+	if err := r.ExecutionBudget.Validate(); err != nil {
+		return fmt.Errorf("runtime execution budget: %w", err)
+	}
+	if !SameRuntimeExecutionBudgetPolicy(r.ExecutionBudget.Policy, r.Facts.ExecutionBudgetPolicy) {
+		return fmt.Errorf("runtime execution budget policy does not match activation facts")
+	}
+	if r.DefinitionClarification != nil {
+		if err := r.DefinitionClarification.Validate(); err != nil {
+			return fmt.Errorf("runtime Definition clarification: %w", err)
+		}
+		clarification := r.DefinitionClarification.Clone()
+		if clarification.Observation.WorkspaceID != r.Facts.WorkspaceID || clarification.Observation.RunID != r.Facts.RunID ||
+			clarification.Observation.DefinitionRevision != r.Definition.Normalized().Revision || clarification.Observation.StartupInputHash != r.Definition.Normalized().StartupInputHash ||
+			r.Decision.State != ConvergenceStateNeedGovernance || !sameStrings(r.Decision.RequiredOutput.Normalized().AcceptedKinds, []string{RuntimeDefinitionClarificationRequiredOutputKind}) || r.ActiveDispatch != nil {
+			return fmt.Errorf("runtime Definition clarification aggregate binding mismatch")
+		}
+		if clarification.Dispatch != nil && clarification.Dispatch.AuthoritySnapshotID != r.Decision.AuthoritySnapshot.ID {
+			return fmt.Errorf("runtime Definition clarification dispatch authority mismatch")
+		}
+		matchedSession := false
+		for _, session := range r.CandidateRequestSessions {
+			if session.LogicalRequestID == clarification.Observation.LogicalRequestID && session.State == RuntimeCandidateRequestSessionDocumentComplete &&
+				session.Transaction.AuthoritySnapshotID == clarification.Observation.AuthoritySnapshotID {
+				matchedSession = true
+				break
+			}
+		}
+		if !matchedSession {
+			return fmt.Errorf("runtime Definition clarification has no complete semantic request session")
+		}
 	}
 	if isTerminalRuntimeDecision(r.Decision) && hasPendingRuntimeCandidateAttempt(r.CandidateAttempts) {
 		return fmt.Errorf("terminal runtime state cannot retain a pending candidate attempt")
@@ -858,6 +898,15 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 			identity := attempt.BindingContradiction.Normalized()
 			ret.CandidateAttempts[idx].BindingContradiction = &identity
 		}
+	}
+	ret.ExecutionBudget = r.ExecutionBudget.Clone()
+	ret.RecoverableWaits = append([]RuntimeRecoverableWaitRecord(nil), r.RecoverableWaits...)
+	for idx := range ret.RecoverableWaits {
+		ret.RecoverableWaits[idx] = ret.RecoverableWaits[idx].Clone()
+	}
+	if r.DefinitionClarification != nil {
+		value := r.DefinitionClarification.Clone()
+		ret.DefinitionClarification = &value
 	}
 	ret.GovernanceRequests = append([]RuntimeGovernanceRequestRecord(nil), r.GovernanceRequests...)
 	ret.GovernanceResolutions = append([]RuntimeGovernanceResolutionRecord(nil), r.GovernanceResolutions...)

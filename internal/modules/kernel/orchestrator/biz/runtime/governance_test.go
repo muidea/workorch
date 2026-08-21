@@ -297,6 +297,10 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if !ok || resumeExecution.ExecutionKey != execution.ExecutionKey || resumeExecution.Fence != execution.Fence+1 || resumeExecution.State != runtimecontract.OperationExecutionClaimed {
 		t.Fatalf("resume execution = %+v", resumeExecution)
 	}
+	resumeAllocation, found := runtimeOperationBudgetAllocationForTest(continued.Aggregate, resumeExecution)
+	if !found || resumeAllocation.State != runtimecontract.RuntimeBudgetAllocationReserved {
+		t.Fatalf("governance resume budget allocation = %+v found=%v", resumeAllocation, found)
+	}
 	grant := continued.Aggregate.OperationGovernanceBindings[0].Grant
 	if grant == nil || grant.ExecutionKey != execution.ExecutionKey || grant.GovernanceFence != execution.Fence || grant.ResumeFence != execution.Fence+1 {
 		t.Fatalf("governance grant = %+v", grant)
@@ -337,4 +341,19 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(resumed.OperationReceipts, execution.ExecutionKey, execution.Fence+1); !ok || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 		t.Fatalf("resume receipt = %+v found=%v", receipt, ok)
 	}
+	resumeAllocation, found = runtimeOperationBudgetAllocationForTest(resumed, resumeExecution)
+	if !found || resumeAllocation.State != runtimecontract.RuntimeBudgetAllocationConfirmed {
+		t.Fatalf("confirmed governance resume budget allocation = %+v found=%v", resumeAllocation, found)
+	}
+}
+
+func runtimeOperationBudgetAllocationForTest(aggregate RuntimeAggregate, execution runtimecontract.RuntimeOperationExecutionRecord) (runtimecontract.RuntimeBudgetAllocation, bool) {
+	scopeRef := runtimeOperationBudgetScopeRef(execution.ExecutionKey, execution.Fence)
+	for _, allocation := range aggregate.ExecutionBudget.Allocations {
+		allocation = allocation.Normalized()
+		if allocation.Dimension == runtimecontract.RuntimeBudgetDimensionCapabilityOperation && allocation.LogicalConsumptionID == execution.ExecutionKey && allocation.ScopeRef == scopeRef {
+			return allocation, true
+		}
+	}
+	return runtimecontract.RuntimeBudgetAllocation{}, false
 }

@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## Purpose
 
@@ -115,8 +115,8 @@ Last Verified: 2026-08-18
 | clarification replacement resolution | 只有 Run owner 可提交专用 typed command；Decision `resolved` / `duplicate` 的 resolution binding hash 精确回绑同一 intent，且 `definition_replacement_intent_bound` 不声称 successor 已创建；不调用 Orchestrator governance resolution且零 `RuntimeContinuationEligibleFact`/active transition |
 | crash after replacement intent CAS | 重投同一 Decision command；无第二 intent/resolution/successor |
 | crash after Decision resolution before Run ack | duplicate result join后 Run CAS ack；不重复 Decision effect，不恢复 predecessor active |
-| stale replacement already bound | Decision 返回 current intent identity/hash；Run join matching persisted intent，或退休本次 intent并恢复已绑定 intent；稳定 stale 不循环重试 |
-| mismatched replacement scope | Run 将 intent CAS 为 `clarification_resolution_rejected`；只有显式新 Restart 在退休 rejected intent 后可重建，零自动 supersede/delivery/successor |
+| stale replacement already bound | exact persisted intent只返回duplicate；不同identity时Decision返回current intent identity/hash，Run持久化invariant-breach rejection并fail-closed，零hash反推、自动覆盖或循环重试 |
+| mismatched replacement scope | Run 将 intent CAS 为 `clarification_resolution_rejected`；只有不同RequestID的显式新 Restart 可将scope-mismatch rejection移入immutable history后重建，零自动 supersede/delivery/successor |
 | Restart after definition gap | 只在 explicit Restart + matching intent + Decision ack + predecessor delivery 后fresh compile；不继承schedule/binding/credit/LLM document/context expansion |
 | predecessor already has owner effects | successor reconciliation 重新观察；不直接继承 credit |
 | dynamic capability unavailable | Run后先由SM-2读取owner-defined typed recovery合同；具备exact condition、trigger/deadline和budget时持久化bounded recoverable runtime wait且provider/dispatch/effect均为零，否则typed fail-closed；duplicate/restart不创建第二wait或重复消费 |

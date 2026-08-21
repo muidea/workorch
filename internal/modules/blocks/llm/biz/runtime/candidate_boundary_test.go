@@ -77,7 +77,7 @@ func TestRequestCandidateRejectsExpectedDocumentTokenMismatchBeforeProvider(t *t
 
 func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
-	definition := runtimecontract.RuntimeDefinitionContext{
+	definition := runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
 		CapabilityContract: []string{runtimecontract.StepKindFileWrite},
 	}
@@ -570,7 +570,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 			LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "candidate-call-1",
 		},
 		Decision: sealed, Transaction: sealed.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
 		CandidateManifest: manifest, CandidateContext: context,
 	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{

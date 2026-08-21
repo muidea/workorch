@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## Ownership Map
 
@@ -22,13 +22,13 @@ Last Verified: 2026-08-18
 
 当前 Run owner model 的稳定字段组包括：
 
-- owner-local `Revision`、Run/Workspace/Goal/DoD identity 与 `DefinitionRevision`；
+- owner-local `Revision`、Run/Workspace/Goal/DoD identity、`DefinitionRevision` 与 immutable `StartupInputHash`；
 - `RuntimeBootstrap`、`ActivationRequestID`、priority 与 lineage；
 - `RuntimeState` 和 opaque lifecycle fence；
 - `ReconciliationRequestID` 与 reconciliation scope；
 - `RuntimeActivationStatus`、SM-1 `State`、blocking ticket/approval；
 - failure/timestamps 与 immutable `TerminalDelivery`；
-- restart predecessor 上的 durable `ReplacementIntent`。
+- restart predecessor 上的 active durable `ReplacementIntent` 与 immutable rejected-intent retirement history。
 
 SM-1 states：`pending`、`active`、`blocked_on_decision`、`blocked_on_approval`、`completed`、`failed`、
 `cancelled`、`superseded`。只有 Run owner 的 reducer 可以转换这些状态。
@@ -41,12 +41,20 @@ condition、trigger/deadline、budget和guard属于Orchestrator aggregate，由S
 
 `ReplacementIntent` 是 predecessor Run 的 owner-local restart transaction：
 
-1. `pending`：已封存 immutable successor input，尚未创建 successor；
-2. `successor_created`：终态投递 identity 已知且 successor 已创建；
-3. `completed`：Run owner已确认 matching terminal delivery 和 aggregate revision。
+1. `pending`：普通 restart 已封存 immutable successor input，尚未创建 successor；
+2. `pending_clarification_resolution`：Definition-gap intent 已绑定 ticket 与 predecessor/successor startup-input lineage，
+   等待 Decision owner acknowledgement；
+3. `clarification_resolution_bound`：matching dedicated resolution 已按 exact binding hash 回绑，可以开始 administrative
+   supersede/delivery；
+4. `clarification_resolution_rejected`：Decision 返回 exact stale/scope conflict；该 intent 不可 delivery；
+5. `successor_created`：终态投递 identity 已知且 successor 已创建；clarification intent 必须仍携带 bound resolution；
+6. `completed`：Run owner已确认 matching terminal delivery 和 aggregate revision；clarification binding 不得在此时丢失。
 
 它不包含 Workspace 目标状态或 Orchestrator reducer 指令。request ID、definition/bootstrap、predecessor/successor lineage
-和 terminal delivery identity 共同保证重试、崩溃恢复与去重。
+和 terminal delivery identity 共同保证重试、崩溃恢复与去重。只有不同 RequestID 的用户显式 Restart 可以把一个
+scope-mismatch `clarification_resolution_rejected` intent 移入 predecessor 的 immutable retirement history 并封存新 intent；
+`ticket_already_bound` rejection 是不可由 Restart 覆盖的 owner invariant breach。相同 RequestID重用、自动 supersede以及
+替换bound/deliverable/completed intent均为typed conflict。
 
 ## Runtime Aggregate
 

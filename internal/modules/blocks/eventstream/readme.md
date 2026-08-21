@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-20
+Last Verified: 2026-08-21
 
 ## 组件类型
 

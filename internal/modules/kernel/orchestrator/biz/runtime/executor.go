@@ -296,11 +296,15 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 		found = true
 		switch exec.State {
 		case runtimecontract.OperationExecutionSealed:
-			exec.State = runtimecontract.OperationExecutionClaimed
-			exec.Fence = exec.Fence + 1
-			if exec.Fence == 0 {
-				exec.Fence = 1
+			nextFence := exec.Fence + 1
+			if nextFence == 0 {
+				nextFence = 1
 			}
+			if err := reserveRuntimeOperationExecutionBudget(&aggregate, *exec, nextFence); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			exec.State = runtimecontract.OperationExecutionClaimed
+			exec.Fence = nextFence
 			exec.ClaimedAt = "claimed"
 		case runtimecontract.OperationExecutionClaimed:
 			return RuntimeAggregate{}, fmt.Errorf("operation %q is already claimed; query receipt before recovery", operationID)
@@ -357,6 +361,13 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 			continue
 		}
 		found = true
+		operation, ok := candidateOperationByID(aggregate.ActiveDispatch.Candidate, operationID)
+		if !ok {
+			return RuntimeAggregate{}, fmt.Errorf("%w: operation outcome has no sealed candidate operation", common.ErrConflict)
+		}
+		if _, err := joinRuntimeOperationExecutionBudget(&aggregate, operation, *exec, nil, true); err != nil {
+			return RuntimeAggregate{}, err
+		}
 		exec.State = runtimecontract.OperationExecutionOutcomeUnknown
 		if exec.Fence == 0 {
 			exec.Fence = 1
@@ -376,7 +387,12 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 		})
 	}
 	aggregate.StateRevision++
-	_ = c.transitions.Commit(ctx, aggregate, expectedRevision)
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	return aggregate, nil
 }
 

@@ -217,9 +217,9 @@ func canonicalizeResultArtifactRefs(item *resultmodel.Result, sourceRefs, artifa
 	}
 	item.ArtifactRefs = append([]common.ArtifactID(nil), artifactIDs...)
 	item.SummaryDetail.ArtifactRefs = mapRefs(item.SummaryDetail.ArtifactRefs)
-	if item.RuntimeCloseout != nil {
-		item.RuntimeCloseout.ArtifactRefs = mapRefs(item.RuntimeCloseout.ArtifactRefs)
-	}
+	// RuntimeCloseout is formal Orchestrator authority and its hash binds the
+	// sealed source references. Keep those refs byte-for-byte canonical here;
+	// canonical child IDs belong only to the Result-owner projection surfaces.
 	for _, coverage := range []*workorchresultcontract.DoDCoverage{
 		item.DoDAssessment.GoalCoverage,
 		item.DoDAssessment.AcceptanceDimensions,

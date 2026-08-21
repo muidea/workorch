@@ -295,7 +295,11 @@ func registerRuntimeOperationReceiptOwner(t *testing.T, hub magicevent.Hub, cont
 			result.Set(nil, runtimeMagicFailure(err))
 			return
 		}
-		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found, Receipt: &receipt}, nil)
+		response := orchestratorevents.QueryRuntimeOperationReceiptResult{Found: found}
+		if found {
+			response.Receipt = &receipt
+		}
+		result.Set(response, nil)
 	})
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)

@@ -93,6 +93,7 @@ type RuntimeCandidateRequestSession struct {
 	State               RuntimeCandidateRequestSessionState
 	NextSequence        int
 	IncompleteOutcomes  int
+	TransportOutcomes   int
 	LastDocumentOutcome *RuntimeProviderDocumentOutcome
 	LastPhysicalCallID  string
 	ProviderSubmitted   bool
@@ -150,7 +151,7 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 func (s RuntimeCandidateRequestSession) Validate() error {
 	s = s.Normalized()
 	if s.LogicalRequestID == "" || (s.DocumentKind != RuntimeProviderDocumentSemanticPlan && s.DocumentKind != RuntimeProviderDocumentOperations) || s.StablePrefixHash == "" || s.ManifestHash == "" ||
-		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 || s.IncompleteOutcomes < 0 {
+		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 || s.IncompleteOutcomes < 0 || s.TransportOutcomes < 0 {
 		return common.ErrInvalidArgument
 	}
 	if err := s.LastOutcome.Validate(); err != nil {
@@ -211,7 +212,7 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	}
-	if s.NextSequence != s.IncompleteOutcomes+1 {
+	if s.NextSequence != s.IncompleteOutcomes+s.TransportOutcomes+1 {
 		return common.ErrInvalidArgument
 	}
 	return nil

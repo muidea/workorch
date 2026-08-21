@@ -361,7 +361,8 @@ func sameRuntimeDefinition(left runtimecontract.RuntimeFacts, right runtimecontr
 	return left.WorkspaceID == right.WorkspaceID &&
 		left.RunID == right.RunID &&
 		left.DefinitionRevision == right.DefinitionRevision &&
-		runtimecontract.SameRuntimeActivationContext(left.Activation, right.Activation)
+		runtimecontract.SameRuntimeActivationContext(left.Activation, right.Activation) &&
+		runtimecontract.SameRuntimeExecutionBudgetPolicy(left.ExecutionBudgetPolicy, right.ExecutionBudgetPolicy)
 }
 
 func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract.RuntimeDispatchRecord {

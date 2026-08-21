@@ -176,6 +176,93 @@ func TestPrerequisiteStaleInvalidatesProposalAndReacquiresWithoutCandidateDebt(t
 	}
 }
 
+func TestPrerequisiteOwnerFactFreshnessCombinationMatrix(t *testing.T) {
+	const prerequisiteID = "operation_admissibility:file"
+	observation := func(id, revision string) *runtimecontract.RuntimePrerequisiteObservation {
+		value := runtimecontract.RuntimePrerequisiteObservation{
+			PrerequisiteID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "catalog-" + revision,
+			Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				SubjectRef: "workspace_deliverable", Revision: revision,
+			}},
+		}
+		value.ObservationID = id
+		return &value
+	}
+	staleV1 := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisiteID, ObservationID: "observation-v1",
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2", Reason: "owner advanced",
+	}
+	staleV2Rollback := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisiteID, ObservationID: "observation-v2",
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "tree-v2", ObservedRevision: "tree-v1", Reason: "owner rolled back",
+	}
+	firstInvalidation := runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		Signature:       runtimecontract.StableRuntimePrerequisiteStaleSignature(staleV1),
+		PrerequisiteIDs: []string{prerequisiteID}, ObservationIDs: []string{staleV1.ObservationID}, Stale: &staleV1,
+	}
+	rollbackInvalidation := runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		Signature:       runtimecontract.StableRuntimePrerequisiteStaleSignature(staleV2Rollback),
+		PrerequisiteIDs: []string{prerequisiteID}, ObservationIDs: []string{staleV2Rollback.ObservationID}, Stale: &staleV2Rollback,
+	}
+	tests := []struct {
+		name          string
+		result        PrerequisiteResult
+		invalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord
+		wantConflict  bool
+	}{
+		{
+			name: "missing observation after stale", result: PrerequisiteResult{PrerequisiteID: prerequisiteID},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation}, wantConflict: true,
+		},
+		{
+			name: "delayed stale v1 after v2", result: PrerequisiteResult{PrerequisiteID: prerequisiteID, Observation: observation("observation-v1", "tree-v1")},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation}, wantConflict: true,
+		},
+		{
+			name: "fresh v2 after v1 stale", result: PrerequisiteResult{PrerequisiteID: prerequisiteID, Observation: observation("observation-v2", "tree-v2")},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation},
+		},
+		{
+			name: "duplicate fresh v2 gate", result: PrerequisiteResult{PrerequisiteID: prerequisiteID, Observation: observation("observation-v2", "tree-v2")},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation},
+		},
+		{
+			name: "out of order v2 after rollback", result: PrerequisiteResult{PrerequisiteID: prerequisiteID, Observation: observation("observation-v2", "tree-v2")},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation, rollbackInvalidation}, wantConflict: true,
+		},
+		{
+			// An ABA rollback cannot reuse a previously invalidated revision as
+			// current prerequisite authority. The owner must publish a distinct
+			// opaque generation/revision even when resource content reappears.
+			name: "rollback reappearance v1 is ABA", result: PrerequisiteResult{PrerequisiteID: prerequisiteID, Observation: observation("observation-v1-reappeared", "tree-v1")},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation, rollbackInvalidation}, wantConflict: true,
+		},
+		{
+			name: "new generation v3 after rollback", result: PrerequisiteResult{PrerequisiteID: prerequisiteID, Observation: observation("observation-v3", "tree-v3")},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation, rollbackInvalidation},
+		},
+		{
+			name: "unrelated prerequisite remains independent", result: PrerequisiteResult{PrerequisiteID: "operation_admissibility:git"},
+			invalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{firstInvalidation, rollbackInvalidation},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validatePrerequisiteResultFreshness(test.result, test.invalidations)
+			if test.wantConflict && !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("freshness error = %v, want conflict", err)
+			}
+			if !test.wantConflict && err != nil {
+				t.Fatalf("freshness error = %v, want success", err)
+			}
+		})
+	}
+}
+
 func TestPrerequisiteStaleInvalidatesPendingCandidateRequestWithoutCandidateDebt(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)

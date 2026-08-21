@@ -37,6 +37,10 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
+	workspace, err = EnsureWorkspaceDefinitionAdmission(ctx, request.Hub, workspace, goal, dod)
+	if err != nil {
+		return nil, err
+	}
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
 	if err != nil {
 		return nil, err
@@ -45,6 +49,7 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 		activationBuild.EffectiveGoal,
 		activationBuild.EffectiveDoD,
 		activationBuild.DefinitionRevision,
+		workspaceStartupInputHash(workspace, activationBuild.DefinitionRevision),
 		activationBuild.DefinitionChangeImpact,
 		activationBuild.RuntimeActivation,
 	)
@@ -52,6 +57,18 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 		return nil, err
 	}
 	return bootstrap, nil
+}
+
+func workspaceStartupInputHash(workspace *workspacemodel.Workspace, definitionRevision string) string {
+	if workspace == nil || workspace.StartupInput == nil || workspace.ActivationAdmission == nil {
+		return ""
+	}
+	startup := workspace.StartupInput.Normalized()
+	admission := workspace.ActivationAdmission.Normalized()
+	if startup.DefinitionRevision != strings.TrimSpace(definitionRevision) || admission.State != workspacemodel.WorkspaceActivationEligible || admission.DefinitionRevision != startup.DefinitionRevision || admission.StartupInputHash != startup.StartupInputHash {
+		return ""
+	}
+	return startup.StartupInputHash
 }
 
 // workspaceRuntimeActivation is the compiler-local projection from immutable

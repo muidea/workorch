@@ -1755,7 +1755,7 @@ func runtimeFactsWithManagedValidationRecipe(facts runtimecontract.RuntimeFacts)
 }
 
 func controllerDefinition() runtimecontract.RuntimeDefinitionContext {
-	return runtimecontract.RuntimeDefinitionContext{
+	return runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-v2", GoalID: "goal-v2", GoalDefinition: "完成目标",
 		DoDID: "dod-v2", DoDDefinition: "产生可验证交付物", CapabilityContract: []string{"file/write"},
 	}

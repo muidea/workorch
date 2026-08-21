@@ -93,14 +93,14 @@ func withTestDeterministicProof(goal *workspacemodel.Goal, dod *workspacemodel.D
 }
 
 func runtimeBootstrapWithTestProof(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext) (*runtimecontract.RuntimeBootstrap, error) {
-	return RuntimeBootstrap(goal, dod, definitionRevision, changeImpact, withTestDeterministicProof(goal, dod, activation))
+	return RuntimeBootstrap(goal, dod, definitionRevision, "startup-input-test", changeImpact, withTestDeterministicProof(goal, dod, activation))
 }
 
 func TestRuntimeBootstrapAcceptsDefinitionSeedWithoutPrecompiledProof(t *testing.T) {
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver a capability"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"verify behavior"}},
-		"definition-1", nil,
+		"definition-1", "startup-input-test", nil,
 		runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce},
@@ -144,7 +144,7 @@ func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) 
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "inspect workspace"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"inspection is verified"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.Focuses) != 2 {
 		t.Fatalf("read-only semantic seed bootstrap=%+v err=%v", bootstrap, err)
@@ -182,7 +182,7 @@ func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 2 {
 		t.Fatalf("shared validation seed bootstrap=%+v err=%v", bootstrap, err)
@@ -206,7 +206,7 @@ func TestRuntimeBootstrapDefersMissingSemanticFieldsToPlanning(t *testing.T) {
 	}
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"first", "second"}}
-	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", nil, activation)
+	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, activation)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 2 {
 		t.Fatalf("semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
 	}
@@ -229,7 +229,7 @@ func TestRuntimeBootstrapDoesNotClaimShellOwnerRecipeFeasibility(t *testing.T) {
 	}
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"bridge starts"}}
-	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", nil, activation)
+	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, activation)
 	if err != nil || bootstrap == nil || len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
 		t.Fatalf("bootstrap shell recipe seed=%+v err=%v", bootstrap, err)
 	}
@@ -257,7 +257,7 @@ func TestRuntimeBootstrapDefersCWIValidationCheckToSemanticPlanning(t *testing.T
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 1 {
 		t.Fatalf("missing CWI check seed bootstrap=%+v err=%v", bootstrap, err)
@@ -288,7 +288,7 @@ func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil {
 		t.Fatalf("per-CWI proof bootstrap: %v", err)
@@ -328,7 +328,7 @@ func TestRuntimeBootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"one", "two", "three", "four"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +357,7 @@ func TestRuntimeBootstrapDefinitionSeedCoversEveryCWIWithoutPreflightFailure(t *
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"one", "two", "three", "four"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 4 {
 		t.Fatalf("bootstrap=%+v err=%v", bootstrap, err)
@@ -388,7 +388,7 @@ func TestRuntimeBootstrapDoesNotCarryEvidencePolicyBindingTarget(t *testing.T) {
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "verify source"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"source exists"}},
-		"definition-1", nil, activation,
+		"definition-1", "startup-input-test", nil, activation,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -514,6 +514,14 @@ func TestRuntimeBootstrapSealsConfiguredConvergencePolicy(t *testing.T) {
 	}
 	if bootstrap.ConvergencePolicy.MaxRepairAttemptsPerFocus != 7 || bootstrap.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus != 2 {
 		t.Fatalf("convergence policy = %+v", bootstrap.ConvergencePolicy)
+	}
+	repairBudget, found := runtimecontract.RuntimeBudgetDimensionPolicyFor(bootstrap.ExecutionBudgetPolicy, runtimecontract.RuntimeBudgetDimensionSameFocusRepair)
+	if !found || repairBudget.Limit != 7 {
+		t.Fatalf("same-focus execution budget = %+v found=%v", repairBudget, found)
+	}
+	recoveryBudget, found := runtimecontract.RuntimeBudgetDimensionPolicyFor(bootstrap.ExecutionBudgetPolicy, runtimecontract.RuntimeBudgetDimensionOperationRecovery)
+	if !found || recoveryBudget.Limit != int64(bootstrap.RecoveryPolicy.MaxOperationRecoveryAttempts) {
+		t.Fatalf("operation-recovery execution budget = %+v found=%v", recoveryBudget, found)
 	}
 }
 

@@ -9,14 +9,17 @@ type RuntimeInternalDeliveryPayload struct {
 	ReconciliationRequest *runtimecontract.RuntimeCWIReconciliationRequest
 	FailureFact           *runtimecontract.FailureFact
 
-	DeliveryAcknowledgement *runtimecontract.RuntimeDeliveryAcknowledgement
-	RecoveryBudgetKind      runtimecontract.RuntimeRecoveryBudgetKind
-	DriveLease              *runtimecontract.RuntimeDriveLease
-	LeaseGeneration         uint64
-	LeaseNow                string
-	TerminationKind         runtimecontract.RuntimeTerminationKind
-	RequestedBy             string
-	Reason                  string
+	DeliveryAcknowledgement        *runtimecontract.RuntimeDeliveryAcknowledgement
+	RecoveryBudgetKind             runtimecontract.RuntimeRecoveryBudgetKind
+	DriveLease                     *runtimecontract.RuntimeDriveLease
+	RecoverableWait                *runtimecontract.RuntimeRecoverableWaitRecord
+	RecoverableWaitID              string
+	RecoverableWaitProbeResultHash string
+	LeaseGeneration                uint64
+	LeaseNow                       string
+	TerminationKind                runtimecontract.RuntimeTerminationKind
+	RequestedBy                    string
+	Reason                         string
 }
 
 // SM-4 facts drive persisted delivery/recovery work. They may schedule from
@@ -30,5 +33,10 @@ const (
 	RuntimeInternalEventDriveLeaseClaimed            RuntimeInternalEventKind = "drive_lease_claimed"
 	RuntimeInternalEventDriveLeaseReleased           RuntimeInternalEventKind = "drive_lease_released"
 	RuntimeInternalEventDriveLeaseRecovered          RuntimeInternalEventKind = "drive_lease_recovered"
+	RuntimeInternalEventRecoverableWaitOpened        RuntimeInternalEventKind = "recoverable_wait_opened"
+	RuntimeInternalEventRecoverableWaitProbeDue      RuntimeInternalEventKind = "recoverable_wait_probe_due"
+	RuntimeInternalEventRecoverableWaitProbeDeferred RuntimeInternalEventKind = "recoverable_wait_probe_deferred"
+	RuntimeInternalEventRecoverableWaitExhausted     RuntimeInternalEventKind = "recoverable_wait_exhausted"
+	RuntimeInternalEventRecoverableWaitRetired       RuntimeInternalEventKind = "recoverable_wait_retired"
 	RuntimeInternalEventTerminationRequested         RuntimeInternalEventKind = "termination_requested"
 )

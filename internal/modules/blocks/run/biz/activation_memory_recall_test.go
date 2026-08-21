@@ -2,11 +2,13 @@ package run
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
@@ -206,6 +208,91 @@ func TestRuntimeActivationMemoryRecallReDrivesFromPersistedRunOnStartup(t *testi
 	}
 	if !memorymodel.SameMemoryRecallTrace(before, after) {
 		t.Fatalf("startup replay changed trace: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestActivationMemoryRecallObservabilityFailureDoesNotRollbackCommittedRun(t *testing.T) {
+	tests := []struct {
+		name         string
+		installOwner func(*testing.T, magicevent.Hub) func() bool
+	}{
+		{name: "missing subscriber"},
+		{
+			name: "memory owner error",
+			installOwner: func(t *testing.T, hub magicevent.Hub) func() bool {
+				t.Helper()
+				called := make(chan struct{}, 1)
+				observer := magicevent.NewSimpleObserverWithMatchID("/run/tests/memory-owner-error", memoryevents.CommandDestination, hub)
+				observer.Subscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert, func(_ magicevent.Event, result magicevent.Result) {
+					called <- struct{}{}
+					result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "memory owner unavailable", Cause: errors.New("memory owner unavailable")})
+				})
+				t.Cleanup(func() { observer.Unsubscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert) })
+				return func() bool {
+					select {
+					case <-called:
+						return true
+					default:
+						return false
+					}
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-observability")
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(context.Background()) })
+			var ownerCalled func() bool
+			if test.installOwner != nil {
+				ownerCalled = test.installOwner(t, hub)
+			}
+			runs := memoryrepo.NewRunRepository()
+			owner := New()
+			if err := owner.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			intent := activationMemoryReplacementIntent(t, "ws-memory-observability", "restart-memory-observability")
+			created, err := owner.createWorkspaceExecutionReplacement(ctx, intent, "")
+			if err != nil {
+				t.Fatalf("create Run with failed Memory observability handoff: %v", err)
+			}
+			if ownerCalled != nil && !ownerCalled() {
+				t.Fatal("Memory owner error path was not exercised")
+			}
+			stored, err := runs.GetByWorkspaceID(ctx, intent.WorkspaceID, created.ID)
+			if err != nil {
+				t.Fatalf("committed Run was rolled back: %v", err)
+			}
+			if stored.ActivationRequestID != intent.RequestID || stored.RuntimeBootstrap == nil || stored.RuntimeBootstrap.Activation.MemorySelection == nil {
+				t.Fatalf("committed Run lost sealed activation input: %+v", stored)
+			}
+		})
+	}
+}
+
+func activationMemoryReplacementIntent(t *testing.T, workspaceID common.WorkspaceID, requestID string) runmodel.ReplacementIntent {
+	t.Helper()
+	bootstrap := restartTestBootstrap(t, workspaceID)
+	bootstrap.Activation.Memories = []runtimecontract.RuntimeMemoryContext{{
+		ID: "memory-observability", Summary: "selected before Run creation", VectorScore: 0.9,
+	}}
+	bootstrap.Activation.MemorySelection = testRuntimeMemorySelection("memory-observability", "selected before Run creation", 0.9)
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
+	if err != nil {
+		t.Fatalf("compile Memory activation definition seed: %v", err)
+	}
+	bootstrap.DefinitionSeed = seed
+	if err := bootstrap.Validate(); err != nil {
+		t.Fatalf("Memory activation bootstrap: %v", err)
+	}
+	return runmodel.ReplacementIntent{
+		RequestID: requestID, WorkspaceID: workspaceID, GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
+		Bootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "workspace execution restart/" + requestID,
+		State: runmodel.ReplacementIntentPending,
 	}
 }
 

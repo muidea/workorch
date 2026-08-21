@@ -47,6 +47,27 @@ func Workspace(response magicevent.Result, topic string) (workspaceevents.Worksp
 	return result, nil
 }
 
+// WorkspaceOwner decodes focused Workspace owner contracts which intentionally
+// do not use the broad management WorkspaceCommandResult union.
+func WorkspaceOwner[Response any](response magicevent.Result, topic string) (Response, error) {
+	var zero Response
+	if response == nil {
+		return zero, common.ErrInvalidArgument
+	}
+	if err := response.Error(); err != nil {
+		return zero, err
+	}
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return zero, resultErr
+	}
+	result, ok := data.(Response)
+	if !ok {
+		return zero, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+	}
+	return result, nil
+}
+
 // WorkspaceLifecycle decodes a Workspace-owned lifecycle/projection receipt.
 // Application may coordinate typed facts, but it never interprets the owner
 // transition or writes the Workspace record directly.

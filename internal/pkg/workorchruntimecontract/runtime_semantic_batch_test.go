@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -132,6 +133,79 @@ func TestCompileRuntimeSemanticPlanFocusBatchIncludesOnlyPrerequisiteClosure(t *
 	}
 	if !sameOrderedCoverageWorkItemIDs(batch.PendingCoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-001"}) {
 		t.Fatalf("unrelated CWI entered prerequisite closure: %+v", batch)
+	}
+}
+
+func TestCompileRuntimeSemanticPlanFocusBatchScalesWithoutIDOrDefinitionOrderBias(t *testing.T) {
+	const (
+		coverageCount = 64
+		batchSize     = 4
+	)
+	manifest := semanticContractTestManifest(t)
+	providerOrder := make([]common.CoverageWorkItemID, 0, coverageCount)
+	itemsInProviderOrder := make([]RuntimeCoverageItem, 0, coverageCount)
+	for index := 0; index < coverageCount; index++ {
+		prefix := "z"
+		if index%2 != 0 {
+			prefix = "a"
+		}
+		id := common.CoverageWorkItemID(fmt.Sprintf("cwi-%s-%02d", prefix, index))
+		item := RuntimeCoverageItem{
+			ID: id, SliceID: fmt.Sprintf("slice-%02d", index), SourceScope: "dodItem",
+			SourceID: fmt.Sprintf("dod-%02d", index), TargetText: fmt.Sprintf("requirement %02d", index),
+			// Definition order deliberately points in the opposite direction.
+			Order: coverageCount - index,
+		}
+		if index%batchSize != 0 {
+			item.PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{providerOrder[index-1]}
+		}
+		providerOrder = append(providerOrder, id)
+		itemsInProviderOrder = append(itemsInProviderOrder, item)
+	}
+	// Manifest declaration order is also the reverse of provider order. The
+	// accepted coverage-order document is therefore the only sequencing input.
+	manifest.CoverageItems = make([]RuntimeCoverageItem, 0, coverageCount)
+	for index := len(itemsInProviderOrder) - 1; index >= 0; index-- {
+		manifest.CoverageItems = append(manifest.CoverageItems, itemsInProviderOrder[index])
+	}
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	order := RuntimeSemanticPlanDocument{
+		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder: append([]common.CoverageWorkItemID(nil), providerOrder...),
+	}
+	if err := order.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("large provider order: %v", err)
+	}
+
+	pending := append([]common.CoverageWorkItemID(nil), providerOrder...)
+	seen := make(map[common.CoverageWorkItemID]int, coverageCount)
+	for sequence := 0; sequence < coverageCount/batchSize; sequence++ {
+		start := sequence * batchSize
+		activeLeaf := providerOrder[start+batchSize-1]
+		batch, err := CompileRuntimeSemanticPlanFocusBatch(
+			manifest, order, sequence, fmt.Sprintf("large-proof-request-%02d", sequence),
+			[]common.CoverageWorkItemID{activeLeaf}, pending, batchSize,
+		)
+		if err != nil {
+			t.Fatalf("compile batch %d: %v", sequence, err)
+		}
+		want := providerOrder[start : start+batchSize]
+		if !sameOrderedCoverageWorkItemIDs(batch.CoverageWorkItemIDs, want) {
+			t.Fatalf("batch %d coverage = %v, want provider dependency order %v", sequence, batch.CoverageWorkItemIDs, want)
+		}
+		for _, id := range batch.CoverageWorkItemIDs {
+			seen[id]++
+		}
+		pending = append([]common.CoverageWorkItemID(nil), batch.PendingCoverageWorkItemIDs...)
+	}
+	if len(pending) != 0 || len(seen) != coverageCount {
+		t.Fatalf("bounded batches did not drain the provider order: pending=%d seen=%d", len(pending), len(seen))
+	}
+	for _, id := range providerOrder {
+		if seen[id] != 1 {
+			t.Fatalf("coverage %s was selected %d times, want exactly once", id, seen[id])
+		}
 	}
 }
 

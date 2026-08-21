@@ -57,6 +57,10 @@ func (s *Service) CreateRun(ctx context.Context, cmd runevents.CreateRunCommand)
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	startupInputHash := ""
+	if cmd.RuntimeBootstrap != nil {
+		startupInputHash = cmd.RuntimeBootstrap.Definition.Normalized().StartupInputHash
+	}
 	run := &runModel.Run{
 		ID:                 cmd.RunID,
 		WorkspaceID:        cmd.WorkspaceID,
@@ -64,6 +68,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runevents.CreateRunCommand)
 		DoDID:              cmd.DoDID,
 		Lineage:            createRunLineage(cmd.PredecessorRunID, cmd.PredecessorResultID),
 		DefinitionRevision: definitionRevision,
+		StartupInputHash:   startupInputHash,
 		InitialStepKind:    cmd.InitialStepKind,
 		RuntimeBootstrap:   cloneRuntimeBootstrap(cmd.RuntimeBootstrap),
 		State:              common.RunStatePending,
@@ -103,6 +108,7 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runevents.CreateRunCommand)
 			run.GoalID != cmd.GoalID ||
 			run.DoDID != cmd.DoDID ||
 			run.DefinitionRevision != definitionRevision ||
+			run.StartupInputHash != startupInputHashForBootstrap(cmd.RuntimeBootstrap) ||
 			run.InitialStepKind != cmd.InitialStepKind ||
 			run.Priority != cmd.Priority ||
 			!sameRuntimeBootstrap(run.RuntimeBootstrap, cmd.RuntimeBootstrap) {
@@ -114,6 +120,13 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runevents.CreateRunCommand)
 		return err
 	}
 	return s.CreateRun(ctx, cmd)
+}
+
+func startupInputHashForBootstrap(bootstrap *runtimemodel.RuntimeBootstrap) string {
+	if bootstrap == nil {
+		return ""
+	}
+	return bootstrap.Definition.Normalized().StartupInputHash
 }
 
 func createRunLineage(predecessorRunID common.RunID, predecessorResultID common.ResultID) runModel.RunLineage {

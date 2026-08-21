@@ -4,11 +4,15 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## 功能范围与边界
 
 `blocks/workspace` 管理 Workspace、Goal、DoD 和 WorkspaceTemplate 组成的 workspace-definition 聚合，包括定义版本、激活绑定和模板查询。它只管理该聚合的正式状态，不承担 Run 调度或跨组件治理。
+
+Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted `WorkspaceStartupInputContract` 与
+`WorkspaceActivationAdmission`。candidate 可以保存尚未获准的 relation input；正式 startup input 只允许 pure compiler
+确认的完整 `all_of`，并以 `StartupInputHash` 封存 Definition、Template snapshot、目录和 candidate-item mapping。
 
 ## 组件交互及合同
 
@@ -19,6 +23,10 @@ Last Verified: 2026-08-18
 - `application/workorchd` 与需要 definition fact 的 owner 通过 EventHub 读取 Workspace、Goal、DoD、Template 和
   definition revision；其他 owner 不直接访问 Workspace repository。
 - `application/workorchd` 通过 owner command/read port 管理和展示 workspace definition。
+- Definition admission 使用三个独立 concrete command/result：submit candidate、promote admitted candidate、acknowledge
+  clarification resolution。promotion 若绑定 blocking ticket，只能先进入 `pending_clarification_resolution`；逐字段匹配
+  Decision resolution 后才可 CAS 为 `eligible`。eligible revision 只关闭不晚于自身的旧 clarification lineage；其后的
+  invalid candidate 仍须由后续 corrected candidate 精确 reconcile。任一步失败都不能把 admission 解释成可启动。
 - `kernel/system` 发送 `EnsureWorkspaceTemplateDefaultsCommand`；本 block 只为缺失的内置 ID 创建默认模板，已存在对象保持不变，并返回具体 result。
 - `WorkspaceTemplate` 是 workspace owner 的 DTO；EventHub result 只返回该 owner DTO，并在 module 内部完成与 repository entity 的双向 mapping、slice/map/payload clone。repository 类型不得泄漏给 application 或其他 owner。
 - 外部定义命令保持唯一入口 `handleCommand -> executeCommand`；Owner 内部按 Workspace、Goal、DoD、Template
@@ -29,7 +37,7 @@ Last Verified: 2026-08-18
 
 | 交互组件 | 方向 | 具体合同 | 当前结论 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → Workspace | Workspace/Goal/DoD/Template CRUD、definition read 与 execution intent ingress | 完整 |
+| `application/workorchd` | Application → Workspace | Workspace/Goal/DoD/Template CRUD、pre-seal candidate submit/promotion/ack、definition read 与 execution intent ingress | 完整 |
 | `kernel/system` | System → Workspace | `EnsureWorkspaceTemplateDefaultsCommand` | 完整 |
 | `blocks/run` | 双向 | Workspace → Run 的 scoped execution intent；Run → Workspace 的 `RunStateChangedData` | 完整；状态转换分别留在各自 owner |
 | `kernel/orchestrator` | Orchestrator → Workspace | typed definition/activation fact 读取；sealed terminal delivery fact | 完整；不访问 repository，不直接写 Workspace model |
@@ -46,7 +54,8 @@ Last Verified: 2026-08-18
   revision。新 identity 只能连接当前唯一 canonical leaf，不得按 ID、列表顺序或 repository 顺序推断前驱；历史
   definition 不可直接更新，当前 canonical leaf 不可物理删除。激活绑定变化必须使旧定义选择可检测为 stale。
 - Workspace block 不驱动 Runtime、不判定 Result、不执行治理恢复；execution-intent ingress 只校验当前
-  Workspace/Goal/DoD、选择 active Run，并向 Run owner 发送 concrete typed intent。它消费 scoped sealed terminal outcome，按
+  Workspace startup input/admission、选择 active Run，并向 Run owner 发送 concrete typed intent。Restart 必须逐字段匹配
+  current eligible `DefinitionRevision + StartupInputHash`；Resume 只选择现有 Run，不重新读取或附带最新 Goal/DoD。它消费 scoped sealed terminal outcome，按
   outcome identity 在自身 reducer 中释放 `ActiveRunID` 并维护 Workspace state projection；首次确认必须满足
   `ActiveRunID == outcome.RunID`，空 slot 不得补写新的 acknowledgement fence，已持久化的同 identity 重投递才是
   idempotent noop。它不读取
@@ -64,10 +73,13 @@ Last Verified: 2026-08-18
 - [x] Goal/DoD 非递增 ID 的 canonical leaf 谱系、历史 definition 更新拒绝和 current leaf 删除拒绝。
 - [x] memory/file backend 上 Goal/DoD 局部 identity、错误 Workspace scope 的 Get/Update/Delete 与无 scope 歧义拒绝。
 - [x] sealed terminal outcome 的匹配释放、空 slot/其他 active Run/冲突 identity 拒绝和同 identity 重投递幂等。
+- [x] immutable candidate create/duplicate/stale revision、all-of promotion、pending clarification acknowledgement 与 startup-input hash clone/persistence。
+- [x] application-owned directory resolver 的空目录默认值、相对/绝对路径规范化、workspace ID/相对路径逃逸拒绝和
+  多 workspace 默认目录隔离。
+- [x] execution intent 的缺失 Goal/DoD、context scope mismatch、duplicate replay、active Run result fence，以及
+  `data_reset_required` 零 Workspace 元数据副作用。
+- [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；
+  `data_reset_required` admission 同样保持 slot，只有 matching terminal delivery 可释放。
+- [x] Template command、repository DTO、EventHub DTO 与 list mapping 对 slice/map/nested payload 的完整深拷贝。
 
-## 待完善测试点
-
-- [ ] 覆盖空工作目录的默认解析、相对/绝对路径规范化、目录逃逸和重复 workspace 隔离。
-- [ ] 覆盖 execution intent 的缺失 Goal/DoD、跨 scope、重复投递与 active Run 冲突。
-- [ ] 覆盖普通 Run notification、`fresh_activation_required`、`data_reset_required` 均不能旁路释放 slot。
-- [ ] 覆盖 Template DTO 中 slice/map/payload 的完整深拷贝矩阵。
+当前没有与本合同对应的已知可执行测试缺口。

@@ -64,6 +64,10 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(topic, m.handleLifecycleCommand)
 		m.topics = append(m.topics, topic)
 	}
+	for _, topic := range definitionAdmissionTopics() {
+		m.SubscribeFunc(topic, m.handleDefinitionAdmissionCommand)
+		m.topics = append(m.topics, topic)
+	}
 	m.SubscribeFunc(workspaceevents.TopicWorkspaceCommandExecutionIntent, m.handleExecutionIntentCommand)
 	m.topics = append(m.topics, workspaceevents.TopicWorkspaceCommandExecutionIntent)
 	// Run owner is the sole publisher of lifecycle facts. Workspace consumes a

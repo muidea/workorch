@@ -1,29 +1,33 @@
 package workorchprojectioncontract
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
 // RuntimeProgress is a read-only product projection of persisted Runtime
 // progress. Consumers must not reverse-drive Runtime authority from it.
 type RuntimeProgress struct {
-	StateRevision                   uint64                                   `json:"stateRevision,omitempty"`
-	EvidenceSequence                uint64                                   `json:"evidenceSequence,omitempty"`
-	CompletedDispatchCount          int                                      `json:"completedDispatchCount"`
-	ActiveDispatchID                string                                   `json:"activeDispatchId,omitempty"`
-	CandidateAttemptCount           int                                      `json:"candidateAttemptCount"`
-	AcceptedEvidenceCount           int                                      `json:"acceptedEvidenceCount"`
-	AcceptedValidationEvidenceCount int                                      `json:"acceptedValidationEvidenceCount"`
-	RejectedEvidenceCount           int                                      `json:"rejectedEvidenceCount"`
-	MissingEvidenceKinds            []string                                 `json:"missingEvidenceKinds,omitempty"`
-	CurrentFocusID                  string                                   `json:"currentFocusId,omitempty"`
-	ConvergenceState                string                                   `json:"convergenceState,omitempty"`
-	TerminalCode                    string                                   `json:"terminalCode,omitempty"`
-	FailureClass                    string                                   `json:"failureClass,omitempty"`
-	FailureCode                     string                                   `json:"failureCode,omitempty"`
-	FailureSignature                string                                   `json:"failureSignature,omitempty"`
-	FailureMessage                  string                                   `json:"failureMessage,omitempty"`
-	RepairHintCodes                 []string                                 `json:"repairHintCodes,omitempty"`
-	PrerequisiteRefreshState        string                                   `json:"prerequisiteRefreshState,omitempty"`
-	PrerequisiteRefreshUsed         int                                      `json:"prerequisiteRefreshUsed,omitempty"`
-	PrerequisiteRefreshLimit        int                                      `json:"prerequisiteRefreshLimit,omitempty"`
-	PrerequisiteInvalidations       []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
+	StateRevision                   uint64                                      `json:"stateRevision,omitempty"`
+	EvidenceSequence                uint64                                      `json:"evidenceSequence,omitempty"`
+	CompletedDispatchCount          int                                         `json:"completedDispatchCount"`
+	ActiveDispatchID                string                                      `json:"activeDispatchId,omitempty"`
+	CandidateAttemptCount           int                                         `json:"candidateAttemptCount"`
+	AcceptedEvidenceCount           int                                         `json:"acceptedEvidenceCount"`
+	AcceptedValidationEvidenceCount int                                         `json:"acceptedValidationEvidenceCount"`
+	RejectedEvidenceCount           int                                         `json:"rejectedEvidenceCount"`
+	MissingEvidenceKinds            []string                                    `json:"missingEvidenceKinds,omitempty"`
+	CurrentFocusID                  string                                      `json:"currentFocusId,omitempty"`
+	ConvergenceState                string                                      `json:"convergenceState,omitempty"`
+	TerminalCode                    string                                      `json:"terminalCode,omitempty"`
+	FailureClass                    string                                      `json:"failureClass,omitempty"`
+	FailureCode                     string                                      `json:"failureCode,omitempty"`
+	FailureSignature                string                                      `json:"failureSignature,omitempty"`
+	FailureMessage                  string                                      `json:"failureMessage,omitempty"`
+	RepairHintCodes                 []string                                    `json:"repairHintCodes,omitempty"`
+	PrerequisiteRefreshState        string                                      `json:"prerequisiteRefreshState,omitempty"`
+	PrerequisiteRefreshUsed         int                                         `json:"prerequisiteRefreshUsed,omitempty"`
+	PrerequisiteRefreshLimit        int                                         `json:"prerequisiteRefreshLimit,omitempty"`
+	PrerequisiteInvalidations       []RuntimePrerequisiteRefreshInvalidation    `json:"prerequisiteInvalidations,omitempty"`
+	ExecutionBudget                 *runtimecontract.RuntimeExecutionBudgetView `json:"executionBudget,omitempty"`
+	RecoverableWait                 *runtimecontract.RuntimeRecoverableWaitView `json:"recoverableWait,omitempty"`
 }
 
 type RuntimePrerequisiteRefreshInvalidation struct {
@@ -58,6 +62,14 @@ func CloneRuntimeProgress(item *RuntimeProgress) *RuntimeProgress {
 	ret := *item
 	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
 	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)
+	if item.ExecutionBudget != nil {
+		value := item.ExecutionBudget.Clone()
+		ret.ExecutionBudget = &value
+	}
+	if item.RecoverableWait != nil {
+		value := item.RecoverableWait.Clone()
+		ret.RecoverableWait = &value
+	}
 	if item.PrerequisiteInvalidations != nil {
 		ret.PrerequisiteInvalidations = make([]RuntimePrerequisiteRefreshInvalidation, 0, len(item.PrerequisiteInvalidations))
 		for _, invalidation := range item.PrerequisiteInvalidations {

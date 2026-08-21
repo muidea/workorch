@@ -556,7 +556,7 @@ func TestRuntimeSemanticPlanSchemaAndRequestContextAreManifestBound(t *testing.T
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	context := RuntimeSemanticPlanRequestContext{
 		WorkspaceID: manifest.WorkspaceID, RunID: manifest.RunID,
-		Definition:      RuntimeDefinitionContext{Revision: manifest.DefinitionRevision, GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
+		Definition:      RuntimeDefinitionContext{StartupInputHash: "startup-input-test", Revision: manifest.DefinitionRevision, GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"}},
 		DefinitionSeed:  seed,
 		Activation:      RuntimeActivationContext{ProviderSelection: ProviderInferenceSelection{Target: target}, ExecutionContract: RuntimeExecutionContract{OperationContractRevision: manifest.OperationContractRevision}},
 		ProviderCeiling: &ProviderCeiling{Selection: ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 2048, EffectiveMaxOutputTokens: 1024, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},

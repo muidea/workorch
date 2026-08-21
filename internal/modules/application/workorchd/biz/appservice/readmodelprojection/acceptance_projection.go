@@ -76,6 +76,22 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 		MaxPrerequisiteRefreshes:    facts.RecoveryPolicy.MaxPrerequisiteRefreshes,
 		PrerequisiteRefreshes:       facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
 	}
+	if run.RuntimeState.ExecutionBudget.Policy.PolicyRevision != "" {
+		activeWaitID := ""
+		if wait, found := activeRuntimeRecoverableWait(run.RuntimeState.RecoverableWaits); found {
+			activeWaitID = wait.WaitID
+			if view, viewErr := runtimecontract.RuntimeRecoverableWaitProjection(wait, run.RuntimeState.StateRevision); viewErr == nil {
+				projection.RecoverableWait = &view
+			}
+		}
+		terminalCode := ""
+		if run.RuntimeState.Decision.Terminal != nil {
+			terminalCode = strings.TrimSpace(run.RuntimeState.Decision.Terminal.Code)
+		}
+		if view, err := runtimecontract.BuildRuntimeExecutionBudgetView(facts.WorkspaceID, facts.RunID, run.RuntimeState.StateRevision, run.RuntimeState.ExecutionBudget, activeWaitID, terminalCode, runtimecontract.RuntimeExecutionBudgetSourceUsageFromFacts(facts)); err == nil {
+			projection.ExecutionBudget = &view
+		}
+	}
 	if facts.RepairDirective != nil {
 		projection.RepairDirective = runtimeRepairDirectiveProjection(facts.RepairDirective)
 	}

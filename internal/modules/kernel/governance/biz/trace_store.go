@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strings"
 
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
@@ -138,11 +139,29 @@ func (s *Service) loadTracesByRunAndType(ctx context.Context, workspaceID common
 	if s == nil || s.traces == nil || workspaceID == "" || runID == "" || strings.TrimSpace(itemType) == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
+	items, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		ItemType:    itemType,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Repository implementations normally return occurred-at order, but the
+	// policy contract must not depend on a storage-specific iteration order.
+	// A stable ID tie-break keeps consecutive-failure evaluation deterministic.
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		if left == nil || right == nil {
+			return left != nil
+		}
+		if left.OccurredAt != right.OccurredAt {
+			return left.OccurredAt < right.OccurredAt
+		}
+		return left.ID < right.ID
+	})
+	return items, nil
 }
 
 func (s *Service) hasClosedTrace(ctx context.Context, workspaceID common.WorkspaceID, itemType string, itemID string) (bool, error) {

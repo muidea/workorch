@@ -12,6 +12,9 @@ func SoulContext(item *soulmodel.Soul) map[string]any {
 	}
 	return map[string]any{
 		"id":                   string(item.ID),
+		"revision":             item.Revision,
+		"contentHash":          item.ContentHash,
+		"sourceProvenance":     item.SourceProvenance,
 		"name":                 item.Name,
 		"description":          item.Description,
 		"businessDomains":      contextregistrycore.CloneStrings(item.BusinessDomains),

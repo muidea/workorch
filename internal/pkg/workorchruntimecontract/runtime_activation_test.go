@@ -13,8 +13,8 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 	activation := RuntimeActivationContext{
 		ProviderSelection:  ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ReasoningEffort: "high"},
 		DialogLanguage:     "zh-CN",
-		DefaultSoul:        &RuntimeSoulContext{ID: "soul-default", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
-		StageSoulBindings:  []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Instructions: "执行阶段指令"}}},
+		DefaultSoul:        &RuntimeSoulContext{ID: "soul-default", Revision: 1, ContentHash: "soul-default-hash", SourceProvenance: "test", Name: "默认 Soul", Instructions: "遵守当前阶段合同", AllowedToolKinds: []string{"shell/command"}},
+		StageSoulBindings:  []RuntimeStageSoulBinding{{Stage: "execution", Source: "workspace_stage_binding", Soul: RuntimeSoulContext{ID: "soul-execution", Revision: 1, ContentHash: "soul-execution-hash", SourceProvenance: "test", Instructions: "执行阶段指令"}}},
 		Skills:             skills,
 		SkillContextBudget: skillBudget,
 		MCPServerIDs:       []common.MCPServerID{"mcp-main"},

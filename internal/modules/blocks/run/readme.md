@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-21
 
 ## 组件类型
 
@@ -33,7 +33,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   fact。该 fact 的合同元数据为 `SM-4 + process scope + process-lifecycle identity`，不携带 workspace/run，也不迁移
   SM-1；它只释放 Orchestrator 已同步完成 inventory/load 的
   owner-local startup recovery actions。这样 recovery 不依赖 `Weight()`，且不会在 `StoreRuntimeStateRecordCommand` 尚未注册时
-  由 BackgroundRoutine 提前驱动。
+  由 BackgroundRoutine 提前驱动。重复 ready fact 只能观察已清空的同一 handoff，不能再次调度 startup drive。
 
 - Run、Step、RuntimeCheckpoint 的查询、Run 删除、runtime resource purge 与 opaque Runtime CAS 均由
   `blocks/run/pkg/events` 定义逐 topic 的具体 command/result。不存在跨 topic 的 `RunCommandResult` 联合 envelope；
@@ -53,13 +53,23 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   即使构造出合法 record 也必须被拒绝；没有 typed bootstrap 的 legacy/non-Runtime Run 也不能借该命令写入
   `RuntimeState` 或 lifecycle fence。
 - `WorkspaceExecutionIntentCommand` 的 restart 分支携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、
-  ordered focus queue 与 prerequisite requirements。RequestID 的幂等身份绑定 workspace、Goal、DoD、definition
+  ordered focus queue 与 prerequisite requirements，并显式绑定 Workspace owner 封存的 `StartupInputHash`。RequestID 的幂等身份绑定 workspace、Goal、DoD、definition
   revision、priority、bootstrap hash 与固定 replacement policy；同 ID、不同 sealed payload 必须 conflict。
 - 当 bootstrap 含有 activation Memory selection 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。它使用稳定的 Run CreatedAt，并透传 sealed candidate/selected/excluded、quota、score/hit 与 byte/token budget；该消息只是不可变 activation audit，Memory owner 独占 create-once RecallTrace 持久化与首次 `MemoryRecallRecorded` 通知。固定 trace ID + 完整内容比较使 exact replay 零写入、内容漂移 conflict；memory observability 失败不得回滚已成功的 Run 创建。Run 启动时会从已持久化 bootstrap 重放该 fact，补偿 Run 提交后、Memory 交接前的崩溃窗口。
 - 生产入口由 application 向 Workspace owner 提交 workspace-scoped resume/restart；Workspace 校验并选择 canonical
   definition 后，只有 `blocks/workspace` 可向 Run owner 发送 `WorkspaceExecutionIntentCommand`。Run Biz 在自身 reducer
   中完成 activation、continuation 或 replacement 准入、CAS 持久化并发布 typed fact。Runtime Resume 不接受 loaded
   Run 或上下文 patch。
+- Resume 只使用所选 Run 自己的 immutable bootstrap、`DefinitionRevision` 与 `StartupInputHash`；Workspace 后续 candidate、
+  promotion 或 Goal/DoD 变化不能改写该 Run。Restart 缺少 eligible admission、definition mismatch 或 startup hash mismatch
+  时在 Workspace ingress fail-closed，Run 不接受半封存 startup input。
+- Runtime-definition clarification 的 successor replacement 先持久化 immutable intent，再同步提交 Decision owner 专用
+  resolution command。intent 按 `pending_clarification_resolution -> clarification_resolution_bound` 后才允许 administrative
+  supersede/delivery；scope mismatch 进入 `clarification_resolution_rejected`，不得创建 successor。只有用户提交不同
+  RequestID 的显式 Restart 才能把 rejected intent 移入 immutable retirement history 并封存新 intent；相同 RequestID
+  仍为 typed conflict，且 bound/deliverable/completed intent 均不可替换。`ticket_already_bound` 的不同 current identity/hash
+  会随 rejection 持久化为 owner invariant breach，不能从 hash 重建 bootstrap 或由 Restart 覆盖。启动恢复只重放相同
+  ticket/intent/hash，Decision acknowledgement 之前零 terminal delivery。
 - Orchestrator 发现不支持的 persisted Runtime schema 时，只能发送带 scope、opaque state ref、actual/supported
   schema 和 safe original diagnostic 的 `RuntimeStateIncompatibleFact`。Run reducer 将它持久化为
   `fresh_activation_required`；该 Run 的 workspace resume admission 返回 typed non-resumable disposition，既不发 continuation
@@ -71,8 +81,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。current development baseline 的 Runtime record 同时持久化 Orchestrator-authored
   opaque lifecycle fence；Run 仅比较 scope/schema/revision/ref/hash/bootstrap/fence，禁止解码 Decision、semantic、candidate、
   governance、evidence 或 drive 内容。若为 `fresh_activation_required`，通知额外携带
-  Run-owned actual/supported schema identity，以便 Workspace 安全释放同一 Run 的 active slot；它仍不公开 aggregate
-  内容或选择 recovery action。Governance、Eventstream 和 application 按需订阅。
+  Run-owned actual/supported schema identity；Workspace 必须保留同一 Run 的 active slot，直到用户显式 reset 后重新
+  activation，不能把该非终态 disposition 当作 terminal release。通知仍不公开 aggregate 内容或选择 recovery action。
+  Governance、Eventstream 和 application 按需订阅。
 - Governance、Eventstream 和 application 按需导入 `blocks/run/pkg/events` 订阅或发送命令。
 
 ## 交互合同完整性
@@ -94,7 +105,8 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - current-baseline restart 由 Run owner 先在非终态 predecessor 上 CAS 持久化 immutable `ReplacementIntent`；只有
   predecessor 的 `Result -> Workspace -> Run` terminal delivery 完成后，Run-private reducer 才幂等创建并激活
   successor。相同 RequestID 只有在完整 sealed activation payload 相同的情况下才是 duplicate；否则 fail-closed。
-  非当前 development baseline 返回 `data_reset_required`，且不持久化 replacement intent。
+  successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；任一切点后重启都只
+  收敛到同一 successor。非当前 development baseline 返回 `data_reset_required`，且不持久化 replacement intent。
 - 不允许形成 active Run 无合法 wait、无 scheduled drive 且 Runtime aggregate 非终态的悬挂状态；该恢复分类来自
   Orchestrator/Run 的 typed inventory，不从 Step/nextAction 推断。
 - Step 合同失败不得先记录 completed 再回滚为 failed。
@@ -107,7 +119,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   覆盖为更低 revision；blocker 字段必须与 SM-1 RunState 一致。Run 不检查 RuntimeStateRecord 内部 definition、
   activation 或 decision 语义。
 - candidate attempt、sealed dispatch、governance binding/resolution、focus/evidence 等均作为 opaque RuntimeStateRecord
-  payload 原样 CAS 持久化；其合法性、去重与状态迁移只由 Orchestrator owner reducer/invariant 负责。
+  payload 原样 CAS 持久化；execution-budget allocation/consumption、SM-2 repair、SM-4 recovery和bounded recoverable wait
+  同样只作为opaque aggregate sub-ledger保存。其合法性、去重、deadline/lease与状态迁移只由Orchestrator owner
+  reducer/invariant负责，Run不汇总余额、不claim probe也不把wait解释成SM-1 blocked。
 - RuntimeBootstrap 的顶层 definition identity/revision 必须与 Run 的 GoalID、DoDID 和 DefinitionRevision 一致；
   不一致的 owner-private create/ensure 或 workspace restart selection 必须返回 conflict。RuntimeStateRecord 内部 definition context、facts 与
   activation 的完整性只由 Orchestrator invariant 校验，Run owner 不据此选择 CAS/recovery/lifecycle 路径。
@@ -121,15 +135,12 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   constructor。Run owner 的生产依赖只包含自身 repository、EventHub、EventHub-backed Workspace typed read port 与
   状态通知能力。
 
-## 回归覆盖与待完善点
+## 回归覆盖
 
-已覆盖：ticket/approval 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload
-冲突、intent 先持久化与 successor 幂等 materialization；Runtime CAS source/scope/schema/hash、aggregate revision race、
-物理 rebase 与 legacy bypass；Setup 阶段 inventory/record read、commands-ready 元数据、typed result clone、workspace scope、
-activation Memory 完整 selection fact、Run 启动补写与 Memory owner exact replay、in-flight Stop 与重复 Start/Stop。
-
-仍待完善：
-
-- [ ] 将 SM-1 所有合法/非法边（尤其 administrative cancel/supersede 与各终态反向迁移）整理为完整表驱动矩阵。
-- [ ] 覆盖 replacement terminal delivery 每个持久化 cut point 的进程崩溃/重启，以及重复 commands-ready 通知的端到端 handoff。
-- [ ] 覆盖 activation Memory recall 的 missing subscriber 与 owner error，确认均不回滚已提交 Run。
+已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；ticket/approval
+两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
+runtime clarification acknowledgement gate，以及 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
+唯一 successor；Runtime CAS source/scope/schema/hash、aggregate revision race、物理 rebase 与 legacy bypass；Setup 阶段
+inventory/record read、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整
+selection fact、missing subscriber/owner error 不回滚、Run 启动补写与 Memory owner exact replay、in-flight Stop 与重复
+Start/Stop。当前无本 README 已知可执行缺口。

@@ -102,6 +102,7 @@ func compactRunListItem(item *runmodel.Run) *runmodel.Run {
 		DoDID:                   item.DoDID,
 		Lineage:                 item.Lineage,
 		DefinitionRevision:      item.DefinitionRevision,
+		StartupInputHash:        item.StartupInputHash,
 		InitialStepKind:         item.InitialStepKind,
 		RuntimeActivationStatus: item.RuntimeActivationStatus.Clone(),
 		State:                   item.State,

@@ -4370,11 +4370,16 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	if err != nil {
 		t.Fatal(err)
 	}
+	executionBudget, err := runtimecontract.NewRuntimeExecutionBudgetLedger(bootstrap.ExecutionBudgetPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	aggregate := runtime.RuntimeAggregate{
 		StateRevision:    revision,
 		Definition:       bootstrap.Definition,
 		Facts:            initialized,
 		SemanticPlanning: semanticPlanning,
+		ExecutionBudget:  executionBudget,
 		Decision:         decision,
 	}
 	if err := aggregate.Validate(); err != nil {
@@ -4486,7 +4491,7 @@ func runtimeOperationAdmissibilityPrerequisite(inventory runtimecontract.Runtime
 }
 
 func runtimeDefinition() runtimecontract.RuntimeDefinitionContext {
-	return runtimecontract.RuntimeDefinitionContext{
+	return runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-v2", GoalID: "goal-v2", GoalDefinition: "完成目标",
 		DoDID: "dod-v2", DoDDefinition: "产生可验证交付物", CapabilityContract: []string{runtimecontract.StepKindFileEdit},
 	}

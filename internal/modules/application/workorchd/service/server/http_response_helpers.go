@@ -476,7 +476,10 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 	case errors.Is(err, common.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
 	default:
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		// An unclassified owner/transport failure may contain provider payloads,
+		// endpoint details or credentials. Keep the concrete cause in the
+		// application call chain, but never serialize it through HTTP.
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 	}
 }
 

@@ -29,6 +29,7 @@ const (
 	RuntimeDriveLeaseReasonOperationRetry   RuntimeDriveLeaseReason = "operation_retry"
 	RuntimeDriveLeaseReasonDeliveryRetry    RuntimeDriveLeaseReason = "delivery_retry"
 	RuntimeDriveLeaseReasonScheduleRetry    RuntimeDriveLeaseReason = "schedule_retry"
+	RuntimeDriveLeaseReasonRecoverableWait  RuntimeDriveLeaseReason = "recoverable_wait"
 )
 
 // RuntimeDriveLease is the Orchestrator-owned, persisted SM-4 retry identity.
@@ -62,7 +63,8 @@ func (l RuntimeDriveLease) Validate() error {
 		RuntimeDriveLeaseReasonProviderRetry,
 		RuntimeDriveLeaseReasonOperationRetry,
 		RuntimeDriveLeaseReasonDeliveryRetry,
-		RuntimeDriveLeaseReasonScheduleRetry:
+		RuntimeDriveLeaseReasonScheduleRetry,
+		RuntimeDriveLeaseReasonRecoverableWait:
 	default:
 		return fmt.Errorf("runtime drive lease has unsupported reason %q", l.Reason)
 	}

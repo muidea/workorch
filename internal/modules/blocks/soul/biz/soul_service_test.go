@@ -9,6 +9,7 @@ import (
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
 	soulservice "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -39,6 +40,19 @@ func TestServiceCreateSoulAndValidateCapabilitySelection(t *testing.T) {
 	}
 	if got.Name != cmd.Name || got.AllowedSkillRefs[0] != "skill-go" {
 		t.Fatalf("soul = %+v, want created command values", got)
+	}
+	if got.Revision != 1 || got.ContentHash == "" || got.SourceProvenance != "user_managed" {
+		t.Fatalf("Soul owner identity = %+v", got)
+	}
+	unchanged, err := service.UpdateSoul(ctx, cmd)
+	if err != nil || unchanged.Revision != got.Revision || unchanged.ContentHash != got.ContentHash {
+		t.Fatalf("idempotent Soul update = %+v err=%v", unchanged, err)
+	}
+	changedCommand := cmd
+	changedCommand.Description = "updated owner content"
+	changed, err := service.UpdateSoul(ctx, changedCommand)
+	if err != nil || changed.Revision != 2 || changed.ContentHash == got.ContentHash || changed.SourceProvenance != got.SourceProvenance {
+		t.Fatalf("changed Soul revision = %+v err=%v", changed, err)
 	}
 
 	if err := service.ValidateCapabilitySelection(ctx, soulservice.ValidateCapabilitySelectionCommand{
@@ -133,7 +147,8 @@ func TestServiceValidateCapabilitySelectionAllowsWildcardRefs(t *testing.T) {
 
 func TestServiceRejectsInvalidSoul(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewSoulRepository())
+	repository := memory.NewSoulRepository()
+	service := NewService(repository)
 
 	if _, err := service.CreateSoul(ctx, soulservice.CreateSoulCommand{
 		SoulID: common.SoulID("soul-invalid"),
@@ -149,6 +164,14 @@ func TestServiceRejectsInvalidSoul(t *testing.T) {
 		AllowedSkillRefs: []string{""},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create blank skill ref err = %v, want invalid argument", err)
+	}
+	invalidProvenance := &soulmodel.Soul{ID: "soul-invalid-provenance", Revision: 1, SourceProvenance: "untrusted", Name: "invalid provenance", SoulMD: "# invalid"}
+	invalidProvenance.ContentHash = soulmodel.StableSoulContentHash(invalidProvenance)
+	if err := repository.Create(ctx, invalidProvenance); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetSoul(ctx, invalidProvenance.ID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("stored invalid Soul provenance err = %v, want conflict", err)
 	}
 }
 

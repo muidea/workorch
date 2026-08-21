@@ -36,6 +36,9 @@ type RuntimeActivationContext struct {
 
 type RuntimeSoulContext struct {
 	ID                          common.SoulID
+	Revision                    uint64
+	ContentHash                 string
+	SourceProvenance            string
 	Name                        string
 	Description                 string
 	BusinessDomains             []string
@@ -154,9 +157,12 @@ func (c RuntimeActivationContext) Validate() error {
 		return fmt.Errorf("runtime activation provider selection: %w", err)
 	}
 	for _, binding := range c.StageSoulBindings {
-		if binding.Stage == "" || binding.Soul.ID == "" {
+		if binding.Stage == "" || binding.Soul.ID == "" || binding.Soul.Revision == 0 || binding.Soul.ContentHash == "" || binding.Soul.SourceProvenance == "" {
 			return fmt.Errorf("runtime activation stage soul binding requires stage and soul")
 		}
+	}
+	if c.DefaultSoul != nil && (c.DefaultSoul.Revision == 0 || c.DefaultSoul.ContentHash == "" || c.DefaultSoul.SourceProvenance == "") {
+		return fmt.Errorf("runtime activation default soul requires owner revision, content hash and provenance")
 	}
 	for _, capability := range c.MCPCapabilities {
 		if capability.ID == "" || capability.ServerID == "" || capability.Kind == "" || capability.Name == "" {
@@ -257,6 +263,8 @@ func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeAc
 }
 
 func (s RuntimeSoulContext) Normalized() RuntimeSoulContext {
+	s.ContentHash = strings.TrimSpace(s.ContentHash)
+	s.SourceProvenance = strings.TrimSpace(s.SourceProvenance)
 	s.Name = strings.TrimSpace(s.Name)
 	s.Description = strings.TrimSpace(s.Description)
 	s.BusinessDomains = normalizeStrings(s.BusinessDomains)
@@ -402,7 +410,7 @@ func sameRuntimeSoulPointers(left *RuntimeSoulContext, right *RuntimeSoulContext
 func sameRuntimeSoul(left RuntimeSoulContext, right RuntimeSoulContext) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	return left.ID == right.ID && left.Name == right.Name && left.Description == right.Description && left.Instructions == right.Instructions &&
+	return left.ID == right.ID && left.Revision == right.Revision && left.ContentHash == right.ContentHash && left.SourceProvenance == right.SourceProvenance && left.Name == right.Name && left.Description == right.Description && left.Instructions == right.Instructions &&
 		sameStrings(left.BusinessDomains, right.BusinessDomains) && sameStrings(left.AllowedSkillRefs, right.AllowedSkillRefs) &&
 		sameStrings(left.AllowedMCPServerRefs, right.AllowedMCPServerRefs) && sameStrings(left.AllowedCapabilityRefs, right.AllowedCapabilityRefs) &&
 		sameStrings(left.AllowedCapabilityCategories, right.AllowedCapabilityCategories) && sameStrings(left.AllowedToolKinds, right.AllowedToolKinds)

@@ -27,7 +27,8 @@ Web owner 直接执行 GET：每个 hostname 只解析一次，解析地址同�
   超 provider result limit 时，Web 返回 exact `RuntimeGovernanceRequirement`；继续执行只接受 Orchestrator 封存且逐字段匹配
   subject/action/risk/authorization hash 与当前 execution key/fence 的 `GovernanceGrant`。
 - Search/fetch 都发布 `effect=none + at_most_once` owner policy。外部请求已提交而 receipt 未提交时进入 Runtime
-  `outcome_unknown`，不得把“无 receipt”误当作安全重放许可；provider POST 也不被声明为幂等请求。
+  `outcome_unknown`，不得把“无 receipt”误当作安全重放许可；provider POST 也不被声明为幂等请求。Found/Receipt 一致性、
+  query identity 与 commit 完整 receipt equality 由 capability owners 共享的 typed validator 校验。
 - 跨 owner 的唯一执行结果是 `RuntimeOperationReceipt`。receipt evidence 携带真实但有界的 normalized content summary、
   SHA-256 content hash、opaque source refs、truncation/quality tags，以及 `workorch://web/evidence/<hash>` raw ref。完整规范化
   内容只写入 workspace internal directory 下的 Web-owner evidence 文件，不把 raw provider body 放入 aggregate。

@@ -102,6 +102,7 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 	}
 	expectedRevision := aggregate.StateRevision
 	found := false
+	var matchedExecution runtimecontract.RuntimeOperationExecutionRecord
 	for idx := range aggregate.ActiveDispatch.OperationExecutions {
 		execution := &aggregate.ActiveDispatch.OperationExecutions[idx]
 		if execution.OperationID != receipt.OperationID || execution.ExecutionKey != receipt.ExecutionKey {
@@ -114,10 +115,18 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 		execution.State = runtimecontract.OperationExecutionOwnerCommitted
 		execution.OwnerReceiptRef = "runtime-receipt/" + receipt.ExecutionKey
 		execution.OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+		matchedExecution = execution.Clone()
 		break
 	}
 	if !found {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: receipt execution is not sealed", common.ErrConflict)
+	}
+	operation, operationFound := candidateOperationByID(aggregate.ActiveDispatch.Candidate, receipt.OperationID)
+	if !operationFound {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: receipt operation is not sealed", common.ErrConflict)
+	}
+	if _, err := joinRuntimeOperationExecutionBudget(&aggregate, operation, matchedExecution, &receipt, false); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt.Clone())
 	aggregate.StateRevision++
