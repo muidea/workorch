@@ -222,7 +222,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		if observationErr != nil {
 			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, observationErr
 		}
-		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_request_contract_error", requestErr.Error(), observation)
+		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_request_contract_error", requestErr.Error(), nil, observation)
 	}
 	return m.handleRuntimeCandidateProviderResponse(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID)
 }
@@ -273,7 +273,7 @@ func (m *Biz) handleRuntimeCandidateProviderResponse(ctx context.Context, aggreg
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, observationErr
 	}
 	if response.Transaction != aggregate.Decision.AuthorityTransaction() {
-		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_response_transaction_mismatch", "runtime candidate response changed the sealed authority transaction", observation)
+		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_response_transaction_mismatch", "runtime candidate response changed the sealed authority transaction", nil, observation)
 	}
 	if response.Stale != nil {
 		updated, staleErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestStaleObserved, session.LogicalRequestID, 0, "", nil, response.Stale, observation)
@@ -283,7 +283,7 @@ func (m *Biz) handleRuntimeCandidateProviderResponse(ctx context.Context, aggreg
 		return m.handleRuntimeCandidateProviderFeedback(ctx, aggregate, session, *response.Feedback, physicalCallID, observation)
 	}
 	if response.DocumentOutcome == nil {
-		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_outcome_missing", "candidate response did not carry a typed provider document outcome", observation)
+		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_outcome_missing", "candidate response did not carry a typed provider document outcome", nil, observation)
 	}
 	return m.handleRuntimeCandidateDocumentOutcome(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID, observation)
 }
@@ -291,9 +291,10 @@ func (m *Biz) handleRuntimeCandidateProviderResponse(ctx context.Context, aggreg
 func (m *Biz) handleRuntimeCandidateProviderFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, feedback runtimecontract.RuntimeFeedback, physicalCallID string, observation *runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	providerFailure := runtimeProviderRequestFailure(feedback)
 	if feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderTransient {
-		return m.handleRuntimeCandidateTransientFeedback(ctx, aggregate, session, providerFailure, physicalCallID, observation)
+		return m.handleRuntimeCandidateTransientFeedback(ctx, aggregate, session, providerFailure, feedback.OriginalDiagnostic, physicalCallID, observation)
 	}
 	if fact, ok := runtimeProviderGovernanceFailure(providerFailure); ok {
+		fact.OriginalDiagnostic = feedback.OriginalDiagnostic.CloneOriginal()
 		outcome := runtimecontract.RuntimeCandidateRequestOutcome{Code: firstNonEmptyString(providerFailure.Code, string(providerFailure.Class)), Signature: firstNonEmptyString(providerFailure.Signature, string(providerFailure.Class))}
 		if feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderAuthentication {
 			outcome.Class = runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication
@@ -307,10 +308,10 @@ func (m *Biz) handleRuntimeCandidateProviderFeedback(ctx context.Context, aggreg
 		failed, err := m.runtimeRecordFailure(ctx, terminated, fact)
 		return failed, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_protocol_failure", providerFailure.Reason, observation)
+	return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_protocol_failure", providerFailure.Reason, feedback.OriginalDiagnostic, observation)
 }
 
-func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, failure runtimecontract.RuntimeCandidateFailure, physicalCallID string, observation *runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
+func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, failure runtimecontract.RuntimeCandidateFailure, originalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic, physicalCallID string, observation *runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(failure.Code, "provider_transient"), Signature: firstNonEmptyString(failure.Signature, "provider-transient"),
 	}
@@ -320,7 +321,7 @@ func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggre
 	}
 	if failure.Code == "provider_body_idle_timeout" {
 		failed, recordErr := m.runtimeRecordFailure(ctx, updated, runtimecontract.FailureFact{
-			Class: runtimecontract.FailureClassProviderTransient, Code: "provider_body_idle_timeout", Signature: "provider-body-idle-timeout", Message: strings.TrimSpace(failure.Reason),
+			Class: runtimecontract.FailureClassProviderTransient, Code: "provider_body_idle_timeout", Signature: "provider-body-idle-timeout", Message: strings.TrimSpace(failure.Reason), OriginalDiagnostic: originalDiagnostic.CloneOriginal(),
 		})
 		return failed, runtimecontract.RuntimeCandidate{}, false, recordErr
 	}
@@ -333,7 +334,7 @@ func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggre
 	}
 	failed, err := m.runtimeRecordFailure(ctx, updated, runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted",
-		Signature: firstNonEmptyString(failure.Signature, "provider-transport-exhausted"), Message: strings.TrimSpace(failure.Reason),
+		Signature: firstNonEmptyString(failure.Signature, "provider-transport-exhausted"), Message: strings.TrimSpace(failure.Reason), OriginalDiagnostic: originalDiagnostic.CloneOriginal(),
 	})
 	return failed, runtimecontract.RuntimeCandidate{}, false, err
 }
@@ -354,13 +355,13 @@ func (m *Biz) handleRuntimeCandidateDocumentOutcome(ctx context.Context, aggrega
 		}
 		return updated, runtimecontract.RuntimeCandidate{}, false, nil
 	case runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
-		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, response.DocumentOutcome.Code, "provider did not return one complete authority document", observation)
+		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, response.DocumentOutcome.Code, "provider did not return one complete authority document", nil, observation)
 	case runtimecontract.RuntimeProviderDocumentComplete:
 		if len(response.DocumentContent) == 0 {
-			return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_missing", "complete candidate response did not carry its raw document", observation)
+			return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_missing", "complete candidate response did not carry its raw document", nil, observation)
 		}
 	default:
-		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_outcome_invalid", "candidate response carried an unknown provider document outcome", observation)
+		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_outcome_invalid", "candidate response carried an unknown provider document outcome", nil, observation)
 	}
 	completed, _, _, completeErr := m.persistAndCompleteRuntimeCandidateRequestDocument(ctx, aggregate, session.LogicalRequestID, sequence, physicalCallID, response.DocumentContent, observation)
 	if completeErr != nil {
@@ -456,7 +457,7 @@ func runtimeCandidateRequestSession(aggregate runtime.RuntimeAggregate, logicalR
 	return runtimecontract.RuntimeCandidateRequestSession{}, false
 }
 
-func (m *Biz) terminateRuntimeCandidateRequestProtocol(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, code, message string, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
+func (m *Biz) terminateRuntimeCandidateRequestProtocol(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, code, message string, originalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol, Code: code, Signature: strings.ReplaceAll(code, "_", "-"),
 	}
@@ -465,7 +466,7 @@ func (m *Biz) terminateRuntimeCandidateRequestProtocol(ctx context.Context, aggr
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	failed, failureErr := m.runtimeRecordFailure(ctx, terminated, runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassProviderProtocol, Code: code, Signature: strings.ReplaceAll(code, "_", "-"), Message: strings.TrimSpace(message),
+		Class: runtimecontract.FailureClassProviderProtocol, Code: code, Signature: strings.ReplaceAll(code, "_", "-"), Message: strings.TrimSpace(message), OriginalDiagnostic: originalDiagnostic.CloneOriginal(),
 	})
 	return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 }

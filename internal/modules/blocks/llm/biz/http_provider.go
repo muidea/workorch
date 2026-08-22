@@ -65,6 +65,17 @@ func (e *ProviderTransportError) Unwrap() error {
 	return e.cause
 }
 
+// RuntimeProviderFailureIdentity exposes only the adapter-owned, audit-safe
+// factual identity.  It deliberately omits the wrapped transport cause, which
+// may contain an endpoint, credential header, or provider-private fragment.
+func (e *ProviderTransportError) RuntimeProviderFailureIdentity() (string, string) {
+	if e == nil {
+		return "", ""
+	}
+	code := strings.TrimSpace(e.Code)
+	return code, strings.ReplaceAll(code, "_", "-")
+}
+
 func (e *ProviderProtocolError) Error() string {
 	if e == nil || strings.TrimSpace(e.Code) == "" {
 		return "llm provider protocol error"
@@ -73,6 +84,16 @@ func (e *ProviderProtocolError) Error() string {
 }
 
 func (e *ProviderProtocolError) Unwrap() error { return common.ErrInvalidArgument }
+
+// RuntimeProviderFailureIdentity preserves the exact protocol guard that
+// rejected the response while keeping raw provider content inside this owner.
+func (e *ProviderProtocolError) RuntimeProviderFailureIdentity() (string, string) {
+	if e == nil {
+		return "", ""
+	}
+	code := strings.TrimSpace(e.Code)
+	return code, strings.ReplaceAll(code, "_", "-")
+}
 
 func providerProtocolError(code string, responseBytes int) error {
 	return &ProviderProtocolError{Code: strings.TrimSpace(code), ResponseBytes: max(responseBytes, 0)}
@@ -163,6 +184,17 @@ func (e *ProviderHTTPStatusError) Error() string {
 }
 
 func (e *ProviderHTTPStatusError) Unwrap() error { return common.ErrInvalidArgument }
+
+// RuntimeProviderFailureIdentity turns the status code into a stable identity
+// without exposing even the sanitized status body across the provider owner
+// boundary.
+func (e *ProviderHTTPStatusError) RuntimeProviderFailureIdentity() (string, string) {
+	if e == nil || e.StatusCode <= 0 {
+		return "", ""
+	}
+	code := fmt.Sprintf("provider_http_status_%d", e.StatusCode)
+	return code, strings.ReplaceAll(code, "_", "-")
+}
 
 func providerHTTPStatusError(statusCode int) error {
 	body := http.StatusText(statusCode)

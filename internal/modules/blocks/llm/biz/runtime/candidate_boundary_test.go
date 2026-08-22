@@ -368,6 +368,26 @@ func TestCandidateFailureFromErrorDoesNotExposeRawProviderTransport(t *testing.T
 	}
 }
 
+func TestRequestCandidatePreservesTypedProviderGuardIdentity(t *testing.T) {
+	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		return llmmodels.RuntimeCandidateGenerationResult{
+			Status:       llmmodels.RuntimeCandidateStatusFailed,
+			FailureClass: string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol),
+		}, typedProviderIdentityError{code: "response_byte_limit_exceeded"}
+	})
+	_, err := RequestCandidate(context.Background(), provider, request)
+	if err == nil {
+		t.Fatal("typed provider protocol failure was accepted")
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Class != runtimecontract.RuntimeCandidateFailureClassProviderProtocol ||
+		failure.Code != "response_byte_limit_exceeded" || failure.Signature != "response-byte-limit-exceeded" ||
+		failure.Reason != "provider response violated the protocol contract" {
+		t.Fatalf("typed provider failure = %+v", failure)
+	}
+}
+
 func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
 	observation := runtimecontract.RuntimePrerequisiteObservation{

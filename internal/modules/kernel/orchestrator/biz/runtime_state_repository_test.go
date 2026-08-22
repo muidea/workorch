@@ -4147,7 +4147,7 @@ func runtimeFileEditParameters(_ string) []runtimecontract.OperationParameter {
 	}
 }
 
-func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidateAttempt(t *testing.T) {
+func TestRuntimeMainlinePreservesProviderProtocolDiagnosticWithoutCandidateAttempt(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -4168,7 +4168,10 @@ func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidate
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requests++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}
+		failure := runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassProviderProtocol, Code: "response_byte_limit_exceeded",
+			Signature: "response-byte-limit-exceeded", Reason: "provider response violated the protocol contract",
+		}
 		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -4196,6 +4199,24 @@ func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidate
 		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol ||
 		session.LastOutcome.Code != "provider_protocol_failure" {
 		t.Fatalf("provider protocol session = %+v", session)
+	}
+	reloaded, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Facts.Failure == nil || reloaded.Facts.Failure.OriginalDiagnostic == nil ||
+		reloaded.Facts.Failure.OriginalDiagnostic.OwnerModuleID != runtimecontract.RuntimeModuleLLM ||
+		reloaded.Facts.Failure.OriginalDiagnostic.OriginalCode != "response_byte_limit_exceeded" ||
+		reloaded.Facts.Failure.OriginalDiagnostic.Signature != "response-byte-limit-exceeded" {
+		t.Fatalf("persisted provider protocol diagnostic = %+v", reloaded.Facts.Failure)
+	}
+	replayed, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, "stable-prefix-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || replayed.StateRevision != reloaded.StateRevision || replayed.Facts.Failure == nil ||
+		replayed.Facts.Failure.OriginalDiagnostic == nil || replayed.Facts.Failure.OriginalDiagnostic.OriginalCode != "response_byte_limit_exceeded" {
+		t.Fatalf("duplicate terminal drive changed provider diagnostic or replayed request: requests=%d aggregate=%+v", requests, replayed)
 	}
 }
 

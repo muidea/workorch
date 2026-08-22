@@ -45,7 +45,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
    非法 2xx JSON、非法 SSE framing/event、响应超限与跨 origin redirect 属于 `provider_protocol`，不得消费
    Orchestrator transport recovery budget；显式 protocol class 在 feedback 转换中不得改写为 internal。`http.Client.Do`
    返回的 endpoint-bearing `url.Error` 或自定义 transport error 必须先收敛为稳定的 timeout/cancel/DNS/TLS/network code，
-   原始 error 文本不得离开 provider adapter。
+   原始 error 文本不得离开 provider adapter。adapter-owned typed error 必须通过 audit-safe identity 保留精确 code
+   （例如 `response_byte_limit_exceeded`、transport code 或 safe HTTP status identity）；Runtime boundary 不得从
+   `Error()` 文本重新猜测该 identity，也不得以 generic `provider_request_failed` 覆盖它。
 10. complete document 只返回 strict decoded candidate/diagnostic。audit-safe original diagnostic 与 provider-safe
     field-violation projection 分开生成，任一转换都不得覆盖另一份；raw provider body/prompt/credential/endpoint
     不进入 Runtime aggregate、eventstream、projection、memory 或后续 request。
@@ -116,7 +118,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] completion/embedding/candidate 的 Post 零物理调用；setup completion、workspace embedding 与 Runtime/preflight
   audit 均覆盖 typed scope、submitted flag、usage 及实际 request/response bytes。
 - [x] 2xx 非法 JSON、非法 SSE event、stream/content/wire/embedding response 超限稳定归类为 protocol；feedback 保留
-  explicit `provider_protocol`，Orchestrator 对该类走 request-terminal 而非 transport recovery。
+  explicit `provider_protocol` 与 adapter 精确 code，Orchestrator 对该类走 request-terminal 而非 transport recovery，
+  fresh reload 后仍可从 terminal failure fact 读取同一 original diagnostic。
 - [x] Responses/embedding 跨 origin 307/308 在重发 body 前拒绝，空 API key 不发送 Authorization。
 - [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
   refresh 后 sealed revision 不漂移。

@@ -13,7 +13,8 @@ Last Verified: 2026-08-22
 SM-2 只以 `ConvergenceState` 作为 canonical decision；action/output kind 是纯派生字段，不进入 aggregate、
 authority transaction、terminal delivery 或 Run notification 的最终合同。所有外部 feedback 必须同时携带
 stable factual category 与完整、安全 original diagnostic；Orchestrator 只读取前者选择 internal transition，
-不得解析原 message/code。
+不得解析原 message/code。原 message/code/signature 仍必须通过 private internal event 原样封入 `FailureFact.OriginalDiagnostic`；
+canonical terminal/recovery code 可以保持稳定抽象，但不能覆盖 LLM/capability owner 的精确诊断 identity。
 
 ## Provider inference selection / ceiling
 
@@ -437,6 +438,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   SM-3 owner-local reducer 决定 final 或唯一 same-step correction；只有 persisted `correctable_once` result 可在相同
   transaction、manifest 和 stable prefix 下开启 attempt 1，attempt 1 再次 complete rejection 形成
   `candidate_retry_exhausted`，不能创建第三次请求或无信息 governance ticket。
+- LLM provider feedback 的 stable category 只用于选择 SM-2/SM-3 路径；authentication/configuration/transient/protocol
+  terminal failure 必须同时保存 LLM owner 提供的 exact `OriginalDiagnostic`。例如 canonical terminal 可保持
+  `provider_protocol_failure`，但 nested original code 必须仍是实际 guard（如 `response_byte_limit_exceeded`），且
+  aggregate reload、duplicate drive 与 projection clone 均不得将其泛化或覆盖。
 - candidate retry 预算按稳定且显式持久化的 `AuthorityContractID` 计算；identity 绑定 workspace/run、完整 `AuthoritySnapshotID`、focus、canonical convergence state、definition/evidence revision 与 requiredOutput hash。派生 action 不参与 identity。缺失或不匹配该字段属于 current-schema invariant violation；同一 contract 超过 attempt 0/1 必须 fail-fast，禁止再次请求 provider。
 - complete schema/contract failure 只记录统一 evaluator 生成的原始 typed rejection；correction/final 由 SM-3 internal event 决定。owner feasibility 的
   `stale`、`prerequisite_required`、`infeasible` 必须作为独立 internal event 交给 SM-2，绝不进入

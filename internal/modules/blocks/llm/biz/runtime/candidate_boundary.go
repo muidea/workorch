@@ -122,6 +122,28 @@ func providerFinalOutputInvalidError(generation llmmodels.RuntimeCandidateGenera
 }
 
 func providerFailureIdentity(err error) (string, string) {
+	if err == nil {
+		return "provider_request_failed", "provider-request-failed"
+	}
+	// Provider adapters may expose an audit-safe typed identity without making
+	// the Runtime boundary import an adapter implementation.  Typed identity is
+	// authoritative; error text remains a compatibility fallback for generic
+	// transports only.
+	type identityCarrier interface {
+		RuntimeProviderFailureIdentity() (code, signature string)
+	}
+	var carrier identityCarrier
+	if errors.As(err, &carrier) {
+		code, signature := carrier.RuntimeProviderFailureIdentity()
+		code = strings.TrimSpace(code)
+		signature = strings.TrimSpace(signature)
+		if code != "" {
+			if signature == "" {
+				signature = strings.ReplaceAll(code, "_", "-")
+			}
+			return code, signature
+		}
+	}
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(message, "body idle timeout"):

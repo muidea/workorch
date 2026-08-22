@@ -31,6 +31,12 @@ core verifier 只验证：
 
 core verifier 不验证 software-dev 特定文件、语言、测试命令、目录或业务 DoD；这些属于 profile verifier。
 
+`scripts/state-transition-owners.manifest` 是唯一 verification-only owner/dispatcher 清单。它必须显式列出 SM-1～SM-4
+以及每个 `*_internal_event.go` / `*_internal_events.go` / `internal_event.go` owner-private transition、transaction、effect、audit 或 derived
+projection gate；owner root、private-event file 与 dispatcher 必须都位于同一组件 `biz/`。新增内部事件文件但未归属、
+重复 transition ID、未知分类、dispatcher 缺失或 owner 漂移必须使 boundary verification 失败。该清单不得被生产代码
+导入或用于 reducer dispatch；正式 Runtime owner 仍只由 typed contract 和 private reducer 决定。
+
 ## Four-State-Machine Mandatory Matrix
 
 | 状态机 | 唯一 owner | 必须验证的合法迁移 | 必须拒绝的迁移 |
@@ -75,6 +81,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - concrete Result 同时携带本 domain stable category 与 producer 的 audit-safe original diagnostic；
 - original class/code/message/signature、field violations、target/revision、scope 与 details ref/hash 在
   normalize/clone/hash/persistence/EventHub/projection 中不被覆盖；
+- provider adapter 的 typed protocol/transport/status identity 必须先于 error-text fallback；canonical
+  `provider_protocol_failure` 等 terminal code 不得覆盖 nested original guard code，restart reload 后二者仍应分别可见；
 - producer 没有 diagnostic 的普通 accepted fact 才允许 original 为空；
 - unknown code 保留 original 并 typed fail-fast，不能默认 retry、CAS、repair、governance 或 terminal；
 - provider-safe correction projection 与 audit-safe original diagnostic 分开生成，互不覆盖；
@@ -174,9 +182,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 以及 AGENTS/Makefile 规定的 aggregate test、race 和 vet gate。具体 package/命令清单以源码、Makefile 和 CI 为执行 SoT，
 本合同不复制一份易漂移的 inventory。
 
-Boundary verification 必须覆盖：共享 package transition policy、全 owner code 表、error-text routing、Action/Output.Kind
-与 Status/Outcome 双权威、terminal action、Runtime reducer-owner/role 漂移、secondary owner 直接 state write、DoD
-definition 的 draft/satisfied 影子状态、通用 Envelope/map/any/JSON/reflect bridge、scope 缺失及禁止 raw provider 内容。
+Boundary verification 必须覆盖：共享 package transition policy、verification-only owner manifest 完整性、全 owner code 表、
+error-text routing、Action/Output.Kind 与 Status/Outcome 双权威、terminal action、Runtime reducer-owner/role 漂移、
+secondary owner 直接 state write、DoD definition 的 draft/satisfied 影子状态、通用 Envelope/map/any/JSON/reflect bridge、
+scope 缺失及禁止 raw provider 内容。
 测试选择为空或只命中 projection compatibility wrapper 不能算通过。
 
 任何以 graph step、checkpoint 或 incremental artifact projection 为对象的 wrapper，只能验证非权威读侧，不能替代

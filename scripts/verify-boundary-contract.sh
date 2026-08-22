@@ -372,7 +372,138 @@ EOF
   exit 1
 fi
 
-owner_secondary_dispatchers=(
+# Keep one verification-only inventory for every formal Runtime machine and
+# every owner-private transition/effect gate.  This is deliberately not a Go
+# production registry: reducers cannot use it to select transitions.  It makes
+# owner identity and the sole private dispatcher reviewable, and makes a newly
+# added *_internal_event(s).go fail CI until it is classified here.
+state_transition_owner_manifest="scripts/state-transition-owners.manifest"
+if [[ ! -f "$state_transition_owner_manifest" ]]; then
+  echo "boundary contract violation: state-transition owner manifest is missing: $state_transition_owner_manifest" >&2
+  exit 1
+fi
+production_manifest_consumers="$(source_matches 'state-transition-owners\.manifest' application internal)"
+if [[ -n "$production_manifest_consumers" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: the verification-only state-transition manifest
+is consumed by production code and can become a global reducer registry.
+
+$production_manifest_consumers
+EOF
+  exit 1
+fi
+
+declare -A state_transition_ids=()
+declare -A declared_internal_event_files=()
+declare -A formal_runtime_machine_owners=()
+manifest_line=0
+while IFS='|' read -r transition_id classification owner_root internal_event_file dispatcher_file dispatcher_symbol unexpected; do
+  manifest_line=$((manifest_line + 1))
+  if [[ -z "$transition_id" || "$transition_id" == \#* ]]; then
+    continue
+  fi
+  if [[ -n "${unexpected:-}" || -z "$classification" || -z "$owner_root" || -z "$internal_event_file" || -z "$dispatcher_file" || -z "$dispatcher_symbol" ]]; then
+    echo "boundary contract violation: malformed state-transition owner manifest row $manifest_line" >&2
+    exit 1
+  fi
+  if [[ ! "$transition_id" =~ ^[a-z0-9_.-]+$ || ! "$dispatcher_symbol" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "boundary contract violation: invalid transition or dispatcher identity at manifest row $manifest_line" >&2
+    exit 1
+  fi
+  if [[ -n "${state_transition_ids[$transition_id]+x}" ]]; then
+    echo "boundary contract violation: duplicate state-transition identity in manifest: $transition_id" >&2
+    exit 1
+  fi
+  state_transition_ids["$transition_id"]=1
+
+  case "$classification" in
+    formal_runtime_machine|resource_state_machine|audit_carrier|owner_private_transaction|owner_private_effect_gate|derived_projection_lifecycle) ;;
+    *)
+      echo "boundary contract violation: unknown state-transition classification at row $manifest_line: $classification" >&2
+      exit 1
+      ;;
+  esac
+
+  owner_declared=false
+  for component_root in "${module_class_roots[@]}" "${block_class_roots[@]}"; do
+    if [[ "$component_root" == "$owner_root" ]]; then
+      owner_declared=true
+      break
+    fi
+  done
+  if [[ "$owner_declared" != true ]]; then
+    echo "boundary contract violation: state-transition owner is not a declared Module/Block: $owner_root" >&2
+    exit 1
+  fi
+  if [[ "$internal_event_file" != "$owner_root/biz/"* || "$dispatcher_file" != "$owner_root/biz/"* ]]; then
+    echo "boundary contract violation: transition $transition_id escapes its owner-local biz boundary" >&2
+    exit 1
+  fi
+  if [[ ! -f "$internal_event_file" || ! -f "$dispatcher_file" ]]; then
+    echo "boundary contract violation: transition $transition_id references a missing internal-event or dispatcher file" >&2
+    exit 1
+  fi
+  case "${internal_event_file##*/}" in
+    *_internal_event.go|*_internal_events.go|internal_event.go) ;;
+    *)
+      echo "boundary contract violation: transition $transition_id does not use the owner-private internal-event file convention" >&2
+      exit 1
+      ;;
+  esac
+  if ! grep -q -E -- "^func (\([^)]*\) )?${dispatcher_symbol}\(" "$dispatcher_file"; then
+    echo "boundary contract violation: transition $transition_id dispatcher is missing: $dispatcher_file:$dispatcher_symbol" >&2
+    exit 1
+  fi
+  declared_internal_event_files["$internal_event_file"]=1
+  case "${dispatcher_file##*/}" in
+    *_internal_event.go|*_internal_events.go|internal_event.go)
+      declared_internal_event_files["$dispatcher_file"]=1
+      ;;
+  esac
+
+  if [[ "$classification" == "formal_runtime_machine" ]]; then
+    case "$transition_id" in
+      sm_1) expected_owner="internal/modules/blocks/run" ;;
+      sm_2|sm_3|sm_4) expected_owner="internal/modules/kernel/orchestrator" ;;
+      *)
+        echo "boundary contract violation: unknown formal Runtime machine in manifest: $transition_id" >&2
+        exit 1
+        ;;
+    esac
+    if [[ "$owner_root" != "$expected_owner" ]]; then
+      echo "boundary contract violation: $transition_id owner is $owner_root, want $expected_owner" >&2
+      exit 1
+    fi
+    formal_runtime_machine_owners["$transition_id"]="$owner_root"
+  fi
+done < "$state_transition_owner_manifest"
+
+for transition_id in sm_1 sm_2 sm_3 sm_4; do
+  if [[ -z "${formal_runtime_machine_owners[$transition_id]+x}" ]]; then
+    echo "boundary contract violation: formal Runtime machine is absent from owner manifest: $transition_id" >&2
+    exit 1
+  fi
+done
+
+while IFS= read -r internal_event_file; do
+  if [[ -z "${declared_internal_event_files[$internal_event_file]+x}" ]]; then
+    cat >&2 <<EOF
+Boundary contract violation: owner-private internal-event file is not present
+in the sole state-transition owner manifest.
+
+$internal_event_file
+
+Classify the owner and dispatcher in $state_transition_owner_manifest. Do not
+introduce a second production registry or a cross-owner reducer call.
+EOF
+    exit 1
+  fi
+done < <(find internal/modules -type f ! -name '*_test.go' \( -name '*_internal_event.go' -o -name '*_internal_events.go' -o -name 'internal_event.go' \) | sort)
+
+# Targeted ingress regressions complement the manifest without defining a
+# second owner inventory. These call sites historically bypassed, or are the
+# only public translators into, their private dispatcher.
+owner_secondary_ingress_dispatcher_assertions=(
   "internal/modules/blocks/workspace/biz/definition_admission.go:submitDefinitionAdmissionInternalEvent"
   "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitReplacementInternalEvent"
   "internal/modules/kernel/governance/biz/worker_reconciliation.go:persistEvaluatedGovernanceTrace"
@@ -383,11 +514,11 @@ owner_secondary_dispatchers=(
   "internal/modules/kernel/orchestrator/biz/runtime_candidate_request_content.go:submitCandidateContentInternalEvent"
   "internal/modules/application/workorchd/biz/appservice/workspaceviewcore/store_mutation.go:submitProjectionLifecycleInternalEventLocked"
 )
-for entry in "${owner_secondary_dispatchers[@]}"; do
+for entry in "${owner_secondary_ingress_dispatcher_assertions[@]}"; do
   path="${entry%%:*}"
   dispatcher="${entry#*:}"
   if ! grep -q -F -- "$dispatcher" "$path"; then
-    echo "boundary contract violation: owner path does not use private dispatcher $dispatcher: $path" >&2
+    echo "boundary contract violation: owner ingress does not use private dispatcher $dispatcher: $path" >&2
     exit 1
   fi
 done

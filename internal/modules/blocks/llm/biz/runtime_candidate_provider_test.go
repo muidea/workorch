@@ -34,6 +34,41 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 	}
 }
 
+func TestProviderErrorsExposeOnlyAuditSafeRuntimeIdentity(t *testing.T) {
+	tests := []struct {
+		name          string
+		errorIdentity interface {
+			RuntimeProviderFailureIdentity() (string, string)
+		}
+		wantCode      string
+		wantSignature string
+	}{
+		{
+			name: "protocol guard", errorIdentity: &ProviderProtocolError{Code: "response_byte_limit_exceeded", ResponseBytes: 761537},
+			wantCode: "response_byte_limit_exceeded", wantSignature: "response-byte-limit-exceeded",
+		},
+		{
+			name: "transport category", errorIdentity: &ProviderTransportError{Code: "network_timeout", cause: fmt.Errorf("https://secret.invalid")},
+			wantCode: "network_timeout", wantSignature: "network-timeout",
+		},
+		{
+			name: "http status", errorIdentity: &ProviderHTTPStatusError{StatusCode: 401, Body: "private provider body"},
+			wantCode: "provider_http_status_401", wantSignature: "provider-http-status-401",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, signature := tc.errorIdentity.RuntimeProviderFailureIdentity()
+			if code != tc.wantCode || signature != tc.wantSignature {
+				t.Fatalf("runtime provider identity = %q/%q, want %q/%q", code, signature, tc.wantCode, tc.wantSignature)
+			}
+			if strings.Contains(code, "secret") || strings.Contains(signature, "secret") || strings.Contains(code, "private") || strings.Contains(signature, "private") {
+				t.Fatalf("runtime provider identity leaked adapter-private content: %q/%q", code, signature)
+			}
+		})
+	}
+}
+
 func TestRuntimeProviderFeedbackPreservesExplicitProtocolClass(t *testing.T) {
 	feedback, err := runtimeProviderRequestFeedback(llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "workspace-1", RunID: "run-1", DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,

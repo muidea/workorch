@@ -61,6 +61,8 @@ Blocks 的 owner 边界，不保存历史偏差、重构过程或 closure 记录
 ## Shared Boundary
 
 - each formal state has one owner and only that owner's private reducer chooses transitions;
+- `scripts/state-transition-owners.manifest` is the sole verification-only inventory for formal machines and owner-private
+  transition/effect gates; it must never become a production dispatcher or shared reducer registry;
 - cross-owner I/O is EventHub plus receiver-defined concrete typed command/data/result;
 - no owner exposes a sibling service or repository facade;
 - Workorchd owns entry/use-case/projection concerns, Run owns SM-1, Orchestrator owns SM-2/3/4, capability blocks own effects,
