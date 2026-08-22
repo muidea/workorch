@@ -66,7 +66,6 @@ readTimeout = %q
 writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
-maxConcurrentRuns = 1
 
 [repository]
 backend = %q

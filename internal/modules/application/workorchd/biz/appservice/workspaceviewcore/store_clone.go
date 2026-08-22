@@ -7,12 +7,13 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func (s *Store) cloneEntryForReplace(workspaceID string) *workspaceProjectionEntry {
+// cloneEntryForReplaceLocked snapshots one entry for a replacement
+// transaction. The caller holds s.mu so a concurrent derived mutation cannot
+// commit between the clone and the map replacement and then be lost.
+func (s *Store) cloneEntryForReplaceLocked(workspaceID string) *workspaceProjectionEntry {
 	if s == nil {
 		return &workspaceProjectionEntry{}
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if entry := s.workspaces[workspaceID]; entry != nil {
 		return cloneWorkspaceProjectionEntry(entry)
 	}

@@ -27,7 +27,7 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 {
   "intent": "resume",
   "priority": 0,
-  "requestId": "optional-idempotency-key",
+  "requestId": "optional-request-id",
   "reason": "optional-reason",
   "source": "optional-source"
 }

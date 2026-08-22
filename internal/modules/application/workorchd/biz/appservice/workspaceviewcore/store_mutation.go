@@ -48,6 +48,8 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	nextWorkspaces := make(map[string]*workspaceProjectionEntry, len(workspaces))
 	nextOrder := make([]string, 0, len(workspaces))
@@ -55,9 +57,13 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 		if strings.TrimSpace(item.ID) == "" {
 			continue
 		}
-		entry := s.cloneEntryForReplace(item.ID)
+		entry := s.cloneEntryForReplaceLocked(item.ID)
 		if snapshot, ok := snapshots[item.ID]; ok && strings.TrimSpace(snapshot.Workspace.ID) != "" {
 			snapshot = readmodelprojection.WorkspaceProjection().Detail(snapshot)
+			if snapshot.RunCommand == nil && entry.HasSnapshot && entry.Snapshot.RunCommand != nil {
+				command := *entry.Snapshot.RunCommand
+				snapshot.RunCommand = &command
+			}
 			item = snapshot.Workspace
 			entry.Snapshot = cloneWorkspaceSnapshot(snapshot)
 			entry.HasSnapshot = true
@@ -79,8 +85,6 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 	}
 	sort.Strings(nextOrder)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.workspaces = nextWorkspaces
 	s.workspaceOrder = nextOrder
 	s.advanceGlobalRevision()
@@ -109,6 +113,8 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	nextWorkspaces := make(map[string]*workspaceProjectionEntry, len(workspaces))
 	nextOrder := make([]string, 0, len(workspaces))
@@ -116,7 +122,7 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 		if strings.TrimSpace(item.ID) == "" {
 			continue
 		}
-		entry := s.cloneEntryForReplace(item.ID)
+		entry := s.cloneEntryForReplaceLocked(item.ID)
 		entry.Workspace = cloneWorkspace(item)
 		entry.HasWorkspace = true
 		entry.syncSnapshotWorkspace()
@@ -126,8 +132,6 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 	}
 	sort.Strings(nextOrder)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.workspaces = nextWorkspaces
 	s.workspaceOrder = nextOrder
 	s.advanceGlobalRevision()
@@ -251,6 +255,9 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 	if entry == nil || !entry.HasWorkspace {
 		return false
 	}
+	if runCommandRequestAlreadyProjected(entry, update.RequestID) {
+		return false
+	}
 	now := time.Now().UTC()
 	snapshot := entry.Snapshot
 	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
@@ -269,7 +276,6 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 		Disposition:        strings.TrimSpace(update.Disposition),
 		Diagnostic:         strings.TrimSpace(update.Diagnostic),
 		RequestID:          strings.TrimSpace(update.RequestID),
-		IdempotencyKey:     strings.TrimSpace(update.IdempotencyKey),
 		Source:             strings.TrimSpace(update.Source),
 		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
 		DecisionID:         strings.TrimSpace(update.DecisionID),
@@ -309,6 +315,9 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 	if entry == nil || !entry.HasWorkspace {
 		return false
 	}
+	if runCommandRequestAlreadyProjected(entry, update.RequestID) {
+		return false
+	}
 	now := time.Now().UTC()
 	snapshot := entry.Snapshot
 	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
@@ -327,7 +336,6 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 		Disposition:        strings.TrimSpace(update.Disposition),
 		Diagnostic:         strings.TrimSpace(update.Diagnostic),
 		RequestID:          strings.TrimSpace(update.RequestID),
-		IdempotencyKey:     strings.TrimSpace(update.IdempotencyKey),
 		Source:             strings.TrimSpace(update.Source),
 		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
 		DecisionID:         strings.TrimSpace(update.DecisionID),
@@ -356,6 +364,17 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 	s.errText = ""
 	s.updatedAt = now
 	return true
+}
+
+// runCommandRequestAlreadyProjected makes one request identity immutable in
+// the derived store. Workspace-owner idempotency remains authoritative; this
+// guard only prevents a duplicate delivery (including a contradictory stale
+// result with the same request ID) from rewriting the previously committed
+// observation or advancing projection revisions.
+func runCommandRequestAlreadyProjected(entry *workspaceProjectionEntry, requestID string) bool {
+	requestID = strings.TrimSpace(requestID)
+	return requestID != "" && entry != nil && entry.HasSnapshot && entry.Snapshot.RunCommand != nil &&
+		strings.TrimSpace(entry.Snapshot.RunCommand.RequestID) == requestID
 }
 
 func (s *Store) MarkWorkspaceDegraded(workspaceID string, err error) {

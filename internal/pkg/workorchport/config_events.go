@@ -20,14 +20,13 @@ type TemplateBackend interface {
 }
 
 type ServiceConfig struct {
-	ServerAddr        string
-	Backend           string
-	DataDir           string
-	DefaultChat       runtimecontract.ProviderModelTarget
-	MaxConcurrentRuns int64
-	AIProxyBaseURL    string
-	LLMOutput         workorchconfig.LLMOutputRuntimeConfig
-	ChatModelTargets  []ChatModelTargetOption
+	ServerAddr       string
+	Backend          string
+	DataDir          string
+	DefaultChat      runtimecontract.ProviderModelTarget
+	AIProxyBaseURL   string
+	LLMOutput        workorchconfig.LLMOutputRuntimeConfig
+	ChatModelTargets []ChatModelTargetOption
 }
 
 type ChatModelTargetOption struct {

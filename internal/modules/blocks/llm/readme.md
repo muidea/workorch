@@ -33,13 +33,20 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 5. `effectiveMaxOutputTokens` 直接采用 selected model 能力；Responses 的 input/output/wire/SSE 上限由 context window、
    输出保留量、利用率和 token/byte 估算派生。Embedding 不使用 chat output ceiling，但必须从 catalog
    `contextWindowTokens` 派生 input/response byte guard；容量缺失时 fail-closed。不存在进程级固定 output/request cap，
-   non-stream JSON、stream content/event/line/wire 与 embedding JSON 都禁止无界读取。
+   non-stream JSON、stream content/event/line/wire 与 embedding JSON 都禁止无界读取。non-stream wire ceiling 只计算
+   bounded JSON envelope 与最坏 JSON escaping；stream wire ceiling 独立计算累计 decoded content、bounded data-event
+   count × event envelope、单行上限与 bounded non-data framing，并为 terminal response 可能携带的第二份 output 留出
+   一条完整 line。non-stream decoded output 必须在 `TrimSpace` 等交付规范化之前按原始 bytes 检查同一 content ceiling，
+   包括首尾与分段空白；所有乘加都必须安全防溢出，不能以整数回绕放宽 guard。
    SSE reader 必须先确认最后一行已完整结束，再解码该 data event；bounded reader 在 partial line
    后返回 wire-limit error 时，`response_byte_limit_exceeded` 必须先于 partial JSON protocol error。
 6. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
 7. ai-proxy client API key 是可选配置；catalog、Responses、stream、embedding 仅在 key 非空时发送 Bearer header，
    空 key 不得编码成无效 `Authorization: Bearer `。Responses 与 embedding 只允许同 origin redirect；scheme/host/port
-   漂移必须在重发 prompt/input body 前以 typed protocol failure 拒绝。
+   漂移必须在重发 prompt/input body 前以 typed protocol failure 拒绝，且最多 10 次 physical submission。注入 client 的
+   redirect callback 只能收窄策略，不能绕过 owner origin/hop guard。2xx Responses/embedding 的实际 `Content-Type`
+   必须与本次声明模式一致：non-stream/embedding 接受 JSON media type，stream 只接受 `text/event-stream`；mismatch
+   只解析/处置当前物理响应并返回 typed protocol failure，禁止切换 parser 后发起第二次 provider call。
 8. Runtime candidate request 只消费 Orchestrator sealed canonical state、authority transaction、manifest、C0～C5
    与可选 sealed correction；不从 action、raw reason、projection 或 provider response 重建 authority。
 9. incomplete/transient/authentication/configuration/protocol/submission-unknown 等只返回本边界 factual category 与
@@ -87,7 +94,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     Orchestrator若封存bounded recoverable wait，后续probe仍必须使用相同workspace/run/authority、selection、minimum bytes与
     canonical request hash。matching result返回detached ceiling fact；stale selection/revision或非typed diagnostic不能解除wait。
 19. Runtime provider result携带的typed usage只确认LLM owner实际观察到的physical call/token消费；无可靠usage时保持
-    unknown，LLM、audit、billing或metrics均不能回写Orchestrator execution-budget allocation。
+    unknown，LLM、audit、billing或metrics均不能回写Orchestrator execution-budget allocation。provider返回的负数usage、
+    无法安全派生的total或整数溢出属于typed provider protocol failure；不得向调用方暴露该usage或同一响应的payload/vector。
 
 ## EventHub 合同
 
@@ -123,11 +131,15 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   Setup Draft、fresh activation、DefaultEmbedding 不读取热配置。
 - [x] completion/embedding/candidate 的 Post 零物理调用；setup completion、workspace embedding 与 Runtime/preflight
   audit 均覆盖 typed scope、submitted flag、usage 及实际 request/response bytes。
-- [x] 2xx 非法 JSON、非法 SSE event、stream/content/wire/embedding response 超限稳定归类为 protocol；feedback 保留
+- [x] 2xx 非法 JSON、非法 SSE event、media type/mode mismatch、stream/content/wire/embedding response 超限稳定归类为 protocol；feedback 保留
   explicit `provider_protocol` 与 adapter 精确 code，Orchestrator 对该类走 request-terminal 而非 transport recovery，
   fresh reload 后仍可从 terminal failure fact 读取同一 original diagnostic。
-- [x] SSE partial final data line 与 wire byte limit 同时命中时，稳定保留 `response_byte_limit_exceeded`，不被提前 JSON decode 改写。
-- [x] Responses/embedding 跨 origin 307/308 在重发 body 前拒绝，空 API key 不发送 Authorization。
+- [x] non-stream 与 stream 的独立 wire ceiling 均覆盖 limit+1；合法高 event-overhead SSE 不再误用 non-stream ceiling；
+  SSE partial final data line 与 wire byte limit 同时命中时，稳定保留 `response_byte_limit_exceeded`，不被提前 JSON decode 改写。
+- [x] stream/non-stream `Content-Type` 与请求声明模式交叉 mismatch、两种 wire guard failure 都确认只有一次物理
+  provider call，不存在 adapter fallback/replay。
+- [x] Responses/stream/embedding 跨 origin 307/308 在重发 body 前拒绝；注入 redirect callback 的同源循环仍由 owner
+  hop limit 有界终止，空 API key 不发送 Authorization。
 - [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
   refresh 后 sealed revision 不漂移。
 - [x] provider-ceiling transient failure的exact recoverable-wait probe、普通drive/伪造lease零额外调用与matching result恢复。
@@ -135,6 +147,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   拒绝非法 complete document。
 - [x] completion、stream、embedding 的 deadline/cancel/DNS/TLS/generic transport，以及 400/401/429/503、malformed 2xx
   矩阵均确认不泄漏 raw body、prompt、credential、endpoint 或 transport detail；redirect protocol identity 保持 typed。
+- [x] completion/stream/embedding usage 的负数与派生 total 溢出均 fail-closed 为 typed protocol fact，结果不携带
+  rejected usage/payload/vector，且每个边界只发生一次 physical call。
 - [x] 1M-token capacity limit arithmetic、4096-event SSE 与 8192-dimension embedding decode benchmark 已建立；基准机
   分别为 0 alloc、约 9.3ms/2.1MB、约 1.6ms/325KB，用于后续性能漂移比较，不改变模型派生 hard guard。
 

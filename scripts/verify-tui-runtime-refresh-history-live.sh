@@ -151,8 +151,6 @@ readTimeout = "15s"
 writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
-maxConcurrentRuns = 1
-staleDispatchedStepMinAge = "10m"
 
 [repository]
 backend = "file"

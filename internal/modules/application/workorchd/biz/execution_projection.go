@@ -25,11 +25,11 @@ func (p executionProjection) RecordWorkspaceExecutionOutcome(topic string, comma
 	}
 }
 
-func (p executionProjection) RecordWorkspaceExecutionRejected(topic string, command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
-	if p.projection != nil {
-		p.projection.RecordWorkspaceExecutionRejected(topic, command, cause)
-	}
+// RecordWorkspaceExecutionFailure records transport/contract diagnostics only.
+// Without a valid Workspace-owner result there is no immutable runCommand
+// outcome to project.
+func (p executionProjection) RecordWorkspaceExecutionFailure(topic string, command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
 	if p.transport != nil {
-		p.transport.RecordWorkspaceExecutionTransportRejected(topic, command, cause)
+		p.transport.RecordWorkspaceExecutionTransportFailure(topic, command, cause)
 	}
 }

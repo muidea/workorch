@@ -21,8 +21,6 @@ GO_TEST_FLAGS="${WORKORCH_MANAGED_GO_TEST_FLAGS:--count=1}"
 # runnable only when explicitly requested; it is not a Runtime acceptance
 # substitute.
 VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-runtime-managed}"
-MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-1}"
-STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:-10m}"
 LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
 PRECREATE_WORKSPACE_COUNT="${WORKORCH_MANAGED_PRECREATE_WORKSPACE_COUNT:-0}"
 SKIP_PREFLIGHT="${WORKORCH_MANAGED_SKIP_PREFLIGHT:-0}"
@@ -159,9 +157,6 @@ readTimeout = "15s"
 writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
-maxConcurrentRuns = $MAX_CONCURRENT_RUNS
-staleDispatchedStepMinAge = "$STALE_DISPATCHED_STEP_MIN_AGE"
-
 [repository]
 backend = "file"
 dataDir = "$DATA_DIR"

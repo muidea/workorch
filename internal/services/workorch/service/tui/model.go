@@ -97,7 +97,6 @@ type AppModel struct {
 	runHeartbeat           projectioncontract.RunHeartbeat
 	convergenceStatus      *projectioncontract.ConvergenceStatus
 	runCommand             *projectioncontract.RunCommandStatus
-	schedulerDiagnostics   *projectioncontract.SchedulerDiagnostics
 	runtime                *projectioncontract.RuntimeProgress
 	activityFeed           projectioncontract.WorkspaceActivityFeed
 	progress               progressState
@@ -1442,7 +1441,6 @@ func renderConfigResult(cfg *backend.ServiceConfig) string {
 	b.WriteString(fmt.Sprintf("- Server: %s\n", nonEmpty(cfg.ServerAddr, "-")))
 	b.WriteString(fmt.Sprintf("- Repository: %s %s\n", nonEmpty(cfg.Backend, "-"), nonEmpty(cfg.DataDir, "-")))
 	b.WriteString(fmt.Sprintf("- Default LLM provider: %s\n", nonEmpty(cfg.DefaultChat.ProviderID, "-")))
-	b.WriteString(fmt.Sprintf("- Max concurrent runs: %d\n", cfg.MaxConcurrentRuns))
 	b.WriteString("\nCandidate Document Recovery\n")
 	b.WriteString(fmt.Sprintf("- maxDocumentRecoveryAttempts: %d\n", output.MaxDocumentRecoveryAttempts))
 	return strings.TrimRight(b.String(), "\n")

@@ -44,7 +44,7 @@ func (s *recordingSubmitter) SubmitWorkspaceRun(ctx context.Context, command wor
 type recordingProjection struct {
 	mu       sync.Mutex
 	outcomes []workorchdevents.WorkspaceRunRequestedResult
-	rejected []error
+	failures []error
 }
 
 func (p *recordingProjection) RecordWorkspaceExecutionOutcome(_ string, _ workorchdevents.WorkspaceRunRequestedCommand, outcome workorchdevents.WorkspaceRunRequestedResult) {
@@ -53,10 +53,10 @@ func (p *recordingProjection) RecordWorkspaceExecutionOutcome(_ string, _ workor
 	p.outcomes = append(p.outcomes, outcome)
 }
 
-func (p *recordingProjection) RecordWorkspaceExecutionRejected(_ string, _ workorchdevents.WorkspaceRunRequestedCommand, err error) {
+func (p *recordingProjection) RecordWorkspaceExecutionFailure(_ string, _ workorchdevents.WorkspaceRunRequestedCommand, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.rejected = append(p.rejected, err)
+	p.failures = append(p.failures, err)
 }
 
 func TestAdmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
@@ -94,8 +94,8 @@ func TestAdmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
 	}
 	projection.mu.Lock()
 	defer projection.mu.Unlock()
-	if len(projection.outcomes) != 1 || len(projection.rejected) != 0 {
-		t.Fatalf("projection outcomes=%d rejected=%d", len(projection.outcomes), len(projection.rejected))
+	if len(projection.outcomes) != 1 || len(projection.failures) != 0 {
+		t.Fatalf("projection outcomes=%d failures=%d", len(projection.outcomes), len(projection.failures))
 	}
 }
 
@@ -112,11 +112,41 @@ func TestAdmitWorkspaceExecutionReturnsOwnerFailureSynchronouslyWithoutRetry(t *
 	callCount := len(submitter.commands)
 	submitter.mu.Unlock()
 	projection.mu.Lock()
-	rejected := append([]error(nil), projection.rejected...)
+	failures := append([]error(nil), projection.failures...)
 	outcomeCount := len(projection.outcomes)
 	projection.mu.Unlock()
-	if callCount != 1 || outcomeCount != 0 || len(rejected) != 1 || !errors.Is(rejected[0], submitErr) {
-		t.Fatalf("calls=%d outcomes=%d rejected=%v", callCount, outcomeCount, rejected)
+	if callCount != 1 || outcomeCount != 0 || len(failures) != 1 || !errors.Is(failures[0], submitErr) {
+		t.Fatalf("calls=%d outcomes=%d failures=%v", callCount, outcomeCount, failures)
+	}
+}
+
+func TestTransportFailureDoesNotReplaceLaterOwnerOutcomeForSameRequest(t *testing.T) {
+	projection := &recordingProjection{}
+	submitter := &recordingSubmitter{err: context.DeadlineExceeded}
+	useCase := New(submitter, projection)
+	command := workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID: "ws-owner-outcome-after-failure", Intent: "resume", RequestID: "req-stable", Source: "http",
+	}
+	if _, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first admission error = %v, want deadline exceeded", err)
+	}
+	submitter.mu.Lock()
+	submitter.err = nil
+	submitter.result = workorchdevents.WorkspaceRunRequestedResult{
+		WorkspaceID: command.WorkspaceID,
+		RequestID:   command.RequestID,
+		Kind:        runtimecontract.RuntimeExecutionIntentResume,
+		Outcome:     runtimecontract.RuntimeExecutionIntentRestartRequired,
+		Reason:      runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+	}
+	submitter.mu.Unlock()
+	if _, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
+		t.Fatalf("second admission: %v", err)
+	}
+	projection.mu.Lock()
+	defer projection.mu.Unlock()
+	if len(projection.failures) != 1 || len(projection.outcomes) != 1 || projection.outcomes[0].RequestID != command.RequestID {
+		t.Fatalf("failures=%v owner outcomes=%+v", projection.failures, projection.outcomes)
 	}
 }
 
@@ -164,6 +194,23 @@ func TestUseCaseRejectsInvalidIntentBeforeOwnerAdmission(t *testing.T) {
 	})
 	if !errors.Is(err, workorchcommon.ErrInvalidArgument) {
 		t.Fatalf("invalid intent error = %v, want ErrInvalidArgument", err)
+	}
+	submitter.mu.Lock()
+	defer submitter.mu.Unlock()
+	if len(submitter.commands) != 0 {
+		t.Fatalf("owner calls = %d, want zero", len(submitter.commands))
+	}
+}
+
+func TestUseCaseRejectsUnsupportedCommandTopicBeforeOwnerAdmission(t *testing.T) {
+	projection := &recordingProjection{}
+	submitter := &recordingSubmitter{}
+	useCase := New(submitter, projection)
+	_, err := useCase.AdmitWorkspaceExecution(context.Background(), "/workorchd/command/unsupported", workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID: "ws-unsupported-topic", Intent: "resume", RequestID: "req-unsupported-topic",
+	})
+	if !errors.Is(err, workorchcommon.ErrInvalidArgument) {
+		t.Fatalf("unsupported topic error = %v, want ErrInvalidArgument", err)
 	}
 	submitter.mu.Lock()
 	defer submitter.mu.Unlock()

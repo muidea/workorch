@@ -22,7 +22,6 @@ type RunSnapshotOf[W, R any] struct {
 	ValidationResults       []ValidationResult      `json:"validationResults,omitempty"`
 	RuntimeCheckpoints      []RuntimeCheckpoint     `json:"runtimeCheckpoints,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus      `json:"convergenceStatus,omitempty"`
-	SchedulerDiagnostics    *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	Results                 []Result                `json:"results,omitempty"`
 	ClosureTraces           []ClosureTrace          `json:"closureTraces,omitempty"`
 	DoDEvidence             []DoDEvidenceTrace      `json:"doDEvidence,omitempty"`

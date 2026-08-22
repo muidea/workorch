@@ -20,7 +20,6 @@ type WorkspaceSnapshotOf[W, R any] struct {
 	RunHeartbeat            RunHeartbeat                      `json:"runHeartbeat,omitempty"`
 	ConvergenceStatus       *ConvergenceStatus                `json:"convergenceStatus,omitempty"`
 	RunCommand              *RunCommandStatus                 `json:"runCommand,omitempty"`
-	SchedulerDiagnostics    *SchedulerDiagnostics             `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle           *ContextBundle                    `json:"contextBundle,omitempty"`
 	CoverageSummary         map[string]any                    `json:"coverageSummary,omitempty"`
 	GapBaseline             *GapBaseline                      `json:"gapBaseline,omitempty"`

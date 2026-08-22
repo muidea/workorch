@@ -41,6 +41,7 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 			})
 		case "/v1/embeddings":
 			embeddingCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}],"usage":{"prompt_tokens":7,"total_tokens":7}}`))
 		case "/v1/responses":
 			responseCalls.Add(1)

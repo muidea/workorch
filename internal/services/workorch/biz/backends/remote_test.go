@@ -113,23 +113,6 @@ func TestWorkspaceSnapshotFromClientPreservesCompleteDetachedProjection(t *testi
 	}
 }
 
-func TestCanonicalSchedulerDiagnosticsPreservesAdmissionFailure(t *testing.T) {
-	got := projectioncontract.CloneSchedulerDiagnostics(&projectioncontract.SchedulerDiagnostics{
-		LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
-			WorkspaceID: "ws-remote-admission",
-			Kind:        "workspace_activation",
-			Outcome:     "admission_rejected",
-			Reason:      "workspace_activation_failed",
-		},
-	})
-	if got == nil || got.LatestAdmissionFailure == nil {
-		t.Fatalf("diagnostics = %+v, want admission failure", got)
-	}
-	if got.LatestAdmissionFailure.Outcome != "admission_rejected" || got.LatestAdmissionFailure.Reason != "workspace_activation_failed" {
-		t.Fatalf("admission failure = %+v, want preserved remote observation", got.LatestAdmissionFailure)
-	}
-}
-
 func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
 	got := projectioncontract.CloneRuntimeProgress(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,

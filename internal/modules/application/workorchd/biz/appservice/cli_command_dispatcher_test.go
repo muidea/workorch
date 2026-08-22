@@ -95,11 +95,11 @@ func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	}
 }
 
-func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.T) {
+func TestCLIDecisionResolveDoesNotPublishExecutionAdmission(t *testing.T) {
 	session, tickets, _ := newCountingDecisionRuntimeSession(t)
-	const workspaceID = common.WorkspaceID("ws-cli-governance-scheduler")
-	const runID = common.RunID("run-cli-governance-scheduler")
-	const ticketID = common.TicketID("ticket-cli-governance-scheduler")
+	const workspaceID = common.WorkspaceID("ws-cli-governance-owner")
+	const runID = common.RunID("run-cli-governance-owner")
+	const ticketID = common.TicketID("ticket-cli-governance-owner")
 	if err := tickets.Create(context.Background(), &decisionmodel.Ticket{ID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateOpen, Reason: "need replan"}); err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
@@ -107,10 +107,10 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 	if err != nil {
 		t.Fatalf("session command hub: %v", err)
 	}
-	schedulerCalls := 0
+	admissionCalls := 0
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
-		schedulerCalls++
+		admissionCalls++
 		command, _ := ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Kind: "resume", Outcome: "reconciliation_requested", Reason: "current_run_continuation_accepted"}, nil)
 	})
@@ -134,23 +134,23 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 	if !ok || result.Decision.ID != string(ticketID) {
 		t.Fatalf("decision = %+v", data)
 	}
-	if schedulerCalls != 0 {
-		t.Fatalf("scheduler continuation calls = %d, want zero; Decision owner/Orchestrator owns the continuation", schedulerCalls)
+	if admissionCalls != 0 {
+		t.Fatalf("execution admission calls = %d, want zero; Decision owner/Orchestrator owns the continuation", admissionCalls)
 	}
 }
 
 // projectioncontract.Approval is an owner-local fact.  Unlike a persisted Runtime governance
 // ticket it has no aggregate binding to consume, so the CLI must not manufacture
-// a scheduler Resume after resolving it.  The only Runtime user continuation
+// an execution-admission Resume after resolving it. The only Runtime user continuation
 // remains the scoped resume command, whose admission is checked by Orchestrator.
-func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
+func TestCLIApprovalResolveDoesNotPublishExecutionAdmission(t *testing.T) {
 	ctx := context.Background()
 	repository := newAppserviceCountingApprovalRepository()
-	const workspaceID = common.WorkspaceID("ws-cli-approval-scheduler")
-	const runID = common.RunID("run-cli-approval-scheduler")
-	const approvalID = common.ApprovalID("approval-cli-scheduler")
+	const workspaceID = common.WorkspaceID("ws-cli-approval-owner")
+	const runID = common.RunID("run-cli-approval-owner")
+	const approvalID = common.ApprovalID("approval-cli-owner")
 	if err := repository.Create(ctx, &approvalmodel.Approval{
-		ID: approvalID, WorkspaceID: workspaceID, RunID: runID, StepID: "step-cli-approval-scheduler",
+		ID: approvalID, WorkspaceID: workspaceID, RunID: runID, StepID: "step-cli-approval-owner",
 		Reason: "need operator approval", State: common.ApprovalStatePending,
 	}); err != nil {
 		t.Fatalf("create approval: %v", err)
@@ -160,10 +160,10 @@ func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session command hub: %v", err)
 	}
-	schedulerCalls := 0
+	admissionCalls := 0
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
-		schedulerCalls++
+		admissionCalls++
 		command, _ := ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Kind: "resume", Outcome: "reconciliation_requested", Reason: "current_run_continuation_accepted"}, nil)
 	})
@@ -190,8 +190,8 @@ func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 	if !ok || resolved.Approval.ID != string(approvalID) || resolved.Approval.State != string(common.ApprovalStateApproved) {
 		t.Fatalf("approval = %+v", data)
 	}
-	if schedulerCalls != 0 {
-		t.Fatalf("scheduler continuation calls = %d, want zero; approval resolution is not a Runtime governance binding", schedulerCalls)
+	if admissionCalls != 0 {
+		t.Fatalf("execution admission calls = %d, want zero; approval resolution is not a Runtime governance binding", admissionCalls)
 	}
 }
 

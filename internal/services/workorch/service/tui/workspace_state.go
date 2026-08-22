@@ -736,7 +736,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 			m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 			m.applyRunCommandStatus(msg.Snapshot.RunCommand)
-			m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		}
 		m.syncBlockingDecisionFromList()
 		m.syncBlockingApprovalFromList()
@@ -791,7 +790,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
 		m.applyRunCommandStatus(msg.Snapshot.RunCommand)
-		m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
@@ -825,9 +823,6 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	if msg.Status != nil {
 		m.applyConvergenceStatus(msg.Status.ConvergenceStatus)
-		if msg.Status.SchedulerDiagnostics != nil {
-			m.applySchedulerDiagnostics(msg.Status.SchedulerDiagnostics)
-		}
 	}
 	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
 		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
@@ -1405,7 +1400,6 @@ func runCommandStatusEqual(a, b *projectioncontract.RunCommandStatus) bool {
 		strings.TrimSpace(a.Intent) == strings.TrimSpace(b.Intent) &&
 		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason) &&
 		strings.TrimSpace(a.RequestID) == strings.TrimSpace(b.RequestID) &&
-		strings.TrimSpace(a.IdempotencyKey) == strings.TrimSpace(b.IdempotencyKey) &&
 		strings.TrimSpace(a.Source) == strings.TrimSpace(b.Source) &&
 		strings.TrimSpace(a.DefinitionRevision) == strings.TrimSpace(b.DefinitionRevision) &&
 		strings.TrimSpace(string(a.DecisionID)) == strings.TrimSpace(string(b.DecisionID)) &&
@@ -1710,7 +1704,6 @@ func (m *AppModel) resetWorkspaceView() {
 	m.llmContext = nil
 	m.acceptance = projectioncontract.AcceptanceProjection{}
 	m.runHeartbeat = projectioncontract.RunHeartbeat{}
-	m.schedulerDiagnostics = nil
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -1800,7 +1793,6 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.acceptance = cached.Acceptance
 	m.runHeartbeat = cached.RunHeartbeat
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(cached.ConvergenceStatus)
-	m.schedulerDiagnostics = nil
 	m.runtime = cloneRuntime(cached.Runtime)
 	m.activityFeed = cloneActivityFeed(cached.Activity)
 	m.repairLoop = cached.RepairLoop
@@ -1862,24 +1854,6 @@ func cloneConvergenceStatusInfoPtr(input *projectioncontract.ConvergenceStatus) 
 	return &ret
 }
 
-func cloneSchedulerDiagnosticsInfoPtr(input *projectioncontract.SchedulerDiagnostics) *projectioncontract.SchedulerDiagnostics {
-	if input == nil {
-		return nil
-	}
-	ret := *input
-	if input.LatestAdmissionFailure != nil {
-		latest := *input.LatestAdmissionFailure
-		latest.RecommendedActions = append([]string(nil), input.LatestAdmissionFailure.RecommendedActions...)
-		ret.LatestAdmissionFailure = &latest
-	}
-	ret.RecentAdmissionFailures = append([]projectioncontract.ExecutionAdmissionFailureDiagnostic(nil), input.RecentAdmissionFailures...)
-	for idx := range ret.RecentAdmissionFailures {
-		ret.RecentAdmissionFailures[idx].RecommendedActions = append([]string(nil), input.RecentAdmissionFailures[idx].RecommendedActions...)
-	}
-	ret.AdmissionFailureCounts = append([]projectioncontract.ExecutionAdmissionFailureCount(nil), input.AdmissionFailureCounts...)
-	return &ret
-}
-
 func (m *AppModel) applyRunHeartbeat(item projectioncontract.RunHeartbeat) {
 	m.runHeartbeat = item
 	switch item.ActivityState {
@@ -1892,10 +1866,6 @@ func (m *AppModel) applyRunHeartbeat(item projectioncontract.RunHeartbeat) {
 
 func (m *AppModel) applyConvergenceStatus(item *projectioncontract.ConvergenceStatus) {
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(item)
-}
-
-func (m *AppModel) applySchedulerDiagnostics(item *projectioncontract.SchedulerDiagnostics) {
-	m.schedulerDiagnostics = cloneSchedulerDiagnosticsInfoPtr(item)
 }
 
 func latestLLMContextBudget(budgets []projectioncontract.LLMContextBudgetTrace, traces []projectioncontract.LLMUsageTrace) map[string]any {

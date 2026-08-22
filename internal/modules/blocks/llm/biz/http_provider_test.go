@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -227,9 +229,72 @@ func TestHTTPProviderRejectsCrossOriginRedirectWithoutReplayingBody(t *testing.T
 	}
 }
 
+func TestInjectedRedirectPolicyCannotBypassSameOriginReplayLimit(t *testing.T) {
+	operations := []struct {
+		name string
+		call func(context.Context, *HTTPProvider) error
+	}{
+		{
+			name: "complete",
+			call: func(ctx context.Context, provider *HTTPProvider) error {
+				_, err := provider.Complete(ctx, llmProviderRequest())
+				return err
+			},
+		},
+		{
+			name: "stream",
+			call: func(ctx context.Context, provider *HTTPProvider) error {
+				_, err := provider.StreamComplete(ctx, llmProviderRequest(), nil)
+				return err
+			},
+		},
+		{
+			name: "embedding",
+			call: func(ctx context.Context, provider *HTTPProvider) error {
+				_, err := provider.Embed(ctx, llmmodels.ProviderEmbeddingRequest{Input: "workspace goal", Model: "embedding-model"})
+				return err
+			},
+		},
+	}
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		for _, operation := range operations {
+			t.Run(http.StatusText(status)+"/"+operation.name, func(t *testing.T) {
+				var physicalCalls atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					physicalCalls.Add(1)
+					w.Header().Set("Location", r.URL.RequestURI())
+					w.WriteHeader(status)
+				}))
+				defer server.Close()
+
+				var callerPolicyCalls atomic.Int32
+				client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+					callerPolicyCalls.Add(1)
+					return nil
+				}}
+				config := testAIProxyProviderConfig(server.URL)
+				config.Timeout = time.Second
+				provider := NewHTTPProviderWithClient(config, client)
+				err := operation.call(context.Background(), provider)
+				var protocolErr *ProviderProtocolError
+				if !errors.As(err, &protocolErr) || protocolErr.Code != "redirect_limit_exceeded" {
+					t.Fatalf("redirect error = %#v (%v), want typed hop-limit rejection", protocolErr, err)
+				}
+				if got := physicalCalls.Load(); got != 10 {
+					t.Fatalf("physical submissions = %d, want bounded 10", got)
+				}
+				if got := callerPolicyCalls.Load(); got != 9 {
+					t.Fatalf("caller redirect policy calls = %d, want 9 before owner guard", got)
+				}
+			})
+		}
+	}
+}
+
 func TestHTTPProviderReportsInvalidJSONAsProtocolWithActualBytes(t *testing.T) {
 	const invalid = `{"status":`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(invalid))
 	}))
 	defer server.Close()
@@ -252,8 +317,11 @@ func TestHTTPProviderResponseLimitsDeriveFromResolvedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(strings.Repeat("x", limits.MaxWireBytes+1)))
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(strings.Repeat("x", limits.MaxNonStreamWireBytes+1)))
 	}))
 	defer server.Close()
 	config.BaseURL = server.URL
@@ -263,15 +331,216 @@ func TestHTTPProviderResponseLimitsDeriveFromResolvedProfile(t *testing.T) {
 	if !errors.As(err, &protocolErr) || protocolErr.Code != "response_byte_limit_exceeded" {
 		t.Fatalf("response limit error = %v", err)
 	}
-	if result.ResponseBytes != limits.MaxWireBytes+1 {
-		t.Fatalf("bounded response bytes = %d, want %d", result.ResponseBytes, limits.MaxWireBytes+1)
+	if result.ResponseBytes != limits.MaxNonStreamWireBytes+1 {
+		t.Fatalf("bounded response bytes = %d, want %d", result.ResponseBytes, limits.MaxNonStreamWireBytes+1)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("physical provider calls = %d, want 1 after non-stream guard failure", calls.Load())
 	}
 
 	larger := config
 	larger.InferenceProfile.MaxOutputTokens = 2
 	largerLimits, err := providerCompletionResponseLimits(larger, llmmodels.ProviderRequest{})
-	if err != nil || largerLimits.MaxContentBytes <= limits.MaxContentBytes || largerLimits.MaxDataEvents <= limits.MaxDataEvents {
+	if err != nil || largerLimits.MaxContentBytes <= limits.MaxContentBytes ||
+		largerLimits.MaxNonStreamWireBytes <= limits.MaxNonStreamWireBytes ||
+		largerLimits.MaxStreamWireBytes <= limits.MaxStreamWireBytes ||
+		largerLimits.MaxDataEvents <= limits.MaxDataEvents || largerLimits.MaxLineBytes <= limits.MaxLineBytes {
 		t.Fatalf("derived limits did not grow with model output capacity: small=%+v large=%+v err=%v", limits, largerLimits, err)
+	}
+}
+
+func TestHTTPProviderNonStreamContentLimitMatchesStreamGuard(t *testing.T) {
+	config := testAIProxyProviderConfig("")
+	config.InferenceProfile.MaxOutputTokens = 4
+	config.ContextProfile.EstimatedTokensPerByte = 1
+	limits, err := providerCompletionResponseLimits(config, llmmodels.ProviderRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxContentBytes != 4 {
+		t.Fatalf("content limit = %d, want 4", limits.MaxContentBytes)
+	}
+
+	tests := []struct {
+		name       string
+		status     string
+		content    string
+		output     []responsesOutputItem
+		incomplete responsesIncompleteDetails
+		wantError  bool
+	}{
+		{name: "completed content exactly limit", status: "completed", content: strings.Repeat("x", limits.MaxContentBytes)},
+		{name: "completed content limit plus one", status: "completed", content: strings.Repeat("x", limits.MaxContentBytes+1), wantError: true},
+		{name: "trimmed whitespace cannot bypass content limit", status: "completed", content: " " + strings.Repeat("x", limits.MaxContentBytes) + " ", wantError: true},
+		{
+			name:   "segmented whitespace cannot bypass content limit",
+			status: "completed",
+			output: []responsesOutputItem{{Content: []responsesContentItem{
+				{Type: "output_text", Text: "  "},
+				{Type: "output_text", Text: "xxx"},
+			}}},
+			wantError: true,
+		},
+		{
+			name:       "incomplete max output tokens content limit plus one",
+			status:     "incomplete",
+			content:    strings.Repeat("x", limits.MaxContentBytes+1),
+			incomplete: responsesIncompleteDetails{Reason: "max_output_tokens"},
+			wantError:  true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body, err := json.Marshal(responsesResponse{
+				Status:            test.status,
+				IncompleteDetails: test.incomplete,
+				Output:            test.output,
+				OutputText:        test.content,
+				Usage:             responsesUsage{OutputTokens: len(test.content), TotalTokens: len(test.content)},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+
+			providerConfig := config
+			providerConfig.BaseURL = server.URL
+			result, completionErr := NewHTTPProvider(providerConfig).Complete(context.Background(), llmmodels.ProviderRequest{})
+			if calls.Load() != 1 {
+				t.Fatalf("physical provider calls = %d, want 1", calls.Load())
+			}
+			if result.ResponseBytes != len(body) {
+				t.Fatalf("response bytes = %d, want factual wire bytes %d", result.ResponseBytes, len(body))
+			}
+			if !test.wantError {
+				if completionErr != nil || string(result.Payload) != test.content || result.Usage == nil {
+					t.Fatalf("exact-limit result=%+v error=%v", result, completionErr)
+				}
+				return
+			}
+			var protocolErr *ProviderProtocolError
+			if !errors.As(completionErr, &protocolErr) || protocolErr.Code != "stream_content_limit_exceeded" || protocolErr.ResponseBytes != len(body) {
+				t.Fatalf("content guard result=%+v protocol=%#v error=%v", result, protocolErr, completionErr)
+			}
+			if result.Payload != nil || result.Usage != nil {
+				t.Fatalf("content guard exposed rejected payload/usage: %+v", result)
+			}
+			var outputLimitErr *ProviderOutputLimitError
+			if errors.As(completionErr, &outputLimitErr) {
+				t.Fatalf("content guard became continuation outcome: %#v", outputLimitErr)
+			}
+		})
+	}
+}
+
+func TestProviderCompletionResponseLimitsRejectStreamEnvelopeOverflow(t *testing.T) {
+	config := testAIProxyProviderConfig("")
+	config.InferenceProfile.MaxOutputTokens = math.MaxInt/(providerStreamEventsPerOutputToken*providerStreamEventEnvelopeBytes) + 1
+	config.ContextProfile.EstimatedTokensPerByte = float64(config.InferenceProfile.MaxOutputTokens)
+
+	_, err := providerCompletionResponseLimits(config, llmmodels.ProviderRequest{})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "stream envelope") {
+		t.Fatalf("stream envelope overflow error = %v", err)
+	}
+}
+
+func TestHTTPProviderStreamAllowsBoundedHighEventEnvelope(t *testing.T) {
+	config := testAIProxyProviderConfig("")
+	config.InferenceProfile.MaxOutputTokens = 256
+	config.ContextProfile.EstimatedTokensPerByte = 1
+	limits, err := providerCompletionResponseLimits(config, llmmodels.ProviderRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body strings.Builder
+	for range 1_000 {
+		body.WriteString("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"r\"}\n\n")
+	}
+	body.WriteString("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")
+	body.WriteString("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+	payload := body.String()
+	if len(payload) <= limits.MaxNonStreamWireBytes || len(payload) > limits.MaxStreamWireBytes {
+		t.Fatalf("high-envelope fixture bytes = %d, non-stream=%d stream=%d", len(payload), limits.MaxNonStreamWireBytes, limits.MaxStreamWireBytes)
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer server.Close()
+	config.BaseURL = server.URL
+
+	result, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmmodels.ProviderRequest{}, nil)
+	if err != nil {
+		t.Fatalf("bounded high-envelope stream: %v", err)
+	}
+	if string(result.Payload) != "ok" || result.ResponseBytes != len(payload) || calls.Load() != 1 {
+		t.Fatalf("high-envelope result=%+v calls=%d", result, calls.Load())
+	}
+}
+
+func TestHTTPProviderRejectsResponseMediaTypeModeMismatchWithoutSecondCall(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		wantStream  bool
+		wantAccept  string
+		body        string
+		call        func(*HTTPProvider) (llmmodels.ProviderCompletionResult, error)
+	}{
+		{
+			name:        "non-stream received event stream",
+			contentType: "text/event-stream",
+			wantAccept:  "application/json",
+			body:        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"ok\"}}\n\n",
+			call: func(provider *HTTPProvider) (llmmodels.ProviderCompletionResult, error) {
+				return provider.Complete(context.Background(), llmProviderRequest())
+			},
+		},
+		{
+			name:        "stream received json",
+			contentType: "application/json; charset=utf-8",
+			wantStream:  true,
+			wantAccept:  "text/event-stream",
+			body:        `{"status":"completed","output_text":"ok"}`,
+			call: func(provider *HTTPProvider) (llmmodels.ProviderCompletionResult, error) {
+				return provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var request responsesRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				if request.Stream != test.wantStream || r.Header.Get("Accept") != test.wantAccept {
+					t.Fatalf("declared stream=%v accept=%q, want stream=%v accept=%q", request.Stream, r.Header.Get("Accept"), test.wantStream, test.wantAccept)
+				}
+				w.Header().Set("Content-Type", test.contentType)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			result, err := test.call(NewHTTPProvider(testAIProxyProviderConfig(server.URL)))
+			var protocolErr *ProviderProtocolError
+			if !errors.As(err, &protocolErr) || protocolErr.Code != "response_media_type_mismatch" {
+				t.Fatalf("media type mismatch error = %#v (%v)", protocolErr, err)
+			}
+			if calls.Load() != 1 || result.ResponseBytes != 0 {
+				t.Fatalf("physical provider calls=%d responseBytes=%d, want one unparsed response", calls.Load(), result.ResponseBytes)
+			}
+		})
 	}
 }
 
@@ -316,20 +585,36 @@ func TestHTTPProviderStreamWireLimitPrecedesPartialEventJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
-		prefix := ": " + strings.Repeat("p", limits.MaxWireBytes/2) + "\n"
-		remaining := limits.MaxWireBytes - len(prefix)
-		partialEvent := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + strings.Repeat("x", remaining) + "\"}\n\n"
-		_, _ = w.Write([]byte(prefix + partialEvent))
+		remaining := limits.MaxStreamWireBytes - 32
+		var prefix strings.Builder
+		for remaining > 0 {
+			lineBytes := min(remaining, 1024)
+			if lineBytes == 1 {
+				prefix.WriteByte('\n')
+			} else {
+				prefix.WriteByte(':')
+				prefix.WriteString(strings.Repeat("p", lineBytes-2))
+				prefix.WriteByte('\n')
+			}
+			remaining -= lineBytes
+		}
+		partialEvent := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"unfinished"
+		_, _ = w.Write([]byte(prefix.String() + partialEvent))
 	}))
 	defer server.Close()
 	config.BaseURL = server.URL
 
 	result, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmmodels.ProviderRequest{}, nil)
 	var protocolErr *ProviderProtocolError
-	if !errors.As(err, &protocolErr) || protocolErr.Code != "response_byte_limit_exceeded" || result.ResponseBytes != limits.MaxWireBytes+1 {
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "response_byte_limit_exceeded" || result.ResponseBytes != limits.MaxStreamWireBytes+1 {
 		t.Fatalf("stream wire limit result=%+v protocol=%#v error=%v", result, protocolErr, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("physical provider calls = %d, want 1 after stream guard failure", calls.Load())
 	}
 }
 
@@ -341,6 +626,7 @@ func TestHTTPProviderEmbeddingResponseIsBoundedByModelInputProfile(t *testing.T)
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(strings.Repeat("0", limit+1)))
 	}))
 	defer server.Close()

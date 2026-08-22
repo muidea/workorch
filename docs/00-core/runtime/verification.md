@@ -87,6 +87,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   normalize/clone/hash/persistence/EventHub/projection 中不被覆盖；
 - provider adapter 的 typed protocol/transport/status identity 必须先于 error-text fallback；canonical
   `provider_protocol_failure` 等 terminal code 不得覆盖 nested original guard code，restart reload 后二者仍应分别可见；
+- completion response guard必须从同一sealed provider ceiling/profile派生，并分别覆盖non-stream JSON body与SSE wire；
+  SSE还要独立验证content/event/line limits和wire-limit error优先级，embedding使用独立input-profile bound；media type不匹配、
+  arithmetic overflow或任一limit breach均形成typed protocol fact，不能通过提高Runtime budget或切换decode路径恢复；
 - producer 没有 diagnostic 的普通 accepted fact 才允许 original 为空；
 - unknown code 保留 original 并 typed fail-fast，不能默认 retry、CAS、repair、governance 或 terminal；
 - provider-safe correction projection 与 audit-safe original diagnostic 分开生成，互不覆盖；
@@ -189,7 +192,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 Boundary verification 必须覆盖：共享 package transition policy、verification-only owner manifest 完整性、全 owner code 表、
 error-text routing、Action/Output.Kind 与 Status/Outcome 双权威、terminal action、Runtime reducer-owner/role 漂移、
 secondary owner 直接 state write、DoD definition 的 draft/satisfied 影子状态、通用 Envelope/map/any/JSON/reflect bridge、
-scope 缺失及禁止 raw provider 内容。
+scope 缺失及禁止 raw provider 内容。它还必须拒绝workorchd `biz/execution`反向依赖protocol `service/server`，并拒绝
+有效verifier把retired application scheduler/watchdog/continuation state、metric或automatic successor重新定义为正向证据；
+退休metric的显式“必须不存在”负向断言不属于该禁止范围。
 测试选择为空或只命中 projection compatibility wrapper 不能算通过。
 
 任何以 graph step、checkpoint 或 incremental artifact projection 为对象的 wrapper，只能验证非权威读侧，不能替代
@@ -202,6 +207,11 @@ Core assertions进入 deployed environment时仍必须使用 fresh data、latest
 filesystem 和 provider evidence 的环境编排由 [Service Acceptance](../../50-product-interface/service-acceptance.md) 负责；profile-specific artifact、
 validation 和 DoD proof 由对应 profile verifier负责。它们只能提供本合同断言的 deployed evidence，不能重新定义 Runtime
 transition 或通过标准。
+
+deployed authority verifier读取Workspace/Run/Decision owner事实，并把workspace snapshot中的matching immutable
+`runCommand accepted|rejected`视为execution-admission completion。该投影不是第五状态机；后续Runtime progression仍由
+owner state与SM-4 aggregate evidence证明，不得以readyz scheduler diagnostics、continuation readback、watchdog recovery或
+自动successor替代。
 
 ## Boundary
 

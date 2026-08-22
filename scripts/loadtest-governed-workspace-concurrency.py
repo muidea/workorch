@@ -45,7 +45,6 @@ COUNTRY = os.environ.get("WORKORCH_LOAD_COUNTRY", "中国")
 PROVINCE = os.environ.get("WORKORCH_LOAD_PROVINCE", "浙江")
 CITY = os.environ.get("WORKORCH_LOAD_CITY", "杭州")
 LOOKUP_NAME = os.environ.get("WORKORCH_LOAD_LOOKUP_NAME", "Hangzhou")
-EXPECTED_MAX_CONCURRENT_RUNS = int(os.environ.get("WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS", "0"))
 EXPECT_ACTIVE_OVERLAP = os.environ.get("WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP", "0") == "1"
 MCP_SESSION_POLICY = os.environ.get("WORKORCH_LOAD_MCP_SESSION_POLICY", "transient").strip().lower()
 MIN_SUCCESS_RATE = float(os.environ.get("WORKORCH_LOAD_MIN_SUCCESS_RATE", "1.0"))
@@ -1448,7 +1447,14 @@ def collect_metrics() -> dict[str, float]:
         if len(parts) != 2:
             continue
         key, value = parts
-        if key in {"workorch_run_requests_in_flight", "workorch_server_max_concurrent_runs"}:
+        if key in {
+            "workorch_workspace_projection_active_run_heartbeats",
+            "workorch_workspace_projection_pending_rebuilds",
+            "workorch_workspace_projection_stalled_runs",
+            "workorch_workspace_projection_ineffective_retry_runs",
+            "workorch_convergence_active_slices",
+            "workorch_convergence_open_focuses",
+        }:
             try:
                 metrics[key] = float(value)
             except ValueError:
@@ -1517,17 +1523,11 @@ def active_run_windows(results: list[WorkspaceResult]) -> list[tuple[float, floa
     return windows
 
 
-def max_metric_value(samples: list[MetricsSample], key: str) -> float:
-    values = [sample.values.get(key, 0) for sample in samples]
-    return max(values) if values else 0
-
-
 def build_summary(
     results: list[WorkspaceResult],
     started_at: float,
     ended_at: float,
     metrics_before: dict[str, float],
-    server_max_concurrent_runs: int,
     metrics_samples: list[MetricsSample],
 ) -> dict[str, Any]:
     success = [item for item in results if item.success]
@@ -1543,14 +1543,13 @@ def build_summary(
         "observabilityRead": stage_stats.get("observability_read", latency_stats([])),
     }
     result_items = [result_to_dict(item) for item in results]
-    expected_overlap = min(CONCURRENCY, server_max_concurrent_runs or CONCURRENCY, len(success))
+    expected_overlap = min(CONCURRENCY, len(success))
     if expected_overlap < 2:
         expected_overlap = 0
     observed_stage_overlap = max_overlap(active_run_windows(results))
-    observed_metric_inflight = int(max_metric_value(metrics_samples, "workorch_run_requests_in_flight"))
     active_overlap_pass = True
     if EXPECT_ACTIVE_OVERLAP and expected_overlap >= 2:
-        active_overlap_pass = max(observed_stage_overlap, observed_metric_inflight) >= expected_overlap
+        active_overlap_pass = observed_stage_overlap >= expected_overlap
     diagnostic_stage_names = [
         "activation_to_run",
         "run_to_completed",
@@ -1568,11 +1567,9 @@ def build_summary(
         "statusWaitTimeoutSeconds": STATUS_WAIT_TIMEOUT_SECONDS,
         "total": TOTAL,
         "concurrency": CONCURRENCY,
-        "serverMaxConcurrentRuns": server_max_concurrent_runs,
         "expectActiveOverlap": EXPECT_ACTIVE_OVERLAP,
         "expectedActiveRunOverlap": expected_overlap,
         "maxObservedActiveStageOverlap": observed_stage_overlap,
-        "maxObservedRunRequestsInFlight": observed_metric_inflight,
         "activeRunOverlapPass": active_overlap_pass,
         "metricsSampleIntervalSeconds": METRICS_SAMPLE_INTERVAL_SECONDS,
         "metricsSampleTotal": len(metrics_samples),
@@ -1658,11 +1655,9 @@ def write_markdown_report(summary: dict[str, Any]) -> None:
         f"- statusWaitTimeoutSeconds: `{summary['statusWaitTimeoutSeconds']}`",
         f"- total: `{summary['total']}`",
         f"- concurrency: `{summary['concurrency']}`",
-        f"- serverMaxConcurrentRuns: `{summary['serverMaxConcurrentRuns']}`",
         f"- expectActiveOverlap: `{summary['expectActiveOverlap']}`",
         f"- expectedActiveRunOverlap: `{summary['expectedActiveRunOverlap']}`",
         f"- maxObservedActiveStageOverlap: `{summary['maxObservedActiveStageOverlap']}`",
-        f"- maxObservedRunRequestsInFlight: `{summary['maxObservedRunRequestsInFlight']}`",
         f"- activeRunOverlapPass: `{summary['activeRunOverlapPass']}`",
         f"- metricsSampleTotal: `{summary['metricsSampleTotal']}`",
         f"- success: `{summary['workspaceSuccessTotal']}`",
@@ -1750,15 +1745,8 @@ def main() -> int:
             raise RuntimeError(f"readyz status={ready.get('status')!r}, want ready")
         configuration = run_curl("GET", "/api/v1/workorch/configuration")
         write_json(ARTIFACT_DIR / "configuration-before.json", configuration)
-        server_max_concurrent_runs = int(nested(configuration, "configuration.server.maxConcurrentRuns", 0) or 0)
         metrics_before = collect_metrics()
         write_json(ARTIFACT_DIR / "metrics-before.json", metrics_before)
-        if EXPECTED_MAX_CONCURRENT_RUNS > 0 and server_max_concurrent_runs < EXPECTED_MAX_CONCURRENT_RUNS:
-            raise RuntimeError(
-                "deployed server maxConcurrentRuns="
-                f"{server_max_concurrent_runs}, want >= {EXPECTED_MAX_CONCURRENT_RUNS}; "
-                "increase [server].maxConcurrentRuns and redeploy before this capacity run"
-            )
 
         endpoint_dir = MCP_ENDPOINT_ROOT / mcp_server_id
         endpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -1901,10 +1889,10 @@ def main() -> int:
             metrics_samples = metrics_sampler.stop()
         results.sort(key=lambda item: item.index)
         ended_at = time.monotonic()
-        summary = build_summary(results, started_at, ended_at, metrics_before, server_max_concurrent_runs, metrics_samples)
+        summary = build_summary(results, started_at, ended_at, metrics_before, metrics_samples)
         write_json(ARTIFACT_DIR / "summary.json", summary)
         write_markdown_report(summary)
-        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "serverMaxConcurrentRuns", "expectActiveOverlap", "expectedActiveRunOverlap", "maxObservedActiveStageOverlap", "maxObservedRunRequestsInFlight", "activeRunOverlapPass", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "minSuccessRate", "pass", "throughputWorkspacesPerMin", "http4xxTotal", "http5xxTotal", "curlErrorTotal", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "expectActiveOverlap", "expectedActiveRunOverlap", "maxObservedActiveStageOverlap", "activeRunOverlapPass", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "minSuccessRate", "pass", "throughputWorkspacesPerMin", "http4xxTotal", "http5xxTotal", "curlErrorTotal", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
         print(f"artifacts={ARTIFACT_DIR}")
         return 0 if summary["pass"] else 1
     except KeyboardInterrupt:

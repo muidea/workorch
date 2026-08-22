@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-22
 
 ## Typed Request Binding
 
@@ -43,6 +43,33 @@ identity/token；不得重读配置、提高预算或按 model name 建第二套
 
 provider ceiling 只约束模型可输出长度。manifest/schema 的数组、字符串、target、binding、content/effect 上限独立决定
 Runtime 可接受的文档，二者不能互相替代。
+
+## Mode-Specific Provider Response Guard
+
+response guard 只从已封存的 effective output-token ceiling 与 selected provider context profile 派生；它不是第二份
+output-token authority，也不能由 adapter、Runtime mode 或 retry 放宽。completion 的模型内容上限保持一致，但 wire
+envelope 必须按协议模式分别限界：
+
+| Mode | Required media type | Independent bounded read |
+| --- | --- | --- |
+| non-stream completion | `application/json` 或 `+json` | JSON body ceiling = escaped content allowance + fixed response envelope |
+| streaming completion | `text/event-stream` | SSE wire ceiling；同时独立限制 accumulated delta content、data-event count 与 single-line bytes |
+| embedding | `application/json` 或 `+json` | 从 selected embedding input/profile byte capacity 派生的独立 JSON response ceiling |
+
+SSE 不能复用 non-stream body ceiling：合法流可能同时包含增量输出和 terminal response 中的完整输出，并含有每个 event
+的 envelope 与非 data framing。SSE ceiling 必须对这些有界开销显式计数，但 accumulated model content 仍受同一
+completion content ceiling 约束。non-stream 也必须对 provider decoded 的原始 output bytes（含最终交付前会被
+`TrimSpace` 移除的首尾/分段空白）先执行同一 content ceiling，不能以规范化后的较短 payload 绕过 guard。所有加法、
+乘法和 token-to-byte 转换都必须 overflow-safe；capacity 不完整或溢出在 HTTP submission 前 fail closed。
+
+media type 在读取 body 前校验。bounded reader 只多探测一个 byte 以区分“恰好到上限”和超限；超限时
+`ResponseBytes = limit + 1` 表示 guard 已命中，不代表已读取或允许记录完整 provider body。SSE 的 wire-limit error 必须
+优先于该边界处 partial line/event 的 JSON decode error。所有 byte、content、event、line、media-type 与 decode violation
+都形成 typed provider-protocol fact；LLM owner保留原始 guard code/response-byte audit，Orchestrator不得从错误文本改写
+其 factual identity。
+
+Responses/stream/embedding redirect 只允许同源且最多 10 次 physical submission（包含初始请求）。注入 client 的
+`CheckRedirect` 只能进一步收窄策略，不能绕过 owner 的 origin/hop guard 或授权无界 307/308 POST body replay。
 
 ## Whole-Document Transaction
 

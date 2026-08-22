@@ -16,11 +16,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func (m *serverMetrics) render(config Config, projection WorkspaceProjection) string {
+func (m *serverMetrics) render(projection WorkspaceProjection) string {
 	body := fmt.Sprintf(
 		"# TYPE workorch_http_requests_total counter\n"+
 			"workorch_http_requests_total{endpoint=\"healthz\"} %d\n"+
@@ -59,17 +58,11 @@ func (m *serverMetrics) render(config Config, projection WorkspaceProjection) st
 			"workorch_http_requests_total{endpoint=\"approval_reject\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"configuration_read\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"configuration_update\"} %d\n"+
-			"# TYPE workorch_run_requests_in_flight gauge\n"+
-			"workorch_run_requests_in_flight %d\n"+
 			"# TYPE workorch_run_outcomes_total counter\n"+
 			"workorch_run_outcomes_total{status=\"succeeded\"} %d\n"+
 			"workorch_run_outcomes_total{status=\"failed\"} %d\n"+
 			"workorch_run_outcomes_total{status=\"rejected\"} %d\n"+
-			"workorch_run_outcomes_total{status=\"canceled\"} %d\n"+
-			"# TYPE workorch_server_max_concurrent_runs gauge\n"+
-			"workorch_server_max_concurrent_runs %d\n"+
-			"# TYPE workorch_stale_dispatched_step_min_age_seconds gauge\n"+
-			"workorch_stale_dispatched_step_min_age_seconds %.0f\n",
+			"workorch_run_outcomes_total{status=\"canceled\"} %d\n",
 		m.healthzRequests.Load(),
 		m.readyzRequests.Load(),
 		m.metricsRequests.Load(),
@@ -106,16 +99,13 @@ func (m *serverMetrics) render(config Config, projection WorkspaceProjection) st
 		m.approvalRejectRequests.Load(),
 		m.configurationReadRequests.Load(),
 		m.configurationUpdateRequests.Load(),
-		m.runInFlight.Load(),
 		m.runSucceeded.Load(),
 		m.runFailed.Load(),
 		m.runRejected.Load(),
 		m.runCanceled.Load(),
-		config.MaxConcurrentRuns,
-		config.StaleDispatchedStepMinAge.Seconds(),
 	)
 	if m != nil {
-		body += m.schedulerDiagnostics.renderMetrics()
+		body += m.executionAdmissionMetrics.render()
 		body += m.renderRuntimeDriveMetrics()
 	}
 	return body + renderWorkspaceProjectionMetrics(projection, m)
@@ -366,33 +356,6 @@ func mcpServerActionFromPath(path string) (serverID string, action string, ok bo
 	return "", "", false
 }
 
-func durationFromEnv(name string, fallback time.Duration) (time.Duration, error) {
-	cfg, err := workorchconfig.Current()
-	if err != nil {
-		return 0, err
-	}
-	serverConfig, err := ConfigFromWorkorch(cfg)
-	if err != nil {
-		return 0, err
-	}
-	switch name {
-	case configServerReadHeaderTimeout:
-		return serverConfig.ReadHeaderTimeout, nil
-	case configServerReadTimeout:
-		return serverConfig.ReadTimeout, nil
-	case configServerWriteTimeout:
-		return serverConfig.WriteTimeout, nil
-	case configServerIdleTimeout:
-		return serverConfig.IdleTimeout, nil
-	case configServerShutdownTimeout:
-		return serverConfig.ShutdownTimeout, nil
-	case configServerStaleDispatchedStepMinAge:
-		return serverConfig.StaleDispatchedStepMinAge, nil
-	default:
-		return fallback, nil
-	}
-}
-
 func durationFromValues(values map[string]string, name string, fallback time.Duration) (time.Duration, error) {
 	return durationFromValue(name, values[name], fallback)
 }
@@ -406,36 +369,6 @@ func durationFromValue(name string, value string, fallback time.Duration) (time.
 		return 0, fmt.Errorf("invalid duration for %s: %w", name, err)
 	}
 	return duration, nil
-}
-
-func int64FromEnv(name string, fallback int64) (int64, error) {
-	cfg, err := workorchconfig.Current()
-	if err != nil {
-		return 0, err
-	}
-	if name == configServerMaxConcurrentRuns {
-		serverConfig, err := ConfigFromWorkorch(cfg)
-		if err != nil {
-			return 0, err
-		}
-		return serverConfig.MaxConcurrentRuns, nil
-	}
-	return fallback, nil
-}
-
-func int64FromValues(values map[string]string, name string, fallback int64) (int64, error) {
-	value := values[name]
-	if value == "" {
-		return fallback, nil
-	}
-	number, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid integer for %s: %w", name, err)
-	}
-	if number <= 0 {
-		return 0, fmt.Errorf("invalid integer for %s: must be positive", name)
-	}
-	return number, nil
 }
 
 func firstNonEmpty(value string, fallback string) string {

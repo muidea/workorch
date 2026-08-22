@@ -40,28 +40,15 @@ func ConfigFromWorkorch(cfg workorchconfig.Config) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	staleDispatchedStepMinAge, err := durationFromValue(configServerStaleDispatchedStepMinAge, cfg.Server.StaleDispatchedStepMinAge, defaultStaleDispatchedStepMinAge)
-	if err != nil {
-		return Config{}, err
-	}
-	maxConcurrentRuns := cfg.Server.MaxConcurrentRuns
-	if maxConcurrentRuns == 0 {
-		maxConcurrentRuns = defaultMaxConcurrentRuns
-	}
-	if maxConcurrentRuns < 0 {
-		return Config{}, fmt.Errorf("invalid integer for %s: must be positive", configServerMaxConcurrentRuns)
-	}
 	return Config{
-		Addr:                      firstNonEmpty(cfg.Server.Addr, defaultServerAddr),
-		Backend:                   cfg.Repository.Backend,
-		DataRoot:                  cfg.Repository.DataDir,
-		ReadHeaderTimeout:         readHeaderTimeout,
-		ReadTimeout:               readTimeout,
-		WriteTimeout:              writeTimeout,
-		IdleTimeout:               idleTimeout,
-		ShutdownTimeout:           shutdownTimeout,
-		MaxConcurrentRuns:         maxConcurrentRuns,
-		StaleDispatchedStepMinAge: staleDispatchedStepMinAge,
+		Addr:              firstNonEmpty(cfg.Server.Addr, defaultServerAddr),
+		Backend:           cfg.Repository.Backend,
+		DataRoot:          cfg.Repository.DataDir,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		ShutdownTimeout:   shutdownTimeout,
 	}, nil
 }
 
@@ -90,25 +77,15 @@ func ConfigFromValues(values map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	maxConcurrentRuns, err := int64FromValues(values, configServerMaxConcurrentRuns, defaultMaxConcurrentRuns)
-	if err != nil {
-		return Config{}, err
-	}
-	staleDispatchedStepMinAge, err := durationFromValues(values, configServerStaleDispatchedStepMinAge, defaultStaleDispatchedStepMinAge)
-	if err != nil {
-		return Config{}, err
-	}
 	return Config{
-		Addr:                      addr,
-		Backend:                   values["repository.backend"],
-		DataRoot:                  values["repository.dataDir"],
-		ReadHeaderTimeout:         readHeaderTimeout,
-		ReadTimeout:               readTimeout,
-		WriteTimeout:              writeTimeout,
-		IdleTimeout:               idleTimeout,
-		ShutdownTimeout:           shutdownTimeout,
-		MaxConcurrentRuns:         maxConcurrentRuns,
-		StaleDispatchedStepMinAge: staleDispatchedStepMinAge,
+		Addr:              addr,
+		Backend:           values["repository.backend"],
+		DataRoot:          values["repository.dataDir"],
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		ShutdownTimeout:   shutdownTimeout,
 	}, nil
 }
 
@@ -130,12 +107,6 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.ShutdownTimeout <= 0 {
 		config.ShutdownTimeout = defaultShutdownTimeout
-	}
-	if config.MaxConcurrentRuns <= 0 {
-		config.MaxConcurrentRuns = defaultMaxConcurrentRuns
-	}
-	if config.StaleDispatchedStepMinAge <= 0 {
-		config.StaleDispatchedStepMinAge = defaultStaleDispatchedStepMinAge
 	}
 	return config
 }
@@ -159,7 +130,11 @@ func newHTTPServerWithApplicationPorts(config Config, ports ApplicationPorts, ba
 
 func newHTTPServerWithState(config Config, state *serverState) *HTTPServer {
 	handler := newMuxWithStateNoStart(state)
-	return &HTTPServer{
+	return newHTTPServerWithHandler(config, state, handler)
+}
+
+func newHTTPServerWithHandler(config Config, state *serverState, handler http.Handler) *HTTPServer {
+	server := &HTTPServer{
 		config: config,
 		state:  state,
 		http: &http.Server{
@@ -171,6 +146,8 @@ func newHTTPServerWithState(config Config, state *serverState) *HTTPServer {
 			IdleTimeout:       config.IdleTimeout,
 		},
 	}
+	server.http.ConnState = server.observeConnection
+	return server
 }
 
 func (s *HTTPServer) Start() error {
@@ -192,14 +169,33 @@ func (s *HTTPServer) Validate(ctx context.Context) error {
 }
 
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return errors.Join(s.Drain(ctx), s.CloseTransportState(ctx))
+}
+
+func (s *HTTPServer) Drain(ctx context.Context) error {
 	if s == nil || s.http == nil {
 		return nil
 	}
-	err := s.http.Shutdown(ctx)
-	if err != nil && ctx != nil && errors.Is(err, context.DeadlineExceeded) {
-		_ = s.http.Close()
+	shutdownErr := s.http.Shutdown(ctx)
+	var closeErr error
+	if shutdownErr != nil {
+		closeErr = s.http.Close()
 	}
-	return errors.Join(err, s.state.close(ctx))
+	// Close terminates connections but does not wait for their handlers. Keep
+	// every Biz-owned dependency live until each accepted connection has
+	// actually left net/http, including the forced-close timeout path.
+	s.connections.Wait()
+	return errors.Join(shutdownErr, closeErr)
+}
+
+func (s *HTTPServer) CloseTransportState(ctx context.Context) error {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	return s.state.close(ctx)
 }
 
 func newMuxWithStateNoStart(state *serverState) http.Handler {

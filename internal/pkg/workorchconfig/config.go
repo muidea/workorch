@@ -3,6 +3,7 @@ package workorchconfig
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -34,15 +35,28 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Addr                      string `json:"addr" toml:"addr"`
-	ReadHeaderTimeout         string `json:"readHeaderTimeout" toml:"readHeaderTimeout"`
-	ReadTimeout               string `json:"readTimeout" toml:"readTimeout"`
-	WriteTimeout              string `json:"writeTimeout" toml:"writeTimeout"`
-	IdleTimeout               string `json:"idleTimeout" toml:"idleTimeout"`
-	ShutdownTimeout           string `json:"shutdownTimeout" toml:"shutdownTimeout"`
-	MaxConcurrentRuns         int64  `json:"maxConcurrentRuns" toml:"maxConcurrentRuns"`
-	StaleDispatchedStepMinAge string `json:"staleDispatchedStepMinAge" toml:"staleDispatchedStepMinAge"`
-	DefaultDialogLanguage     string `json:"defaultDialogLanguage" toml:"defaultDialogLanguage"`
+	Addr                  string `json:"addr" toml:"addr"`
+	ReadHeaderTimeout     string `json:"readHeaderTimeout" toml:"readHeaderTimeout"`
+	ReadTimeout           string `json:"readTimeout" toml:"readTimeout"`
+	WriteTimeout          string `json:"writeTimeout" toml:"writeTimeout"`
+	IdleTimeout           string `json:"idleTimeout" toml:"idleTimeout"`
+	ShutdownTimeout       string `json:"shutdownTimeout" toml:"shutdownTimeout"`
+	DefaultDialogLanguage string `json:"defaultDialogLanguage" toml:"defaultDialogLanguage"`
+}
+
+// UnmarshalJSON rejects removed execution-scheduler/watchdog settings instead
+// of silently accepting configuration that no longer controls any production
+// behavior. The server section is transport configuration only.
+func (c *ServerConfig) UnmarshalJSON(data []byte) error {
+	type serverConfigAlias ServerConfig
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var alias serverConfigAlias
+	if err := decoder.Decode(&alias); err != nil {
+		return fmt.Errorf("%w: server configuration rejects legacy or unknown fields: %v", common.ErrInvalidArgument, err)
+	}
+	*c = ServerConfig(alias)
+	return nil
 }
 
 type RepositoryConfig struct {
@@ -313,8 +327,19 @@ func Persisted() (Config, error) {
 		return Config{}, err
 	}
 	var cfg Config
-	if err := toml.Unmarshal(payload, &cfg); err != nil {
-		return Config{}, err
+	decoder := toml.NewDecoder(bytes.NewReader(payload)).DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		var strictErr *toml.StrictMissingError
+		if errors.As(err, &strictErr) {
+			unknownFields := make([]string, 0, len(strictErr.Errors))
+			for index := range strictErr.Errors {
+				if key := strictErr.Errors[index].Key(); len(key) != 0 {
+					unknownFields = append(unknownFields, strings.Join(key, "."))
+				}
+			}
+			return Config{}, fmt.Errorf("%w: application configuration rejects legacy or unknown fields: %s", common.ErrInvalidArgument, strings.Join(unknownFields, ", "))
+		}
+		return Config{}, fmt.Errorf("%w: invalid application configuration: %v", common.ErrInvalidArgument, err)
 	}
 	if err := normalizeConfig(&cfg); err != nil {
 		return Config{}, err

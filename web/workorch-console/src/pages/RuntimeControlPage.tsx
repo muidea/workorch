@@ -7,7 +7,6 @@ import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import {
   joinLines,
-  metricValue,
   capabilityKindTag,
   errorMessage,
   splitLines
@@ -145,7 +144,6 @@ export function RuntimeControlPage() {
   const [capabilities, setCapabilities] = useState<MCPCapability[]>([]);
   const [editingCapability, setEditingCapability] = useState<MCPCapability | undefined>(undefined);
   const [capabilityModalOpen, setCapabilityModalOpen] = useState(false);
-  const [metrics, setMetrics] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -167,12 +165,8 @@ export function RuntimeControlPage() {
   const loadRuntime = async () => {
     setLoading(true);
     try {
-      const [nextServers, nextMetrics] = await Promise.all([
-        workorchApi.listMCPServers(),
-        workorchApi.metrics()
-      ]);
+      const nextServers = await workorchApi.listMCPServers();
       setServers(nextServers);
-      setMetrics(nextMetrics);
       await loadCapabilityDirectory();
       if (!selectedServerId && nextServers[0]) {
         setSelectedServerId(nextServers[0].id);
@@ -421,22 +415,11 @@ export function RuntimeControlPage() {
   return (
     <PageContainer
       title="运行控制"
-      subTitle={`管理${modelLabels.mcpCapability}，并观察本地运行队列与并发压力`}
+      subTitle={`管理${modelLabels.mcpCapability}目录与服务接入状态`}
       extra={<Button onClick={() => void loadRuntime()} loading={loading}>刷新</Button>}
     >
       <CardGrid loading={loading}>
-        <ProCard title="运行调度" colSpan={{ xs: 24, lg: 8 }}>
-          <Descriptions
-            column={1}
-            items={[
-              { key: 'max', label: '最大并发运行（Run）', children: metricValue(metrics, 'workorch_server_max_concurrent_runs') },
-              { key: 'inFlight', label: '执行中', children: metricValue(metrics, 'workorch_run_requests_in_flight') },
-              { key: 'waiting', label: '队列等待', children: metricValue(metrics, 'workorch_run_queue_waiting') },
-              { key: 'total', label: '队列总量', children: metricValue(metrics, 'workorch_run_queue_total') }
-            ]}
-          />
-        </ProCard>
-        <ProCard title="MCP 能力摘要" colSpan={{ xs: 24, lg: 16 }}>
+        <ProCard title="MCP 能力摘要" colSpan={24}>
           <Space wrap>
             <Tag>{servers.length} 个服务</Tag>
             <Tag color="green">{servers.filter((item) => item.enabled).length} 个已启用</Tag>

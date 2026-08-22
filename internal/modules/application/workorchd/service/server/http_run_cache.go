@@ -24,7 +24,6 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 		interval = 10 * time.Millisecond
 	}
 	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
-		cached = s.attachSchedulerDiagnosticsToRunSnapshot(ctx, cached)
 		status := readmodelprojection.RunProjection().Status(cached)
 		if waitState == "" || status.State == waitState {
 			return status, waitState == "" || status.State == waitState, nil
@@ -32,7 +31,6 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 	}
 	if waitState == "" || timeout <= 0 {
 		item, err := s.readRunStatus(ctx, s.config.Backend, s.config.DataRoot, runID)
-		item = s.attachSchedulerDiagnosticsToRunStatus(ctx, item)
 		matched := waitState == "" || item.State == waitState
 		if err == nil && matched {
 			s.warmRunSnapshotCache(ctx, runID, item.State)
@@ -46,7 +44,6 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 		if err != nil {
 			return projectioncontract.RunStatus{}, false, err
 		}
-		item = s.attachSchedulerDiagnosticsToRunStatus(ctx, item)
 		if item.State == waitState {
 			s.warmRunSnapshotCache(ctx, runID, item.State)
 			return item, true, nil
@@ -120,69 +117,29 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 
 func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (readmodelcore.RunSnapshotState, error) {
 	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
-		return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, cached), nil
+		return cached, nil
 	}
 	if item, err, ok := s.waitRunSnapshotInflight(ctx, runID); ok {
-		return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, item), err
+		return item, err
 	}
 	item, err := s.readRunSnapshot(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
 		return readmodelcore.RunSnapshotState{}, err
 	}
 	s.cacheRunSnapshot(item)
-	return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, item), nil
+	return item, nil
 }
 
 func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
-	ret, err := s.readWorkspaceSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
-	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
+	return s.readWorkspaceSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
 }
 
 func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
-	ret, err := s.readWorkspaceDetailSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
-	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
+	return s.readWorkspaceDetailSnapshot(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
 }
 
 func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (content.ArtifactContent, error) {
 	return s.readArtifactContent(ctx, s.config.Backend, s.config.DataRoot, artifactURI)
-}
-
-func (s *serverState) schedulerDiagnosticsFor(workspaceID string, runID string) *projectioncontract.SchedulerDiagnostics {
-	if s == nil || s.schedulerDiagnostics == nil {
-		return nil
-	}
-	return s.schedulerDiagnostics.snapshot(workspaceID, runID)
-}
-
-func (s *serverState) attachSchedulerDiagnosticsToRunStatus(ctx context.Context, item projectioncontract.RunStatus) projectioncontract.RunStatus {
-	workspaceID := strings.TrimSpace(item.WorkspaceID)
-	if workspaceID == "" {
-		workspaceID = string(common.RuntimeWorkspaceIDFromContext(ctx))
-	}
-	item.SchedulerDiagnostics = s.schedulerDiagnosticsFor(workspaceID, item.ID)
-	return item
-}
-
-func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Context, item readmodelcore.RunSnapshotState) readmodelcore.RunSnapshotState {
-	workspaceID := strings.TrimSpace(item.Run.WorkspaceID)
-	if workspaceID == "" {
-		workspaceID = strings.TrimSpace(item.Workspace.ID)
-	}
-	if workspaceID == "" {
-		workspaceID = string(common.RuntimeWorkspaceIDFromContext(ctx))
-	}
-	item.SchedulerDiagnostics = s.schedulerDiagnosticsFor(workspaceID, item.Run.ID)
-	return item
-}
-
-func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
-	workspaceID := strings.TrimSpace(item.Workspace.ID)
-	var runID string
-	if item.Run != nil {
-		runID = strings.TrimSpace(item.Run.ID)
-	}
-	item.SchedulerDiagnostics = s.schedulerDiagnosticsFor(workspaceID, runID)
-	return item
 }
 
 func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (readmodelcore.RunObservabilityState, error) {

@@ -297,7 +297,7 @@ func TestEventHubRunResumeGeneratesRequestCorrelation(t *testing.T) {
 	}
 }
 
-func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
+func TestEventHubRunCommandRequiresOwnerAdmissionResponse(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
@@ -305,7 +305,7 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 		wantError string
 	}{
 		{
-			name:      "missing scheduler response",
+			name:      "missing owner admission response",
 			wantError: "missing observer",
 		},
 		{

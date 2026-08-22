@@ -198,6 +198,24 @@ EOF
   exit 1
 fi
 
+# The execution-admission use case owns focused application ports and must stay
+# independent of its HTTP adapter. The Biz package root is the composition
+# boundary and may wire both sides; biz/execution itself may not import server.
+workorchd_execution_server_import_matches="$({
+  find internal/modules/application/workorchd/biz/execution -type f -name '*.go' ! -name '*_test.go' -print0 |
+    xargs -0 -r grep -Hn -F -- 'internal/modules/application/workorchd/service/server' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$workorchd_execution_server_import_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workorchd biz/execution imports its downstream
+HTTP service/server adapter. The execution use case must own focused typed
+ports and remain independent of server handlers, metrics, and local state.
+
+$workorchd_execution_server_import_matches
+EOF
+  exit 1
+fi
+
 workorchd_server_owner_implementation_matches="$({
   source_matches '"github.com/muidea/workorch/internal/modules/(blocks|kernel)/[^\"]+/(biz|service)(/|\")' \
     internal/modules/application/workorchd/service/server
@@ -255,18 +273,138 @@ EOF
 fi
 
 retired_application_state_surface_matches="$({
-  source_matches 'WatchdogDiagnostics|ContinuationReadbackDiagnostic|LatestContinuation|RecentContinuations|schedulerDiagnosticState(NotScheduled|Accepted|Running|Failed|Completed|NoActionNeeded)|recordWatchdog|recordStaleRuntimeGapRecovery|workorch_scheduler_continuation_|workorch_watchdog_' \
+  source_matches 'workorchd\.scheduler|WatchdogDiagnostics|ContinuationReadbackDiagnostic|LatestContinuation|RecentContinuations|schedulerDiagnosticState(NotScheduled|Accepted|Running|Failed|Completed|NoActionNeeded)|recordWatchdog|recordStaleRuntimeGapRecovery|MaxConcurrentRuns|StaleDispatchedStepMinAge|runInFlight|worker_lifecycle|worker_lost|workorch_run_requests_in_flight|workorch_server_max_concurrent_runs|workorch_stale_dispatched_step_min_age_seconds|workorch_runtime_event_publish_failures_total|workorch_runtime_heartbeat_timer_start_failures_total|workorch_scheduler_continuation_|workorch_watchdog_' \
     internal/modules/application/workorchd \
+    internal/pkg/workorchconfig \
+    internal/pkg/workorchconfigurationcontract \
+    internal/pkg/workorchport \
     internal/pkg/workorchprojectioncontract \
     internal/services/workorch
 } | sed '/^[[:space:]]*$/d')"
 if [[ -n "$retired_application_state_surface_matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: a retired Workorchd scheduler/watchdog state,
-recovery readback, projection field, or metric was reintroduced. Execution
-admission may expose only an immutable admission outcome.
+Boundary contract violation: a retired Workorchd scheduler identity/state,
+watchdog recovery readback, projection field, or metric was reintroduced.
+Execution admission may expose only an immutable admission outcome.
 
 $retired_application_state_surface_matches
+EOF
+  exit 1
+fi
+
+# Deployed verifiers must read owner state and the immutable runCommand
+# admission outcome.  They must not make removed Workorchd continuation
+# diagnostics, scheduler counters, watchdog recovery, or an automatically
+# created successor part of the passing contract.
+retired_authority_verifier_matches="$({
+  find scripts -maxdepth 1 -type f -name '*.sh' ! -name 'verify-boundary-contract.sh' -print0 |
+    xargs -0 -r grep -Hn -E -- 'latestContinuation|recentContinuations|latestAdmissionFailure|recentAdmissionFailures|schedulerDiagnostics|scheduler_recent_items|governance_scheduler_diagnostics|has_failed_continuation_diagnostic|successor_or_failed_diagnostic_present|resolved_replan_without_successor_or_failed_diagnostic' || true
+  grep -Hn -E -- 'WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION' Makefile || true
+  source_matches 'scheduler_recent_items|governance_scheduler_diagnostics|has_failed_continuation_diagnostic|successor_or_failed_diagnostic_present|resolved_replan_without_successor_or_failed_diagnostic|workorch_scheduler_commands_total|workorch_scheduler_continuation_|workorch_watchdog_' \
+    scripts/verify-authority-live-e2e-closure.sh
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$retired_authority_verifier_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a deployed authority verifier requires retired
+application scheduler/watchdog/continuation state or automatic successor
+evidence. Verify owner readback and immutable runCommand admission outcomes.
+
+$retired_authority_verifier_matches
+EOF
+  exit 1
+fi
+
+for verifier in scripts/verify-authority-live-e2e-closure.sh scripts/observe-workorch-runtime-closure.sh; do
+  if ! grep -q -F -- 'runCommand' "$verifier"; then
+    echo "boundary contract violation: $verifier does not inspect immutable runCommand admission outcomes" >&2
+    exit 1
+  fi
+done
+
+retired_application_metric_markers=(
+  "workorch_scheduler_commands_total"
+  "workorch_scheduler_continuation_failures_total"
+  "workorch_scheduler_continuation_no_action_total"
+  "workorch_watchdog_timer_registrations_total"
+  "workorch_watchdog_interval_seconds"
+  "workorch_watchdog_ticks_total"
+  "workorch_watchdog_last_error_timestamp_seconds"
+  "workorch_watchdog_stale_runtime_gap_recoveries_total"
+  "workorch_run_requests_in_flight"
+  "workorch_server_max_concurrent_runs"
+  "workorch_stale_dispatched_step_min_age_seconds"
+  "workorch_runtime_event_publish_failures_total"
+  "workorch_runtime_heartbeat_timer_start_failures_total"
+)
+observer_negative_metric_block="$(sed -n '/^retired_application_state_metric_markers = \[/,/^\]/p' scripts/observe-workorch-runtime-closure.sh)"
+for marker in "${retired_application_metric_markers[@]}"; do
+  if ! grep -q -F -- "$marker" <<<"$observer_negative_metric_block"; then
+    echo "boundary contract violation: closure observer lost the negative assertion for retired metric $marker" >&2
+    exit 1
+  fi
+done
+
+retired_metric_positive_usage="$({
+  find scripts -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) \
+    ! -name 'verify-boundary-contract.sh' \
+    ! -name 'observe-workorch-runtime-closure.sh' -print0 |
+    xargs -0 -r grep -Hn -E -- 'workorch_scheduler_commands_total|workorch_scheduler_continuation_|workorch_watchdog_|workorch_run_requests_in_flight|workorch_server_max_concurrent_runs|workorch_stale_dispatched_step_min_age_seconds|workorch_runtime_event_publish_failures_total|workorch_runtime_heartbeat_timer_start_failures_total|worker_lifecycle|worker_lost' || true
+  grep -Hn -E -- 'workorch_scheduler_commands_total|workorch_scheduler_continuation_|workorch_watchdog_|workorch_run_requests_in_flight|workorch_server_max_concurrent_runs|workorch_stale_dispatched_step_min_age_seconds|workorch_runtime_event_publish_failures_total|workorch_runtime_heartbeat_timer_start_failures_total|worker_lifecycle|worker_lost' Makefile || true
+  awk '
+    /^retired_application_state_metric_markers = \[/ { negative = 1; next }
+    negative && /^\]/ { negative = 0; next }
+    /workorch_scheduler_commands_total|workorch_scheduler_continuation_|workorch_watchdog_|workorch_run_requests_in_flight|workorch_server_max_concurrent_runs|workorch_stale_dispatched_step_min_age_seconds|workorch_runtime_event_publish_failures_total|workorch_runtime_heartbeat_timer_start_failures_total|worker_lifecycle|worker_lost/ && !negative { print FNR ":" $0 }
+  ' scripts/observe-workorch-runtime-closure.sh
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$retired_metric_positive_usage" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a production/verification target consumes a
+retired application scheduler/watchdog metric. Those names may appear only in
+the closure observer's explicit "must be absent" marker block.
+
+$retired_metric_positive_usage
+EOF
+  exit 1
+fi
+
+retired_execution_scheduler_config_matches="$({
+  find application config docs internal scripts -type f \
+    \( -name '*.go' -o -name '*.toml' -o -name '*.md' -o -name '*.py' -o -name '*.sh' \) \
+    ! -path 'scripts/verify-boundary-contract.sh' \
+    ! -path 'internal/pkg/workorchconfig/retired_server_config_test.go' -print0 |
+    xargs -0 -r grep -Hn -E -- 'maxConcurrentRuns|staleDispatchedStepMinAge|WORKORCH_MANAGED_MAX_CONCURRENT_RUNS|WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE|WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS|WORKORCH_OBSERVE_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS|WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$retired_execution_scheduler_config_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a retired Workorchd execution scheduler/watchdog
+configuration surface was reintroduced. Client concurrency and owner Runtime
+facts must be observed directly; Application must not expose a parallel run
+limit or stale-dispatch recovery policy.
+
+$retired_execution_scheduler_config_matches
+EOF
+  exit 1
+fi
+
+retired_server_config_test='internal/pkg/workorchconfig/retired_server_config_test.go'
+for marker in 'maxConcurrentRuns' 'staleDispatchedStepMinAge' 'TestCurrentRejectsRetiredServerSchedulerFields' 'TestPersistedRejectsRetiredServerSchedulerFields'; do
+  if ! grep -q -F -- "$marker" "$retired_server_config_test"; then
+    echo "boundary contract violation: retired server config rejection test lost marker $marker" >&2
+    exit 1
+  fi
+done
+
+retired_web_execution_shadow_matches="$({
+  source_matches 'export type RuntimeExecution[[:space:]]*=|runtimeExecution\?:[[:space:]]*RuntimeExecution|queuedAt\?:|workorch_run_queue_|workorch_server_max_concurrent_runs|workorch_run_requests_in_flight|schedulerDiagnostics|maxConcurrentRuns[?]?:|staleDispatchedStepMinAge[?]?:' \
+    web/workorch-console/src
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$retired_web_execution_shadow_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Web Console reintroduced the retired application
+execution scheduler/worker projection or one of its queue/concurrency controls.
+Render owner facts and immutable runCommand outcomes instead.
+
+$retired_web_execution_shadow_matches
 EOF
   exit 1
 fi
@@ -404,11 +542,21 @@ application_execution_state_bypass_matches="$({
     grep -v -F -- 'scripts/verify-boundary-contract.sh' || true
   source_matches 'session\.State[[:space:]]*=|State:[[:space:]]*workspaceSetupDraftState' \
     internal/modules/application/workorchd/service/server/workspace_setup_draft.go || true
+  source_matches 'IdempotencyKey|idempotencyKey[[:space:]]*[?=:]|idempotency[_-]key[[:space:]]*[:=]' \
+    internal/modules/application/workorchd \
+    internal/pkg/workorchprojectioncontract \
+    internal/services/workorch/biz/backends \
+    internal/services/workorch/service/tui \
+    web/workorch-console/src \
+    scripts |
+    grep -v -F -- 'scripts/verify-boundary-contract.sh' || true
+  grep -R -n -E --exclude-dir='90-archive' -- 'optional[-_]idempotency[-_]key|"idempotencyKey"[[:space:]]*:|"idempotency_key"[[:space:]]*:|"idempotency-key"[[:space:]]*:' docs || true
 } | sed '/^[[:space:]]*$/d')"
 if [[ -n "$application_execution_state_bypass_matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: Application owns an execution queue/state or
-persists a setup-draft state that must remain derived.
+Boundary contract violation: Application owns an execution queue/state,
+fabricates a run-command idempotency identity, or persists a setup-draft state
+that must remain derived.
 
 $application_execution_state_bypass_matches
 EOF
@@ -2826,6 +2974,7 @@ legacy_llm_output_config_matches="$(
 	# the worktree, without treating ignored runtime-local configuration (for
 	# example config/application.toml) as versioned product authority.
 	while IFS= read -r -d '' repository_file; do
+		[[ -f "$repository_file" ]] || continue
 		case "$repository_file" in
 			*_test.go) ;;
 			*.go|*.toml|*.ts|*.tsx)

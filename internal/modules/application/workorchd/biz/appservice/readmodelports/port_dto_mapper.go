@@ -17,7 +17,6 @@ func WorkspaceSnapshotProjection(snapshot readmodelcore.WorkspaceSnapshotState) 
 		RunHeartbeat:            snapshot.RunHeartbeat,
 		ConvergenceStatus:       projectioncontract.CloneConvergenceStatus(snapshot.ConvergenceStatus),
 		RunCommand:              projectioncontract.CloneRunCommandStatus(snapshot.RunCommand),
-		SchedulerDiagnostics:    projectioncontract.CloneSchedulerDiagnostics(snapshot.SchedulerDiagnostics),
 		ContextBundle:           projectioncontract.CloneContextBundle(snapshot.ContextBundle),
 		CoverageSummary:         snapshot.CoverageSummary,
 		GapBaseline:             projectioncontract.CloneGapBaseline(snapshot.GapBaseline),

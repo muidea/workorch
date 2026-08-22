@@ -1,7 +1,6 @@
 package projection
 
 import (
-	"context"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -43,7 +42,15 @@ func TestExecutionObservationWritesOnlyBizOwnedProjection(t *testing.T) {
 		t.Fatalf("accepted run command = %+v", snapshot.RunCommand)
 	}
 
-	component.RecordWorkspaceExecutionRejected("workspace.run", command, context.Canceled)
+	rejectedCommand := command
+	rejectedCommand.RequestID = "request-2"
+	component.RecordWorkspaceExecutionOutcome("workspace.run", rejectedCommand, workorchdevents.WorkspaceRunRequestedResult{
+		WorkspaceID: rejectedCommand.WorkspaceID,
+		RequestID:   rejectedCommand.RequestID,
+		Kind:        runtimecontract.RuntimeExecutionIntentResume,
+		Outcome:     runtimecontract.RuntimeExecutionIntentRestartRequired,
+		Reason:      runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+	})
 	snapshot, _, err = component.ReadWorkspaceSummarySnapshot(string(command.WorkspaceID))
 	if err != nil {
 		t.Fatalf("read rejected snapshot: %v", err)

@@ -54,8 +54,9 @@ func (s *Service) StartupWithApplicationPorts(ctx context.Context, serviceName s
 	return nil
 }
 
-// SetWorkspaceExecutionAdmission installs the Biz-owned execution use case.
-// The typed production constructor never falls back to a server-local queue.
+// SetWorkspaceExecutionAdmission installs the Biz-owned EventHub admission
+// gateway. The typed production constructor never falls back to a
+// server-local queue or direct owner call.
 func (s *Service) SetWorkspaceExecutionAdmission(admission WorkspaceExecutionAdmission) {
 	if s == nil || s.http == nil || s.http.state == nil {
 		return
@@ -178,13 +179,21 @@ func (s *Service) publishStopped(err error) {
 }
 
 func (s *Service) Shutdown(ctx context.Context) {
+	s.DrainHTTP(ctx)
+	s.CloseTransportState(ctx)
+}
+
+// DrainHTTP rejects new network ingress and waits until every accepted HTTP
+// handler returns. Biz may then drain non-HTTP EventHub admissions before it
+// closes the shared transport state.
+func (s *Service) DrainHTTP(ctx context.Context) {
 	if s == nil || s.http == nil {
 		return
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.http.Shutdown(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := s.http.Drain(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("workorch http server shutdown failed", "err", err)
 	}
 	if !s.runStarted.Load() {
@@ -200,6 +209,18 @@ func (s *Service) Shutdown(ctx context.Context) {
 		}
 	case <-ctx.Done():
 		slog.Warn("workorch http server shutdown timed out", "err", ctx.Err())
+	}
+}
+
+func (s *Service) CloseTransportState(ctx context.Context) {
+	if s == nil || s.http == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := s.http.CloseTransportState(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Error("workorch transport state shutdown failed", "err", err)
 	}
 }
 

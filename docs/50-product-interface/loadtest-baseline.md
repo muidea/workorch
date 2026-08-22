@@ -32,7 +32,6 @@ Both target an already running service. Default base URL is `http://127.0.0.1:80
 | `WORKORCH_LOAD_POLL_INTERVAL_SECONDS` | `1` | verifier status-read interval; not a product refresh loop |
 | `WORKORCH_LOAD_ACTIVATION_RUN_TIMEOUT_SECONDS` | `180` | mock/current activation timeout |
 | `WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS` | `900` | real-provider Run timeout |
-| `WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS` | `0` | optional asserted server setting |
 | `WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP` | `0` | enable overlap gate |
 | `WORKORCH_LOAD_MCP_SESSION_POLICY` | `transient` | `transient` or `long_lived` fixture |
 
@@ -53,8 +52,8 @@ The fixture does not require a fixed number or order of governance objects and d
 ## Pass Criteria
 
 - success rate is at least `WORKORCH_LOAD_MIN_SUCCESS_RATE`;
-- when active-overlap checking is enabled and at least two Runs can overlap, observed Run windows or in-flight metrics reach the
-  expected overlap;
+- when active-overlap checking is enabled and the client submits at least two successful concurrent cases, owner-derived Run
+  activity windows reach the client-requested overlap;
 - every successful case reaches a valid terminal Result and passes snapshot/observability consistency checks;
 - HTTP/provider/protocol failures are classified and retained per Workspace.
 

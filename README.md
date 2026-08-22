@@ -119,11 +119,14 @@ create/start/resume mutation endpoints are intentionally not part of the current
 Configuration is loaded from the selected config directory. The main groups are:
 
 - `repository`: memory/file backend and internal data root;
-- `server`: listener, timeout and concurrency settings;
+- `server`: listener, timeout and default dialog settings;
 - `runtime`: convergence, retry and capability execution limits;
 - `llm`: ai-proxy catalog, default model selection and context budget;
 - `webSearch`: provider configuration;
 - `governance`: automatic ticket/approval and budget policy.
+
+The `server` section rejects unknown and retired execution-scheduler/watchdog fields. Runtime concurrency and recovery are
+owner contracts, not HTTP-server controls.
 
 The LLM owner freezes its active configuration at process startup. Saving LLM configuration changes persisted values for
 the next process start; it does not mutate an active owner snapshot or an already sealed Run selection. Secrets are redacted

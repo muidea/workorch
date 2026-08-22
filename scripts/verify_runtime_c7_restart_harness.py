@@ -601,7 +601,7 @@ class Harness:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.config_dir / "application.toml").write_text(
-            f'''endpointName = "workorch"\n\n[server]\naddr = "{self.host}:{self.port}"\nreadHeaderTimeout = "5s"\nreadTimeout = "15s"\nwriteTimeout = "180s"\nidleTimeout = "60s"\nshutdownTimeout = "5s"\nmaxConcurrentRuns = 3\nstaleDispatchedStepMinAge = "10m"\n\n[repository]\nbackend = "file"\ndataDir = "{self.data_dir}"\n\n[runtime.git]\ndefaultTimeout = "30s"\n\n[llm.aiProxy]\nbaseURL = "{self.mock_url}"\napiKey = "restart-harness-secret"\ntimeout = "60s"\ncatalogRequestTimeout = "5s"\ncatalogTTL = "5m"\ncatalogMaxStaleAge = "24h"\nmaxCatalogResponseBytes = 1048576\nmaxCatalogModels = 1000\n\n[llm.defaultChat]\nproviderID = "ai-proxy"\nmodelID = "verify-model"\n''',
+            f'''endpointName = "workorch"\n\n[server]\naddr = "{self.host}:{self.port}"\nreadHeaderTimeout = "5s"\nreadTimeout = "15s"\nwriteTimeout = "180s"\nidleTimeout = "60s"\nshutdownTimeout = "5s"\n\n[repository]\nbackend = "file"\ndataDir = "{self.data_dir}"\n\n[runtime.git]\ndefaultTimeout = "30s"\n\n[llm.aiProxy]\nbaseURL = "{self.mock_url}"\napiKey = "restart-harness-secret"\ntimeout = "60s"\ncatalogRequestTimeout = "5s"\ncatalogTTL = "5m"\ncatalogMaxStaleAge = "24h"\nmaxCatalogResponseBytes = 1048576\nmaxCatalogModels = 1000\n\n[llm.defaultChat]\nproviderID = "ai-proxy"\nmodelID = "verify-model"\n''',
             encoding="utf-8",
         )
 

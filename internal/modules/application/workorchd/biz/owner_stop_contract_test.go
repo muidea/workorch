@@ -30,7 +30,19 @@ func TestApplicationStopPreservesTransportProjectionRuntimeOrder(t *testing.T) {
 	if stop == nil || stop.Body == nil {
 		t.Fatal("Biz.Stop declaration not found")
 	}
-	wanted := []string{"b.service.Shutdown", "b.projection.CloseContext", "b.runtime.close"}
+	wanted := []string{
+		"admissions.stop",
+		"b.cliDispatcher.Close",
+		"b.service.DrainHTTP",
+		"admissions.wait",
+		"b.service.CloseTransportState",
+		"b.service.SetWorkspaceExecutionAdmission",
+		"b.service.SetWorkspaceProjection",
+		"b.service.SetWorkspaceProjectionWriter",
+		"b.UnsubscribeFunc",
+		"b.projection.CloseContext",
+		"b.runtime.close",
+	}
 	positions := make(map[string]token.Pos, len(wanted))
 	ast.Inspect(stop.Body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)

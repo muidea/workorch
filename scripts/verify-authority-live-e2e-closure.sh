@@ -185,6 +185,8 @@ python3 - \
   "$COMMAND_STATUS" \
   "$COMMAND_ERROR" \
   "$RESUME_WORKSPACE_ID" \
+  "$RESUME_REQUEST_ID" \
+  "$RESUME_INTENT" \
   "$DECISION_WORKSPACE_ID" \
   "$DECISION_TICKET_ID" \
   "$MAX_METADATA_RECORDS_SCANNED_DELTA" \
@@ -207,6 +209,8 @@ from pathlib import Path
     command_status,
     command_error,
     resume_workspace_id,
+    resume_request_id,
+    resume_intent,
     decision_workspace_id,
     decision_ticket_id,
     max_metadata_records_delta,
@@ -322,9 +326,23 @@ def compact_decision(item):
         "runId": item.get("runId"),
         "state": item.get("state"),
         "resolutionType": item.get("resolutionType"),
-        "continuationAction": item.get("continuationAction"),
-        "resumeRunId": item.get("resumeRunId"),
-        "successorRunId": item.get("successorRunId"),
+    }
+
+def compact_run_command(item):
+    if not item:
+        return None
+    return {
+        "workspaceId": item.get("workspaceId"),
+        "runId": item.get("runId"),
+        "state": item.get("state"),
+        "intent": item.get("intent"),
+        "disposition": item.get("disposition"),
+        "requestId": item.get("requestId"),
+        "definitionRevision": item.get("definitionRevision"),
+        "decisionId": item.get("decisionId"),
+        "acceptedAt": item.get("acceptedAt"),
+        "rejectedAt": item.get("rejectedAt"),
+        "revision": item.get("revision"),
     }
 
 def command_target_id():
@@ -334,11 +352,48 @@ def command_target_id():
         return decision_workspace_id
     return ""
 
-def command_progress(before_item, after_item):
+def command_progress(before_item, after_item, authority_readback):
     if command_status != "submitted":
         return {"required": False, "advanced": None, "reason": command_status}
     if not before_item or not after_item:
         return {"required": True, "advanced": False, "reason": "target_workspace_missing_after_command"}
+    target_id = command_target_id()
+    owner_readback = authority_readback.get(target_id) or {}
+    if command_kind == "decision":
+        decision = decision_by_id(owner_readback.get("decisions") or []).get(decision_ticket_id)
+        resolved = bool(decision and decision.get("state") == "resolved")
+        return {
+            "required": True,
+            "advanced": resolved,
+            "reason": "owner_decision_resolved" if resolved else "owner_decision_not_resolved",
+            "decision": decision,
+        }
+    if command_kind == "resume":
+        run_command = owner_readback.get("runCommand") or {}
+        state = str(run_command.get("state") or "")
+        accepted_at = str(run_command.get("acceptedAt") or "")
+        rejected_at = str(run_command.get("rejectedAt") or "")
+        mismatch = ""
+        if not run_command:
+            mismatch = "matching_run_command_missing"
+        elif run_command.get("workspaceId") != resume_workspace_id:
+            mismatch = "run_command_workspace_mismatch"
+        elif run_command.get("requestId") != resume_request_id:
+            mismatch = "run_command_request_mismatch"
+        elif run_command.get("intent") != resume_intent:
+            mismatch = "run_command_intent_mismatch"
+        elif state not in {"accepted", "rejected"}:
+            mismatch = "run_command_outcome_invalid"
+        elif state == "accepted" and (not accepted_at or rejected_at):
+            mismatch = "run_command_accepted_timestamp_invalid"
+        elif state == "rejected" and (not rejected_at or accepted_at):
+            mismatch = "run_command_rejected_timestamp_invalid"
+        return {
+            "required": True,
+            "advanced": not mismatch,
+            "reason": mismatch or "workspace_owner_admission_outcome_observed",
+            "runCommand": run_command,
+        }
     before = compact_workspace(before_item)
     after = compact_workspace(after_item)
     advanced = False
@@ -364,41 +419,6 @@ def command_progress(before_item, after_item):
         "after": after,
     }
 
-def scheduler_recent_items(ready_data):
-    diagnostics = ready_data.get("diagnostics") or {}
-    items = []
-    latest = diagnostics.get("latestContinuation")
-    if latest:
-        items.append(latest)
-    for item in diagnostics.get("recentContinuations") or []:
-        if item:
-            items.append(item)
-    return items
-
-def diagnostic_matches(item, workspace_id="", run_id="", states=None, kinds=None, reasons=None):
-    if not item:
-        return False
-    if workspace_id and item.get("workspaceId") != workspace_id:
-        return False
-    if run_id and item.get("runId") != run_id:
-        return False
-    if states and item.get("state") not in states:
-        return False
-    if kinds and item.get("kind") not in kinds:
-        return False
-    if reasons and item.get("reason") not in reasons:
-        return False
-    return True
-
-def has_failed_continuation_diagnostic(items, workspace_id, run_id):
-    return any(diagnostic_matches(
-        item,
-        workspace_id,
-        run_id,
-        states={"failed"},
-        kinds={"governance_continuation", "replan_continuation", "run_continuation", "workspace_run"},
-    ) for item in items)
-
 def workspace_needs_authority_fetch(item):
     view = item.get("viewModel") or {}
     return bool(
@@ -411,6 +431,14 @@ def workspace_needs_authority_fetch(item):
 def selected_authority_workspaces(items):
     ordered = []
     seen = set()
+    target_id = command_target_id() if command_status == "submitted" else ""
+    if target_id:
+        for item in items:
+            workspace_id = str(item.get("id") or "")
+            if workspace_id == target_id:
+                ordered.append(item)
+                seen.add(workspace_id)
+                break
     for item in items:
         if workspace_needs_authority_fetch(item):
             workspace_id = item.get("id")
@@ -422,7 +450,10 @@ def selected_authority_workspaces(items):
         if workspace_id and workspace_id not in seen:
             ordered.append(item)
             seen.add(workspace_id)
-    return ordered[:max_workspace_detail_fetches]
+    limit = max_workspace_detail_fetches
+    if target_id:
+        limit = max(1, limit)
+    return ordered[:limit]
 
 def build_authority_readback(workspaces):
     readback = {}
@@ -439,11 +470,17 @@ def build_authority_readback(workspaces):
             f"/api/v1/workorch/runs?workspaceId={encoded_workspace}",
             f"runs-{encoded_workspace}.json",
         )
+        snapshot, snapshot_err = fetch_json_path(
+            f"/api/v1/workorch/workspaces/{encoded_workspace}/snapshot",
+            f"snapshot-{encoded_workspace}.json",
+        )
+        snapshot_value = (snapshot or {}).get("snapshot") or {}
         readback[workspace_id] = {
             "workspace": compact_workspace(item),
             "decisions": [compact_decision(decision) for decision in (decisions or {}).get("decisions", [])],
             "runs": [compact_run(run) for run in (runs or {}).get("runs", [])],
-            "errors": [err for err in (decision_err, run_err) if err],
+            "runCommand": compact_run_command(snapshot_value.get("runCommand")),
+            "errors": [err for err in (decision_err, run_err, snapshot_err) if err],
         }
     return readback
 
@@ -462,7 +499,7 @@ def open_decision(decision, workspace_id, run_id, ticket_id):
         decision.get("state") == "open"
     )
 
-def authority_consistency_checks(readback, scheduler_items):
+def authority_consistency_checks(readback):
     checks = []
     errors = []
     for workspace_id, data in sorted(readback.items()):
@@ -477,6 +514,7 @@ def authority_consistency_checks(readback, scheduler_items):
         state = str(workspace.get("state") or "")
         active_run = runs_by_id.get(active_run_id)
         decision = decisions_by_id.get(ticket_id)
+        run_command = data.get("runCommand")
 
         if data.get("errors"):
             for err in data["errors"]:
@@ -525,54 +563,30 @@ def authority_consistency_checks(readback, scheduler_items):
                 "result": reason,
             })
 
-        for decision_item in decisions:
-            if decision_item.get("state") != "resolved":
-                continue
-            if decision_item.get("resolutionType") != "replan" and decision_item.get("continuationAction") != "replan":
-                continue
-            run_id = str(decision_item.get("runId") or "")
-            successor_id = str(decision_item.get("successorRunId") or "")
-            successor_exists = bool(successor_id and successor_id in runs_by_id)
-            if not successor_exists:
-                successor_exists = any(str(run.get("id") or "") != run_id for run in runs)
-            failed_diagnostic = has_failed_continuation_diagnostic(scheduler_items, workspace_id, run_id)
-            result = "successor_or_failed_diagnostic_present" if successor_exists or failed_diagnostic else "resolved_replan_without_successor_or_failed_diagnostic"
-            if result != "successor_or_failed_diagnostic_present":
-                errors.append(f"{workspace_id}/{run_id}/{decision_item.get('id')}: {result}")
+        if run_command:
+            command_state = str(run_command.get("state") or "")
+            accepted_at = str(run_command.get("acceptedAt") or "")
+            rejected_at = str(run_command.get("rejectedAt") or "")
+            result = "immutable_admission_outcome"
+            if run_command.get("workspaceId") != workspace_id:
+                result = "admission_outcome_scope_mismatch"
+            elif command_state not in {"accepted", "rejected"}:
+                result = "invalid_admission_outcome"
+            elif command_state == "accepted" and (not accepted_at or rejected_at):
+                result = "invalid_accepted_admission_timestamp"
+            elif command_state == "rejected" and (not rejected_at or accepted_at):
+                result = "invalid_rejected_admission_timestamp"
+            if result != "immutable_admission_outcome":
+                errors.append(f"{workspace_id}: {result}")
             checks.append({
-                "kind": "resolved_replan_continuation",
+                "kind": "execution_admission_outcome",
                 "workspaceId": workspace_id,
-                "runId": run_id,
-                "ticketId": decision_item.get("id"),
-                "ticketState": decision_item.get("state"),
-                "resolutionType": decision_item.get("resolutionType"),
-                "successorRunId": successor_id,
-                "successorExists": successor_exists,
-                "failedDiagnostic": failed_diagnostic,
+                "runId": run_command.get("runId"),
+                "requestId": run_command.get("requestId"),
+                "intent": run_command.get("intent"),
+                "state": command_state,
+                "disposition": run_command.get("disposition"),
                 "result": result,
-            })
-
-    for item in scheduler_items:
-        if item.get("state") != "completed":
-            continue
-        readback_diag = item.get("readback") or {}
-        old_ticket = str(readback_diag.get("oldBlockingTicketId") or "")
-        new_ticket = str(readback_diag.get("newBlockingTicketId") or "")
-        workspace_id = str(item.get("workspaceId") or readback_diag.get("workspaceId") or "")
-        if not old_ticket or old_ticket != new_ticket or workspace_id not in readback:
-            continue
-        decision = decision_by_id(readback[workspace_id].get("decisions") or []).get(old_ticket)
-        if decision and decision.get("state") == "resolved":
-            reason = "continuation_completed_while_old_resolved_blocker_remains"
-            errors.append(f"{workspace_id}/{item.get('runId')}/{old_ticket}: {reason}")
-            checks.append({
-                "kind": "completed_continuation_readback",
-                "workspaceId": workspace_id,
-                "runId": item.get("runId"),
-                "ticketId": old_ticket,
-                "ticketState": decision.get("state"),
-                "diagnosticKind": item.get("kind"),
-                "result": reason,
             })
     return checks, errors
 
@@ -614,7 +628,8 @@ required_metric_markers = [
     "workorch_event_record_metadata_scans_total",
     "workorch_event_record_payload_hydrates_total",
     "workorch_event_record_payload_hydrate_bytes_total",
-    "workorch_scheduler_commands_total",
+    "workorch_execution_admission_commands_total",
+    "workorch_execution_admission_failures_total",
 ]
 for marker in required_metric_markers:
     if marker not in metrics_text_after:
@@ -640,7 +655,16 @@ for key, limit in limits.items():
 before_by_id = workspace_index(workspaces_before)
 after_by_id = workspace_index(workspaces_after)
 target_workspace_id = command_target_id()
-progress = command_progress(before_by_id.get(target_workspace_id), after_by_id.get(target_workspace_id)) if target_workspace_id else {
+authority_readback = build_authority_readback(workspaces_after.get("workspaces") or [])
+(root / "authority-readback-after.json").write_text(
+    json.dumps(authority_readback, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8",
+)
+progress = command_progress(
+    before_by_id.get(target_workspace_id),
+    after_by_id.get(target_workspace_id),
+    authority_readback,
+) if target_workspace_id else {
     "required": False,
     "advanced": None,
     "reason": "no_command_requested",
@@ -650,13 +674,7 @@ if command_error:
 if progress.get("required") and not progress.get("advanced"):
     errors.append(f"command {command_kind} accepted but owner progress was not observed: {progress.get('reason')}")
 
-scheduler_items = scheduler_recent_items(ready_after)
-authority_readback = build_authority_readback(workspaces_after.get("workspaces") or [])
-(root / "authority-readback-after.json").write_text(
-    json.dumps(authority_readback, ensure_ascii=False, indent=2) + "\n",
-    encoding="utf-8",
-)
-authority_checks, authority_errors = authority_consistency_checks(authority_readback, scheduler_items)
+authority_checks, authority_errors = authority_consistency_checks(authority_readback)
 errors.extend(authority_errors)
 if len(authority_readback) < len(workspaces_after.get("workspaces") or []):
     warnings.append(
@@ -705,6 +723,11 @@ report = {
     },
     "workspaceCount": workspace_count,
     "waitingDecisions": waiting_decisions,
+    "executionAdmissionOutcomes": [
+        item.get("runCommand")
+        for _, item in sorted(authority_readback.items())
+        if item.get("runCommand")
+    ],
     "authorityChecks": authority_checks,
     "authorityReadbackWorkspaceCount": len(authority_readback),
     "metrics": {

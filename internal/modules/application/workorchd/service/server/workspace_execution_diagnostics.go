@@ -11,13 +11,29 @@ func (s *Service) RecordWorkspaceExecutionTransportOutcome(topic string, _ worko
 	if s == nil || s.http == nil || s.http.state == nil {
 		return
 	}
-	s.http.state.recordSchedulerCommandResult(topic, string(outcome.Outcome))
+	s.http.state.recordExecutionAdmissionResult(topic, string(outcome.Outcome))
 }
 
-func (s *Service) RecordWorkspaceExecutionTransportRejected(topic string, command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
+func (s *Service) RecordWorkspaceExecutionTransportFailure(topic string, _ workorchdevents.WorkspaceRunRequestedCommand, cause error) {
 	if s == nil || s.http == nil || s.http.state == nil {
 		return
 	}
-	s.http.state.recordSchedulerCommandResult(topic, "failed")
-	s.http.state.recordWorkspaceRunFailure(command, schedulerKindWorkspaceActivation, schedulerReasonWorkspaceActivationFailed, cause)
+	s.http.state.recordExecutionAdmissionResult(topic, "failed")
+	if cause != nil {
+		s.http.state.recordExecutionAdmissionFailure(executionAdmissionKindFromTopic(topic), executionAdmissionReasonSubmissionFailed)
+	}
+}
+
+func (s *serverState) recordExecutionAdmissionResult(topic string, result string) {
+	if s == nil || s.metrics == nil {
+		return
+	}
+	s.metrics.executionAdmissionMetrics.recordCommand(executionAdmissionKindFromTopic(topic), result)
+}
+
+func (s *serverState) recordExecutionAdmissionFailure(kind string, reason string) {
+	if s == nil || s.metrics == nil {
+		return
+	}
+	s.metrics.executionAdmissionMetrics.recordFailure(kind, reason)
 }

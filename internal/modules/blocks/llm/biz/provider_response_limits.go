@@ -12,32 +12,39 @@ const (
 	providerResponseEnvelopeOverheadBytes = 64 * 1024
 	providerResponseWireExpansion         = 6
 	providerStreamEventsPerOutputToken    = 4
-	providerStreamEventEnvelope           = 16
+	providerStreamEventCountOverhead      = 16
+	providerStreamEventEnvelopeBytes      = 512
+	providerStreamLineEnvelopeBytes       = 16 * 1024
 )
 
 type providerResponseLimits struct {
-	MaxContentBytes int
-	MaxWireBytes    int
-	MaxDataEvents   int
-	MaxLineBytes    int
+	MaxContentBytes       int
+	MaxNonStreamWireBytes int
+	MaxStreamWireBytes    int
+	MaxDataEvents         int
+	MaxLineBytes          int
 }
 
 func providerCompletionResponseLimits(config llmmodels.ProviderConfig, request llmmodels.ProviderRequest) (providerResponseLimits, error) {
-	outputTokens := int(maxOutputTokensForRequest(config, request))
+	outputTokenLimit := maxOutputTokensForRequest(config, request)
 	tokensPerByte := config.ContextProfile.EstimatedTokensPerByte
-	if outputTokens <= 0 || tokensPerByte <= 0 || math.IsNaN(tokensPerByte) || math.IsInf(tokensPerByte, 0) {
+	if outputTokenLimit <= 0 || outputTokenLimit > int64(math.MaxInt) || tokensPerByte <= 0 || math.IsNaN(tokensPerByte) || math.IsInf(tokensPerByte, 0) {
 		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity is incomplete", common.ErrInvalidArgument)
 	}
+	outputTokens := int(outputTokenLimit)
 	contentFloat := math.Ceil(float64(outputTokens) / tokensPerByte)
-	if contentFloat <= 0 || contentFloat > float64(math.MaxInt) {
+	// float64(math.MaxInt) rounds upward on 64-bit platforms. Reject the
+	// boundary value as well so the subsequent float-to-int conversion cannot
+	// wrap before the integer guards take over.
+	if contentFloat <= 0 || contentFloat >= float64(math.MaxInt) {
 		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows byte limits", common.ErrInvalidArgument)
 	}
 	contentBytes := int(contentFloat)
-	wireBytes, ok := safeProviderLimitMultiply(contentBytes, providerResponseWireExpansion)
+	contentWireBytes, ok := safeProviderLimitMultiply(contentBytes, providerResponseWireExpansion)
 	if !ok {
 		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows wire limits", common.ErrInvalidArgument)
 	}
-	wireBytes, ok = safeProviderLimitAdd(wireBytes, providerResponseEnvelopeOverheadBytes)
+	nonStreamWireBytes, ok := safeProviderLimitAdd(contentWireBytes, providerResponseEnvelopeOverheadBytes)
 	if !ok {
 		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows wire limits", common.ErrInvalidArgument)
 	}
@@ -45,15 +52,41 @@ func providerCompletionResponseLimits(config llmmodels.ProviderConfig, request l
 	if !ok {
 		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows event limits", common.ErrInvalidArgument)
 	}
-	dataEvents, ok = safeProviderLimitAdd(dataEvents, providerStreamEventEnvelope)
+	dataEvents, ok = safeProviderLimitAdd(dataEvents, providerStreamEventCountOverhead)
 	if !ok {
 		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows event limits", common.ErrInvalidArgument)
 	}
+	eventEnvelopeBytes, ok := safeProviderLimitMultiply(dataEvents, providerStreamEventEnvelopeBytes)
+	if !ok {
+		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows stream envelope limits", common.ErrInvalidArgument)
+	}
+	maxLineBytes, ok := safeProviderLimitAdd(contentWireBytes, providerStreamLineEnvelopeBytes)
+	if !ok {
+		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows stream line limits", common.ErrInvalidArgument)
+	}
+	// A streaming response may carry the output once as deltas and once in a
+	// terminal response object. Account for the aggregate escaped content, a
+	// bounded envelope for every data event, one maximum-size terminal line,
+	// and bounded non-data SSE framing independently from the non-stream JSON
+	// response ceiling.
+	streamWireBytes, ok := safeProviderLimitAdd(providerResponseEnvelopeOverheadBytes, contentWireBytes)
+	if !ok {
+		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows stream wire limits", common.ErrInvalidArgument)
+	}
+	streamWireBytes, ok = safeProviderLimitAdd(streamWireBytes, eventEnvelopeBytes)
+	if !ok {
+		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows stream wire limits", common.ErrInvalidArgument)
+	}
+	streamWireBytes, ok = safeProviderLimitAdd(streamWireBytes, maxLineBytes)
+	if !ok {
+		return providerResponseLimits{}, fmt.Errorf("%w: provider response capacity overflows stream wire limits", common.ErrInvalidArgument)
+	}
 	return providerResponseLimits{
-		MaxContentBytes: contentBytes,
-		MaxWireBytes:    wireBytes,
-		MaxDataEvents:   dataEvents,
-		MaxLineBytes:    wireBytes,
+		MaxContentBytes:       contentBytes,
+		MaxNonStreamWireBytes: nonStreamWireBytes,
+		MaxStreamWireBytes:    streamWireBytes,
+		MaxDataEvents:         dataEvents,
+		MaxLineBytes:          maxLineBytes,
 	}, nil
 }
 

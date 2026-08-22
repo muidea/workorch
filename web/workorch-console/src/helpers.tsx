@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionIntent, WorkspaceExecutionIntentRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionIntent, WorkspaceExecutionIntentRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -184,21 +184,6 @@ export function runHeartbeatDescriptions(heartbeat?: RunHeartbeat) {
   ];
 }
 
-export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
-  if (!runtime || (!runtime.stepId && !runtime.requestId && !runtime.gap && !runtime.pending)) {
-    return [{ key: 'runtimeExecution', label: 'Runtime Execution', children: '-' }];
-  }
-  return [
-    { key: 'pending', label: 'Runtime 状态', children: <Space wrap>{runtime.pending ? <Tag color="gold">pending</Tag> : <Tag>finalized</Tag>}{runtime.gap ? <Tag color="red">{runtime.gap}</Tag> : null}</Space> },
-    { key: 'step', label: 'Runtime 步骤', children: [runtime.stepId, runtime.stepKind, runtime.stepState].filter(Boolean).join(' / ') || '-' },
-    { key: 'request', label: '调度请求', children: [runtime.requestId, runtime.queueKey].filter(Boolean).join(' / ') || '-' },
-    { key: 'worker', label: 'Worker', children: [runtime.workerId, runtime.workerHeartbeatAt ? `heartbeat ${runtime.workerHeartbeatAt}` : '', runtime.workerLostAt ? `lost ${runtime.workerLostAt}` : ''].filter(Boolean).join(' / ') || '-' },
-    { key: 'acceptedAt', label: '接收时间', children: runtime.acceptedAt || '-' },
-    { key: 'lastProgress', label: '最近进展', children: [runtime.lastProgressSummary, runtime.lastProgressEvent, runtime.lastProgressStage, runtime.lastProgressAt].filter(Boolean).join(' / ') || '-' },
-    { key: 'terminal', label: '终态事件', children: [runtime.doneAt ? `done ${runtime.doneAt}` : '', runtime.failedAt ? `failed ${runtime.failedAt}` : '', runtime.finalizedAt ? `finalized ${runtime.finalizedAt}` : '', runtime.finalizeEvent].filter(Boolean).join(' / ') || '-' }
-  ];
-}
-
 export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
   if (!status || (!status.runId && !status.currentFocusId && !status.convergenceState && !status.suggestedNextAction && !status.currentGap && !status.gapSummary && !status.latestContractViolationRule && !status.assessmentDisposition && !status.currentSliceId)) {
     return [{ key: 'convergenceStatus', label: '收敛状态', children: '-' }];
@@ -232,21 +217,18 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
 
 export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
   const command = snapshot?.runCommand;
-  if (!command || (!command.intent && !command.requestId && !command.queuedAt && !command.acceptedAt && !command.rejectedAt)) {
-    return [{ key: 'runCommand', label: '调度 ACK', children: '-' }];
+  if (!command || (command.state !== 'accepted' && command.state !== 'rejected')) {
+    return [{ key: 'runCommand', label: '执行准入', children: '-' }];
   }
-  const commandState = command.state || (command.rejectedAt ? 'rejected' : command.acceptedAt ? 'accepted' : 'pending');
-  const stateColor = commandState === 'accepted' ? 'green' : commandState === 'rejected' ? 'red' : 'gold';
+  const stateColor = command.state === 'accepted' ? 'green' : 'red';
   return [
-    { key: 'intent', label: '调度 ACK', children: <Space wrap><Tag color={stateColor}>{commandState}</Tag>{command.intent ? <Tag>{command.intent}</Tag> : null}{command.source ? <Tag>{command.source}</Tag> : null}</Space> },
+    { key: 'intent', label: '执行准入', children: <Space wrap><Tag color={stateColor}>{command.state}</Tag>{command.intent ? <Tag>{command.intent}</Tag> : null}{command.source ? <Tag>{command.source}</Tag> : null}</Space> },
     { key: 'requestId', label: '请求 ID', children: command.requestId || '-' },
-    { key: 'idempotencyKey', label: '幂等键', children: command.idempotencyKey || '-' },
     { key: 'runId', label: '目标运行', children: command.runId || '-' },
     { key: 'reason', label: '原因', children: command.reason || '-' },
     { key: 'error', label: '错误', children: command.error || '-' },
     { key: 'decisionId', label: '关联决策', children: command.decisionId || '-' },
     { key: 'definitionRevision', label: '定义 Revision', children: command.definitionRevision || '-' },
-    { key: 'queuedAt', label: '入队时间', children: command.queuedAt || '-' },
     { key: 'acceptedAt', label: '接收时间', children: command.acceptedAt || '-' },
     { key: 'rejectedAt', label: '拒绝时间', children: command.rejectedAt || '-' },
     { key: 'revision', label: '投影 Revision', children: command.revision ?? '-' }

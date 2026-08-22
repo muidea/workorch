@@ -16,10 +16,9 @@ import (
 // wiring so protocol changes cannot silently alter application ownership.
 
 type statusResponse struct {
-	Service     string                                   `json:"service"`
-	Status      string                                   `json:"status"`
-	Projection  *projectioncontract.ProjectionStatus     `json:"projection,omitempty"`
-	Diagnostics *projectioncontract.SchedulerDiagnostics `json:"diagnostics,omitempty"`
+	Service    string                               `json:"service"`
+	Status     string                               `json:"status"`
+	Projection *projectioncontract.ProjectionStatus `json:"projection,omitempty"`
 }
 
 type configurationResponse struct {

@@ -36,23 +36,35 @@ func asModel(m tea.Model) AppModel {
 	panic("not AppModel")
 }
 
-func TestSchedulerDiagnosticsStatusShowsAdmissionFailure(t *testing.T) {
-	text := schedulerDiagnosticsStatusText(&projectioncontract.SchedulerDiagnostics{
-		LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
-			Kind: "workspace_activation", Outcome: "admission_rejected", Reason: "workspace_activation_failed",
-			Recoverability: "inspect_required", RecommendedActions: []string{"repair_profile_or_definition", "workspace_restart"},
+func TestInspectStatusShowsRejectedRunCommandProjection(t *testing.T) {
+	m := AppModel{
+		activeWorkspaceID: "ws-admission",
+		runCommand: &projectioncontract.RunCommandStatus{
+			WorkspaceID: "ws-admission",
+			State:       "rejected",
+			Intent:      "restart",
+			Error:       "workspace owner rejected activation",
 		},
-	})
+	}
+	text := m.renderInspectStatus()
 	for _, want := range []string{
 		"execution admission",
-		"admission_rejected",
-		"workspace_activation_failed",
-		"inspect_required",
-		"repair_profile_or_definition,workspace_restart",
+		"command rejected restart",
+		"workspace owner rejected activation",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status text = %q, want %q", text, want)
 		}
+	}
+}
+
+func TestRunCommandStatusDoesNotInventPendingAdmissionState(t *testing.T) {
+	command := &projectioncontract.RunCommandStatus{
+		WorkspaceID: "ws-admission",
+		RequestID:   "request-without-owner-outcome",
+	}
+	if got := runCommandStatusText(command); got != "" {
+		t.Fatalf("run command status = %q, want no derived pending state", got)
 	}
 }
 
@@ -1053,21 +1065,16 @@ func TestModelInspectCommandsRenderCurrentState(t *testing.T) {
 	}
 }
 
-func TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands(t *testing.T) {
+func TestModelStatusRendersRunCommandRejectionWithoutTriggeringCommands(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.activeRunID = "run-1"
-	m.schedulerDiagnostics = &projectioncontract.SchedulerDiagnostics{
-		LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
-			WorkspaceID:        "ws-1",
-			Kind:               "workspace_activation",
-			Outcome:            "admission_rejected",
-			Reason:             "workspace_activation_failed",
-			Detail:             "owner command failed during execution admission",
-			Recoverability:     "inspect_required",
-			RecommendedActions: []string{"repair_profile_or_definition", "workspace_restart"},
-		},
+	m.runCommand = &projectioncontract.RunCommandStatus{
+		WorkspaceID: "ws-1",
+		State:       "rejected",
+		Intent:      "restart",
+		Error:       "owner command failed during execution admission",
 	}
 
 	m.setInput("/status")
@@ -1077,8 +1084,8 @@ func TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands(t *test
 		t.Fatal("/status returned command, want local projection render only")
 	}
 	for _, want := range []string{
-		"workspace_activation admission_rejected workspace_activation_failed",
-		"inspect_required repair_profile_or_definition,workspace_restart",
+		"command rejected restart",
+		"owner command failed during execution admission",
 	} {
 		if !strings.Contains(m.result, want) {
 			t.Fatalf("/status result = %q, missing %q", m.result, want)
@@ -2875,16 +2882,15 @@ func TestModelWorkspaceContextDisplaysRejectedRunCommandProjection(t *testing.T)
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			RunCommand: &projectioncontract.RunCommandStatus{
-				WorkspaceID:    "ws-a",
-				RunID:          "run-rejected",
-				State:          "rejected",
-				Intent:         "resume",
-				RequestID:      "request-rejected",
-				Source:         "tui",
-				RejectedAt:     "2026-06-21T00:01:00Z",
-				Error:          "scheduler command was not queued",
-				IdempotencyKey: "resume/ws-a/run-rejected",
-				Revision:       4,
+				WorkspaceID: "ws-a",
+				RunID:       "run-rejected",
+				State:       "rejected",
+				Intent:      "resume",
+				RequestID:   "request-rejected",
+				Source:      "tui",
+				RejectedAt:  "2026-06-21T00:01:00Z",
+				Error:       "workspace owner rejected admission",
+				Revision:    4,
 			},
 		},
 	})
@@ -2893,7 +2899,7 @@ func TestModelWorkspaceContextDisplaysRejectedRunCommandProjection(t *testing.T)
 		t.Fatalf("progress = %s/%q, rejected command projection must not leave stale submitting state", m.progress, m.progressText)
 	}
 	status := stripANSI(m.renderRuntimeStatusBar(120))
-	for _, want := range []string{"command rejected resume", "scheduler command was not queued"} {
+	for _, want := range []string{"command rejected resume", "workspace owner rejected admission"} {
 		if !strings.Contains(status, want) {
 			t.Fatalf("status bar = %q, missing %q", status, want)
 		}
@@ -4080,14 +4086,11 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			Workspace:    projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
 			TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
-			SchedulerDiagnostics: &projectioncontract.SchedulerDiagnostics{
-				LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
-					WorkspaceID:    "ws-b",
-					Kind:           "workspace_activation",
-					Outcome:        "admission_rejected",
-					Reason:         "active-diagnostic",
-					Recoverability: "inspect_required",
-				},
+			RunCommand: &projectioncontract.RunCommandStatus{
+				WorkspaceID: "ws-b",
+				State:       "rejected",
+				Intent:      "restart",
+				Error:       "active-admission",
 			},
 		},
 		WorkspaceHasLive: true,
@@ -4105,8 +4108,8 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	if view := stripANSI(m.View()); !strings.Contains(view, "build workspace B") || strings.Contains(view, "task-a") {
 		t.Fatalf("main view not rebound to workspace B:\n%s", view)
 	}
-	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); !strings.Contains(scheduler, "active-diagnostic") {
-		t.Fatalf("scheduler diagnostics = %q, want active workspace diagnostic", scheduler)
+	if command := runCommandStatusText(m.runCommand); !strings.Contains(command, "active-admission") {
+		t.Fatalf("run command = %q, want active workspace admission", command)
 	}
 
 	next, _ = m.Update(WorkspaceContextMsg{
@@ -4114,19 +4117,17 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 		Workspace:   &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-			SchedulerDiagnostics: &projectioncontract.SchedulerDiagnostics{
-				LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
-					WorkspaceID: "ws-a",
-					Kind:        "workspace_activation",
-					Outcome:     "admission_rejected",
-					Reason:      "inactive-diagnostic",
-				},
+			RunCommand: &projectioncontract.RunCommandStatus{
+				WorkspaceID: "ws-a",
+				State:       "rejected",
+				Intent:      "restart",
+				Error:       "inactive-admission",
 			},
 		},
 	})
 	m = asModel(next)
-	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); strings.Contains(scheduler, "inactive-diagnostic") || !strings.Contains(scheduler, "active-diagnostic") {
-		t.Fatalf("inactive scheduler diagnostic polluted active view: %q", scheduler)
+	if command := runCommandStatusText(m.runCommand); strings.Contains(command, "inactive-admission") || !strings.Contains(command, "active-admission") {
+		t.Fatalf("inactive run command polluted active view: %q", command)
 	}
 
 	cmd = m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
@@ -5826,11 +5827,10 @@ type fakeC struct{}
 
 func (f *fakeC) Get(ctx context.Context) (*backend.ServiceConfig, error) {
 	return &backend.ServiceConfig{
-		ServerAddr:        "127.0.0.1:8080",
-		Backend:           "file",
-		DataDir:           ".workorch-data",
-		DefaultChat:       runtimecontract.ProviderModelTarget{ProviderID: "local"},
-		MaxConcurrentRuns: 1,
+		ServerAddr:  "127.0.0.1:8080",
+		Backend:     "file",
+		DataDir:     ".workorch-data",
+		DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "local"},
 		LLMOutput: workorchconfig.LLMOutputRuntimeConfig{
 			MaxDocumentRecoveryAttempts: 3,
 		},

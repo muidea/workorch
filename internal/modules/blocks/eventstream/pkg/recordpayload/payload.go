@@ -169,7 +169,6 @@ const (
 	PayloadKeyFailureClass            = "failureClass"
 	PayloadKeyResult                  = "result"
 	PayloadKeyArtifact                = "artifact"
-	PayloadKeyIdempotencyKey          = "idempotencyKey"
 	PayloadKeyProviderRequest         = "providerRequest"
 	PayloadKeyProviderCompletion      = "providerCompletion"
 	PayloadKeyProviderEmbedding       = "providerEmbedding"

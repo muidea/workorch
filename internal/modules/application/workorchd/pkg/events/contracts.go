@@ -6,7 +6,7 @@ func Contracts() []eventcontract.Contract {
 	ret := eventcontract.Build("workorchd.service", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
 		TopicWorkorchDServiceStopped,
 	)
-	ret = append(ret, eventcontract.Build("workorchd.scheduler", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
+	ret = append(ret, eventcontract.Build("workorchd.execution_admission", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkorchDCommandWorkspaceRunRequested,
 	)...)
 	ret = append(ret, eventcontract.Build("workorchd.workspace_runtime_view", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,

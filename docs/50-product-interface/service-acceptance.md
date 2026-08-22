@@ -28,6 +28,9 @@ gate that explicitly requires provider, process restart or filesystem evidence.
 
 Container、software-dev、governance-resolution 与 service-restart wrappers 必须执行 current typed contracts。Focused
 wrapper 必须拒绝空的 `go test -run` selection；boundary verifier 必须拒绝 removed route 或 provider authority field。
+静态边界还必须拒绝 `workorchd/biz/execution` 反向导入 `service/server`，并拒绝有效生产/验证脚本把
+application scheduler/watchdog/continuation diagnostics、retired metrics 或 automatic-successor evidence恢复为通过条件。
+退休指标名只允许出现在 closure observer 的显式“必须不存在”负向断言中。
 
 ## Current Mutation Contract
 
@@ -44,8 +47,11 @@ Acceptance must prove:
 - `runId`, Goal/DoD content, provider selection and raw Runtime contract fields are rejected;
 - the handler waits for a concrete, scope-matched Workspace-owner result; only then does `202` carry normalized request metadata;
 - `202` means owner admission, never application-local queue admission; no `queued`/`queuedAt` projection is produced;
-- owner rejection/failure is returned synchronously and recorded only as a derived rejected observation, never as an owner state rewrite;
-- the same workspace/request is submitted to the owner on every call; durable idempotency and payload-conflict detection remain with Workspace/Run;
+- a validated owner rejection outcome is returned synchronously and recorded only as a derived rejected observation, never as an owner state rewrite; context/transport/bootstrap/result-contract failures have no owner outcome and therefore return synchronously without writing `runCommand`;
+- workspace snapshot只投影最新的immutable `runCommand` owner outcome：state恰为`accepted|rejected`，scope/request identity
+  保持一致，且`acceptedAt`/`rejectedAt`互斥；readyz不得暴露另一份 admission/scheduler diagnostic state；
+- server配置必须在active/persisted读取以及任一配置更新前拒绝unknown/retired execution scheduler与stale-dispatch watchdog字段，失败更新不得改写原文件；并发压测只观察客户端并发和owner Run事实，不能读取application run limit；
+- the same workspace/request is submitted to the owner on every call; `requestId` is the carried identity, and Application不得拼装或投影第二份`idempotencyKey`; durable idempotency and payload-conflict detection remain with Workspace/Run;
 - removed run create/start/resume and `execution-restarts` routes return `404` and create no projected command.
 
 Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POST .../runs/:runId/resume` or
@@ -194,6 +200,13 @@ the executable inventory for LLM、Runtime convergence、MCP、vector memory、w
 They must record the deployed revision/config identity, workspace/run IDs, terminal or bounded-live disposition, provider
 call evidence and filesystem/artifact evidence where applicable. A valid artifact without later convergence is positive
 progress but not complete deployed acceptance.
+
+`verify-authority-live-e2e-closure` 的权威 readback 只由 Workspace/Run/Decision owner 读模型与 workspace snapshot 的
+immutable `runCommand` outcome构成。显式 execution activation提交后，matching request的`accepted|rejected` outcome就是
+admission completion evidence；后续 Runtime 正向推进由 owner state/projection单独观察。该 verifier 和
+`observe-workorch-runtime-closure` 不得读取 readyz/snapshot scheduler diagnostics，不得要求 continuation readback、
+application auto-replan、自动 successor 或 watchdog compensation。`workorch_execution_admission_*` monotonic counters可作为
+数量证据；退休 scheduler/watchdog metrics必须完全不暴露，observer只能把它们作为负向 marker。
 
 ## Change Rule
 

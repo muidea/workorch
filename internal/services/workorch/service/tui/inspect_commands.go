@@ -52,8 +52,9 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString(status)
 		b.WriteString("\n")
 	}
-	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); scheduler != "" {
-		b.WriteString(scheduler)
+	if command := runCommandStatusText(m.runCommand); command != "" {
+		b.WriteString("- execution admission: ")
+		b.WriteString(command)
 		b.WriteString("\n")
 	}
 	if m.currentTask != "" {
@@ -79,32 +80,6 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString("- approval: ")
 		b.WriteString(blockingApprovalLabel(approval))
 		b.WriteString("\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func schedulerDiagnosticsStatusText(item *projectioncontract.SchedulerDiagnostics) string {
-	if item == nil {
-		return ""
-	}
-	var b strings.Builder
-	if item.LatestAdmissionFailure != nil {
-		latest := item.LatestAdmissionFailure
-		b.WriteString("- execution admission: ")
-		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{latest.Kind, latest.Outcome, latest.Reason}), " ")))
-		if latest.Detail != "" {
-			b.WriteString(" - ")
-			b.WriteString(latest.Detail)
-		}
-		b.WriteString("\n")
-		if latest.Recoverability != "" || len(latest.RecommendedActions) > 0 {
-			b.WriteString("- admission recovery: ")
-			b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
-				latest.Recoverability,
-				strings.Join(latest.RecommendedActions, ","),
-			}), " ")))
-			b.WriteString("\n")
-		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

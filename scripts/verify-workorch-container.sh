@@ -120,7 +120,6 @@ readTimeout = "15s"
 writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
-maxConcurrentRuns = 1
 
 [repository]
 backend = "file"

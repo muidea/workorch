@@ -1098,7 +1098,6 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 		Intent:             "resume",
 		Reason:             "user_requested",
 		RequestID:          "request-a",
-		IdempotencyKey:     "resume/ws-a/run-a",
 		Source:             "tui",
 		DefinitionRevision: "rev-a",
 		DecisionID:         "ticket-a",
@@ -1117,7 +1116,6 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
-		snapshot.RunCommand.IdempotencyKey != "resume/ws-a/run-a" ||
 		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
 		snapshot.RunCommand.DecisionID != "ticket-a" ||
 		snapshot.RunCommand.Revision != 42 {
@@ -1195,6 +1193,34 @@ func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
 	}
 }
 
+func TestStoreFullRebuildPreservesLatestRunCommandObservation(t *testing.T) {
+	store := NewStore()
+	workspace := appmodelcore.Workspace{ID: "ws-a", State: "active"}
+	store.ReplaceAll([]appmodelcore.Workspace{workspace}, map[string]readmodelcore.WorkspaceSnapshotState{
+		"ws-a": {Workspace: workspace},
+	}, nil)
+	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
+		WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-latest", Revision: 42,
+		AcceptedAt: "2026-06-21T00:00:00Z",
+	}) {
+		t.Fatal("latest command observation was not applied")
+	}
+
+	// Owner snapshots do not persist this Workorchd-derived observation. A
+	// same-generation full rebuild must therefore retain the committed value
+	// instead of treating the absent field as an older replacement.
+	store.ReplaceAll([]appmodelcore.Workspace{workspace}, map[string]readmodelcore.WorkspaceSnapshotState{
+		"ws-a": {Workspace: workspace},
+	}, nil)
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get rebuilt snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-latest" || snapshot.RunCommand.State != "accepted" {
+		t.Fatalf("RunCommand after full rebuild = %+v, want latest accepted observation", snapshot.RunCommand)
+	}
+}
+
 func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
@@ -1229,13 +1255,12 @@ func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
 		Intent:             "resume",
 		Reason:             "user_requested",
 		RequestID:          "request-a",
-		IdempotencyKey:     "resume/ws-a/run-a",
 		Source:             "tui",
 		DefinitionRevision: "rev-a",
 		DecisionID:         "ticket-a",
 		Revision:           43,
 		RejectedAt:         "2026-06-21T00:01:00Z",
-		Error:              "scheduler command was not queued",
+		Error:              "execution admission was not accepted",
 	}) {
 		t.Fatalf("ApplyRunCommandRejected returned false")
 	}
@@ -1249,16 +1274,51 @@ func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
 		snapshot.RunCommand.State != "rejected" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
-		snapshot.RunCommand.IdempotencyKey != "resume/ws-a/run-a" ||
 		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
 		snapshot.RunCommand.DecisionID != "ticket-a" ||
 		snapshot.RunCommand.RejectedAt != "2026-06-21T00:01:00Z" ||
-		snapshot.RunCommand.Error != "scheduler command was not queued" ||
+		snapshot.RunCommand.Error != "execution admission was not accepted" ||
 		snapshot.RunCommand.Revision != 43 {
 		t.Fatalf("RunCommand = %+v, want rejected command projection", snapshot.RunCommand)
 	}
 	if status.SourceEventRevision != 43 || status.ProjectedSourceRevision != 43 {
 		t.Fatalf("status revisions = %+v, want rejected command revision", status)
+	}
+}
+
+func TestStoreRunCommandDuplicateRequestIsIdempotentAndCannotRewriteOutcome(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
+		WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-duplicate", Revision: 42,
+		AcceptedAt: "2026-06-21T00:00:00Z",
+	}) {
+		t.Fatal("first command observation was not applied")
+	}
+	before, beforeStatus, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get first snapshot: %v", err)
+	}
+	if store.ApplyRunCommandRejected(RunCommandRejectedUpdate{
+		WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-duplicate", Revision: 99,
+		RejectedAt: "2026-06-21T00:01:00Z", Error: "stale contradictory duplicate",
+	}) {
+		t.Fatal("duplicate request rewrote immutable command observation")
+	}
+	after, afterStatus, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get duplicate snapshot: %v", err)
+	}
+	if before.RunCommand == nil || after.RunCommand == nil || *after.RunCommand != *before.RunCommand {
+		t.Fatalf("RunCommand changed after duplicate: before=%+v after=%+v", before.RunCommand, after.RunCommand)
+	}
+	if afterStatus.WorkspaceRevision != beforeStatus.WorkspaceRevision ||
+		afterStatus.GlobalRevision != beforeStatus.GlobalRevision ||
+		afterStatus.SourceEventRevision != beforeStatus.SourceEventRevision ||
+		afterStatus.ProjectedSourceRevision != beforeStatus.ProjectedSourceRevision {
+		t.Fatalf("projection revisions advanced for duplicate: before=%+v after=%+v", beforeStatus, afterStatus)
 	}
 }
 

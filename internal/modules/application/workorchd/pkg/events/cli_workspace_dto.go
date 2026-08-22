@@ -63,7 +63,6 @@ type CLIWorkspaceSnapshotInfo struct {
 	RunHeartbeat            projectioncontract.RunHeartbeat
 	ConvergenceStatus       *projectioncontract.ConvergenceStatus
 	RunCommand              *projectioncontract.RunCommandStatus
-	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics
 	ContextBundle           workorcheventpayload.Payload
 	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *CLIGapBaselineInfo

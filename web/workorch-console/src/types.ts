@@ -14,7 +14,6 @@ export type ServerConfiguration = {
   writeTimeout?: string;
   idleTimeout?: string;
   shutdownTimeout?: string;
-  maxConcurrentRuns?: number;
   defaultDialogLanguage?: string;
 };
 
@@ -324,30 +323,6 @@ export type RunHeartbeat = {
   summary?: string;
 };
 
-export type RuntimeExecution = {
-  stepId?: string;
-  stepKind?: string;
-  stepState?: string;
-  requestId?: string;
-  queueKey?: string;
-  acceptedAt?: string;
-  lastProgressAt?: string;
-  lastProgressEvent?: string;
-  lastProgressStage?: string;
-  lastProgressSummary?: string;
-  workerId?: string;
-  workerStartedAt?: string;
-  workerHeartbeatAt?: string;
-  workerStoppedAt?: string;
-  workerLostAt?: string;
-  doneAt?: string;
-  failedAt?: string;
-  finalizedAt?: string;
-  finalizeEvent?: string;
-  pending?: boolean;
-  gap?: string;
-};
-
 export type ConvergenceStatus = {
   workspaceId?: string;
   runId?: string;
@@ -388,15 +363,13 @@ export type ConvergenceStatus = {
 export type RunCommandStatus = {
   workspaceId?: string;
   runId?: string;
-  state?: string;
+  state?: 'accepted' | 'rejected';
   intent?: string;
   reason?: string;
   requestId?: string;
-  idempotencyKey?: string;
   source?: string;
   definitionRevision?: string;
   decisionId?: string;
-  queuedAt?: string;
   acceptedAt?: string;
   rejectedAt?: string;
   error?: string;
@@ -1888,7 +1861,6 @@ export type RunSnapshot = {
   repairLoop: RepairLoop;
   acceptance: AcceptanceProjection;
   gapBaseline?: GapBaseline;
-  runtimeExecution?: RuntimeExecution;
   convergenceStatus?: ConvergenceStatus;
   taskDecompositions?: TaskDecomposition[];
   taskPlans?: TaskPlan[];
@@ -1919,7 +1891,6 @@ export type WorkspaceSnapshot = {
   outcome?: WorkspaceOutcome;
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
-  runtimeExecution?: RuntimeExecution;
   convergenceStatus?: ConvergenceStatus;
   runCommand?: RunCommandStatus;
   contextBundle?: ContextBundle;

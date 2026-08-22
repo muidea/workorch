@@ -72,9 +72,12 @@ writes and deletion remain application-owned and cannot mutate owner aggregates�
 Execution admission has no independent lifecycle or queue. HTTP returns `202` only after synchronous Workspace-owner admission;
 owner rejection is returned by that request, and duplicate identity is always delegated to the owner persistence contract. The
 setup-draft response state and terminal acceptance presentation are pure projections of their source facts, never separately
-persisted transition authority. A failed execution admission may be projected only as one immutable
-`admission_rejected` outcome. Workorchd does not expose a continuation state, watchdog state, recovery readback, or a transition
-from that diagnostic into an owner command.
+persisted transition authority. Its only workspace-scoped admission observation is the latest immutable owner outcome in
+`snapshot.runCommand`: `accepted` has only `acceptedAt`, `rejected` has only `rejectedAt`, and both retain exact request/scope
+identity. Replacing this read-side observation when a later command completes does not create an application state machine。
+Monotonic accepted/rejected/failure counters may summarize requests, but readyz、metrics and snapshots不得保存可迁移的
+scheduler/admission lifecycle。Workorchd does not expose continuation state、scheduler/watchdog diagnostics、recovery
+readback or a transition from any diagnostic into an owner command。
 
 Lifecycle ordering is:
 
@@ -91,6 +94,8 @@ Recovery remains SM-4 idempotent re-drive from the persisted aggregate。
 
 - Cross-owner reads and writes use receiving-owner concrete `pkg/events` Command/Result through EventHub。
 - HTTP、CLI and EventHub DTOs remain distinct contracts；no generic dispatcher、callback alias、Envelope、map/JSON/reflect bridge。
+- `biz/execution` owns its focused submitter/projection ports and must never import protocol `service/server`; server types、metrics or
+  handler state cannot become execution-admission authority。The `biz` package root remains the composition boundary that wires both sides。
 - `module.go` only wires lifecycle；Hub subscription and application orchestration stay in `biz/`；protocol `service/` does not retain Hub。
 - Production code does not construct sibling owner repository fixtures；test-only fixtures stay outside production APIs。
 - Large/raw evidence is exposed by validated ref and never copied into EventHub、projection or Runtime authority。

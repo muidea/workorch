@@ -29,7 +29,6 @@ type serverState struct {
 	runStatusNotifyMu           sync.Mutex
 	runStatusNotify             chan struct{}
 	eventUnsubscribes           []func()
-	schedulerDiagnostics        *schedulerDiagnosticsStore
 	workspaceProjection         WorkspaceProjection
 	workspaceProjectionWriter   WorkspaceProjectionWriter
 	runSnapshotCacheMu          sync.Mutex

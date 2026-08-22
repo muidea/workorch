@@ -24,7 +24,6 @@ CACHE_UNTIL="${WORKORCH_OBSERVE_CACHE_UNTIL:-}"
 CACHE_BASELINE_FILE="${WORKORCH_OBSERVE_CACHE_BASELINE_FILE:-}"
 MIN_CACHE_AVERAGE_DELTA="${WORKORCH_OBSERVE_MIN_CACHE_AVERAGE_DELTA:-}"
 MIN_CACHE_LATEST_DELTA="${WORKORCH_OBSERVE_MIN_CACHE_LATEST_DELTA:-}"
-EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS="${WORKORCH_OBSERVE_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS:-}"
 SYNTHETIC_WORKSPACE_COUNT="${WORKORCH_OBSERVE_SYNTHETIC_WORKSPACE_COUNT:-0}"
 ENABLE_PPROF_CHECK="${WORKORCH_OBSERVE_ENABLE_PPROF_CHECK:-1}"
 REQUIRE_PPROF="${WORKORCH_OBSERVE_REQUIRE_PPROF:-0}"
@@ -36,7 +35,7 @@ MAX_PENDING_REBUILDS="${WORKORCH_OBSERVE_MAX_PENDING_REBUILDS:-10}"
 MAX_PROJECTION_SCHEDULE_DROPPED_DELTA="${WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDULE_DROPPED_DELTA:-0}"
 MAX_SUSPICIOUS_CPU_FLAT_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_FLAT_PERCENT:-50}"
 MAX_SUSPICIOUS_CPU_CUM_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_CUM_PERCENT:-90}"
-REQUIRE_GOVERNANCE_CONTINUATION="${WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION:-0}"
+REQUIRE_GOVERNANCE_RESOLUTION="${WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_RESOLUTION:-0}"
 GOVERNANCE_RESOLVE_WORKSPACE_ID="${WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID:-}"
 GOVERNANCE_RESOLVE_TICKET_ID="${WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID:-}"
 GOVERNANCE_RESOLVE_PAYLOAD="${WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_PAYLOAD:-}"
@@ -385,7 +384,7 @@ if [[ -n "$WORKSPACE_IDS" ]]; then
   done
 fi
 
-python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$MIN_WORKSPACE_COUNT" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_CONTINUATION" <<'PY'
+python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$MIN_WORKSPACE_COUNT" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_RESOLUTION" <<'PY'
 import json
 import os
 import re
@@ -408,24 +407,22 @@ cache_until = sys.argv[12].strip()
 cache_baseline_file = sys.argv[13].strip()
 min_cache_average_delta = sys.argv[14].strip()
 min_cache_latest_delta = sys.argv[15].strip()
-expected_stale_dispatched_step_min_age_seconds = sys.argv[16].strip()
-synthetic_workspace_count = int(sys.argv[17].strip() or "0")
-synthetic_workspace_ids_path = Path(sys.argv[18])
-enable_pprof_check = sys.argv[19].strip() in {"1", "true", "yes"}
-require_pprof = sys.argv[20].strip() in {"1", "true", "yes"}
-enable_cpu_profile_check = sys.argv[21].strip() in {"1", "true", "yes"}
-require_cpu_profile = sys.argv[22].strip() in {"1", "true", "yes"}
-max_pending_rebuilds = int(sys.argv[23].strip() or "10")
-max_projection_schedule_dropped_delta = int(sys.argv[24].strip() or "0")
-max_suspicious_cpu_flat_percent = float(sys.argv[25].strip() or "50")
-max_suspicious_cpu_cum_percent = float(sys.argv[26].strip() or "90")
-require_governance_continuation = sys.argv[27].strip() in {"1", "true", "yes"}
+synthetic_workspace_count = int(sys.argv[16].strip() or "0")
+synthetic_workspace_ids_path = Path(sys.argv[17])
+enable_pprof_check = sys.argv[18].strip() in {"1", "true", "yes"}
+require_pprof = sys.argv[19].strip() in {"1", "true", "yes"}
+enable_cpu_profile_check = sys.argv[20].strip() in {"1", "true", "yes"}
+require_cpu_profile = sys.argv[21].strip() in {"1", "true", "yes"}
+max_pending_rebuilds = int(sys.argv[22].strip() or "10")
+max_projection_schedule_dropped_delta = int(sys.argv[23].strip() or "0")
+max_suspicious_cpu_flat_percent = float(sys.argv[24].strip() or "50")
+max_suspicious_cpu_cum_percent = float(sys.argv[25].strip() or "90")
+require_governance_resolution = sys.argv[26].strip() in {"1", "true", "yes"}
 governance_resolve_workspace_id = os.environ.get("WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_WORKSPACE_ID", "").strip()
 governance_resolve_ticket_id = os.environ.get("WORKORCH_OBSERVE_GOVERNANCE_RESOLVE_TICKET_ID", "").strip()
 max_event_metadata_records_scanned_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_METADATA_RECORDS_SCANNED_DELTA", "").strip()
 max_event_payload_hydrates_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATES_DELTA", "").strip()
 max_event_payload_hydrate_bytes_delta = os.environ.get("WORKORCH_OBSERVE_MAX_EVENT_PAYLOAD_HYDRATE_BYTES_DELTA", "").strip()
-max_runtime_event_publish_failures_delta = os.environ.get("WORKORCH_OBSERVE_MAX_RUNTIME_EVENT_PUBLISH_FAILURES_DELTA", "").strip()
 require_process_resource = os.environ.get("WORKORCH_OBSERVE_REQUIRE_PROCESS_RESOURCE", "").strip() in {"1", "true", "yes"}
 max_process_cpu_percent = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_CPU_PERCENT", "").strip()
 max_process_rss_bytes = os.environ.get("WORKORCH_OBSERVE_MAX_PROCESS_RSS_BYTES", "").strip()
@@ -546,22 +543,43 @@ def metric_sample_sum(samples, name, labels=None):
             total += float(sample.get("value") or 0)
     return total
 
-def admission_failure_diagnostics_from_payload(payload, scope):
-    if not payload:
+def execution_admission_outcome_from_run_command(payload, scope):
+    if not isinstance(payload, dict) or not payload:
+        return None
+    return {
+        "scope": scope,
+        "workspaceId": payload.get("workspaceId"),
+        "runId": payload.get("runId"),
+        "state": payload.get("state"),
+        "intent": payload.get("intent"),
+        "disposition": payload.get("disposition"),
+        "requestId": payload.get("requestId"),
+        "definitionRevision": payload.get("definitionRevision"),
+        "decisionId": payload.get("decisionId"),
+        "acceptedAt": payload.get("acceptedAt"),
+        "rejectedAt": payload.get("rejectedAt"),
+        "revision": payload.get("revision"),
+    }
+
+def validate_execution_admission_outcome(item, expected_workspace_id):
+    if not item:
         return []
-    ret = []
-    latest = payload.get("latestAdmissionFailure")
-    if isinstance(latest, dict):
-        item = dict(latest)
-        item["scope"] = f"{scope}.latestAdmissionFailure"
-        ret.append(item)
-    for idx, raw in enumerate(payload.get("recentAdmissionFailures") or []):
-        if not isinstance(raw, dict):
-            continue
-        item = dict(raw)
-        item["scope"] = f"{scope}.recentAdmissionFailures[{idx}]"
-        ret.append(item)
-    return ret
+    issues = []
+    state = str(item.get("state") or "")
+    accepted_at = str(item.get("acceptedAt") or "")
+    rejected_at = str(item.get("rejectedAt") or "")
+    if item.get("workspaceId") != expected_workspace_id:
+        issues.append(
+            f"{item.get('scope')}: runCommand workspace scope mismatch: "
+            f"{item.get('workspaceId')!r} != {expected_workspace_id!r}"
+        )
+    if state not in {"accepted", "rejected"}:
+        issues.append(f"{item.get('scope')}: runCommand state={state!r}, want immutable accepted/rejected outcome")
+    elif state == "accepted" and (not accepted_at or rejected_at):
+        issues.append(f"{item.get('scope')}: accepted runCommand has invalid outcome timestamps")
+    elif state == "rejected" and (not rejected_at or accepted_at):
+        issues.append(f"{item.get('scope')}: rejected runCommand has invalid outcome timestamps")
+    return issues
 
 def validate_projection_display_contract(projection, scope, require_workspace_revision):
     required = ["state", "globalRevision", "sourceEventRevision", "projectedSourceRevision", "updatedAt", "rebuiltAt"]
@@ -1051,7 +1069,7 @@ if min_workspace_count > 0 and len(workspace_ids) < min_workspace_count:
         "set WORKORCH_OBSERVE_WORKSPACE_IDS or WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT"
     )
 readyz = read_json(artifact_dir / "readyz.json")
-admission_failure_diagnostics_observed = admission_failure_diagnostics_from_payload(readyz.get("diagnostics") or {}, "readyz")
+execution_admission_outcomes_observed = []
 if readyz.get("status") != "ready":
     errors.append(f"readyz status = {readyz.get('status')!r}, want ready")
 projection = readyz.get("projection") or {}
@@ -1109,9 +1127,13 @@ for workspace_id in workspace_ids:
         workspace_summaries.append(live_summary)
         goal_convergence.append(evaluate_goal_convergence(live_summary))
         workspace_progress.append(evaluate_workspace_progress(live_summary))
-        admission_failure_diagnostics_observed.extend(
-            admission_failure_diagnostics_from_payload(snapshot.get("schedulerDiagnostics") or {}, f"workspace-snapshot[{workspace_id}]")
+        admission_outcome = execution_admission_outcome_from_run_command(
+            snapshot.get("runCommand"),
+            f"workspace-snapshot[{workspace_id}].runCommand",
         )
+        if admission_outcome:
+            execution_admission_outcomes_observed.append(admission_outcome)
+            errors.extend(validate_execution_admission_outcome(admission_outcome, workspace_id))
         snapshot_display = {
             "workspaceId": workspace_id,
             "projection": validate_projection_display_contract(snapshot_projection, f"workspace-snapshot[{workspace_id}]", True),
@@ -1182,7 +1204,6 @@ metrics, metrics_text = read_metrics(artifact_dir / "metrics-after.txt")
 metric_samples_before = parse_metric_samples(metrics_before_text)
 metric_samples = parse_metric_samples(metrics_text)
 required_metric_markers = [
-    "workorch_stale_dispatched_step_min_age_seconds",
     "workorch_workspace_projection_rebuild_total",
     "workorch_workspace_projection_active_run_heartbeats",
     "workorch_workspace_projection_active_run_heartbeat_age_seconds_max",
@@ -1204,10 +1225,18 @@ retired_application_state_metric_markers = [
     "workorch_watchdog_ticks_total",
     "workorch_watchdog_last_error_timestamp_seconds",
     "workorch_watchdog_stale_runtime_gap_recoveries_total",
+    "workorch_run_requests_in_flight",
+    "workorch_server_max_concurrent_runs",
+    "workorch_stale_dispatched_step_min_age_seconds",
+    "workorch_runtime_event_publish_failures_total",
+    "workorch_runtime_heartbeat_timer_start_failures_total",
 ]
-for marker in retired_application_state_metric_markers:
-    if marker in metrics_text:
-        errors.append(f"retired application scheduler/watchdog metric is still exposed: {marker}")
+retired_application_metrics_observed = [
+    marker for marker in retired_application_state_metric_markers
+    if marker in metrics_text
+]
+for marker in retired_application_metrics_observed:
+    errors.append(f"retired application scheduler/watchdog metric is still exposed: {marker}")
 
 optional_metric_groups = [
     {
@@ -1227,14 +1256,6 @@ optional_metric_groups = [
             )
         ),
     },
-    {
-        "name": "runtimeEventPublishFailures",
-        "markers": [
-            "workorch_runtime_event_publish_failures_total",
-            "workorch_runtime_heartbeat_timer_start_failures_total",
-        ],
-        "required": bool(str(max_runtime_event_publish_failures_delta or "").strip()),
-    },
 ]
 optional_metric_availability = {}
 for group in optional_metric_groups:
@@ -1251,17 +1272,6 @@ for group in optional_metric_groups:
         errors.append(message)
     else:
         warnings.append(message)
-stale_dispatched_step_min_age_seconds = metrics.get("workorch_stale_dispatched_step_min_age_seconds")
-if expected_stale_dispatched_step_min_age_seconds:
-    expected = float(expected_stale_dispatched_step_min_age_seconds)
-    if stale_dispatched_step_min_age_seconds is None:
-        errors.append("metrics missing workorch_stale_dispatched_step_min_age_seconds value")
-    elif abs(float(stale_dispatched_step_min_age_seconds) - expected) > 0.001:
-        errors.append(
-            "stale dispatched step min age metric mismatch: "
-            f"got={stale_dispatched_step_min_age_seconds} expected={expected}"
-        )
-
 def metric_delta(name):
     return float(metrics.get(name) or 0) - float(metrics_before.get(name) or 0)
 
@@ -1280,8 +1290,6 @@ event_metadata_scan_delta = metric_delta("workorch_event_record_metadata_scans_t
 event_metadata_records_scanned_delta = metric_delta("workorch_event_record_metadata_records_scanned_total")
 event_payload_hydrates_delta = metric_delta("workorch_event_record_payload_hydrates_total")
 event_payload_hydrate_bytes_delta = metric_delta("workorch_event_record_payload_hydrate_bytes_total")
-runtime_event_publish_failure_delta = labeled_metric_delta("workorch_runtime_event_publish_failures_total")
-runtime_heartbeat_timer_start_failure_delta = metric_delta("workorch_runtime_heartbeat_timer_start_failures_total")
 if pending_rebuilds > max_pending_rebuilds:
     errors.append(
         "workspace projection pending rebuilds above threshold: "
@@ -1310,105 +1318,29 @@ if max_payload_hydrate_bytes is not None and event_payload_hydrate_bytes_delta >
         "event payload hydrate bytes delta above threshold: "
         f"delta={event_payload_hydrate_bytes_delta} threshold={max_payload_hydrate_bytes}"
     )
-max_runtime_publish_failures = optional_float(max_runtime_event_publish_failures_delta)
-if max_runtime_publish_failures is not None:
-    runtime_publish_failure_total_delta = runtime_event_publish_failure_delta + runtime_heartbeat_timer_start_failure_delta
-    if runtime_publish_failure_total_delta > max_runtime_publish_failures:
-        errors.append(
-            "runtime event publish failure delta above threshold: "
-            f"delta={runtime_publish_failure_total_delta} threshold={max_runtime_publish_failures}"
-        )
-
 governance_resolution_delta = (
     metric_delta('workorch_http_requests_total{endpoint="decision_resolve"}')
     + metric_delta('workorch_http_requests_total{endpoint="approval_approve"}')
     + metric_delta('workorch_http_requests_total{endpoint="approval_reject"}')
 )
-governance_command_accepted_delta = labeled_metric_delta(
-    "workorch_scheduler_commands_total",
-    {"kind": "governance_continuation", "result": "accepted"},
-)
-replan_command_accepted_delta = labeled_metric_delta(
-    "workorch_scheduler_commands_total",
-    {"kind": "replan_continuation", "result": "accepted"},
-)
-governance_command_error_delta = sum(
-    labeled_metric_delta("workorch_scheduler_commands_total", {"kind": "governance_continuation", "result": result})
-    for result in ("failed", "not_accepted", "missing_response")
-)
-replan_command_error_delta = sum(
-    labeled_metric_delta("workorch_scheduler_commands_total", {"kind": "replan_continuation", "result": result})
-    for result in ("failed", "not_accepted", "missing_response")
-)
-governance_continuation_failure_delta = labeled_metric_delta(
-    "workorch_scheduler_continuation_failures_total",
-    {"kind": "governance_continuation"},
-)
-replan_continuation_failure_delta = labeled_metric_delta(
-    "workorch_scheduler_continuation_failures_total",
-    {"kind": "replan_continuation"},
-)
-governance_continuation_no_action_delta = labeled_metric_delta(
-    "workorch_scheduler_continuation_no_action_total",
-    {"kind": "governance_continuation"},
-)
-replan_continuation_no_action_delta = labeled_metric_delta(
-    "workorch_scheduler_continuation_no_action_total",
-    {"kind": "replan_continuation"},
-)
-legacy_watchdog_stale_recovery_delta = labeled_metric_delta("workorch_watchdog_stale_runtime_gap_recoveries_total")
-governance_scheduler_diagnostics = [
-    item for item in admission_failure_diagnostics_observed
-    if item.get("kind") in {"governance_continuation", "replan_continuation"}
-]
-forbidden_application_continuation_metric_delta = (
-    governance_command_accepted_delta
-    + replan_command_accepted_delta
-    + governance_command_error_delta
-    + replan_command_error_delta
-    + governance_continuation_failure_delta
-    + replan_continuation_failure_delta
-    + governance_continuation_no_action_delta
-    + replan_continuation_no_action_delta
-)
-governance_continuation_main_path = {
-    "required": require_governance_continuation,
+execution_admission_command_delta = labeled_metric_delta("workorch_execution_admission_commands_total")
+execution_admission_failure_delta = labeled_metric_delta("workorch_execution_admission_failures_total")
+governance_owner_resolution_path = {
+    "required": require_governance_resolution,
     "triggeredResolution": bool(governance_resolve_workspace_id and governance_resolve_ticket_id),
     "triggeredWorkspaceID": governance_resolve_workspace_id,
     "triggeredTicketID": governance_resolve_ticket_id,
     "governanceResolutionDelta": governance_resolution_delta,
-    "governanceCommandAcceptedDelta": governance_command_accepted_delta,
-    "replanCommandAcceptedDelta": replan_command_accepted_delta,
-    "governanceCommandErrorDelta": governance_command_error_delta,
-    "replanCommandErrorDelta": replan_command_error_delta,
-    "governanceContinuationFailureDelta": governance_continuation_failure_delta,
-    "replanContinuationFailureDelta": replan_continuation_failure_delta,
-    "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
-    "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
-    "legacyWatchdogStaleRecoveryDelta": legacy_watchdog_stale_recovery_delta,
-    "diagnosticItems": governance_scheduler_diagnostics,
-    "forbiddenApplicationSchedulerMetricDelta": forbidden_application_continuation_metric_delta,
-    "forbiddenApplicationSchedulerObserved": forbidden_application_continuation_metric_delta > 0 or len(governance_scheduler_diagnostics) > 0,
+    "retiredApplicationMetricsObserved": retired_application_metrics_observed,
     "ownerResolutionObserved": governance_resolution_delta > 0,
-    "hiddenWatchdogCompensationSuspected": False,
 }
-if governance_continuation_main_path["forbiddenApplicationSchedulerObserved"]:
+if require_governance_resolution and governance_resolution_delta <= 0:
     errors.append(
-        "forbidden application governance/replan continuation scheduler evidence was observed; "
-        "Decision/Approval owner and Orchestrator must continue Runtime directly"
+        "WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_RESOLUTION is enabled but no owner governance resolution was observed"
     )
-if require_governance_continuation and governance_resolution_delta <= 0:
-    errors.append(
-        "WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION is enabled but no owner governance resolution was observed"
-    )
-if governance_resolution_delta > 0 and legacy_watchdog_stale_recovery_delta > 0:
-    governance_continuation_main_path["hiddenWatchdogCompensationSuspected"] = True
-    errors.append(
-        "governance continuation appears to rely on retired watchdog stale-runtime recovery"
-    )
-if governance_continuation_main_path["triggeredResolution"]:
-    governance_continuation_main_path["requestArtifact"] = "governance-resolution-request.json"
-    governance_continuation_main_path["responseArtifact"] = "governance-resolution-response.json"
+if governance_owner_resolution_path["triggeredResolution"]:
+    governance_owner_resolution_path["requestArtifact"] = "governance-resolution-request.json"
+    governance_owner_resolution_path["responseArtifact"] = "governance-resolution-response.json"
     if not (artifact_dir / "governance-resolution-response.json").exists():
         errors.append("governance resolution trigger was requested but response artifact is missing")
 
@@ -1845,9 +1777,6 @@ summary = {
         "activeRunHeartbeatAgeSecondsMax": metrics.get("workorch_workspace_projection_active_run_heartbeat_age_seconds_max", 0),
         "stalledRuns": metrics.get("workorch_workspace_projection_stalled_runs", 0),
         "ineffectiveRetryRuns": metrics.get("workorch_workspace_projection_ineffective_retry_runs", 0),
-        "staleDispatchedStepMinAgeSeconds": stale_dispatched_step_min_age_seconds,
-        "serverMaxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs", 0),
-        "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight", 0),
         "projectionPendingRebuilds": pending_rebuilds,
         "projectionScheduleDroppedDelta": schedule_dropped_delta,
         "projectionRebuildDelta": {
@@ -1870,33 +1799,17 @@ summary = {
                 "maxPayloadHydrateBytesDelta": max_payload_hydrate_bytes,
             },
         },
-        "runtimeEventPublishFailures": {
-            "acceptedDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "accepted"}),
-            "terminalDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "terminal"}),
-            "progressDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "progress"}),
-            "workerLifecycleDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "worker_lifecycle"}),
-            "workerLostDelta": labeled_metric_delta("workorch_runtime_event_publish_failures_total", {"category": "worker_lost"}),
-            "heartbeatTimerStartFailureDelta": runtime_heartbeat_timer_start_failure_delta,
-            "totalPublishFailureDelta": runtime_event_publish_failure_delta + runtime_heartbeat_timer_start_failure_delta,
-            "thresholds": {
-                "maxTotalDelta": max_runtime_publish_failures,
-            },
+        "executionAdmission": {
+            "commandsDelta": execution_admission_command_delta,
+            "failuresDelta": execution_admission_failure_delta,
+            "outcomes": execution_admission_outcomes_observed,
+            "retiredApplicationMetricsObserved": retired_application_metrics_observed,
         },
-        "scheduler": {
+        "governanceOwnerResolution": {
             "governanceResolutionDelta": governance_resolution_delta,
-            "governanceCommandAcceptedDelta": governance_command_accepted_delta,
-            "replanCommandAcceptedDelta": replan_command_accepted_delta,
-            "governanceCommandErrorDelta": governance_command_error_delta,
-            "replanCommandErrorDelta": replan_command_error_delta,
-            "governanceContinuationFailureDelta": governance_continuation_failure_delta,
-            "replanContinuationFailureDelta": replan_continuation_failure_delta,
-            "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
-            "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
-            "forbiddenApplicationContinuationMetricDelta": forbidden_application_continuation_metric_delta,
-            "legacyWatchdogStaleRecoveryDelta": legacy_watchdog_stale_recovery_delta,
         },
     },
-    "governanceContinuationMainPath": governance_continuation_main_path,
+    "governanceOwnerResolutionPath": governance_owner_resolution_path,
     "displayContract": {
         "pass": display_contract.get("pass"),
         "snapshotCount": len(display_contract.get("snapshots") or []),

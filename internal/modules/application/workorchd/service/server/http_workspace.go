@@ -546,7 +546,7 @@ func registerWorkspaceExecutionWriteRoute(router engine.RouteRegistry, state *se
 			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume or restart intent, got %q", common.ErrInvalidArgument, intent))
 			return
 		}
-		command, commandErr := workspaceExecutionCommandSchedulerCommand(workspaceID, req, priority)
+		command, commandErr := workspaceExecutionCommand(workspaceID, req, priority)
 		if commandErr != nil {
 			writeBusinessError(w, commandErr)
 			return
@@ -557,7 +557,7 @@ func registerWorkspaceExecutionWriteRoute(router engine.RouteRegistry, state *se
 			writeBusinessError(w, commandErr)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, "execution-activation", command))
+		writeJSON(w, http.StatusAccepted, executionAdmissionAcceptedHTTPBody(state.config, "execution-activation", command))
 	})
 }
 
@@ -741,12 +741,19 @@ func registerWorkspaceDefinitionWriteRoutes(router engine.RouteRegistry, state *
 	})
 }
 
-func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workorchmanagementcontract.WorkspaceExecutionCommandRequest, priority int) (workorchdevents.WorkspaceRunRequestedCommand, error) {
+func workspaceExecutionCommand(workspaceID string, req workorchmanagementcontract.WorkspaceExecutionCommandRequest, priority int) (workorchdevents.WorkspaceRunRequestedCommand, error) {
 	return workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
 		Reason:      req.Reason,
-		Source:      schedulerCommandSource(req.Source, "http"),
+		Source:      req.Source,
 		RequestID:   req.RequestID,
 		Priority:    priority,
 	}, nil
+}
+
+func (s *serverState) updateWorkspaceLLMSelection(ctx context.Context, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
+	if s != nil && s.updateWorkspaceLLMSelectionPort != nil {
+		return s.updateWorkspaceLLMSelectionPort(ctx, workspaceID, selection, expectedRevision)
+	}
+	return appmodelcore.Workspace{}, fmt.Errorf("%w: workspace LLM selection application port is not configured", common.ErrConflict)
 }

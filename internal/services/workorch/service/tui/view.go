@@ -1015,17 +1015,8 @@ func runCommandStatusText(command *projectioncontract.RunCommandStatus) string {
 		return ""
 	}
 	state := strings.ToLower(strings.TrimSpace(command.State))
-	if state == "" {
-		switch {
-		case strings.TrimSpace(command.RejectedAt) != "":
-			state = "rejected"
-		case strings.TrimSpace(command.AcceptedAt) != "":
-			state = "accepted"
-		case strings.TrimSpace(command.RequestID) != "":
-			state = "pending"
-		default:
-			return ""
-		}
+	if state != "accepted" && state != "rejected" {
+		return ""
 	}
 	parts := []string{"command", state}
 	if intent := strings.TrimSpace(command.Intent); intent != "" {

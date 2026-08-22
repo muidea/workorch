@@ -38,6 +38,7 @@ type Biz struct {
 	workspaceGate *workspaceCommandGateway
 	cliDispatcher *appservice.CLICommandDispatcher
 	execution     *executionusecase.UseCase
+	admissions    *executionAdmissionLifecycle
 	projection    *projectioncomponent.Component
 }
 
@@ -75,7 +76,8 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	b.service.SetWorkspaceProjection(b.projection)
 	b.service.SetWorkspaceProjectionWriter(b.projection)
 	b.execution = executionusecase.New(b, executionProjection{projection: b.projection, transport: b.service})
-	b.service.SetWorkspaceExecutionAdmission(b.execution)
+	b.admissions = newExecutionAdmissionLifecycle()
+	b.service.SetWorkspaceExecutionAdmission(newExecutionAdmissionGateway(b))
 	b.service.SetServiceStoppedNotifier(b.publishServiceStopped)
 	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
 	b.SubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged)
@@ -117,26 +119,41 @@ func (b *Biz) Stop(ctx context.Context) {
 	if b == nil {
 		return
 	}
+	admissions := b.admissions
+	firstStop := false
+	if admissions != nil {
+		// Reject every new HTTP/CLI/TUI admission before stopping an ingress.
+		// Already-entered handlers retain all dependencies until the shared
+		// barrier is drained below.
+		firstStop = admissions.stop()
+	}
 	if b.cliDispatcher != nil {
 		b.cliDispatcher.Close()
 		b.cliDispatcher = nil
 	}
-	b.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
-	b.UnsubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.TopicWorkspaceProjectionChanged)
-	b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
-	b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
-	b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
-	if b.execution != nil {
-		b.execution = nil
+	if b.service != nil {
+		// Stop accepting HTTP requests and wait for in-flight admissions while
+		// the Workorchd command subscription, execution use case and projection
+		// are still live. This preserves the lane transaction through shutdown.
+		b.service.DrainHTTP(ctx)
+	}
+	if admissions != nil {
+		admissions.wait()
 	}
 	if b.service != nil {
-		b.service.Shutdown(ctx)
-		// Clear injected ports only after the HTTP server has stopped so an
-		// in-flight synchronous owner admission can finish against live ports.
+		b.service.CloseTransportState(ctx)
 		b.service.SetWorkspaceExecutionAdmission(nil)
 		b.service.SetWorkspaceProjection(nil)
 		b.service.SetWorkspaceProjectionWriter(nil)
 	}
+	if b.EventHub() != nil && firstStop {
+		b.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
+		b.UnsubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.TopicWorkspaceProjectionChanged)
+		b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
+		b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
+		b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
+	}
+	b.execution = nil
 	if b.projection != nil {
 		_ = b.projection.CloseContext(ctx)
 	}
@@ -236,6 +253,22 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 }
 
 func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicevent.Result) {
+	if b == nil {
+		if result != nil {
+			err := fmt.Errorf("%w: workorchd execution admission is unavailable", common.ErrConflict)
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		}
+		return
+	}
+	admissions := b.admissions
+	if admissions == nil || !admissions.begin() {
+		if result != nil {
+			err := fmt.Errorf("%w: workorchd execution admission is stopping", common.ErrConflict)
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		}
+		return
+	}
+	defer admissions.end()
 	command, ok := event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
 	if !ok {
 		if result != nil {

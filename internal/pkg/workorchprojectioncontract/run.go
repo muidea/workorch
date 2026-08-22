@@ -20,23 +20,22 @@ type RuntimeActivationStatus struct {
 // RunStatus is the owner-neutral status projection assembled from already
 // persisted owner state. It cannot transition a Run or schedule Runtime work.
 type RunStatus struct {
-	ID                   string                `json:"id"`
-	WorkspaceID          string                `json:"workspaceId"`
-	State                string                `json:"state"`
-	CurrentStepID        string                `json:"currentStepId,omitempty"`
-	CurrentStepKind      string                `json:"currentStepKind,omitempty"`
-	CurrentStepState     string                `json:"currentStepState,omitempty"`
-	CurrentActionLabel   string                `json:"currentActionLabel,omitempty"`
-	DiagnosticLineage    string                `json:"diagnosticLineage,omitempty"`
-	StepCount            int                   `json:"stepCount"`
-	DecisionCount        int                   `json:"decisionCount"`
-	ApprovalCount        int                   `json:"approvalCount"`
-	BlockingTicketID     string                `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID   string                `json:"blockingApprovalId,omitempty"`
-	FailureReason        string                `json:"failureReason,omitempty"`
-	ConvergenceStatus    *ConvergenceStatus    `json:"convergenceStatus,omitempty"`
-	SchedulerDiagnostics *SchedulerDiagnostics `json:"schedulerDiagnostics,omitempty"`
-	Acceptance           AcceptanceProjection  `json:"acceptance"`
+	ID                 string               `json:"id"`
+	WorkspaceID        string               `json:"workspaceId"`
+	State              string               `json:"state"`
+	CurrentStepID      string               `json:"currentStepId,omitempty"`
+	CurrentStepKind    string               `json:"currentStepKind,omitempty"`
+	CurrentStepState   string               `json:"currentStepState,omitempty"`
+	CurrentActionLabel string               `json:"currentActionLabel,omitempty"`
+	DiagnosticLineage  string               `json:"diagnosticLineage,omitempty"`
+	StepCount          int                  `json:"stepCount"`
+	DecisionCount      int                  `json:"decisionCount"`
+	ApprovalCount      int                  `json:"approvalCount"`
+	BlockingTicketID   string               `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string               `json:"blockingApprovalId,omitempty"`
+	FailureReason      string               `json:"failureReason,omitempty"`
+	ConvergenceStatus  *ConvergenceStatus   `json:"convergenceStatus,omitempty"`
+	Acceptance         AcceptanceProjection `json:"acceptance"`
 }
 
 // ConvergenceStatus preserves the complete Runtime convergence diagnosis for
@@ -84,7 +83,6 @@ func CloneConvergenceStatus(item *ConvergenceStatus) *ConvergenceStatus {
 
 func CloneRunStatus(item RunStatus) RunStatus {
 	item.ConvergenceStatus = CloneConvergenceStatus(item.ConvergenceStatus)
-	item.SchedulerDiagnostics = CloneSchedulerDiagnostics(item.SchedulerDiagnostics)
 	item.Acceptance = CloneAcceptanceProjection(item.Acceptance)
 	return item
 }

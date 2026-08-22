@@ -77,7 +77,7 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmo
 	if err != nil {
 		return snapshot, status, err
 	}
-	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
+	return snapshot, status, nil
 }
 
 func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
@@ -88,7 +88,7 @@ func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) 
 	if err != nil {
 		return snapshot, status, err
 	}
-	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
+	return snapshot, status, nil
 }
 
 func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
@@ -105,9 +105,6 @@ func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID 
 func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshotState, projected readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	if projected.RunCommand != nil {
 		detail.RunCommand = projected.RunCommand
-	}
-	if projected.SchedulerDiagnostics != nil {
-		detail.SchedulerDiagnostics = projected.SchedulerDiagnostics
 	}
 	detail = mergeWorkspaceProjectionViewModel(detail, projected.ViewModel)
 	return detail

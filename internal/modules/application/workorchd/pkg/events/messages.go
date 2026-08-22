@@ -26,18 +26,18 @@ type ServiceStoppedData struct {
 }
 
 type WorkspaceRunRequestedCommand struct {
-	WorkspaceID    common.WorkspaceID
-	Intent         string
-	Reason         string
-	RequestID      string
-	IdempotencyKey string
-	Source         string
-	Priority       int
+	WorkspaceID common.WorkspaceID
+	Intent      string
+	Reason      string
+	RequestID   string
+	Source      string
+	Priority    int
 }
 
 // WorkspaceRunRequestedResult is the unmodified admission outcome produced by
-// the Workspace owner.  The application scheduler owns request transport only;
-// it must never collapse an owner rejection into transport acceptance.
+// the Workspace owner. The application admission adapter owns request
+// transport only; it must never collapse an owner rejection into transport
+// acceptance.
 type WorkspaceRunRequestedResult runtimecontract.RuntimeExecutionIntentAdmission
 
 func (r WorkspaceRunRequestedResult) Validate() error {
@@ -81,7 +81,7 @@ type ReadWorkspaceRuntimeViewResult struct {
 func MessageContracts() []eventcontract.MessageContract {
 	ret := eventcontract.MessageContracts(
 		eventcontract.DataTopic[ServiceStoppedData]("workorchd.service", definitionPackage, eventcontract.LanePolicyTopic, TopicWorkorchDServiceStopped),
-		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.scheduler", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
+		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.execution_admission", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
 		eventcontract.CommandTopic[ReadWorkspaceRuntimeViewCommand, ReadWorkspaceRuntimeViewResult]("workorchd.workspace_runtime_view", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkorchDCommandReadWorkspaceRuntimeView),
 		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),
 	)

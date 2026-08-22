@@ -10,15 +10,13 @@ import (
 
 func serverConfiguration(cfg workorchconfig.Config) workorchconfig.ServerConfig {
 	return workorchconfig.ServerConfig{
-		Addr:                      cfg.Server.Addr,
-		ReadHeaderTimeout:         cfg.Server.ReadHeaderTimeout,
-		ReadTimeout:               cfg.Server.ReadTimeout,
-		WriteTimeout:              cfg.Server.WriteTimeout,
-		IdleTimeout:               cfg.Server.IdleTimeout,
-		ShutdownTimeout:           cfg.Server.ShutdownTimeout,
-		MaxConcurrentRuns:         cfg.Server.MaxConcurrentRuns,
-		StaleDispatchedStepMinAge: strings.TrimSpace(cfg.Server.StaleDispatchedStepMinAge),
-		DefaultDialogLanguage:     strings.TrimSpace(cfg.Server.DefaultDialogLanguage),
+		Addr:                  cfg.Server.Addr,
+		ReadHeaderTimeout:     cfg.Server.ReadHeaderTimeout,
+		ReadTimeout:           cfg.Server.ReadTimeout,
+		WriteTimeout:          cfg.Server.WriteTimeout,
+		IdleTimeout:           cfg.Server.IdleTimeout,
+		ShutdownTimeout:       cfg.Server.ShutdownTimeout,
+		DefaultDialogLanguage: strings.TrimSpace(cfg.Server.DefaultDialogLanguage),
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 func ServiceConfigFromConfiguration(item workorchconfigurationcontract.ServiceConfiguration) ServiceConfig {
 	return ServiceConfig{
 		ServerAddr: item.Server.Addr, Backend: item.Repository.Backend, DataDir: item.Repository.DataDir,
-		DefaultChat: item.LLM.DefaultChat, MaxConcurrentRuns: item.Server.MaxConcurrentRuns,
+		DefaultChat:    item.LLM.DefaultChat,
 		AIProxyBaseURL: item.LLM.AIProxy.BaseURL, LLMOutput: item.Runtime.LLMOutput,
 		ChatModelTargets: ChatModelTargetOptionsFromConfiguration(&item),
 	}

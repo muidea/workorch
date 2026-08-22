@@ -21,10 +21,6 @@ export WORKORCH_MANAGED_VERIFY_TARGET=verify-runtime-c7-fixture
 export WORKORCH_MANAGED_SKIP_PREFLIGHT="${WORKORCH_MANAGED_SKIP_PREFLIGHT:-0}"
 export WORKORCH_MANAGED_GO_TEST_PACKAGES=./...
 export WORKORCH_MANAGED_GO_TEST_FLAGS=-count=1
-# C7 proves two independently activated workspace scopes can run at once. Do
-# not inherit the managed harness's single-run default, which only serializes
-# the test and leaves the concurrency exit criterion unexercised.
-export WORKORCH_MANAGED_MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-2}"
 export WORKORCH_VERIFY_KEEP_TMP=1
 # Keep all C7 request, receipt, terminal and safe-diagnostic artifacts beneath
 # the managed harness root.  A fresh run never reuses an operator workspace or

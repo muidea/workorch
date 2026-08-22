@@ -515,8 +515,6 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req port.WorkspaceRunC
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, eventcontract.LaneScope{
-		SubjectType: "workspace-run",
-		SubjectID:   string(req.WorkspaceID),
 		WorkspaceID: string(req.WorkspaceID),
 	}))
 	response := b.parent.commandHub.Send(event)

@@ -11,7 +11,7 @@ import (
 )
 
 func UpdateServerConfiguration(cmd UpdateServerConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
-	cfg, err := workorchconfig.Current()
+	cfg, err := workorchconfig.Persisted()
 	if err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}

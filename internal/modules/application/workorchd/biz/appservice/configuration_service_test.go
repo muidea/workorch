@@ -49,7 +49,6 @@ readTimeout = "15s"
 writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
-maxConcurrentRuns = 2
 
 [repository]
 backend = "file"
@@ -311,7 +310,6 @@ endpointName = "workorch"
 
 [server]
 addr = "127.0.0.1:18080"
-maxConcurrentRuns = 2
 defaultDialogLanguage = "en-US"
 
 [repository]
@@ -330,7 +328,7 @@ dataDir = ".workorch-data"
 	if err != nil {
 		t.Fatalf("update server configuration: %v", err)
 	}
-	if cfg.Server.DefaultDialogLanguage != lang || cfg.Server.MaxConcurrentRuns != 2 || cfg.Server.Addr != "127.0.0.1:18080" {
+	if cfg.Server.DefaultDialogLanguage != lang || cfg.Server.Addr != "127.0.0.1:18080" {
 		t.Fatalf("server configuration = %+v, want language update with preserved server fields", cfg.Server)
 	}
 }

@@ -261,7 +261,6 @@ func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelco
 		status := *source.RunCommand
 		snapshot.RunCommand = &status
 	}
-	snapshot.SchedulerDiagnostics = source.SchedulerDiagnostics
 	snapshot.LLMUsageSummary = source.LLMUsageSummary
 	return readmodelprojection.WorkspaceProjection().Summary(snapshot)
 }

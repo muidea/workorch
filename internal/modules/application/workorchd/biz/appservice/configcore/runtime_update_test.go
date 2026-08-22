@@ -77,7 +77,6 @@ func useRuntimeUpdateTestConfig(t *testing.T) {
 
 [server]
 addr = "127.0.0.1:0"
-maxConcurrentRuns = 1
 
 [repository]
 backend = "file"

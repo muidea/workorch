@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
+	executionusecase "github.com/muidea/workorch/internal/modules/application/workorchd/biz/execution"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -72,7 +73,7 @@ func configureSessionBackedTestOperations(s *serverState, session *runtimecore.S
 	s.updateWorkspaceLLMSelectionPort = func(ctx context.Context, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
 		return appservice.UpdateWorkspaceLLMSelectionWithSession(ctx, session, workspaceID, selection, expectedRevision)
 	}
-	s.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: s, submitter: directWorkspaceRunScheduler{state: s}}
+	s.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: s, submitter: directWorkspaceExecutionSubmitter{state: s}}
 }
 
 func withBorrowedTestSession(ctx context.Context, session *runtimecore.Session, fn func(*runtimecore.Session) error) error {
@@ -127,23 +128,12 @@ func (a sessionBackedTestExecutionAdmission) AdmitWorkspaceExecution(ctx context
 	if a.state == nil || testRuntimeSession(a.state) == nil {
 		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrConflict
 	}
-	command = prepareWorkspaceRunSchedulerCommand(topic, command)
+	command = executionusecase.NormalizeWorkspaceExecutionCommandAt(topic, command, time.Now().UTC())
 	if a.submitter == nil {
 		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrConflict
 	}
 	outcome, err := a.submitter.SubmitWorkspaceRun(ctx, command)
 	if err != nil {
-		a.state.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
-			WorkspaceID:    string(command.WorkspaceID),
-			Intent:         command.Intent,
-			Reason:         command.Reason,
-			RequestID:      command.RequestID,
-			IdempotencyKey: testSchedulerCommandIdempotencyKey(command),
-			Source:         command.Source,
-			RejectedAt:     time.Now().UTC().Format(time.RFC3339Nano),
-			Error:          err.Error(),
-		})
-		a.state.recordWorkspaceRunFailure(command, schedulerKindWorkspaceActivation, schedulerReasonWorkspaceActivationFailed, err)
 		return command, err
 	}
 	projectTestWorkspaceExecutionOutcome(a.state, command, outcome)
@@ -164,7 +154,7 @@ func projectTestWorkspaceExecutionOutcome(state *serverState, command workorchde
 		state.applyProjectedRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
 			WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent, Reason: command.Reason,
 			Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID,
-			IdempotencyKey: testSchedulerCommandIdempotencyKey(command), Source: command.Source,
+			Source:     command.Source,
 			AcceptedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		return
@@ -172,16 +162,7 @@ func projectTestWorkspaceExecutionOutcome(state *serverState, command workorchde
 	state.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
 		WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent, Reason: command.Reason,
 		Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID,
-		IdempotencyKey: testSchedulerCommandIdempotencyKey(command), Source: command.Source,
+		Source:     command.Source,
 		RejectedAt: time.Now().UTC().Format(time.RFC3339Nano), Error: diagnostic,
 	})
-}
-
-func testSchedulerCommandIdempotencyKey(command workorchdevents.WorkspaceRunRequestedCommand) string {
-	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
-	intent := strings.TrimSpace(command.Intent)
-	if workspaceID == "" || intent == "" {
-		return ""
-	}
-	return intent + "/" + workspaceID
 }

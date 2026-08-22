@@ -251,7 +251,6 @@ export function ConfigurationPage() {
                         { key: 'writeTimeout', label: '写超时', children: configuration?.server.writeTimeout || '-' },
                         { key: 'idleTimeout', label: '空闲超时', children: configuration?.server.idleTimeout || '-' },
                         { key: 'shutdownTimeout', label: '关闭超时', children: configuration?.server.shutdownTimeout || '-' },
-                        { key: 'maxConcurrentRuns', label: '最大并发运行（Run）', children: configuration?.server.maxConcurrentRuns ?? '-' },
                         { key: 'defaultSoulId', label: '系统默认执行人格（Soul）', children: configuration?.runtime.defaultSoulId || '-' }
                       ]}
                     />

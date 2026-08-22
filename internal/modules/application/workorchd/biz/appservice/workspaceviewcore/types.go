@@ -62,7 +62,6 @@ type RunCommandAcceptedUpdate struct {
 	Disposition        string
 	Diagnostic         string
 	RequestID          string
-	IdempotencyKey     string
 	Source             string
 	DefinitionRevision string
 	DecisionID         string
@@ -78,7 +77,6 @@ type RunCommandRejectedUpdate struct {
 	Disposition        string
 	Diagnostic         string
 	RequestID          string
-	IdempotencyKey     string
 	Source             string
 	DefinitionRevision string
 	DecisionID         string

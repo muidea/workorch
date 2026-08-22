@@ -77,13 +77,12 @@ type serverMetrics struct {
 	runFailed                    atomic.Uint64
 	runRejected                  atomic.Uint64
 	runCanceled                  atomic.Uint64
-	runInFlight                  atomic.Int64
 	convergenceRepairAttempts    atomic.Uint64
 	runtimeMetricsMu             sync.Mutex
 	observedTerminalStates       map[string]struct{}
 	observedRepairAttempts       map[string]int
 	observedRuntimeDrives        map[string]runtimeDriveMetric
-	schedulerDiagnostics         *schedulerDiagnosticsStore
+	executionAdmissionMetrics    *executionAdmissionMetrics
 }
 
 // runtimeDriveMetric is a process-local metric projection of an immutable

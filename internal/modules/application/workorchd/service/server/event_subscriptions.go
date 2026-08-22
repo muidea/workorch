@@ -140,7 +140,7 @@ func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.Ru
 
 // RecordRuntimeDriveObserved is a process-local metric projection of the
 // Orchestrator owner's immutable telemetry. It intentionally has no access to
-// a Runtime repository, reducer, scheduler, or EventHub.
+// a Runtime repository, reducer, background driver, or EventHub.
 func (s *serverState) RecordRuntimeDriveObserved(data orchestratorevents.RuntimeDriveObservedData) {
 	if s == nil || data.Validate() != nil {
 		return

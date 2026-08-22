@@ -11,7 +11,7 @@ import (
 )
 
 func UpdateRuntimeConfiguration(cmd UpdateRuntimeConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
-	cfg, err := workorchconfig.Current()
+	cfg, err := workorchconfig.Persisted()
 	if err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}

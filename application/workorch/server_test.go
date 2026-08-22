@@ -366,7 +366,6 @@ readTimeout = %q
 writeTimeout = "30s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
-maxConcurrentRuns = 1
 
 [repository]
 backend = %q
@@ -464,7 +463,6 @@ func assertMetricsAvailable(t *testing.T, metricsURL string) {
 	text := string(body)
 	for _, want := range []string{
 		"workorch_http_requests_total",
-		"workorch_server_max_concurrent_runs",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, text)
