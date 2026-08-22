@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 组件类型
 
@@ -46,6 +46,7 @@ Eventstream 正式拥有两个不同的顺序身份：
 - stable Result、Decision、Approval notification 以 owner 派生的 `NotificationID` 作为 EventRecord ID。相同 ID 仅在持久化记录与预期 topic/source/scope/payload 完全一致时视为 exact replay；内容漂移仍是 conflict。
 - typed payload encoder 不保存 Memory 正文、Goal/DoD 原文、Decision resolution material 或 Approval context 原文；这些材料只保存 hash、bytes、count 等审计摘要。
 - `SanitizeAuditPayload` 是追加前和 owner 读出前的双重 guard：递归脱敏 secret-like key，并限制 payload 为 16 KiB、最多 32 个字段/数组项、单字符串 512 bytes、最大深度 4；无法安全容纳的内容退化为确定性 hash/size 摘要。旧版本已落库的 payload 也必须经过读边界清洗后才能进入 EventHub/SSE。
+- file repository 只在持久化读取边界兼容旧版大 payload 占位格式：`Payload:null` 必须同时具有非空 `PayloadRef`，随后按该 locator 读取对象形态的外置 payload；读取过程不改写历史 JSONL。无引用的 `null`、数组或标量仍以 invalid payload fail-closed。
 - `EventRecordData.Validate()` 要求完整 immutable identity/source、正 `StreamPosition`、workspace-local 正 revision，以及已经清洗且有界的 payload；Application 消费者还校验发布 source 必须是 `blocks/eventstream`。
 
 ## 追加、回放与失败语义
@@ -61,6 +62,7 @@ Eventstream 正式拥有两个不同的顺序身份：
 - topic/data/source/identity 校验、伪造 producer 拒绝与订阅释放；
 - concrete result、默认/最大 limit、high-watermark 范围和 Post 强写拒绝；
 - payload 脱敏、深度/长度/总量边界、旧记录读边界清洗；
+- legacy `Payload:null + PayloadRef` 外置对象的只读回填与历史 JSONL 不改写；inline `null`、数组、标量继续拒绝；
 - stable notification exact replay、conflicting/failed append 不发布虚假记录、瞬时失败重试；
 - workspace revision 单调、跨 workspace clock skew、全局 `StreamPosition` cursor、重启与 purge 后计数语义；
 - memory/file/workspace-scoped repository 的 scope、cursor、物理 purge、其他 owner 文件保留；

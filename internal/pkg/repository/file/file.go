@@ -83,6 +83,49 @@ type ResultRepository struct {
 	path string
 }
 
+type resultPersistenceValue resultmodel.Result
+
+type resultPersistenceWire struct {
+	resultPersistenceValue
+	SummaryDetail json.RawMessage `json:"SummaryDetail"`
+}
+
+type resultSummaryPersistenceValue workorchresultcontract.ResultSummary
+
+type resultSummaryPersistenceWire struct {
+	resultSummaryPersistenceValue
+	Diagnostics json.RawMessage `json:"diagnostics"`
+}
+
+func decodeResultSummaryPersistence(data json.RawMessage) (workorchresultcontract.ResultSummary, error) {
+	if payloadJSON := bytes.TrimSpace(data); len(payloadJSON) == 0 || bytes.Equal(payloadJSON, []byte("null")) {
+		return workorchresultcontract.ResultSummary{}, nil
+	}
+	wire := resultSummaryPersistenceWire{}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return workorchresultcontract.ResultSummary{}, err
+	}
+	item := workorchresultcontract.ResultSummary(wire.resultSummaryPersistenceValue)
+	if err := decodePersistencePayloadAllowLegacyNull(wire.Diagnostics, &item.Diagnostics); err != nil {
+		return workorchresultcontract.ResultSummary{}, err
+	}
+	return item, nil
+}
+
+func decodeResultPersistence(data []byte) (resultmodel.Result, error) {
+	wire := resultPersistenceWire{}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return resultmodel.Result{}, err
+	}
+	item := resultmodel.Result(wire.resultPersistenceValue)
+	summary, err := decodeResultSummaryPersistence(wire.SummaryDetail)
+	if err != nil {
+		return resultmodel.Result{}, err
+	}
+	item.SummaryDetail = summary
+	return item, nil
+}
+
 type ArtifactRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -104,6 +147,63 @@ const (
 type eventRecordLogLine struct {
 	Record     eventstream.EventRecord `json:"record"`
 	PayloadRef string                  `json:"payloadRef,omitempty"`
+}
+
+// eventRecordPersistenceValue deliberately aliases the complete record so the
+// JSON boundary can intercept only Payload without maintaining a second copy
+// of every persisted EventRecord field.
+type eventRecordPersistenceValue eventstream.EventRecord
+
+type eventRecordPersistenceWire struct {
+	eventRecordPersistenceValue
+	Payload json.RawMessage `json:"Payload"`
+}
+
+type eventRecordLogLinePersistenceWire struct {
+	Record     eventRecordPersistenceWire `json:"record"`
+	PayloadRef string                     `json:"payloadRef,omitempty"`
+}
+
+// UnmarshalJSON preserves the object-only event payload contract while reading
+// the bounded legacy representation used for external payloads. Older writers
+// emitted Payload:null together with PayloadRef; the repository must resolve
+// that locator before the typed payload decoder sees the external JSON object.
+// An inline null or any scalar/array payload remains invalid.
+func (line *eventRecordLogLine) UnmarshalJSON(data []byte) error {
+	if line == nil {
+		return fmt.Errorf("%w: nil event record log line target", workorcheventpayload.ErrInvalidPayload)
+	}
+	wire := eventRecordLogLinePersistenceWire{}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+
+	record := eventstream.EventRecord(wire.Record.eventRecordPersistenceValue)
+	storagePayloadRef := strings.TrimSpace(wire.PayloadRef)
+	effectivePayloadRef := storagePayloadRef
+	if effectivePayloadRef == "" {
+		effectivePayloadRef = strings.TrimSpace(record.PayloadRef)
+	}
+	payloadJSON := bytes.TrimSpace(wire.Record.Payload)
+	legacyExternalPayload := false
+	switch {
+	case len(payloadJSON) == 0:
+		record.Payload = workorcheventpayload.Payload{}
+	case bytes.Equal(payloadJSON, []byte("null")) && effectivePayloadRef != "":
+		record.Payload = workorcheventpayload.Payload{}
+		legacyExternalPayload = true
+	default:
+		if err := json.Unmarshal(payloadJSON, &record.Payload); err != nil {
+			return err
+		}
+	}
+	if legacyExternalPayload && storagePayloadRef == "" {
+		storagePayloadRef = effectivePayloadRef
+	}
+
+	line.Record = record
+	line.PayloadRef = storagePayloadRef
+	return nil
 }
 
 type eventRecordStreamPositionState struct {
@@ -717,7 +817,7 @@ func (r *ResultRepository) Get(_ context.Context, id common.ResultID) (*resultmo
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	item, err := readJSONItemFile[resultmodel.Result](r.resultPath(id))
+	item, err := readResultPersistenceFile(r.resultPath(id))
 	if err != nil {
 		return nil, err
 	}
@@ -812,7 +912,7 @@ func (r *ResultRepository) CompareAndSwap(_ context.Context, item *resultmodel.R
 		return common.ErrInvalidArgument
 	}
 	path := r.resultPath(item.ID)
-	current, err := readJSONItemFile[resultmodel.Result](path)
+	current, err := readResultPersistenceFile(path)
 	if err != nil {
 		return err
 	}
@@ -850,7 +950,7 @@ func (r *ResultRepository) list(matches func(resultmodel.Result) bool) ([]*resul
 	}
 	ret := make([]*resultmodel.Result, 0, len(paths))
 	for _, path := range paths {
-		item, err := readJSONItemFile[resultmodel.Result](path)
+		item, err := readResultPersistenceFile(path)
 		if err != nil {
 			return nil, err
 		}
@@ -1902,6 +2002,62 @@ func readJSONItemFile[T any](path string) (T, error) {
 	return item, nil
 }
 
+func readResultPersistenceFile(path string) (resultmodel.Result, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return resultmodel.Result{}, common.ErrNotFound
+		}
+		return resultmodel.Result{}, err
+	}
+	return decodeResultPersistence(data)
+}
+
+type workspacePersistenceAlias workspace.Workspace
+
+type workspacePersistenceValue workspace.Workspace
+
+type workspacePersistenceWire struct {
+	workspacePersistenceAlias
+	ContextHints json.RawMessage `json:"ContextHints"`
+}
+
+func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
+	if item == nil {
+		return fmt.Errorf("%w: nil workspace persistence target", common.ErrInvalidArgument)
+	}
+	wire := workspacePersistenceWire{}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	decoded := workspace.Workspace(wire.workspacePersistenceAlias)
+	if err := decodePersistencePayloadAllowLegacyNull(wire.ContextHints, &decoded.ContextHints); err != nil {
+		return err
+	}
+	*item = workspacePersistenceValue(decoded)
+	return nil
+}
+
+func loadWorkspacePersistenceMap(path string) (map[common.WorkspaceID]workspace.Workspace, error) {
+	persisted, err := loadMap[common.WorkspaceID, workspacePersistenceValue](path)
+	if err != nil {
+		return nil, err
+	}
+	items := make(map[common.WorkspaceID]workspace.Workspace, len(persisted))
+	for id, item := range persisted {
+		items[id] = workspace.Workspace(item)
+	}
+	return items, nil
+}
+
+func saveWorkspacePersistenceMap(path string, items map[common.WorkspaceID]workspace.Workspace) error {
+	persisted := make(map[common.WorkspaceID]workspacePersistenceValue, len(items))
+	for id, item := range items {
+		persisted[id] = workspacePersistenceValue(item)
+	}
+	return saveMap(path, persisted)
+}
+
 func NewWorkspaceRepository(path string) *WorkspaceRepository {
 	return &WorkspaceRepository{path: path}
 }
@@ -1910,7 +2066,7 @@ func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspac
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	items, err := loadWorkspacePersistenceMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -1921,14 +2077,14 @@ func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspac
 		item.Revision = 1
 	}
 	items[item.ID] = *cloneWorkspace(item)
-	return saveMap(r.path, items)
+	return saveWorkspacePersistenceMap(r.path, items)
 }
 
 func (r *WorkspaceRepository) Get(_ context.Context, id common.WorkspaceID) (*workspace.Workspace, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	items, err := loadWorkspacePersistenceMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -1943,7 +2099,7 @@ func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, e
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	items, err := loadWorkspacePersistenceMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -1966,7 +2122,7 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	items, err := loadWorkspacePersistenceMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -1974,7 +2130,7 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 		return common.ErrNotFound
 	}
 	items[item.ID] = *cloneWorkspace(item)
-	return saveMap(r.path, items)
+	return saveWorkspacePersistenceMap(r.path, items)
 }
 
 func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.Workspace, expectedRevision uint64) error {
@@ -1983,7 +2139,7 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	items, err := loadWorkspacePersistenceMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -1996,14 +2152,14 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	}
 	item.Revision = expectedRevision + 1
 	items[item.ID] = *cloneWorkspace(item)
-	return saveMap(r.path, items)
+	return saveWorkspacePersistenceMap(r.path, items)
 }
 
 func (r *WorkspaceRepository) Delete(_ context.Context, id common.WorkspaceID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[common.WorkspaceID, workspace.Workspace](r.path)
+	items, err := loadWorkspacePersistenceMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -2011,7 +2167,7 @@ func (r *WorkspaceRepository) Delete(_ context.Context, id common.WorkspaceID) e
 		return common.ErrNotFound
 	}
 	delete(items, id)
-	return saveMap(r.path, items)
+	return saveWorkspacePersistenceMap(r.path, items)
 }
 
 func NewWorkspaceTemplateRepository(path string) *WorkspaceTemplateRepository {
@@ -2777,6 +2933,42 @@ func stepRunIDFromStepID(id common.StepID) common.RunID {
 	return common.RunID(runID)
 }
 
+// decodePersistencePayloadAllowLegacyNull accepts the old zero-value encoding
+// only at file persistence boundaries that explicitly opt in. Missing or null
+// becomes an empty payload; every non-object value still flows through the
+// strict Payload decoder and remains invalid.
+func decodePersistencePayloadAllowLegacyNull(data json.RawMessage, target *workorcheventpayload.Payload) error {
+	payloadJSON := bytes.TrimSpace(data)
+	if len(payloadJSON) == 0 || bytes.Equal(payloadJSON, []byte("null")) {
+		*target = workorcheventpayload.Payload{}
+		return nil
+	}
+	return json.Unmarshal(payloadJSON, target)
+}
+
+type stepPersistenceValue run.Step
+
+type stepPersistenceWire struct {
+	stepPersistenceValue
+	Input  json.RawMessage `json:"Input"`
+	Output json.RawMessage `json:"Output"`
+}
+
+func decodeStepMetadata(data []byte) (run.Step, error) {
+	wire := stepPersistenceWire{}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return run.Step{}, err
+	}
+	item := run.Step(wire.stepPersistenceValue)
+	if err := decodePersistencePayloadAllowLegacyNull(wire.Input, &item.Input); err != nil {
+		return run.Step{}, err
+	}
+	if err := decodePersistencePayloadAllowLegacyNull(wire.Output, &item.Output); err != nil {
+		return run.Step{}, err
+	}
+	return item, nil
+}
+
 func (r *StepRepository) stepRoot() string {
 	path := filepath.Clean(strings.TrimSpace(r.path))
 	if strings.EqualFold(filepath.Base(path), "step.json") {
@@ -2845,8 +3037,8 @@ func (r *StepRepository) loadStepFromDir(dir string) (*run.Step, error) {
 		}
 		return nil, err
 	}
-	var item run.Step
-	if err := json.Unmarshal(data, &item); err != nil {
+	item, err := decodeStepMetadata(data)
+	if err != nil {
 		return nil, err
 	}
 	input, err := readOptionalMapFile(filepath.Join(dir, "input.json"))
@@ -2894,6 +3086,29 @@ func (r *StepRepository) loadStepSummaryFromDir(dir string) (*run.Step, error) {
 type ToolCallRepository struct {
 	mu   sync.RWMutex
 	path string
+}
+
+type toolCallPersistenceValue runtimeevidencemodel.ToolCall
+
+type toolCallPersistenceWire struct {
+	toolCallPersistenceValue
+	Arguments json.RawMessage `json:"Arguments"`
+	Output    json.RawMessage `json:"Output"`
+}
+
+func decodeToolCallMetadata(data []byte) (runtimeevidencemodel.ToolCall, error) {
+	wire := toolCallPersistenceWire{}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return runtimeevidencemodel.ToolCall{}, err
+	}
+	item := runtimeevidencemodel.ToolCall(wire.toolCallPersistenceValue)
+	if err := decodePersistencePayloadAllowLegacyNull(wire.Arguments, &item.Arguments); err != nil {
+		return runtimeevidencemodel.ToolCall{}, err
+	}
+	if err := decodePersistencePayloadAllowLegacyNull(wire.Output, &item.Output); err != nil {
+		return runtimeevidencemodel.ToolCall{}, err
+	}
+	return item, nil
 }
 
 func NewToolCallRepository(path string) *ToolCallRepository {
@@ -3069,8 +3284,8 @@ func (r *ToolCallRepository) loadToolCallFromDir(dir string) (*runtimeevidencemo
 		}
 		return nil, err
 	}
-	var item runtimeevidencemodel.ToolCall
-	if err := json.Unmarshal(data, &item); err != nil {
+	item, err := decodeToolCallMetadata(data)
+	if err != nil {
 		return nil, err
 	}
 	arguments, err := readOptionalMapFile(filepath.Join(dir, "arguments.json"))

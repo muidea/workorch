@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 功能范围与边界
 
@@ -65,6 +65,7 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
   对不兼容 development data 的 restart，Run owner返回 `data_reset_required`，Workspace 不代替 Run 创建 successor、
   不读取旧 aggregate，也不通过旁路 fact 清除 active slot。
 - 默认 WorkspaceTemplate 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。嵌入默认值变更若需迁移，必须使用独立的显式迁移合同。
+- file repository 只在 Workspace 持久化读边界把旧版零值 `ContextHints:null` 解释为空对象，且不得因此改写历史文件；数组、标量等非对象值仍 fail-closed。该兼容不放宽 EventHub、HTTP 或 Runtime payload 合同。
 
 ## 已覆盖测试点
 
@@ -81,5 +82,6 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 - [x] 普通/治理/冲突 Run notification 与 `fresh_activation_required` 均不能释放 active slot；
   `data_reset_required` admission 同样保持 slot，只有 matching terminal delivery 可释放。
 - [x] Template command、repository DTO、EventHub DTO 与 list mapping 对 slice/map/nested payload 的完整深拷贝。
+- [x] 旧版 `ContextHints:null` 的只读兼容、历史 Workspace 文件不改写，以及非对象 context hints 拒绝。
 
 当前没有与本合同对应的已知可执行测试缺口。
