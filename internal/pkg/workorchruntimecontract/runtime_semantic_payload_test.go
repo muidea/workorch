@@ -20,6 +20,22 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if strings.Contains(orderSchema, `"operationKind"`) || !strings.Contains(orderSchema, `"planStep":{"const":"coverage_order"}`) || !strings.Contains(orderSchema, `"maxItems":0`) {
 		t.Fatalf("coverage-order schema was not narrowed: %s", orderSchema)
 	}
+	var orderDecoded map[string]any
+	if err := json.Unmarshal([]byte(orderSchema), &orderDecoded); err != nil {
+		t.Fatal(err)
+	}
+	branches := orderDecoded["anyOf"].([]any)
+	semanticBranch := branches[0].(map[string]any)
+	var proposalsRequired bool
+	for _, field := range semanticBranch["required"].([]any) {
+		if field == "proposals" {
+			proposalsRequired = true
+			break
+		}
+	}
+	if !proposalsRequired {
+		t.Fatalf("coverage-order schema does not require its explicit empty proposals field: %s", orderSchema)
+	}
 	proofSchema, err := RuntimeSemanticPlanJSONSchemaForRequest(manifest, RuntimeSemanticPlanStepProofBatch, "batch-1", 1, []common.CoverageWorkItemID{"cwi-002"})
 	if err != nil {
 		t.Fatal(err)
@@ -464,6 +480,26 @@ func TestRuntimeSemanticPlanPayloadRejectsUnknownMissingAndWrongKind(t *testing.
 				t.Fatalf("diagnostic = %+v err=%v", diagnostic, err)
 			}
 		})
+	}
+}
+
+func TestRuntimeSemanticCoverageOrderRequiresExplicitEmptyProposals(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	payload := `{"documentKind":"semantic_plan","schemaVersion":"` + RuntimeSemanticPlanDocumentSchemaCurrent + `","manifestHash":"` + manifest.Hash + `","definitionSeedHash":"` + manifest.DefinitionSeedHash + `","planStep":"coverage_order","coverageOrder":["cwi-001"]}`
+	_, err := DecodeRuntimeSemanticPlanPayloadWithManifest(manifest, []byte(payload))
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Actual != "missing_required" {
+		t.Fatalf("diagnostic = %+v err=%v, want missing required proposals", diagnostic, err)
+	}
+	found := false
+	for _, required := range diagnostic.Required {
+		if required == "proposals" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("coverage-order diagnostic lost required proposals field: %+v", diagnostic)
 	}
 }
 

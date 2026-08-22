@@ -26,7 +26,9 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 3. catalog 精确模型容量是能力权威；ai-proxy exact override 是 Responses 容量的唯一替代来源。
    OpenAI-compatible API surface 或 `/v1/models` 的 `/v1/responses` endpoint 声明不等同于
    `response_format` 支持；未显式声明 JSON Schema 能力时 adapter 必须省略该字段，并继续由
-   sealed manifest、prompt 与 strict decoder 约束候选输出。
+   sealed manifest、prompt 与 strict decoder 约束候选输出。catalog cache 只保存目录事实；`fresh | stale |
+   unavailable` 是每次读取时纯派生的 readiness observation，不写回 cache、不提供 transition API，也不形成 LLM
+   owner 内的第二个 lifecycle。
 4. 能力不完整时 fail-fast，不使用 model pattern 或 conservative default。
 5. `effectiveMaxOutputTokens` 直接采用 selected model 能力；Responses 的 input/output/wire/SSE 上限由 context window、
    输出保留量、利用率和 token/byte 估算派生。Embedding 不使用 chat output ceiling，但必须从 catalog
@@ -63,6 +65,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
     constraint 和 `ready + direct` validation recipe identity。non-ready 或 auxiliary/not-declared validation surface、
     input schema/binding/prerequisite、完整 MCP capability effect metadata 与 Shell command/args 都不得进入 provider context；
     最终 renderer 必须再次按 readiness 与 proof applicability 取交集，不能把 audit fact 变成 model hint。
+    coverage-order schema 要求 `proposals` 字段存在且恒为 `[]`，provider instruction 必须逐字保持同一合同，禁止用
+    “不返回 proposals”制造 schema/prompt 冲突；结构错误只返回 factual diagnostic，由 Orchestrator SM-3 决定一次有界纠错。
 13. profile `RequiredOwnerFacts` 作为 immutable declaration 进入 C2 和 stable prefix；它不是 current availability。
     current selectable identity 只能来自同 owner 的 C3 catalog。semantic instruction 明确禁止模型发明或宣称 owner fact；
     assessment credit/replan 仍只属于 Orchestrator SM-2。

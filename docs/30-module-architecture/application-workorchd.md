@@ -72,7 +72,9 @@ writes and deletion remain application-owned and cannot mutate owner aggregates�
 Execution admission has no independent lifecycle or queue. HTTP returns `202` only after synchronous Workspace-owner admission;
 owner rejection is returned by that request, and duplicate identity is always delegated to the owner persistence contract. The
 setup-draft response state and terminal acceptance presentation are pure projections of their source facts, never separately
-persisted transition authority.
+persisted transition authority. A failed execution admission may be projected only as one immutable
+`admission_rejected` outcome. Workorchd does not expose a continuation state, watchdog state, recovery readback, or a transition
+from that diagnostic into an owner command.
 
 Lifecycle ordering is:
 
@@ -81,7 +83,8 @@ start projection -> start transport
 stop EventHub/CLI ingress -> stop transport -> clear ports -> close projection/tasks -> close runtime session
 ```
 
-The module does not run inactive-Run recovery scans、stale-Step watchdogs、pending/started queues or orphan-step repair APIs。
+The module does not run inactive-Run recovery scans、stale-Step watchdogs、pending/started queues or orphan-step repair APIs;
+the retired watchdog/continuation metrics are not part of the service contract and their reappearance fails closure observation。
 Recovery remains SM-4 idempotent re-drive from the persisted aggregate。
 
 ## Cross-Owner Rules

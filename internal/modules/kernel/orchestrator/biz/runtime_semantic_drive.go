@@ -569,8 +569,11 @@ func (m *Biz) handleRuntimeSemanticDocumentDecodeFailure(ctx context.Context, ag
 	expected.CorrectionAttempt = 1
 	expected.LogicalRequestID = ""
 	expected.Hash = ""
-	diagnostic = runtimeSemanticCorrectionDiagnostic(diagnostic, expected)
-	if ledger.Manifest == nil || len(diagnostic.SemanticViolations) == 0 {
+	if ledger.Manifest == nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "semantic plan rejection has no sealed manifest", &diagnostic)
+	}
+	diagnostic = runtimeSemanticCorrectionDiagnostic(diagnostic, *ledger.Manifest, expected)
+	if len(diagnostic.SemanticViolations) == 0 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", "semantic plan rejection has no sealed typed correction delta", &diagnostic)
 	}
 	directive, deriveErr := runtimecontract.DeriveRuntimeSemanticCorrectionDirective(*ledger.Manifest, expected, ledger.StablePrefixHash, diagnostic)
@@ -594,18 +597,44 @@ func (m *Biz) handleRuntimeSemanticDocumentDecodeFailure(ctx context.Context, ag
 	return updated.Aggregate, nil
 }
 
-func runtimeSemanticCorrectionDiagnostic(diagnostic runtimecontract.RuntimeOriginalDiagnostic, expected runtimecontract.RuntimeExpectedDocumentContract) runtimecontract.RuntimeOriginalDiagnostic {
-	if len(diagnostic.SemanticViolations) != 0 || expected.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch || len(expected.BatchCoverageWorkItemIDs) == 0 {
+func runtimeSemanticCorrectionDiagnostic(diagnostic runtimecontract.RuntimeOriginalDiagnostic, manifest runtimecontract.RuntimeSemanticPlanManifest, expected runtimecontract.RuntimeExpectedDocumentContract) runtimecontract.RuntimeOriginalDiagnostic {
+	if len(diagnostic.SemanticViolations) != 0 {
 		return diagnostic
 	}
 	path := "$"
+	actual := "invalid_document"
 	if len(diagnostic.FieldViolations) != 0 && strings.TrimSpace(diagnostic.FieldViolations[0].Path) != "" {
 		path = diagnostic.FieldViolations[0].Path
+		if strings.TrimSpace(diagnostic.FieldViolations[0].Actual) != "" {
+			actual = diagnostic.FieldViolations[0].Actual
+		}
 	}
-	diagnostic.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{
-		Kind: runtimecontract.RuntimeSemanticContractViolationProofBatchDocument, Path: path,
-		RequiredCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
-	}}
+	var violation runtimecontract.RuntimeSemanticContractViolation
+	switch expected.PlanStep {
+	case runtimecontract.RuntimeSemanticPlanStepCoverageOrder:
+		requiredIDs := make([]common.CoverageWorkItemID, 0, len(manifest.CoverageItems))
+		for _, item := range manifest.Normalized().CoverageItems {
+			requiredIDs = append(requiredIDs, item.ID)
+		}
+		if len(requiredIDs) == 0 {
+			return diagnostic
+		}
+		violation = runtimecontract.RuntimeSemanticContractViolation{
+			Kind: runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument, Path: path, Actual: actual,
+			RequiredCoverageWorkItemIDs: requiredIDs,
+		}
+	case runtimecontract.RuntimeSemanticPlanStepProofBatch:
+		if len(expected.BatchCoverageWorkItemIDs) == 0 {
+			return diagnostic
+		}
+		violation = runtimecontract.RuntimeSemanticContractViolation{
+			Kind: runtimecontract.RuntimeSemanticContractViolationProofBatchDocument, Path: path, Actual: actual,
+			RequiredCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), expected.BatchCoverageWorkItemIDs...),
+		}
+	default:
+		return diagnostic
+	}
+	diagnostic.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{violation}
 	return diagnostic
 }
 

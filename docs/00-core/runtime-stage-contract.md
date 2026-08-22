@@ -89,6 +89,10 @@ Start/Resume queue、自动 replan successor、checkpoint replay，以及 map/JS
 3. 覆盖 normal、duplicate、stale、CAS 前中断、CAS 后响应丢失与 fresh-process reload；
 4. 覆盖 budget/guard 和零副作用断言；
 5. 同步对应 core 子合同、组件 README、flow 与 verification；
-6. 通过 `make verify-boundary-contract` 及受影响测试。
+6. 新增或重命名任何 `State | Status | Phase | Disposition | Outcome | Mode | Lifecycle | Stage` string type 时，必须在
+   verification-only `scripts/state-model-owners.manifest` 中把它穷尽分类；只有 authoritative/owner-private state 可以绑定
+   `scripts/state-transition-owners.manifest` 中的唯一 owner-private dispatcher，projection、outcome、disposition、technical
+   mode 与 invariant 不得绑定 transition；
+7. 通过 `make verify-boundary-contract` 及受影响测试。
 
 实施进度、候选需求、dated run 和 closure diary 不属于本合同，也不进入 `docs/` 的规范树。

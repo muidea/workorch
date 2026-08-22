@@ -36,39 +36,19 @@ func asModel(m tea.Model) AppModel {
 	panic("not AppModel")
 }
 
-func TestSchedulerDiagnosticsStatusShowsWatchdogTimerRegistration(t *testing.T) {
+func TestSchedulerDiagnosticsStatusShowsAdmissionFailure(t *testing.T) {
 	text := schedulerDiagnosticsStatusText(&projectioncontract.SchedulerDiagnostics{
-		Watchdog: projectioncontract.WatchdogDiagnostics{TimerRegistrations: 2},
-	})
-	if !strings.Contains(text, "- watchdog: registered x2") {
-		t.Fatalf("status text = %q, want watchdog registration summary", text)
-	}
-}
-
-func TestSchedulerDiagnosticsStatusShowsReadback(t *testing.T) {
-	text := schedulerDiagnosticsStatusText(&projectioncontract.SchedulerDiagnostics{
-		LatestContinuation: &projectioncontract.ContinuationDiagnostic{
-			Kind:   "run_continuation",
-			State:  "failed",
-			Reason: "owner_readback_not_advanced",
-			Readback: &projectioncontract.ContinuationReadbackDiagnostic{
-				Action:              "resume",
-				Advanced:            false,
-				Reason:              "blocked_on_resolved_decision",
-				OldRunState:         "blocked_on_decision",
-				NewRunState:         "blocked_on_decision",
-				NewBlockingTicketID: "ticket-readback",
-				ProjectionRevision:  9,
-			},
+		LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
+			Kind: "workspace_activation", Outcome: "admission_rejected", Reason: "workspace_activation_failed",
+			Recoverability: "inspect_required", RecommendedActions: []string{"repair_profile_or_definition", "workspace_restart"},
 		},
 	})
 	for _, want := range []string{
-		"scheduler readback",
-		"resume",
-		"advanced=false",
-		"blocked_on_resolved_decision",
-		"ticket=ticket-readback",
-		"projection=9",
+		"execution admission",
+		"admission_rejected",
+		"workspace_activation_failed",
+		"inspect_required",
+		"repair_profile_or_definition,workspace_restart",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status text = %q, want %q", text, want)
@@ -1079,17 +1059,15 @@ func TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands(t *test
 	m.activeWorkspaceID = "ws-1"
 	m.activeRunID = "run-1"
 	m.schedulerDiagnostics = &projectioncontract.SchedulerDiagnostics{
-		LatestContinuation: &projectioncontract.ContinuationDiagnostic{
+		LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
 			WorkspaceID:        "ws-1",
-			RunID:              "run-1",
-			Kind:               "replan_continuation",
-			State:              "failed",
-			Reason:             "owner_command_failed",
-			Detail:             "owner command failed after accepted scheduler event",
-			Recoverability:     "manual_retry_required",
-			RecommendedActions: []string{"run_resume", "workspace_restart"},
+			Kind:               "workspace_activation",
+			Outcome:            "admission_rejected",
+			Reason:             "workspace_activation_failed",
+			Detail:             "owner command failed during execution admission",
+			Recoverability:     "inspect_required",
+			RecommendedActions: []string{"repair_profile_or_definition", "workspace_restart"},
 		},
-		Watchdog: projectioncontract.WatchdogDiagnostics{TimerRegistrations: 1},
 	}
 
 	m.setInput("/status")
@@ -1099,9 +1077,8 @@ func TestModelStatusRendersSchedulerDiagnosticsWithoutTriggeringCommands(t *test
 		t.Fatal("/status returned command, want local projection render only")
 	}
 	for _, want := range []string{
-		"replan_continuation failed owner_command_failed",
-		"manual_retry_required run_resume,workspace_restart",
-		"watchdog: registered",
+		"workspace_activation admission_rejected workspace_activation_failed",
+		"inspect_required repair_profile_or_definition,workspace_restart",
 	} {
 		if !strings.Contains(m.result, want) {
 			t.Fatalf("/status result = %q, missing %q", m.result, want)
@@ -4104,13 +4081,12 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
 			SchedulerDiagnostics: &projectioncontract.SchedulerDiagnostics{
-				LatestContinuation: &projectioncontract.ContinuationDiagnostic{
+				LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
 					WorkspaceID:    "ws-b",
-					RunID:          "run-b",
-					Kind:           "run_continuation",
-					State:          "completed",
+					Kind:           "workspace_activation",
+					Outcome:        "admission_rejected",
 					Reason:         "active-diagnostic",
-					Recoverability: "no_action_needed",
+					Recoverability: "inspect_required",
 				},
 			},
 		},
@@ -4139,11 +4115,10 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 			SchedulerDiagnostics: &projectioncontract.SchedulerDiagnostics{
-				LatestContinuation: &projectioncontract.ContinuationDiagnostic{
+				LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
 					WorkspaceID: "ws-a",
-					RunID:       "run-a",
-					Kind:        "replan_continuation",
-					State:       "failed",
+					Kind:        "workspace_activation",
+					Outcome:     "admission_rejected",
 					Reason:      "inactive-diagnostic",
 				},
 			},

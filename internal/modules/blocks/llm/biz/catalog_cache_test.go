@@ -10,8 +10,31 @@ import (
 	"testing"
 	"time"
 
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+func TestCatalogReadinessIsDerivedAndNeverStoredInCacheValue(t *testing.T) {
+	base := llmmodels.ProviderModelCatalog{
+		ProviderID: "ai-proxy", Revision: "revision-1", State: llmmodels.ProviderCatalogStateStale,
+		Stale: true, ErrorCode: "old_error", ErrorMessage: "old message",
+	}
+	stored := catalogCacheValue(base)
+	if stored.State != "" || stored.Stale || stored.ErrorCode != "" || stored.ErrorMessage != "" {
+		t.Fatalf("catalog cache retained derived readiness: %+v", stored)
+	}
+	fresh := freshCatalogObservation(stored)
+	if fresh.State != llmmodels.ProviderCatalogStateFresh || fresh.Stale || fresh.ErrorCode != "" {
+		t.Fatalf("fresh observation = %+v", fresh)
+	}
+	stale := staleCatalogObservation(stored, context.DeadlineExceeded)
+	if stale.State != llmmodels.ProviderCatalogStateStale || !stale.Stale || stale.ErrorCode == "" || stale.ErrorMessage == "" {
+		t.Fatalf("stale observation = %+v", stale)
+	}
+	if stored.State != "" || stored.Stale || stored.ErrorCode != "" {
+		t.Fatalf("derived observations mutated cached catalog: %+v", stored)
+	}
+}
 
 func TestCatalogServiceMergesConcurrentRefreshPerKey(t *testing.T) {
 	var hits atomic.Int64

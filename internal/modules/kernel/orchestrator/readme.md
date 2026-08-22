@@ -205,7 +205,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `runtime_contract_defect`，不能退化为无信息 governance ticket。
 - semantic-plan 的 `CorrectionDirective` 必须持久化 exact dependency edge、actual position、manifest/seed/prefix、
   plan step 与 source rejection hash；LLM command 只取得 detached fact 并仅在 C4 渲染，不能从 `OriginalMessage`
-  重建。correction lineage 只属于一个 sealed provider document；coverage-order attempt 1 即使 accepted，创建新的
+  重建。coverage-order 缺 schema-required 空 `proposals`、覆盖不全、未知/重复 CWI 或其他 complete-document 结构错误，
+  必须由 SM-3 绑定 manifest 的完整 CWI identity，形成 typed `coverage_order_document` violation；proof-batch 对应
+  `proof_batch_document`。二者都只有 attempt 1，不得因无 typed delta 误报 `runtime_contract_defect`，也不得由 LLM 或
+  application 选择 retry。correction lineage 只属于一个 sealed provider document；coverage-order attempt 1 即使 accepted，创建新的
   proof-batch request 时也必须在同一 SM-3 private CAS 中重置 attempt、directive 与 current rejection lineage。
 - candidate pipeline 只接收 `request_recoverable`、`candidate_rejection`、`owner_feasibility` 和 `accepted`
   factual result。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility

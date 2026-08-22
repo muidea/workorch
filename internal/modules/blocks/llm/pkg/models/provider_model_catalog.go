@@ -13,14 +13,13 @@ const (
 	CapabilitySourceAIProxyExactOverride = "ai_proxy_exact_override"
 )
 
-// ProviderCatalogState describes the cache/readiness state of a model catalog.
+// ProviderCatalogState is a derived readiness observation attached to one
+// catalog read. It is never a persisted lifecycle and has no transition API.
 type ProviderCatalogState string
 
 const (
-	ProviderCatalogStateEmpty       ProviderCatalogState = "empty"
 	ProviderCatalogStateFresh       ProviderCatalogState = "fresh"
 	ProviderCatalogStateStale       ProviderCatalogState = "stale"
-	ProviderCatalogStateRefreshing  ProviderCatalogState = "refreshing"
 	ProviderCatalogStateUnavailable ProviderCatalogState = "unavailable"
 )
 
@@ -115,11 +114,13 @@ func (c ProviderReasoningCapability) Clone() ProviderReasoningCapability {
 
 // ProviderModelCatalog is a bounded, normalized snapshot of models for one provider endpoint.
 type ProviderModelCatalog struct {
-	ProviderID   string
-	Models       []ProviderModelDescriptor
-	Revision     string
-	FetchedAt    time.Time
-	ExpiresAt    time.Time
+	ProviderID string
+	Models     []ProviderModelDescriptor
+	Revision   string
+	FetchedAt  time.Time
+	ExpiresAt  time.Time
+	// Stale, State and Error* are derived for the returned read observation.
+	// Catalog cache entries must not retain them as lifecycle authority.
 	Stale        bool
 	Source       string
 	State        ProviderCatalogState

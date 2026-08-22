@@ -503,6 +503,63 @@ func TestRuntimeSemanticPlanningRejectsInvalidStaleAndThirdAttemptTransitions(t 
 	}
 }
 
+func TestRuntimeSemanticCoverageOrderCorrectionPersistsAndReplaysIdempotently(t *testing.T) {
+	controller, _, aggregate := newSemanticPlanningController(t)
+	manifest, _, _ := semanticPlanningFixture(t, aggregate)
+	ctx := context.Background()
+	started, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventSemanticPlanRequestStarted,
+		Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{
+			SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-coverage", LogicalRequestID: "semantic-coverage-request-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = started.Aggregate
+	required := make([]common.CoverageWorkItemID, 0, len(manifest.CoverageItems))
+	for _, item := range manifest.CoverageItems {
+		required = append(required, item.ID)
+	}
+	rejection := semanticPlanningDiagnostic()
+	rejection.FieldViolations = []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}}
+	rejection.SemanticViolations = []runtimecontract.RuntimeSemanticContractViolation{{
+		Kind: runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.proposals", Actual: "missing_required",
+		RequiredCoverageWorkItemIDs: required,
+	}}
+	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-coverage", runtimecontract.RuntimeSemanticPlanStepCoverageOrder, rejection)
+	expected := runtimecontract.RuntimeExpectedDocumentContract{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CorrectionAttempt: 1,
+	}
+	event := RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventSemanticPlanCorrectionRequired,
+		Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{
+			StablePrefixHash: "semantic-prefix-coverage", LogicalRequestID: "semantic-coverage-request-2",
+			ExpectedDocument: &expected, SemanticDiagnostic: &rejection,
+		},
+	}
+	corrected, err := controller.ApplyInternalEvent(ctx, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrected.Aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired ||
+		corrected.Aggregate.SemanticPlanning.CorrectionDirective == nil ||
+		corrected.Aggregate.SemanticPlanning.CorrectionDirective.Hash != directive.Hash {
+		t.Fatalf("coverage-order correction was not persisted: %+v", corrected.Aggregate.SemanticPlanning)
+	}
+	replayed, err := controller.ApplyInternalEvent(ctx, event)
+	if err != nil || replayed.Aggregate.StateRevision != corrected.Aggregate.StateRevision {
+		t.Fatalf("duplicate coverage-order correction changed state: revision=%d want=%d err=%v", replayed.Aggregate.StateRevision, corrected.Aggregate.StateRevision, err)
+	}
+	reloaded, err := controller.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || reloaded.SemanticPlanning.CorrectionDirective == nil || reloaded.SemanticPlanning.CorrectionDirective.Hash != directive.Hash {
+		t.Fatalf("coverage-order correction did not survive reload: %+v err=%v", reloaded.SemanticPlanning.CorrectionDirective, err)
+	}
+}
+
 func TestRuntimeSemanticPlanningFailurePreservesOwnerDiagnosticFacts(t *testing.T) {
 	controller, _, aggregate := newSemanticPlanningController(t)
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)

@@ -133,6 +133,9 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "planning-soul-guidance") {
 		t.Fatalf("semantic C3 lost planning Soul guidance: %s", authority)
 	}
+	if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "proposals=[]") || !strings.Contains(authority, "must be present and empty") {
+		t.Fatalf("coverage-order instruction contradicts its required empty proposals field: %s", authority)
+	}
 
 	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
@@ -182,6 +185,49 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	tail := retry.PromptContext.Sections[4].Content
 	if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.coverageOrder"`) || !strings.Contains(tail, `"requiredBeforeId":"cwi-000"`) {
 		t.Fatalf("semantic correction tail is not provider-safe: %s", tail)
+	}
+}
+
+func TestRuntimeSemanticCoverageOrderCorrectionProjectsExactManifestCoverage(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	request.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	request.SemanticContext.BatchID = ""
+	request.SemanticContext.BatchSequence = 0
+	request.SemanticContext.BatchCoverageWorkItemIDs = nil
+	violation := runtimecontract.RuntimeSemanticContractViolation{
+		Kind: runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.proposals", Actual: "missing_required",
+		RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "schema", OriginalCode: "missing_required",
+		OriginalMessage: "private provider response must not be rendered", Signature: "semantic/missing-required",
+		FieldViolations:    []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}},
+		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{violation},
+	}
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder, ManifestHash: request.SemanticManifest.Hash,
+		DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash, StablePrefixHash: request.StablePrefixHash,
+		SourceRejectionHash: runtimecontract.StableRuntimeSemanticPlanCorrectionHash(*rejection), Attempt: 1,
+		Violations: []runtimecontract.RuntimeSemanticContractViolation{violation},
+	}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	request.CandidateAttempt = 1
+	request.PreviousSemanticRejection = rejection
+	request.SemanticCorrectionDirective = &directive
+	providerRequest, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail := providerRequest.PromptContext.Sections[4].Content
+	for _, required := range []string{`"kind":"coverage_order_document"`, `"path":"$.proposals"`, `"requiredCoverageWorkItemIds":["cwi-001"]`} {
+		if !strings.Contains(tail, required) {
+			t.Fatalf("coverage-order correction tail lost %s: %s", required, tail)
+		}
+	}
+	if strings.Contains(tail, rejection.OriginalMessage) {
+		t.Fatalf("coverage-order correction leaked provider message: %s", tail)
 	}
 }
 

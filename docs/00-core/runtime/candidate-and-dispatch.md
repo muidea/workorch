@@ -121,7 +121,9 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
 delta，例如删除 forbidden field、补 required field、选择 allowed kind、替换为 allowed target、改变 rejected
-semantic shape；它不修改 authority，也不包含 raw provider/decoder/owner 错误文本。
+semantic shape；它不修改 authority，也不包含 raw provider/decoder/owner 错误文本。semantic coverage-order 的完整文档
+结构错误必须保存 manifest 全量 CWI identity 与 field path，使用 typed `coverage_order_document` violation；proof-batch
+保存 exact batch CWI identity 并使用 `proof_batch_document`。两者都只能由 SM-3 owner-private transition seal。
 
 若 complete rejection 无法由 SM-3 根据 typed diagnostic 归类，属于 `runtime_contract_defect`，必须 fail-fast
 且零额外 provider、ticket、dispatch 或 effect。`candidate_correction_undefined` 不得作为正常模型输出兜底。

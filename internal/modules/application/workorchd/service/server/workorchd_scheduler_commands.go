@@ -140,93 +140,17 @@ func (s *serverState) recordWorkspaceRunFailure(command workorchdevents.Workspac
 	if strings.TrimSpace(reason) == "" {
 		reason = schedulerReasonWorkspaceActivationFailed
 	}
-	s.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+	s.schedulerDiagnostics.recordAdmissionFailure(schedulerDiagnosticInput{
 		WorkspaceID:    workspaceID,
 		Kind:           kind,
-		State:          schedulerDiagnosticStateFailed,
+		Outcome:        schedulerDiagnosticOutcomeAdmissionRejected,
 		Reason:         reason,
 		Detail:         cause.Error(),
-		Recoverability: schedulerRecoverabilityManualRetry,
-		DedupeKey:      schedulerDedupeKey(workspaceID, "", kind, reason),
+		Recoverability: schedulerRecoverabilityInspect,
+		RecommendedActions: []string{
+			"repair_profile_or_definition",
+			"workspace_restart",
+		},
+		DedupeKey: schedulerDedupeKey(workspaceID, "", kind, reason),
 	})
-}
-
-func schedulerStringValue(payload map[string]any, key string) string {
-	if payload == nil {
-		return ""
-	}
-	value, _ := payload[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func schedulerInt(payload map[string]any, key string) int {
-	if payload == nil {
-		return 0
-	}
-	switch value := payload[key].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		return int(value)
-	default:
-		return 0
-	}
-}
-
-func schedulerMap(payload map[string]any, key string) map[string]any {
-	if payload == nil {
-		return nil
-	}
-	if value, ok := payload[key].(map[string]any); ok {
-		return value
-	}
-	return nil
-}
-
-func schedulerStringMap(payload map[string]any, key string) map[string]string {
-	if payload == nil {
-		return nil
-	}
-	switch value := payload[key].(type) {
-	case map[string]string:
-		ret := make(map[string]string, len(value))
-		for k, v := range value {
-			ret[k] = v
-		}
-		return ret
-	case map[string]any:
-		ret := make(map[string]string, len(value))
-		for k, v := range value {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				ret[k] = strings.TrimSpace(s)
-			}
-		}
-		if len(ret) > 0 {
-			return ret
-		}
-	}
-	return nil
-}
-
-func schedulerStringSlice(payload map[string]any, key string) []string {
-	if payload == nil {
-		return nil
-	}
-	switch value := payload[key].(type) {
-	case []string:
-		return append([]string(nil), value...)
-	case []any:
-		ret := make([]string, 0, len(value))
-		for _, item := range value {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				ret = append(ret, strings.TrimSpace(s))
-			}
-		}
-		if len(ret) > 0 {
-			return ret
-		}
-	}
-	return nil
 }

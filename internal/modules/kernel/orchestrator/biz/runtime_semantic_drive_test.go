@@ -107,11 +107,12 @@ func TestRuntimeSemanticCorrectionDiagnosticBindsProofBatchWithoutReclassifyingO
 	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
 		FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals", Actual: "missing_required"}},
 	}
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-002"}, {ID: "cwi-001"}}}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		PlanStep:                 runtimecontract.RuntimeSemanticPlanStepProofBatch,
 		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-002", "cwi-001"},
 	}
-	got := runtimeSemanticCorrectionDiagnostic(diagnostic, expected)
+	got := runtimeSemanticCorrectionDiagnostic(diagnostic, manifest, expected)
 	if len(got.SemanticViolations) != 1 || got.SemanticViolations[0].Kind != runtimecontract.RuntimeSemanticContractViolationProofBatchDocument ||
 		got.SemanticViolations[0].Path != "$.proposals" || len(got.SemanticViolations[0].RequiredCoverageWorkItemIDs) != 2 ||
 		got.SemanticViolations[0].RequiredCoverageWorkItemIDs[0] != "cwi-002" || got.SemanticViolations[0].RequiredCoverageWorkItemIDs[1] != "cwi-001" {
@@ -119,8 +120,11 @@ func TestRuntimeSemanticCorrectionDiagnosticBindsProofBatchWithoutReclassifyingO
 	}
 	orderExpected := expected
 	orderExpected.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
-	if order := runtimeSemanticCorrectionDiagnostic(diagnostic, orderExpected); len(order.SemanticViolations) != 0 {
-		t.Fatalf("coverage-order diagnostic was reclassified as proof batch: %+v", order)
+	order := runtimeSemanticCorrectionDiagnostic(diagnostic, manifest, orderExpected)
+	if len(order.SemanticViolations) != 1 || order.SemanticViolations[0].Kind != runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument ||
+		order.SemanticViolations[0].Path != "$.proposals" || order.SemanticViolations[0].Actual != "missing_required" ||
+		len(order.SemanticViolations[0].RequiredCoverageWorkItemIDs) != 2 {
+		t.Fatalf("coverage-order structural diagnostic = %+v", order)
 	}
 }
 

@@ -1867,28 +1867,16 @@ func cloneSchedulerDiagnosticsInfoPtr(input *projectioncontract.SchedulerDiagnos
 		return nil
 	}
 	ret := *input
-	if input.LatestContinuation != nil {
-		latest := *input.LatestContinuation
-		latest.RecommendedActions = append([]string(nil), input.LatestContinuation.RecommendedActions...)
-		latest.Readback = cloneContinuationReadbackDiagnosticInfo(input.LatestContinuation.Readback)
-		ret.LatestContinuation = &latest
+	if input.LatestAdmissionFailure != nil {
+		latest := *input.LatestAdmissionFailure
+		latest.RecommendedActions = append([]string(nil), input.LatestAdmissionFailure.RecommendedActions...)
+		ret.LatestAdmissionFailure = &latest
 	}
-	ret.RecentContinuations = append([]projectioncontract.ContinuationDiagnostic(nil), input.RecentContinuations...)
-	for idx := range ret.RecentContinuations {
-		ret.RecentContinuations[idx].RecommendedActions = append([]string(nil), input.RecentContinuations[idx].RecommendedActions...)
-		ret.RecentContinuations[idx].Readback = cloneContinuationReadbackDiagnosticInfo(input.RecentContinuations[idx].Readback)
+	ret.RecentAdmissionFailures = append([]projectioncontract.ExecutionAdmissionFailureDiagnostic(nil), input.RecentAdmissionFailures...)
+	for idx := range ret.RecentAdmissionFailures {
+		ret.RecentAdmissionFailures[idx].RecommendedActions = append([]string(nil), input.RecentAdmissionFailures[idx].RecommendedActions...)
 	}
-	ret.ContinuationFailureCounts = append([]projectioncontract.ContinuationDiagnosticCount(nil), input.ContinuationFailureCounts...)
-	ret.ContinuationNoActionCounts = append([]projectioncontract.ContinuationDiagnosticCount(nil), input.ContinuationNoActionCounts...)
-	ret.ContinuationCompletedCounts = append([]projectioncontract.ContinuationDiagnosticCount(nil), input.ContinuationCompletedCounts...)
-	return &ret
-}
-
-func cloneContinuationReadbackDiagnosticInfo(input *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
-	if input == nil {
-		return nil
-	}
-	ret := *input
+	ret.AdmissionFailureCounts = append([]projectioncontract.ExecutionAdmissionFailureCount(nil), input.AdmissionFailureCounts...)
 	return &ret
 }
 

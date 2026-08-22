@@ -113,39 +113,20 @@ func TestWorkspaceSnapshotFromClientPreservesCompleteDetachedProjection(t *testi
 	}
 }
 
-func TestCanonicalSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
+func TestCanonicalSchedulerDiagnosticsPreservesAdmissionFailure(t *testing.T) {
 	got := projectioncontract.CloneSchedulerDiagnostics(&projectioncontract.SchedulerDiagnostics{
-		LatestContinuation: &projectioncontract.ContinuationDiagnostic{
-			WorkspaceID: "ws-remote-readback",
-			RunID:       "run-remote-readback",
-			Kind:        "run_continuation",
-			State:       "failed",
-			Reason:      "owner_readback_not_advanced",
-			Readback: &projectioncontract.ContinuationReadbackDiagnostic{
-				WorkspaceID:             "ws-remote-readback",
-				RunID:                   "run-remote-readback",
-				Action:                  "resume",
-				Found:                   true,
-				OldRunState:             "blocked_on_decision",
-				NewRunState:             "blocked_on_decision",
-				OldBlockingTicketID:     "ticket-old",
-				NewBlockingTicketID:     "ticket-old",
-				Reason:                  "blocked_on_resolved_decision",
-				ProjectionRevision:      11,
-				SourceEventRevision:     12,
-				ProjectedSourceRevision: 12,
-			},
+		LatestAdmissionFailure: &projectioncontract.ExecutionAdmissionFailureDiagnostic{
+			WorkspaceID: "ws-remote-admission",
+			Kind:        "workspace_activation",
+			Outcome:     "admission_rejected",
+			Reason:      "workspace_activation_failed",
 		},
 	})
-	if got == nil || got.LatestContinuation == nil || got.LatestContinuation.Readback == nil {
-		t.Fatalf("diagnostics = %+v, want readback", got)
+	if got == nil || got.LatestAdmissionFailure == nil {
+		t.Fatalf("diagnostics = %+v, want admission failure", got)
 	}
-	readback := got.LatestContinuation.Readback
-	if readback.Action != "resume" ||
-		readback.NewBlockingTicketID != "ticket-old" ||
-		readback.Reason != "blocked_on_resolved_decision" ||
-		readback.ProjectionRevision != 11 {
-		t.Fatalf("readback = %+v, want preserved remote readback", readback)
+	if got.LatestAdmissionFailure.Outcome != "admission_rejected" || got.LatestAdmissionFailure.Reason != "workspace_activation_failed" {
+		t.Fatalf("admission failure = %+v, want preserved remote observation", got.LatestAdmissionFailure)
 	}
 }
 

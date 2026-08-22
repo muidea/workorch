@@ -254,6 +254,23 @@ EOF
   exit 1
 fi
 
+retired_application_state_surface_matches="$({
+  source_matches 'WatchdogDiagnostics|ContinuationReadbackDiagnostic|LatestContinuation|RecentContinuations|schedulerDiagnosticState(NotScheduled|Accepted|Running|Failed|Completed|NoActionNeeded)|recordWatchdog|recordStaleRuntimeGapRecovery|workorch_scheduler_continuation_|workorch_watchdog_' \
+    internal/modules/application/workorchd \
+    internal/pkg/workorchprojectioncontract \
+    internal/services/workorch
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$retired_application_state_surface_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a retired Workorchd scheduler/watchdog state,
+recovery readback, projection field, or metric was reintroduced. Execution
+admission may expose only an immutable admission outcome.
+
+$retired_application_state_surface_matches
+EOF
+  exit 1
+fi
+
 # Eventstream is audit/display infrastructure. Goal/DoD selection, effective
 # definition compilation, stale checks and definition consolidation feed SM-4
 # Runtime bootstrap or owner writes and therefore must never read EventRecord.
@@ -438,13 +455,29 @@ if [[ ! -f "$state_transition_owner_manifest" ]]; then
   echo "boundary contract violation: state-transition owner manifest is missing: $state_transition_owner_manifest" >&2
   exit 1
 fi
-production_manifest_consumers="$(source_matches 'state-transition-owners\.manifest' application internal)"
+production_manifest_consumers="$(source_matches 'state-transition-owners\.manifest' application internal | grep -v -F -- 'internal/tools/stateownercheck/' || true)"
 if [[ -n "$production_manifest_consumers" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: the verification-only state-transition manifest
 is consumed by production code and can become a global reducer registry.
 
 $production_manifest_consumers
+EOF
+  exit 1
+fi
+
+state_model_owner_manifest="scripts/state-model-owners.manifest"
+if [[ ! -f "$state_model_owner_manifest" ]]; then
+  echo "boundary contract violation: exhaustive state-model owner manifest is missing: $state_model_owner_manifest" >&2
+  exit 1
+fi
+production_state_model_manifest_consumers="$(source_matches 'state-model-owners\.manifest' application internal | grep -v -F -- 'internal/tools/stateownercheck/' || true)"
+if [[ -n "$production_state_model_manifest_consumers" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: the verification-only state-model inventory is
+consumed by production code and can become a global state/reducer registry.
+
+$production_state_model_manifest_consumers
 EOF
   exit 1
 fi
@@ -533,6 +566,16 @@ while IFS='|' read -r transition_id classification owner_root internal_event_fil
     formal_runtime_machine_owners["$transition_id"]="$owner_root"
   fi
 done < "$state_transition_owner_manifest"
+
+# The transition-file inventory above catches private dispatcher additions.
+# The AST inventory complements it by exhaustively classifying every named
+# string State/Status/Phase/Disposition, including values that are deliberately
+# immutable outcomes, pure dispositions, projections, or technical state and
+# therefore must not gain a business-state reducer.
+go run ./internal/tools/stateownercheck \
+  -root . \
+  -inventory "$state_model_owner_manifest" \
+  -transitions "$state_transition_owner_manifest"
 
 for transition_id in sm_1 sm_2 sm_3 sm_4; do
   if [[ -z "${formal_runtime_machine_owners[$transition_id]+x}" ]]; then
@@ -2368,7 +2411,7 @@ duplicate_owner_dto_matches="$({
 	grep -Hn -E '^type (AcceptanceSlice|CoverageFocus|AcceptanceSummary|ConvergenceBudget|RuntimeRepairDirective|RuntimeRepairClosure|RuntimeOperationStatus|RuntimeCapabilityState|RuntimeGovernanceState|RuntimeSemanticPlanning|RuntimeSemanticPlanningItem|RuntimeSemanticFeasibilityGap|RuntimeSemanticDiagnostic) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
-	grep -Hn -E '^type (ContinuationDiagnostic|ContinuationReadbackDiagnostic|ContinuationDiagnosticCount|WatchdogDiagnostics|SchedulerDiagnostics) struct' \
+	grep -Hn -E '^type (ContinuationDiagnostic|ContinuationReadbackDiagnostic|ContinuationDiagnosticCount|WatchdogDiagnostics|ExecutionAdmissionFailureDiagnostic|ExecutionAdmissionFailureCount|SchedulerDiagnostics) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
 	grep -Hn -E '^type (DoDAssessment|DoDAssessmentItem|DoDCoverage|DoDCoverageItem) struct' \

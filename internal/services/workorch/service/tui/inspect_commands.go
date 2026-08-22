@@ -88,73 +88,25 @@ func schedulerDiagnosticsStatusText(item *projectioncontract.SchedulerDiagnostic
 		return ""
 	}
 	var b strings.Builder
-	if item.LatestContinuation != nil {
-		latest := item.LatestContinuation
-		b.WriteString("- scheduler: ")
-		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{latest.Kind, latest.State, latest.Reason}), " ")))
+	if item.LatestAdmissionFailure != nil {
+		latest := item.LatestAdmissionFailure
+		b.WriteString("- execution admission: ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{latest.Kind, latest.Outcome, latest.Reason}), " ")))
 		if latest.Detail != "" {
 			b.WriteString(" - ")
 			b.WriteString(latest.Detail)
 		}
 		b.WriteString("\n")
 		if latest.Recoverability != "" || len(latest.RecommendedActions) > 0 {
-			b.WriteString("- scheduler recovery: ")
+			b.WriteString("- admission recovery: ")
 			b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
 				latest.Recoverability,
 				strings.Join(latest.RecommendedActions, ","),
 			}), " ")))
 			b.WriteString("\n")
 		}
-		if latest.Readback != nil {
-			b.WriteString("- scheduler readback: ")
-			b.WriteString(schedulerReadbackStatusText(latest.Readback))
-			b.WriteString("\n")
-		}
-	}
-	if item.Watchdog.LatestTickAt != "" {
-		b.WriteString("- watchdog: ")
-		b.WriteString(item.Watchdog.LatestTickAt)
-		if item.Watchdog.LatestDurationMs > 0 {
-			b.WriteString(fmt.Sprintf(" %dms", item.Watchdog.LatestDurationMs))
-		}
-		if item.Watchdog.LatestError != "" {
-			b.WriteString(" - ")
-			b.WriteString(item.Watchdog.LatestError)
-		}
-		b.WriteString("\n")
-	} else if item.Watchdog.TimerRegistrations > 0 {
-		b.WriteString("- watchdog: registered")
-		if item.Watchdog.TimerRegistrations > 1 {
-			b.WriteString(fmt.Sprintf(" x%d", item.Watchdog.TimerRegistrations))
-		}
-		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func schedulerReadbackStatusText(item *projectioncontract.ContinuationReadbackDiagnostic) string {
-	if item == nil {
-		return ""
-	}
-	parts := compactStrings([]string{
-		item.Action,
-		fmt.Sprintf("advanced=%t", item.Advanced),
-		item.Reason,
-	})
-	state := strings.TrimSpace(strings.Join(compactStrings([]string{item.OldRunState, "->", item.NewRunState}), " "))
-	if state != "->" && state != "" {
-		parts = append(parts, state)
-	}
-	if item.NewBlockingTicketID != "" {
-		parts = append(parts, "ticket="+item.NewBlockingTicketID)
-	}
-	if item.NewBlockingApprovalID != "" {
-		parts = append(parts, "approval="+item.NewBlockingApprovalID)
-	}
-	if item.ProjectionRevision > 0 {
-		parts = append(parts, fmt.Sprintf("projection=%d", item.ProjectionRevision))
-	}
-	return strings.TrimSpace(strings.Join(compactStrings(parts), " "))
 }
 
 func (m AppModel) renderInspectCoverage() string {

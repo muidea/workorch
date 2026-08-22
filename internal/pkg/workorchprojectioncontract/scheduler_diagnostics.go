@@ -1,69 +1,36 @@
 package workorchprojectioncontract
 
-// ContinuationDiagnostic is a read-only observation of one bounded Runtime
-// continuation attempt. It cannot schedule or transition a Run.
-type ContinuationDiagnostic struct {
-	WorkspaceID        string                          `json:"workspaceId,omitempty"`
-	RunID              string                          `json:"runId,omitempty"`
-	Kind               string                          `json:"kind"`
-	State              string                          `json:"state"`
-	Reason             string                          `json:"reason,omitempty"`
-	Detail             string                          `json:"detail,omitempty"`
-	Readback           *ContinuationReadbackDiagnostic `json:"readback,omitempty"`
-	Recoverability     string                          `json:"recoverability,omitempty"`
-	RecommendedActions []string                        `json:"recommendedActions,omitempty"`
-	DedupeKey          string                          `json:"dedupeKey,omitempty"`
-	Attempt            int                             `json:"attempt,omitempty"`
-	OccurredAt         string                          `json:"occurredAt,omitempty"`
-	Source             string                          `json:"source,omitempty"`
+// ExecutionAdmissionFailureDiagnostic is an immutable observation of one application
+// execution-admission failure. Outcome is not a lifecycle state and cannot
+// schedule, continue, recover, or transition a Run.
+type ExecutionAdmissionFailureDiagnostic struct {
+	WorkspaceID        string   `json:"workspaceId,omitempty"`
+	RunID              string   `json:"runId,omitempty"`
+	Kind               string   `json:"kind"`
+	Outcome            string   `json:"outcome"`
+	Reason             string   `json:"reason,omitempty"`
+	Detail             string   `json:"detail,omitempty"`
+	Recoverability     string   `json:"recoverability,omitempty"`
+	RecommendedActions []string `json:"recommendedActions,omitempty"`
+	DedupeKey          string   `json:"dedupeKey,omitempty"`
+	Attempt            int      `json:"attempt,omitempty"`
+	OccurredAt         string   `json:"occurredAt,omitempty"`
+	Source             string   `json:"source,omitempty"`
 }
 
-type ContinuationReadbackDiagnostic struct {
-	WorkspaceID             string `json:"workspaceId,omitempty"`
-	RunID                   string `json:"runId,omitempty"`
-	Action                  string `json:"action,omitempty"`
-	Found                   bool   `json:"found,omitempty"`
-	OldRunState             string `json:"oldRunState,omitempty"`
-	NewRunState             string `json:"newRunState,omitempty"`
-	OldBlockingTicketID     string `json:"oldBlockingTicketId,omitempty"`
-	NewBlockingTicketID     string `json:"newBlockingTicketId,omitempty"`
-	OldBlockingApprovalID   string `json:"oldBlockingApprovalId,omitempty"`
-	NewBlockingApprovalID   string `json:"newBlockingApprovalId,omitempty"`
-	SuccessorRunID          string `json:"successorRunId,omitempty"`
-	LatestStepID            string `json:"latestStepId,omitempty"`
-	Terminal                bool   `json:"terminal,omitempty"`
-	GovernedWait            bool   `json:"governedWait,omitempty"`
-	Advanced                bool   `json:"advanced,omitempty"`
-	Reason                  string `json:"reason,omitempty"`
-	ProjectionRevision      int64  `json:"projectionRevision,omitempty"`
-	SourceEventRevision     int64  `json:"sourceEventRevision,omitempty"`
-	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
-}
-
-type ContinuationDiagnosticCount struct {
+type ExecutionAdmissionFailureCount struct {
 	Kind   string `json:"kind,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	Count  uint64 `json:"count"`
 }
 
-type WatchdogDiagnostics struct {
-	TimerRegistrations uint64 `json:"timerRegistrations,omitempty"`
-	LatestTickAt       string `json:"latestTickAt,omitempty"`
-	LatestDurationMs   int64  `json:"latestDurationMs,omitempty"`
-	LatestError        string `json:"latestError,omitempty"`
-	StaleRecoveryRuns  uint64 `json:"staleRecoveryRuns,omitempty"`
-}
-
 // SchedulerDiagnostics is the complete owner-neutral projection exposed by
-// server and client boundaries. Scheduling policy and mutable counters remain
-// private to the server implementation.
+// server and client boundaries. It contains transport/admission observations
+// only; no scheduler lifecycle, watchdog, or recovery policy is represented.
 type SchedulerDiagnostics struct {
-	Watchdog                    WatchdogDiagnostics           `json:"watchdog,omitempty"`
-	LatestContinuation          *ContinuationDiagnostic       `json:"latestContinuation,omitempty"`
-	RecentContinuations         []ContinuationDiagnostic      `json:"recentContinuations,omitempty"`
-	ContinuationFailureCounts   []ContinuationDiagnosticCount `json:"continuationFailureCounts,omitempty"`
-	ContinuationNoActionCounts  []ContinuationDiagnosticCount `json:"continuationNoActionCounts,omitempty"`
-	ContinuationCompletedCounts []ContinuationDiagnosticCount `json:"continuationCompletedCounts,omitempty"`
+	LatestAdmissionFailure  *ExecutionAdmissionFailureDiagnostic  `json:"latestAdmissionFailure,omitempty"`
+	RecentAdmissionFailures []ExecutionAdmissionFailureDiagnostic `json:"recentAdmissionFailures,omitempty"`
+	AdmissionFailureCounts  []ExecutionAdmissionFailureCount      `json:"admissionFailureCounts,omitempty"`
 }
 
 func CloneSchedulerDiagnostics(input *SchedulerDiagnostics) *SchedulerDiagnostics {
@@ -71,36 +38,29 @@ func CloneSchedulerDiagnostics(input *SchedulerDiagnostics) *SchedulerDiagnostic
 		return nil
 	}
 	ret := &SchedulerDiagnostics{
-		Watchdog:                    input.Watchdog,
-		RecentContinuations:         cloneContinuationDiagnostics(input.RecentContinuations),
-		ContinuationFailureCounts:   append([]ContinuationDiagnosticCount(nil), input.ContinuationFailureCounts...),
-		ContinuationNoActionCounts:  append([]ContinuationDiagnosticCount(nil), input.ContinuationNoActionCounts...),
-		ContinuationCompletedCounts: append([]ContinuationDiagnosticCount(nil), input.ContinuationCompletedCounts...),
+		RecentAdmissionFailures: cloneExecutionAdmissionFailureDiagnostics(input.RecentAdmissionFailures),
+		AdmissionFailureCounts:  append([]ExecutionAdmissionFailureCount(nil), input.AdmissionFailureCounts...),
 	}
-	if input.LatestContinuation != nil {
-		value := cloneContinuationDiagnostic(*input.LatestContinuation)
-		ret.LatestContinuation = &value
+	if input.LatestAdmissionFailure != nil {
+		value := cloneExecutionAdmissionFailureDiagnostic(*input.LatestAdmissionFailure)
+		ret.LatestAdmissionFailure = &value
 	}
 	return ret
 }
 
-func cloneContinuationDiagnostics(input []ContinuationDiagnostic) []ContinuationDiagnostic {
+func cloneExecutionAdmissionFailureDiagnostics(input []ExecutionAdmissionFailureDiagnostic) []ExecutionAdmissionFailureDiagnostic {
 	if len(input) == 0 {
 		return nil
 	}
-	ret := make([]ContinuationDiagnostic, 0, len(input))
+	ret := make([]ExecutionAdmissionFailureDiagnostic, 0, len(input))
 	for _, item := range input {
-		ret = append(ret, cloneContinuationDiagnostic(item))
+		ret = append(ret, cloneExecutionAdmissionFailureDiagnostic(item))
 	}
 	return ret
 }
 
-func cloneContinuationDiagnostic(input ContinuationDiagnostic) ContinuationDiagnostic {
+func cloneExecutionAdmissionFailureDiagnostic(input ExecutionAdmissionFailureDiagnostic) ExecutionAdmissionFailureDiagnostic {
 	ret := input
 	ret.RecommendedActions = append([]string(nil), input.RecommendedActions...)
-	if input.Readback != nil {
-		readback := *input.Readback
-		ret.Readback = &readback
-	}
 	return ret
 }

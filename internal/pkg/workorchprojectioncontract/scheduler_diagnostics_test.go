@@ -4,31 +4,27 @@ import "testing"
 
 func TestCloneSchedulerDiagnosticsDetachesNestedCollections(t *testing.T) {
 	input := &SchedulerDiagnostics{
-		LatestContinuation: &ContinuationDiagnostic{
+		LatestAdmissionFailure: &ExecutionAdmissionFailureDiagnostic{
 			RecommendedActions: []string{"resume"},
-			Readback:           &ContinuationReadbackDiagnostic{Reason: "original"},
 		},
-		RecentContinuations: []ContinuationDiagnostic{{
+		RecentAdmissionFailures: []ExecutionAdmissionFailureDiagnostic{{
 			RecommendedActions: []string{"restart"},
-			Readback:           &ContinuationReadbackDiagnostic{Reason: "recent"},
 		}},
-		ContinuationFailureCounts: []ContinuationDiagnosticCount{{Kind: "failure", Count: 1}},
+		AdmissionFailureCounts: []ExecutionAdmissionFailureCount{{Kind: "failure", Count: 1}},
 	}
 
 	got := CloneSchedulerDiagnostics(input)
-	input.LatestContinuation.RecommendedActions[0] = "mutated"
-	input.LatestContinuation.Readback.Reason = "mutated"
-	input.RecentContinuations[0].RecommendedActions[0] = "mutated"
-	input.RecentContinuations[0].Readback.Reason = "mutated"
-	input.ContinuationFailureCounts[0].Count = 2
+	input.LatestAdmissionFailure.RecommendedActions[0] = "mutated"
+	input.RecentAdmissionFailures[0].RecommendedActions[0] = "mutated"
+	input.AdmissionFailureCounts[0].Count = 2
 
-	if got.LatestContinuation.RecommendedActions[0] != "resume" || got.LatestContinuation.Readback.Reason != "original" {
-		t.Fatalf("latest continuation shares mutable storage: %+v", got.LatestContinuation)
+	if got.LatestAdmissionFailure.RecommendedActions[0] != "resume" {
+		t.Fatalf("latest admission failure shares mutable storage: %+v", got.LatestAdmissionFailure)
 	}
-	if got.RecentContinuations[0].RecommendedActions[0] != "restart" || got.RecentContinuations[0].Readback.Reason != "recent" {
-		t.Fatalf("recent continuation shares mutable storage: %+v", got.RecentContinuations[0])
+	if got.RecentAdmissionFailures[0].RecommendedActions[0] != "restart" {
+		t.Fatalf("recent admission failure shares mutable storage: %+v", got.RecentAdmissionFailures[0])
 	}
-	if got.ContinuationFailureCounts[0].Count != 1 {
-		t.Fatalf("count slice shares mutable storage: %+v", got.ContinuationFailureCounts)
+	if got.AdmissionFailureCounts[0].Count != 1 {
+		t.Fatalf("count slice shares mutable storage: %+v", got.AdmissionFailureCounts)
 	}
 }

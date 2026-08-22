@@ -177,7 +177,7 @@ func TestServiceRunDoesNotRecoverLegacyInactiveRunningWorkspace(t *testing.T) {
 	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != runID {
 		t.Fatalf("projected workspace = %+v, want legacy state left untouched", snapshot.Workspace)
 	}
-	if diagnostics := svc.http.state.schedulerDiagnostics.snapshot(workspaceID, runID); diagnostics != nil && diagnostics.LatestContinuation != nil {
+	if diagnostics := svc.http.state.schedulerDiagnostics.snapshot(workspaceID, runID); diagnostics != nil && diagnostics.LatestAdmissionFailure != nil {
 		t.Fatalf("scheduler diagnostics = %+v, want no legacy startup recovery diagnostic", diagnostics)
 	}
 }

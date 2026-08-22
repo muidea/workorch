@@ -14,9 +14,10 @@ const RuntimeSemanticCorrectionDirectiveSchemaCurrent = "workorch.runtime_semant
 type RuntimeSemanticContractViolationKind string
 
 const (
-	RuntimeSemanticContractViolationDependencyOrder    RuntimeSemanticContractViolationKind = "dependency_order"
-	RuntimeSemanticContractViolationProofBatchDocument RuntimeSemanticContractViolationKind = "proof_batch_document"
-	RuntimeSemanticContractViolationProposalConstraint RuntimeSemanticContractViolationKind = "proposal_constraint"
+	RuntimeSemanticContractViolationDependencyOrder       RuntimeSemanticContractViolationKind = "dependency_order"
+	RuntimeSemanticContractViolationCoverageOrderDocument RuntimeSemanticContractViolationKind = "coverage_order_document"
+	RuntimeSemanticContractViolationProofBatchDocument    RuntimeSemanticContractViolationKind = "proof_batch_document"
+	RuntimeSemanticContractViolationProposalConstraint    RuntimeSemanticContractViolationKind = "proposal_constraint"
 )
 
 type RuntimeSemanticConstraintRule string
@@ -101,6 +102,12 @@ func (v RuntimeSemanticContractViolation) Validate() error {
 		if v.ActualBeforePosition < 0 || v.ActualAfterPosition < 0 || v.ActualBeforePosition < v.ActualAfterPosition {
 			return fmt.Errorf("runtime semantic dependency violation positions do not describe an order violation")
 		}
+	case RuntimeSemanticContractViolationCoverageOrderDocument:
+		if !strings.HasPrefix(v.Path, "$") || len(v.RequiredCoverageWorkItemIDs) == 0 ||
+			v.RequiredBeforeID != "" || v.RequiredAfterID != "" || v.CoverageWorkItemID != "" ||
+			v.Rule != "" || len(v.Required) != 0 || len(v.Allowed) != 0 {
+			return fmt.Errorf("runtime semantic coverage-order document violation requires a field path and exact manifest coverage")
+		}
 	case RuntimeSemanticContractViolationProofBatchDocument:
 		if !strings.HasPrefix(v.Path, "$") || v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) == 0 {
 			return fmt.Errorf("runtime semantic proof-batch violation requires a field path and exact batch coverage")
@@ -135,7 +142,7 @@ func (v RuntimeSemanticContractViolation) ValidateAgainstManifest(manifest Runti
 	if err := manifest.Validate(); err != nil {
 		return err
 	}
-	if v.Kind == RuntimeSemanticContractViolationProofBatchDocument || v.Kind == RuntimeSemanticContractViolationProposalConstraint {
+	if v.Kind == RuntimeSemanticContractViolationCoverageOrderDocument || v.Kind == RuntimeSemanticContractViolationProofBatchDocument || v.Kind == RuntimeSemanticContractViolationProposalConstraint {
 		known := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
 		for _, item := range manifest.CoverageItems {
 			known[item.ID] = struct{}{}
@@ -146,8 +153,11 @@ func (v RuntimeSemanticContractViolation) ValidateAgainstManifest(manifest Runti
 		}
 		for _, id := range ids {
 			if _, found := known[id]; !found {
-				return fmt.Errorf("runtime semantic proof-batch violation coverage %q is outside manifest", id)
+				return fmt.Errorf("runtime semantic document violation coverage %q is outside manifest", id)
 			}
+		}
+		if v.Kind == RuntimeSemanticContractViolationCoverageOrderDocument && len(ids) != len(known) {
+			return fmt.Errorf("runtime semantic coverage-order violation does not preserve exact manifest coverage")
 		}
 		return nil
 	}
@@ -293,6 +303,10 @@ func (d RuntimeSemanticCorrectionDirective) ValidateAgainst(manifest RuntimeSema
 		case RuntimeSemanticContractViolationDependencyOrder:
 			if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
 				return fmt.Errorf("runtime semantic dependency correction is outside coverage-order step")
+			}
+		case RuntimeSemanticContractViolationCoverageOrderDocument:
+			if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
+				return fmt.Errorf("runtime semantic coverage-order document correction is outside coverage-order step")
 			}
 		case RuntimeSemanticContractViolationProofBatchDocument:
 			if d.PlanStep != RuntimeSemanticPlanStepProofBatch {

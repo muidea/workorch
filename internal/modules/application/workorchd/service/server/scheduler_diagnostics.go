@@ -12,46 +12,27 @@ import (
 )
 
 const (
-	runWatchdogInterval       = time.Duration(0)
 	schedulerDiagnosticSource = "workorchd/scheduler"
 	schedulerDiagnosticLimit  = 64
 	schedulerDetailLimit      = 512
 
 	schedulerKindWorkspaceActivation = "workspace_activation"
 	schedulerKindWorkspaceRun        = "workspace_run"
-	schedulerKindWorkspaceRestart    = "workspace_restart"
-	schedulerKindRunContinuation     = "run_continuation"
 
-	schedulerDiagnosticStateNotScheduled   = "not_scheduled"
-	schedulerDiagnosticStateAccepted       = "accepted"
-	schedulerDiagnosticStateRunning        = "running"
-	schedulerDiagnosticStateFailed         = "failed"
-	schedulerDiagnosticStateCompleted      = "completed"
-	schedulerDiagnosticStateNoActionNeeded = "no_action_needed"
+	schedulerDiagnosticOutcomeAdmissionRejected = "admission_rejected"
 
-	schedulerReasonBackgroundFailed                        = "background_execution_failed"
-	schedulerReasonWorkspaceActivationFailed               = "workspace_activation_failed"
-	schedulerReasonOwnerCommandFailed                      = "owner_command_failed"
-	schedulerReasonRunSlotUnavailable                      = "run_slot_unavailable"
-	schedulerReasonServiceShuttingDown                     = "service_shutting_down"
-	schedulerReasonWorkspaceNotEligible                    = "workspace_not_eligible"
-	schedulerReasonRunNotEligible                          = "run_not_eligible"
-	schedulerReasonOwnerReadbackNotAdvanced                = "owner_readback_not_advanced"
-	schedulerReasonServiceRestartedPendingWorkNotRecovered = "service_restarted_pending_scheduler_work_not_recovered"
+	schedulerReasonWorkspaceActivationFailed = "workspace_activation_failed"
 
-	schedulerRecoverabilityManualRetry = "manual_retry_required"
-	schedulerRecoverabilityNoAction    = "no_action_needed"
-	schedulerRecoverabilityInspect     = "inspect_required"
+	schedulerRecoverabilityInspect = "inspect_required"
 )
 
 type schedulerDiagnosticInput struct {
 	WorkspaceID        string
 	RunID              string
 	Kind               string
-	State              string
+	Outcome            string
 	Reason             string
 	Detail             string
-	Readback           *projectioncontract.ContinuationReadbackDiagnostic
 	Recoverability     string
 	RecommendedActions []string
 	DedupeKey          string
@@ -60,22 +41,11 @@ type schedulerDiagnosticInput struct {
 type schedulerDiagnosticsStore struct {
 	mu sync.Mutex
 
-	recent   []projectioncontract.ContinuationDiagnostic
+	recent   []projectioncontract.ExecutionAdmissionFailureDiagnostic
 	attempts map[string]int
 
-	commandCounts         map[labelPair]uint64
-	continuationFailures  map[labelPair]uint64
-	continuationNoActions map[labelPair]uint64
-	continuationCompleted map[labelPair]uint64
-
-	watchdogTimerRegistrations uint64
-	watchdogTicks              uint64
-	watchdogLatestTickAt       time.Time
-	watchdogLatestDuration     time.Duration
-	watchdogLatestError        string
-	watchdogLastErrorAt        time.Time
-	watchdogStaleRecoveries    map[labelPair]uint64
-	watchdogStaleRecoveryRuns  uint64
+	commandCounts     map[labelPair]uint64
+	admissionFailures map[labelPair]uint64
 }
 
 type labelPair struct {
@@ -85,12 +55,9 @@ type labelPair struct {
 
 func newSchedulerDiagnosticsStore() *schedulerDiagnosticsStore {
 	return &schedulerDiagnosticsStore{
-		attempts:                map[string]int{},
-		commandCounts:           map[labelPair]uint64{},
-		continuationFailures:    map[labelPair]uint64{},
-		continuationNoActions:   map[labelPair]uint64{},
-		continuationCompleted:   map[labelPair]uint64{},
-		watchdogStaleRecoveries: map[labelPair]uint64{},
+		attempts:          map[string]int{},
+		commandCounts:     map[labelPair]uint64{},
+		admissionFailures: map[labelPair]uint64{},
 	}
 }
 
@@ -105,34 +72,26 @@ func (s *schedulerDiagnosticsStore) recordCommand(kind, result string) {
 	s.commandCounts[labelPair{Left: kind, Right: result}]++
 }
 
-func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnosticInput) projectioncontract.ContinuationDiagnostic {
+func (s *schedulerDiagnosticsStore) recordAdmissionFailure(input schedulerDiagnosticInput) projectioncontract.ExecutionAdmissionFailureDiagnostic {
 	if s == nil {
-		return projectioncontract.ContinuationDiagnostic{}
+		return projectioncontract.ExecutionAdmissionFailureDiagnostic{}
 	}
-	item := projectioncontract.ContinuationDiagnostic{
+	item := projectioncontract.ExecutionAdmissionFailureDiagnostic{
 		WorkspaceID:        strings.TrimSpace(input.WorkspaceID),
 		RunID:              strings.TrimSpace(input.RunID),
 		Kind:               schedulerLabel(input.Kind, "unknown"),
-		State:              schedulerLabel(input.State, schedulerDiagnosticStateFailed),
+		Outcome:            schedulerLabel(input.Outcome, schedulerDiagnosticOutcomeAdmissionRejected),
 		Reason:             schedulerLabel(input.Reason, ""),
 		Detail:             truncateSchedulerDetail(input.Detail),
-		Readback:           cloneContinuationReadbackDiagnostic(input.Readback),
 		Recoverability:     strings.TrimSpace(input.Recoverability),
 		RecommendedActions: compactSchedulerActions(input.RecommendedActions),
 		DedupeKey:          strings.TrimSpace(input.DedupeKey),
 		OccurredAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		Source:             schedulerDiagnosticSource,
 	}
-	if item.Recoverability == "" {
-		item.Recoverability = schedulerRecoverabilityFor(item.State, item.Reason)
-	}
 	if item.DedupeKey == "" {
 		item.DedupeKey = schedulerDedupeKey(item.WorkspaceID, item.RunID, item.Kind, item.Reason)
 	}
-	if len(item.RecommendedActions) == 0 {
-		item.RecommendedActions = schedulerRecommendedActions(item.Kind, item.Reason, item.Recoverability)
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if item.DedupeKey != "" {
@@ -145,56 +104,8 @@ func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnostic
 		s.recent = s.recent[:schedulerDiagnosticLimit]
 	}
 	pair := labelPair{Left: item.Kind, Right: item.Reason}
-	switch item.State {
-	case schedulerDiagnosticStateFailed:
-		s.continuationFailures[pair]++
-	case schedulerDiagnosticStateNoActionNeeded:
-		s.continuationNoActions[pair]++
-	case schedulerDiagnosticStateCompleted:
-		s.continuationCompleted[pair]++
-	}
+	s.admissionFailures[pair]++
 	return item
-}
-
-func (s *schedulerDiagnosticsStore) recordWatchdogTimerRegistration() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.watchdogTimerRegistrations++
-}
-
-func (s *schedulerDiagnosticsStore) recordWatchdogTick(start time.Time, duration time.Duration, err error) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.watchdogTicks++
-	if start.IsZero() {
-		start = time.Now().UTC()
-	}
-	s.watchdogLatestTickAt = start.UTC()
-	s.watchdogLatestDuration = duration
-	if err != nil {
-		s.watchdogLatestError = truncateSchedulerDetail(err.Error())
-		s.watchdogLastErrorAt = time.Now().UTC()
-	} else {
-		s.watchdogLatestError = ""
-	}
-}
-
-func (s *schedulerDiagnosticsStore) recordStaleRuntimeGapRecovery(gap, safety string, recoveredRuns int) {
-	if s == nil || recoveredRuns <= 0 {
-		return
-	}
-	gap = schedulerLabel(gap, "stale_dispatched")
-	safety = schedulerLabel(safety, "runtime_recovery_policy")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.watchdogStaleRecoveries[labelPair{Left: gap, Right: safety}] += uint64(recoveredRuns)
-	s.watchdogStaleRecoveryRuns += uint64(recoveredRuns)
 }
 
 func (s *schedulerDiagnosticsStore) snapshot(workspaceID, runID string) *projectioncontract.SchedulerDiagnostics {
@@ -207,31 +118,20 @@ func (s *schedulerDiagnosticsStore) snapshot(workspaceID, runID string) *project
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var recent []projectioncontract.ContinuationDiagnostic
+	var recent []projectioncontract.ExecutionAdmissionFailureDiagnostic
 	for i := len(s.recent) - 1; i >= 0; i-- {
 		item := s.recent[i]
 		if schedulerDiagnosticMatches(item, workspaceID, runID) {
-			recent = append(recent, cloneContinuationDiagnostic(item))
+			recent = append(recent, cloneExecutionAdmissionFailureDiagnostic(item))
 		}
 	}
-	ret := &projectioncontract.SchedulerDiagnostics{
-		Watchdog: projectioncontract.WatchdogDiagnostics{
-			TimerRegistrations: s.watchdogTimerRegistrations,
-			LatestTickAt:       formatSchedulerTime(s.watchdogLatestTickAt),
-			LatestDurationMs:   int64(s.watchdogLatestDuration / time.Millisecond),
-			LatestError:        s.watchdogLatestError,
-			StaleRecoveryRuns:  s.watchdogStaleRecoveryRuns,
-		},
-		RecentContinuations: recent,
-	}
+	ret := &projectioncontract.SchedulerDiagnostics{RecentAdmissionFailures: recent}
 	if len(recent) > 0 {
 		latest := recent[0]
-		ret.LatestContinuation = &latest
-		ret.ContinuationFailureCounts = continuationCountsFromRecent(recent, schedulerDiagnosticStateFailed)
-		ret.ContinuationNoActionCounts = continuationCountsFromRecent(recent, schedulerDiagnosticStateNoActionNeeded)
-		ret.ContinuationCompletedCounts = continuationCountsFromRecent(recent, schedulerDiagnosticStateCompleted)
+		ret.LatestAdmissionFailure = &latest
+		ret.AdmissionFailureCounts = admissionFailureCountsFromRecent(recent)
 	}
-	if ret.Watchdog.LatestTickAt == "" && len(recent) == 0 && workspaceID != "" {
+	if len(recent) == 0 && workspaceID != "" {
 		return nil
 	}
 	return ret
@@ -244,26 +144,14 @@ func (s *schedulerDiagnosticsStore) renderMetrics() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var b strings.Builder
-	b.WriteString("# TYPE workorch_scheduler_commands_total counter\n")
-	writeLabelPairMetrics(&b, "workorch_scheduler_commands_total", "kind", "result", s.commandCounts)
-	b.WriteString("# TYPE workorch_scheduler_continuation_failures_total counter\n")
-	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_failures_total", "kind", "reason", s.continuationFailures)
-	b.WriteString("# TYPE workorch_scheduler_continuation_no_action_total counter\n")
-	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_no_action_total", "kind", "reason", s.continuationNoActions)
-	b.WriteString("# TYPE workorch_watchdog_timer_registrations_total counter\n")
-	b.WriteString(fmt.Sprintf("workorch_watchdog_timer_registrations_total %d\n", s.watchdogTimerRegistrations))
-	b.WriteString("# TYPE workorch_watchdog_interval_seconds gauge\n")
-	b.WriteString(fmt.Sprintf("workorch_watchdog_interval_seconds %.0f\n", runWatchdogInterval.Seconds()))
-	b.WriteString("# TYPE workorch_watchdog_ticks_total counter\n")
-	b.WriteString(fmt.Sprintf("workorch_watchdog_ticks_total %d\n", s.watchdogTicks))
-	b.WriteString("# TYPE workorch_watchdog_last_error_timestamp_seconds gauge\n")
-	b.WriteString(fmt.Sprintf("workorch_watchdog_last_error_timestamp_seconds %d\n", schedulerUnixSeconds(s.watchdogLastErrorAt)))
-	b.WriteString("# TYPE workorch_watchdog_stale_runtime_gap_recoveries_total counter\n")
-	writeLabelPairMetrics(&b, "workorch_watchdog_stale_runtime_gap_recoveries_total", "gap", "safety", s.watchdogStaleRecoveries)
+	b.WriteString("# TYPE workorch_execution_admission_commands_total counter\n")
+	writeLabelPairMetrics(&b, "workorch_execution_admission_commands_total", "kind", "result", s.commandCounts)
+	b.WriteString("# TYPE workorch_execution_admission_failures_total counter\n")
+	writeLabelPairMetrics(&b, "workorch_execution_admission_failures_total", "kind", "reason", s.admissionFailures)
 	return b.String()
 }
 
-func schedulerDiagnosticMatches(item projectioncontract.ContinuationDiagnostic, workspaceID, runID string) bool {
+func schedulerDiagnosticMatches(item projectioncontract.ExecutionAdmissionFailureDiagnostic, workspaceID, runID string) bool {
 	if workspaceID != "" && strings.TrimSpace(item.WorkspaceID) != workspaceID {
 		return false
 	}
@@ -273,10 +161,10 @@ func schedulerDiagnosticMatches(item projectioncontract.ContinuationDiagnostic, 
 	return true
 }
 
-func continuationCountsFromRecent(items []projectioncontract.ContinuationDiagnostic, state string) []projectioncontract.ContinuationDiagnosticCount {
+func admissionFailureCountsFromRecent(items []projectioncontract.ExecutionAdmissionFailureDiagnostic) []projectioncontract.ExecutionAdmissionFailureCount {
 	counts := map[labelPair]uint64{}
 	for _, item := range items {
-		if item.State != state {
+		if item.Outcome != schedulerDiagnosticOutcomeAdmissionRejected {
 			continue
 		}
 		counts[labelPair{Left: item.Kind, Right: item.Reason}]++
@@ -285,9 +173,9 @@ func continuationCountsFromRecent(items []projectioncontract.ContinuationDiagnos
 		return nil
 	}
 	keys := sortedLabelPairs(counts)
-	ret := make([]projectioncontract.ContinuationDiagnosticCount, 0, len(keys))
+	ret := make([]projectioncontract.ExecutionAdmissionFailureCount, 0, len(keys))
 	for _, key := range keys {
-		ret = append(ret, projectioncontract.ContinuationDiagnosticCount{
+		ret = append(ret, projectioncontract.ExecutionAdmissionFailureCount{
 			Kind:   key.Left,
 			Reason: key.Right,
 			Count:  counts[key],
@@ -324,18 +212,9 @@ func sortedLabelPairs(values map[labelPair]uint64) []labelPair {
 	return keys
 }
 
-func cloneContinuationDiagnostic(item projectioncontract.ContinuationDiagnostic) projectioncontract.ContinuationDiagnostic {
+func cloneExecutionAdmissionFailureDiagnostic(item projectioncontract.ExecutionAdmissionFailureDiagnostic) projectioncontract.ExecutionAdmissionFailureDiagnostic {
 	item.RecommendedActions = append([]string(nil), item.RecommendedActions...)
-	item.Readback = cloneContinuationReadbackDiagnostic(item.Readback)
 	return item
-}
-
-func cloneContinuationReadbackDiagnostic(input *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
-	if input == nil {
-		return nil
-	}
-	ret := *input
-	return &ret
 }
 
 func compactSchedulerActions(input []string) []string {
@@ -356,45 +235,6 @@ func compactSchedulerActions(input []string) []string {
 		ret = append(ret, item)
 	}
 	return ret
-}
-
-func schedulerRecommendedActions(kind, reason, recoverability string) []string {
-	if recoverability == schedulerRecoverabilityNoAction {
-		return nil
-	}
-	switch kind {
-	case schedulerKindWorkspaceRestart:
-		return []string{"workspace_restart"}
-	case schedulerKindWorkspaceActivation:
-		if reason == schedulerReasonWorkspaceActivationFailed {
-			// Bootstrap compilation happens before a Run exists. Resume cannot
-			// make an incomplete profile/definition evidence contract executable;
-			// surface the repair boundary and the only valid subsequent command.
-			return []string{"repair_profile_or_definition", "workspace_restart"}
-		}
-		return []string{"run_resume"}
-	case schedulerKindRunContinuation:
-		return []string{"run_resume"}
-	default:
-		if reason == schedulerReasonRunSlotUnavailable || reason == schedulerReasonServiceShuttingDown {
-			return []string{"run_resume", "workspace_restart"}
-		}
-		return nil
-	}
-}
-
-func schedulerRecoverabilityFor(state, reason string) string {
-	if state == schedulerDiagnosticStateNoActionNeeded {
-		return schedulerRecoverabilityNoAction
-	}
-	switch reason {
-	case schedulerReasonWorkspaceNotEligible, schedulerReasonRunNotEligible:
-		return schedulerRecoverabilityNoAction
-	case schedulerReasonWorkspaceActivationFailed, schedulerReasonOwnerCommandFailed, schedulerReasonBackgroundFailed, schedulerReasonOwnerReadbackNotAdvanced:
-		return schedulerRecoverabilityInspect
-	default:
-		return schedulerRecoverabilityManualRetry
-	}
 }
 
 func schedulerDedupeKey(workspaceID, runID, kind, reason string) string {
@@ -426,18 +266,4 @@ func truncateSchedulerDetail(value string) string {
 	}
 	runes := []rune(value)
 	return string(runes[:schedulerDetailLimit])
-}
-
-func formatSchedulerTime(value time.Time) string {
-	if value.IsZero() {
-		return ""
-	}
-	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func schedulerUnixSeconds(value time.Time) int64 {
-	if value.IsZero() {
-		return 0
-	}
-	return value.Unix()
 }

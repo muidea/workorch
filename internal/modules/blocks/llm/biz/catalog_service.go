@@ -130,9 +130,7 @@ func (s *CatalogService) GetCatalog(ctx context.Context, cfg workorchconfig.LLMC
 	if !forceRefresh {
 		if entry := s.entries[key]; entry != nil {
 			if now.Before(entry.catalog.ExpiresAt) {
-				catalog := cloneCatalog(entry.catalog)
-				catalog.State = llmmodels.ProviderCatalogStateFresh
-				catalog.Stale = false
+				catalog := freshCatalogObservation(entry.catalog)
 				s.mu.Unlock()
 				return catalog, nil
 			}
@@ -155,7 +153,7 @@ func (s *CatalogService) GetCatalog(ctx context.Context, cfg workorchconfig.LLMC
 			if call.key != key {
 				return s.fallbackOrError(cfg, key, fmt.Errorf("%w: catalog refresh key mismatch", common.ErrInvalidArgument))
 			}
-			return cloneCatalog(call.catalog), nil
+			return freshCatalogObservation(call.catalog), nil
 		}
 	}
 	call := &catalogRefreshCall{key: key, done: make(chan struct{})}
@@ -164,6 +162,7 @@ func (s *CatalogService) GetCatalog(ctx context.Context, cfg workorchconfig.LLMC
 
 	catalog, refreshErr := s.fetchCatalog(ctx, cfg)
 	s.mu.Lock()
+	catalog = catalogCacheValue(catalog)
 	call.catalog = catalog
 	call.err = refreshErr
 	close(call.done)
@@ -177,7 +176,7 @@ func (s *CatalogService) GetCatalog(ctx context.Context, cfg workorchconfig.LLMC
 		if call.key != key {
 			return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: catalog refresh result discarded due to key change", common.ErrInvalidArgument)
 		}
-		return cloneCatalog(catalog), nil
+		return freshCatalogObservation(catalog), nil
 	}
 	s.mu.Unlock()
 	return s.fallbackOrError(cfg, key, refreshErr)
@@ -188,31 +187,14 @@ func (s *CatalogService) fallbackOrError(cfg workorchconfig.LLMConfig, key catal
 	defer s.mu.Unlock()
 	entry := s.entries[key]
 	if entry == nil || entry.key != key {
-		return llmmodels.ProviderModelCatalog{
-			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
-			State:        llmmodels.ProviderCatalogStateUnavailable,
-			Source:       "ai_proxy",
-			ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
-			ErrorMessage: redactCatalogError(refreshErr, cfg.AIProxy.APIKey),
-		}, refreshErr
+		return unavailableCatalogObservation(refreshErr, cfg.AIProxy.APIKey), refreshErr
 	}
 	maxStaleAge, _ := time.ParseDuration(cfg.AIProxy.CatalogMaxStaleAge)
 	if s.now().Sub(entry.catalog.FetchedAt) > maxStaleAge {
 		delete(s.entries, key)
-		return llmmodels.ProviderModelCatalog{
-			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
-			State:        llmmodels.ProviderCatalogStateUnavailable,
-			Source:       "ai_proxy",
-			ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
-			ErrorMessage: redactCatalogError(refreshErr, cfg.AIProxy.APIKey),
-		}, refreshErr
+		return unavailableCatalogObservation(refreshErr, cfg.AIProxy.APIKey), refreshErr
 	}
-	catalog := cloneCatalog(entry.catalog)
-	catalog.Stale = true
-	catalog.State = llmmodels.ProviderCatalogStateStale
-	catalog.ErrorCode = string(llmmodels.ProviderModelFailureCatalogUnavailable)
-	catalog.ErrorMessage = redactCatalogError(refreshErr, cfg.AIProxy.APIKey)
-	return catalog, nil
+	return staleCatalogObservation(entry.catalog, refreshErr, cfg.AIProxy.APIKey), nil
 }
 
 func (s *CatalogService) fetchCatalog(ctx context.Context, cfg workorchconfig.LLMConfig) (llmmodels.ProviderModelCatalog, error) {
@@ -357,9 +339,7 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		Revision:   catalogRevision(runtimecontract.BuiltinAIProxyProviderID, models),
 		FetchedAt:  now,
 		ExpiresAt:  now.Add(ttl),
-		Stale:      false,
 		Source:     "ai_proxy",
-		State:      llmmodels.ProviderCatalogStateFresh,
 	}
 	return catalog, nil
 }
@@ -477,6 +457,44 @@ func cloneCatalog(catalog llmmodels.ProviderModelCatalog) llmmodels.ProviderMode
 		catalog.Models[idx].Reasoning = catalog.Models[idx].Reasoning.Clone()
 	}
 	return catalog
+}
+
+// catalogCacheValue strips read-observation fields before a catalog snapshot
+// enters the LLM owner's cache. Cache replacement is ordinary resource
+// ownership; fresh/stale/unavailable remain pure observations, not states that
+// can be transitioned by another component.
+func catalogCacheValue(catalog llmmodels.ProviderModelCatalog) llmmodels.ProviderModelCatalog {
+	catalog = cloneCatalog(catalog)
+	catalog.Stale = false
+	catalog.State = ""
+	catalog.ErrorCode = ""
+	catalog.ErrorMessage = ""
+	return catalog
+}
+
+func freshCatalogObservation(catalog llmmodels.ProviderModelCatalog) llmmodels.ProviderModelCatalog {
+	catalog = catalogCacheValue(catalog)
+	catalog.State = llmmodels.ProviderCatalogStateFresh
+	return catalog
+}
+
+func staleCatalogObservation(catalog llmmodels.ProviderModelCatalog, refreshErr error, secrets ...string) llmmodels.ProviderModelCatalog {
+	catalog = catalogCacheValue(catalog)
+	catalog.Stale = true
+	catalog.State = llmmodels.ProviderCatalogStateStale
+	catalog.ErrorCode = string(llmmodels.ProviderModelFailureCatalogUnavailable)
+	catalog.ErrorMessage = redactCatalogError(refreshErr, secrets...)
+	return catalog
+}
+
+func unavailableCatalogObservation(refreshErr error, secrets ...string) llmmodels.ProviderModelCatalog {
+	return llmmodels.ProviderModelCatalog{
+		ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
+		State:        llmmodels.ProviderCatalogStateUnavailable,
+		Source:       "ai_proxy",
+		ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
+		ErrorMessage: redactCatalogError(refreshErr, secrets...),
+	}
 }
 
 func readLimitedErrorBody(r io.Reader, limit int64, secrets ...string) string {

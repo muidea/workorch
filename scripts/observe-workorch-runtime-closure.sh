@@ -546,20 +546,20 @@ def metric_sample_sum(samples, name, labels=None):
             total += float(sample.get("value") or 0)
     return total
 
-def scheduler_diagnostics_from_payload(payload, scope):
+def admission_failure_diagnostics_from_payload(payload, scope):
     if not payload:
         return []
     ret = []
-    latest = payload.get("latestContinuation")
+    latest = payload.get("latestAdmissionFailure")
     if isinstance(latest, dict):
         item = dict(latest)
-        item["scope"] = f"{scope}.latestContinuation"
+        item["scope"] = f"{scope}.latestAdmissionFailure"
         ret.append(item)
-    for idx, raw in enumerate(payload.get("recentContinuations") or []):
+    for idx, raw in enumerate(payload.get("recentAdmissionFailures") or []):
         if not isinstance(raw, dict):
             continue
         item = dict(raw)
-        item["scope"] = f"{scope}.recentContinuations[{idx}]"
+        item["scope"] = f"{scope}.recentAdmissionFailures[{idx}]"
         ret.append(item)
     return ret
 
@@ -1051,7 +1051,7 @@ if min_workspace_count > 0 and len(workspace_ids) < min_workspace_count:
         "set WORKORCH_OBSERVE_WORKSPACE_IDS or WORKORCH_OBSERVE_AUTO_SNAPSHOT_LIMIT"
     )
 readyz = read_json(artifact_dir / "readyz.json")
-scheduler_diagnostics_observed = scheduler_diagnostics_from_payload(readyz.get("diagnostics") or {}, "readyz")
+admission_failure_diagnostics_observed = admission_failure_diagnostics_from_payload(readyz.get("diagnostics") or {}, "readyz")
 if readyz.get("status") != "ready":
     errors.append(f"readyz status = {readyz.get('status')!r}, want ready")
 projection = readyz.get("projection") or {}
@@ -1109,8 +1109,8 @@ for workspace_id in workspace_ids:
         workspace_summaries.append(live_summary)
         goal_convergence.append(evaluate_goal_convergence(live_summary))
         workspace_progress.append(evaluate_workspace_progress(live_summary))
-        scheduler_diagnostics_observed.extend(
-            scheduler_diagnostics_from_payload(snapshot.get("schedulerDiagnostics") or {}, f"workspace-snapshot[{workspace_id}]")
+        admission_failure_diagnostics_observed.extend(
+            admission_failure_diagnostics_from_payload(snapshot.get("schedulerDiagnostics") or {}, f"workspace-snapshot[{workspace_id}]")
         )
         snapshot_display = {
             "workspaceId": workspace_id,
@@ -1188,17 +1188,26 @@ required_metric_markers = [
     "workorch_workspace_projection_active_run_heartbeat_age_seconds_max",
     "workorch_workspace_projection_stalled_runs",
     "workorch_workspace_projection_ineffective_retry_runs",
+    "workorch_execution_admission_commands_total",
+    "workorch_execution_admission_failures_total",
+]
+for marker in required_metric_markers:
+    if marker not in metrics_text:
+        errors.append(f"metrics missing {marker}")
+
+retired_application_state_metric_markers = [
     "workorch_scheduler_commands_total",
     "workorch_scheduler_continuation_failures_total",
     "workorch_scheduler_continuation_no_action_total",
+    "workorch_watchdog_timer_registrations_total",
     "workorch_watchdog_interval_seconds",
     "workorch_watchdog_ticks_total",
     "workorch_watchdog_last_error_timestamp_seconds",
     "workorch_watchdog_stale_runtime_gap_recoveries_total",
 ]
-for marker in required_metric_markers:
-    if marker not in metrics_text:
-        errors.append(f"metrics missing {marker}")
+for marker in retired_application_state_metric_markers:
+    if marker in metrics_text:
+        errors.append(f"retired application scheduler/watchdog metric is still exposed: {marker}")
 
 optional_metric_groups = [
     {
@@ -1225,11 +1234,6 @@ optional_metric_groups = [
             "workorch_runtime_heartbeat_timer_start_failures_total",
         ],
         "required": bool(str(max_runtime_event_publish_failures_delta or "").strip()),
-    },
-    {
-        "name": "watchdogRegistration",
-        "markers": ["workorch_watchdog_timer_registrations_total"],
-        "required": bool_env("WORKORCH_OBSERVE_REQUIRE_WATCHDOG_REGISTRATION_METRIC", False),
     },
 ]
 optional_metric_availability = {}
@@ -1352,10 +1356,9 @@ replan_continuation_no_action_delta = labeled_metric_delta(
     "workorch_scheduler_continuation_no_action_total",
     {"kind": "replan_continuation"},
 )
-watchdog_ticks_delta = metric_delta("workorch_watchdog_ticks_total")
-watchdog_stale_recovery_delta = labeled_metric_delta("workorch_watchdog_stale_runtime_gap_recoveries_total")
+legacy_watchdog_stale_recovery_delta = labeled_metric_delta("workorch_watchdog_stale_runtime_gap_recoveries_total")
 governance_scheduler_diagnostics = [
-    item for item in scheduler_diagnostics_observed
+    item for item in admission_failure_diagnostics_observed
     if item.get("kind") in {"governance_continuation", "replan_continuation"}
 ]
 forbidden_application_continuation_metric_delta = (
@@ -1382,7 +1385,7 @@ governance_continuation_main_path = {
     "replanContinuationFailureDelta": replan_continuation_failure_delta,
     "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
     "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
-    "watchdogStaleRecoveryDelta": watchdog_stale_recovery_delta,
+    "legacyWatchdogStaleRecoveryDelta": legacy_watchdog_stale_recovery_delta,
     "diagnosticItems": governance_scheduler_diagnostics,
     "forbiddenApplicationSchedulerMetricDelta": forbidden_application_continuation_metric_delta,
     "forbiddenApplicationSchedulerObserved": forbidden_application_continuation_metric_delta > 0 or len(governance_scheduler_diagnostics) > 0,
@@ -1398,10 +1401,10 @@ if require_governance_continuation and governance_resolution_delta <= 0:
     errors.append(
         "WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION is enabled but no owner governance resolution was observed"
     )
-if governance_resolution_delta > 0 and watchdog_stale_recovery_delta > 0:
+if governance_resolution_delta > 0 and legacy_watchdog_stale_recovery_delta > 0:
     governance_continuation_main_path["hiddenWatchdogCompensationSuspected"] = True
     errors.append(
-        "governance continuation appears to rely on forbidden watchdog stale-runtime recovery"
+        "governance continuation appears to rely on retired watchdog stale-runtime recovery"
     )
 if governance_continuation_main_path["triggeredResolution"]:
     governance_continuation_main_path["requestArtifact"] = "governance-resolution-request.json"
@@ -1845,8 +1848,6 @@ summary = {
         "staleDispatchedStepMinAgeSeconds": stale_dispatched_step_min_age_seconds,
         "serverMaxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs", 0),
         "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight", 0),
-        "watchdogTimerRegistrations": metrics.get("workorch_watchdog_timer_registrations_total", 0),
-        "watchdogIntervalSeconds": metrics.get("workorch_watchdog_interval_seconds", 0),
         "projectionPendingRebuilds": pending_rebuilds,
         "projectionScheduleDroppedDelta": schedule_dropped_delta,
         "projectionRebuildDelta": {
@@ -1892,8 +1893,7 @@ summary = {
             "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
             "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
             "forbiddenApplicationContinuationMetricDelta": forbidden_application_continuation_metric_delta,
-            "watchdogTicksDelta": watchdog_ticks_delta,
-            "watchdogStaleRecoveryDelta": watchdog_stale_recovery_delta,
+            "legacyWatchdogStaleRecoveryDelta": legacy_watchdog_stale_recovery_delta,
         },
     },
     "governanceContinuationMainPath": governance_continuation_main_path,

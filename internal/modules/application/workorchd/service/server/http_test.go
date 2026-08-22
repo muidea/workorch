@@ -660,15 +660,13 @@ func TestReadyzNativeRouteDoesNotExposeEventHub(t *testing.T) {
 
 func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.schedulerDiagnostics.recordWatchdogTimerRegistration()
-	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+	state.schedulerDiagnostics.recordAdmissionFailure(schedulerDiagnosticInput{
 		WorkspaceID:    "ws-readyz-diagnostics",
-		RunID:          "run-readyz-diagnostics",
-		Kind:           schedulerKindRunContinuation,
-		State:          schedulerDiagnosticStateFailed,
-		Reason:         schedulerReasonOwnerCommandFailed,
+		Kind:           schedulerKindWorkspaceActivation,
+		Outcome:        schedulerDiagnosticOutcomeAdmissionRejected,
+		Reason:         schedulerReasonWorkspaceActivationFailed,
 		Detail:         "owner command returned an explicit failure",
-		Recoverability: schedulerRecoverabilityManualRetry,
+		Recoverability: schedulerRecoverabilityInspect,
 	})
 	handler := newMuxWithState(state)
 	waitForReconciledWorkspaceProjection(t, state)
@@ -687,19 +685,15 @@ func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	if body.Status != "ready" {
 		t.Fatalf("readyz status = %q, want ready", body.Status)
 	}
-	if body.Diagnostics == nil || body.Diagnostics.LatestContinuation == nil {
-		t.Fatalf("readyz diagnostics = %+v, want latest scheduler continuation", body.Diagnostics)
+	if body.Diagnostics == nil || body.Diagnostics.LatestAdmissionFailure == nil {
+		t.Fatalf("readyz diagnostics = %+v, want latest admission failure", body.Diagnostics)
 	}
-	if body.Diagnostics.Watchdog.TimerRegistrations != 1 {
-		t.Fatalf("readyz watchdog timer registrations = %d, want 1", body.Diagnostics.Watchdog.TimerRegistrations)
-	}
-	latest := body.Diagnostics.LatestContinuation
+	latest := body.Diagnostics.LatestAdmissionFailure
 	if latest.WorkspaceID != "ws-readyz-diagnostics" ||
-		latest.RunID != "run-readyz-diagnostics" ||
-		latest.Kind != schedulerKindRunContinuation ||
-		latest.State != schedulerDiagnosticStateFailed ||
-		latest.Reason != schedulerReasonOwnerCommandFailed {
-		t.Fatalf("latest diagnostics = %+v, want recorded run continuation failure", latest)
+		latest.Kind != schedulerKindWorkspaceActivation ||
+		latest.Outcome != schedulerDiagnosticOutcomeAdmissionRejected ||
+		latest.Reason != schedulerReasonWorkspaceActivationFailed {
+		t.Fatalf("latest diagnostics = %+v, want recorded admission failure", latest)
 	}
 }
 
@@ -5690,11 +5684,11 @@ func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "rejected" || snapshot.RunCommand.RequestID != requestID || !strings.Contains(snapshot.RunCommand.Error, "provider target is not ready") {
 		t.Fatalf("run command = %+v, want rejected command with exact activation error", snapshot.RunCommand)
 	}
-	if snapshot.SchedulerDiagnostics == nil || snapshot.SchedulerDiagnostics.LatestContinuation == nil {
+	if snapshot.SchedulerDiagnostics == nil || snapshot.SchedulerDiagnostics.LatestAdmissionFailure == nil {
 		t.Fatalf("scheduler diagnostics = %+v, want workspace activation failure", snapshot.SchedulerDiagnostics)
 	}
-	latest := snapshot.SchedulerDiagnostics.LatestContinuation
-	if latest.Kind != schedulerKindWorkspaceActivation || latest.State != schedulerDiagnosticStateFailed || latest.Reason != schedulerReasonWorkspaceActivationFailed || !strings.Contains(latest.Detail, "provider target is not ready") {
+	latest := snapshot.SchedulerDiagnostics.LatestAdmissionFailure
+	if latest.Kind != schedulerKindWorkspaceActivation || latest.Outcome != schedulerDiagnosticOutcomeAdmissionRejected || latest.Reason != schedulerReasonWorkspaceActivationFailed || !strings.Contains(latest.Detail, "provider target is not ready") {
 		t.Fatalf("latest scheduler diagnostic = %+v, want classified exact activation failure", latest)
 	}
 }
@@ -6038,26 +6032,14 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 
 func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.schedulerDiagnostics.recordCommand(schedulerKindRunContinuation, "accepted")
-	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+	state.schedulerDiagnostics.recordCommand(schedulerKindWorkspaceRun, "accepted")
+	state.schedulerDiagnostics.recordAdmissionFailure(schedulerDiagnosticInput{
 		WorkspaceID: "ws-metrics-diagnostics",
-		RunID:       "run-metrics-diagnostics",
-		Kind:        schedulerKindRunContinuation,
-		State:       schedulerDiagnosticStateFailed,
-		Reason:      schedulerReasonOwnerCommandFailed,
+		Kind:        schedulerKindWorkspaceActivation,
+		Outcome:     schedulerDiagnosticOutcomeAdmissionRejected,
+		Reason:      schedulerReasonWorkspaceActivationFailed,
 		Detail:      "owner command failed after accepted scheduler event",
 	})
-	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
-		WorkspaceID: "ws-metrics-diagnostics",
-		RunID:       "run-metrics-diagnostics",
-		Kind:        schedulerKindRunContinuation,
-		State:       schedulerDiagnosticStateNoActionNeeded,
-		Reason:      schedulerReasonRunNotEligible,
-		Detail:      "run no longer needs continuation",
-	})
-	state.schedulerDiagnostics.recordWatchdogTimerRegistration()
-	state.schedulerDiagnostics.recordWatchdogTick(time.Now().UTC(), 25*time.Millisecond, errors.New("watchdog failed"))
-	state.schedulerDiagnostics.recordStaleRuntimeGapRecovery("stale_dispatched", "runtime_recovery_policy", 2)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -6068,14 +6050,8 @@ func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`workorch_scheduler_commands_total{kind="run_continuation",result="accepted"} 1`,
-		`workorch_scheduler_continuation_failures_total{kind="run_continuation",reason="owner_command_failed"} 1`,
-		`workorch_scheduler_continuation_no_action_total{kind="run_continuation",reason="run_not_eligible"} 1`,
-		`workorch_watchdog_timer_registrations_total 1`,
-		`workorch_watchdog_interval_seconds 0`,
-		`workorch_watchdog_ticks_total 1`,
-		`workorch_watchdog_last_error_timestamp_seconds`,
-		`workorch_watchdog_stale_runtime_gap_recoveries_total{gap="stale_dispatched",safety="runtime_recovery_policy"} 2`,
+		`workorch_execution_admission_commands_total{kind="workspace_run",result="accepted"} 1`,
+		`workorch_execution_admission_failures_total{kind="workspace_activation",reason="workspace_activation_failed"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)

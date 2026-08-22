@@ -90,6 +90,38 @@ func TestRuntimeSemanticProofBatchCorrectionIsBoundToExactBatch(t *testing.T) {
 	}
 }
 
+func TestRuntimeSemanticCoverageOrderCorrectionIsBoundToExactManifest(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	violation := RuntimeSemanticContractViolation{
+		Kind: RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.coverageOrder", Actual: "incomplete_order",
+		RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	rejection := *semanticContractTestDiagnostic()
+	rejection.SemanticViolations = []RuntimeSemanticContractViolation{violation}
+	directive := RuntimeSemanticCorrectionDirective{
+		SchemaVersion: RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+		PlanStep:      RuntimeSemanticPlanStepCoverageOrder, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		StablePrefixHash: "prefix-1", SourceRejectionHash: StableRuntimeSemanticPlanCorrectionHash(rejection), Attempt: 1,
+		Violations: []RuntimeSemanticContractViolation{violation},
+	}
+	directive.Hash = StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	if err := directive.ValidateAgainst(manifest, rejection); err != nil {
+		t.Fatal(err)
+	}
+
+	incomplete := violation
+	incomplete.RequiredCoverageWorkItemIDs = nil
+	if err := incomplete.ValidateAgainstManifest(manifest); err == nil {
+		t.Fatal("coverage-order correction accepted empty manifest coverage")
+	}
+	wrongStep := directive.Clone()
+	wrongStep.PlanStep = RuntimeSemanticPlanStepProofBatch
+	wrongStep.Hash = StableRuntimeSemanticCorrectionDirectiveHash(wrongStep)
+	if err := wrongStep.ValidateAgainst(manifest, rejection); err == nil {
+		t.Fatal("coverage-order correction was accepted outside coverage-order step")
+	}
+}
+
 func TestRuntimeSemanticProposalCorrectionPreservesExactFieldFact(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
 	violation := RuntimeSemanticContractViolation{

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Runtime 生产主链
 
@@ -54,6 +54,12 @@ owner 的 manifest 及其 exact freshness observation，再通过 concrete typed
 返回对该 manifest 当前适用的 recipe，并在自己的 catalog observation 中复制 exact File workspace-tree revision。
 Orchestrator 不解释 manifest path 或 recipe。没有 confirmed recipe 的 `validation/managed_session` 不得进入
 provider-visible allowed operation set。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
+
+coverage-order request 的 closed schema 与 provider instruction 必须一致：`proposals` 是 required field 且只能为 `[]`，
+不能用“不返回 proposals”替代空数组。缺字段、覆盖不全、重复/未知 CWI 等 complete-document 结构错误，由 SM-3 从
+current manifest 合成 typed `coverage_order_document` factual violation，并只允许同 request contract 的 attempt 1；
+proof-batch 的同类结构错误使用 `proof_batch_document`。纠错不修改 Definition/authority、不扩宽 owner catalog、不执行
+operation；attempt 1 再失败才沿既有 typed terminal 收口。
 
 owner operation-admissibility catalog 必须把“可调用 operation”与“当前可作为验证证明的 surface”分开。每个
 `RuntimeValidationSurface` 由对应 capability owner 在一次一致 snapshot 中声明 `ready | prerequisite_required |
