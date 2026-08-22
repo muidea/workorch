@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 功能范围与边界
 
@@ -29,6 +29,10 @@ Governance 与 Orchestrator 没有直接 EventHub I/O。Governance 只向 Decisi
 - Trace identity 由 `WorkspaceID + ItemType + ItemID` 决定；相同原始 Ticket / Approval ID 在不同 Workspace，或 Ticket 与 Approval 使用相同原始 ID，必须得到不同的 trace ID。repository `Upsert` 不允许同一 ID 改绑 Workspace、Run、Step 或 item identity。
 - 幂等检查、每 Run budget 和 shared budget history 查询都必须同时携带 `WorkspaceID`；RunID 或 item ID 不能单独充当全局 scope。
 - owner mutation 前必须依次持久化 `evaluated` 和 `resolving`。任一 trace List / Upsert 失败都 fail-closed，不得继续调用 Decision / Approval owner。
+- worker 只提交 evaluated/escalated/resolution-started/blocked/completed immutable fact；唯一 Governance-private
+  dispatcher 选择 `evaluated | resolving | escalated | blocked | resolved` 并写 repository，worker 不能直接设置 status
+  或调用 Upsert。当前 repository 没有 CAS，因此 dispatcher 使用 owner-local mutex 串行化 load/reduce/upsert；这不授予
+  Governance 修改 Decision、Approval、Run 或 Runtime state 的权限。
 - owner ensure 成功后再把 `resolving` 提交为 `resolved`。若最终 trace 写入失败或进程崩溃，启动恢复从 Governance 全局未完成 trace inventory 读取 `evaluated` / `resolving`，先绑定每条 owner fact 的 Workspace，再查询 Decision / Approval 状态并幂等完成或阻塞 trace；不得重复已提交的 owner mutation。
 - 启动时 Run 恢复使用 Run owner 的进程级全局 `List` inventory，而不是 scoped query。全局 trace query 显式请求至多 `100001` 条并以 `100000` 为硬上限，Run inventory 同样以 `100000` 为硬上限；超限或包含 nil/缺失 identity 的 owner fact 均 fail-closed，本轮不执行任何恢复 mutation。每个有效 Run fact 必须先提供 WorkspaceID，之后才能进行 scoped Ticket / Approval 读取。该 inventory 只发现阻塞项，不授予 Run lifecycle 或 Runtime drive 权限。
 - Governance 通知使用无 acknowledgement 的 EventHub `Post`，因此 trace 必须先持久化再发布；通知丢失不得反向修改已提交的 trace 或 owner 状态。
@@ -57,6 +61,8 @@ Governance 与 Orchestrator 没有直接 EventHub I/O。Governance 只向 Decisi
 
 - [x] Workspace-scoped Ticket / Approval / Run / Goal / DoD owner 读取，以及无 scope identifier 在 owner I/O 前被拒绝。
 - [x] trace 幂等查询、budget 查询失败及 evaluated/resolving precommit 写失败均阻止 owner mutation。
+- [x] trace private-event exactly-one payload、caller-selected status 清除、合法/禁止 transition、terminal duplicate
+  noop 与 late transition 拒绝。
 - [x] owner 已提交但最终 trace 写失败后，从 `resolving` 启动恢复为 `resolved`，且不重复 owner mutation。
 - [x] Workspace / item type 隔离的 trace identity、budget、closed-state 查询，以及 memory/file repository identity rebinding 拒绝。
 - [x] 自动解决、升级、重复 prompt budget、启动发现 Approval 与 Governance 通知 scope 的代表性回归。

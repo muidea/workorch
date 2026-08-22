@@ -32,6 +32,7 @@ func TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification(t *testing.T
 		}
 		if metadata.Layer != eventcontract.LayerOrchestratorPrivateFact ||
 			metadata.StateMachine == "" || metadata.StateMachine == eventcontract.StateMachineNone ||
+			metadata.ReducerOwner != "orchestrator" || metadata.MachineRole != eventcontract.StateMachineRoleOwnerInternalReducer ||
 			metadata.EffectClass == "" || metadata.SourcePolicy == "" ||
 			metadata.ScopePolicy != eventcontract.ScopePolicyWorkspaceRun ||
 			metadata.IdentityPolicy == "" ||
@@ -74,6 +75,9 @@ func TestRuntimeInternalFactsStayWithinStateMachineFences(t *testing.T) {
 		}
 		if metadata.StateMachine == eventcontract.StateMachineSM1 {
 			t.Fatalf("Orchestrator internal fact %s attempts to own an SM-1 transition", name)
+		}
+		if metadata.ReducerOwner != eventcontract.ReducerOwnerForStateMachine(metadata.StateMachine) || metadata.MachineRole != eventcontract.StateMachineRoleOwnerInternalReducer {
+			t.Fatalf("runtime internal fact %s bypasses canonical reducer ownership: %+v", name, metadata)
 		}
 
 		want := map[runtimeInternalEventPayloadClass]eventcontract.StateMachine{

@@ -170,10 +170,10 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		EvidenceRefs:       eval.evidenceRefs,
 		PromptFingerprint:  eval.promptKey,
 		LLMDecisionPreview: eval.promptKey,
-		Status:             autoGovernanceStatusEvaluated,
 		OccurredAt:         nowUTC(),
 	}
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	trace, err = s.persistEvaluatedGovernanceTrace(ctx, trace)
+	if err != nil {
 		return err
 	}
 	if err := s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, ""); err != nil {
@@ -181,9 +181,8 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	}
 
 	if !eval.canAutoResolve {
-		trace.Status = autoGovernanceStatusEscalated
-		trace.OccurredAt = nowUTC()
-		if err := s.traces.Upsert(ctx, trace); err != nil {
+		trace, err = s.escalateGovernanceTrace(ctx, trace, eval.policyBlocked)
+		if err != nil {
 			return err
 		}
 		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
@@ -211,31 +210,19 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 
 	// Persist the exact intended owner mutation before sending it. A restart
 	// can now distinguish an interrupted ensure from a mere evaluation.
-	trace.Status = autoGovernanceStatusResolving
-	trace.Action = "answer"
-	trace.PolicyMatched = eval.policyMatched
-	trace.PolicyBlocked = ""
-	trace.BudgetAfter = eval.budgetAfter
-	trace.Reason = eval.reason
-	trace.OccurredAt = nowUTC()
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	trace, err = s.startGovernanceTraceResolution(ctx, trace, "answer", eval.policyMatched, eval.budgetAfter, eval.reason)
+	if err != nil {
 		return err
 	}
 	if err := s.resolve(ctx, ticket.ID, semantic.ResolutionType, payload); err != nil {
-		trace.Status = autoGovernanceStatusBlocked
-		trace.Action = "escalate"
-		trace.PolicyMatched = ""
-		trace.PolicyBlocked = "resolve_failed"
-		trace.Reason = err.Error()
-		trace.OccurredAt = nowUTC()
-		if traceErr := s.traces.Upsert(ctx, trace); traceErr != nil {
+		trace, traceErr := s.blockGovernanceTrace(ctx, trace, "resolve_failed", err.Error())
+		if traceErr != nil {
 			return traceErr
 		}
 		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
 	}
-	trace.Status = autoGovernanceStatusResolved
-	trace.OccurredAt = nowUTC()
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	trace, err = s.resolveGovernanceTrace(ctx, trace, "answer", "")
+	if err != nil {
 		return err
 	}
 	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
@@ -300,10 +287,10 @@ func (s *Service) processPendingApproval(ctx context.Context, runID common.RunID
 		EvidenceRefs:       eval.evidenceRefs,
 		PromptFingerprint:  eval.promptKey,
 		LLMDecisionPreview: eval.promptKey,
-		Status:             autoGovernanceStatusEvaluated,
 		OccurredAt:         nowUTC(),
 	}
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	trace, err = s.persistEvaluatedGovernanceTrace(ctx, trace)
+	if err != nil {
 		return err
 	}
 	if err := s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, ""); err != nil {
@@ -311,22 +298,15 @@ func (s *Service) processPendingApproval(ctx context.Context, runID common.RunID
 	}
 
 	if !eval.canAutoApprove {
-		trace.Status = autoGovernanceStatusEscalated
-		trace.OccurredAt = nowUTC()
-		if err := s.traces.Upsert(ctx, trace); err != nil {
+		trace, err = s.escalateGovernanceTrace(ctx, trace, eval.policyBlocked)
+		if err != nil {
 			return err
 		}
 		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
 	}
 
-	trace.Status = autoGovernanceStatusResolving
-	trace.Action = "approve"
-	trace.PolicyMatched = eval.policyMatched
-	trace.PolicyBlocked = ""
-	trace.BudgetAfter = eval.budgetAfter
-	trace.Reason = eval.reason
-	trace.OccurredAt = nowUTC()
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	trace, err = s.startGovernanceTraceResolution(ctx, trace, "approve", eval.policyMatched, eval.budgetAfter, eval.reason)
+	if err != nil {
 		return err
 	}
 	if err := s.resolveApproval(ctx, approval.ID, approval.RunID); err != nil {
@@ -340,21 +320,15 @@ func (s *Service) processPendingApproval(ctx context.Context, runID common.RunID
 		if readErr == nil && approvalResolutionDeliveredByGovernance(current) {
 			return s.finalizeRecoveredTrace(ctx, trace, "approve")
 		}
-		trace.Status = autoGovernanceStatusBlocked
-		trace.Action = "escalate"
-		trace.PolicyMatched = ""
-		trace.PolicyBlocked = "resolve_failed"
-		trace.Reason = err.Error()
-		trace.OccurredAt = nowUTC()
-		if traceErr := s.traces.Upsert(ctx, trace); traceErr != nil {
+		trace, traceErr := s.blockGovernanceTrace(ctx, trace, "resolve_failed", err.Error())
+		if traceErr != nil {
 			return traceErr
 		}
 		return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
 	}
 
-	trace.Status = autoGovernanceStatusResolved
-	trace.OccurredAt = nowUTC()
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	trace, err = s.resolveGovernanceTrace(ctx, trace, "approve", "")
+	if err != nil {
 		return err
 	}
 	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
@@ -559,27 +533,18 @@ func approvalResolutionDeliveredByGovernance(item *approvalmodel.Approval) bool 
 }
 
 func (s *Service) finalizeRecoveredTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace, action string) error {
-	trace.Status = autoGovernanceStatusResolved
-	trace.Action = action
-	trace.PolicyBlocked = ""
-	if strings.TrimSpace(trace.Reason) == "" {
-		trace.Reason = "recovered committed auto-governance owner state"
-	}
-	trace.OccurredAt = nowUTC()
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	var err error
+	trace, err = s.resolveGovernanceTrace(ctx, trace, action, "recovered committed auto-governance owner state")
+	if err != nil {
 		return err
 	}
 	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 }
 
 func (s *Service) blockIncompleteTrace(ctx context.Context, trace *governancemodel.AutoGovernanceTrace, reason string) error {
-	trace.Status = autoGovernanceStatusBlocked
-	trace.Action = "escalate"
-	trace.PolicyMatched = ""
-	trace.PolicyBlocked = reason
-	trace.Reason = reason
-	trace.OccurredAt = nowUTC()
-	if err := s.traces.Upsert(ctx, trace); err != nil {
+	var err error
+	trace, err = s.blockGovernanceTrace(ctx, trace, reason, reason)
+	if err != nil {
 		return err
 	}
 	return s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, reason)

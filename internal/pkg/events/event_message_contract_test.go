@@ -77,6 +77,13 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 			if (!opaquePersistence && contract.Metadata.StateMachine == eventcontract.StateMachineNone) || contract.Metadata.ScopePolicy == eventcontract.ScopePolicyDeclared || contract.Metadata.IdentityPolicy == eventcontract.IdentityPolicyTopicOwnerReceiver {
 				t.Fatalf("Runtime-sensitive topic %s lacks explicit SM/scope/identity metadata: %+v", topic, contract.Metadata)
 			}
+			if opaquePersistence {
+				if contract.Metadata.ReducerOwner != "orchestrator" || contract.Metadata.MachineRole != eventcontract.StateMachineRoleOpaquePersistence {
+					t.Fatalf("Runtime opaque persistence topic %s has ambiguous reducer ownership: %+v", topic, contract.Metadata)
+				}
+			} else if contract.Metadata.ReducerOwner != eventcontract.ReducerOwnerForStateMachine(contract.Metadata.StateMachine) || contract.Metadata.MachineRole == eventcontract.StateMachineRoleNone {
+				t.Fatalf("Runtime-sensitive topic %s has ambiguous reducer ownership: %+v", topic, contract.Metadata)
+			}
 		}
 	}
 }

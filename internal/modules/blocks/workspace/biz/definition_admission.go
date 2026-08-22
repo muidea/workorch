@@ -4,9 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
-	"fmt"
-	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -53,169 +50,42 @@ func (m *Biz) handleDefinitionAdmissionCommand(ev magicevent.Event, result magic
 }
 
 func (m *Biz) submitDefinitionAdmissionCandidate(ctx context.Context, cmd workspaceevents.SubmitDefinitionAdmissionCandidateCommand) (workspaceevents.SubmitDefinitionAdmissionCandidateResult, error) {
-	candidate := cmd.Candidate.WithHash()
-	if err := candidate.Validate(); err != nil {
-		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-	}
-	bound, err := common.BindRuntimeWorkspaceContext(ctx, candidate.WorkspaceID)
+	transition, err := m.submitDefinitionAdmissionInternalEvent(ctx, definitionAdmissionInternalEvent{
+		Kind: definitionAdmissionInternalEventCandidateSubmitted, WorkspaceID: cmd.Candidate.WorkspaceID, CandidateSubmission: &cmd,
+	})
 	if err != nil {
 		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, err
 	}
-	for attempt := 0; attempt < 4; attempt++ {
-		workspace, err := m.workspaces.Get(bound, candidate.WorkspaceID)
-		if err != nil {
-			return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, err
-		}
-		currentRevision := uint64(0)
-		for _, existing := range workspace.DefinitionAdmissionCandidates {
-			if existing.CandidateID != candidate.CandidateID {
-				continue
-			}
-			if existing.CandidateRevision == candidate.CandidateRevision {
-				if existing.CandidateHash != candidate.CandidateHash {
-					return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, common.ErrConflict
-				}
-				return workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: existing.Clone(), Disposition: workspaceevents.DefinitionAdmissionCandidateDuplicate}, nil
-			}
-			if existing.CandidateRevision > currentRevision {
-				currentRevision = existing.CandidateRevision
-			}
-		}
-		if cmd.ExpectedCandidateRevision != currentRevision || candidate.CandidateRevision != currentRevision+1 {
-			return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, common.ErrConflict
-		}
-		next := *workspace
-		next.DefinitionAdmissionCandidates = append(cloneDefinitionAdmissionCandidates(workspace.DefinitionAdmissionCandidates), candidate.Clone())
-		if err := m.workspaces.CompareAndSwap(bound, &next, workspace.Revision); err != nil {
-			if errors.Is(err, common.ErrConflict) {
-				continue
-			}
-			return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, err
-		}
-		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{Candidate: candidate.Clone(), Disposition: workspaceevents.DefinitionAdmissionCandidateCreated}, nil
+	if transition.CandidateSubmissionResult == nil {
+		return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
 	}
-	return workspaceevents.SubmitDefinitionAdmissionCandidateResult{}, common.ErrConflict
+	return *transition.CandidateSubmissionResult, nil
 }
 
 func (m *Biz) promoteDefinitionAdmissionCandidate(ctx context.Context, cmd workspaceevents.PromoteDefinitionAdmissionCandidateCommand) (workspaceevents.PromoteDefinitionAdmissionCandidateResult, error) {
-	cmd.CandidateID = strings.TrimSpace(cmd.CandidateID)
-	cmd.CandidateHash = strings.TrimSpace(cmd.CandidateHash)
-	if cmd.WorkspaceID == "" || cmd.CandidateID == "" || cmd.CandidateRevision == 0 || cmd.CandidateHash == "" || cmd.AdmissionResult.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
-		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
-	}
-	bound, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+	transition, err := m.submitDefinitionAdmissionInternalEvent(ctx, definitionAdmissionInternalEvent{
+		Kind: definitionAdmissionInternalEventCandidatePromoted, WorkspaceID: cmd.WorkspaceID, CandidatePromotion: &cmd,
+	})
 	if err != nil {
 		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, err
 	}
-	for attempt := 0; attempt < 4; attempt++ {
-		workspace, err := m.workspaces.Get(bound, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, err
-		}
-		candidate, current := currentDefinitionAdmissionCandidate(workspace.DefinitionAdmissionCandidates, cmd.CandidateID)
-		if candidate == nil || !current || candidate.CandidateRevision != cmd.CandidateRevision || candidate.CandidateHash != cmd.CandidateHash {
-			return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrConflict
-		}
-		if err := cmd.AdmissionResult.ValidateFor(*candidate); err != nil {
-			return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
-		}
-		if workspace.StartupInput != nil || workspace.ActivationAdmission != nil {
-			if samePromotion(workspace, *candidate, cmd.AdmissionResult, cmd.BlockingTicketID) {
-				return workspaceevents.PromoteDefinitionAdmissionCandidateResult{
-					DefinitionRevision:                workspace.StartupInput.DefinitionRevision,
-					StartupInputHash:                  workspace.StartupInput.StartupInputHash,
-					CandidateItemToItemRefMappingHash: workspace.StartupInput.CandidateItemToItemRefMappingHash,
-					StartupInput:                      workspace.StartupInput.Clone(), ActivationAdmission: workspace.ActivationAdmission.Normalized(), Duplicate: true,
-				}, nil
-			}
-			if candidate.BaseDefinitionRevision == "" || candidate.BaseStartupInputHash == "" || workspace.StartupInput == nil || candidate.BaseDefinitionRevision != workspace.StartupInput.DefinitionRevision || candidate.BaseStartupInputHash != workspace.StartupInput.StartupInputHash {
-				return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrConflict
-			}
-		}
-		startup := startupInputFromCandidate(*candidate, cmd.AdmissionResult)
-		if err := startup.Validate(); err != nil {
-			return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-		}
-		admission := workspacemodel.WorkspaceActivationAdmission{
-			WorkspaceID: cmd.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash,
-			DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
-		}
-		if cmd.BlockingTicketID != "" {
-			admission.State = workspacemodel.WorkspaceActivationPendingClarificationResolution
-			admission.BlockingTicketID = cmd.BlockingTicketID
-		}
-		if err := admission.Validate(startup); err != nil {
-			return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
-		}
-		next := *workspace
-		next.StartupInput = &startup
-		next.ActivationAdmission = &admission
-		if err := m.workspaces.CompareAndSwap(bound, &next, workspace.Revision); err != nil {
-			if errors.Is(err, common.ErrConflict) {
-				continue
-			}
-			return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, err
-		}
-		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{
-			DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash,
-			CandidateItemToItemRefMappingHash: startup.CandidateItemToItemRefMappingHash,
-			StartupInput:                      startup.Clone(), ActivationAdmission: admission.Normalized(),
-		}, nil
+	if transition.CandidatePromotionResult == nil {
+		return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrInvalidArgument
 	}
-	return workspaceevents.PromoteDefinitionAdmissionCandidateResult{}, common.ErrConflict
+	return *transition.CandidatePromotionResult, nil
 }
 
 func (m *Biz) acknowledgeWorkspaceDefinitionClarification(ctx context.Context, cmd workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand) (workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult, error) {
-	cmd.CandidateID = strings.TrimSpace(cmd.CandidateID)
-	cmd.CandidateHash = strings.TrimSpace(cmd.CandidateHash)
-	cmd.ResolutionBindingHash = strings.TrimSpace(cmd.ResolutionBindingHash)
-	cmd.DefinitionRevision = strings.TrimSpace(cmd.DefinitionRevision)
-	cmd.StartupInputHash = strings.TrimSpace(cmd.StartupInputHash)
-	if cmd.WorkspaceID == "" || cmd.CandidateID == "" || cmd.CandidateRevision == 0 || cmd.CandidateHash == "" || cmd.BlockingTicketID == "" || cmd.ResolutionID == "" || cmd.ResolutionBindingHash == "" || cmd.DefinitionRevision == "" || cmd.StartupInputHash == "" {
-		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrInvalidArgument
-	}
-	bound, err := common.BindRuntimeWorkspaceContext(ctx, cmd.WorkspaceID)
+	transition, err := m.submitDefinitionAdmissionInternalEvent(ctx, definitionAdmissionInternalEvent{
+		Kind: definitionAdmissionInternalEventClarificationResolutionObserved, WorkspaceID: cmd.WorkspaceID, ClarificationResolution: &cmd,
+	})
 	if err != nil {
 		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, err
 	}
-	for attempt := 0; attempt < 4; attempt++ {
-		workspace, err := m.workspaces.Get(bound, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, err
-		}
-		if workspace.StartupInput == nil || workspace.ActivationAdmission == nil {
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrConflict
-		}
-		current := workspace.ActivationAdmission.Normalized()
-		if current.WorkspaceID != cmd.WorkspaceID || current.CandidateID != cmd.CandidateID || current.CandidateRevision != cmd.CandidateRevision || current.CandidateHash != cmd.CandidateHash || current.BlockingTicketID != cmd.BlockingTicketID || current.DefinitionRevision != cmd.DefinitionRevision || current.StartupInputHash != cmd.StartupInputHash {
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrConflict
-		}
-		if current.State == workspacemodel.WorkspaceActivationEligible {
-			if current.ClarificationResolutionID == cmd.ResolutionID && current.ClarificationResolutionBindingHash == cmd.ResolutionBindingHash {
-				return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{ActivationAdmission: current, Transitioned: false}, nil
-			}
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrConflict
-		}
-		if current.State != workspacemodel.WorkspaceActivationPendingClarificationResolution {
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrConflict
-		}
-		current.State = workspacemodel.WorkspaceActivationEligible
-		current.ClarificationResolutionID = cmd.ResolutionID
-		current.ClarificationResolutionBindingHash = cmd.ResolutionBindingHash
-		if err := current.Validate(*workspace.StartupInput); err != nil {
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrConflict
-		}
-		next := *workspace
-		next.ActivationAdmission = &current
-		if err := m.workspaces.CompareAndSwap(bound, &next, workspace.Revision); err != nil {
-			if errors.Is(err, common.ErrConflict) {
-				continue
-			}
-			return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, err
-		}
-		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{ActivationAdmission: current, Transitioned: true}, nil
+	if transition.ClarificationResolutionResult == nil {
+		return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrInvalidArgument
 	}
-	return workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionResult{}, common.ErrConflict
+	return *transition.ClarificationResolutionResult, nil
 }
 
 func currentDefinitionAdmissionCandidate(values []workspacemodel.DefinitionAdmissionCandidate, candidateID string) (*workspacemodel.DefinitionAdmissionCandidate, bool) {

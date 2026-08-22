@@ -27,9 +27,10 @@ const (
 )
 
 const (
-	DoDStateDraft     DoDState = "draft"
-	DoDStateReady     DoDState = "ready"
-	DoDStateSatisfied DoDState = "satisfied"
+	// DoDStateReady is the only state of a formal Workspace-owned DoD
+	// definition. Runtime/CWI satisfaction is sealed per Run by Orchestrator
+	// and must not be copied back into this reusable definition resource.
+	DoDStateReady DoDState = "ready"
 )
 
 const (

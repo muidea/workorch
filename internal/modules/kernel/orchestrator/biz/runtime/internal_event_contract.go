@@ -178,6 +178,8 @@ func (event RuntimeInternalEvent) validateRecoveryAuthorization() error {
 func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.Metadata, bool) {
 	metadata := eventcontract.Metadata{
 		Layer:             eventcontract.LayerOrchestratorPrivateFact,
+		ReducerOwner:      eventcontract.ReducerOwnerForStateMachine(eventcontract.StateMachineSM2),
+		MachineRole:       eventcontract.StateMachineRoleOwnerInternalReducer,
 		EffectClass:       eventcontract.EffectClassOwnerState,
 		SourcePolicy:      eventcontract.SourcePolicyCallerContext,
 		ScopePolicy:       eventcontract.ScopePolicyWorkspaceRun,

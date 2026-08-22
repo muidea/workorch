@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 功能范围与边界
 
@@ -97,6 +97,9 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 实现必须保持：
 
 - SM-1 不选择 action，SM-2 不执行 operation，SM-3 不选择 next action，SM-4 不重建 authority。
+- Runtime EventHub metadata 的 `StateMachine` 只说明参与链；`ReducerOwner` 固定 SM-1=`run`、SM-2～SM-4=`orchestrator`，
+  `MachineRole` 区分 participant、owner ingress 与 owner observation。只有本 owner 的 private internal fact 可标记
+  `owner_internal_reducer`；Run owner 的 opaque aggregate CAS 只标记 `opaque_persistence`。
 - Orchestrator 的外部 typed command/result、owner receipt、request outcome 与 delivery acknowledgement 必须先映射为
   owner-local `RuntimeInternalEvent`；Biz 只能经 `submitRuntimeInternalEvent` 提交，
   `RuntimeController.ApplyInternalEvent` 是唯一 mutation dispatcher，
@@ -172,6 +175,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   kind/variant/parameter → target → binding → effect/dependency → replay 的固定顺序返回 `accepted` 或完整
   `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不得伪装为
   candidate rejection。
+- 完整 candidate request bytes 的 `ArtifactContinuation` 只是 Orchestrator-owned audit carrier，不是 SM-3 authority。
+  created/applied/failed 只能由一个 carrier-private reducer 写入；它绑定 workspace/run/logical request/authority
+  transaction，但不能创建 attempt、选择 recovery/admission 或 seal dispatch。重启若发现内容已完整组装而 carrier 仍为
+  chunking，必须幂等补交 applied fact，关闭“内容落盘后、metadata transition 前”崩溃窗口。
 - 当前唯一结构 evaluator 是 `biz/internal/candidateadmission.Evaluate`；`biz/runtime/candidate_admission.go`
   只投影当前 authority/attempt/evidence lineage、调用该 evaluator 一次，并在返回后执行 SM-3 owner-local
   rejection seal。repair closure、validation-only gap 与 owner-grounded target scope 都在 replay 前由同一 evaluator
@@ -617,6 +624,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   EventHub topic 的静态边界。
 - [x] 全量 owner-private fact 的 SM-2/SM-3/SM-4 分类、唯一 payload route、malformed pre-CAS gate，以及单 aggregate/
   mutation kernel 边界；Orchestrator 不拥有 SM-1 transition，也不存在跨 owner state setter。
+- [x] Runtime EventHub reducer-owner/role 分类、LLM/capability participant 与 Run opaque-persistence 边界，以及 candidate
+  request content carrier 的 private transition、duplicate/stale identity 和 assembled-before-metadata restart recovery。
 - [x] 64 CWI 的依赖闭包按 provider order 分成 16 个四项 batch，current focus fence 与后续公平 drain 不按 ID 或
   Definition `Order` 重排；proof-batch provider projection 只携带相关 coverage，C0～C5 stable prefix/context 分层保持不变。
 - [x] owner fact 的 missing、stale、duplicate、out-of-order、rollback/reappearance（ABA）、新 generation 与无关

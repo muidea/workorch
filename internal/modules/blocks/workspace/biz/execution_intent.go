@@ -329,7 +329,7 @@ func currentDoDLeaf(items []*workspacemodel.DoD, workspaceID common.WorkspaceID)
 	}
 	var selected *workspacemodel.DoD
 	for _, item := range items {
-		if item == nil || item.WorkspaceID != workspaceID || strings.TrimSpace(item.LineageState) != "active" || (item.State != common.DoDStateReady && item.State != common.DoDStateSatisfied) {
+		if item == nil || item.WorkspaceID != workspaceID || strings.TrimSpace(item.LineageState) != "active" || item.State != common.DoDStateReady {
 			continue
 		}
 		if _, superseded := predecessors[item.ID]; superseded {

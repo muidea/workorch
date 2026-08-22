@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Ownership
 
@@ -51,8 +51,10 @@ Goal 表达一个 Workspace 的正式目标。owner model 包含 `ID`、`Workspa
 DoD 表达可验证的完成条件。owner model 包含 `ID`、`WorkspaceID`、`Items`、`State`、
 `DefinitionRevision`、previous definition/hash lineage 与 `LineageState`。
 
-DoD state 为 `draft`、`ready` 或 `satisfied`。`satisfied` 的业务判定来自已密封的 Runtime closeout，不能由 UI、
-application 或 Result owner自行推断。
+正式 DoD definition resource 只有 `ready`：pre-seal authoring 状态属于 immutable
+`DefinitionAdmissionCandidate`，不能作为可启动 DoD 保存。`satisfied | unsatisfied | indeterminate` 是每个 Run、每个
+CWI 的 Orchestrator assessment/terminal closeout 结论；Result 只保存已密封 outcome，任何 owner 都不得把该结论回写到
+可复用的 Workspace DoD definition 形成第二套状态机。
 
 ## Definition Revision
 

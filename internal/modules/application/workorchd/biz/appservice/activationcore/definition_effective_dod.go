@@ -26,7 +26,7 @@ func EffectiveWorkspaceDoD(
 	mergedItems := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, item := range items {
-		if item == nil || item.WorkspaceID != workspaceID || (item.State != common.DoDStateReady && item.State != common.DoDStateSatisfied) {
+		if item == nil || item.WorkspaceID != workspaceID || item.State != common.DoDStateReady {
 			continue
 		}
 		normalized := doditems.Normalize(item.Items)

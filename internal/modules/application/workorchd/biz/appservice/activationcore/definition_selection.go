@@ -49,7 +49,7 @@ func SelectWorkspaceExecutionDoD(
 	items = OrderedWorkspaceDoDs(items)
 	readyItems := make([]*workspacemodel.DoD, 0, len(items))
 	for _, item := range items {
-		if item != nil && (item.State == common.DoDStateReady || item.State == common.DoDStateSatisfied) {
+		if item != nil && item.State == common.DoDStateReady {
 			readyItems = append(readyItems, item)
 		}
 	}

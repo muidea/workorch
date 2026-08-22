@@ -59,7 +59,7 @@ func TestEffectiveWorkspaceDoDMergesReadyItems(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-001")
 	first := &workspacemodel.DoD{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"one", "two"}, State: common.DoDStateReady}
-	second := &workspacemodel.DoD{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"two", "three"}, State: common.DoDStateSatisfied}
+	second := &workspacemodel.DoD{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"two", "three"}, State: common.DoDStateReady}
 
 	effective, contexts, err := EffectiveWorkspaceDoD(ctx, func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error) {
 		return []*workspacemodel.DoD{first, second}, nil

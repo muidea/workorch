@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 功能范围与边界
 
@@ -40,6 +40,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
    与可选 sealed correction；不从 action、raw reason、projection 或 provider response 重建 authority。
 9. incomplete/transient/authentication/configuration/protocol/submission-unknown 等只返回本边界 factual category 与
    safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
+   provider request 的 closed category/class vocabulary 与穷尽映射只在 LLM `pkg/events` 维护；Orchestrator 只验证
+   sealed workspace/run/authority scope，不复制第二套 provider mapping。
    非法 2xx JSON、非法 SSE framing/event、响应超限与跨 origin redirect 属于 `provider_protocol`，不得消费
    Orchestrator transport recovery budget；显式 protocol class 在 feedback 转换中不得改写为 internal。`http.Client.Do`
    返回的 endpoint-bearing `url.Error` 或自定义 transport error 必须先收敛为稳定的 timeout/cancel/DNS/TLS/network code，

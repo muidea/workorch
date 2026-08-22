@@ -243,6 +243,7 @@ func TestRuntimeProviderRequestFeedbackValidationIsExhaustiveAndScoped(t *testin
 		{name: "configuration", class: runtimecontract.RuntimeCandidateFailureClassProviderConfiguration, category: runtimecontract.RuntimeFeedbackCategoryProviderConfiguration},
 		{name: "transient", class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, category: runtimecontract.RuntimeFeedbackCategoryProviderTransient},
 		{name: "protocol", class: runtimecontract.RuntimeCandidateFailureClassProvider, category: runtimecontract.RuntimeFeedbackCategoryProviderProtocol},
+		{name: "explicit protocol", class: runtimecontract.RuntimeCandidateFailureClassProviderProtocol, category: runtimecontract.RuntimeFeedbackCategoryProviderProtocol},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

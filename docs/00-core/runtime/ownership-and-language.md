@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-22
 
 ## Core Neutrality And Owner Layers
 
@@ -30,6 +30,11 @@ operation、effect、evidence、assessment、governance、recoverable wait、bud
 - 禁止跨 owner service/repository/adapter callback、Envelope、`map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 registry。
 - EventHub payload 只传 bounded immutable data，不传 repository、registry、recorder、channel、writer 或其它可变资源。
 - Application 可以编排多个 owner command，但不能代替接收 owner校验、持久化或选择 transition。
+- Runtime EventHub metadata 中的 `StateMachine` 只表示参与哪一条协调链，不授予 reducer authority；`ReducerOwner`
+  固定为 SM-1=`run`、SM-2～SM-4=`orchestrator`，`MachineRole` 区分 participant、owner ingress 与 owner observation。
+  EventHub envelope 即使是 owner ingress，也必须先翻译为 owner-private internal event；只有该私有事实可标记
+  `owner_internal_reducer` 并选择 transition。Run 对 Orchestrator aggregate 的物理 CAS 只能标记为
+  `opaque_persistence`，不能据此解释 SM-2～SM-4。
 
 Workspace scope 是 command execution context 的一部分，不是组件实例的“当前 workspace”。带 `WorkspaceID` 的入站
 命令必须先绑定 matching EventHub context；已有 scope 不能静默覆盖。Biz、Service、Module、共享 cache、全局变量和

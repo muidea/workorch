@@ -38,6 +38,52 @@ func TestRuntimeCandidateRequestContentStoresOpaqueCompleteDocumentIdempotently(
 	}
 }
 
+func TestRuntimeCandidateRequestContentRecoversAssembledBeforeCarrierTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewArtifactContinuationRepository()
+	aggregate := runtimeAggregate(t, 1)
+	logicalRequestID := "candidate-request-content-crash-window"
+	document := []byte(`{"operations":[]}`)
+	carrier, err := loadOrCreateRuntimeCandidateRequestContent(ctx, repo, aggregate, logicalRequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := runtimeCandidateOutputHash(string(document))
+	if err := repo.SaveAssembled(ctx, &runtimecontract.ArtifactContinuationAssembledMetadata{
+		ContinuationID: carrier.ID,
+		TargetRef:      carrier.TargetRef,
+		Bytes:          int64(len(document)),
+		RollingHash:    hash,
+		CreatedAt:      "2026-08-22T00:00:00Z",
+	}, string(document)); err != nil {
+		t.Fatal(err)
+	}
+
+	id, gotHash, err := persistRuntimeCandidateRequestDocument(ctx, repo, aggregate, logicalRequestID, 1, "physical-crash-window", document)
+	if err != nil || id != carrier.ID || gotHash != hash {
+		t.Fatalf("recover assembled document = %q/%q err=%v", id, gotHash, err)
+	}
+	stored, err := repo.Get(ctx, carrier.ID)
+	if err != nil || stored.State != common.ArtifactContinuationStateApplied || !stored.FinalReceived || stored.RollingHash != hash {
+		t.Fatalf("recovered carrier = %+v err=%v", stored, err)
+	}
+}
+
+func TestCandidateContentInternalEventRequiresExactlyOneFact(t *testing.T) {
+	logicalRequestID := "candidate-request-content-envelope"
+	_, err := normalizeCandidateContentInternalEvent(candidateContentInternalEvent{
+		Kind:           candidateContentInternalEventCreated,
+		ContinuationID: runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID),
+		WorkspaceID:    "workspace-1", RunID: "run-1", LogicalRequestID: logicalRequestID,
+		AuthorityTransaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+		Created:              &candidateContentCreatedFact{CreatedAt: "2026-08-22T00:00:00Z", UpdatedAt: "2026-08-22T00:00:00Z"},
+		Applied:              &candidateContentAppliedFact{BytesWritten: 1, RollingHash: "hash", UpdatedAt: "2026-08-22T00:00:01Z"},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("multi-payload content event err = %v, want invalid argument", err)
+	}
+}
+
 func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAttempt(t *testing.T) {
 	ctx := context.Background()
 	contents := memory.NewArtifactContinuationRepository()

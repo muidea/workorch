@@ -55,7 +55,7 @@ func ValidateRunDefinitions(ctx context.Context, hub magicevent.Hub, workspaceID
 	if dod.WorkspaceID != common.WorkspaceID(workspaceID) {
 		return common.ErrConflict
 	}
-	if dod.State != common.DoDStateReady && dod.State != common.DoDStateSatisfied {
+	if dod.State != common.DoDStateReady {
 		return common.ErrConflict
 	}
 	return nil

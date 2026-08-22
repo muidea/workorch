@@ -240,47 +240,18 @@ func validateRuntimeCandidateOutcomeContent(outcome runtimecontract.RuntimeProvi
 }
 
 func validateRuntimeProviderRequestFeedback(command llmevents.RequestRuntimeCandidateCommand, feedback runtimecontract.RuntimeFeedback) error {
-	if err := feedback.Validate(); err != nil {
+	if err := llmevents.ValidateRuntimeProviderRequestFeedback(feedback); err != nil {
 		return fmt.Errorf("LLM block returned invalid provider feedback: %w", err)
 	}
-	if feedback.Domain != runtimecontract.RuntimeFeedbackDomainProviderRequest || feedback.WorkspaceID != command.WorkspaceID || feedback.RunID != command.RunID {
+	if feedback.WorkspaceID != command.WorkspaceID || feedback.RunID != command.RunID {
 		return fmt.Errorf("LLM block returned provider feedback outside the requested scope")
 	}
 	wantAuthority := ""
 	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
 		wantAuthority = command.Transaction.AuthoritySnapshotID
 	}
-	if feedback.AuthoritySnapshotID != wantAuthority || feedback.DispatchID != "" {
+	if feedback.AuthoritySnapshotID != wantAuthority {
 		return fmt.Errorf("LLM block returned provider feedback with mismatched authority identity")
-	}
-	if feedback.OriginalDiagnostic == nil || feedback.OriginalDiagnostic.OwnerModuleID != runtimecontract.RuntimeModuleLLM {
-		return fmt.Errorf("LLM block returned provider feedback without its owner diagnostic")
-	}
-	class := runtimecontract.RuntimeCandidateFailureClass(feedback.OriginalDiagnostic.OriginalClass)
-	switch feedback.StableCategory {
-	case runtimecontract.RuntimeFeedbackCategoryProviderAuthentication:
-		if class != runtimecontract.RuntimeCandidateFailureClassProviderAuthentication {
-			return fmt.Errorf("LLM provider authentication feedback class mismatch")
-		}
-	case runtimecontract.RuntimeFeedbackCategoryProviderConfiguration:
-		if class != runtimecontract.RuntimeCandidateFailureClassProviderConfiguration {
-			return fmt.Errorf("LLM provider configuration feedback class mismatch")
-		}
-	case runtimecontract.RuntimeFeedbackCategoryProviderTransient:
-		if class != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
-			return fmt.Errorf("LLM provider transient feedback class mismatch")
-		}
-	case runtimecontract.RuntimeFeedbackCategoryProviderProtocol:
-		switch class {
-		case runtimecontract.RuntimeCandidateFailureClassProvider,
-			runtimecontract.RuntimeCandidateFailureClassSchema,
-			runtimecontract.RuntimeCandidateFailureClassContract,
-			runtimecontract.RuntimeCandidateFailureClassInternal:
-		default:
-			return fmt.Errorf("LLM provider protocol feedback class mismatch")
-		}
-	default:
-		return fmt.Errorf("LLM block returned unknown provider feedback category %q", feedback.StableCategory)
 	}
 	return nil
 }

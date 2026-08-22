@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 功能范围与边界
 
@@ -17,6 +17,10 @@ Last Verified: 2026-08-21
 - HTTP server 退出时发布只含数据的 `ServiceStoppedData` notification；process service 在 framework `Run` 前建立 observer，并在自身维护 local wait state。EventHub 不传退出 channel、server 或 error object。`WorkspaceRunRequestedCommand` / `WorkspaceRunRequestedResult` 用于 scheduler 请求；embedded CLI facade 使用按操作拆分的具体 command/result，例如 `CLIWorkspaceCreateCommand` / `CLIWorkspaceCreateResult`，不存在通用 `CLICommand` / `CLIResult`。
 - `biz/execution.UseCase` 是 HTTP 异步 admission 与 Workorchd typed scheduler 同步 admission 的共同入口。它只规范化 request identity/scope、使用 framework `BackgroundRoutine`、提交 Workspace owner typed intent，并把 queued/owner outcome 交给 Biz-owned execution observation；同一 workspace/request 的 HTTP 重复请求只在有界进程窗口内 coalesce，持久化幂等仍归 owner；它不拥有 retry、Resume successor 或 lifecycle target state。
 - `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 upsert/queued/accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，server 仅接收独立的 transport diagnostics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
+- projection Store lifecycle 是 Workorchd-owned 的派生状态机：rebuild requested/completed、mutation applied、degraded、
+  failed 与 stopped 只能经过一个 private-event reducer 写入。`stopped` 对 late mutation/completion/failure 保持终态；
+  `failed` 只能由成功提交的 owner mutation 或显式 rebuild 恢复。该状态只描述 read-model 健康度，不能反向修复
+  任何 owner authority。
 - Runtime audit 的 sealed-operation 视图只投影 operation identity、binding、`ExecutionKey` 与 `Fence` 等只读关联字段，使 governance continuation 后的 accepted receipt 仍按聚合中保存的原始 logical execution identity 精确核对；它不投影 operation 参数，不生成 dispatch，也不得作为 reducer/capability 可执行 authority。
 - HTTP、SSE 和 remote adapter 使用应用层 DTO；组件间 EventHub 传输不得复用 HTTP DTO。
 - MCP 管理列表通过 owner 的 cursor/limit concrete result 分页，并要求所有页面保持同一 `RegistryRevision`；fresh activation
@@ -101,6 +105,8 @@ Last Verified: 2026-08-21
 - [x] HTTP 异步 admission 对同一 `workspace + request` 做有界进程内 coalesce，冲突复用会被拒绝。
 - [x] 大 DoD 的稳定语义排序、slice 分组、每 CWI 独立 focus 以及 focus 总数上限门禁。
 - [x] projection lag/high-watermark reconciliation、显式 rebuild、重启 generation 与“不得向 owner 回写修复”。
+- [x] projection lifecycle 合法/禁止迁移、stopped late-event noop、failed 经成功 owner mutation/显式 rebuild 恢复与
+  未知 state/event 拒绝。
 - [x] run-scoped execution route 已移除，workspace-scoped resume/restart 进入 Workspace owner，且 restart 使用 fresh bootstrap。
 - [x] owner-lane 测试确认 execution gateway 投递 Workspace owner；聚合边界校验确认唯一 HTTP execution write route 为 workspace-scoped `execution-activations`，Run HTTP route 保持只读。
 - [x] 生产 transport AST 扫描确认 `service/server` 不导入或保存 EventHub、runtime Session、root appservice 兼容状态；聚合边界校验禁止 workorchd 生产代码直接导入 repository。

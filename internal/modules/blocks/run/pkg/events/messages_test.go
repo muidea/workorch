@@ -14,7 +14,7 @@ func TestRuntimeStateStoreIsOpaquePersistenceNotSM1Transition(t *testing.T) {
 		if contract.Topic != TopicRunCommandStoreRuntimeStateRecord {
 			continue
 		}
-		if contract.Metadata.StateMachine != eventcontract.StateMachineNone || contract.Metadata.EffectClass != eventcontract.EffectClassOpaquePersistence || contract.Metadata.TransitionTarget != eventcontract.TransitionTargetOpaquePersistence {
+		if contract.Metadata.StateMachine != eventcontract.StateMachineNone || contract.Metadata.ReducerOwner != "orchestrator" || contract.Metadata.MachineRole != eventcontract.StateMachineRoleOpaquePersistence || contract.Metadata.EffectClass != eventcontract.EffectClassOpaquePersistence || contract.Metadata.TransitionTarget != eventcontract.TransitionTargetOpaquePersistence {
 			t.Fatalf("runtime store metadata = %+v", contract.Metadata)
 		}
 		return

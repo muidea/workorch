@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Purpose
 
@@ -27,6 +27,9 @@ Runtime 行为变更必须先读取总入口，再从 Runtime Topics 进入受�
 - Workspace、Result、Decision、Approval、Memory 与 capability owners 只修改自己的正式状态。
 - Application 构造 typed bootstrap、提交 Start/Resume/Restart intent、提供协议与 projection；它不拥有 Runtime drive。
 - 跨 owner I/O 只使用 EventHub 与接收 owner 定义的 concrete typed command/data/result；禁止 service/repository 直连。
+- Runtime topic 标注某个 `StateMachine` 只表示参与该机器；`ReducerOwner + MachineRole` 必须分别固定唯一 reducer
+  owner 与 participant/owner ingress/owner observation。EventHub envelope 从不直接调用 reducer，只有 owner-private
+  internal event 可以选择 transition；Run 的 opaque aggregate CAS 也不获得 SM-2～SM-4 authority。
 
 ## Production Mainline
 

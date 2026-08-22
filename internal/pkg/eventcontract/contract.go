@@ -28,6 +28,21 @@ const (
 	StateMachineSM4  StateMachine = "sm_4"
 )
 
+// StateMachineRole distinguishes participation in a coordinated Runtime
+// machine from authority to reduce it. EventHub envelopes are never reducer
+// calls: an owner ingress must first translate the envelope into an
+// owner-private internal event.
+type StateMachineRole string
+
+const (
+	StateMachineRoleNone                 StateMachineRole = "none"
+	StateMachineRoleParticipant          StateMachineRole = "participant"
+	StateMachineRoleOwnerIngress         StateMachineRole = "owner_ingress"
+	StateMachineRoleOwnerObservation     StateMachineRole = "owner_observation"
+	StateMachineRoleOwnerInternalReducer StateMachineRole = "owner_internal_reducer"
+	StateMachineRoleOpaquePersistence    StateMachineRole = "opaque_persistence"
+)
+
 // EffectClass describes what the receiver may do while handling the wire
 // contract. It is metadata for validation and audit only; it never selects a
 // Runtime transition or retry action.
@@ -80,6 +95,8 @@ const (
 type Metadata struct {
 	Layer             Layer
 	StateMachine      StateMachine
+	ReducerOwner      string
+	MachineRole       StateMachineRole
 	EffectClass       EffectClass
 	SourcePolicy      SourcePolicy
 	ScopePolicy       ScopePolicy
@@ -279,6 +296,7 @@ func DefaultMetadata(class CommandClass) Metadata {
 	metadata := Metadata{
 		Layer:            LayerOwnerEventHub,
 		StateMachine:     StateMachineNone,
+		MachineRole:      StateMachineRoleNone,
 		SourcePolicy:     SourcePolicyCallerContext,
 		ScopePolicy:      ScopePolicyDeclared,
 		IdentityPolicy:   IdentityPolicyTopicOwnerReceiver,
@@ -304,6 +322,8 @@ func DefaultMetadata(class CommandClass) Metadata {
 func RuntimeMetadata(class CommandClass, stateMachine StateMachine, scope ScopePolicy, identity IdentityPolicy, canonicalFeedback bool) Metadata {
 	metadata := DefaultMetadata(class)
 	metadata.StateMachine = stateMachine
+	metadata.ReducerOwner = ReducerOwnerForStateMachine(stateMachine)
+	metadata.MachineRole = StateMachineRoleParticipant
 	metadata.ScopePolicy = scope
 	metadata.IdentityPolicy = identity
 	metadata.CanonicalFeedback = canonicalFeedback
@@ -314,6 +334,8 @@ func RuntimeMetadata(class CommandClass, stateMachine StateMachine, scope ScopeP
 // state-machine semantics remain owned by another component.
 func OpaquePersistenceMetadata(scope ScopePolicy, identity IdentityPolicy) Metadata {
 	metadata := RuntimeMetadata(CommandClassWrite, StateMachineNone, scope, identity, true)
+	metadata.ReducerOwner = ReducerOwnerForStateMachine(StateMachineSM4)
+	metadata.MachineRole = StateMachineRoleOpaquePersistence
 	metadata.EffectClass = EffectClassOpaquePersistence
 	metadata.TransitionTarget = TransitionTargetOpaquePersistence
 	return metadata
@@ -332,6 +354,7 @@ func Annotate(contracts []Contract, metadata Metadata, topics ...string) []Contr
 	for idx := range contracts {
 		if _, ok := selected[contracts[idx].Topic]; ok {
 			annotated := metadata
+			annotated = classifyRuntimeEventHubRole(contracts[idx], annotated)
 			if strings.TrimSpace(annotated.LaneIdentity) == "" {
 				annotated.LaneIdentity = contracts[idx].Metadata.LaneIdentity
 			}
@@ -380,10 +403,89 @@ func Validate(contract Contract) error {
 	if metadata.Layer != LayerOwnerEventHub {
 		return fmt.Errorf("EventHub contract %s has invalid layer %q", contract.Topic, metadata.Layer)
 	}
-	if metadata.StateMachine == "" || metadata.EffectClass == "" || metadata.SourcePolicy == "" || metadata.ScopePolicy == "" || metadata.IdentityPolicy == "" || metadata.TransitionTarget == "" || strings.TrimSpace(metadata.LaneIdentity) == "" {
+	if metadata.StateMachine == "" || metadata.MachineRole == "" || metadata.EffectClass == "" || metadata.SourcePolicy == "" || metadata.ScopePolicy == "" || metadata.IdentityPolicy == "" || metadata.TransitionTarget == "" || strings.TrimSpace(metadata.LaneIdentity) == "" {
 		return fmt.Errorf("EventHub contract %s has incomplete metadata", contract.Topic)
 	}
+	if err := validateStateMachineOwnership(contract); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ReducerOwnerForStateMachine is the canonical owner identity used by EventHub
+// contracts. SM-1 belongs to Run; SM-2 through SM-4 belong to Orchestrator.
+func ReducerOwnerForStateMachine(stateMachine StateMachine) string {
+	switch stateMachine {
+	case StateMachineSM1:
+		return "run"
+	case StateMachineSM2, StateMachineSM3, StateMachineSM4:
+		return "orchestrator"
+	default:
+		return ""
+	}
+}
+
+func classifyRuntimeEventHubRole(contract Contract, metadata Metadata) Metadata {
+	if metadata.Layer != LayerOwnerEventHub || metadata.StateMachine == StateMachineNone {
+		return metadata
+	}
+	metadata.ReducerOwner = ReducerOwnerForStateMachine(metadata.StateMachine)
+	metadata.MachineRole = StateMachineRoleParticipant
+	if contract.CommandClass == CommandClassNotify && contract.Owner == metadata.ReducerOwner {
+		metadata.MachineRole = StateMachineRoleOwnerObservation
+		return metadata
+	}
+	if contract.CommandClass != CommandClassWrite && contract.CommandClass != CommandClassExecute {
+		return metadata
+	}
+	for _, receiver := range normalizedOwners(contract.ReceiverOwners) {
+		if receiver == metadata.ReducerOwner {
+			metadata.MachineRole = StateMachineRoleOwnerIngress
+			break
+		}
+	}
+	return metadata
+}
+
+func validateStateMachineOwnership(contract Contract) error {
+	metadata := contract.Metadata
+	if metadata.StateMachine == StateMachineNone {
+		if metadata.EffectClass == EffectClassOpaquePersistence {
+			if metadata.ReducerOwner != ReducerOwnerForStateMachine(StateMachineSM4) || metadata.MachineRole != StateMachineRoleOpaquePersistence || metadata.TransitionTarget != TransitionTargetOpaquePersistence {
+				return fmt.Errorf("opaque Runtime persistence contract %s has invalid reducer ownership", contract.Topic)
+			}
+			return nil
+		}
+		if strings.TrimSpace(metadata.ReducerOwner) != "" || metadata.MachineRole != StateMachineRoleNone {
+			return fmt.Errorf("non-Runtime contract %s declares reducer ownership", contract.Topic)
+		}
+		return nil
+	}
+	wantOwner := ReducerOwnerForStateMachine(metadata.StateMachine)
+	if wantOwner == "" || metadata.ReducerOwner != wantOwner {
+		return fmt.Errorf("Runtime contract %s declares reducer owner %q, want %q", contract.Topic, metadata.ReducerOwner, wantOwner)
+	}
+	switch metadata.MachineRole {
+	case StateMachineRoleParticipant:
+		return nil
+	case StateMachineRoleOwnerIngress:
+		if contract.CommandClass != CommandClassWrite && contract.CommandClass != CommandClassExecute {
+			return fmt.Errorf("Runtime owner ingress %s must be write or execute", contract.Topic)
+		}
+		for _, receiver := range normalizedOwners(contract.ReceiverOwners) {
+			if receiver == wantOwner {
+				return nil
+			}
+		}
+		return fmt.Errorf("Runtime owner ingress %s does not target reducer owner %q", contract.Topic, wantOwner)
+	case StateMachineRoleOwnerObservation:
+		if contract.CommandClass != CommandClassNotify || contract.Owner != wantOwner {
+			return fmt.Errorf("Runtime owner observation %s is not published by reducer owner %q", contract.Topic, wantOwner)
+		}
+		return nil
+	default:
+		return fmt.Errorf("EventHub Runtime contract %s has invalid machine role %q", contract.Topic, metadata.MachineRole)
+	}
 }
 
 type NoCommand struct{}

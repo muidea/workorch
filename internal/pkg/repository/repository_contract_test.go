@@ -1856,7 +1856,7 @@ func testDoDRepositoryContract(t *testing.T, factory func() repository.DoDReposi
 	if fresh.Items[0] != "workspace created" {
 		t.Fatalf("dod clone isolation failed, first item = %q", fresh.Items[0])
 	}
-	fresh.State = common.DoDStateSatisfied
+	fresh.Items = []string{"workspace created", "run completed", "result recorded"}
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update dod: %v", err)
 	}
@@ -1864,8 +1864,8 @@ func testDoDRepositoryContract(t *testing.T, factory func() repository.DoDReposi
 	if err != nil {
 		t.Fatalf("get updated dod: %v", err)
 	}
-	if updated.State != common.DoDStateSatisfied {
-		t.Fatalf("dod state = %q, want satisfied", updated.State)
+	if len(updated.Items) != 3 || updated.Items[2] != "result recorded" || updated.State != common.DoDStateReady {
+		t.Fatalf("updated dod = %+v, want ready definition with updated items", updated)
 	}
 	second := &workspacemodel.DoD{
 		ID:          common.DoDID("dod-contract-2"),

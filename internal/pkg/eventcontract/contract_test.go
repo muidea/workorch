@@ -34,3 +34,34 @@ func TestValidateRejectsCrossLayerAndReceiverShape(t *testing.T) {
 		t.Fatal("owner-neutral value registered as EventHub contract was accepted")
 	}
 }
+
+func TestRuntimeMetadataSeparatesOwnerIngressFromParticipant(t *testing.T) {
+	participant := Build("llm", CommandClassExecute, LanePolicyExecute, "/llm/runtime-candidate/request")
+	participant = Annotate(participant, RuntimeMetadata(CommandClassExecute, StateMachineSM3, ScopePolicyWorkspaceRun, IdentityPolicyRuntimeAuthority, true), "/llm/runtime-candidate/request")
+	if got := participant[0].Metadata; got.ReducerOwner != "orchestrator" || got.MachineRole != StateMachineRoleParticipant {
+		t.Fatalf("LLM SM-3 metadata = %+v, want orchestrator participant", got)
+	}
+	if err := Validate(participant[0]); err != nil {
+		t.Fatalf("participant contract: %v", err)
+	}
+
+	ingress := Build("run", CommandClassWrite, LanePolicyState, "/run/workspace-execution-intent")
+	ingress = Annotate(ingress, RuntimeMetadata(CommandClassWrite, StateMachineSM1, ScopePolicyWorkspaceRun, IdentityPolicyRuntimeAuthority, true), "/run/workspace-execution-intent")
+	if got := ingress[0].Metadata; got.ReducerOwner != "run" || got.MachineRole != StateMachineRoleOwnerIngress {
+		t.Fatalf("Run SM-1 metadata = %+v, want Run owner ingress", got)
+	}
+	if err := Validate(ingress[0]); err != nil {
+		t.Fatalf("owner ingress contract: %v", err)
+	}
+}
+
+func TestValidateRejectsRuntimeReducerOwnerDrift(t *testing.T) {
+	contracts := Build("llm", CommandClassExecute, LanePolicyExecute, "/llm/runtime-candidate/request")
+	contracts = Annotate(contracts, RuntimeMetadata(CommandClassExecute, StateMachineSM3, ScopePolicyWorkspaceRun, IdentityPolicyRuntimeAuthority, true), "/llm/runtime-candidate/request")
+	contract := contracts[0]
+	contract.Metadata.ReducerOwner = "llm"
+	contract.Metadata.MachineRole = StateMachineRoleOwnerIngress
+	if err := Validate(contract); err == nil {
+		t.Fatal("LLM was accepted as the SM-3 reducer owner")
+	}
+}

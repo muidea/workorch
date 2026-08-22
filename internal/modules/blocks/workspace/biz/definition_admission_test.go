@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -9,6 +10,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func TestDefinitionAdmissionInternalEventRequiresExactlyOneFact(t *testing.T) {
+	submit := workspaceevents.SubmitDefinitionAdmissionCandidateCommand{}
+	promote := workspaceevents.PromoteDefinitionAdmissionCandidateCommand{}
+	_, err := normalizeDefinitionAdmissionInternalEvent(definitionAdmissionInternalEvent{
+		Kind: definitionAdmissionInternalEventCandidateSubmitted, WorkspaceID: "workspace-1",
+		CandidateSubmission: &submit, CandidatePromotion: &promote,
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("multi-payload admission event err = %v, want invalid argument", err)
+	}
+}
 
 func testAdmissionCandidate() workspacemodel.DefinitionAdmissionCandidate {
 	return (workspacemodel.DefinitionAdmissionCandidate{
@@ -48,5 +61,9 @@ func TestDefinitionAdmissionOwnerSubmitPromoteAndAcknowledge(t *testing.T) {
 	ack, err := biz.acknowledgeWorkspaceDefinitionClarification(ctx, workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, BlockingTicketID: "ticket-1", ResolutionID: "resolution-1", ResolutionBindingHash: "binding-hash", DefinitionRevision: promoted.DefinitionRevision, StartupInputHash: promoted.StartupInputHash})
 	if err != nil || !ack.Transitioned || ack.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible {
 		t.Fatalf("ack = %+v err=%v", ack, err)
+	}
+	duplicateAck, err := biz.acknowledgeWorkspaceDefinitionClarification(ctx, workspaceevents.AcknowledgeWorkspaceDefinitionClarificationResolutionCommand{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, BlockingTicketID: "ticket-1", ResolutionID: "resolution-1", ResolutionBindingHash: "binding-hash", DefinitionRevision: promoted.DefinitionRevision, StartupInputHash: promoted.StartupInputHash})
+	if err != nil || duplicateAck.Transitioned || duplicateAck.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible {
+		t.Fatalf("duplicate ack = %+v err=%v", duplicateAck, err)
 	}
 }

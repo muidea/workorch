@@ -26,7 +26,9 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 - Definition admission 使用三个独立 concrete command/result：submit candidate、promote admitted candidate、acknowledge
   clarification resolution。promotion 若绑定 blocking ticket，只能先进入 `pending_clarification_resolution`；逐字段匹配
   Decision resolution 后才可 CAS 为 `eligible`。eligible revision 只关闭不晚于自身的旧 clarification lineage；其后的
-  invalid candidate 仍须由后续 corrected candidate 精确 reconcile。任一步失败都不能把 admission 解释成可启动。
+  invalid candidate 仍须由后续 corrected candidate 精确 reconcile。三个 handler 只把 immutable fact 翻译成
+  exactly-one owner-private event；candidate/startup/admission 的状态选择和 CAS 只经过一个 dispatcher，调用方不能携带
+  target state。任一步失败都不能把 admission 解释成可启动。
 - `kernel/system` 发送 `EnsureWorkspaceTemplateDefaultsCommand`；本 block 只为缺失的内置 ID 创建默认模板，已存在对象保持不变，并返回具体 result。
 - `WorkspaceTemplate` 是 workspace owner 的 DTO；EventHub result 只返回该 owner DTO，并在 module 内部完成与 repository entity 的双向 mapping、slice/map/payload clone。repository 类型不得泄漏给 application 或其他 owner。
 - 外部定义命令保持唯一入口 `handleCommand -> executeCommand`；Owner 内部按 Workspace、Goal、DoD、Template
@@ -61,6 +63,8 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
   idempotent noop。它不读取
   `ConvergenceState`、RuntimeAction、focus、repair 或 error message 重新裁决；delivery feedback 保留 stable
   category 与完整安全 original diagnostic。
+- 正式 DoD definition resource 只保存 `ready`。pre-seal draft 属于 `DefinitionAdmissionCandidate`；每个 Run 的
+  satisfied/unsatisfied/indeterminate assessment 与 terminal closeout 属于 Orchestrator，不能回写 DoD state。
 - `fresh_activation_required` 只是 Run owner 的不可继续 disposition；普通 Run notification 不释放 Workspace slot。
   对不兼容 development data 的 restart，Run owner返回 `data_reset_required`，Workspace 不代替 Run 创建 successor、
   不读取旧 aggregate，也不通过旁路 fact 清除 active slot。
@@ -74,7 +78,8 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 - [x] Goal/DoD 非递增 ID 的 canonical leaf 谱系、历史 definition 更新拒绝和 current leaf 删除拒绝。
 - [x] memory/file backend 上 Goal/DoD 局部 identity、错误 Workspace scope 的 Get/Update/Delete 与无 scope 歧义拒绝。
 - [x] sealed terminal outcome 的匹配释放、空 slot/其他 active Run/冲突 identity 拒绝和同 identity 重投递幂等。
-- [x] immutable candidate create/duplicate/stale revision、all-of promotion、pending clarification acknowledgement 与 startup-input hash clone/persistence。
+- [x] immutable candidate create/duplicate/stale revision、all-of promotion、pending clarification acknowledgement、
+  exactly-one private-event payload、duplicate acknowledgement noop 与 startup-input hash clone/persistence。
 - [x] application-owned directory resolver 的空目录默认值、相对/绝对路径规范化、workspace ID/相对路径逃逸拒绝和
   多 workspace 默认目录隔离。
 - [x] execution intent 的缺失 Goal/DoD、context scope mismatch、duplicate replay、active Run result fence，以及

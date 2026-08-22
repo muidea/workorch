@@ -29,7 +29,7 @@ func TestPersistReplacementIntentKeepsSuccessorAbsent(t *testing.T) {
 		RequestID: "restart-1", WorkspaceID: "ws-restart", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1",
 		StartupInputHash: "startup-input-test",
 		Bootstrap:        &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
-		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: runmodel.ReplacementIntentPending,
+		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "restart",
 	}
 	if err := biz.persistReplacementIntent(ctx, predecessor, intent); err != nil {
 		t.Fatalf("persist replacement intent: %v", err)
@@ -38,8 +38,13 @@ func TestPersistReplacementIntentKeepsSuccessorAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != predecessor.ID || items[0].ReplacementIntent == nil || items[0].ReplacementIntent.RequestID != intent.RequestID {
+	if len(items) != 1 || items[0].ID != predecessor.ID || items[0].ReplacementIntent == nil || items[0].ReplacementIntent.RequestID != intent.RequestID || items[0].ReplacementIntent.State != runmodel.ReplacementIntentPending {
 		t.Fatalf("runs after intent = %+v", items)
+	}
+	callerSelectedState := intent
+	callerSelectedState.State = runmodel.ReplacementIntentPending
+	if err := biz.persistReplacementIntent(ctx, predecessor, callerSelectedState); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("caller-selected replacement state err = %v, want invalid argument", err)
 	}
 	if err := biz.persistReplacementIntent(ctx, predecessor, intent); err != nil {
 		t.Fatalf("duplicate replacement intent: %v", err)
@@ -96,7 +101,11 @@ func TestPersistReplacementIntentRetiresOnlyRejectedClarificationOnExplicitNewRe
 	if stored.ReplacementIntent == nil || stored.ReplacementIntent.RequestID != second.RequestID || len(stored.RetiredReplacementIntents) != 1 || stored.RetiredReplacementIntents[0].RequestID != first.RequestID || stored.RetiredReplacementIntents[0].State != runmodel.ReplacementIntentClarificationResolutionRejected {
 		t.Fatalf("replacement retirement lineage = %+v active=%+v", stored.RetiredReplacementIntents, stored.ReplacementIntent)
 	}
-	if err := biz.persistReplacementIntent(ctx, stored, first); !errors.Is(err, common.ErrConflict) {
+	reusedRetired := first
+	reusedRetired.State = ""
+	reusedRetired.ClarificationResolutionBindingHash = ""
+	reusedRetired.ClarificationConflictKind = ""
+	if err := biz.persistReplacementIntent(ctx, stored, reusedRetired); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("retired RequestID was reused: %v", err)
 	}
 	third := second

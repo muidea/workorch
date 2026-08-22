@@ -202,6 +202,7 @@ func TestRuntimeClarificationRejectsForgedConflictBindingWithoutStateAdvance(t *
 		StartupInputHash: "startup-input-test", Priority: 3, Bootstrap: &bootstrap,
 	})
 	requested = replacementIntentForPredecessor(requested, predecessor)
+	requested.State = runmodel.ReplacementIntentPendingClarificationResolution
 	predecessor.ReplacementIntent = &requested
 	if err := runs.Create(ctx, predecessor); err != nil {
 		t.Fatal(err)

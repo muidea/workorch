@@ -88,7 +88,7 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 	s.globalStale = false
 	s.globalStaleReason = ""
 	if degraded != nil {
-		s.state = StateReady // statusLocked upgrades to degraded from failure set
+		_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleRebuildCompleted})
 		s.errText = degraded.Error()
 		s.recordGlobalFailureLocked(degraded)
 		// Mark remaining workspace failures for entries without snapshots.
@@ -98,7 +98,7 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 			}
 		}
 	} else {
-		s.state = StateReady
+		_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleRebuildCompleted})
 		s.clearAllCurrentFailuresLocked()
 	}
 	s.updatedAt = now
@@ -140,11 +140,11 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 		}
 	}
 	if degraded != nil {
-		s.state = StateReady
+		_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleRebuildCompleted})
 		s.errText = degraded.Error()
 		s.recordGlobalFailureLocked(degraded)
 	} else {
-		s.state = StateReady
+		_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleRebuildCompleted})
 		// List-only refresh keeps remaining workspace failures; only clears global list loader failure.
 		s.globalFailure = nil
 		if s.errText != "" && (s.workspaceFailures == nil || len(s.workspaceFailures) == 0) {
@@ -200,9 +200,7 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) {
 	s.globalStale = false
 	s.globalStaleReason = ""
 	s.globalFailure = nil
-	if s.state != StateStopped && s.state != StateFailed {
-		s.state = StateReady
-	}
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
 	if len(s.workspaceFailures) == 0 {
 		s.errText = ""
 	}
@@ -236,9 +234,7 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	s.globalStale = false
 	s.globalStaleReason = ""
 	s.globalFailure = nil
-	if s.state != StateStopped && s.state != StateFailed {
-		s.state = StateReady
-	}
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
 	if len(s.workspaceFailures) == 0 {
 		s.errText = ""
 	}
@@ -302,7 +298,7 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	s.state = StateReady
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
 	s.errText = ""
 	s.updatedAt = now
 	return true
@@ -358,7 +354,7 @@ func (s *Store) ApplyRunCommandQueued(update RunCommandQueuedUpdate) bool {
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	s.state = StateReady
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
 	s.errText = ""
 	s.updatedAt = now
 	return true
@@ -422,7 +418,7 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	s.state = StateReady
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
 	s.errText = ""
 	s.updatedAt = now
 	return true
@@ -443,9 +439,7 @@ func (s *Store) MarkWorkspaceDegraded(workspaceID string, err error) {
 	entry.StaleReason = "rebuild_failed"
 	s.advanceGlobalRevision()
 	// Do not sticky-set StateDegraded; statusLocked derives degraded from current failure set.
-	if s.state != StateBuilding && s.state != StateStopped && s.state != StateFailed {
-		s.state = StateReady
-	}
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleDegradedObserved})
 	s.updatedAt = time.Now().UTC()
 }
 
@@ -468,9 +462,7 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
 	s.globalStaleReason = ""
-	if s.state != StateStopped && s.state != StateFailed {
-		s.state = StateReady
-	}
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
 	if len(s.workspaceFailures) == 0 && s.globalFailure == nil {
 		s.errText = ""
 	}

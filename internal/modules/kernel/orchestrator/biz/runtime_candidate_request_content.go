@@ -27,33 +27,13 @@ func loadOrCreateRuntimeCandidateRequestContent(ctx context.Context, repo reposi
 		return nil, common.ErrInvalidArgument
 	}
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
-	value, err := repo.Get(ctx, id)
-	if err == nil {
-		if value.WorkspaceID != aggregate.Facts.WorkspaceID || value.RunID != aggregate.Facts.RunID || value.ArtifactID != logicalRequestID ||
-			value.TargetRef != runtimeCandidateRequestContentTargetRef || value.OutputMode != runtimeCandidateRequestContentMode ||
-			value.AuthorityTransaction != aggregate.Decision.AuthorityTransaction() || value.CandidateAttempt != 0 {
-			return nil, fmt.Errorf("%w: candidate request content does not match sealed authority", common.ErrConflict)
-		}
-		return value, nil
-	}
-	if !errors.Is(err, common.ErrNotFound) {
-		return nil, err
-	}
-	value = &runtimecontract.ArtifactContinuation{
-		ID: id, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		ArtifactID: logicalRequestID, TargetRef: runtimeCandidateRequestContentTargetRef,
-		Operation: "candidate_request_content", OutputMode: runtimeCandidateRequestContentMode,
-		AuthorityTransaction: aggregate.Decision.AuthorityTransaction(), State: common.ArtifactContinuationStateChunking,
-		ExpectedSequence: 1, ReceivedChunkHashes: map[int]string{},
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	if err := repo.Create(ctx, value); err != nil {
-		if !errors.Is(err, common.ErrConflict) {
-			return nil, err
-		}
-		return repo.Get(ctx, id)
-	}
-	return value, nil
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	value, _, err := submitCandidateContentInternalEvent(ctx, repo, candidateContentInternalEvent{
+		Kind: candidateContentInternalEventCreated, ContinuationID: id,
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: logicalRequestID,
+		AuthorityTransaction: aggregate.Decision.AuthorityTransaction(), Created: &candidateContentCreatedFact{CreatedAt: now, UpdatedAt: now},
+	})
+	return value, err
 }
 
 // persistRuntimeCandidateRequestDocument stores a complete raw document before
@@ -74,6 +54,14 @@ func persistRuntimeCandidateRequestDocument(ctx context.Context, repo repository
 		if existing.RollingHash != hash || existing.Bytes != int64(len(content)) || existingContent != contentString {
 			return "", "", fmt.Errorf("%w: candidate request complete document conflicts", common.ErrConflict)
 		}
+		if _, _, err := submitCandidateContentInternalEvent(ctx, repo, candidateContentInternalEvent{
+			Kind: candidateContentInternalEventApplied, ContinuationID: continuation.ID,
+			WorkspaceID: continuation.WorkspaceID, RunID: continuation.RunID, LogicalRequestID: logicalRequestID,
+			AuthorityTransaction: continuation.AuthorityTransaction,
+			Applied:              &candidateContentAppliedFact{BytesWritten: int64(len(content)), RollingHash: hash, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+		}); err != nil {
+			return "", "", err
+		}
 		return continuation.ID, hash, nil
 	} else if !errors.Is(getErr, common.ErrNotFound) {
 		return "", "", getErr
@@ -85,12 +73,12 @@ func persistRuntimeCandidateRequestDocument(ctx context.Context, repo repository
 	if err := repo.SaveAssembled(ctx, metadata, contentString); err != nil {
 		return "", "", err
 	}
-	continuation.State = common.ArtifactContinuationStateApplied
-	continuation.FinalReceived = true
-	continuation.BytesWritten = int64(len(content))
-	continuation.RollingHash = hash
-	continuation.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := repo.Update(ctx, continuation); err != nil {
+	if _, _, err := submitCandidateContentInternalEvent(ctx, repo, candidateContentInternalEvent{
+		Kind: candidateContentInternalEventApplied, ContinuationID: continuation.ID,
+		WorkspaceID: continuation.WorkspaceID, RunID: continuation.RunID, LogicalRequestID: logicalRequestID,
+		AuthorityTransaction: continuation.AuthorityTransaction,
+		Applied:              &candidateContentAppliedFact{BytesWritten: int64(len(content)), RollingHash: hash, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+	}); err != nil {
 		return "", "", err
 	}
 	return continuation.ID, hash, nil
@@ -158,15 +146,12 @@ func (m *Biz) markRuntimeCandidateRequestContentFailed(ctx context.Context, aggr
 		content.OutputMode != runtimeCandidateRequestContentMode || content.AuthorityTransaction != sessionTransaction {
 		return fmt.Errorf("%w: candidate request content does not match sealed authority", common.ErrConflict)
 	}
-	switch content.State {
-	case common.ArtifactContinuationStateFailed:
-		return nil
-	case common.ArtifactContinuationStateApplied:
-		return fmt.Errorf("%w: complete candidate request content cannot become failed", common.ErrConflict)
-	}
-	content.State = common.ArtifactContinuationStateFailed
-	content.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	return repository.Update(ctx, content)
+	_, _, err = submitCandidateContentInternalEvent(ctx, repository, candidateContentInternalEvent{
+		Kind: candidateContentInternalEventFailed, ContinuationID: content.ID,
+		WorkspaceID: content.WorkspaceID, RunID: content.RunID, LogicalRequestID: logicalRequestID,
+		AuthorityTransaction: content.AuthorityTransaction, Failed: &candidateContentFailedFact{UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+	})
+	return err
 }
 
 func loadRuntimeCandidateRequestDocument(ctx context.Context, repo repository.ArtifactContinuationRepository, logicalRequestID string) ([]byte, error) {

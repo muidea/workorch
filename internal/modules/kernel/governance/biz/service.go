@@ -88,6 +88,7 @@ type Service struct {
 	loadConfig      func() (workorchconfig.Config, error)
 	background      magictask.BackgroundRoutine
 	mu              sync.Mutex
+	traceMu         sync.Mutex
 	unsubscribes    []func()
 	topics          []string
 	workCtx         context.Context

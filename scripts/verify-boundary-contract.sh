@@ -342,6 +342,76 @@ EOF
   exit 1
 fi
 
+# Secondary owner state machines and audit/read-model carriers follow the same
+# rule: public/cross-owner handlers translate immutable facts, while exactly
+# one owner-private dispatcher selects and persists the next state.
+owner_secondary_state_bypass_matches="$({
+  source_matches '\.(DefinitionAdmissionCandidates|StartupInput|ActivationAdmission)(\.[A-Za-z0-9_]+)?[[:space:]]*=[[:space:]]*[^=]' \
+    internal/modules/blocks/workspace/biz |
+    grep -v -F -- 'internal/modules/blocks/workspace/biz/definition_admission_internal_event.go' || true
+  source_matches '\.(ReplacementIntent(\.[A-Za-z0-9_]+)?|Lineage\.SuccessorRunID)[[:space:]]*=[[:space:]]*[^=]|[A-Za-z0-9_]+\.State[[:space:]]*=[[:space:]]*runmodel\.ReplacementIntent|State:[[:space:]]*runmodel\.ReplacementIntent|updateReplacementIntent' \
+    internal/modules/blocks/run/biz |
+    grep -v -F -- 'internal/modules/blocks/run/biz/replacement_internal_event.go' || true
+  source_matches '\.Status[[:space:]]*=[[:space:]]*[^=]|s\.traces\.Upsert\(' \
+    internal/modules/kernel/governance/biz |
+    grep -v -F -- 'internal/modules/kernel/governance/biz/trace_internal_event.go' || true
+  source_matches '\.State[[:space:]]*=[[:space:]]*[^=]|\.Update\(' \
+    internal/modules/kernel/orchestrator/biz/runtime_candidate_request_content.go || true
+  source_matches 's\.state[[:space:]]*=[[:space:]]*[^=]' \
+    internal/modules/application/workorchd/biz/appservice/workspaceviewcore |
+    grep -v -F -- 'internal/modules/application/workorchd/biz/appservice/workspaceviewcore/store_lifecycle_internal_event.go' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$owner_secondary_state_bypass_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a secondary owner state machine, audit carrier,
+or derived projection lifecycle bypasses its owner-private internal-event
+dispatcher.
+
+$owner_secondary_state_bypass_matches
+EOF
+  exit 1
+fi
+
+owner_secondary_dispatchers=(
+  "internal/modules/blocks/workspace/biz/definition_admission.go:submitDefinitionAdmissionInternalEvent"
+  "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitReplacementInternalEvent"
+  "internal/modules/kernel/governance/biz/worker_reconciliation.go:persistEvaluatedGovernanceTrace"
+  "internal/modules/kernel/governance/biz/worker_reconciliation.go:escalateGovernanceTrace"
+  "internal/modules/kernel/governance/biz/worker_reconciliation.go:startGovernanceTraceResolution"
+  "internal/modules/kernel/governance/biz/worker_reconciliation.go:blockGovernanceTrace"
+  "internal/modules/kernel/governance/biz/worker_reconciliation.go:resolveGovernanceTrace"
+  "internal/modules/kernel/orchestrator/biz/runtime_candidate_request_content.go:submitCandidateContentInternalEvent"
+  "internal/modules/application/workorchd/biz/appservice/workspaceviewcore/store_mutation.go:submitProjectionLifecycleInternalEventLocked"
+)
+for entry in "${owner_secondary_dispatchers[@]}"; do
+  path="${entry%%:*}"
+  dispatcher="${entry#*:}"
+  if ! grep -q -F -- "$dispatcher" "$path"; then
+    echo "boundary contract violation: owner path does not use private dispatcher $dispatcher: $path" >&2
+    exit 1
+  fi
+done
+
+# Provider feedback category/class vocabulary belongs to LLM. Orchestrator may
+# validate sealed Runtime scope, but must not maintain a second factual mapping.
+if ! grep -q -F -- 'ValidateRuntimeProviderRequestFeedback(feedback)' internal/modules/kernel/orchestrator/biz/runtime_candidate_event_adapter.go ||
+   ! grep -q -F -- 'RuntimeCandidateFailureClassProviderProtocol' internal/modules/blocks/llm/pkg/events/messages.go; then
+  echo "boundary contract violation: Runtime provider feedback vocabulary is not owned exhaustively by LLM" >&2
+  exit 1
+fi
+
+legacy_dod_resource_state_matches="$(source_matches 'DoDState(Draft|Satisfied)' internal || true)"
+if [[ -n "$legacy_dod_resource_state_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Workspace DoD definitions only have the ready
+resource state. Per-Run satisfied/unsatisfied assessment belongs to the
+Orchestrator closeout ledger and must not become a second DoD state machine.
+
+$legacy_dod_resource_state_matches
+EOF
+  exit 1
+fi
+
 if ! grep -q -F -- 'submitEffectInternalEvent' internal/modules/blocks/file/biz/owner.go ||
    source_matches 'runtimeAdapter\.ApplyPatch\(' internal/modules/blocks/file/biz/owner.go | grep -q .; then
   echo "boundary contract violation: File EventHub handler bypasses the owner-private effect dispatcher" >&2

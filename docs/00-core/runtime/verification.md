@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Purpose
 
@@ -17,6 +17,8 @@ canonical decision、无损反馈、sealed dispatch、receipt 与 terminal deliv
 core verifier 只验证：
 
 - SM-1～SM-4 的 owner、合法/禁止迁移与跨状态机交接；
+- Runtime EventHub contract 的 `ReducerOwner + MachineRole` 与 canonical owner 一致，participant/opaque persistence
+  不能伪装成 reducer；正式 state mutation 只能进入 owner-private internal-event dispatcher；
 - `ConvergenceState` 是唯一 canonical decision，action/output kind 仅可派生；
 - request、candidate、feasibility、operation、drive、delivery 的 stable factual category 与 safe original
   diagnostic 全链路保真；
@@ -173,7 +175,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 本合同不复制一份易漂移的 inventory。
 
 Boundary verification 必须覆盖：共享 package transition policy、全 owner code 表、error-text routing、Action/Output.Kind
-与 Status/Outcome 双权威、terminal action、通用 Envelope/map/any/JSON/reflect bridge、scope 缺失及禁止 raw provider 内容。
+与 Status/Outcome 双权威、terminal action、Runtime reducer-owner/role 漂移、secondary owner 直接 state write、DoD
+definition 的 draft/satisfied 影子状态、通用 Envelope/map/any/JSON/reflect bridge、scope 缺失及禁止 raw provider 内容。
 测试选择为空或只命中 projection compatibility wrapper 不能算通过。
 
 任何以 graph step、checkpoint 或 incremental artifact projection 为对象的 wrapper，只能验证非权威读侧，不能替代

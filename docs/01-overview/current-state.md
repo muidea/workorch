@@ -4,7 +4,7 @@ Status: normative
 
 Type: design-baseline
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Purpose
 
@@ -45,6 +45,8 @@ this path without a parallel compatibility authority.
 - Workspace owner persists a pre-seal `DefinitionAdmissionCandidate`; pure admission accepts only complete `all_of` semantics;
 - explicit `one_of`/`any_of`, threshold or unresolved required relation creates a blocking clarification ticket and cannot create a Run;
 - promotion seals exact Goal/DoD, Template/Profile snapshot, resolved directory and `StartupInputHash`;
+- formal Workspace-owned DoD resource only has `ready`; pre-seal draft belongs to the admission candidate, while
+  satisfied/unsatisfied/indeterminate are per-Run Orchestrator assessment facts and are never written back to the DoD definition;
 - every Start/Restart ingress requires `WorkspaceActivationAdmission=eligible`;
 - after startup input is sealed, bounded LLM semantic planning/diagnosis/candidate generation is allowed, but cannot alter the
   startup input, choose Runtime action, grant credit or decide terminal;
@@ -76,8 +78,11 @@ See [Semantic Convergence](../00-core/runtime/semantic-convergence.md) and
 | SM-3 | `kernel/orchestrator` | request session, candidate attempts, sealed dispatch and receipt transaction |
 | SM-4 | `kernel/orchestrator` | bounded drive, recovery, singleflight and delivery ledger |
 
-All external results become Orchestrator private internal events before aggregate mutation. Cross-owner I/O uses EventHub plus
-concrete typed contracts only.
+All formal state transitions first become a private internal event of their sole owner. External Runtime results become
+Orchestrator private internal events before aggregate mutation; Workspace definition admission, Run replacement intent and
+Governance trace progress follow the same owner-local rule. Cross-owner I/O uses EventHub plus concrete typed contracts only.
+EventHub `StateMachine` metadata means participation, while `ReducerOwner + MachineRole` fixes SM-1 to Run and SM-2～SM-4 to
+Orchestrator; participant and opaque-persistence contracts never acquire reducer authority.
 
 ## Request And Capability Facts
 

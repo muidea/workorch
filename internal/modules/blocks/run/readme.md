@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 组件类型
 
@@ -105,6 +105,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - current-baseline restart 由 Run owner 先在非终态 predecessor 上 CAS 持久化 immutable `ReplacementIntent`；只有
   predecessor 的 `Result -> Workspace -> Run` terminal delivery 完成后，Run-private reducer 才幂等创建并激活
   successor。相同 RequestID 只有在完整 sealed activation payload 相同的情况下才是 duplicate；否则 fail-closed。
+  request fact 不携带 `State` 或 mutable progress；唯一 private-event dispatcher 根据 clarification binding 选择
+  `pending` 或 `pending_clarification_resolution`，termination claim/ack/failure、resolution acknowledgement、successor
+  materialization 与 lineage/activation 全部经同一 CAS reducer 推进，禁止 generic mutate callback。
   successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；任一切点后重启都只
   收敛到同一 successor。非当前 development baseline 返回 `data_reset_required`，且不持久化 replacement intent。
 - 不允许形成 active Run 无合法 wait、无 scheduled drive 且 Runtime aggregate 非终态的悬挂状态；该恢复分类来自
@@ -139,7 +142,8 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
 已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；ticket/approval
 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
-runtime clarification acknowledgement gate，以及 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
+caller-selected initial state 拒绝、runtime clarification acknowledgement gate，以及
+terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
 唯一 successor；Runtime CAS source/scope/schema/hash、aggregate revision race、物理 rebase 与 legacy bypass；Setup 阶段
 inventory/record read、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整
 selection fact、missing subscriber/owner error 不回滚、Run 启动补写与 Memory owner exact replay、in-flight Stop 与重复

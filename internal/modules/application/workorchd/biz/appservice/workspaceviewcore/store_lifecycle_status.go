@@ -176,11 +176,10 @@ func (s *Store) setBuilding() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.workspaceTotalLocked() > 0 {
-		s.state = StateStale
-	} else {
-		s.state = StateBuilding
-	}
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{
+		Kind:              projectionLifecycleRebuildRequested,
+		HasProjectionData: s.workspaceTotalLocked() > 0,
+	})
 	s.errText = ""
 	s.updatedAt = time.Now().UTC()
 }
@@ -191,7 +190,7 @@ func (s *Store) setStopped() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.state = StateStopped
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleStopObserved})
 	s.updatedAt = time.Now().UTC()
 }
 
@@ -201,7 +200,7 @@ func (s *Store) setFailed(err error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.state = StateFailed
+	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleFailureObserved})
 	if err != nil {
 		s.errText = err.Error()
 		s.recordGlobalFailureLocked(err)

@@ -200,7 +200,7 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 	if err := m.persistReplacementIntent(ctx, predecessor, requestedIntent); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
-	if requestedIntent.State == runmodel.ReplacementIntentPendingClarificationResolution {
+	if isRuntimeDefinitionClarificationTicket(requestedIntent.ClarificationTicketID) {
 		predecessor, err = m.runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
 		if err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
@@ -223,6 +223,8 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 // identity from Run-owned predecessor state. Exact replay therefore compares
 // the same ticket/startup-input lineage that was sealed on the first write,
 // while any changed successor bootstrap still fails the payload comparison.
+// It deliberately leaves State empty: only the replacement owner-private
+// reducer may select the initial lifecycle state.
 func replacementIntentForPredecessor(intent runmodel.ReplacementIntent, predecessor *runmodel.Run) runmodel.ReplacementIntent {
 	if predecessor == nil {
 		return intent
@@ -238,7 +240,6 @@ func replacementIntentForPredecessor(intent runmodel.ReplacementIntent, predeces
 	intent.PredecessorStartupInputHash = strings.TrimSpace(predecessor.StartupInputHash)
 	intent.SuccessorStartupInputHash = strings.TrimSpace(intent.StartupInputHash)
 	intent.ReplacementIntentID = "runtime-definition-replacement/" + intent.RequestID
-	intent.State = runmodel.ReplacementIntentPendingClarificationResolution
 	intent.ReplacementIntentHash = runmodel.StableReplacementIntentHash(intent)
 	return intent
 }
@@ -287,67 +288,18 @@ func replacementIntentFromCommand(cmd runevents.WorkspaceExecutionIntentCommand)
 		DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash, Bootstrap: &bootstrap, Priority: cmd.Priority,
 		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		Kind:                runtimecontract.RuntimeTerminationSuperseded, Reason: "workspace execution restart/" + cmd.RequestID,
-		State: runmodel.ReplacementIntentPending,
 	}
 }
 
 func (m *Biz) persistReplacementIntent(ctx context.Context, predecessor *runmodel.Run, intent runmodel.ReplacementIntent) error {
-	if predecessor == nil || !intent.ValidFor(predecessor) {
+	if predecessor == nil || predecessor.ID == "" || predecessor.WorkspaceID == "" || intent.State != "" {
 		return common.ErrInvalidArgument
 	}
-	for attempt := 0; attempt < 8; attempt++ {
-		current, err := m.runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
-		if err != nil {
-			return err
-		}
-		if current.ReplacementIntent != nil {
-			if current.ReplacementIntent.RequestID == intent.RequestID {
-				if replacementIntentMatches(current.ReplacementIntent, intent) {
-					return nil
-				}
-				return common.ErrConflict
-			}
-			// Only an explicit new RequestID may retire a clarification attempt
-			// that Decision rejected. Bound, deliverable and completed intents are
-			// immutable and can never be superseded by another restart request.
-			if current.ReplacementIntent.State != runmodel.ReplacementIntentClarificationResolutionRejected || current.ReplacementIntent.ClarificationConflictKind != string(decisionevents.RuntimeDefinitionClarificationScopeMismatch) || !current.ReplacementIntent.ValidFor(current) {
-				return common.ErrConflict
-			}
-			for idx := range current.RetiredReplacementIntents {
-				if current.RetiredReplacementIntents[idx].RequestID == intent.RequestID {
-					return common.ErrConflict
-				}
-			}
-			if runStateIsTerminal(current.State) || !intent.ValidFor(current) {
-				return common.ErrConflict
-			}
-			current.RetiredReplacementIntents = append(current.RetiredReplacementIntents, runmodel.CloneReplacementIntent(*current.ReplacementIntent))
-			clone := runmodel.CloneReplacementIntent(intent)
-			current.ReplacementIntent = &clone
-			if err := m.runs.CompareAndSwap(ctx, current, current.Revision); err != nil {
-				if err == common.ErrConflict {
-					continue
-				}
-				return err
-			}
-			return nil
-		}
-		if runStateIsTerminal(current.State) {
-			return common.ErrConflict
-		}
-		clone := intent
-		bootstrap := intent.Bootstrap.Clone()
-		clone.Bootstrap = &bootstrap
-		current.ReplacementIntent = &clone
-		if err := m.runs.CompareAndSwap(ctx, current, current.Revision); err != nil {
-			if err == common.ErrConflict {
-				continue
-			}
-			return err
-		}
-		return nil
-	}
-	return common.ErrConflict
+	clone := runmodel.CloneReplacementIntent(intent)
+	_, err := m.submitReplacementInternalEvent(ctx, m.runs, replacementInternalEvent{
+		Kind: replacementInternalEventRequested, WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, Requested: &clone,
+	})
+	return err
 }
 
 func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent runmodel.ReplacementIntent, predecessorID common.RunID) (*runmodel.Run, error) {
@@ -497,88 +449,49 @@ func (m *Biz) deliverReplacementTermination(workspaceID common.WorkspaceID, pred
 }
 
 func (m *Biz) claimReplacementTerminationAttempt(workspaceID common.WorkspaceID, predecessorRunID common.RunID) (runmodel.ReplacementIntent, bool, error) {
-	for attempt := 0; attempt < 8; attempt++ {
-		runs, err := m.activeRunRepository()
-		if err != nil {
-			return runmodel.ReplacementIntent{}, false, err
-		}
-		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
-		item, err := runs.GetByWorkspaceID(ctx, workspaceID, predecessorRunID)
-		if err != nil {
-			return runmodel.ReplacementIntent{}, false, err
-		}
-		if item.ReplacementIntent == nil {
-			return runmodel.ReplacementIntent{}, false, nil
-		}
-		intent := *item.ReplacementIntent
-		if !intent.ValidFor(item) {
-			return runmodel.ReplacementIntent{}, false, common.ErrConflict
-		}
-		if !replacementIntentMayDeliver(&intent) {
-			return intent, false, nil
-		}
-		intent.AttemptCount++
-		intent.LastAttemptAt = time.Now().UTC().Format(time.RFC3339Nano)
-		item.ReplacementIntent = &intent
-		if err := runs.CompareAndSwap(ctx, item, item.Revision); err != nil {
-			if err == common.ErrConflict {
-				continue
-			}
-			return runmodel.ReplacementIntent{}, false, err
-		}
-		return intent, true, nil
+	runs, err := m.activeRunRepository()
+	if err != nil {
+		return runmodel.ReplacementIntent{}, false, err
 	}
-	return runmodel.ReplacementIntent{}, false, common.ErrConflict
+	transition, err := m.submitReplacementInternalEvent(context.Background(), runs, replacementInternalEvent{
+		Kind: replacementInternalEventTerminationAttemptClaimed, WorkspaceID: workspaceID, RunID: predecessorRunID,
+		TerminationAttempt: &replacementTerminationAttemptFact{AttemptedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+	})
+	if err != nil {
+		return runmodel.ReplacementIntent{}, false, err
+	}
+	if transition.Intent == nil {
+		return runmodel.ReplacementIntent{}, false, nil
+	}
+	return runmodel.CloneReplacementIntent(*transition.Intent), transition.Deliver, nil
 }
 
 func (m *Biz) acknowledgeReplacementTermination(workspaceID common.WorkspaceID, predecessorRunID common.RunID, requestID string, ack orchestratorevents.RequestRuntimeTerminationResult) error {
-	return m.updateReplacementIntent(workspaceID, predecessorRunID, requestID, func(intent *runmodel.ReplacementIntent) {
-		intent.State = runmodel.ReplacementIntentCompleted
-		intent.LastError = ""
-		intent.TerminalDeliveryID = strings.TrimSpace(ack.TerminalDeliveryID)
-		intent.RuntimeStateRevision = ack.StateRevision
-		intent.AcknowledgedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	runs, err := m.activeRunRepository()
+	if err != nil {
+		return err
+	}
+	_, err = m.submitReplacementInternalEvent(context.Background(), runs, replacementInternalEvent{
+		Kind: replacementInternalEventTerminationAcknowledged, WorkspaceID: workspaceID, RunID: predecessorRunID,
+		TerminationAcknowledged: &replacementTerminationAcknowledgedFact{
+			RequestID: requestID, Acknowledgement: ack, AcknowledgedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
 	})
+	return err
 }
 
 func (m *Biz) recordReplacementTerminationFailure(workspaceID common.WorkspaceID, predecessorRunID common.RunID, requestID string, cause error) {
-	_ = m.updateReplacementIntent(workspaceID, predecessorRunID, requestID, func(intent *runmodel.ReplacementIntent) {
-		intent.LastError = cause.Error()
-	})
-}
-
-func (m *Biz) updateReplacementIntent(workspaceID common.WorkspaceID, predecessorRunID common.RunID, requestID string, mutate func(*runmodel.ReplacementIntent)) error {
-	for attempt := 0; attempt < 8; attempt++ {
-		runs, err := m.activeRunRepository()
-		if err != nil {
-			return err
-		}
-		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
-		item, err := runs.GetByWorkspaceID(ctx, workspaceID, predecessorRunID)
-		if err != nil {
-			return err
-		}
-		if item.ReplacementIntent == nil || item.ReplacementIntent.RequestID != requestID {
-			return common.ErrConflict
-		}
-		if item.ReplacementIntent.State == runmodel.ReplacementIntentCompleted {
-			return nil
-		}
-		intent := *item.ReplacementIntent
-		mutate(&intent)
-		item.ReplacementIntent = &intent
-		if !intent.ValidFor(item) {
-			return common.ErrConflict
-		}
-		if err := runs.CompareAndSwap(ctx, item, item.Revision); err != nil {
-			if err == common.ErrConflict {
-				continue
-			}
-			return err
-		}
-		return nil
+	if cause == nil {
+		return
 	}
-	return common.ErrConflict
+	runs, err := m.activeRunRepository()
+	if err != nil {
+		return
+	}
+	_, _ = m.submitReplacementInternalEvent(context.Background(), runs, replacementInternalEvent{
+		Kind: replacementInternalEventTerminationFailed, WorkspaceID: workspaceID, RunID: predecessorRunID,
+		TerminationFailed: &replacementTerminationFailedFact{RequestID: requestID, Error: cause.Error()},
+	})
 }
 
 func (m *Biz) activeRunRepository() (repository.RunRepository, error) {
@@ -600,47 +513,18 @@ func (m *Biz) materializeReplacementAfterTerminalDelivery(ctx context.Context, p
 	}
 	created, err := m.createWorkspaceExecutionReplacement(ctx, intent, predecessor.ID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create replacement successor: %w", err)
 	}
-	committed := false
-	for attempt := 0; attempt < 8; attempt++ {
-		current, loadErr := m.runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		if current.ReplacementIntent == nil || current.ReplacementIntent.RequestID != intent.RequestID {
-			return nil, common.ErrConflict
-		}
-		if current.ReplacementIntent.SuccessorRunID != "" && current.ReplacementIntent.SuccessorRunID != created.ID {
-			return nil, common.ErrConflict
-		}
-		if current.ReplacementIntent.SuccessorRunID == created.ID && current.Lineage.SuccessorRunID == created.ID {
-			committed = true
-			break
-		}
-		nextIntent := *current.ReplacementIntent
-		nextIntent.State = runmodel.ReplacementIntentSuccessorCreated
-		nextIntent.SuccessorRunID = created.ID
-		nextIntent.TerminalDeliveryID = strings.TrimSpace(terminalDeliveryID)
-		current.ReplacementIntent = &nextIntent
-		current.Lineage.SuccessorRunID = created.ID
-		if !nextIntent.ValidFor(current) {
-			return nil, common.ErrConflict
-		}
-		if swapErr := m.runs.CompareAndSwap(ctx, current, current.Revision); swapErr != nil {
-			if swapErr == common.ErrConflict {
-				continue
-			}
-			return nil, swapErr
-		}
-		committed = true
-		break
-	}
-	if !committed {
-		return nil, common.ErrConflict
+	if _, err := m.submitReplacementInternalEvent(ctx, m.runs, replacementInternalEvent{
+		Kind: replacementInternalEventSuccessorMaterialized, WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID,
+		SuccessorMaterialized: &replacementSuccessorMaterializedFact{
+			RequestID: intent.RequestID, SuccessorRunID: created.ID, TerminalDeliveryID: terminalDeliveryID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("record replacement successor materialization: %w", err)
 	}
 	if err := m.activateWorkspaceExecutionReplacement(ctx, created, intent.RequestID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("activate replacement successor: %w", err)
 	}
 	return created, nil
 }
@@ -754,21 +638,21 @@ func (m *Biz) bindRuntimeClarificationReplacement(ctx context.Context, predecess
 		return common.ErrConflict
 	}
 	if result.ConflictKind == decisionevents.RuntimeDefinitionClarificationNoConflict {
-		return m.updateReplacementIntent(predecessor.WorkspaceID, predecessor.ID, intent.RequestID, func(value *runmodel.ReplacementIntent) {
-			value.State = runmodel.ReplacementIntentClarificationResolutionBound
-			value.ClarificationResolutionID = result.ResolutionID
-			value.ClarificationResolutionBindingHash = result.ResolutionBindingHash
-			value.ClarificationConflictKind = ""
-			value.ConflictingReplacementIntentID = ""
-			value.ConflictingReplacementIntentHash = ""
+		_, err := m.submitReplacementInternalEvent(ctx, m.runs, replacementInternalEvent{
+			Kind: replacementInternalEventClarificationResolutionObserved, WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID,
+			ClarificationResolution: &replacementClarificationResolutionFact{
+				RequestID: intent.RequestID, ResolutionID: result.ResolutionID, ResolutionBindingHash: result.ResolutionBindingHash,
+				ConflictKind: result.ConflictKind,
+			},
 		})
+		return err
 	}
-	if err := m.updateReplacementIntent(predecessor.WorkspaceID, predecessor.ID, intent.RequestID, func(value *runmodel.ReplacementIntent) {
-		value.State = runmodel.ReplacementIntentClarificationResolutionRejected
-		value.ClarificationResolutionBindingHash = result.ResolutionBindingHash
-		value.ClarificationConflictKind = string(result.ConflictKind)
-		value.ConflictingReplacementIntentID = result.CurrentReplacementIntentID
-		value.ConflictingReplacementIntentHash = result.CurrentReplacementIntentHash
+	if _, err := m.submitReplacementInternalEvent(ctx, m.runs, replacementInternalEvent{
+		Kind: replacementInternalEventClarificationResolutionObserved, WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID,
+		ClarificationResolution: &replacementClarificationResolutionFact{
+			RequestID: intent.RequestID, ResolutionBindingHash: result.ResolutionBindingHash, ConflictKind: result.ConflictKind,
+			CurrentReplacementIntentID: result.CurrentReplacementIntentID, CurrentReplacementIntentHash: result.CurrentReplacementIntentHash,
+		},
 	}); err != nil {
 		return err
 	}
