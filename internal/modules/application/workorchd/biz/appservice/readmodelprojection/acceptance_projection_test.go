@@ -175,4 +175,27 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	}
 }
 
+func TestMapAcceptanceProjectionDoesNotPresentTerminalFocusAsActive(t *testing.T) {
+	state := runtimecontract.RuntimeStateRecord{
+		Facts: runtimecontract.RuntimeFacts{
+			WorkspaceID: "ws-terminal", RunID: "run-terminal",
+			Focus:    runtimecontract.CoverageFocus{ID: "focus-terminal", SliceID: "slice-terminal", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-terminal"}},
+			Slices:   []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-terminal", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-terminal"}}},
+			Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-terminal", SliceID: "slice-terminal", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		},
+		Decision: runtimecontract.RuntimeDecision{
+			State:    runtimecontract.ConvergenceStateFailed,
+			Terminal: &runtimecontract.RuntimeTerminalDecision{Code: "terminal-test", Summary: "terminal"},
+		},
+	}
+
+	projection := mapAcceptanceProjection(appmodelcore.Run{ID: "run-terminal", RuntimeState: &state})
+	if projection.ActiveSliceID != "" || len(projection.Slices) != 1 || projection.Slices[0].State == "active" {
+		t.Fatalf("terminal acceptance projection = %+v, want historical focus without active slice", projection)
+	}
+	if projection.CurrentFocus == nil || projection.CurrentFocus.State != string(runtimecontract.ConvergenceStateFailed) {
+		t.Fatalf("terminal focus = %+v, want terminal decision state", projection.CurrentFocus)
+	}
+}
+
 func strPtr(value string) *string { return &value }

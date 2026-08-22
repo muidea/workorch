@@ -260,10 +260,6 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 	if acceptedAt == "" {
 		acceptedAt = formatProjectionTime(now)
 	}
-	queuedAt := ""
-	if snapshot.RunCommand != nil && strings.TrimSpace(snapshot.RunCommand.RequestID) == strings.TrimSpace(update.RequestID) {
-		queuedAt = strings.TrimSpace(snapshot.RunCommand.QueuedAt)
-	}
 	snapshot.RunCommand = &projectioncontract.RunCommandStatus{
 		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
 		RunID:              strings.TrimSpace(update.RunID),
@@ -277,64 +273,7 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 		Source:             strings.TrimSpace(update.Source),
 		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
 		DecisionID:         strings.TrimSpace(update.DecisionID),
-		QueuedAt:           queuedAt,
 		AcceptedAt:         acceptedAt,
-		Revision:           update.Revision,
-	}
-	entry.Snapshot = snapshot
-	entry.Workspace = cloneWorkspace(snapshot.Workspace)
-	entry.HasWorkspace = true
-	entry.HasSnapshot = true
-	s.advanceEntryRevision(entry)
-	s.advanceGlobalRevision()
-	if update.Revision > entry.SourceRevision {
-		entry.SourceRevision = update.Revision
-	}
-	entry.ProjectedSourceRevision = entry.SourceRevision
-	entry.RebuiltAt = now
-	entry.Stale = false
-	entry.StaleReason = ""
-	entry.Error = ""
-	s.refreshProjectedSourceRevisionLocked()
-	s.globalStale = false
-	s.globalStaleReason = ""
-	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
-	s.errText = ""
-	s.updatedAt = now
-	return true
-}
-
-func (s *Store) ApplyRunCommandQueued(update RunCommandQueuedUpdate) bool {
-	if s == nil || strings.TrimSpace(update.WorkspaceID) == "" {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry := s.workspaces[update.WorkspaceID]
-	if entry == nil || !entry.HasWorkspace {
-		return false
-	}
-	now := time.Now().UTC()
-	snapshot := entry.Snapshot
-	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
-		snapshot.Workspace = cloneWorkspace(entry.Workspace)
-	}
-	queuedAt := strings.TrimSpace(update.QueuedAt)
-	if queuedAt == "" {
-		queuedAt = formatProjectionTime(now)
-	}
-	snapshot.RunCommand = &projectioncontract.RunCommandStatus{
-		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
-		RunID:              strings.TrimSpace(update.RunID),
-		State:              "queued",
-		Intent:             strings.TrimSpace(update.Intent),
-		Reason:             strings.TrimSpace(update.Reason),
-		RequestID:          strings.TrimSpace(update.RequestID),
-		IdempotencyKey:     strings.TrimSpace(update.IdempotencyKey),
-		Source:             strings.TrimSpace(update.Source),
-		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
-		DecisionID:         strings.TrimSpace(update.DecisionID),
-		QueuedAt:           queuedAt,
 		Revision:           update.Revision,
 	}
 	entry.Snapshot = snapshot
@@ -379,10 +318,6 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 	if rejectedAt == "" {
 		rejectedAt = formatProjectionTime(now)
 	}
-	queuedAt := ""
-	if snapshot.RunCommand != nil && strings.TrimSpace(snapshot.RunCommand.RequestID) == strings.TrimSpace(update.RequestID) {
-		queuedAt = strings.TrimSpace(snapshot.RunCommand.QueuedAt)
-	}
 	snapshot.RunCommand = &projectioncontract.RunCommandStatus{
 		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
 		RunID:              strings.TrimSpace(update.RunID),
@@ -396,7 +331,6 @@ func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
 		Source:             strings.TrimSpace(update.Source),
 		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
 		DecisionID:         strings.TrimSpace(update.DecisionID),
-		QueuedAt:           queuedAt,
 		RejectedAt:         rejectedAt,
 		Error:              strings.TrimSpace(update.Error),
 		Revision:           update.Revision,

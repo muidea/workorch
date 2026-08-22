@@ -39,16 +39,14 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceevent
 	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
-
-	workspace := &workspaceModel.Workspace{
-		ID:                   cmd.WorkspaceID,
-		Title:                cmd.Title,
-		Description:          cmd.Description,
-		DeliverableDirectory: cmd.DeliverableDirectory,
-		InternalDirectory:    cmd.InternalDirectory,
-		State:                common.WorkspaceStateActive,
-	}
-	if err := m.workspaces.Create(ctx, workspace); err != nil {
+	workspace, err := m.submitWorkspaceCreationInternalEvent(ctx, workspaceCreationInternalEvent{
+		Kind: workspaceCreationInternalEventRequested,
+		Requested: &workspaceCreationRequestedFact{
+			WorkspaceID: cmd.WorkspaceID, Title: cmd.Title, Description: cmd.Description,
+			DeliverableDirectory: cmd.DeliverableDirectory, InternalDirectory: cmd.InternalDirectory,
+		},
+	})
+	if err != nil {
 		return err
 	}
 	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceCreated, workspace)

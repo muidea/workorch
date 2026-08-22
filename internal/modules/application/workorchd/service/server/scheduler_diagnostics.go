@@ -29,7 +29,6 @@ const (
 	schedulerDiagnosticStateCompleted      = "completed"
 	schedulerDiagnosticStateNoActionNeeded = "no_action_needed"
 
-	schedulerReasonEnqueueFailed                           = "scheduler_enqueue_failed"
 	schedulerReasonBackgroundFailed                        = "background_execution_failed"
 	schedulerReasonWorkspaceActivationFailed               = "workspace_activation_failed"
 	schedulerReasonOwnerCommandFailed                      = "owner_command_failed"
@@ -64,11 +63,10 @@ type schedulerDiagnosticsStore struct {
 	recent   []projectioncontract.ContinuationDiagnostic
 	attempts map[string]int
 
-	commandCounts          map[labelPair]uint64
-	commandEnqueueFailures map[labelPair]uint64
-	continuationFailures   map[labelPair]uint64
-	continuationNoActions  map[labelPair]uint64
-	continuationCompleted  map[labelPair]uint64
+	commandCounts         map[labelPair]uint64
+	continuationFailures  map[labelPair]uint64
+	continuationNoActions map[labelPair]uint64
+	continuationCompleted map[labelPair]uint64
 
 	watchdogTimerRegistrations uint64
 	watchdogTicks              uint64
@@ -89,7 +87,6 @@ func newSchedulerDiagnosticsStore() *schedulerDiagnosticsStore {
 	return &schedulerDiagnosticsStore{
 		attempts:                map[string]int{},
 		commandCounts:           map[labelPair]uint64{},
-		commandEnqueueFailures:  map[labelPair]uint64{},
 		continuationFailures:    map[labelPair]uint64{},
 		continuationNoActions:   map[labelPair]uint64{},
 		continuationCompleted:   map[labelPair]uint64{},
@@ -106,17 +103,6 @@ func (s *schedulerDiagnosticsStore) recordCommand(kind, result string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.commandCounts[labelPair{Left: kind, Right: result}]++
-}
-
-func (s *schedulerDiagnosticsStore) recordCommandEnqueueFailure(kind, reason string) {
-	if s == nil {
-		return
-	}
-	kind = schedulerLabel(kind, "unknown")
-	reason = schedulerLabel(reason, schedulerReasonEnqueueFailed)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.commandEnqueueFailures[labelPair{Left: kind, Right: reason}]++
 }
 
 func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnosticInput) projectioncontract.ContinuationDiagnostic {
@@ -260,8 +246,6 @@ func (s *schedulerDiagnosticsStore) renderMetrics() string {
 	var b strings.Builder
 	b.WriteString("# TYPE workorch_scheduler_commands_total counter\n")
 	writeLabelPairMetrics(&b, "workorch_scheduler_commands_total", "kind", "result", s.commandCounts)
-	b.WriteString("# TYPE workorch_scheduler_command_enqueue_failures_total counter\n")
-	writeLabelPairMetrics(&b, "workorch_scheduler_command_enqueue_failures_total", "kind", "reason", s.commandEnqueueFailures)
 	b.WriteString("# TYPE workorch_scheduler_continuation_failures_total counter\n")
 	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_failures_total", "kind", "reason", s.continuationFailures)
 	b.WriteString("# TYPE workorch_scheduler_continuation_no_action_total counter\n")

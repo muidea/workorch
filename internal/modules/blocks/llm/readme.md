@@ -32,6 +32,8 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
    输出保留量、利用率和 token/byte 估算派生。Embedding 不使用 chat output ceiling，但必须从 catalog
    `contextWindowTokens` 派生 input/response byte guard；容量缺失时 fail-closed。不存在进程级固定 output/request cap，
    non-stream JSON、stream content/event/line/wire 与 embedding JSON 都禁止无界读取。
+   SSE reader 必须先确认最后一行已完整结束，再解码该 data event；bounded reader 在 partial line
+   后返回 wire-limit error 时，`response_byte_limit_exceeded` 必须先于 partial JSON protocol error。
 6. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
 7. ai-proxy client API key 是可选配置；catalog、Responses、stream、embedding 仅在 key 非空时发送 Bearer header，
    空 key 不得编码成无效 `Authorization: Bearer `。Responses 与 embedding 只允许同 origin redirect；scheme/host/port
@@ -120,6 +122,7 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - [x] 2xx 非法 JSON、非法 SSE event、stream/content/wire/embedding response 超限稳定归类为 protocol；feedback 保留
   explicit `provider_protocol` 与 adapter 精确 code，Orchestrator 对该类走 request-terminal 而非 transport recovery，
   fresh reload 后仍可从 terminal failure fact 读取同一 original diagnostic。
+- [x] SSE partial final data line 与 wire byte limit 同时命中时，稳定保留 `response_byte_limit_exceeded`，不被提前 JSON decode 改写。
 - [x] Responses/embedding 跨 origin 307/308 在重发 body 前拒绝，空 API key 不发送 Authorization。
 - [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
   refresh 后 sealed revision 不漂移。

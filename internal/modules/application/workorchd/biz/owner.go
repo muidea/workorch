@@ -74,9 +74,8 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	})
 	b.service.SetWorkspaceProjection(b.projection)
 	b.service.SetWorkspaceProjectionWriter(b.projection)
-	b.execution = executionusecase.New(b, executionProjection{projection: b.projection, transport: b.service}, b.BackgroundRoutine())
+	b.execution = executionusecase.New(b, executionProjection{projection: b.projection, transport: b.service})
 	b.service.SetWorkspaceExecutionAdmission(b.execution)
-	b.service.SetWorkspaceRunScheduler(b)
 	b.service.SetServiceStoppedNotifier(b.publishServiceStopped)
 	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
 	b.SubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged)
@@ -128,15 +127,12 @@ func (b *Biz) Stop(ctx context.Context) {
 	b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
 	b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
 	if b.execution != nil {
-		_ = b.execution.Close(ctx)
 		b.execution = nil
 	}
 	if b.service != nil {
 		b.service.Shutdown(ctx)
-		// Clear injected ports only after the HTTP server has stopped. During
-		// graceful shutdown an in-flight handler can still finish against the
-		// live projection, while the closed execution use case already fails
-		// closed for new admissions.
+		// Clear injected ports only after the HTTP server has stopped so an
+		// in-flight synchronous owner admission can finish against live ports.
 		b.service.SetWorkspaceExecutionAdmission(nil)
 		b.service.SetWorkspaceProjection(nil)
 		b.service.SetWorkspaceProjectionWriter(nil)

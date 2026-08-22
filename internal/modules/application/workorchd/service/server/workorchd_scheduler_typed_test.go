@@ -58,7 +58,6 @@ func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) 
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
 	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
 	scheduler := directWorkspaceRunScheduler{state: state}
-	state.workspaceRunScheduler = scheduler
 	registerTestWorkspaceRunScheduler(t, rawHub, scheduler)
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID("ws-invalid-typed-scheduler"),
@@ -69,23 +68,10 @@ func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) 
 	}
 }
 
-func TestWorkspaceExecutionSchedulerDoesNotChooseLifecyclePath(t *testing.T) {
-	state := &serverState{}
-	scheduler := &recordingWorkspaceRunScheduler{}
-	state.workspaceRunScheduler = scheduler
-	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-active", Intent: "resume", RequestID: "request-active"}
-	if _, err := state.handleWorkorchDSchedulerCommand(context.Background(), command); err != nil {
-		t.Fatalf("handleWorkspaceRunSchedulerCommand: %v", err)
-	}
-	if len(scheduler.commands) != 1 || scheduler.commands[0].WorkspaceID != command.WorkspaceID || scheduler.commands[0].Intent != command.Intent || scheduler.commands[0].RequestID != command.RequestID {
-		t.Fatalf("scheduler commands = %+v, want forwarded immutable request", scheduler.commands)
-	}
-}
-
 // registerTestWorkspaceRunScheduler models the application Biz subscription
 // that owns this command in production. It deliberately lives in the server
 // test fixture so the HTTP adapter itself remains free of EventHub observers.
-func registerTestWorkspaceRunScheduler(t *testing.T, hub magicevent.Hub, scheduler WorkspaceRunScheduler) {
+func registerTestWorkspaceRunScheduler(t *testing.T, hub magicevent.Hub, scheduler testWorkspaceRunSubmitter) {
 	t.Helper()
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {

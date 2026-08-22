@@ -15,6 +15,9 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 		return emptyAcceptanceProjection()
 	}
 	facts := run.RuntimeState.Facts.Normalized()
+	decisionTerminal := run.RuntimeState.Decision.Terminal != nil ||
+		run.RuntimeState.Decision.State == runtimecontract.ConvergenceStateComplete ||
+		run.RuntimeState.Decision.State == runtimecontract.ConvergenceStateFailed
 	projection := projectioncontract.AcceptanceProjection{}
 	byID := map[string]string{}
 	for _, item := range facts.Coverage {
@@ -36,7 +39,7 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 				break
 			}
 		}
-		if slice.ID == facts.Focus.SliceID {
+		if !decisionTerminal && slice.ID == facts.Focus.SliceID {
 			projection.ActiveSliceID = slice.ID
 			if item.State != "accepted" {
 				item.State = "active"
@@ -44,7 +47,7 @@ func mapAcceptanceProjection(run appmodelcore.Run) projectioncontract.Acceptance
 		}
 		projection.Slices = append(projection.Slices, item)
 	}
-	if len(projection.Slices) == 0 && facts.Focus.ID != "" {
+	if !decisionTerminal && len(projection.Slices) == 0 && facts.Focus.ID != "" {
 		projection.ActiveSliceID = facts.Focus.SliceID
 	}
 	projection.CurrentFocus = &projectioncontract.CoverageFocus{

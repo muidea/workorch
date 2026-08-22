@@ -238,7 +238,6 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 	session.SetRepositoryConfig(config.Backend, config.DataRoot)
 	configureSessionBackedTestOperations(state, session)
 	attachTestEventNotifications(state)
-	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
 }
 
 // directWorkspaceRunScheduler is a test-only adapter. Production HTTP code
@@ -265,7 +264,6 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
 		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, session.Borrow(), string(command.WorkspaceID))
 		if err != nil {
-			p.state.projectRejectedSchedulerCommand(command, err)
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
 		}
 		intent.Bootstrap = bootstrap
@@ -283,12 +281,10 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
 	}
 	if err := response.Error(); err != nil {
-		p.state.projectRejectedSchedulerCommand(command, err)
 		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		p.state.projectRejectedSchedulerCommand(command, resultErr)
 		return workorchdevents.WorkspaceRunRequestedResult{}, resultErr
 	}
 	ownerResult, ok := data.(workspaceevents.WorkspaceExecutionIntentResult)
@@ -5420,26 +5416,13 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		t.Fatalf("read projected workspace snapshot: %v", err)
 	}
 	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.State != "rejected" ||
+		snapshot.RunCommand.Disposition != "restart_required" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-http-activation" ||
 		snapshot.RunCommand.Reason != "http_test" ||
 		snapshot.RunCommand.Source != "web" {
-		t.Fatalf("projected run command = %+v, want workspace-scoped HTTP request metadata", snapshot.RunCommand)
-	}
-	var accepted readmodelcore.WorkspaceSnapshotState
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		item, _, readErr := state.readProjectedWorkspaceSnapshot(workspace.ID)
-		if readErr == nil {
-			accepted = item
-			if item.RunCommand != nil && item.RunCommand.State == "rejected" && item.RunCommand.Disposition == "restart_required" && item.RunCommand.RequestID == "request-http-activation" {
-				break
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if accepted.RunCommand == nil || accepted.RunCommand.State != "rejected" || accepted.RunCommand.Disposition != "restart_required" || accepted.RunCommand.RequestID != "request-http-activation" {
-		t.Fatalf("owner outcome projection = %+v diagnostics=%+v", accepted.RunCommand, accepted.SchedulerDiagnostics)
+		t.Fatalf("owner outcome projection = %+v diagnostics=%+v", snapshot.RunCommand, snapshot.SchedulerDiagnostics)
 	}
 	runs, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
 	if err != nil {
@@ -5450,14 +5433,14 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 	}
 }
 
-func TestWorkorchDActivationHTTPReturnsWhileSchedulerIsStillRunning(t *testing.T) {
+func TestWorkorchDActivationHTTPWaitsForOwnerAdmission(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "async activation", "workspaces/async-activation")
 	scheduler := &blockingWorkspaceRunScheduler{
 		state: state, started: make(chan struct{}), release: make(chan struct{}),
 	}
-	state.workspaceRunScheduler = scheduler
+	state.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: state, submitter: scheduler}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"resume",
@@ -5474,67 +5457,63 @@ func TestWorkorchDActivationHTTPReturnsWhileSchedulerIsStillRunning(t *testing.T
 	}()
 
 	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("activation HTTP handler waited for scheduler completion")
-	}
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
-	}
-	select {
 	case <-scheduler.started:
 	case <-time.After(time.Second):
-		t.Fatal("background scheduler did not start")
+		t.Fatal("workspace owner admission did not start")
+	}
+	select {
+	case <-done:
+		t.Fatal("activation HTTP handler returned before Workspace owner admission")
+	case <-time.After(50 * time.Millisecond):
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "queued" || snapshot.RunCommand.RequestID != "request-http-async-activation" || snapshot.RunCommand.QueuedAt == "" {
-		t.Fatalf("queued run command = %+v", snapshot.RunCommand)
+	if snapshot.RunCommand != nil {
+		t.Fatalf("run command before owner admission = %+v, want no application-local queued state", snapshot.RunCommand)
 	}
 
 	close(scheduler.release)
-	waitForCondition(t, time.Second, func() bool {
-		latest, _, readErr := state.readProjectedWorkspaceSnapshot(workspace.ID)
-		return readErr == nil && latest.RunCommand != nil && latest.RunCommand.State == "accepted"
-	})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("activation HTTP handler did not return after Workspace owner admission")
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
 	accepted, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.RunCommand.QueuedAt == "" || accepted.RunCommand.AcceptedAt == "" {
-		t.Fatalf("accepted run command = %+v, want queued and accepted timestamps", accepted.RunCommand)
+	if accepted.RunCommand == nil || accepted.RunCommand.State != "accepted" || accepted.RunCommand.AcceptedAt == "" {
+		t.Fatalf("accepted run command = %+v, want synchronous owner outcome", accepted.RunCommand)
 	}
 }
 
-func TestWorkorchDActivationHTTPProjectsBackgroundSchedulerFailure(t *testing.T) {
+func TestWorkorchDActivationHTTPReturnsOwnerFailureSynchronously(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	workspace := createWorkspaceForHTTP(t, handler, "failed async activation", "workspaces/failed-async-activation")
-	state.workspaceRunScheduler = failingWorkspaceRunScheduler{err: errors.New("scheduler submission failed")}
+	workspace := createWorkspaceForHTTP(t, handler, "failed owner admission", "workspaces/failed-owner-admission")
+	state.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: state, submitter: failingWorkspaceRunScheduler{err: errors.New("scheduler submission failed")}}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"resume",
-		"requestId":"request-http-async-failure",
+		"requestId":"request-http-owner-failure",
 		"source":"web"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
-	}
-	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := state.waitBackground(waitCtx); err != nil {
-		t.Fatalf("wait for scheduler failure projection: %v", err)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("activation status = %d, want 500 owner admission failure, body=%s", rec.Code, rec.Body.String())
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.RunCommand.RequestID != "request-http-async-failure" || snapshot.RunCommand.QueuedAt == "" || snapshot.RunCommand.RejectedAt == "" || !strings.Contains(snapshot.RunCommand.Error, "scheduler submission failed") {
+	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-http-owner-failure" || snapshot.RunCommand.RejectedAt == "" || !strings.Contains(snapshot.RunCommand.Error, "scheduler submission failed") {
 		t.Fatalf("rejected run command = %+v", snapshot.RunCommand)
 	}
 }
@@ -5637,7 +5616,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
 	_, _ = defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-	state.workspaceRunScheduler = acceptedRestartWorkspaceRunScheduler{}
+	state.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: state, submitter: acceptedRestartWorkspaceRunScheduler{}}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"restart",
@@ -5682,66 +5661,12 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation
 	}
 }
 
-func TestWorkorchDActivationEnqueueFailureProjectsRejected(t *testing.T) {
-	routine := &recordingBackgroundRoutine{err: errors.New("background unavailable")}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
-	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
-	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
-		Workspace: appmodelcore.Workspace{ID: "ws-enqueue-failure", State: "active"},
-	})
-	handler := newMuxWithState(state)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-enqueue-failure/execution-activations", strings.NewReader(`{
-		"intent":"resume",
-		"requestId":"request-enqueue-failure",
-		"source":"web"
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("enqueue failure status = %d, want 409, body=%s", rec.Code, rec.Body.String())
-	}
-	snapshot, _, readErr := state.readProjectedWorkspaceSnapshot("ws-enqueue-failure")
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "rejected" || snapshot.RunCommand.RequestID != "request-enqueue-failure" || snapshot.RunCommand.QueuedAt == "" || snapshot.RunCommand.Error == "" {
-		t.Fatalf("rejected run command = %+v", snapshot.RunCommand)
-	}
-}
-
-func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
-	routine := &recordingBackgroundRoutine{}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
-	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
-	const workspaceID = "ws-scheduler-reject-recover"
-	state.workspaceProjectionWriter.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
-		Workspace: appmodelcore.Workspace{ID: workspaceID, State: "active"},
-	})
-
-	_, err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID: common.WorkspaceID(workspaceID),
-		Intent:      "recover",
-		RequestID:   "request-recover-rejected",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("publish recover scheduler command error = %v, want invalid argument", err)
-	}
-	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
-	if err != nil {
-		t.Fatalf("read projected workspace snapshot: %v", err)
-	}
-	if snapshot.RunCommand != nil {
-		t.Fatalf("projected run command = %+v, want no projection for adapter-level invalid intent", snapshot.RunCommand)
-	}
-}
-
 func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation diagnostic", "workspaces/activation-diagnostic")
 	const requestID = "request-activation-diagnostic"
-	state.workspaceRunScheduler = failingWorkspaceRunScheduler{err: errors.New("activation preflight: provider target is not ready")}
+	state.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: state, submitter: failingWorkspaceRunScheduler{err: errors.New("activation preflight: provider target is not ready")}}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"resume",
@@ -5751,19 +5676,10 @@ func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("activation status = %d, want 500 owner admission failure, body=%s", rec.Code, rec.Body.String())
 	}
 
-	var snapshot readmodelcore.WorkspaceSnapshotState
-	waitForCondition(t, time.Second, func() bool {
-		item, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
-		if err != nil {
-			return false
-		}
-		snapshot = item
-		return snapshot.RunCommand != nil && snapshot.RunCommand.State == "rejected" && snapshot.SchedulerDiagnostics != nil && snapshot.SchedulerDiagnostics.LatestContinuation != nil
-	})
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatalf("read projected workspace snapshot: %v", err)
@@ -5780,18 +5696,6 @@ func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 	latest := snapshot.SchedulerDiagnostics.LatestContinuation
 	if latest.Kind != schedulerKindWorkspaceActivation || latest.State != schedulerDiagnosticStateFailed || latest.Reason != schedulerReasonWorkspaceActivationFailed || !strings.Contains(latest.Detail, "provider target is not ready") {
 		t.Fatalf("latest scheduler diagnostic = %+v, want classified exact activation failure", latest)
-	}
-}
-
-func TestWorkorchDSchedulerCommandRequiresApplicationScheduler(t *testing.T) {
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
-
-	_, err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID: "ws-missing-scheduler",
-		Intent:      "resume",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("publish scheduler command error = %v, want invalid argument for missing application scheduler", err)
 	}
 }
 
@@ -6105,8 +6009,6 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_http_requests_total{endpoint="approval_get"} 0`,
 		`workorch_http_requests_total{endpoint="approval_approve"} 0`,
 		`workorch_http_requests_total{endpoint="approval_reject"} 0`,
-		`workorch_run_queue_waiting 0`,
-		`workorch_run_queue_total 0`,
 		`workorch_run_outcomes_total{status="succeeded"} 0`,
 		`workorch_run_outcomes_total{status="failed"} 1`,
 		`workorch_run_outcomes_total{status="canceled"} 0`,
@@ -6137,7 +6039,6 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.schedulerDiagnostics.recordCommand(schedulerKindRunContinuation, "accepted")
-	state.schedulerDiagnostics.recordCommandEnqueueFailure(schedulerKindRunContinuation, schedulerReasonEnqueueFailed)
 	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
 		WorkspaceID: "ws-metrics-diagnostics",
 		RunID:       "run-metrics-diagnostics",
@@ -6168,7 +6069,6 @@ func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`workorch_scheduler_commands_total{kind="run_continuation",result="accepted"} 1`,
-		`workorch_scheduler_command_enqueue_failures_total{kind="run_continuation",reason="scheduler_enqueue_failed"} 1`,
 		`workorch_scheduler_continuation_failures_total{kind="run_continuation",reason="owner_command_failed"} 1`,
 		`workorch_scheduler_continuation_no_action_total{kind="run_continuation",reason="run_not_eligible"} 1`,
 		`workorch_watchdog_timer_registrations_total 1`,

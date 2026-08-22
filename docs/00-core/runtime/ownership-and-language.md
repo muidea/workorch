@@ -24,12 +24,13 @@ operation、effect、evidence、assessment、governance、recoverable wait、bud
 
 ## Cross-Owner Contract Boundary
 
-- 正式状态只由唯一 owner 的 private event/reducer 修改；外部 command 表达 intent 或提交已持久化 fact，不携带 target state。
+- 正式状态（包括对象创建时的 initial state）只由唯一 owner 的 private event/reducer 选择并持久化；外部 command/service 只表达 immutable intent/fact，不携带或直写 target/initial state。
 - 跨 owner runtime I/O 只使用 EventHub 与接收 owner `pkg/events` 定义的 concrete typed Command/Data/Result。
 - 需要同步结果、强一致写入或 admission 的交互使用 `Send`；审计通知使用 `Post`，Post handler 不依赖 `event.Result`。
 - 禁止跨 owner service/repository/adapter callback、Envelope、`map[string]any`、无约束 `any`、JSON/reflect bridge 或通用 registry。
 - EventHub payload 只传 bounded immutable data，不传 repository、registry、recorder、channel、writer 或其它可变资源。
 - Application 可以编排多个 owner command，但不能代替接收 owner校验、持久化或选择 transition。
+- read model/UI/session 中的 display state 只能从 owner fact 或自身源 fact 纯派生；不得另存一份可独立迁移的 mirror lifecycle，也不得使用 queued/active 等展示值触发 owner transition。
 - Runtime EventHub metadata 中的 `StateMachine` 只表示参与哪一条协调链，不授予 reducer authority；`ReducerOwner`
   固定为 SM-1=`run`、SM-2～SM-4=`orchestrator`，`MachineRole` 区分 participant、owner ingress 与 owner observation。
   EventHub envelope 即使是 owner ingress，也必须先翻译为 owner-private internal event；只有该私有事实可标记

@@ -194,6 +194,44 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	}
 }
 
+func TestDecisionLifecycleSelectsInitialRuntimeGovernanceProposalState(t *testing.T) {
+	current := &decisionModel.Ticket{
+		ID:           "ticket-proposal-owner",
+		WorkspaceID:  "ws-proposal-owner",
+		RunID:        "run-proposal-owner",
+		Reason:       "provider recovery needs confirmation",
+		DecisionKind: "runtime_governance",
+		State:        common.DecisionTicketStateOpen,
+	}
+	seed := &decisionModel.RuntimeGovernanceResolutionProposal{
+		ResolutionID:   "resolution-proposal-owner",
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+		PayloadHash:    "payload-hash",
+	}
+
+	next, err := reduceDecisionLifecycle(current, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventProposalPrepared, TicketID: current.ID, Proposal: seed,
+	})
+	if err != nil {
+		t.Fatalf("prepare proposal: %v", err)
+	}
+	if next.RuntimeGovernanceProposal == nil || next.RuntimeGovernanceProposal.State != decisionModel.RuntimeGovernanceResolutionProposalPending ||
+		next.RuntimeGovernanceProposal.CreatedAt == "" || next.RuntimeGovernanceProposal.UpdatedAt == "" {
+		t.Fatalf("proposal lifecycle fields = %+v", next.RuntimeGovernanceProposal)
+	}
+	if seed.State != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" {
+		t.Fatalf("proposal seed was mutated by reducer: %+v", seed)
+	}
+
+	callerSelected := seed.Clone()
+	callerSelected.State = decisionModel.RuntimeGovernanceResolutionProposalPending
+	if rejected, err := reduceDecisionLifecycle(current, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventProposalPrepared, TicketID: current.ID, Proposal: &callerSelected,
+	}); !errors.Is(err, common.ErrInvalidArgument) || rejected != nil {
+		t.Fatalf("caller-selected proposal state was accepted: next=%+v err=%v", rejected, err)
+	}
+}
+
 func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()

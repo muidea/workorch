@@ -9,25 +9,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// RecordWorkspaceExecutionQueued records the transport admission fact in the
-// derived workspace view. It is intentionally a projection-only operation;
-// the Workspace owner has not accepted a lifecycle intent at this point.
-func (c *Component) RecordWorkspaceExecutionQueued(command workorchdevents.WorkspaceRunRequestedCommand) {
-	if c == nil || strings.TrimSpace(string(command.WorkspaceID)) == "" {
-		return
-	}
-	c.ApplyRunCommandQueued(workspaceviewcore.RunCommandQueuedUpdate{
-		WorkspaceID:    strings.TrimSpace(string(command.WorkspaceID)),
-		RunID:          "",
-		Intent:         strings.TrimSpace(command.Intent),
-		Reason:         strings.TrimSpace(command.Reason),
-		RequestID:      strings.TrimSpace(command.RequestID),
-		IdempotencyKey: executionIdempotencyKey(command),
-		Source:         strings.TrimSpace(command.Source),
-		QueuedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-	})
-}
-
 // RecordWorkspaceExecutionOutcome projects the concrete Workspace-owner
 // admission result. Only the owner outcome decides whether the derived view
 // is accepted or rejected; the application never infers a lifecycle state.
@@ -77,12 +58,6 @@ func (c *Component) RecordWorkspaceExecutionOutcome(_ string, command workorchde
 // RecordWorkspaceExecutionRejected records a typed admission failure without
 // retrying or creating a successor request.
 func (c *Component) RecordWorkspaceExecutionRejected(_ string, command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
-	c.recordWorkspaceExecutionRejected(command, cause)
-}
-
-// RecordWorkspaceExecutionEnqueueFailure records a transport enqueue failure
-// as the same derived rejected fact. No owner command is issued by projection.
-func (c *Component) RecordWorkspaceExecutionEnqueueFailure(_ string, command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
 	c.recordWorkspaceExecutionRejected(command, cause)
 }
 

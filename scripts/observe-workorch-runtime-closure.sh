@@ -1189,7 +1189,6 @@ required_metric_markers = [
     "workorch_workspace_projection_stalled_runs",
     "workorch_workspace_projection_ineffective_retry_runs",
     "workorch_scheduler_commands_total",
-    "workorch_scheduler_command_enqueue_failures_total",
     "workorch_scheduler_continuation_failures_total",
     "workorch_scheduler_continuation_no_action_total",
     "workorch_watchdog_interval_seconds",
@@ -1337,14 +1336,6 @@ replan_command_error_delta = sum(
     labeled_metric_delta("workorch_scheduler_commands_total", {"kind": "replan_continuation", "result": result})
     for result in ("failed", "not_accepted", "missing_response")
 )
-governance_enqueue_failure_delta = labeled_metric_delta(
-    "workorch_scheduler_command_enqueue_failures_total",
-    {"kind": "governance_continuation", "reason": "scheduler_enqueue_failed"},
-)
-replan_enqueue_failure_delta = labeled_metric_delta(
-    "workorch_scheduler_command_enqueue_failures_total",
-    {"kind": "replan_continuation", "reason": "scheduler_enqueue_failed"},
-)
 governance_continuation_failure_delta = labeled_metric_delta(
     "workorch_scheduler_continuation_failures_total",
     {"kind": "governance_continuation"},
@@ -1367,13 +1358,11 @@ governance_scheduler_diagnostics = [
     item for item in scheduler_diagnostics_observed
     if item.get("kind") in {"governance_continuation", "replan_continuation"}
 ]
-governance_scheduler_evidence_delta = (
+forbidden_application_continuation_metric_delta = (
     governance_command_accepted_delta
     + replan_command_accepted_delta
     + governance_command_error_delta
     + replan_command_error_delta
-    + governance_enqueue_failure_delta
-    + replan_enqueue_failure_delta
     + governance_continuation_failure_delta
     + replan_continuation_failure_delta
     + governance_continuation_no_action_delta
@@ -1389,29 +1378,30 @@ governance_continuation_main_path = {
     "replanCommandAcceptedDelta": replan_command_accepted_delta,
     "governanceCommandErrorDelta": governance_command_error_delta,
     "replanCommandErrorDelta": replan_command_error_delta,
-    "governanceEnqueueFailureDelta": governance_enqueue_failure_delta,
-    "replanEnqueueFailureDelta": replan_enqueue_failure_delta,
     "governanceContinuationFailureDelta": governance_continuation_failure_delta,
     "replanContinuationFailureDelta": replan_continuation_failure_delta,
     "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
     "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
     "watchdogStaleRecoveryDelta": watchdog_stale_recovery_delta,
     "diagnosticItems": governance_scheduler_diagnostics,
-    "explicitSchedulerEvidence": governance_scheduler_evidence_delta > 0 or len(governance_scheduler_diagnostics) > 0,
+    "forbiddenApplicationSchedulerMetricDelta": forbidden_application_continuation_metric_delta,
+    "forbiddenApplicationSchedulerObserved": forbidden_application_continuation_metric_delta > 0 or len(governance_scheduler_diagnostics) > 0,
+    "ownerResolutionObserved": governance_resolution_delta > 0,
     "hiddenWatchdogCompensationSuspected": False,
 }
-if governance_resolution_delta > 0 and not governance_continuation_main_path["explicitSchedulerEvidence"]:
+if governance_continuation_main_path["forbiddenApplicationSchedulerObserved"]:
     errors.append(
-        "governance resolution observed but no scheduler accepted/error metric or continuation diagnostic was observed"
+        "forbidden application governance/replan continuation scheduler evidence was observed; "
+        "Decision/Approval owner and Orchestrator must continue Runtime directly"
     )
-if require_governance_continuation and governance_resolution_delta <= 0 and not governance_continuation_main_path["explicitSchedulerEvidence"]:
+if require_governance_continuation and governance_resolution_delta <= 0:
     errors.append(
-        "WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION is enabled but no governance continuation evidence was observed"
+        "WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION is enabled but no owner governance resolution was observed"
     )
-if governance_resolution_delta > 0 and watchdog_stale_recovery_delta > 0 and not governance_continuation_main_path["explicitSchedulerEvidence"]:
+if governance_resolution_delta > 0 and watchdog_stale_recovery_delta > 0:
     governance_continuation_main_path["hiddenWatchdogCompensationSuspected"] = True
     errors.append(
-        "governance continuation appears to rely on watchdog stale-runtime recovery without scheduler evidence"
+        "governance continuation appears to rely on forbidden watchdog stale-runtime recovery"
     )
 if governance_continuation_main_path["triggeredResolution"]:
     governance_continuation_main_path["requestArtifact"] = "governance-resolution-request.json"
@@ -1855,7 +1845,6 @@ summary = {
         "staleDispatchedStepMinAgeSeconds": stale_dispatched_step_min_age_seconds,
         "serverMaxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs", 0),
         "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight", 0),
-        "runQueueWaiting": metrics.get("workorch_run_queue_waiting", 0),
         "watchdogTimerRegistrations": metrics.get("workorch_watchdog_timer_registrations_total", 0),
         "watchdogIntervalSeconds": metrics.get("workorch_watchdog_interval_seconds", 0),
         "projectionPendingRebuilds": pending_rebuilds,
@@ -1898,12 +1887,11 @@ summary = {
             "replanCommandAcceptedDelta": replan_command_accepted_delta,
             "governanceCommandErrorDelta": governance_command_error_delta,
             "replanCommandErrorDelta": replan_command_error_delta,
-            "governanceEnqueueFailureDelta": governance_enqueue_failure_delta,
-            "replanEnqueueFailureDelta": replan_enqueue_failure_delta,
             "governanceContinuationFailureDelta": governance_continuation_failure_delta,
             "replanContinuationFailureDelta": replan_continuation_failure_delta,
             "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
             "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
+            "forbiddenApplicationContinuationMetricDelta": forbidden_application_continuation_metric_delta,
             "watchdogTicksDelta": watchdog_ticks_delta,
             "watchdogStaleRecoveryDelta": watchdog_stale_recovery_delta,
         },

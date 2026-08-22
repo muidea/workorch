@@ -16,12 +16,14 @@ type lifecycleInternalEvent struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	Kind        lifecycleInternalEventKind
+	Approval    *approvalmodel.Approval
 	Proposal    *approvalmodel.ResolutionProposal
 }
 
 type lifecycleInternalEventKind string
 
 const (
+	lifecycleInternalEventOpened                     lifecycleInternalEventKind = "opened"
 	lifecycleInternalEventResolutionProposed         lifecycleInternalEventKind = "resolution_proposed"
 	lifecycleInternalEventResolutionCommitted        lifecycleInternalEventKind = "resolution_committed"
 	lifecycleInternalEventResolutionProposalRejected lifecycleInternalEventKind = "resolution_proposal_rejected"
@@ -31,35 +33,68 @@ const (
 )
 
 func (s *Service) applyLifecycleInternalEvent(ctx context.Context, current *approvalmodel.Approval, event lifecycleInternalEvent) (*approvalmodel.Approval, error) {
-	if s == nil || current == nil || event.ApprovalID == "" {
+	if s == nil || s.approvals == nil || event.ApprovalID == "" || event.WorkspaceID == "" || event.RunID == "" {
 		return nil, common.ErrInvalidArgument
+	}
+	if current == nil {
+		if event.Kind != lifecycleInternalEventOpened || event.Approval == nil {
+			return nil, common.ErrInvalidArgument
+		}
+	} else if event.Kind == lifecycleInternalEventOpened || event.Approval != nil {
+		return nil, common.ErrInvalidArgument
+	}
+	bound, err := common.BindRuntimeWorkspaceContext(ctx, event.WorkspaceID)
+	if err != nil {
+		return nil, err
 	}
 	next, err := reduceApprovalLifecycle(current, event)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.approvals.Update(ctx, next); err != nil {
+	if event.Kind == lifecycleInternalEventOpened {
+		if err := s.approvals.Create(bound, next); err != nil {
+			return nil, err
+		}
+		return next, nil
+	}
+	if err := s.approvals.Update(bound, next); err != nil {
 		return nil, err
 	}
 	return next, nil
 }
 
 func reduceApprovalLifecycle(current *approvalmodel.Approval, event lifecycleInternalEvent) (*approvalmodel.Approval, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if event.Kind == lifecycleInternalEventOpened {
+		seed := event.Approval
+		if current != nil || seed == nil || seed.ID == "" || seed.ID != event.ApprovalID || seed.WorkspaceID != event.WorkspaceID || seed.RunID != event.RunID || strings.TrimSpace(seed.Reason) == "" ||
+			seed.State != "" || seed.ResolutionID != "" || seed.ResolutionProposal != nil || seed.EvidenceRecordedAt != "" || seed.ResolutionNotificationPublishedAt != "" || seed.DeletionRequestedAt != "" || seed.ResolvedAt != "" || seed.ResolvedBy != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" || event.Proposal != nil {
+			return nil, common.ErrInvalidArgument
+		}
+		next := approvalmodel.CloneApproval(seed)
+		next.State = common.ApprovalStatePending
+		next.CreatedAt = now
+		next.UpdatedAt = now
+		return next, nil
+	}
 	if current == nil || current.ID == "" || current.ID != event.ApprovalID || current.WorkspaceID != event.WorkspaceID || current.RunID != event.RunID {
 		return nil, common.ErrInvalidArgument
 	}
 	next := approvalmodel.CloneApproval(current)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	switch event.Kind {
 	case lifecycleInternalEventResolutionProposed:
-		if current.State != common.ApprovalStatePending || event.Proposal == nil || event.Proposal.ResolutionID == "" || event.Proposal.Principal.Validate() != nil {
+		if current.State != common.ApprovalStatePending || event.Proposal == nil || event.Proposal.ResolutionID == "" || event.Proposal.Principal.Validate() != nil ||
+			(event.Proposal.TargetState != common.ApprovalStateApproved && event.Proposal.TargetState != common.ApprovalStateRejected) {
 			return nil, common.ErrConflict
+		}
+		if event.Proposal.State != "" || strings.TrimSpace(event.Proposal.FailureClass) != "" || strings.TrimSpace(event.Proposal.FailureReason) != "" ||
+			strings.TrimSpace(event.Proposal.ProposedAt) != "" || strings.TrimSpace(event.Proposal.CommittedAt) != "" ||
+			strings.TrimSpace(event.Proposal.EvidenceRecordedAt) != "" || strings.TrimSpace(event.Proposal.ResolutionNotificationPublishedAt) != "" {
+			return nil, common.ErrInvalidArgument
 		}
 		proposal := event.Proposal.Clone()
 		proposal.State = approvalmodel.ResolutionProposalPending
-		if proposal.ProposedAt == "" {
-			proposal.ProposedAt = now
-		}
+		proposal.ProposedAt = now
 		next.ResolutionProposal = &proposal
 	case lifecycleInternalEventResolutionCommitted:
 		if current.State != common.ApprovalStatePending || current.ResolutionProposal == nil || event.Proposal == nil ||

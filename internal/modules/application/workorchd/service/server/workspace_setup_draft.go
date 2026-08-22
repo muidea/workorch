@@ -126,7 +126,6 @@ func (s *serverState) createWorkspaceSetupDraftSession(ctx context.Context, req 
 		TemplateID:     templateID,
 		Workspace:      workspace,
 		Draft:          draft,
-		State:          workspaceSetupDraftState(draft),
 		DialogLanguage: strings.TrimSpace(req.DialogLanguage),
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -135,9 +134,9 @@ func (s *serverState) createWorkspaceSetupDraftSession(ctx context.Context, req 
 	if s.workspaceSetupDraftSessions == nil {
 		s.workspaceSetupDraftSessions = map[string]*workspaceSetupDraftSession{}
 	}
-	s.workspaceSetupDraftSessions[session.ID] = cloneWorkspaceSetupDraftSessionPtr(session)
+	s.workspaceSetupDraftSessions[session.ID] = cloneWorkspaceSetupDraftSessionForStorage(session)
 	s.workspaceSetupDraftMu.Unlock()
-	return session, nil
+	return workspaceSetupDraftSessionView(session), nil
 }
 
 func (s *serverState) appendWorkspaceSetupDraftMessage(ctx context.Context, sessionID string, req appendWorkspaceSetupDraftMessageRequest) (workspaceSetupDraftSession, error) {
@@ -236,15 +235,14 @@ func (s *serverState) generateAndStoreWorkspaceSetupDraft(ctx context.Context, s
 	session.Draft = setupdraft.MergeDraft(session.Draft, draft)
 	session.Draft.PreviousDraftApplied = session.Draft.PreviousDraftApplied || previousDraftApplied
 	session.Messages = append(session.Messages, setupdraft.Message{Role: "assistant", Content: workspaceSetupDraftAssistantMessage(session.Draft)})
-	session.State = workspaceSetupDraftState(session.Draft)
 	session.UpdatedAt = time.Now().UTC()
 	s.workspaceSetupDraftMu.Lock()
 	if s.workspaceSetupDraftSessions == nil {
 		s.workspaceSetupDraftSessions = map[string]*workspaceSetupDraftSession{}
 	}
-	s.workspaceSetupDraftSessions[session.ID] = cloneWorkspaceSetupDraftSessionPtr(session)
+	s.workspaceSetupDraftSessions[session.ID] = cloneWorkspaceSetupDraftSessionForStorage(session)
 	s.workspaceSetupDraftMu.Unlock()
-	return session, nil
+	return workspaceSetupDraftSessionView(session), nil
 }
 
 func (s *serverState) workspaceSetupDraftSession(sessionID string) (workspaceSetupDraftSession, error) {
@@ -261,7 +259,7 @@ func (s *serverState) workspaceSetupDraftSession(sessionID string) (workspaceSet
 	if item == nil {
 		return workspaceSetupDraftSession{}, common.ErrNotFound
 	}
-	return cloneWorkspaceSetupDraftSession(*item), nil
+	return workspaceSetupDraftSessionView(*item), nil
 }
 
 func (s *serverState) findWorkspaceTemplate(ctx context.Context, templateID string) (workorchmanagementcontract.WorkspaceTemplate, error) {
@@ -338,9 +336,16 @@ func hasWorkspaceSetupDraftContent(draft setupdraft.Draft) bool {
 		len(draft.Warnings) > 0
 }
 
-func cloneWorkspaceSetupDraftSessionPtr(session workspaceSetupDraftSession) *workspaceSetupDraftSession {
+func cloneWorkspaceSetupDraftSessionForStorage(session workspaceSetupDraftSession) *workspaceSetupDraftSession {
 	cloned := cloneWorkspaceSetupDraftSession(session)
+	cloned.State = ""
 	return &cloned
+}
+
+func workspaceSetupDraftSessionView(session workspaceSetupDraftSession) workspaceSetupDraftSession {
+	cloned := cloneWorkspaceSetupDraftSession(session)
+	cloned.State = workspaceSetupDraftState(cloned.Draft)
+	return cloned
 }
 
 func cloneWorkspaceSetupDraftSession(session workspaceSetupDraftSession) workspaceSetupDraftSession {

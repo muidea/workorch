@@ -806,21 +806,36 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, min(64*1024, limits.MaxLineBytes)), limits.MaxLineBytes)
 	stream := &responsesStreamReader{guard: newProviderStreamGuard(limits), emit: emit}
-	for scanner.Scan() {
-		data, ok := responsesStreamData(scanner.Text())
-		if !ok {
-			continue
+	var pendingData string
+	pending := false
+	consumePending := func() (stop bool, preservePartial bool, err error) {
+		if !pending {
+			return false, false, nil
 		}
-		stop, preservePartial, err := stream.consume(data)
-		if err != nil {
+		data := pendingData
+		pendingData = ""
+		pending = false
+		return stream.consume(data)
+	}
+	for scanner.Scan() {
+		// Delay consuming the final scanned data line until Scanner has proved
+		// that the line ended cleanly. A bounded reader can return one partial
+		// token before surfacing its limit error; decoding that token first would
+		// incorrectly replace response_byte_limit_exceeded with invalid JSON.
+		if stop, preservePartial, err := consumePending(); err != nil {
 			if preservePartial {
 				return stream.builder.String(), stream.usage, err
 			}
 			return "", nil, err
+		} else if stop {
+			return stream.builder.String(), stream.usage, nil
 		}
-		if stop {
-			break
+		data, ok := responsesStreamData(scanner.Text())
+		if !ok {
+			continue
 		}
+		pendingData = data
+		pending = true
 	}
 	if err := scanner.Err(); err != nil {
 		var protocolErr *ProviderProtocolError
@@ -831,6 +846,14 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 			return "", nil, providerProtocolError("stream_line_limit_exceeded", 0)
 		}
 		return "", nil, err
+	}
+	if stop, preservePartial, err := consumePending(); err != nil {
+		if preservePartial {
+			return stream.builder.String(), stream.usage, err
+		}
+		return "", nil, err
+	} else if stop {
+		return stream.builder.String(), stream.usage, nil
 	}
 	if !stream.completed {
 		return "", nil, providerProtocolError("stream_ended_before_completion", 0)

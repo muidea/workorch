@@ -16,15 +16,6 @@ type executionProjection struct {
 	transport  *server.Service
 }
 
-func (p executionProjection) RecordWorkspaceExecutionQueued(command workorchdevents.WorkspaceRunRequestedCommand) {
-	if p.projection != nil {
-		p.projection.RecordWorkspaceExecutionQueued(command)
-	}
-	if p.transport != nil {
-		p.transport.RecordWorkspaceExecutionTransportQueued(command)
-	}
-}
-
 func (p executionProjection) RecordWorkspaceExecutionOutcome(topic string, command workorchdevents.WorkspaceRunRequestedCommand, outcome workorchdevents.WorkspaceRunRequestedResult) {
 	if p.projection != nil {
 		p.projection.RecordWorkspaceExecutionOutcome(topic, command, outcome)
@@ -40,14 +31,5 @@ func (p executionProjection) RecordWorkspaceExecutionRejected(topic string, comm
 	}
 	if p.transport != nil {
 		p.transport.RecordWorkspaceExecutionTransportRejected(topic, command, cause)
-	}
-}
-
-func (p executionProjection) RecordWorkspaceExecutionEnqueueFailure(topic string, command workorchdevents.WorkspaceRunRequestedCommand, cause error) {
-	if p.projection != nil {
-		p.projection.RecordWorkspaceExecutionEnqueueFailure(topic, command, cause)
-	}
-	if p.transport != nil {
-		p.transport.RecordWorkspaceExecutionTransportEnqueueFailure(topic, command, cause)
 	}
 }

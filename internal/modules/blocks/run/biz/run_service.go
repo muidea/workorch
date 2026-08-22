@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
@@ -56,27 +55,20 @@ func (s *Service) CreateRun(ctx context.Context, cmd runevents.CreateRunCommand)
 	if err := validateRuntimeBootstrapForRun(cmd.RuntimeBootstrap, cmd.GoalID, cmd.DoDID, definitionRevision); err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	startupInputHash := ""
 	if cmd.RuntimeBootstrap != nil {
 		startupInputHash = cmd.RuntimeBootstrap.Definition.Normalized().StartupInputHash
 	}
-	run := &runModel.Run{
-		ID:                 cmd.RunID,
-		WorkspaceID:        cmd.WorkspaceID,
-		GoalID:             cmd.GoalID,
-		DoDID:              cmd.DoDID,
-		Lineage:            createRunLineage(cmd.PredecessorRunID, cmd.PredecessorResultID),
-		DefinitionRevision: definitionRevision,
-		StartupInputHash:   startupInputHash,
-		InitialStepKind:    cmd.InitialStepKind,
-		RuntimeBootstrap:   cloneRuntimeBootstrap(cmd.RuntimeBootstrap),
-		State:              common.RunStatePending,
-		Priority:           cmd.Priority,
-		FailureReason:      "",
-		CreatedAt:          now,
-	}
-	if err := s.runs.Create(ctx, run); err != nil {
+	run, err := submitRunCreationInternalEvent(ctx, s.runs, runCreationInternalEvent{
+		Kind: runCreationInternalEventRequested,
+		Requested: &runCreationRequestedFact{
+			WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, GoalID: cmd.GoalID, DoDID: cmd.DoDID,
+			PredecessorRunID: cmd.PredecessorRunID, PredecessorResultID: cmd.PredecessorResultID,
+			DefinitionRevision: definitionRevision, StartupInputHash: startupInputHash,
+			InitialStepKind: cmd.InitialStepKind, RuntimeBootstrap: cmd.RuntimeBootstrap, Priority: cmd.Priority,
+		},
+	})
+	if err != nil {
 		return err
 	}
 	return s.publishRunEvent(ctx, runevents.TopicRunCreated, run)
@@ -127,14 +119,6 @@ func startupInputHashForBootstrap(bootstrap *runtimemodel.RuntimeBootstrap) stri
 		return ""
 	}
 	return bootstrap.Definition.Normalized().StartupInputHash
-}
-
-func createRunLineage(predecessorRunID common.RunID, predecessorResultID common.ResultID) runModel.RunLineage {
-	return runModel.RunLineage{
-		PredecessorRunID:    common.RunID(strings.TrimSpace(string(predecessorRunID))),
-		PredecessorResultID: common.ResultID(strings.TrimSpace(string(predecessorResultID))),
-		LineageState:        "active",
-	}
 }
 
 func cloneRuntimeBootstrap(value *runtimemodel.RuntimeBootstrap) *runtimemodel.RuntimeBootstrap {

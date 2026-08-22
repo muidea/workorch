@@ -237,9 +237,9 @@ apply_managed_llm_config() {
 wait_projection_drained() {
   local deadline=$((SECONDS + 60))
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz-projection-wait.json"
-    curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-projection-wait.txt"
-    if python3 - "$TMP_DIR/readyz-projection-wait.json" "$TMP_DIR/metrics-projection-wait.txt" <<'PY'
+    if curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz-projection-wait.json" 2>/dev/null &&
+      curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-projection-wait.txt" 2>/dev/null &&
+      python3 - "$TMP_DIR/readyz-projection-wait.json" "$TMP_DIR/metrics-projection-wait.txt" <<'PY'
 import json
 import sys
 

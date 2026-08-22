@@ -16,10 +16,6 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
-	return s.acquireRunSlotWithPriority(ctx, 0)
-}
-
 func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, values url.Values) (projectioncontract.RunStatus, bool, error) {
 	waitState := strings.TrimSpace(values.Get("waitState"))
 	timeout := durationFromMillisQuery(values, "waitTimeoutMillis", 0, 30*time.Second)
@@ -532,96 +528,4 @@ func uniqueNonEmptyStrings(items []string) []string {
 		ret = append(ret, item)
 	}
 	return ret
-}
-
-func (s *serverState) acquireRunSlotWithPriority(ctx context.Context, priority int) (func(), error) {
-	s.runQueueMu.Lock()
-	if s.activeRunSlots < s.config.MaxConcurrentRuns && len(s.runQueueWaiters) == 0 {
-		s.activeRunSlots++
-		s.metrics.runInFlight.Add(1)
-		s.runQueueMu.Unlock()
-		return s.releaseRunSlot, nil
-	}
-
-	s.runQueueSequence++
-	waiter := &runQueueWaiter{
-		ready:    make(chan struct{}),
-		priority: priority,
-		sequence: s.runQueueSequence,
-	}
-	s.runQueueWaiters = append(s.runQueueWaiters, waiter)
-	s.metrics.runQueueWaiting.Add(1)
-	s.metrics.runQueuedTotal.Add(1)
-	s.runQueueMu.Unlock()
-
-	select {
-	case <-waiter.ready:
-		if ctx.Err() != nil {
-			s.releaseRunSlot()
-			return nil, ctx.Err()
-		}
-		return s.releaseRunSlot, nil
-	case <-ctx.Done():
-		if s.cancelQueuedRunWaiter(waiter.ready) {
-			return nil, ctx.Err()
-		}
-		s.releaseRunSlot()
-		return nil, ctx.Err()
-	}
-}
-
-func (s *serverState) releaseRunSlot() {
-	s.runQueueMu.Lock()
-	if len(s.runQueueWaiters) > 0 {
-		idx := s.nextRunQueueWaiterIndex()
-		waiter := s.runQueueWaiters[idx]
-		s.runQueueWaiters = append(s.runQueueWaiters[:idx], s.runQueueWaiters[idx+1:]...)
-		s.metrics.runQueueWaiting.Add(-1)
-		s.runQueueMu.Unlock()
-		close(waiter.ready)
-		return
-	}
-	if s.activeRunSlots > 0 {
-		s.activeRunSlots--
-		s.metrics.runInFlight.Add(-1)
-	}
-	s.runQueueMu.Unlock()
-}
-
-func (s *serverState) cancelQueuedRunWaiter(target chan struct{}) bool {
-	s.runQueueMu.Lock()
-	defer s.runQueueMu.Unlock()
-
-	for idx, waiter := range s.runQueueWaiters {
-		if waiter.ready != target {
-			continue
-		}
-		s.runQueueWaiters = append(s.runQueueWaiters[:idx], s.runQueueWaiters[idx+1:]...)
-		s.metrics.runQueueWaiting.Add(-1)
-		return true
-	}
-	return false
-}
-
-func (s *serverState) nextRunQueueWaiterIndex() int {
-	best := 0
-	for idx := 1; idx < len(s.runQueueWaiters); idx++ {
-		if runQueueWaiterBefore(s.runQueueWaiters[idx], s.runQueueWaiters[best]) {
-			best = idx
-		}
-	}
-	return best
-}
-
-func runQueueWaiterBefore(left *runQueueWaiter, right *runQueueWaiter) bool {
-	if left == nil {
-		return false
-	}
-	if right == nil {
-		return true
-	}
-	if left.priority != right.priority {
-		return left.priority > right.priority
-	}
-	return left.sequence < right.sequence
 }

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -41,8 +40,7 @@ func (s *Service) CreateTicketAndReturn(ctx context.Context, cmd decisioncontrac
 		return nil, common.ErrInvalidArgument
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	item := &decisionModel.Ticket{
+	seed := &decisionModel.Ticket{
 		ID:                     cmd.TicketID,
 		WorkspaceID:            cmd.WorkspaceID,
 		RunID:                  cmd.RunID,
@@ -51,18 +49,14 @@ func (s *Service) CreateTicketAndReturn(ctx context.Context, cmd decisioncontrac
 		DecisionKind:           cmd.DecisionKind,
 		Question:               cmd.Question,
 		Context:                clonePayload(cmd.Context),
-		State:                  common.DecisionTicketStateOpen,
 		AutoGovernance:         clonePayload(cmd.AutoGovernance),
 		FailureClass:           nonEmptyString(cmd.FailureClass, stringPayloadValue(cmd.Context, "failureClass")),
 		FailureSignature:       nonEmptyString(cmd.FailureSignature, stringPayloadValue(cmd.Context, "failureSignature")),
 		AllowedRecoveryActions: nonEmptyStringSlice(cmd.AllowedRecoveryActions, stringSlicePayloadValue(cmd.Context, "allowedRecoveryActions")),
-		CreatedAt:              now,
-		UpdatedAt:              now,
 	}
-	if err := s.tickets.Create(ctx, item); err != nil {
-		return nil, err
-	}
-	return item, nil
+	return s.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventOpened, TicketID: seed.ID, Ticket: seed,
+	})
 }
 
 func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
@@ -550,7 +544,6 @@ func runtimeGovernanceProposalFromCommand(cmd decisioncontracts.ResolveTicketCom
 		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(payload, "resumeRunId"))),
 		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(payload, "successorRunId"))),
 		PayloadHash:        hash,
-		State:              decisionModel.RuntimeGovernanceResolutionProposalPending,
 	}, nil
 }
 

@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 组件类型与职责
 
@@ -17,6 +17,9 @@ Orchestrator 与各资源 owner。
 
 ## 写入与恢复合同
 
+- 所有 Ticket creation 入口只构造无 state/时间戳/进度的 immutable seed，再提交同一
+  `opened` Decision-private lifecycle event。只有 `lifecycle_internal_event.go` 可选择 initial `open`、封存
+  timestamps 并执行 Ticket repository Create；generic、Runtime governance 和两类 clarification open 都不得直写初始状态。
 - Definition clarification 不复用普通 `EnsureResolvedCommand` 或 Runtime governance envelope。pre-seal Workspace 路径使用
   dedicated open/reconcile-candidate/resolve-by-admission command/result；execution-time 路径使用 dedicated runtime open 与
   Run-owner resolve-by-replacement command/result。generic resolver、auto-governance policy 和 continuation action 均拒绝这两类 ticket。
@@ -26,6 +29,9 @@ Orchestrator 与各资源 owner。
 - Runtime clarification ticket 绑定 Run、Definition/StartupInput、authority、focus、semantic request/document 与 clarification
   dispatch。只有 `blocks/run` 已持久化的 replacement intent 可以绑定 resolution；重复 command 返回相同 resolution/binding
   hash，scope mismatch 或另一 intent 返回 typed stale/conflict，不生成 Runtime continuation。
+- clarification resolution 不得在 handler 中先改 nested binding 再改 Ticket state。handler 只提交 bounded
+  `definitionClarificationResolutionFact`，唯一 lifecycle reducer 在同一 owner Update 中原子绑定
+  resolution/replacement/admission identity 并执行 `open -> resolved`；partial binding 或已解决 binding 重写 fail-closed。
 
 - Runtime governance ticket 的唯一创建入口是 `OpenRuntimeGovernanceRequestCommand/Result`。Decision 在任何
   repository 访问前同时校验 EventHub source 必须为 `kernel/orchestrator`，并用 command `WorkspaceID` 绑定已有
@@ -39,6 +45,9 @@ Orchestrator 与各资源 owner。
   `committed` 或 `duplicate` 的 typed result 后，Decision 才创建正式 Resolution 并将 Ticket/proposal finalize 为
   resolved/committed。nil result、wrong result、missing subscriber 和 owner/transient error 都保留 pending；只有
   Orchestrator 明确返回 `stale_diagnostic` 才能标为 rejected。
+- `RuntimeGovernanceResolutionProposal` 的 ingress seed 同样不携带 state、failure、timestamp 或 delivery progress；
+  `proposal_prepared` private event 是唯一可选择 initial `pending` 并封存 proposal timestamps 的位置，caller-selected
+  proposal lifecycle 字段必须 fail-closed。
 - 已 committed 的相同 Runtime resolution 重放仍会向 Orchestrator 执行幂等 join，但不会再次 Update Ticket、刷新
   Ticket/proposal 时间戳或重写 Resolution。proposal 的 evidence/notification marker 只有在对应交付成功后由 private
   reducer 持久化；finalize 后进程中断或 evidence owner 失败时，启动/周期 reconciliation 会从正式 Resolution 重放
@@ -92,7 +101,7 @@ Orchestrator 与各资源 owner。
   fail-closed。Runtime governance open/capability ingress 另由专用 adapter 处理并先校验 Orchestrator source。
 - `ticket_commands.go` 只实现 scoped query、keyset page 与 workspace aggregate purge；`resolution_commands.go` 只实现
   resolution query/ensure；二者共享 workspace fence，但不形成第二个 owner 或 facade。
-- `lifecycle_internal_event.go` 是 Ticket、proposal、delivery marker 和 deletion tombstone 的唯一状态 reducer。
+- `lifecycle_internal_event.go` 是 Ticket creation/lifecycle、clarification binding、proposal、delivery marker 和 deletion tombstone 的唯一状态 reducer。
   `runtime_governance_proposal_reconciliation.go` 只重放已持久化 fact，不选择新的 resolution 或 Runtime action。
 - 生产依赖只包含 DecisionTicket repository、DecisionResolution repository、EventHub 和 framework background routine；
   不得注入 Run、Workspace、Evidence、Orchestrator repository/service 或 application callback。
@@ -107,6 +116,7 @@ Orchestrator 与各资源 owner。
 - concrete result type、显式全局 scope、默认/最大 limit、composite cursor continuation、跨 workspace 重复 ID 和深拷贝。
 - stable Decision notification identity 与 Eventstream duplicate append 去重。
 - Workspace invalid-candidate replacement、admission resolution，以及 Runtime replacement resolution 的 exact duplicate、scope mismatch、orphan-resolution recovery。
+- Ticket/proposal seed 均拒绝 caller-selected initial/progress state；clarification binding 与 `open -> resolved` 单次 owner write，静态门禁拒绝 handler 直写 binding、proposal initial state 或 Ticket repository Create。
 
 ## 闭合验证
 

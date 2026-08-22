@@ -14,9 +14,9 @@ Last Verified: 2026-08-22
 
 - framework 注入的 magicCommon `event.Hub` 只进入 `biz/` 子树：`biz.Biz` 内嵌 Base 并拥有顶层订阅生命周期，`workspaceCommandGateway`、CLI dispatcher、runtime event collector 和 focused Biz port 可以按职责保存 Hub/Base；module root 与生产 HTTP/SSE transport 不保存 Hub 或 runtime session。Biz 通过七组 concrete named `ApplicationPorts` 向 server 注入应用操作，禁止 callback type alias、通用 dispatcher 或 owner service/repository。包内测试基础设施可以构造 owner runtime，但不得扩展生产 `Service` API 或提供 exported Session-backed server constructor；生产默认构造器 fail-closed。
 - 对 Workspace、Orchestrator、Result、Decision、Approval、Memory、MCP Registry、Skill、Soul、Governance 和 Eventstream 的读写，以及对 Run 的读取，必须发送对应 owner `pkg/events` 定义的具体 command，并校验具体 result。execution mutation 只提交 Workspace owner；HTTP `RunPorts` 全部为只读端口。
-- HTTP server 退出时发布只含数据的 `ServiceStoppedData` notification；process service 在 framework `Run` 前建立 observer，并在自身维护 local wait state。EventHub 不传退出 channel、server 或 error object。`WorkspaceRunRequestedCommand` / `WorkspaceRunRequestedResult` 用于 scheduler 请求；embedded CLI facade 使用按操作拆分的具体 command/result，例如 `CLIWorkspaceCreateCommand` / `CLIWorkspaceCreateResult`，不存在通用 `CLICommand` / `CLIResult`。
-- `biz/execution.UseCase` 是 HTTP 异步 admission 与 Workorchd typed scheduler 同步 admission 的共同入口。它只规范化 request identity/scope、使用 framework `BackgroundRoutine`、提交 Workspace owner typed intent，并把 queued/owner outcome 交给 Biz-owned execution observation；同一 workspace/request 的 HTTP 重复请求只在有界进程窗口内 coalesce，持久化幂等仍归 owner；它不拥有 retry、Resume successor 或 lifecycle target state。
-- `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 upsert/queued/accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，server 仅接收独立的 transport diagnostics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
+- HTTP server 退出时发布只含数据的 `ServiceStoppedData` notification；process service 在 framework `Run` 前建立 observer，并在自身维护 local wait state。EventHub 不传退出 channel、server 或 error object。`WorkspaceRunRequestedCommand` / `WorkspaceRunRequestedResult` 是 Workorchd typed execution ingress；embedded CLI facade 使用按操作拆分的具体 command/result，例如 `CLIWorkspaceCreateCommand` / `CLIWorkspaceCreateResult`，不存在通用 `CLICommand` / `CLIResult`。
+- `biz/execution.UseCase` 是 HTTP 与 Workorchd typed EventHub 入口的唯一同步 admission 路径。它只规范化 request identity/scope、绑定 Workspace context、提交 Workspace owner typed intent、验证具体 owner result，再投影 accepted/rejected fact。它不保存 queue、pending/active request、进程内 dedupe、retry、Resume successor 或 lifecycle target state；重复 request 必须每次交给 Workspace/Run owner 持久化幂等合同裁决。
+- `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，不存在 `queued` observation 或 `queuedAt`；server 仅接收独立的 transport diagnostics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
 - projection Store lifecycle 是 Workorchd-owned 的派生状态机：rebuild requested/completed、mutation applied、degraded、
   failed 与 stopped 只能经过一个 private-event reducer 写入。`stopped` 对 late mutation/completion/failure 保持终态；
   `failed` 只能由成功提交的 owner mutation 或显式 rebuild 恢复。该状态只描述 read-model 健康度，不能反向修复
@@ -46,7 +46,7 @@ Last Verified: 2026-08-22
 - activation同时封存与repair/recovery source policy一致的`RuntimeExecutionBudgetPolicy`。read-model从opaque Runtime
   aggregate纯派生`RuntimeExecutionBudgetView`与active `RuntimeRecoverableWaitView`，明确区分recoverable wait、
   governance blocker和terminal；Application、HTTP、SSE、Web/TUI不提供retry-now、clear wait、top-up或预算回写入口。
-- Biz 启动 workspace projection 后再启动 HTTP；Stop 先关闭 execution admission，再优雅关闭 transport，随后关闭 projection 并等待已接收后台任务，最后关闭 runtime session。不再运行禁止的 inactive-running workspace recovery，也不注册 stale-Step watchdog timer。
+- Biz 启动 workspace projection 后再启动 HTTP；execution admission 是无状态同步 use case，没有独立 lifecycle。Stop 先停止 EventHub/CLI 入口并优雅关闭 transport，让 in-flight owner admission 使用仍有效的 port 完成；随后清理 port、关闭 projection 并等待其后台任务，最后关闭 runtime session。不再运行禁止的 inactive-running workspace recovery，也不注册 stale-Step watchdog timer。
 - Decision/Approval HTTP resolve 只提交对应 owner command 并刷新投影，不发布 Run Resume；Runtime Decision resolution 由 Decision owner 通过 typed EventHub command 直接提交 Orchestrator。
 - 生产路径不存在 run-scoped Start/Resume mutation 或直达 Run owner 的 scheduler command；唯一 execution ingress 是
   workspace-scoped `resume`/`restart`，由 `workspaceCommandGateway` 提交 Workspace owner。`RunPorts` 只提供 Run、snapshot、
@@ -95,14 +95,15 @@ Last Verified: 2026-08-22
 - application 不提供 orphan Step、stale dispatched Run 或 runtime-gap 的恢复 API；Runtime 重启推进由 Run owner
   的 SM-1 state + opaque RuntimeStateRecord inventory/notification 触发 Orchestrator internal drive；SM-4 typed load
   aggregate 后 owner-local 分类并幂等恢复。
-- application 不保留 execution pending/started、owner readback retry 或 scheduler recovery map。HTTP 异步入口只在后台任务成功入队后返回 queued/202，不得将其表述为 owner accepted；同步 scheduler 只在收到并校验具体 owner result 后返回 admission outcome，异步 owner outcome 由 projection 后续记录。
+- application 不保留 execution queue、pending/started、owner readback retry 或 scheduler recovery map。HTTP 只在收到并校验具体 Workspace owner result 后返回 `202`；该状态码表示 owner 已受理 execution intent，不表示 application-local queued state。owner 同步拒绝/失败直接映射为当前 HTTP error，投影只记录已观测的 accepted/rejected fact。
+- setup-draft session 只保存 message 与 Draft fact，API `state` 每次从 Draft 纯派生，不持久化第二份 authoring lifecycle。acceptance projection 只从 Runtime aggregate 派生 active slice；已有 sealed terminal 或 canonical terminal state 时不得继续标记 active slice/focus。
 
 ## 测试状态
 
 已覆盖：
 
 - [x] 七组 `ApplicationPorts` 的每个缺失 port 都会在 transport 启动前 fail-closed。
-- [x] HTTP 异步 admission 对同一 `workspace + request` 做有界进程内 coalesce，冲突复用会被拒绝。
+- [x] HTTP handler 等待 Workspace owner 同步 admission；成功前零 `queued` 投影，owner 失败在当前请求返回，重复 request 每次交由 owner 幂等裁决。
 - [x] 大 DoD 的稳定语义排序、slice 分组、每 CWI 独立 focus 以及 focus 总数上限门禁。
 - [x] projection lag/high-watermark reconciliation、显式 rebuild、重启 generation 与“不得向 owner 回写修复”。
 - [x] projection lifecycle 合法/禁止迁移、stopped late-event noop、failed 经成功 owner mutation/显式 rebuild 恢复与
@@ -123,8 +124,8 @@ Last Verified: 2026-08-22
   的代表 HTTP 路由覆盖 transport-safe error mapping，workspace/request/intent 以及现有 owner read/mutation 测试覆盖
   scope mismatch 并 fail-closed。
 - [x] Run owner 的 file-backed restart 重放跨 owner restart 仍只保留一个 `ActivationRequestID` 对应的 Run；changed
-  payload 冲突。execution use case 关闭后同步/异步 admission 均 fail-closed 且无 side effect。
-- [x] AST 顺序测试固定 Stop 为 admission → transport → projection/background tasks → runtime session；真实 Setup
+  payload 冲突。execution use case 对缺失 dependency、invalid intent 和 owner result scope mismatch 均 fail-closed 且无 retry/queue side effect。
+- [x] AST 顺序测试固定 Stop 为 transport → projection/background tasks → runtime session，并确认 admission port 在 transport 完成 graceful shutdown 后才清理；真实 Setup
   后重复 Stop 幂等并清空所有生命周期引用。
 - [x] 512 份、单份 32 KiB 的 cumulative Goal/DoD 压力用例确认 activation 只传 identity/revision，不复制稳定正文，
   definition change context 保持有界。

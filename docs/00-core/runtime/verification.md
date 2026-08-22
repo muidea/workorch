@@ -37,6 +37,10 @@ projection gate；owner root、private-event file 与 dispatcher 必须都位于
 重复 transition ID、未知分类、dispatcher 缺失或 owner 漂移必须使 boundary verification 失败。该清单不得被生产代码
 导入或用于 reducer dispatch；正式 Runtime owner 仍只由 typed contract 和 private reducer 决定。
 
+静态门禁同时将 initial state 视为 transition：Workspace/Run/Decision/Approval 的创建必须经过各自
+owner-private creation/lifecycle dispatcher，创建入口不得直接 repository `Create` 带 state。它还必须拒绝
+application-local execution queue/queued projection 的回归，以及 setup-draft 等派生状态的单独持久化。
+
 ## Four-State-Machine Mandatory Matrix
 
 | 状态机 | 唯一 owner | 必须验证的合法迁移 | 必须拒绝的迁移 |

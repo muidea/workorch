@@ -127,7 +127,7 @@ run_pkg ./internal/modules/application/workorchd/service/server \
 # first resolved model target into the workspace; TUI resume/exit only manage
 # input and projection lifecycle, never reconstruct runtime authority.
 run_pkg ./internal/modules/application/workorchd/service/server \
-  -run 'TestWorkorchDActivationHTTPProjectsRequestID|TestWorkorchDActivationHTTPReturnsWhileSchedulerIsStillRunning'
+  -run 'TestWorkorchDActivationHTTPProjectsRequestID|TestWorkorchDActivationHTTPWaitsForOwnerAdmission'
 
 run_pkg ./internal/services/workorch/service/cli \
   -run 'TestRunResumeUsesUnifiedWorkspaceRunCommand'

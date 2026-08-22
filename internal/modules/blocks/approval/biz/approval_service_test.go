@@ -169,6 +169,46 @@ func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	}
 }
 
+func TestApprovalLifecycleSelectsInitialResolutionProposalState(t *testing.T) {
+	current := &approvalModel.Approval{
+		ID:          "approval-proposal-owner",
+		WorkspaceID: "ws-proposal-owner",
+		RunID:       "run-proposal-owner",
+		Reason:      "review runtime action",
+		State:       common.ApprovalStatePending,
+	}
+	seed := &approvalModel.ResolutionProposal{
+		ResolutionID: "resolution-proposal-owner",
+		TargetState:  common.ApprovalStateApproved,
+		Principal: approvalModel.ApprovalResolutionPrincipal{
+			Kind: approvalModel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "operator",
+		},
+	}
+
+	next, err := reduceApprovalLifecycle(current, lifecycleInternalEvent{
+		ApprovalID: current.ID, WorkspaceID: current.WorkspaceID, RunID: current.RunID,
+		Kind: lifecycleInternalEventResolutionProposed, Proposal: seed,
+	})
+	if err != nil {
+		t.Fatalf("prepare proposal: %v", err)
+	}
+	if next.ResolutionProposal == nil || next.ResolutionProposal.State != approvalModel.ResolutionProposalPending || next.ResolutionProposal.ProposedAt == "" {
+		t.Fatalf("proposal lifecycle fields = %+v", next.ResolutionProposal)
+	}
+	if seed.State != "" || seed.ProposedAt != "" {
+		t.Fatalf("proposal seed was mutated by reducer: %+v", seed)
+	}
+
+	callerSelected := seed.Clone()
+	callerSelected.State = approvalModel.ResolutionProposalPending
+	if rejected, err := reduceApprovalLifecycle(current, lifecycleInternalEvent{
+		ApprovalID: current.ID, WorkspaceID: current.WorkspaceID, RunID: current.RunID,
+		Kind: lifecycleInternalEventResolutionProposed, Proposal: &callerSelected,
+	}); !errors.Is(err, common.ErrInvalidArgument) || rejected != nil {
+		t.Fatalf("caller-selected proposal state was accepted: next=%+v err=%v", rejected, err)
+	}
+}
+
 func TestService_CreateApproval_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(memory.NewApprovalRepository())

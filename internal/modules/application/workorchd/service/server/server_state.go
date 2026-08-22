@@ -15,7 +15,6 @@ import (
 
 type serverState struct {
 	config                      Config
-	workspaceRunScheduler       WorkspaceRunScheduler
 	workspaceExecutionAdmission WorkspaceExecutionAdmission
 	eventReplay                 *sseReplayBuffer
 	streamSubscribersMu         sync.Mutex
@@ -23,10 +22,6 @@ type serverState struct {
 	streamSubscriberSequence    uint64
 	metrics                     *serverMetrics
 	applicationOperations
-	runQueueMu                  sync.Mutex
-	runQueueWaiters             []*runQueueWaiter
-	runQueueSequence            uint64
-	activeRunSlots              int64
 	backgroundRoutine           task.BackgroundRoutine
 	backgroundWG                sync.WaitGroup
 	backgroundCtx               context.Context
@@ -58,10 +53,4 @@ type runSnapshotInflight struct {
 	done     chan struct{}
 	snapshot readmodelcore.RunSnapshotState
 	err      error
-}
-
-type runQueueWaiter struct {
-	ready    chan struct{}
-	priority int
-	sequence uint64
 }

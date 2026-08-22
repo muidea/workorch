@@ -19,6 +19,9 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 - Workspace、Goal、DoD 和 Template 的 CRUD input，以及 Template defaults ensure input，均由
   `blocks/workspace/pkg/events` 定义具体 command 类型；普通 CRUD 当前共享 owner-local typed result union
   `WorkspaceCommandResult`。该 union 不包含 `map[string]any` authority，也不替代各操作的具体 command。
+- Workspace creation command 只携带 identity、描述和已解析目录，不携带 `State` 或 active slot。
+  `workspace.creation` owner-private event/dispatcher 是唯一 repository Create 入口，由 Workspace owner
+  选择 initial `active` 并绑定 matching workspace context；protocol/service 不得构造 caller-selected initial state。
 - Workspace 创建、状态变化、删除以及 Goal/DoD 定义变化由本 block 发布具体通知。
 - `application/workorchd` 与需要 definition fact 的 owner 通过 EventHub 读取 Workspace、Goal、DoD、Template 和
   definition revision；其他 owner 不直接访问 Workspace repository。
@@ -74,6 +77,7 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 ## 已覆盖测试点
 
 - [x] memory/file backend 上 Template defaults 的部分已存在、缺失补建、重复 ensure 与内置 ID 用户修改非覆盖语义。
+- [x] Workspace creation 经唯一 private dispatcher 选择 initial state，错误 workspace scope/非 creation event 零写入，静态门禁拒绝其他 Biz `State` literal 或 repository Create 旁路。
 - [x] Workspace CAS revision，以及 Goal/DoD create/update、`A → B → A` 的单调 revision、相同内容 noop 和 stale restart definition 拒绝。
 - [x] Goal/DoD 非递增 ID 的 canonical leaf 谱系、历史 definition 更新拒绝和 current leaf 删除拒绝。
 - [x] memory/file backend 上 Goal/DoD 局部 identity、错误 Workspace scope 的 Get/Update/Delete 与无 scope 歧义拒绝。

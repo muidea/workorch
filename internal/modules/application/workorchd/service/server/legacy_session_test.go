@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -69,7 +72,7 @@ func configureSessionBackedTestOperations(s *serverState, session *runtimecore.S
 	s.updateWorkspaceLLMSelectionPort = func(ctx context.Context, workspaceID string, selection *runtimecontract.ProviderInferenceSelection, expectedRevision uint64) (appmodelcore.Workspace, error) {
 		return appservice.UpdateWorkspaceLLMSelectionWithSession(ctx, session, workspaceID, selection, expectedRevision)
 	}
-	s.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: s}
+	s.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: s, submitter: directWorkspaceRunScheduler{state: s}}
 }
 
 func withBorrowedTestSession(ctx context.Context, session *runtimecore.Session, fn func(*runtimecore.Session) error) error {
@@ -111,15 +114,74 @@ func testRuntimeSession(state *serverState) *runtimecore.Session {
 	return session
 }
 
-type sessionBackedTestExecutionAdmission struct{ state *serverState }
+type testWorkspaceRunSubmitter interface {
+	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error)
+}
 
-func (a sessionBackedTestExecutionAdmission) EnqueueWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error) {
+type sessionBackedTestExecutionAdmission struct {
+	state     *serverState
+	submitter testWorkspaceRunSubmitter
+}
+
+func (a sessionBackedTestExecutionAdmission) AdmitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error) {
 	if a.state == nil || testRuntimeSession(a.state) == nil {
 		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrConflict
 	}
 	command = prepareWorkspaceRunSchedulerCommand(topic, command)
-	if err := a.state.enqueueWorkorchDSchedulerCommand(topic, command); err != nil {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, err
+	if a.submitter == nil {
+		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrConflict
 	}
+	outcome, err := a.submitter.SubmitWorkspaceRun(ctx, command)
+	if err != nil {
+		a.state.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
+			WorkspaceID:    string(command.WorkspaceID),
+			Intent:         command.Intent,
+			Reason:         command.Reason,
+			RequestID:      command.RequestID,
+			IdempotencyKey: testSchedulerCommandIdempotencyKey(command),
+			Source:         command.Source,
+			RejectedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			Error:          err.Error(),
+		})
+		a.state.recordWorkspaceRunFailure(command, schedulerKindWorkspaceActivation, schedulerReasonWorkspaceActivationFailed, err)
+		return command, err
+	}
+	projectTestWorkspaceExecutionOutcome(a.state, command, outcome)
 	return command, nil
+}
+
+func projectTestWorkspaceExecutionOutcome(state *serverState, command workorchdevents.WorkspaceRunRequestedCommand, outcome workorchdevents.WorkspaceRunRequestedResult) {
+	if state == nil {
+		return
+	}
+	workspaceID := strings.TrimSpace(string(outcome.WorkspaceID))
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(string(command.WorkspaceID))
+	}
+	disposition := string(outcome.Outcome)
+	diagnostic := runtimecontract.RuntimeExecutionIntentReasonSummary(outcome.Reason)
+	if outcome.Outcome == runtimecontract.RuntimeExecutionIntentReconciliationRequested || outcome.Outcome == runtimecontract.RuntimeExecutionIntentReplacementPending {
+		state.applyProjectedRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
+			WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent, Reason: command.Reason,
+			Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID,
+			IdempotencyKey: testSchedulerCommandIdempotencyKey(command), Source: command.Source,
+			AcceptedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		return
+	}
+	state.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
+		WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent, Reason: command.Reason,
+		Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID,
+		IdempotencyKey: testSchedulerCommandIdempotencyKey(command), Source: command.Source,
+		RejectedAt: time.Now().UTC().Format(time.RFC3339Nano), Error: diagnostic,
+	})
+}
+
+func testSchedulerCommandIdempotencyKey(command workorchdevents.WorkspaceRunRequestedCommand) string {
+	workspaceID := strings.TrimSpace(string(command.WorkspaceID))
+	intent := strings.TrimSpace(command.Intent)
+	if workspaceID == "" || intent == "" {
+		return ""
+	}
+	return intent + "/" + workspaceID
 }

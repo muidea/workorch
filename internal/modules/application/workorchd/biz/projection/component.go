@@ -164,10 +164,6 @@ func (c *Component) ApplyRunCommandAccepted(update workspaceviewcore.RunCommandA
 	return c != nil && c.manager != nil && c.manager.ApplyRunCommandAccepted(update)
 }
 
-func (c *Component) ApplyRunCommandQueued(update workspaceviewcore.RunCommandQueuedUpdate) bool {
-	return c != nil && c.manager != nil && c.manager.ApplyRunCommandQueued(update)
-}
-
 func (c *Component) ApplyRunCommandRejected(update workspaceviewcore.RunCommandRejectedUpdate) bool {
 	return c != nil && c.manager != nil && c.manager.ApplyRunCommandRejected(update)
 }

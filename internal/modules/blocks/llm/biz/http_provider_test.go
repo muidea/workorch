@@ -308,6 +308,31 @@ func TestHTTPProviderMalformedStreamEventIsProtocolFailure(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderStreamWireLimitPrecedesPartialEventJSON(t *testing.T) {
+	config := testAIProxyProviderConfig("")
+	config.InferenceProfile.MaxOutputTokens = 1
+	config.ContextProfile.EstimatedTokensPerByte = 1
+	limits, err := providerCompletionResponseLimits(config, llmmodels.ProviderRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		prefix := ": " + strings.Repeat("p", limits.MaxWireBytes/2) + "\n"
+		remaining := limits.MaxWireBytes - len(prefix)
+		partialEvent := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + strings.Repeat("x", remaining) + "\"}\n\n"
+		_, _ = w.Write([]byte(prefix + partialEvent))
+	}))
+	defer server.Close()
+	config.BaseURL = server.URL
+
+	result, err := NewHTTPProvider(config).StreamComplete(context.Background(), llmmodels.ProviderRequest{}, nil)
+	var protocolErr *ProviderProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != "response_byte_limit_exceeded" || result.ResponseBytes != limits.MaxWireBytes+1 {
+		t.Fatalf("stream wire limit result=%+v protocol=%#v error=%v", result, protocolErr, err)
+	}
+}
+
 func TestHTTPProviderEmbeddingResponseIsBoundedByModelInputProfile(t *testing.T) {
 	config := testAIProxyProviderConfig("")
 	config.ContextProfile.MaxRequestBytes = 1

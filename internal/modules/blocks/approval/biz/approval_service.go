@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -23,17 +22,20 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.Crea
 	if s == nil || s.approvals == nil || cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || strings.TrimSpace(cmd.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	item := &approvalmodel.Approval{
+	seed := &approvalmodel.Approval{
 		ID: cmd.ApprovalID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID,
 		Reason: strings.TrimSpace(cmd.Reason), Action: strings.TrimSpace(cmd.Action), Context: cmd.Context.Clone(),
-		State: common.ApprovalStatePending, AutoGovernance: cmd.AutoGovernance.Clone(), CreatedAt: now, UpdatedAt: now,
+		AutoGovernance: cmd.AutoGovernance.Clone(),
 	}
 	if cmd.RuntimeGovernance != nil {
 		binding := cmd.RuntimeGovernance.Clone()
-		item.RuntimeGovernance = &binding
+		seed.RuntimeGovernance = &binding
 	}
-	return s.approvals.Create(ctx, item)
+	_, err := s.applyLifecycleInternalEvent(ctx, nil, lifecycleInternalEvent{
+		ApprovalID: seed.ID, WorkspaceID: seed.WorkspaceID, RunID: seed.RunID,
+		Kind: lifecycleInternalEventOpened, Approval: seed,
+	})
+	return err
 }
 
 func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
@@ -64,7 +66,7 @@ func (s *Service) EnsureResolutionProposal(ctx context.Context, cmd approvalcont
 	}
 	want := approvalmodel.ResolutionProposal{
 		ResolutionID: cmd.ResolutionID, TargetState: target, Principal: cmd.Principal.Normalized(),
-		Context: cmd.Context.Clone(), State: approvalmodel.ResolutionProposalPending,
+		Context: cmd.Context.Clone(),
 	}
 	item, err := s.approvals.GetScoped(ctx, cmd.WorkspaceID, cmd.RunID, cmd.ApprovalID)
 	if err != nil {

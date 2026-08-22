@@ -43,6 +43,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   fence 内，静态穷尽地委派到 Run query、Step query、Checkpoint query、opaque Runtime state store 和 resource
   cleanup 五个 owner-private handler。公开 EventHub surface 不提供 create/ensure/update topic；`CreateRunCommand` 只供
   Run owner 内部持久化 helper 与 activation-memory fact 映射使用，不是跨 owner command。
+- ordinary Run creation 与 replacement successor materialization 共用唯一 `run.creation` owner-private
+  dispatcher。两个入口只提交 immutable creation fact，不携带 `State`/时间戳；Run owner 选择
+  initial SM-1 `pending`、initial lineage `active`、封存 `CreatedAt` 并执行唯一 repository Create。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
 - Runtime 正式状态使用 typed `RuntimeStateRecord` 随 Run 物理持久化；update command 必须携带 expected runtime
   revision，并返回唯一的 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或 `owner_transient`
@@ -140,9 +143,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
 ## 回归覆盖
 
-已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；ticket/approval
+已覆盖：SM-1 全状态合法/非法边矩阵（含 administrative cancel/supersede、终态反向迁移与未知状态拒绝）；Run creation/replacement successor 共用 private dispatcher、caller-selected initial state 与直达 repository Create 拒绝；ticket/approval
 两类 wait/continuation、terminal stale/duplicate、fresh-activation；restart RequestID sealed-payload 冲突、intent 先持久化、
-caller-selected initial state 拒绝、runtime clarification acknowledgement gate，以及
+runtime clarification acknowledgement gate，以及
 terminal→successor create→lineage CAS→activation 各持久化切点的崩溃恢复与
 唯一 successor；Runtime CAS source/scope/schema/hash、aggregate revision race、物理 rebase 与 legacy bypass；Setup 阶段
 inventory/record read、commands-ready 元数据与重复 handoff、typed result clone、workspace scope；activation Memory 完整

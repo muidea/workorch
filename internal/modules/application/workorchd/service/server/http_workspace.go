@@ -552,7 +552,7 @@ func registerWorkspaceExecutionWriteRoute(router engine.RouteRegistry, state *se
 			return
 		}
 		command.Intent = intent
-		command, commandErr = state.enqueueWorkspaceExecution(r.Context(), topic, command)
+		command, commandErr = state.admitWorkspaceExecution(r.Context(), topic, command)
 		if commandErr != nil {
 			writeBusinessError(w, commandErr)
 			return

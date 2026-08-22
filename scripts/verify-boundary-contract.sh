@@ -342,6 +342,62 @@ EOF
   exit 1
 fi
 
+# Initial owner state is a lifecycle choice as well. Object literals used by
+# public services historically bypassed the private dispatcher because the
+# assignment form above only saw later mutations.
+owner_initial_state_bypass_matches="$({
+  source_matches 'State:[[:space:]]*common\.WorkspaceState' internal/modules/blocks/workspace/biz |
+    grep -v -F -- 'internal/modules/blocks/workspace/biz/creation_internal_event.go' || true
+  source_matches 'State:[[:space:]]*common\.RunState' internal/modules/blocks/run/biz |
+    grep -v -F -- 'internal/modules/blocks/run/biz/creation_internal_event.go' || true
+  source_matches 'State:[[:space:]]*common\.DecisionTicketState' internal/modules/blocks/decision/biz |
+    grep -v -F -- 'internal/modules/blocks/decision/biz/lifecycle_internal_event.go' || true
+  source_matches 'State:[[:space:]]*common\.ApprovalState' internal/modules/blocks/approval/biz |
+    grep -v -F -- 'internal/modules/blocks/approval/biz/lifecycle_internal_event.go' || true
+  source_matches 'State:[[:space:]]*decisionModel\.RuntimeGovernanceResolutionProposal' internal/modules/blocks/decision/biz |
+    grep -v -F -- 'internal/modules/blocks/decision/biz/lifecycle_internal_event.go' || true
+  source_matches 'State:[[:space:]]*approvalmodel\.ResolutionProposal' internal/modules/blocks/approval/biz |
+    grep -v -F -- 'internal/modules/blocks/approval/biz/lifecycle_internal_event.go' || true
+  source_matches 'LineageState:[[:space:]]*"active"' internal/modules/blocks/run/biz |
+    grep -v -F -- 'internal/modules/blocks/run/biz/creation_internal_event.go' || true
+  source_matches '(workspaces|runs|tickets|approvals)\.Create\(' \
+    internal/modules/blocks/workspace/biz internal/modules/blocks/run/biz internal/modules/blocks/decision/biz internal/modules/blocks/approval/biz |
+    grep -v -E -- '/(creation|lifecycle)_internal_event\.go:' || true
+  source_matches '(binding|oldBinding)\.(ResolutionID|ResolutionBindingHash|DefinitionRevision|StartupInputHash|ReplacementIntentID|ReplacementIntentHash|SuccessorDefinitionRevision|SuccessorStartupInputHash)[[:space:]]*=[[:space:]]*[^=]' \
+    internal/modules/blocks/decision/biz |
+    grep -v -F -- 'internal/modules/blocks/decision/biz/lifecycle_internal_event.go' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$owner_initial_state_bypass_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: owner creation state or clarification binding
+bypasses its owner-private internal-event dispatcher.
+
+$owner_initial_state_bypass_matches
+EOF
+  exit 1
+fi
+
+# Application execution admission is synchronous with Workspace owner. Keep
+# deleted application-local queue/state-owner surfaces from returning under a
+# different call site, and keep setup draft state a response-only derivation.
+application_execution_state_bypass_matches="$({
+  source_matches '(runQueueWaiters|activeRunSlots|EnqueueWorkspaceExecution|RecordWorkspaceExecutionQueued|RecordWorkspaceExecutionEnqueueFailure|RecordWorkspaceExecutionTransportQueued|RecordWorkspaceExecutionTransportEnqueueFailure|RunCommandQueuedUpdate|ApplyRunCommandQueued|QueuedAt|recordCommandEnqueueFailure|scheduler_enqueue_failed|workorch_run_queue_)' \
+    internal/modules/application/workorchd || true
+  source_matches '(runQueueWaiting|workorch_run_queue_|workorch_scheduler_command_enqueue_failures_total|scheduler_enqueue_failed)' scripts |
+    grep -v -F -- 'scripts/verify-boundary-contract.sh' || true
+  source_matches 'session\.State[[:space:]]*=|State:[[:space:]]*workspaceSetupDraftState' \
+    internal/modules/application/workorchd/service/server/workspace_setup_draft.go || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$application_execution_state_bypass_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Application owns an execution queue/state or
+persists a setup-draft state that must remain derived.
+
+$application_execution_state_bypass_matches
+EOF
+  exit 1
+fi
+
 # Secondary owner state machines and audit/read-model carriers follow the same
 # rule: public/cross-owner handlers translate immutable facts, while exactly
 # one owner-private dispatcher selects and persists the next state.
@@ -504,8 +560,14 @@ done < <(find internal/modules -type f ! -name '*_test.go' \( -name '*_internal_
 # second owner inventory. These call sites historically bypassed, or are the
 # only public translators into, their private dispatcher.
 owner_secondary_ingress_dispatcher_assertions=(
+  "internal/modules/blocks/workspace/biz/goal_dod_manager.go:submitWorkspaceCreationInternalEvent"
   "internal/modules/blocks/workspace/biz/definition_admission.go:submitDefinitionAdmissionInternalEvent"
+  "internal/modules/blocks/run/biz/run_service.go:submitRunCreationInternalEvent"
+  "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitRunCreationInternalEvent"
   "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitReplacementInternalEvent"
+  "internal/modules/blocks/decision/biz/decision_service.go:applyLifecycleInternalEvent"
+  "internal/modules/blocks/decision/biz/definition_clarification.go:applyLifecycleInternalEvent"
+  "internal/modules/blocks/approval/biz/approval_service.go:applyLifecycleInternalEvent"
   "internal/modules/kernel/governance/biz/worker_reconciliation.go:persistEvaluatedGovernanceTrace"
   "internal/modules/kernel/governance/biz/worker_reconciliation.go:escalateGovernanceTrace"
   "internal/modules/kernel/governance/biz/worker_reconciliation.go:startGovernanceTraceResolution"

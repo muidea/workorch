@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Purpose
 
@@ -20,14 +20,14 @@ Approval 或 capability 的正式状态。
 | Responsibility | Owns | Must not |
 | --- | --- | --- |
 | framework composition | one module lifecycle and dependency readiness | expose a sibling owner service/repository |
-| execution admission | request normalization, bounded scheduling and Workspace intent submission | own retry、SM-1 or successor creation |
+| execution admission | request normalization, synchronous Workspace intent submission and exact owner-result validation | own queue/dedupe/retry、SM-1 or successor creation |
 | bootstrap composition | read activation-eligible owner snapshots and build typed `RuntimeBootstrap` | choose Runtime action or modify sealed input |
 | runtime session | one process-lifetime session with scoped borrow/close | leak session to transport or clients |
 | projection | derived manager/store lifecycle and rebuild | repair or rebuild owner authority |
 | HTTP/SSE/CLI adapters | parse/render stable application DTO and invoke named use cases | retain EventHub or perform owner mutation directly |
 
 The module fails closed before accepting work when required ports, owner contracts, runtime session or projection dependencies
-are unavailable. Server-local scheduler、projection 或 repository fallback 不属于生产路径。
+are unavailable. Server-local execution queue、scheduler authority、projection 或 repository fallback 不属于生产路径。
 
 ## Definition And Execution Admission
 
@@ -38,7 +38,7 @@ Fresh execution follows one application sequence:
 3. when admission reports unsupported relation or ambiguity, open/reconcile the pre-Run blocking clarification ticket and stop;
 4. read activation-eligible Workspace startup input plus referenced Template/Profile、provider、Soul、Skill、MCP and Memory facts;
 5. build a typed `RuntimeBootstrap` from those owner snapshots and process defaults;
-6. submit a workspace-scoped `resume|restart` intent; Workspace and Run owners perform their own transitions;
+6. synchronously submit a workspace-scoped `resume|restart` intent and validate the exact Workspace-owner result; Workspace and Run owners perform their own transitions;
 7. observe owner facts for projection while Orchestrator drive starts from Run-owner notification.
 
 Normal TUI/Web input does not include raw context hints、evidence policy、target、recipe、check、artifact graph、target Run state
@@ -69,11 +69,16 @@ records is bounded read-side behavior, not Orchestrator Runtime or an authority 
 Projection consumes immutable Eventstream/Orchestrator/owner/execution observations。Its cache/store can rebuild, but derived
 writes and deletion remain application-owned and cannot mutate owner aggregates。
 
+Execution admission has no independent lifecycle or queue. HTTP returns `202` only after synchronous Workspace-owner admission;
+owner rejection is returned by that request, and duplicate identity is always delegated to the owner persistence contract. The
+setup-draft response state and terminal acceptance presentation are pure projections of their source facts, never separately
+persisted transition authority.
+
 Lifecycle ordering is:
 
 ```text
-start projection -> open execution admission -> start transport
-stop admission -> stop transport -> close projection/tasks -> close runtime session
+start projection -> start transport
+stop EventHub/CLI ingress -> stop transport -> clear ports -> close projection/tasks -> close runtime session
 ```
 
 The module does not run inactive-Run recovery scans、stale-Step watchdogs、pending/started queues or orphan-step repair APIs。

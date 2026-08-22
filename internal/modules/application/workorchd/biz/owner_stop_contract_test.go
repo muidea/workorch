@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestApplicationStopPreservesAdmissionTransportProjectionRuntimeOrder(t *testing.T) {
+func TestApplicationStopPreservesTransportProjectionRuntimeOrder(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
@@ -30,7 +30,7 @@ func TestApplicationStopPreservesAdmissionTransportProjectionRuntimeOrder(t *tes
 	if stop == nil || stop.Body == nil {
 		t.Fatal("Biz.Stop declaration not found")
 	}
-	wanted := []string{"b.execution.Close", "b.service.Shutdown", "b.projection.CloseContext", "b.runtime.close"}
+	wanted := []string{"b.service.Shutdown", "b.projection.CloseContext", "b.runtime.close"}
 	positions := make(map[string]token.Pos, len(wanted))
 	ast.Inspect(stop.Body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)

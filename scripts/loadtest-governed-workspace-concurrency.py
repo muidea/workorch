@@ -1448,7 +1448,7 @@ def collect_metrics() -> dict[str, float]:
         if len(parts) != 2:
             continue
         key, value = parts
-        if key in {"workorch_run_queue_waiting", "workorch_run_queue_total", "workorch_run_requests_in_flight", "workorch_server_max_concurrent_runs"}:
+        if key in {"workorch_run_requests_in_flight", "workorch_server_max_concurrent_runs"}:
             try:
                 metrics[key] = float(value)
             except ValueError:

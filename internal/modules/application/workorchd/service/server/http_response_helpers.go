@@ -61,10 +61,6 @@ func (m *serverMetrics) render(config Config, projection WorkspaceProjection) st
 			"workorch_http_requests_total{endpoint=\"configuration_update\"} %d\n"+
 			"# TYPE workorch_run_requests_in_flight gauge\n"+
 			"workorch_run_requests_in_flight %d\n"+
-			"# TYPE workorch_run_queue_waiting gauge\n"+
-			"workorch_run_queue_waiting %d\n"+
-			"# TYPE workorch_run_queue_total counter\n"+
-			"workorch_run_queue_total %d\n"+
 			"# TYPE workorch_run_outcomes_total counter\n"+
 			"workorch_run_outcomes_total{status=\"succeeded\"} %d\n"+
 			"workorch_run_outcomes_total{status=\"failed\"} %d\n"+
@@ -111,8 +107,6 @@ func (m *serverMetrics) render(config Config, projection WorkspaceProjection) st
 		m.configurationReadRequests.Load(),
 		m.configurationUpdateRequests.Load(),
 		m.runInFlight.Load(),
-		m.runQueueWaiting.Load(),
-		m.runQueuedTotal.Load(),
 		m.runSucceeded.Load(),
 		m.runFailed.Load(),
 		m.runRejected.Load(),
@@ -513,12 +507,6 @@ func writeRuntimeRawContent(w http.ResponseWriter, item content.RuntimeRawConten
 	w.Header().Set("X-Workorch-Raw-Ref", item.Ref)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(item.Content)
-}
-
-func writeRunQueueError(w http.ResponseWriter, err error) {
-	writeJSON(w, http.StatusRequestTimeout, errorResponse{
-		Error: fmt.Sprintf("run execution request canceled while waiting for available execution slot: %v", err),
-	})
 }
 
 func decodeJSON(r *http.Request, dst any) error {

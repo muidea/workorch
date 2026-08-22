@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Event Record
 
@@ -59,7 +59,7 @@ projection 不拥有：
 
 ## Operational Observability
 
-服务可暴露 health、metrics、scheduler admission、provider request audit 和 cache diagnostics。这些信号用于运行诊断
+服务可暴露 health、metrics、execution admission、provider request audit 和 cache diagnostics。这些信号用于运行诊断
 和验证，不参与 reducer 输入，除非相应 owner 通过明确 typed contract 将事实提交给 Orchestrator。
 
 observability可以展示recoverable wait的reason、condition、next eligible drive/deadline和budget guard，以及

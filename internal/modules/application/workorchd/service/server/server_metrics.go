@@ -78,8 +78,6 @@ type serverMetrics struct {
 	runRejected                  atomic.Uint64
 	runCanceled                  atomic.Uint64
 	runInFlight                  atomic.Int64
-	runQueueWaiting              atomic.Int64
-	runQueuedTotal               atomic.Uint64
 	convergenceRepairAttempts    atomic.Uint64
 	runtimeMetricsMu             sync.Mutex
 	observedTerminalStates       map[string]struct{}

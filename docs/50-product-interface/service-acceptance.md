@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Purpose
 
@@ -42,9 +42,10 @@ Acceptance must prove:
 - only `resume` and `restart` are admitted; empty intent normalizes to `resume`;
 - body fields are limited to `priority`, `requestId`, `reason`, `source`, `intent`;
 - `runId`, Goal/DoD content, provider selection and raw Runtime contract fields are rejected;
-- accepted response is `202` and carries normalized request metadata;
-- asynchronous scheduler failure becomes an execution-observation/projection failure, not an owner state rewrite;
-- the same workspace/request may be process-locally coalesced, while durable idempotency remains with the owners;
+- the handler waits for a concrete, scope-matched Workspace-owner result; only then does `202` carry normalized request metadata;
+- `202` means owner admission, never application-local queue admission; no `queued`/`queuedAt` projection is produced;
+- owner rejection/failure is returned synchronously and recorded only as a derived rejected observation, never as an owner state rewrite;
+- the same workspace/request is submitted to the owner on every call; durable idempotency and payload-conflict detection remain with Workspace/Run;
 - removed run create/start/resume and `execution-restarts` routes return `404` and create no projected command.
 
 Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POST .../runs/:runId/resume` or
@@ -78,7 +79,7 @@ The workorchd server package test suite is the in-process HTTP baseline. It cove
 - Workspace/Goal/DoD scope validation and owner-generated identity;
 - pre-seal candidate、all-of admission、两类Definition clarification的scope/action/revision isolation；
 - workspace LLM selection completeness, CAS revision and scope isolation;
-- execution admission, early `202`, request-id projection, rejected async outcome and restart intent;
+- synchronous execution admission, no pre-owner response/queued projection, request-id projection, owner rejection and restart intent;
 - Decision/Approval single and batch resolution;
 - 两类Definition clarification ticket在通用Decision resolution中均被拒绝；static corrected admission与Runtime corrected
   Definition + Restart分别走各自专用owner binding；

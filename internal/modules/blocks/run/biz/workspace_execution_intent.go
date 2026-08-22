@@ -331,28 +331,19 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 			maxSequence = sequence
 		}
 	}
-	lineage := runmodel.RunLineage{LineageState: "active"}
-	lineage.PredecessorRunID = predecessorID
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for attempt := 1; attempt <= 8; attempt++ {
 		runID := common.RunID(fmt.Sprintf("run-%03d", maxSequence+attempt))
-		item := &runmodel.Run{
-			ID:                  runID,
-			WorkspaceID:         intent.WorkspaceID,
-			GoalID:              intent.GoalID,
-			DoDID:               intent.DoDID,
-			DefinitionRevision:  intent.DefinitionRevision,
-			StartupInputHash:    intent.StartupInputHash,
-			InitialStepKind:     llmcommon.StepKindWorkspaceExecution,
-			RuntimeBootstrap:    &bootstrap,
-			ActivationRequestID: intent.RequestID,
-			ReconciliationScope: intent.ReconciliationScope,
-			Lineage:             lineage,
-			State:               common.RunStatePending,
-			Priority:            intent.Priority,
-			CreatedAt:           now,
-		}
-		if err := m.runs.Create(ctx, item); err != nil {
+		item, err := submitRunCreationInternalEvent(ctx, m.runs, runCreationInternalEvent{
+			Kind: runCreationInternalEventRequested,
+			Requested: &runCreationRequestedFact{
+				WorkspaceID: intent.WorkspaceID, RunID: runID, GoalID: intent.GoalID, DoDID: intent.DoDID,
+				PredecessorRunID:   predecessorID,
+				DefinitionRevision: intent.DefinitionRevision, StartupInputHash: intent.StartupInputHash,
+				InitialStepKind: llmcommon.StepKindWorkspaceExecution, RuntimeBootstrap: &bootstrap,
+				ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope, Priority: intent.Priority,
+			},
+		})
+		if err != nil {
 			if err == common.ErrConflict {
 				continue
 			}

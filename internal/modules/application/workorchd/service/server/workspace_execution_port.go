@@ -7,8 +7,8 @@ import (
 )
 
 // WorkspaceExecutionAdmission is the one application ingress used by HTTP
-// for workspace resume/restart. It returns the normalized immutable command
-// that is safe to expose in the HTTP 202 response.
+// for workspace resume/restart. It returns only after the Workspace owner has
+// synchronously admitted the normalized immutable command.
 type WorkspaceExecutionAdmission interface {
-	EnqueueWorkspaceExecution(context.Context, string, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error)
+	AdmitWorkspaceExecution(context.Context, string, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error)
 }

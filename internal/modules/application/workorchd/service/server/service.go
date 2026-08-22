@@ -54,16 +54,6 @@ func (s *Service) StartupWithApplicationPorts(ctx context.Context, serviceName s
 	return nil
 }
 
-// SetWorkspaceRunScheduler injects the application Biz port after server
-// construction. HTTP handlers use it for typed scheduling without retaining
-// or dispatching through EventHub themselves.
-func (s *Service) SetWorkspaceRunScheduler(scheduler WorkspaceRunScheduler) {
-	if s == nil || s.http == nil || s.http.state == nil {
-		return
-	}
-	s.http.state.workspaceRunScheduler = scheduler
-}
-
 // SetWorkspaceExecutionAdmission installs the Biz-owned execution use case.
 // The typed production constructor never falls back to a server-local queue.
 func (s *Service) SetWorkspaceExecutionAdmission(admission WorkspaceExecutionAdmission) {
@@ -159,10 +149,6 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 	if s.http.state.workspaceExecutionAdmission == nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.IllegalParam, "workspace execution admission is not configured")
-	}
-	if s.http.state.workspaceRunScheduler == nil {
-		s.runStarted.Store(false)
-		return cd.NewError(cd.IllegalParam, "workspace run scheduler is not configured")
 	}
 	if s.http.state.workspaceProjectionWriter == nil {
 		s.runStarted.Store(false)

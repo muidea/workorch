@@ -1128,41 +1128,6 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 	}
 }
 
-func TestStoreRunCommandQueuedTransitionsToAccepted(t *testing.T) {
-	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
-		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
-	}, nil)
-
-	if !store.ApplyRunCommandQueued(RunCommandQueuedUpdate{
-		WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-queued",
-		IdempotencyKey: "resume/ws-a", Source: "web", QueuedAt: "2026-07-20T00:00:00Z",
-	}) {
-		t.Fatal("ApplyRunCommandQueued returned false")
-	}
-	snapshot, _, err := store.GetSnapshot("ws-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "queued" || snapshot.RunCommand.RequestID != "request-queued" || snapshot.RunCommand.QueuedAt == "" {
-		t.Fatalf("queued RunCommand = %+v", snapshot.RunCommand)
-	}
-
-	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
-		WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-queued",
-		IdempotencyKey: "resume/ws-a", Source: "web", AcceptedAt: "2026-07-20T00:00:01Z",
-	}) {
-		t.Fatal("ApplyRunCommandAccepted returned false")
-	}
-	snapshot, _, err = store.GetSnapshot("ws-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "accepted" || snapshot.RunCommand.QueuedAt != "2026-07-20T00:00:00Z" || snapshot.RunCommand.AcceptedAt == "" {
-		t.Fatalf("accepted RunCommand = %+v, want queued timestamp retained", snapshot.RunCommand)
-	}
-}
-
 func TestStoreRunCommandAcceptedCreatesDetailPlaceholderForKnownWorkspace(t *testing.T) {
 	store := NewStore()
 	store.ReplaceWorkspaceList([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, nil)

@@ -18,7 +18,7 @@ func TestServiceExecutionObservationDoesNotWriteProjection(t *testing.T) {
 	const workspaceID = "ws-transport-diagnostics-only"
 	svc.http.state.workspaceProjectionWriter.UpsertWorkspace(appmodelcore.Workspace{ID: workspaceID})
 
-	svc.RecordWorkspaceExecutionTransportQueued(workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: workspaceID, Intent: "resume", RequestID: "request-1"})
+	svc.RecordWorkspaceExecutionTransportOutcome("workspace.run", workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: workspaceID, Intent: "resume", RequestID: "request-1"}, workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: workspaceID, RequestID: "request-1"})
 	snapshot, _, err := svc.http.state.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
 	if err != nil {
 		t.Fatalf("read projection snapshot: %v", err)

@@ -15,15 +15,32 @@ import (
 type lifecycleInternalEvent struct {
 	Kind          lifecycleInternalEventKind
 	TicketID      common.TicketID
+	Ticket        *decisionModel.Ticket
 	Proposal      *decisionModel.RuntimeGovernanceResolutionProposal
+	Clarification *definitionClarificationResolutionFact
 	ResolvedBy    string
 	FailureClass  string
 	FailureReason string
 }
 
+// definitionClarificationResolutionFact is the bounded Decision-owner input
+// needed to resolve a clarification binding. It carries no target ticket
+// state; binding progress and open->resolved are committed together below.
+type definitionClarificationResolutionFact struct {
+	ResolutionID                common.ResolutionID
+	ResolutionBindingHash       string
+	DefinitionRevision          string
+	StartupInputHash            string
+	ReplacementIntentID         string
+	ReplacementIntentHash       string
+	SuccessorDefinitionRevision string
+	SuccessorStartupInputHash   string
+}
+
 type lifecycleInternalEventKind string
 
 const (
+	lifecycleInternalEventOpened                          lifecycleInternalEventKind = "opened"
 	lifecycleInternalEventResolutionObserved              lifecycleInternalEventKind = "resolution_observed"
 	lifecycleInternalEventResolutionRecovered             lifecycleInternalEventKind = "resolution_recovered"
 	lifecycleInternalEventProposalPrepared                lifecycleInternalEventKind = "proposal_prepared"
@@ -37,29 +54,79 @@ const (
 )
 
 func (s *Service) applyLifecycleInternalEvent(ctx context.Context, current *decisionModel.Ticket, event lifecycleInternalEvent) (*decisionModel.Ticket, error) {
-	if s == nil || current == nil || event.TicketID == "" || current.ID != event.TicketID {
+	if s == nil || s.tickets == nil || event.TicketID == "" {
 		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := common.WorkspaceID("")
+	if current != nil {
+		if current.ID != event.TicketID || event.Kind == lifecycleInternalEventOpened || event.Ticket != nil {
+			return nil, common.ErrInvalidArgument
+		}
+		workspaceID = current.WorkspaceID
+	} else {
+		if event.Kind != lifecycleInternalEventOpened || event.Ticket == nil || event.Ticket.ID != event.TicketID {
+			return nil, common.ErrInvalidArgument
+		}
+		workspaceID = event.Ticket.WorkspaceID
+	}
+	bound, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		return nil, err
 	}
 	next, err := reduceDecisionLifecycle(current, event)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.tickets.Update(ctx, next); err != nil {
+	if event.Kind == lifecycleInternalEventOpened {
+		if err := s.tickets.Create(bound, next); err != nil {
+			return nil, err
+		}
+		return next, nil
+	}
+	if err := s.tickets.Update(bound, next); err != nil {
 		return nil, err
 	}
 	return next, nil
 }
 
 func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInternalEvent) (*decisionModel.Ticket, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if event.Kind == lifecycleInternalEventOpened {
+		if current != nil || event.Ticket == nil || event.Ticket.ID == "" || event.Ticket.ID != event.TicketID || event.Ticket.WorkspaceID == "" || strings.TrimSpace(event.Ticket.Reason) == "" {
+			return nil, common.ErrInvalidArgument
+		}
+		seed := event.Ticket
+		if seed.State != "" || seed.RuntimeGovernanceProposal != nil || seed.ResolvedAt != "" || seed.ResolvedBy != "" || seed.CreatedAt != "" || seed.UpdatedAt != "" || seed.CreatedNotificationPublishedAt != "" || seed.ResolutionNotificationPublishedAt != "" || seed.DeletionRequestedAt != "" || event.Proposal != nil || event.Clarification != nil {
+			return nil, common.ErrInvalidArgument
+		}
+		if seed.DefinitionClarification != nil && definitionClarificationBindingHasResolution(seed.DefinitionClarification) {
+			return nil, common.ErrInvalidArgument
+		}
+		next := decisionModel.CloneTicket(seed)
+		next.State = common.DecisionTicketStateOpen
+		next.CreatedAt = now
+		next.UpdatedAt = now
+		return next, nil
+	}
 	if current == nil || current.ID == "" || current.ID != event.TicketID {
 		return nil, common.ErrInvalidArgument
 	}
 	next := decisionModel.CloneTicket(current)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	switch event.Kind {
 	case lifecycleInternalEventResolutionObserved:
 		if current.State != common.DecisionTicketStateOpen || current.DecisionKind == "runtime_governance" {
 			return nil, common.ErrConflict
+		}
+		if current.DefinitionClarification == nil {
+			if event.Clarification != nil {
+				return nil, common.ErrInvalidArgument
+			}
+		} else {
+			binding, err := reduceDefinitionClarificationResolution(current.DefinitionClarification, event.Clarification)
+			if err != nil {
+				return nil, err
+			}
+			next.DefinitionClarification = binding
 		}
 		next.State = common.DecisionTicketStateResolved
 		next.ResolvedAt = now
@@ -72,6 +139,11 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 	case lifecycleInternalEventProposalPrepared:
 		if current.State != common.DecisionTicketStateOpen || current.DecisionKind != "runtime_governance" || current.RuntimeGovernanceProposal != nil || event.Proposal == nil {
 			return nil, common.ErrConflict
+		}
+		if event.Proposal.State != "" || strings.TrimSpace(event.Proposal.FailureClass) != "" || strings.TrimSpace(event.Proposal.FailureReason) != "" ||
+			strings.TrimSpace(event.Proposal.CreatedAt) != "" || strings.TrimSpace(event.Proposal.UpdatedAt) != "" ||
+			strings.TrimSpace(event.Proposal.EvidenceRecordedAt) != "" || strings.TrimSpace(event.Proposal.ResolutionNotificationPublishedAt) != "" {
+			return nil, common.ErrInvalidArgument
 		}
 		proposal := event.Proposal.Clone()
 		proposal.State = decisionModel.RuntimeGovernanceResolutionProposalPending
@@ -130,5 +202,40 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 		return nil, common.ErrInvalidArgument
 	}
 	next.UpdatedAt = now
+	return next, nil
+}
+
+func definitionClarificationBindingHasResolution(binding *decisionModel.DefinitionClarificationBinding) bool {
+	return binding != nil && (binding.ResolutionID != "" || strings.TrimSpace(binding.ResolutionBindingHash) != "" ||
+		strings.TrimSpace(binding.ReplacementIntentID) != "" || strings.TrimSpace(binding.ReplacementIntentHash) != "" ||
+		strings.TrimSpace(binding.SuccessorDefinitionRevision) != "" || strings.TrimSpace(binding.SuccessorStartupInputHash) != "")
+}
+
+func reduceDefinitionClarificationResolution(current *decisionModel.DefinitionClarificationBinding, fact *definitionClarificationResolutionFact) (*decisionModel.DefinitionClarificationBinding, error) {
+	if current == nil || fact == nil || fact.ResolutionID == "" || strings.TrimSpace(fact.ResolutionBindingHash) == "" || definitionClarificationBindingHasResolution(current) {
+		return nil, common.ErrConflict
+	}
+	next := current.Clone()
+	next.ResolutionID = fact.ResolutionID
+	next.ResolutionBindingHash = strings.TrimSpace(fact.ResolutionBindingHash)
+	switch current.Class {
+	case decisionModel.DefinitionClarificationWorkspacePreSeal:
+		if fact.ReplacementIntentID != "" || fact.ReplacementIntentHash != "" || fact.SuccessorDefinitionRevision != "" || fact.SuccessorStartupInputHash != "" ||
+			((fact.DefinitionRevision == "") != (fact.StartupInputHash == "")) {
+			return nil, common.ErrInvalidArgument
+		}
+		next.DefinitionRevision = strings.TrimSpace(fact.DefinitionRevision)
+		next.StartupInputHash = strings.TrimSpace(fact.StartupInputHash)
+	case decisionModel.DefinitionClarificationRuntime:
+		if strings.TrimSpace(fact.ReplacementIntentID) == "" || strings.TrimSpace(fact.ReplacementIntentHash) == "" || strings.TrimSpace(fact.SuccessorDefinitionRevision) == "" || strings.TrimSpace(fact.SuccessorStartupInputHash) == "" || fact.DefinitionRevision != "" || fact.StartupInputHash != "" {
+			return nil, common.ErrInvalidArgument
+		}
+		next.ReplacementIntentID = strings.TrimSpace(fact.ReplacementIntentID)
+		next.ReplacementIntentHash = strings.TrimSpace(fact.ReplacementIntentHash)
+		next.SuccessorDefinitionRevision = strings.TrimSpace(fact.SuccessorDefinitionRevision)
+		next.SuccessorStartupInputHash = strings.TrimSpace(fact.SuccessorStartupInputHash)
+	default:
+		return nil, common.ErrInvalidArgument
+	}
 	return next, nil
 }

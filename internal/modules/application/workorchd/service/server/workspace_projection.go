@@ -150,13 +150,6 @@ func (s *serverState) applyProjectedRunCommandAccepted(update workspaceviewcore.
 	return s.workspaceProjectionWriter.ApplyRunCommandAccepted(update)
 }
 
-func (s *serverState) applyProjectedRunCommandQueued(update workspaceviewcore.RunCommandQueuedUpdate) bool {
-	if s == nil || s.workspaceProjectionWriter == nil {
-		return false
-	}
-	return s.workspaceProjectionWriter.ApplyRunCommandQueued(update)
-}
-
 func (s *serverState) applyProjectedRunCommandRejected(update workspaceviewcore.RunCommandRejectedUpdate) bool {
 	if s == nil || s.workspaceProjectionWriter == nil {
 		return false

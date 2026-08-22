@@ -16,7 +16,7 @@ echo "=== software requirement Runtime orchestration verification ==="
 echo "-> read models and HTTP activation remain non-authoritative"
 go test ./internal/modules/application/workorchd/biz/appservice/... -count=1
 go test ./internal/modules/application/workorchd/service/server \
-  -run 'Test(WorkspaceExecutionActivationEndpointCreatesAndStartsRun|WorkorchDActivationHTTPProjectsRequestID|WorkorchDActivationHTTPReturnsWhileSchedulerIsStillRunning|WorkorchDAPINativeRoutesRegistered|WorkorchDUnsupportedMutatingAPINativeRoutesNotRegistered)$' \
+  -run 'Test(WorkspaceExecutionActivationEndpointCreatesAndStartsRun|WorkorchDActivationHTTPProjectsRequestID|WorkorchDActivationHTTPWaitsForOwnerAdmission|WorkorchDAPINativeRoutesRegistered|WorkorchDUnsupportedMutatingAPINativeRoutesNotRegistered)$' \
   -count=1
 
 echo "software requirement Runtime orchestration verification passed"

@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## Purpose And Authority
 
@@ -39,7 +39,8 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
   `definition_clarification_pending`，零 Run/replacement intent；
 - Resume 只复用 existing Run 的 original sealed startup input，不吸收 newer candidate/revision；
 - Restart 使用 fresh eligible bootstrap；Run owner先 seal predecessor `ReplacementIntent`，terminal delivery 完成后才创建 successor；
-- accepted 返回 `202`，只表示 typed owner command 已接收；non-current predecessor 返回 `data_reset_required`。
+- handler 同步等待并校验 Workspace owner result；only owner-admitted intent 返回 `202`，不存在
+  application-local queue/queued acknowledgement；owner 拒绝在当前请求返回，non-current predecessor 返回 `data_reset_required`。
 
 以下 mutation 永久不属于当前 API：run-addressed create/start/resume、`execution-restarts`、
 `ExecutionContextPatch`、caller-selected target state 或 successor。

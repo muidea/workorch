@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -111,10 +110,10 @@ func (m *Biz) openWorkspaceDefinitionClarification(ctx context.Context, cmd deci
 	} else if !errors.Is(err, common.ErrNotFound) {
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, Reason: cmd.ViolationCode, DecisionKind: "workspace_definition_clarification", Question: "Revise the Definition into explicit all-of semantics", State: common.DecisionTicketStateOpen, FailureClass: "definition_admission", FailureSignature: cmd.CanonicalSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind}, CreatedAt: now, UpdatedAt: now,
+	seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, Reason: cmd.ViolationCode, DecisionKind: "workspace_definition_clarification", Question: "Revise the Definition into explicit all-of semantics", FailureClass: "definition_admission", FailureSignature: cmd.CanonicalSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind},
 		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationWorkspacePreSeal, OpenBindingHash: bindingHash, RequiredActionKind: cmd.RequiredActionKind, CandidateID: cmd.CandidateID, CandidateRevision: cmd.CandidateRevision, CandidateHash: cmd.CandidateHash, ViolationOrGapCode: cmd.ViolationCode, CanonicalSignatureVersion: cmd.CanonicalSignatureVersion, CanonicalSignature: cmd.CanonicalSignature, CanonicalSignatureHash: cmd.CanonicalSignatureHash, OffendingRefs: append([]string(nil), cmd.OffendingRefs...)}}
-	if err := m.tickets.Create(bound, ticket); err != nil {
+	ticket, err := m.service.applyLifecycleInternalEvent(bound, nil, lifecycleInternalEvent{Kind: lifecycleInternalEventOpened, TicketID: seed.ID, Ticket: seed})
+	if err != nil {
 		return decisionevents.OpenWorkspaceDefinitionClarificationRequestResult{}, err
 	}
 	if err := m.ensureTicketCreatedNotification(bound, ticket); err != nil {
@@ -142,10 +141,10 @@ func (m *Biz) openRuntimeDefinitionClarification(ctx context.Context, cmd decisi
 	} else if !errors.Is(err, common.ErrNotFound) {
 		return decisionevents.OpenRuntimeDefinitionClarificationRequestResult{}, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: common.StepID("runtime-definition/" + cmd.ClarificationDispatchID), Reason: string(cmd.GapKind), DecisionKind: "runtime_definition_clarification", Question: "Revise the Workspace Definition and explicitly restart", State: common.DecisionTicketStateOpen, FailureClass: "runtime_definition_gap", FailureSignature: cmd.CanonicalGapSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind}, CreatedAt: now, UpdatedAt: now,
+	seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: common.StepID("runtime-definition/" + cmd.ClarificationDispatchID), Reason: string(cmd.GapKind), DecisionKind: "runtime_definition_clarification", Question: "Revise the Workspace Definition and explicitly restart", FailureClass: "runtime_definition_gap", FailureSignature: cmd.CanonicalGapSignatureHash, AllowedRecoveryActions: []string{cmd.RequiredActionKind},
 		DefinitionClarification: &decisionmodel.DefinitionClarificationBinding{Class: decisionmodel.DefinitionClarificationRuntime, OpenBindingHash: bindingHash, RequiredActionKind: cmd.RequiredActionKind, ViolationOrGapCode: string(cmd.GapKind), CanonicalSignatureVersion: cmd.CanonicalGapSignatureVersion, CanonicalSignature: cmd.CanonicalGapSignature, CanonicalSignatureHash: cmd.CanonicalGapSignatureHash, OffendingRefs: append([]string(nil), cmd.OffendingItemRefs...), DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash, AuthoritySnapshotID: cmd.AuthoritySnapshotID, ClarificationDispatchID: cmd.ClarificationDispatchID, FocusRef: cmd.FocusRef, LogicalRequestID: cmd.LogicalRequestID, SemanticDocumentHash: cmd.SemanticDocumentHash}}
-	if err := m.tickets.Create(bound, ticket); err != nil {
+	ticket, err := m.service.applyLifecycleInternalEvent(bound, nil, lifecycleInternalEvent{Kind: lifecycleInternalEventOpened, TicketID: seed.ID, Ticket: seed})
+	if err != nil {
 		return decisionevents.OpenRuntimeDefinitionClarificationRequestResult{}, err
 	}
 	if err := m.ensureTicketCreatedNotification(bound, ticket); err != nil {
@@ -213,8 +212,10 @@ func (m *Biz) reconcileWorkspaceDefinitionClarification(ctx context.Context, cmd
 	} else if err := m.resolutions.Create(bound, expected); err != nil {
 		return decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, err
 	}
-	oldBinding.ResolutionID, oldBinding.ResolutionBindingHash = resolutionID, bindingHash
-	updated, err := m.service.applyLifecycleInternalEvent(bound, oldTicket, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionObserved, TicketID: oldTicket.ID})
+	updated, err := m.service.applyLifecycleInternalEvent(bound, oldTicket, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: oldTicket.ID,
+		Clarification: &definitionClarificationResolutionFact{ResolutionID: resolutionID, ResolutionBindingHash: bindingHash},
+	})
 	if err != nil {
 		return decisionevents.ReconcileWorkspaceDefinitionClarificationCandidateResult{}, err
 	}
@@ -269,9 +270,13 @@ func (m *Biz) resolveWorkspaceDefinitionClarification(ctx context.Context, cmd d
 	} else if err := m.resolutions.Create(bound, resolution); err != nil {
 		return decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, err
 	}
-	binding.ResolutionID, binding.ResolutionBindingHash = resolutionID, resolutionHash
-	binding.DefinitionRevision, binding.StartupInputHash = cmd.DefinitionRevision, cmd.StartupInputHash
-	updated, err := m.service.applyLifecycleInternalEvent(bound, ticket, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID})
+	updated, err := m.service.applyLifecycleInternalEvent(bound, ticket, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
+		Clarification: &definitionClarificationResolutionFact{
+			ResolutionID: resolutionID, ResolutionBindingHash: resolutionHash,
+			DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash,
+		},
+	})
 	if err != nil {
 		return decisionevents.ResolveWorkspaceDefinitionClarificationByAdmissionResult{}, err
 	}
@@ -329,10 +334,14 @@ func (m *Biz) resolveRuntimeDefinitionClarification(ctx context.Context, cmd dec
 	} else if err := m.resolutions.Create(bound, resolution); err != nil {
 		return decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, err
 	}
-	binding.ResolutionID, binding.ResolutionBindingHash = resolutionID, result.ResolutionBindingHash
-	binding.ReplacementIntentID, binding.ReplacementIntentHash = cmd.ReplacementIntentID, cmd.ReplacementIntentHash
-	binding.SuccessorDefinitionRevision, binding.SuccessorStartupInputHash = cmd.SuccessorDefinitionRevision, cmd.SuccessorStartupInputHash
-	updated, err := m.service.applyLifecycleInternalEvent(bound, ticket, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID})
+	updated, err := m.service.applyLifecycleInternalEvent(bound, ticket, lifecycleInternalEvent{
+		Kind: lifecycleInternalEventResolutionObserved, TicketID: ticket.ID,
+		Clarification: &definitionClarificationResolutionFact{
+			ResolutionID: resolutionID, ResolutionBindingHash: result.ResolutionBindingHash,
+			ReplacementIntentID: cmd.ReplacementIntentID, ReplacementIntentHash: cmd.ReplacementIntentHash,
+			SuccessorDefinitionRevision: cmd.SuccessorDefinitionRevision, SuccessorStartupInputHash: cmd.SuccessorStartupInputHash,
+		},
+	})
 	if err != nil {
 		return decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{}, err
 	}

@@ -44,7 +44,7 @@ func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *te
 		},
 		Runtime: WorkspaceRuntimeView{
 			Projection: ProjectionStatusFromWorkspaceViewModel(WorkspaceViewModel{StreamGeneration: "generation-1", FailedWorkspaceIds: []string{"workspace-2"}, DegradedSince: "2026-08-04T08:00:00Z"}),
-			RunCommand: &RunCommandStatus{Disposition: "accepted", Diagnostic: "scheduled", QueuedAt: "2026-08-04T09:30:00Z"},
+			RunCommand: &RunCommandStatus{Disposition: "accepted", Diagnostic: "scheduled"},
 			Activity:   WorkspaceActivityFeed{StreamGeneration: "generation-1"},
 		},
 	}

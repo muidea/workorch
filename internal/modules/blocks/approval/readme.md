@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-22
 
 ## 功能范围与边界
 
@@ -24,11 +24,15 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 1. Orchestrator 先从 Approval owner 获取 `approval/request` capability，再以
    `OpenRuntimeApprovalRequestCommand/Result` 创建 Runtime Approval。入口只接受 Orchestrator，
    相同 identity 的完全相同请求是幂等重放，不同 sealed payload 返回 conflict。
+   所有 create ingress 只构造无 state/时间戳/proposal/resolution 的 immutable seed；唯一
+   `opened` Approval-private lifecycle event 选择 initial `pending`、封存 timestamps 并执行 repository Create。
 2. 解决入口只接受两个生产 producer：`application/workorchd/appservice` 的
    `human_operator` principal，或 `kernel/governance` 的 `auto_governance` principal；Event source、
    principal kind 和 subject 必须匹配。该 principal 表达进程内 producer authority，不替代 transport
    层的终端用户认证。
-3. owner 先持久化 `ResolutionProposal`。Runtime Approval 随后同步提交
+3. owner 先持久化 `ResolutionProposal`。proposal ingress seed 不携带 state、failure、timestamp 或 delivery progress，
+   只有 `resolution_proposed` Approval-private event 可选择 initial `pending` 并封存 `ProposedAt`；caller-selected
+   proposal lifecycle 字段必须 fail-closed。Runtime Approval 随后同步提交
    `CommitRuntimeGovernanceApprovalResolutionCommand/Result`；只有 committed/duplicate 才能进入终态，
    stale proposal 会被持久化为 rejected 并 fail closed。普通 owner-local Approval 不触发 Runtime commit。
 4. 终态落库后，owner 依次取得 Orchestrator evidence 的 exact-scope ack、Eventstream resolution record
@@ -59,7 +63,7 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
   不增加订阅或遗留后台任务。
 - `command_router.go` 对 query、resolution、purge 三类 topic 做穷尽分派，未知 topic fail closed。
 - `runtime_governance_adapter.go` 只负责可信 Runtime create ingress；`resolution_commands.go` 负责
-  proposal/commit/finalize 协议；private lifecycle reducer 是聚合变更的唯一入口。
+  proposal/commit/finalize 协议；private lifecycle reducer 是 creation 与全部聚合变更的唯一入口。
 - `evidence_event.go`、`approval_notification.go` 只执行 scope-validated delivery；`reconciliation.go`
   只重放持久化 proposal/checkpoint。
 - 本 Block 只持有 Approval repository，不直接访问 Run、Workspace、EvidenceRecord 或 capability implementation。
@@ -70,6 +74,7 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 - Runtime request exact replay、sealed payload 冲突、SM-2 commit 的 nil/wrong/stale/duplicate 处理；
 - commit 后崩溃、终态后 evidence 失败、Eventstream ack 失败及 notification 重放恢复；
 - pending/approved/rejected 转换、同结果幂等、相反终态冲突、repository 写失败不提前发布；
+- Approval/proposal seed 均拒绝 caller-selected initial/progress state，静态门禁拒绝 lifecycle reducer 之外的 initial state 与 Approval repository Create；
 - 同 Approval ID 跨 workspace/run 的 memory/file backend 隔离及错误 scope 拒绝；
 - concrete typed result、显式 all scope、cursor/limit 边界与 detached deep-copy；
 - workspace purge tombstone、重复 Teardown、capability/open ingress 的 Orchestrator-only 边界。

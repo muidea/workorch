@@ -21,14 +21,12 @@ func TestExecutionObservationWritesOnlyBizOwnedProjection(t *testing.T) {
 		RequestID:   "request-1",
 		Source:      "http",
 	}
-	component.RecordWorkspaceExecutionQueued(command)
-
 	snapshot, _, err := component.ReadWorkspaceSummarySnapshot(string(command.WorkspaceID))
 	if err != nil {
-		t.Fatalf("read queued snapshot: %v", err)
+		t.Fatalf("read initial snapshot: %v", err)
 	}
-	if snapshot.RunCommand == nil || snapshot.RunCommand.State != "queued" {
-		t.Fatalf("queued run command = %+v", snapshot.RunCommand)
+	if snapshot.RunCommand != nil {
+		t.Fatalf("application-local queued run command = %+v, want none before owner outcome", snapshot.RunCommand)
 	}
 
 	component.RecordWorkspaceExecutionOutcome("workspace.run", command, workorchdevents.WorkspaceRunRequestedResult{
