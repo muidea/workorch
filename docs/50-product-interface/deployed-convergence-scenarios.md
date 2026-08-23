@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -33,7 +33,7 @@ mock LLM/provider可用于CI-safe行，但 Orchestrator、Run、Workspace、Resu
 | ID | Required deployed flow | Mandatory assertions | Eligible current entrypoints |
 | --- | --- | --- | --- |
 | `DC-01` | admitted all-of Definition经过多次drive完成semantic plan→binding→candidate→sealed dispatch→receipt→evidence→assessment→Result | 每次drive revision单调；operation前已有binding/dispatch seal；至少一个真实capability owner receipt；Result与terminal delivery hash匹配 | `make verify-runtime-positive-convergence-live`; `make verify-real-runtime-closure` |
-| `DC-02` | provider request crash-window：submission前中断、submission后result commit前中断、response loss | 复用same logical request/session；physical-call ledger无无界重复；complete document只消费一次attempt；unknown不按zero重放 | `make verify-runtime-restart-recovery-live`; real-provider时`make verify-real-runtime-closure` |
+| `DC-02` | provider request crash-window：terminal CAS前中断、terminal CAS已提交但response loss | CAS前fresh reload从submitted marker封存submission-unknown，零provider replay；CAS后readback复用exact terminal/session failure且duplicate零写入；complete document只消费一次attempt | `make verify-runtime-restart-recovery-live`; real-provider时`make verify-real-runtime-closure` |
 | `DC-03` | durable capability effect在owner commit/Runtime receipt commit前后restart | same ExecutionKey/Fence；owner effect至多一次；matching receipt/reconciliation后才credit；stale/duplicate receipt零第二credit/预算 | `make verify-runtime-restart-recovery-live`; `make verify-service-restart-recoverable-e2e` |
 | `DC-04` | accepted evidence后修改一个精确相交owner resource并revalidate | 只有相交dependency set的evidence进入`stale_or_superseded`并reopen对应CWI；无关CWI保持current；新receipt/assessment后重新close | `make verify-software-dev-goal-dod-e2e`; profile-specific deployed verifier |
 | `DC-05` | typed transient owner condition打开recoverable wait，process restart后由matching trigger/probe恢复 | wait record字段完整；普通Resume/HTTP wait不解除；duplicate trigger零重复call/effect；condition满足后继续；独立case覆盖deadline/guard terminal | `make verify-service-restart-recoverable-e2e`; `make verify-runtime-restart-recovery-live` |

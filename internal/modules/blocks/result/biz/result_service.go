@@ -9,44 +9,44 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-type Service struct {
+type service struct {
 	results   repository.ResultRepository
 	artifacts repository.ArtifactRepository
 }
 
-func NewService(results repository.ResultRepository, artifacts repository.ArtifactRepository) *Service {
-	return &Service{results: results, artifacts: artifacts}
+func newService(results repository.ResultRepository, artifacts repository.ArtifactRepository) *service {
+	return &service{results: results, artifacts: artifacts}
 }
 
-func (s *Service) CreateResult(ctx context.Context, item *resultmodel.Result) error {
+func (s *service) CreateResult(ctx context.Context, item *resultmodel.Result) error {
 	if err := validateResult(item); err != nil {
 		return err
 	}
 	return s.results.Create(ctx, item)
 }
 
-func (s *Service) GetResult(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
+func (s *service) GetResult(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.results.Get(ctx, id)
 }
 
-func (s *Service) ListResultsByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
+func (s *service) ListResultsByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
 	if workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.results.ListByWorkspace(ctx, workspaceID)
 }
 
-func (s *Service) ListResultsByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
+func (s *service) ListResultsByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
 	if runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.results.ListByRun(ctx, runID)
 }
 
-func (s *Service) UpdateResult(ctx context.Context, item *resultmodel.Result) error {
+func (s *service) UpdateResult(ctx context.Context, item *resultmodel.Result) error {
 	if err := validateResult(item); err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func (s *Service) UpdateResult(ctx context.Context, item *resultmodel.Result) er
 	return s.results.CompareAndSwap(ctx, item, item.Revision)
 }
 
-func (s *Service) DeleteResult(ctx context.Context, workspaceID common.WorkspaceID, id common.ResultID) error {
+func (s *service) DeleteResult(ctx context.Context, workspaceID common.WorkspaceID, id common.ResultID) error {
 	if workspaceID == "" || id == "" {
 		return common.ErrInvalidArgument
 	}
@@ -105,7 +105,7 @@ func (s *Service) DeleteResult(ctx context.Context, workspaceID common.Workspace
 	return nil
 }
 
-func (s *Service) CreateArtifact(ctx context.Context, item *resultmodel.Artifact) error {
+func (s *service) CreateArtifact(ctx context.Context, item *resultmodel.Artifact) error {
 	if err := validateArtifact(item); err != nil {
 		return err
 	}
@@ -127,42 +127,42 @@ func (s *Service) CreateArtifact(ctx context.Context, item *resultmodel.Artifact
 // createTerminalArtifact permits the terminal-delivery saga to persist child
 // metadata while its parent Result is still draft/pending. Public owner writes
 // never bypass the parent-scope check in CreateArtifact.
-func (s *Service) createTerminalArtifact(ctx context.Context, item *resultmodel.Artifact) error {
+func (s *service) createTerminalArtifact(ctx context.Context, item *resultmodel.Artifact) error {
 	if err := validateArtifact(item); err != nil {
 		return err
 	}
 	return s.artifacts.Create(ctx, item)
 }
 
-func (s *Service) GetArtifact(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
+func (s *service) GetArtifact(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.artifacts.Get(ctx, id)
 }
 
-func (s *Service) ListArtifactsByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
+func (s *service) ListArtifactsByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
 	if workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.artifacts.ListByWorkspace(ctx, workspaceID)
 }
 
-func (s *Service) ListArtifactsByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+func (s *service) ListArtifactsByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
 	if runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.artifacts.ListByRun(ctx, runID)
 }
 
-func (s *Service) ListArtifactsByResult(ctx context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+func (s *service) ListArtifactsByResult(ctx context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
 	if resultID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.artifacts.ListByResult(ctx, resultID)
 }
 
-func (s *Service) UpdateArtifact(ctx context.Context, item *resultmodel.Artifact) error {
+func (s *service) UpdateArtifact(ctx context.Context, item *resultmodel.Artifact) error {
 	if err := validateArtifact(item); err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (s *Service) UpdateArtifact(ctx context.Context, item *resultmodel.Artifact
 	return s.artifacts.Update(ctx, item)
 }
 
-func (s *Service) DeleteArtifact(ctx context.Context, workspaceID common.WorkspaceID, id common.ArtifactID) error {
+func (s *service) DeleteArtifact(ctx context.Context, workspaceID common.WorkspaceID, id common.ArtifactID) error {
 	if workspaceID == "" || id == "" {
 		return common.ErrInvalidArgument
 	}

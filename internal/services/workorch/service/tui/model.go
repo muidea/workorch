@@ -18,6 +18,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/doditems"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	executioncontract "github.com/muidea/workorch/internal/pkg/workorchexecutioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
@@ -2424,23 +2425,19 @@ func (m *AppModel) applyRunCommandAdmission(admission *backend.RunCommandResult,
 		m.activeRunID = string(admission.RunID)
 	}
 	m.running = false
-	summary := runtimecontract.RuntimeExecutionIntentReasonSummary(admission.Reason)
-	switch admission.Outcome {
-	case runtimecontract.RuntimeExecutionIntentReconciliationRequested:
-		m.progress = progressSubmitting
-		m.progressText = nonEmpty(summary, fallback, "Workspace execution requested")
-	case runtimecontract.RuntimeExecutionIntentGovernanceRequired:
-		m.progress = progressWaitingDecision
-		m.progressText = nonEmpty(summary, "Waiting for governance")
-	case runtimecontract.RuntimeExecutionIntentDataResetRequired:
+	presentation, err := executioncontract.PresentAdmission(runtimecontract.RuntimeExecutionIntentAdmission(*admission))
+	if err != nil {
 		m.progress = progressFailed
-		m.progressText = nonEmpty(summary, "Development data reset required")
-		m.result = "The persisted Runtime data predates the current development baseline. Stop WorkOrch and clear the configured data and workspace directories before creating a new workspace."
-		m.syncMainViewportToCurrentContent()
-	default:
-		m.progress = progressIdle
-		m.progressText = nonEmpty(summary, string(admission.Outcome), fallback)
+		m.progressText = err.Error()
+		return
 	}
+	if presentation.Accepted {
+		m.progress = progressSubmitting
+		m.progressText = nonEmpty(presentation.Diagnostic, fallback, "Workspace execution requested")
+		return
+	}
+	m.progress = progressIdle
+	m.progressText = nonEmpty(presentation.Diagnostic, string(admission.Outcome), fallback)
 }
 
 func runRequiresFreshActivation(run *projectioncontract.Run) bool {

@@ -89,7 +89,7 @@ func persistRuntimeCandidateRequestDocument(ctx context.Context, repo repository
 // deliberately separate from candidate admission: after this function
 // returns, CandidateAttempts must still be empty and C5 is solely responsible
 // for decoding/admitting the stored document.
-func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, common.ArtifactContinuationID, string, error) {
+func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, common.ArtifactContinuationID, string, error) {
 	if m == nil || m.runtimeController == nil || m.evidence.ArtifactContinuations == nil {
 		return runtime.RuntimeAggregate{}, "", "", common.ErrInvalidArgument
 	}
@@ -106,7 +106,7 @@ func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Cont
 		return runtime.RuntimeAggregate{}, "", "", err
 	}
 	updatedEvent, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidateDocumentObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderBudgetObservation: firstRuntimeProviderBudgetObservation(budgetObservation)},
+		Kind: runtime.RuntimeInternalEventCandidateDocumentObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement)},
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, "", "", err

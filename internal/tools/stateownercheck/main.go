@@ -31,8 +31,15 @@ type inventoryEntry struct {
 }
 
 type transitionOwner struct {
-	OwnerRoot string
-	Line      int
+	Classification string
+	OwnerRoot      string
+	Line           int
+}
+
+var transitionClassificationsRequiringStateType = map[string]bool{
+	"formal_runtime_machine":       true,
+	"resource_state_machine":       true,
+	"derived_projection_lifecycle": true,
 }
 
 var stateLikeSuffixes = []string{"State", "Status", "Phase", "Disposition", "Outcome", "Mode", "Lifecycle", "Stage"}
@@ -114,6 +121,18 @@ func verify(root, inventoryPath, transitionPath string) error {
 			if entry.OwnerRoot == "-" || transition.OwnerRoot != entry.OwnerRoot {
 				return fmt.Errorf("state-model inventory row %d assigns %s to %s but transition %s is owned by %s", entry.Line, key, entry.OwnerRoot, transitionID, transition.OwnerRoot)
 			}
+		}
+	}
+
+	transitionStateTypes := map[string]int{}
+	for _, entry := range inventory {
+		for _, transitionID := range entry.TransitionIDs {
+			transitionStateTypes[transitionID]++
+		}
+	}
+	for transitionID, transition := range transitions {
+		if transitionClassificationsRequiringStateType[transition.Classification] && transitionStateTypes[transitionID] == 0 {
+			return fmt.Errorf("state-transition owner row %d declares %s %q without a named state type in scripts/state-model-owners.manifest", transition.Line, transition.Classification, transitionID)
 		}
 	}
 
@@ -281,14 +300,15 @@ func readTransitionOwners(path string) (map[string]transitionOwner, error) {
 			return nil, fmt.Errorf("malformed state-transition owner row %d", line)
 		}
 		id := strings.TrimSpace(parts[0])
+		classification := strings.TrimSpace(parts[1])
 		owner := strings.TrimSpace(parts[2])
-		if id == "" || owner == "" {
-			return nil, fmt.Errorf("state-transition owner row %d omits identity or owner", line)
+		if id == "" || classification == "" || owner == "" {
+			return nil, fmt.Errorf("state-transition owner row %d omits identity, classification or owner", line)
 		}
 		if _, duplicate := ret[id]; duplicate {
 			return nil, fmt.Errorf("duplicate state-transition owner identity %q", id)
 		}
-		ret[id] = transitionOwner{OwnerRoot: filepath.ToSlash(owner), Line: line}
+		ret[id] = transitionOwner{Classification: classification, OwnerRoot: filepath.ToSlash(owner), Line: line}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err

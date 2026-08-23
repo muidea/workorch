@@ -18,6 +18,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type Manager struct {
@@ -303,25 +304,14 @@ func (m *Manager) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) 
 	m.publishProjectionChangedWithDiff(context.Background(), snapshot.Workspace.ID, "detail", previous, snapshot)
 }
 
-func (m *Manager) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
+func (m *Manager) ApplyWorkspaceExecutionAdmission(command workorchdevents.WorkspaceRunRequestedCommand, admission runtimecontract.RuntimeExecutionIntentAdmission) bool {
 	if m == nil || m.store == nil {
 		return false
 	}
-	if !m.store.ApplyRunCommandAccepted(update) {
+	if !m.store.ApplyWorkspaceExecutionAdmission(command, admission) {
 		return false
 	}
-	m.publishProjectionChanged(context.Background(), update.WorkspaceID, "run_command_accepted")
-	return true
-}
-
-func (m *Manager) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
-	if m == nil || m.store == nil {
-		return false
-	}
-	if !m.store.ApplyRunCommandRejected(update) {
-		return false
-	}
-	m.publishProjectionChanged(context.Background(), update.WorkspaceID, "run_command_rejected")
+	m.publishProjectionChanged(context.Background(), strings.TrimSpace(string(admission.WorkspaceID)), "workspace_execution_admission")
 	return true
 }
 

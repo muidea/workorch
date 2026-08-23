@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 功能范围与边界
 
@@ -63,10 +63,11 @@ LLM EventHub command、provider request、provider-facing `max_output_tokens` �
 不等值时拒绝提交，physical call count 保持为零。SM-4 whole-document recovery 复用 sealed ExpectedDocument，不提高预算、
 不重读配置、不拼接 partial output。
 
-两个 request renderer 都要求恰好一个完整 compact JSON object，无 prose、fence、prefix/suffix 或 authority 重复。
-sealed manifest 同时约束 prompt、closed JSON Schema、strict decoder 与 evaluator；object 禁止 unknown field，数组、字符串、
-target、binding 与 content/effect shape 均有界。LLM owner只返回 provider factual outcome，不能选择 retry、terminal、
-CandidateAttempt 或 Runtime transition。
+两个 request renderer 的 provider-facing instruction 都要求恰好一个完整 compact JSON object，无 prose、fence、
+prefix/suffix 或 authority 重复；LLM wire boundary 只可兼容移除一层完整且独占响应的精确 JSON fence，不能接受 prose、
+多 value 或畸形 fence。sealed manifest 同时约束 prompt、closed JSON Schema、strict decoder 与 evaluator；object 禁止
+unknown field，数组、字符串、target、binding 与 content/effect shape 均有界。LLM owner只返回 provider factual outcome，
+不能选择 retry、terminal、CandidateAttempt 或 Runtime transition。
 
 activation-only `DefinitionFocuses` 与 SM-2 generation-specific focus/binding queue 分开持久化。semantic document
 admission、feasibility merge 与 seal 只读前者的 immutable declaration；receipt/resource-change 触发的 binding retirement、CWI
@@ -92,7 +93,7 @@ contradiction 只通过 `semantic_binding_contradiction_observed` 私有事件�
 | --- | --- | --- |
 | SM-1 Run lifecycle | 不拥有；只消费 Run state notification 触发自身 SM-4 drive | Run owner 持久化 SM-1 state/lineage，并为 Orchestrator aggregate 提供 opaque RuntimeStateRecord CAS；Workspace owner 持久化 activeRun |
 | SM-2 authority/focus | reducer、focus/evidence/assessment/repair/governance/terminal 裁决；编译 sealed candidate manifest | application 只编译 typed bootstrap；owner 只返回 facts；Result 只存 outcome |
-| SM-3 candidate/dispatch | request session、单 evaluator、attempt 0/1、transaction、seal、typed operation、evidence commit | LLM 返回 candidate；capability block 执行 operation |
+| SM-3 candidate/dispatch | request session、单 evaluator、attempt 0/1、transaction、seal、typed operation、evidence commit | LLM 返回 exactly-one `Stale | Feedback | DocumentOutcome` fact；Orchestrator只从complete document解码/裁决candidate；capability block执行operation |
 | SM-4 drive/recovery/delivery ledger | bounded drive、singleflight、restart load、delivery acknowledgement/retry；不写 owner state | Result/Workspace/Run owner 各自完成资源迁移；projection store/read model 只保存派生状态 |
 
 实现必须保持：
@@ -210,7 +211,7 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `proof_batch_document`。二者都只有 attempt 1，不得因无 typed delta 误报 `runtime_contract_defect`，也不得由 LLM 或
   application 选择 retry。correction lineage 只属于一个 sealed provider document；coverage-order attempt 1 即使 accepted，创建新的
   proof-batch request 时也必须在同一 SM-3 private CAS 中重置 attempt、directive 与 current rejection lineage。
-- candidate pipeline 只接收 `request_recoverable`、`candidate_rejection`、`owner_feasibility` 和 `accepted`
+- candidate pipeline 只接收 `request_recoverable`、`request_terminal`、`candidate_rejection`、`owner_feasibility` 和 `accepted`
   factual result。attempt 0/1 与 correction policy 只由 SM-3 reducer 消费 persisted diagnostic；owner feasibility
   必须先成为 Orchestrator internal event，再由 SM-2 coordinator 选择 prerequisite、新 authority 或 typed
   terminal，零 correction attempt。SM-4 只从 persisted result 恢复，不再解释 raw failure。
@@ -238,7 +239,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   authentication/configuration/transient/protocol；它不得跨 EventHub 返回 `RuntimeCandidateFailure` 或完整文档的
   schema/contract 裁决。Orchestrator adapter 必须先穷举校验 scope、authority、owner、category/class 与
   typed document disposition/content/feedback/stale 互斥关系，再在 SM-3 owner-private 边界重建内部 failure fact。
-  `incomplete_document` 只提交 SM-4 owner-private request-recovery fact；transport retry 与 incomplete recovery 都必须推进
+  `incomplete_document` 只提交 primary-classified-as-SM-4 的 owner-private `provider_request_recovery_coordinated`
+  fact；transport（包括 body-idle）与 incomplete recovery 都必须在同一 aggregate CAS 中结算本次 physical call 并推进
   persisted request-session physical sequence，使下一 physical call 使用新 `PhysicalCallID`，并从头请求同一 sealed
   expected document，禁止跨 owner 携带 partial bytes、拼接 raw suffix 或消耗 candidate correction budget。
   provider request 的 request ID/status 只保存在 sealed `ProviderRequestAuditView`，EventHub Result 不再重复携带未消费的
@@ -441,6 +443,33 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   SM-3 owner-local reducer 决定 final 或唯一 same-step correction；只有 persisted `correctable_once` result 可在相同
   transaction、manifest 和 stable prefix 下开启 attempt 1，attempt 1 再次 complete rejection 形成
   `candidate_retry_exhausted`，不能创建第三次请求或无信息 governance ticket。
+- recoverable provider result 统一经 `NormalizeRuntimeProviderRequestRecovery` 形成一个 deterministic owner-private fact，
+  operations 与 semantic-plan 不得分别推导恢复/耗尽语义。`provider_request_recovery_coordinated` 的 metadata primary class
+  是 SM-4，但它只在唯一 Orchestrator aggregate 内组合三个彼此独立的 reducer 结果：结算 SM-3 request session、transport
+  时消费 SM-4 `provider_transport` guard、guard 耗尽时应用预先归一的 SM-2 failure；整组结果只提交一次 CAS。incomplete
+  document 不消费 transport guard，只依据 sealed ExpectedDocument `MaxRecoveryAttempts` 在同一 CAS 中进入 recovery-pending
+  或 terminal。body-idle 不得旁路该 guard，也不得直接伪装为 protocol terminal。
+- LLM result 的 exact audit 是 physical submission 的唯一事实来源；Orchestrator 将其归约为 owner-private immutable
+  `confirmed | released | unknown` settlement，并与 SM-3 session、SM-4 recovery/ledger 以及可选 SM-2 terminal 在同一
+  aggregate CAS 中提交。`ProviderSubmitted=false` 必须释放该 physical call 的 provider、reasoning、semantic generation
+  与 token reservations，不能产生 consumption；`ProviderSubmitted=true` 才能确认 consumption，usage 缺失时仅 token
+  allocation 进入 unknown。audit 缺失或 workspace/run/logical/physical identity 不可信时全部进入 unknown 并以
+  submission-unknown 终结，禁止盲重放；`RequestBytes` 永远不能推断 submission。stale 只接受 released，incomplete 与
+  transient/body-idle recovery 只接受 confirmed，避免无 transport-budget 循环。
+- recovery CAS 写入前中断时，fresh load 只能看到既有 `ProviderSubmitted=true`，必须收敛为 submission-unknown 且不得再次
+  调用 provider；CAS 已写入但调用方丢失响应时，fresh load 必须直接重放 durable pending/terminal decision，duplicate 不得
+  再消费 budget 或增加 physical call。terminal transport session 的 `LastOutcome` 保留 LLM owner 的 factual
+  `provider_transient` class 与 exact original code/signature；operations 的 stable terminal code 可为
+  `provider_transport_exhausted`，semantic 的 stable terminal code 可为 `semantic_provider_transport_exhausted`，但两者的
+  nested `OriginalDiagnostic` 必须与 producer fact 精确一致。
+- authentication/configuration/protocol/transient-exhausted/submission-unknown/document-recovery-exhausted 统一先经
+  `NormalizeRuntimeProviderRequestTerminal` 形成唯一 owner-private fact，再由
+  `provider_request_terminal_coordinated` 在同一 aggregate CAS 内同时关闭 SM-3 request session 并应用完整 SM-2
+  successor failure；operations 与 semantic-plan 不得各自重写 code/signature/`OriginalDiagnostic`，也不得恢复旧的
+  “先 terminal session、后 failure”双 CAS。SM-2 与 SM-3 的 reducer 语义仍独立，只在 Orchestrator owner 内部以该明确
+  transaction 原子协调：CAS 写入前中断时 fresh load 只看到 submitted marker，必须确定性封存
+  `provider_submission_unknown` 且不重调 provider；CAS 已写入但响应丢失时 fresh load 必须看到 exact terminal+failure，
+  duplicate 只读返回。terminal session 若缺少 matching failure/semantic ledger 必须 fail closed，不能作为成功恢复旁路。
 - LLM provider feedback 的 stable category 只用于选择 SM-2/SM-3 路径；authentication/configuration/transient/protocol
   terminal failure 必须同时保存 LLM owner 提供的 exact `OriginalDiagnostic`。例如 canonical terminal 可保持
   `provider_protocol_failure`，但 nested original code 必须仍是实际 guard（如 `response_byte_limit_exceeded`），且
@@ -489,7 +518,10 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
 - 普通 drive、governance resolution 与 drive-failure terminal 共用唯一 terminal delivery lane：先校验 persisted sealed aggregate，
   再发布 Result -> Workspace -> Run 的有界 delivery fact 序列，并仅在 SM-4 记录 acknowledgement；ack 只能取自
   该三个 owner 的同步 typed response 后转入 Orchestrator private internal event，绝不开放独立 EventHub ack command；
-  任一 delivery 失败进入延迟重试，不得改写 reducer terminal 或越权写 owner state。
+  任一 delivery 失败进入延迟重试，不得改写 reducer terminal 或越权写 owner state。SM-4 的 delivery request、Result
+  material、Run lifecycle fence 与 acknowledgement 校验必须共用 `runtime.DeriveTerminalOutcome`；administrative 与
+  convergence 双 terminal、terminal state 缺 detail、non-terminal 携带 detail 或非法 outcome 一律 fail closed。
+  `runtimeController == nil` 时 acknowledgement 必须返回 invalid argument，禁止将未持久化 ack 当作成功。
 - Start/Resume 由 Application 经 Workspace owner ingress 提交 scoped intent；Run owner 内部迁移并发布 `RunStateChanged` 后，
   Orchestrator 才后台执行唯一 Runtime drive。application 不再拥有 Start/Resume continuation queue，Orchestrator
   service 不暴露 execution-context-patch resume facade。Workspace 与 Run owner 的同步 intent Result 只携带 typed

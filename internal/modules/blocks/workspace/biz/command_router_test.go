@@ -85,7 +85,7 @@ func TestWorkspaceDefinitionCommandsEnforceScopeAcrossBackends(t *testing.T) {
 			ctx := context.Background()
 			workspaceRepo := memoryRepo.NewWorkspaceRepository()
 			goalRepo, dodRepo := backend.new(t)
-			manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+			manager := newGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
 			biz := &Biz{manager: manager, goals: goalRepo, dods: dodRepo}
 			for _, workspaceID := range []common.WorkspaceID{"ws-scope-a", "ws-scope-b"} {
 				if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: string(workspaceID), DeliverableDirectory: "/tmp/" + string(workspaceID), State: common.WorkspaceStateActive}); err != nil {

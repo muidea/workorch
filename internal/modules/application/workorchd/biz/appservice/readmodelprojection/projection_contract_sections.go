@@ -155,36 +155,52 @@ func llmUsageTraceFromEventRecord(item projectioncontract.EventRecord) (projecti
 	if len(item.Payload.Fields) == 0 {
 		return projectioncontract.LLMUsageTrace{}, false
 	}
+	physicalResponseMode, ok := llmUsageTracePhysicalResponseMode(item.Payload)
+	if !ok {
+		return projectioncontract.LLMUsageTrace{}, false
+	}
+	providerSubmitted, ok := llmUsageTraceProviderSubmitted(item.Payload)
+	if !ok {
+		return projectioncontract.LLMUsageTrace{}, false
+	}
+	logicalRequestID, physicalCallID, ok := llmUsageTraceRequestIdentity(item.Payload)
+	if !ok {
+		return projectioncontract.LLMUsageTrace{}, false
+	}
 	estimated := llmUsageTraceEstimated(item.Payload)
 	usageSource := llmUsageTraceUsageSource(item.Payload, estimated)
 	return projectioncontract.LLMUsageTrace{
-		ID:            item.ID,
-		WorkspaceID:   llmUsageTraceWorkspaceID(item, item.Payload),
-		RunID:         llmUsageTraceRunID(item, item.Payload),
-		StepID:        llmUsageTraceStepID(item, item.Payload),
-		ProviderID:    llmUsageTraceProviderID(item.Payload),
-		Provider:      llmUsageTraceProvider(item.Payload),
-		APISurface:    llmUsageTraceAPISurface(item.Payload),
-		Model:         llmUsageTraceModel(item.Payload),
-		Operation:     llmUsageTraceOperation(item.Payload),
-		InputTokens:   llmUsageTraceInputTokens(item.Payload),
-		OutputTokens:  llmUsageTraceOutputTokens(item.Payload),
-		TotalTokens:   llmUsageTraceTotalTokens(item.Payload),
-		Estimated:     estimated,
-		UsageSource:   usageSource,
-		RequestBytes:  llmUsageTraceRequestBytes(item.Payload),
-		ResponseBytes: llmUsageTraceResponseBytes(item.Payload),
-		Streaming:     llmUsageTraceStreaming(item.Payload),
-		ContextBudget: llmUsageTraceContextBudget(item.Payload),
-		CacheUsage:    llmUsageTraceCacheUsage(item.Payload),
-		CacheMarkers:  llmUsageTraceCacheMarkers(item.Payload),
-		StartedAt:     llmUsageTraceStartedAt(item.Payload),
-		CompletedAt:   llmUsageTraceCompletedAt(item.Payload),
-		DurationMs:    llmUsageTraceDurationMs(item.Payload),
-		Status:        llmUsageTraceStatus(item.Payload),
-		FailureClass:  llmUsageTraceFailureClass(item.Payload),
-		OccurredAt:    item.OccurredAt,
-		EvidenceRef:   llmUsageTraceEvidenceRef(item),
+		ID:                   item.ID,
+		LogicalRequestID:     logicalRequestID,
+		PhysicalCallID:       physicalCallID,
+		WorkspaceID:          llmUsageTraceWorkspaceID(item, item.Payload),
+		RunID:                llmUsageTraceRunID(item, item.Payload),
+		StepID:               llmUsageTraceStepID(item, item.Payload),
+		ProviderID:           llmUsageTraceProviderID(item.Payload),
+		Provider:             llmUsageTraceProvider(item.Payload),
+		APISurface:           llmUsageTraceAPISurface(item.Payload),
+		Model:                llmUsageTraceModel(item.Payload),
+		Operation:            llmUsageTraceOperation(item.Payload),
+		InputTokens:          llmUsageTraceInputTokens(item.Payload),
+		OutputTokens:         llmUsageTraceOutputTokens(item.Payload),
+		TotalTokens:          llmUsageTraceTotalTokens(item.Payload),
+		Estimated:            estimated,
+		UsageSource:          usageSource,
+		RequestBytes:         llmUsageTraceRequestBytes(item.Payload),
+		ResponseBytes:        llmUsageTraceResponseBytes(item.Payload),
+		PhysicalResponseMode: physicalResponseMode,
+		ProviderSubmitted:    providerSubmitted,
+		Streaming:            physicalResponseMode.Streaming(),
+		ContextBudget:        llmUsageTraceContextBudget(item.Payload),
+		CacheUsage:           llmUsageTraceCacheUsage(item.Payload),
+		CacheMarkers:         llmUsageTraceCacheMarkers(item.Payload),
+		StartedAt:            llmUsageTraceStartedAt(item.Payload),
+		CompletedAt:          llmUsageTraceCompletedAt(item.Payload),
+		DurationMs:           llmUsageTraceDurationMs(item.Payload),
+		Status:               llmUsageTraceStatus(item.Payload),
+		FailureClass:         llmUsageTraceFailureClass(item.Payload),
+		OccurredAt:           item.OccurredAt,
+		EvidenceRef:          llmUsageTraceEvidenceRef(item),
 	}, true
 }
 

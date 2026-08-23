@@ -550,7 +550,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 		t.Fatalf("Runtime aggregate receipt = %+v", result.RuntimeStateUpdate)
 	}
 	stored, err := base.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || stored.Priority != 17 || stored.RuntimeState == nil || stored.RuntimeState.StateRevision != nextState.StateRevision {
+	if err != nil || stored.FailureReason != "unrelated-owner-write" || stored.RuntimeState == nil || stored.RuntimeState.StateRevision != nextState.StateRevision {
 		t.Fatalf("rebased stored Run = %+v err=%v", stored, err)
 	}
 	if runs.casCalls != 2 {
@@ -616,7 +616,7 @@ func (r *runtimeStateCASRaceRepository) CompareAndSwap(ctx context.Context, item
 		next.StateRevision++
 		changed.RuntimeState = &next
 	} else if r.mutateModelOnly {
-		changed.Priority = 17
+		changed.FailureReason = "unrelated-owner-write"
 	}
 	if err := r.RunRepository.CompareAndSwap(ctx, &changed, current.Revision); err != nil {
 		return err

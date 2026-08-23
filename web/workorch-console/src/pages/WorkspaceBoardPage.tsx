@@ -62,8 +62,12 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const trackWorkspaceExecutionInBackground = (workspace: Workspace, request: WorkspaceExecutionIntentRequest) => {
     const workspaceId = workspace.id;
     void workorchApi.submitWorkspaceExecution(workspaceId, request)
-      .then(() => {
-        message.success(request.intent === 'restart' ? '新执行请求已进入后台 admission 队列' : '恢复请求已进入后台 admission 队列');
+      .then((admission) => {
+        if (admission.accepted) {
+          message.success(request.intent === 'restart' ? 'Workspace owner 已受理新执行请求' : 'Workspace owner 已受理恢复请求');
+        } else {
+          message.error(`Workspace owner 拒绝执行请求：${admission.diagnostic || admission.reason}`);
+        }
         void loadBoard();
       })
       .catch((error: unknown) => {

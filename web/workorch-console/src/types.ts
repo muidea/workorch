@@ -283,7 +283,6 @@ export type Run = {
   doDId?: string;
   initialStepKind?: string;
   state: string;
-  priority?: number;
   blockingTicketId?: string;
   blockingApprovalId?: string;
   failureReason?: string;
@@ -360,21 +359,23 @@ export type ConvergenceStatus = {
   ineffectiveRetry?: boolean;
 };
 
-export type RunCommandStatus = {
-  workspaceId?: string;
+type RunCommandStatusBase = {
+  workspaceId: string;
   runId?: string;
-  state?: 'accepted' | 'rejected';
-  intent?: string;
-  reason?: string;
-  requestId?: string;
+  intent: WorkspaceExecutionIntent;
+  requestId: string;
+  requestReason?: string;
   source?: string;
-  definitionRevision?: string;
-  decisionId?: string;
-  acceptedAt?: string;
-  rejectedAt?: string;
-  error?: string;
-  revision?: number;
+  outcome: RuntimeExecutionIntentOutcome;
+  admissionReason: RuntimeExecutionIntentReason;
+  diagnostic: string;
+  revision: number;
 };
+
+export type RunCommandStatus = RunCommandStatusBase & (
+  | { state: 'accepted'; acceptedAt: string; rejectedAt?: never }
+  | { state: 'rejected'; acceptedAt?: never; rejectedAt: string }
+);
 
 export type RunOutcome = {
   runId?: string;
@@ -405,12 +406,58 @@ export type WorkspaceOutcome = {
 
 export type WorkspaceExecutionIntent = 'resume' | 'restart';
 
+export type RuntimeExecutionIntentOutcome =
+  | 'reconciliation_requested'
+  | 'replacement_pending'
+  | 'restart_required'
+  | 'fresh_activation_required'
+  | 'definition_changed_requires_restart'
+  | 'governance_required'
+  | 'data_reset_required';
+
+export type RuntimeExecutionIntentReason =
+  | 'workspace_active_run_absent'
+  | 'selected_run_absent'
+  | 'selected_run_terminal'
+  | 'runtime_state_incompatible'
+  | 'definition_changed'
+  | 'runtime_bootstrap_missing'
+  | 'current_run_continuation_accepted'
+  | 'pending_run_activated'
+  | 'governance_pending'
+  | 'run_not_resumable'
+  | 'duplicate_restart'
+  | 'new_run_activated'
+  | 'predecessor_supersede_requested'
+  | 'development_data_incompatible'
+  | 'definition_admission_missing'
+  | 'definition_admission_mismatch'
+  | 'definition_clarification_pending';
+
+export type WorkspaceExecutionAdmission = {
+  service: string;
+  backend?: string;
+  dataRoot?: string;
+  action?: string;
+  accepted: boolean;
+  state: 'accepted' | 'rejected';
+  workspaceId: string;
+  runId?: string;
+  requestId: string;
+  intent: WorkspaceExecutionIntent;
+  outcome: RuntimeExecutionIntentOutcome;
+  reason: RuntimeExecutionIntentReason;
+  requestReason?: string;
+  source?: string;
+  diagnostic?: string;
+  error?: string;
+};
+
 export type WorkspaceExecutionIntentRequest = {
   intent?: WorkspaceExecutionIntent;
   requestId?: string;
   reason?: string;
   source?: string;
-  priority?: number;
 };
 
 // Form-only configuration for an explicit fresh activation. Model and Soul
@@ -422,7 +469,6 @@ export type WorkspaceExecutionActivationRequest = {
   reasoningEffort?: string;
   soulId?: string;
   soulBindings?: Record<string, string>;
-  priority?: number;
 };
 
 export type Soul = {
@@ -954,6 +1000,8 @@ export type LLMContextBudgetSummary = {
 
 export type LLMUsageTrace = {
   id: string;
+  logicalRequestId?: string;
+  physicalCallId?: string;
   workspaceId: string;
   runId: string;
   stepId?: string;
@@ -968,6 +1016,9 @@ export type LLMUsageTrace = {
   usageSource?: string;
   requestBytes?: number;
   responseBytes?: number;
+  physicalResponseMode: 'streaming' | 'non_streaming';
+  providerSubmitted: boolean;
+  /** @deprecated compatibility-only derivation of physicalResponseMode */
   streaming: boolean;
   contextBudget?: Record<string, unknown>;
   cacheUsage?: Record<string, unknown>;

@@ -1022,12 +1022,19 @@ func runCommandStatusText(command *projectioncontract.RunCommandStatus) string {
 	if intent := strings.TrimSpace(command.Intent); intent != "" {
 		parts = append(parts, intent)
 	}
-	if errText := strings.TrimSpace(command.Error); errText != "" {
-		parts = append(parts, errText)
-	} else if reason := strings.TrimSpace(command.Reason); reason != "" && state == "rejected" {
-		parts = append(parts, reason)
+	if outcome := strings.TrimSpace(string(command.Outcome)); outcome != "" {
+		parts = append(parts, "outcome="+outcome)
 	}
-	return truncateDisplay(strings.Join(parts, " "), 72)
+	if reason := strings.TrimSpace(string(command.AdmissionReason)); reason != "" {
+		parts = append(parts, "admission="+reason)
+	}
+	if diagnostic := strings.TrimSpace(command.Diagnostic); diagnostic != "" {
+		parts = append(parts, "diagnostic="+diagnostic)
+	}
+	if requestReason := strings.TrimSpace(command.RequestReason); requestReason != "" {
+		parts = append(parts, "request="+requestReason)
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m AppModel) visibleArtifactContinuations() []projectioncontract.ArtifactContinuation {

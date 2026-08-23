@@ -6,6 +6,7 @@ import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
 import { stateTag as canonicalStateTag } from './utils/ui';
+import { presentWorkspaceRunCommand } from './workspaceRunCommand';
 
 export { progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
 
@@ -216,8 +217,8 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
 }
 
 export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
-  const command = snapshot?.runCommand;
-  if (!command || (command.state !== 'accepted' && command.state !== 'rejected')) {
+  const command = presentWorkspaceRunCommand(snapshot?.runCommand);
+  if (!command) {
     return [{ key: 'runCommand', label: '执行准入', children: '-' }];
   }
   const stateColor = command.state === 'accepted' ? 'green' : 'red';
@@ -225,13 +226,12 @@ export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
     { key: 'intent', label: '执行准入', children: <Space wrap><Tag color={stateColor}>{command.state}</Tag>{command.intent ? <Tag>{command.intent}</Tag> : null}{command.source ? <Tag>{command.source}</Tag> : null}</Space> },
     { key: 'requestId', label: '请求 ID', children: command.requestId || '-' },
     { key: 'runId', label: '目标运行', children: command.runId || '-' },
-    { key: 'reason', label: '原因', children: command.reason || '-' },
-    { key: 'error', label: '错误', children: command.error || '-' },
-    { key: 'decisionId', label: '关联决策', children: command.decisionId || '-' },
-    { key: 'definitionRevision', label: '定义 Revision', children: command.definitionRevision || '-' },
-    { key: 'acceptedAt', label: '接收时间', children: command.acceptedAt || '-' },
-    { key: 'rejectedAt', label: '拒绝时间', children: command.rejectedAt || '-' },
-    { key: 'revision', label: '投影 Revision', children: command.revision ?? '-' }
+    { key: 'outcome', label: 'Owner outcome', children: <Tag color={stateColor}>{command.outcome}</Tag> },
+    { key: 'admissionReason', label: 'Admission reason', children: command.admissionReason },
+    { key: 'diagnostic', label: 'Diagnostic', children: boundedParagraph(command.diagnostic, { rows: 2 }) },
+    { key: 'requestReason', label: '请求原因', children: command.requestReason || '-' },
+    { key: 'observedAt', label: command.state === 'accepted' ? '接收时间' : '拒绝时间', children: command.state === 'accepted' ? command.acceptedAt : command.rejectedAt },
+    { key: 'revision', label: '投影 Revision', children: command.revision }
   ];
 }
 
@@ -1337,7 +1337,8 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                   { title: 'usage 来源', dataIndex: 'usageSource', width: 140, render: (_, item) => item.usageSource || (item.estimated ? 'estimated' : 'provider_native') },
                   { title: 'Token', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)} / ${numberText(item.totalTokens)}` },
                   { title: '耗时', dataIndex: 'durationMs', width: 100, render: (_, item) => item.durationMs ? `${numberText(item.durationMs)} ms` : '-' },
-                  { title: '流式', dataIndex: 'streaming', width: 80, render: (_, item) => item.streaming ? <Tag color="blue">stream</Tag> : '-' }
+                  { title: '物理响应', dataIndex: 'physicalResponseMode', width: 110, render: (_, item) => <Tag color={item.physicalResponseMode === 'streaming' ? 'blue' : 'default'}>{item.physicalResponseMode}</Tag> },
+                  { title: 'Provider 提交', dataIndex: 'providerSubmitted', width: 110, render: (_, item) => item.providerSubmitted ? <Tag color="green">submitted</Tag> : <Tag>not submitted</Tag> }
                 ]}
                 expandable={{
                   expandedRowRender: (item) => (
@@ -1345,6 +1346,8 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                       size="small"
                       column={1}
                       items={[
+                        { key: 'logicalRequestId', label: '逻辑请求 ID', children: item.logicalRequestId ? boundedParagraph(item.logicalRequestId, { rows: 1, copyText: item.logicalRequestId }) : '-' },
+                        { key: 'physicalCallId', label: '物理调用 ID', children: item.physicalCallId ? boundedParagraph(item.physicalCallId, { rows: 1, copyText: item.physicalCallId }) : '-' },
                         { key: 'step', label: '步骤', children: item.stepId ? boundedParagraph(item.stepId, { rows: 1, copyText: item.stepId }) : '-' },
                         { key: 'bytes', label: '请求/响应字节', children: `${numberText(item.requestBytes)} / ${numberText(item.responseBytes)}` },
                         { key: 'failure', label: '失败分类', children: item.failureClass || '-' },
@@ -2571,11 +2574,6 @@ export function checkpointTypeLabel(type?: string) {
     validation: '验收校验'
   };
   return type ? labels[type] ?? type : '-';
-}
-
-export function runPriority(item: Run) {
-  const direct = item.priority;
-  return direct !== undefined && direct !== null ? direct : '-';
 }
 
 export type LLMConfigurationFormValues = UpdateLLMConfigurationRequest;

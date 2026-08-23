@@ -7,11 +7,8 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
+	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -39,52 +36,30 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		deps.CommandHub.Terminate(ctx)
 	})
 
-	tickets := memoryrepo.NewDecisionTicketRepository()
-	resolutions := memoryrepo.NewDecisionResolutionRepository()
-	service := decisionbiz.NewService(tickets, resolutions)
-	create := decisioncontracts.CreateTicketCommand{
-		TicketID:     "ticket-pairwise-evidence",
-		WorkspaceID:  "ws-pairwise-evidence",
-		RunID:        "run-pairwise-evidence",
-		StepID:       "step-pairwise-evidence",
-		Reason:       "need operator decision",
-		DecisionKind: "operator_input",
-		Question:     "which path should continue",
-	}
-	if err := service.CreateTicket(ctx, create); err != nil {
-		t.Fatalf("create ticket: %v", err)
-	}
-	resolve := decisioncontracts.ResolveTicketCommand{
-		ResolutionID: "resolution-pairwise-evidence",
-		TicketID:     create.TicketID,
-		WorkspaceID:  create.WorkspaceID,
-		RunID:        create.RunID,
-		StepID:       create.StepID,
-		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload: workorcheventpayload.New(
+	command := decisionevents.RecordDecisionEvidenceCommand{
+		EvidenceRecordID: "evidence-decision-pairwise",
+		WorkspaceID:      "ws-pairwise-evidence",
+		RunID:            "run-pairwise-evidence",
+		StepID:           "step-pairwise-evidence",
+		TicketID:         "ticket-pairwise-evidence",
+		ResolutionID:     "resolution-pairwise-evidence",
+		ResolutionType:   decisioncommon.ResolutionTypeProvideMissingInfo,
+		DecisionKind:     "operator_input",
+		Reason:           "need operator decision",
+		Question:         "which path should continue",
+		ResolutionPayload: workorcheventpayload.New(
 			workorcheventpayload.StringField("operator", "tester"),
 			workorcheventpayload.BoolField("retry", true),
 			workorcheventpayload.StringArrayField("targets", []string{"step-a", "step-b"}),
-		),
+		).Fields,
 		ContinuationAction: "resume",
-		ResumeRunID:        create.RunID,
+		ResumeRunID:        "run-pairwise-evidence",
 	}
-	if err := service.EnsureResolvedTicket(ctx, resolve); err != nil {
-		t.Fatalf("resolve ticket: %v", err)
-	}
-	if err := service.EnsureResolvedTicket(ctx, resolve); err != nil {
-		t.Fatalf("resolve ticket idempotently: %v", err)
-	}
-	if _, err := module.recordDecisionEvidence(ctx, decisionevents.RecordDecisionEvidenceCommand{
-		EvidenceRecordID: "evidence-decision-pairwise", WorkspaceID: create.WorkspaceID, RunID: create.RunID, StepID: create.StepID,
-		TicketID: create.TicketID, ResolutionID: resolve.ResolutionID, ResolutionType: resolve.Type, DecisionKind: create.DecisionKind,
-		Reason: create.Reason, Question: create.Question, ResolutionPayload: resolve.Payload.Clone().Fields,
-		ContinuationAction: resolve.ContinuationAction, ResumeRunID: resolve.ResumeRunID,
-	}); err != nil {
+	if _, err := module.recordDecisionEvidence(ctx, command); err != nil {
 		t.Fatalf("record decision evidence: %v", err)
 	}
 
-	records, err := evidenceRepo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, create.WorkspaceID), create.RunID)
+	records, err := evidenceRepo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), command.RunID)
 	if err != nil {
 		t.Fatalf("list decision evidence: %v", err)
 	}
@@ -92,7 +67,7 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		t.Fatalf("decision evidence count = %d, want 1", len(records))
 	}
 	record := records[0]
-	if record.Kind != runtimemodel.EvidenceKindDecision || record.Status != runtimemodel.EvidenceStatusAccepted || record.SubjectID != string(create.TicketID) {
+	if record.Kind != runtimemodel.EvidenceKindDecision || record.Status != runtimemodel.EvidenceStatusAccepted || record.SubjectID != string(command.TicketID) {
 		t.Fatalf("decision evidence = %+v, want accepted decision record", record)
 	}
 	payload, ok := record.Metadata.Object("resolutionPayload")
@@ -121,48 +96,32 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		deps.CommandHub.Terminate(ctx)
 	})
 
-	approvals := memoryrepo.NewApprovalRepository()
-	service := approvalbiz.NewService(approvals)
-	create := approvalcontracts.CreateApprovalCommand{
-		ApprovalID:  "approval-pairwise-evidence",
-		WorkspaceID: "ws-pairwise-evidence",
-		RunID:       "run-pairwise-evidence",
-		StepID:      "step-pairwise-evidence",
-		Reason:      "need authorization",
-		Action:      "continue runtime action",
+	command := approvalevents.RecordApprovalEvidenceCommand{
+		EvidenceRecordID: "evidence-approval-pairwise",
+		WorkspaceID:      "ws-pairwise-evidence",
+		RunID:            "run-pairwise-evidence",
+		StepID:           "step-pairwise-evidence",
+		ApprovalID:       "approval-pairwise-evidence",
+		ApprovalState:    common.ApprovalStateApproved,
+		ResolutionID:     "resolution-approval-pairwise-evidence",
+		Principal: approvalmodel.ApprovalResolutionPrincipal{
+			Kind: approvalmodel.ApprovalResolutionPrincipalHumanOperator, SubjectID: "tester",
+		},
+		Reason: "need authorization",
+		Action: "continue runtime action",
 		Context: workorcheventpayload.New(
 			workorcheventpayload.StringField("scope", "runtime"),
 			workorcheventpayload.IntField("risk", 2),
-		),
-	}
-	if err := service.CreateApproval(ctx, create); err != nil {
-		t.Fatalf("create approval: %v", err)
-	}
-	resolve := approvalcontracts.ResolveApprovalCommand{
-		ApprovalID:  create.ApprovalID,
-		WorkspaceID: create.WorkspaceID,
-		RunID:       create.RunID,
-		Context: workorcheventpayload.New(
+		).Fields,
+		ResolutionContext: workorcheventpayload.New(
 			workorcheventpayload.StringField("resolvedBy", "tester"),
-		),
+		).Fields,
 	}
-	approved, err := service.EnsureApprovedAndReturn(ctx, resolve)
-	if err != nil {
-		t.Fatalf("approve: %v", err)
-	}
-	if _, err := service.EnsureApprovedAndReturn(ctx, resolve); err != nil {
-		t.Fatalf("approve idempotently: %v", err)
-	}
-	if _, err := module.recordApprovalEvidence(ctx, approvalevents.RecordApprovalEvidenceCommand{
-		EvidenceRecordID: "evidence-approval-pairwise", WorkspaceID: create.WorkspaceID, RunID: create.RunID, StepID: create.StepID,
-		ApprovalID: create.ApprovalID, ApprovalState: common.ApprovalStateApproved, Reason: create.Reason, Action: create.Action,
-		ResolutionID: approved.ResolutionID, Principal: approved.ResolutionPrincipal,
-		Context: approved.Context.Clone().Fields, ResolutionContext: approved.ResolutionContext.Clone().Fields,
-	}); err != nil {
+	if _, err := module.recordApprovalEvidence(ctx, command); err != nil {
 		t.Fatalf("record approval evidence: %v", err)
 	}
 
-	records, err := evidenceRepo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, create.WorkspaceID), create.RunID)
+	records, err := evidenceRepo.ListByRun(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), command.RunID)
 	if err != nil {
 		t.Fatalf("list approval evidence: %v", err)
 	}
@@ -170,7 +129,7 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		t.Fatalf("approval evidence count = %d, want 1", len(records))
 	}
 	record := records[0]
-	if record.Kind != runtimemodel.EvidenceKindApproval || record.Status != runtimemodel.EvidenceStatusAccepted || record.SubjectID != string(create.ApprovalID) {
+	if record.Kind != runtimemodel.EvidenceKindApproval || record.Status != runtimemodel.EvidenceStatusAccepted || record.SubjectID != string(command.ApprovalID) {
 		t.Fatalf("approval evidence = %+v, want accepted approval record", record)
 	}
 	metadataContext, ok := record.Metadata.Object("context")

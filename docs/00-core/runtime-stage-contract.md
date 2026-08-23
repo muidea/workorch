@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Purpose
 

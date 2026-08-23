@@ -75,14 +75,13 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		"llmTarget?: ProviderModelTarget;",
 		"reasoningEffort?: string;",
 		"soulBindings?: Record<string, string>;",
-		"priority?: number;",
 	} {
 		if !strings.Contains(activationType, want) {
 			t.Fatalf("WorkspaceExecutionActivationRequest missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
-		"runId", "goalId", "doDId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds", "definitionRevision", "decisionId",
+		"runId", "goalId", "doDId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds", "definitionRevision", "decisionId", "priority",
 	} {
 		if strings.Contains(activationType, forbidden) {
 			t.Fatalf("WorkspaceExecutionActivationRequest retains non-owner activation field %q", forbidden)
@@ -111,6 +110,7 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		"body: JSON.stringify(activationRequest)",
 		"resumeWorkspaceExecution:",
 		"goalIdOrRequest",
+		"requestBody.priority",
 	} {
 		if strings.Contains(apiData, forbidden) {
 			t.Fatalf("execution intent API retains legacy activation surface %q", forbidden)
@@ -123,7 +123,7 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		"primaryExecutionIntent === 'resume'",
 		"Resume 只继续当前 Run 已封存的定义、模型和执行上下文",
 		"commandIntent === 'restart'",
-		"workorchApi.submitWorkspaceExecution(targetWorkspaceId, { intent: commandIntent, priority: request.priority })",
+		"workorchApi.submitWorkspaceExecution(targetWorkspaceId, { intent: commandIntent })",
 	} {
 		if !strings.Contains(detailData, want) {
 			t.Fatalf("WorkspaceDetailPage missing execution intent contract %q", want)
@@ -131,7 +131,7 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	}
 	activationModal := webSourceSection(t, detailData, "title={activationIntent === 'restart'", "<FloatButton.BackTop")
 	for _, forbidden := range []string{
-		`name="goalId"`, `name="doDId"`, `name="skillIds"`, `name="mcpServerIds"`, `name="capabilityIds"`, `name="memoryIds"`,
+		`name="goalId"`, `name="doDId"`, `name="skillIds"`, `name="mcpServerIds"`, `name="capabilityIds"`, `name="memoryIds"`, `name="priority"`,
 	} {
 		if strings.Contains(activationModal, forbidden) {
 			t.Fatalf("Workspace execution modal retains ignored form field %q", forbidden)
@@ -161,6 +161,53 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	} {
 		if !strings.Contains(helperData, want) {
 			t.Fatalf("workspace execution intent helper missing %q", want)
+		}
+	}
+}
+
+func TestWebWorkspaceExecutionAdmissionRequiresExactOwnerContract(t *testing.T) {
+	apiData := string(readWebConsoleFile(t, "src/api.ts"))
+	for _, want := range []string{
+		"parseWorkspaceExecutionAdmission(body, {",
+		"workspaceId,",
+		"requestId: commandRequestId,",
+		"intent: commandIntent",
+	} {
+		if !strings.Contains(apiData, want) {
+			t.Fatalf("workspace execution API missing strict admission boundary %q", want)
+		}
+	}
+	if strings.Contains(apiData, "JSON.parse(text) as WorkspaceExecutionAdmission") {
+		t.Fatal("workspace execution API must not cast an arbitrary JSON response to owner admission")
+	}
+
+	parserData := string(readWebConsoleFile(t, "src/workspaceExecutionAdmission.ts"))
+	for _, want := range []string{
+		"const canonicalReasons: Record<RuntimeExecutionIntentOutcome",
+		"reconciliation_requested:",
+		"replacement_pending:",
+		"restart_required:",
+		"fresh_activation_required:",
+		"definition_changed_requires_restart:",
+		"governance_required:",
+		"data_reset_required:",
+		"body.workspaceId !== expectation.workspaceId",
+		"body.requestId !== expectation.requestId",
+		"body.intent !== expectation.intent",
+		"body.accepted !== classification.accepted",
+		"body.state !== classification.state",
+		"expectation.httpStatus !== classification.httpStatus",
+	} {
+		if !strings.Contains(parserData, want) {
+			t.Fatalf("workspace execution admission parser missing contract check %q", want)
+		}
+	}
+
+	boardData := string(readWebConsoleFile(t, "src/pages/WorkspaceBoardPage.tsx"))
+	detailData := string(readWebConsoleFile(t, "src/pages/WorkspaceDetailPage.tsx"))
+	for name, data := range map[string]string{"board": boardData, "detail": detailData} {
+		if !strings.Contains(data, "Workspace owner 拒绝") || !strings.Contains(data, "工作空间执行提交失败") {
+			t.Fatalf("%s page must distinguish typed owner rejection from submission/contract failure", name)
 		}
 	}
 }

@@ -17,7 +17,6 @@ type WorkspaceExecutionIntentCommand struct {
 	WorkspaceID common.WorkspaceID
 	RequestID   string
 	Kind        runtimecontract.RuntimeExecutionIntentKind
-	Priority    int
 	Bootstrap   *runtimecontract.RuntimeBootstrap
 }
 

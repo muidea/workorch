@@ -190,7 +190,11 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 		return
 	}
 	aggregate := terminated.Aggregate
-	request := terminalDeliveryRequest(aggregate)
+	request, err := terminalDeliveryRequest(aggregate)
+	if err != nil {
+		setOrchestratorAck(result, err)
+		return
+	}
 	err = m.deliverRuntimeTerminal(ev.Context(), aggregate)
 	if err != nil {
 		setOrchestratorAck(result, err)

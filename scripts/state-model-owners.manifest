@@ -15,10 +15,12 @@ internal/modules/blocks/workspace/pkg/models/definition_admission.go|DefinitionA
 internal/modules/blocks/workspace/pkg/models/definition_admission.go|WorkspaceActivationAdmissionState|owner_private_state|internal/modules/blocks/workspace|workspace.definition_admission
 internal/modules/application/workorchd/biz/appservice/readmodelports/run_snapshot_models.go|runSnapshotLoadMode|ephemeral_technical|internal/modules/application/workorchd|-
 internal/modules/application/workorchd/biz/appservice/readmodelports/workspace_snapshot_load_mode.go|workspaceSnapshotLoadMode|ephemeral_technical|internal/modules/application/workorchd|-
+internal/modules/application/workorchd/biz/appservice/workspaceviewcore/types.go|projectionLifecycleState|owner_private_state|internal/modules/application/workorchd|workorchd.projection_lifecycle
 internal/modules/kernel/orchestrator/biz/runtime/candidate_admission.go|CandidateAdmissionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go|CommitDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go|DispatchState|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/biz/runtime/failure_policy.go|FailureDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
+internal/modules/kernel/orchestrator/biz/runtime/execution_budget.go|RuntimeProviderBudgetSettlementStatus|immutable_outcome|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/pkg/events/messages.go|RuntimeGovernanceResolutionDisposition|immutable_outcome|internal/modules/kernel/orchestrator|-
 internal/pkg/common/states.go|WorkspaceState|authoritative_state_machine|internal/modules/blocks/workspace|workspace.creation,workspace.lifecycle
 internal/pkg/common/states.go|DoDState|invariant_value|internal/modules/blocks/workspace|-
@@ -32,6 +34,7 @@ internal/pkg/common/states.go|ValidationResultState|immutable_outcome|internal/m
 internal/pkg/common/states.go|ResultState|authoritative_state_machine|internal/modules/blocks/result|result.lifecycle
 internal/pkg/common/states.go|ArtifactState|immutable_outcome|internal/modules/blocks/result|-
 internal/pkg/common/states.go|ArtifactContinuationState|owner_private_state|internal/modules/kernel/orchestrator|orchestrator.candidate_content
+internal/pkg/llmaudit/physical_response_mode.go|PhysicalResponseMode|immutable_outcome|internal/modules/blocks/llm|-
 internal/pkg/workorchport/workspace_runtime_view.go|SubscriptionState|ephemeral_technical|internal/modules/application/workorchd|-
 internal/pkg/workorchruntimecontract/canonical_runtime.go|ConvergenceState|owner_private_state|internal/modules/kernel/orchestrator|sm_2
 internal/pkg/workorchruntimecontract/canonical_runtime.go|RuntimeOperationExecutionStatus|immutable_outcome|-|-
@@ -42,7 +45,7 @@ internal/pkg/workorchruntimecontract/runtime_acceptance_slice.go|RuntimeCoverage
 internal/pkg/workorchruntimecontract/runtime_activation_disposition.go|RuntimeActivationDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_assessment.go|AssessmentDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_candidate_evaluator.go|RuntimeCandidateCorrectionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
-internal/pkg/workorchruntimecontract/runtime_candidate_payload.go|RuntimeCandidateDocumentDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
+internal/pkg/workorchruntimecontract/runtime_candidate_payload.go|RuntimeCandidateDocumentDisposition|pure_disposition|internal/modules/blocks/llm|-
 internal/pkg/workorchruntimecontract/runtime_candidate_request_session.go|RuntimeCandidateRequestSessionState|owner_private_state|internal/modules/kernel/orchestrator|sm_3
 internal/pkg/workorchruntimecontract/runtime_complete_admission.go|RuntimeCompleteAdmissionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_coverage_proof_lineage.go|RuntimeCoverageProofLineageDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
@@ -55,8 +58,7 @@ internal/pkg/workorchruntimecontract/runtime_execution_budget.go|RuntimeBudgetRe
 internal/pkg/workorchruntimecontract/runtime_execution_budget.go|RuntimeBudgetExhaustionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/pkg/workorchruntimecontract/runtime_execution_budget.go|RuntimeBudgetAllocationState|owner_private_state|internal/modules/kernel/orchestrator|sm_3
 internal/pkg/workorchruntimecontract/runtime_execution_budget.go|RuntimeBudgetReconciliationStatus|owner_private_state|internal/modules/kernel/orchestrator|sm_4
-internal/pkg/workorchruntimecontract/runtime_execution_budget.go|RuntimeProviderConsumptionStatus|immutable_outcome|internal/modules/blocks/llm|-
-internal/pkg/workorchruntimecontract/runtime_expected_document.go|RuntimeProviderDocumentDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
+internal/pkg/workorchruntimecontract/runtime_expected_document.go|RuntimeProviderDocumentDisposition|immutable_outcome|internal/modules/blocks/llm|-
 internal/pkg/workorchruntimecontract/runtime_governance.go|RuntimeOperationGovernanceBindingState|owner_private_state|internal/modules/kernel/orchestrator|sm_2
 internal/pkg/workorchruntimecontract/runtime_governance.go|RuntimeGovernanceResolutionOutcome|immutable_outcome|-|-
 internal/pkg/workorchruntimecontract/runtime_lifecycle_delivery.go|RuntimeDeliveryAcknowledgedState|owner_private_state|internal/modules/kernel/orchestrator|sm_4

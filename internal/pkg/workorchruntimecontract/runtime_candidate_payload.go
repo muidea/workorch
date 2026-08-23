@@ -11,10 +11,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-// RuntimeCandidateDocumentDisposition classifies the provider response before
-// any candidate attempt is allocated.  It is deliberately a pure payload
-// boundary type: deciding whether to continue, retry transport or create an
-// attempt remains the Orchestrator's responsibility.
+// RuntimeCandidateDocumentDisposition is the LLM owner's pure classification
+// of raw provider bytes before any candidate attempt is allocated. Shared
+// placement does not authorize a downstream consumer to inspect or reclassify
+// those bytes. Deciding whether to recover, terminate, or create an attempt
+// remains the Orchestrator's responsibility.
 type RuntimeCandidateDocumentDisposition string
 
 const (

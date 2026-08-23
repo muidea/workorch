@@ -59,7 +59,7 @@ func (p *recordingProjection) RecordWorkspaceExecutionFailure(_ string, _ workor
 	p.failures = append(p.failures, err)
 }
 
-func TestAdmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
+func TestSubmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
 	projection := &recordingProjection{}
 	submitter := &recordingSubmitter{}
 	fixed := time.Unix(123, 456).UTC()
@@ -67,7 +67,7 @@ func TestAdmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
 
 	type requestMarker struct{}
 	requestCtx := context.WithValue(context.Background(), requestMarker{}, "request-live")
-	command, err := useCase.AdmitWorkspaceExecution(requestCtx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+	outcome, err := useCase.SubmitWorkspaceExecution(requestCtx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workorchcommon.WorkspaceID("ws-execution-usecase"),
 		Intent:      "resume",
 	})
@@ -75,17 +75,17 @@ func TestAdmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
 		t.Fatalf("admit: %v", err)
 	}
 	wantRequestID := "workorchd-workspace_run-ws-execution-usecase-123000000456"
-	if command.RequestID != wantRequestID || command.Source != "http" {
-		t.Fatalf("normalized command = %+v, want request=%q source=http", command, wantRequestID)
-	}
-
 	submitter.mu.Lock()
 	if len(submitter.contexts) != 1 {
 		submitter.mu.Unlock()
 		t.Fatalf("submitter calls = %d, want 1", len(submitter.contexts))
 	}
 	ownerCtx := submitter.contexts[0]
+	command := submitter.commands[0]
 	submitter.mu.Unlock()
+	if command.RequestID != wantRequestID || command.Source != "http" || outcome.RequestID != wantRequestID {
+		t.Fatalf("normalized command = %+v outcome=%+v, want request=%q source=http", command, outcome, wantRequestID)
+	}
 	if scope := workorchcommon.RuntimeWorkspaceIDFromContext(ownerCtx); scope != command.WorkspaceID {
 		t.Fatalf("owner workspace scope = %q", scope)
 	}
@@ -99,13 +99,13 @@ func TestAdmitWorkspaceExecutionWaitsForScopedOwnerAdmission(t *testing.T) {
 	}
 }
 
-func TestAdmitWorkspaceExecutionReturnsOwnerFailureSynchronouslyWithoutRetry(t *testing.T) {
+func TestSubmitWorkspaceExecutionReturnsOwnerFailureSynchronouslyWithoutRetry(t *testing.T) {
 	projection := &recordingProjection{}
 	submitErr := errors.New("owner rejected intent")
 	submitter := &recordingSubmitter{err: submitErr}
 	useCase := New(submitter, projection)
 	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-owner-failure", Intent: "restart", RequestID: "req-owner-failure"}
-	if _, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, submitErr) {
+	if _, err := useCase.SubmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, submitErr) {
 		t.Fatalf("admission error = %v, want owner error", err)
 	}
 	submitter.mu.Lock()
@@ -127,7 +127,7 @@ func TestTransportFailureDoesNotReplaceLaterOwnerOutcomeForSameRequest(t *testin
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-owner-outcome-after-failure", Intent: "resume", RequestID: "req-stable", Source: "http",
 	}
-	if _, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := useCase.SubmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("first admission error = %v, want deadline exceeded", err)
 	}
 	submitter.mu.Lock()
@@ -140,7 +140,7 @@ func TestTransportFailureDoesNotReplaceLaterOwnerOutcomeForSameRequest(t *testin
 		Reason:      runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
 	}
 	submitter.mu.Unlock()
-	if _, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
+	if _, err := useCase.SubmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
 		t.Fatalf("second admission: %v", err)
 	}
 	projection.mu.Lock()
@@ -158,7 +158,7 @@ func TestDuplicateAdmissionIsDelegatedToWorkspaceOwner(t *testing.T) {
 		WorkspaceID: "ws-owner-idempotency", Intent: "resume", RequestID: "req-owner-idempotency", Source: "http",
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
+		if _, err := useCase.SubmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
 			t.Fatalf("admission %d: %v", attempt, err)
 		}
 	}
@@ -189,7 +189,7 @@ func TestUseCaseRejectsInvalidIntentBeforeOwnerAdmission(t *testing.T) {
 	projection := &recordingProjection{}
 	submitter := &recordingSubmitter{}
 	useCase := New(submitter, projection)
-	_, err := useCase.AdmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+	_, err := useCase.SubmitWorkspaceExecution(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-invalid-intent", Intent: "pause", RequestID: "req-invalid-intent",
 	})
 	if !errors.Is(err, workorchcommon.ErrInvalidArgument) {
@@ -206,7 +206,7 @@ func TestUseCaseRejectsUnsupportedCommandTopicBeforeOwnerAdmission(t *testing.T)
 	projection := &recordingProjection{}
 	submitter := &recordingSubmitter{}
 	useCase := New(submitter, projection)
-	_, err := useCase.AdmitWorkspaceExecution(context.Background(), "/workorchd/command/unsupported", workorchdevents.WorkspaceRunRequestedCommand{
+	_, err := useCase.SubmitWorkspaceExecution(context.Background(), "/workorchd/command/unsupported", workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-unsupported-topic", Intent: "resume", RequestID: "req-unsupported-topic",
 	})
 	if !errors.Is(err, workorchcommon.ErrInvalidArgument) {

@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-16
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -14,7 +14,7 @@ execution 与 evidence commit 的主执行链路。
 生产主线是：
 
 ```text
-candidate → seal → ExecuteRuntimeOperation → evidence → reducer
+request session → complete document → candidate → seal → ExecuteRuntimeOperation → evidence → reducer
 ```
 
 **不是**已删除的 `llm → executionGraph → checkpoint` 路径。
@@ -39,13 +39,21 @@ RuntimeDecision.ConvergenceState ∈ {
   need_assessment,
   need_governance
 }
-  -> BeginRuntimeCandidateAttempt (attempt 0 or 1)
+  -> persist sealed request session
   -> RequestRuntimeCandidate
        Decision + AuthorityTransaction
        DefinitionContext
        RuntimeCandidateContext (from persisted facts)
        StablePrefixHash
-  -> Accept / Fail candidate attempt
+  -> exactly one factual result:
+       Stale
+       Feedback
+       DocumentOutcome
+         recoverable -> same-session whole-document recovery; no candidate attempt
+         terminal -> one owner-private CAS closes SM-3 session + applies exact SM-2 failure
+         complete -> persist one complete document
+  -> strict decode/evaluate -> BeginRuntimeCandidateAttempt (attempt 0 or 1)
+  -> accept / reject candidate attempt
   -> seal SealedDispatch
        full transaction + candidate hash + typed step input
   -> branch:
@@ -60,7 +68,9 @@ RuntimeDecision.ConvergenceState ∈ {
 
 ### 1. Planning = Candidate Request（不是 graph 规划）
 
-在 Runtime 中，“planning” 的实现形态是 **LLM 返回 typed candidate**，绑定当前 authority transaction。
+在 Runtime 中，“planning” 先由 LLM owner 返回严格互斥的 `Stale | Feedback | DocumentOutcome` factual result。
+只有 complete `DocumentOutcome` 的 opaque content 被持久化并通过 Orchestrator 的 strict decoder/evaluator 后，才形成绑定当前
+authority transaction 的 typed candidate；LLM Block 不创建 candidate attempt，也不决定 retry 或 terminal。
 
 允许的 candidate 形态：
 
@@ -73,7 +83,8 @@ RuntimeDecision.ConvergenceState ∈ {
 
 约束：
 
-- block / LLM 输出只是 **candidate**，不是 accepted Result
+- provider document 只是 LLM owner fact；Orchestrator 从一个 complete document 解码出的对象才是 **candidate**，仍不是 accepted Result
+- incomplete/transport recovery 与 provider terminal 都发生在 candidate attempt 之前；前者只重取同一完整 document，后者不重调 provider
 - candidate 必须绑定同一 authority snapshot；transaction 漂移不得进入执行
 - attempt 0/1 的 pending / failed / accepted 随 aggregate 持久化
 - attempt 1 **必须**复用相同 transaction 与 stable prefix；第二次 complete candidate rejection 只能形成 typed terminal，不能创建无信息 governance
@@ -164,7 +175,7 @@ post-receipt convergence state. No component may patch CWI/focus state to force 
 
 ## Key Flow Guarantees
 
-- LLM 只产生 structured candidate；不能直接写文件、执行 shell 或调用 MCP
+- LLM owner 只产生 factual whole-document outcome；Orchestrator 才能解码/裁决 structured candidate，二者都不能直接写文件、执行 shell 或调用 MCP
 - Orchestrator 拥有 seal、evidence quality、coverage binding 与 next action 判定
 - block modules 只拥有外部动作执行
 - 每次 dispatch 基于一致的 workspace/run/definition/evidence 快照

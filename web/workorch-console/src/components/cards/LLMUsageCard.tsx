@@ -101,7 +101,8 @@ export const LLMUsageCard = React.memo(function LLMUsageCard({ summary, traces }
                   { title: 'usage 来源', dataIndex: 'usageSource', width: 140, render: (_, item) => item.usageSource || (item.estimated ? 'estimated' : 'provider_native') },
                   { title: 'Token', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)} / ${numberText(item.totalTokens)}` },
                   { title: '耗时', dataIndex: 'durationMs', width: 100, render: (_, item) => item.durationMs ? `${numberText(item.durationMs)} ms` : '-' },
-                  { title: '流式', dataIndex: 'streaming', width: 80, render: (_, item) => item.streaming ? <Tag color="blue">stream</Tag> : '-' }
+                  { title: '物理响应', dataIndex: 'physicalResponseMode', width: 110, render: (_, item) => <Tag color={item.physicalResponseMode === 'streaming' ? 'blue' : 'default'}>{item.physicalResponseMode}</Tag> },
+                  { title: 'Provider 提交', dataIndex: 'providerSubmitted', width: 110, render: (_, item) => item.providerSubmitted ? <Tag color="green">submitted</Tag> : <Tag>not submitted</Tag> }
                 ]}
                 expandable={{
                   expandedRowRender: (item) => (
@@ -109,6 +110,8 @@ export const LLMUsageCard = React.memo(function LLMUsageCard({ summary, traces }
                       size="small"
                       column={1}
                       items={[
+                        { key: 'logicalRequestId', label: '逻辑请求 ID', children: item.logicalRequestId ? <BoundedParagraph text={item.logicalRequestId} rows={1} copyText={item.logicalRequestId} /> : '-' },
+                        { key: 'physicalCallId', label: '物理调用 ID', children: item.physicalCallId ? <BoundedParagraph text={item.physicalCallId} rows={1} copyText={item.physicalCallId} /> : '-' },
                         { key: 'step', label: '步骤', children: item.stepId ? <BoundedParagraph text={item.stepId} rows={1} copyText={item.stepId} /> : '-' },
                         { key: 'bytes', label: '请求/响应字节', children: `${numberText(item.requestBytes)} / ${numberText(item.responseBytes)}` },
                         { key: 'time', label: '开始/结束时间', children: `${item.startedAt || '-'} / ${item.completedAt || '-'}` },

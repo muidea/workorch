@@ -40,17 +40,23 @@ func TestInspectStatusShowsRejectedRunCommandProjection(t *testing.T) {
 	m := AppModel{
 		activeWorkspaceID: "ws-admission",
 		runCommand: &projectioncontract.RunCommandStatus{
-			WorkspaceID: "ws-admission",
-			State:       "rejected",
-			Intent:      "restart",
-			Error:       "workspace owner rejected activation",
+			WorkspaceID:     "ws-admission",
+			State:           "rejected",
+			Intent:          "restart",
+			RequestReason:   "force_accept",
+			Outcome:         runtimecontract.RuntimeExecutionIntentRestartRequired,
+			AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+			Diagnostic:      "workspace owner rejected activation",
 		},
 	}
 	text := m.renderInspectStatus()
 	for _, want := range []string{
 		"execution admission",
 		"command rejected restart",
+		"outcome=restart_required",
+		"admission=run_not_resumable",
 		"workspace owner rejected activation",
+		"request=force_accept",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status text = %q, want %q", text, want)
@@ -65,6 +71,57 @@ func TestRunCommandStatusDoesNotInventPendingAdmissionState(t *testing.T) {
 	}
 	if got := runCommandStatusText(command); got != "" {
 		t.Fatalf("run command status = %q, want no derived pending state", got)
+	}
+}
+
+func TestRunCommandStatusEqualityCoversEveryCanonicalField(t *testing.T) {
+	base := projectioncontract.RunCommandStatus{
+		WorkspaceID:     "ws-admission",
+		RunID:           "run-admission",
+		State:           "accepted",
+		Intent:          "resume",
+		RequestID:       "request-admission",
+		RequestReason:   "operator_requested",
+		Source:          "tui",
+		Outcome:         runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+		AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+		Diagnostic:      "current Run continuation accepted",
+		AcceptedAt:      "2026-08-23T00:00:00Z",
+		Revision:        7,
+	}
+	mutations := []struct {
+		name   string
+		mutate func(*projectioncontract.RunCommandStatus)
+	}{
+		{name: "workspaceId", mutate: func(value *projectioncontract.RunCommandStatus) { value.WorkspaceID = "ws-other" }},
+		{name: "runId", mutate: func(value *projectioncontract.RunCommandStatus) { value.RunID = "run-other" }},
+		{name: "state", mutate: func(value *projectioncontract.RunCommandStatus) { value.State = "rejected" }},
+		{name: "intent", mutate: func(value *projectioncontract.RunCommandStatus) { value.Intent = "restart" }},
+		{name: "requestId", mutate: func(value *projectioncontract.RunCommandStatus) { value.RequestID = "request-other" }},
+		{name: "requestReason", mutate: func(value *projectioncontract.RunCommandStatus) { value.RequestReason = "other reason" }},
+		{name: "source", mutate: func(value *projectioncontract.RunCommandStatus) { value.Source = "web" }},
+		{name: "outcome", mutate: func(value *projectioncontract.RunCommandStatus) {
+			value.Outcome = runtimecontract.RuntimeExecutionIntentReplacementPending
+		}},
+		{name: "admissionReason", mutate: func(value *projectioncontract.RunCommandStatus) {
+			value.AdmissionReason = runtimecontract.RuntimeExecutionIntentReasonPendingRunActivated
+		}},
+		{name: "diagnostic", mutate: func(value *projectioncontract.RunCommandStatus) { value.Diagnostic = "other diagnostic" }},
+		{name: "acceptedAt", mutate: func(value *projectioncontract.RunCommandStatus) { value.AcceptedAt = "2026-08-23T00:00:01Z" }},
+		{name: "rejectedAt", mutate: func(value *projectioncontract.RunCommandStatus) { value.RejectedAt = "2026-08-23T00:00:02Z" }},
+		{name: "revision", mutate: func(value *projectioncontract.RunCommandStatus) { value.Revision = 8 }},
+	}
+	if !runCommandStatusEqual(&base, &base) {
+		t.Fatal("identical canonical run command status is not equal")
+	}
+	for _, tc := range mutations {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := base
+			tc.mutate(&changed)
+			if runCommandStatusEqual(&base, &changed) {
+				t.Fatalf("%s-only mutation was treated as equal: base=%+v changed=%+v", tc.name, base, changed)
+			}
+		})
 	}
 }
 
@@ -1071,10 +1128,12 @@ func TestModelStatusRendersRunCommandRejectionWithoutTriggeringCommands(t *testi
 	m.activeWorkspaceID = "ws-1"
 	m.activeRunID = "run-1"
 	m.runCommand = &projectioncontract.RunCommandStatus{
-		WorkspaceID: "ws-1",
-		State:       "rejected",
-		Intent:      "restart",
-		Error:       "owner command failed during execution admission",
+		WorkspaceID:     "ws-1",
+		State:           "rejected",
+		Intent:          "restart",
+		Outcome:         runtimecontract.RuntimeExecutionIntentRestartRequired,
+		AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+		Diagnostic:      "owner command failed during execution admission",
 	}
 
 	m.setInput("/status")
@@ -2849,13 +2908,16 @@ func TestModelWorkspaceContextDoesNotTreatAcceptedRunCommandAsRunning(t *testing
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			RunCommand: &projectioncontract.RunCommandStatus{
-				WorkspaceID: "ws-a",
-				RunID:       "run-accepted",
-				State:       "accepted",
-				Intent:      "replan",
-				RequestID:   "request-accepted",
-				Source:      "tui",
-				Revision:    3,
+				WorkspaceID:     "ws-a",
+				RunID:           "run-accepted",
+				State:           "accepted",
+				Intent:          "resume",
+				RequestID:       "request-accepted",
+				Source:          "tui",
+				Outcome:         runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+				AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+				Diagnostic:      "current Run continuation accepted",
+				Revision:        3,
 			},
 		},
 	})
@@ -2867,7 +2929,7 @@ func TestModelWorkspaceContextDoesNotTreatAcceptedRunCommandAsRunning(t *testing
 		t.Fatalf("progress = %s/%q, accepted command projection must not leave stale submitting state", m.progress, m.progressText)
 	}
 	status := stripANSI(m.renderRuntimeStatusBar(120))
-	if !strings.Contains(status, "command accepted replan") {
+	if !strings.Contains(status, "command accepted resume") {
 		t.Fatalf("status bar = %q, want accepted command projection", status)
 	}
 }
@@ -2882,15 +2944,17 @@ func TestModelWorkspaceContextDisplaysRejectedRunCommandProjection(t *testing.T)
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			RunCommand: &projectioncontract.RunCommandStatus{
-				WorkspaceID: "ws-a",
-				RunID:       "run-rejected",
-				State:       "rejected",
-				Intent:      "resume",
-				RequestID:   "request-rejected",
-				Source:      "tui",
-				RejectedAt:  "2026-06-21T00:01:00Z",
-				Error:       "workspace owner rejected admission",
-				Revision:    4,
+				WorkspaceID:     "ws-a",
+				RunID:           "run-rejected",
+				State:           "rejected",
+				Intent:          "resume",
+				RequestID:       "request-rejected",
+				Source:          "tui",
+				Outcome:         runtimecontract.RuntimeExecutionIntentRestartRequired,
+				AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+				Diagnostic:      "workspace owner rejected admission",
+				RejectedAt:      "2026-06-21T00:01:00Z",
+				Revision:        4,
 			},
 		},
 	})
@@ -2898,7 +2962,7 @@ func TestModelWorkspaceContextDisplaysRejectedRunCommandProjection(t *testing.T)
 	if m.progress == progressSubmitting {
 		t.Fatalf("progress = %s/%q, rejected command projection must not leave stale submitting state", m.progress, m.progressText)
 	}
-	status := stripANSI(m.renderRuntimeStatusBar(120))
+	status := stripANSI(m.renderRuntimeStatusBar(240))
 	for _, want := range []string{"command rejected resume", "workspace owner rejected admission"} {
 		if !strings.Contains(status, want) {
 			t.Fatalf("status bar = %q, missing %q", status, want)
@@ -4087,10 +4151,12 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
 			RunCommand: &projectioncontract.RunCommandStatus{
-				WorkspaceID: "ws-b",
-				State:       "rejected",
-				Intent:      "restart",
-				Error:       "active-admission",
+				WorkspaceID:     "ws-b",
+				State:           "rejected",
+				Intent:          "restart",
+				Outcome:         runtimecontract.RuntimeExecutionIntentRestartRequired,
+				AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+				Diagnostic:      "active-admission",
 			},
 		},
 		WorkspaceHasLive: true,
@@ -4118,10 +4184,12 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 			RunCommand: &projectioncontract.RunCommandStatus{
-				WorkspaceID: "ws-a",
-				State:       "rejected",
-				Intent:      "restart",
-				Error:       "inactive-admission",
+				WorkspaceID:     "ws-a",
+				State:           "rejected",
+				Intent:          "restart",
+				Outcome:         runtimecontract.RuntimeExecutionIntentRestartRequired,
+				AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+				Diagnostic:      "inactive-admission",
 			},
 		},
 	})

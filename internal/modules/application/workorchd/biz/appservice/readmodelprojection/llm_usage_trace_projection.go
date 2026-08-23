@@ -2,6 +2,7 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -75,8 +76,28 @@ func llmUsageTraceDurationMs(payload workorcheventpayload.Payload) int {
 
 // source: llm_usage_trace_runtime.go
 
-func llmUsageTraceStreaming(payload workorcheventpayload.Payload) bool {
-	return eventPayloadBool(payload, recordpayload.PayloadKeyStreaming)
+func llmUsageTracePhysicalResponseMode(payload workorcheventpayload.Payload) (llmaudit.PhysicalResponseMode, bool) {
+	if raw, present := payload.String(recordpayload.PayloadKeyPhysicalResponseMode); present {
+		mode := llmaudit.PhysicalResponseMode(raw).Normalized()
+		if mode.Validate() != nil {
+			return "", false
+		}
+		return mode, true
+	}
+	// Persistence-only compatibility for event records written before the
+	// bounded enum existed. New records always carry the canonical mode.
+	streaming, present := payload.Bool(recordpayload.PayloadKeyStreaming)
+	if !present {
+		return "", false
+	}
+	if streaming {
+		return llmaudit.PhysicalResponseModeStreaming, true
+	}
+	return llmaudit.PhysicalResponseModeNonStreaming, true
+}
+
+func llmUsageTraceProviderSubmitted(payload workorcheventpayload.Payload) (bool, bool) {
+	return payload.Bool(recordpayload.PayloadKeyProviderSubmitted)
 }
 
 func llmUsageTraceContextBudget(payload workorcheventpayload.Payload) workorcheventpayload.Payload {

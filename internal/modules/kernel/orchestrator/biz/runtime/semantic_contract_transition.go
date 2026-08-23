@@ -324,26 +324,10 @@ func (c *planningTransactionComponent) failSemanticContract(ctx context.Context,
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed || ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
 		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot fail from phase %q", common.ErrConflict, ledger.Phase)
 	}
-	ledger.Phase = runtimecontract.RuntimeSemanticPlanningFailed
-	ledger.Failure = failure.CloneOriginal()
-	if err := ledger.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	expectedRevision := aggregate.StateRevision
-	aggregate.SemanticPlanning = ledger
-	aggregate.Facts.Failure = &runtimecontract.FailureFact{
-		Class:              semanticFailureClassForFailureCode(terminalCode, failure),
-		Code:               "semantic_contract_failed",
-		Signature:          failure.Signature,
-		Message:            failure.OriginalMessage,
-		OriginalDiagnostic: failure.CloneOriginal(),
-	}
-	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	aggregate, err = applySemanticContractFailureToAggregate(aggregate, terminalCode, failure)
 	if err != nil {
 		return RuntimeAggregate{}, err
-	}
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "semantic_contract_failed" {
-		return RuntimeAggregate{}, fmt.Errorf("runtime semantic failure did not seal a terminal decision")
 	}
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -353,6 +337,48 @@ func (c *planningTransactionComponent) failSemanticContract(ctx context.Context,
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// applySemanticContractFailureToAggregate is the pure SM-2 semantic-terminal
+// transform. The provider-terminal coordinator composes it with the SM-3
+// request close before one owner-local CAS; ordinary semantic failures reuse
+// the same transform through failSemanticContract.
+func applySemanticContractFailureToAggregate(aggregate RuntimeAggregate, terminalCode string, failure runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
+	if err := failure.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger := aggregate.SemanticPlanning.Clone()
+	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed || ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot fail from phase %q", common.ErrConflict, ledger.Phase)
+	}
+	ledger.Phase = runtimecontract.RuntimeSemanticPlanningFailed
+	ledger.Failure = failure.CloneOriginal()
+	if err := ledger.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.SemanticPlanning = ledger
+	semanticFailure := semanticContractFailureFact(terminalCode, failure)
+	aggregate.Facts.Failure = &semanticFailure
+	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.Facts = facts
+	aggregate.Decision = decision
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "semantic_contract_failed" {
+		return RuntimeAggregate{}, fmt.Errorf("runtime semantic failure did not seal a terminal decision")
+	}
+	return aggregate, nil
+}
+
+func semanticContractFailureFact(terminalCode string, failure runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.FailureFact {
+	return runtimecontract.FailureFact{
+		Class:              semanticFailureClassForFailureCode(terminalCode, failure),
+		Code:               "semantic_contract_failed",
+		Signature:          failure.Signature,
+		Message:            failure.OriginalMessage,
+		OriginalDiagnostic: failure.CloneOriginal(),
+	}
 }
 
 // semanticFailureClass preserves the historical code-only helper for tests and

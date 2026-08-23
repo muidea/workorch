@@ -121,7 +121,7 @@ run_pkg ./internal/modules/application/workorchd/biz/appservice/readmodelports \
   -run 'TestRunObservabilityHydratesLLMUsagePayloads|TestRunSnapshotBuildsSnapshotFromReaders'
 
 run_pkg ./internal/modules/application/workorchd/service/server \
-  -run 'TestServerMetricsObserveRunStateIsExactlyOnceAndMonotonic'
+  -run 'TestServerMetricsObserveRunStateIsExactlyOnce'
 
 # WP-8 boundary: activation acknowledgement is asynchronous and must seal the
 # first resolved model target into the workspace; TUI resume/exit only manage

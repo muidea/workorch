@@ -195,7 +195,7 @@ func TestRuntimePrivateComponentsShareOneMutationKernel(t *testing.T) {
 	}
 	for receiver, required := range map[string][]string{
 		"authorityComponent":           {"reconcileAuthorityBeforeCandidate", "recordFeasibilityFact", "commitPrerequisite", "commitAssessment", "commitGovernanceResolution", "commitReconciliationBatch", "invalidatePrerequisitesForReadOnlyStale"},
-		"planningTransactionComponent": {"beginSemanticPlanningMutation", "commitSemanticPlanningMutation", "requireSemanticContract", "ensureCandidateRequestSessionWithExpected", "markCandidateRequestSubmitted", "recordCandidateRequestRecoveryRequired", "invalidateCandidateRequestSessionForPrerequisiteStale"},
+		"planningTransactionComponent": {"beginSemanticPlanningMutation", "commitSemanticPlanningMutation", "requireSemanticContract", "ensureCandidateRequestSessionWithExpected", "markCandidateRequestSubmitted", "coordinateProviderRequestRecovery", "invalidateCandidateRequestSessionForPrerequisiteStale"},
 		"candidateDispatchComponent":   {"commitEvidence", "commitOperationReceipt", "admitCandidateProposal", "admitAndSealCandidateAttempt", "beginCandidateAttempt", "claimOperationExecution", "invalidateActiveDispatchForPrerequisiteStale"},
 		"driveDeliveryComponent":       {"scheduleDriveLease", "claimDriveLease", "consumeRecoveryBudget", "recordDeliveryAcknowledgement", "ensureReconciliationRequest", "requestTermination"},
 	} {

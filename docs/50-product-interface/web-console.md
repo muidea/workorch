@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -39,7 +39,18 @@ projection 观察面，不是第二套业务实现或 Runtime owner。
 2. current-baseline 非终态 Run 的主操作提交 `resume`，同时提供独立的显式 `restart`；
 3. Resume 只读展示 Run 已封存 selection，不读取模型目录、不更新 Workspace preference；
 4. 只有显式 Restart 弹窗允许先通过 Workspace owner API 保存模型/reasoning 与 Soul，再提交 immutable intent；
-5. activation body 只发送 `intent`、`priority`、`requestId`、`reason`、`source`。
+5. activation body 只发送 `intent`、`requestId`、`reason`、`source`。
+
+Web 使用共享 admission classifier：`reconciliation_requested|replacement_pending` 显示 accepted，其他五类 owner outcome
+显示 rejected，并保留 exact `outcome`/`admissionReason`。HTTP `202|409` 只是同一 owner result 的 transport presentation；页面不得将
+409 当作 transport failure、自行重判 progress/governance，也不得发送 caller Run priority。
+
+Board/Detail 读取 `snapshot.runCommand` 时直接展示 projection 的 exact `state`、owner `outcome`、`admissionReason` 与
+`diagnostic`；caller `requestReason` 只能独立展示，不能参与 accepted/rejected 分类。Web type 不保留重复
+`disposition`、歧义 `reason`、`error`、`definitionRevision` 或 `decisionId`，accepted/rejected 时间戳在类型上互斥。
+LLM usage 明细直接展示可用的 `logicalRequestId` 与 `physicalCallId`，只按 `physicalResponseMode` 展示
+streaming/non-streaming，并单独展示 exact `providerSubmitted`。历史或 generic trace 缺少双层身份时显示 `-`，不得从
+event ID、request bytes 或 streaming 补造；旧 `streaming` boolean 即使存在也不能成为页面判断来源。
 
 activation form 不提供 Goal/DoD、Skill、MCP 或 Memory 的 per-run override；这些定义和策略只从 owner 当前状态编译。
 Workspace 创建使用共享的 `WorkspaceSetupModal`，正常流程要求 Template、Goal 与 DoD。工作目录允许留空；创建时由

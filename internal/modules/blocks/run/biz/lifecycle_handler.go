@@ -53,7 +53,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	}
 	m.commandMu.RLock()
 	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil || m.Service == nil {
+	if m.stopping || m.runs == nil {
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -231,7 +231,7 @@ func runTerminalDeliveryAck(
 }
 
 func (m *Biz) publishLifecycleTransition(ctx context.Context, item *runmodel.Run) {
-	if m == nil || m.Service == nil || m.EventHub() == nil || item == nil {
+	if m == nil || m.runs == nil || m.EventHub() == nil || item == nil {
 		return
 	}
 	data := runevents.RunStateChangedDataFromModel(item)
@@ -252,7 +252,7 @@ func (m *Biz) publishLifecycleTransition(ctx context.Context, item *runmodel.Run
 }
 
 func (m *Biz) publishContinuationRequested(ctx context.Context, item *runmodel.Run, causationID string) {
-	if m == nil || m.Service == nil || m.EventHub() == nil || item == nil {
+	if m == nil || m.runs == nil || m.EventHub() == nil || item == nil {
 		return
 	}
 	data := runevents.RunContinuationRequestedData{WorkspaceID: item.WorkspaceID, RunID: item.ID, CausationID: causationID, RequestID: "continuation/" + causationID}.Normalized()

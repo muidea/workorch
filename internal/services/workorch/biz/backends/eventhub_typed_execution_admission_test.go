@@ -29,12 +29,11 @@ func TestEventHubRunBackendSendsTypedExecutionAdmissionCommand(t *testing.T) {
 		Reason:      "typed execution admission contract",
 		RequestID:   "request-typed-backend",
 		Source:      "test",
-		Priority:    9,
 	})
 	if err != nil {
 		t.Fatalf("run command: type=%T value=%#v text=%v", err, err, err)
 	}
-	if captured.WorkspaceID != "ws-typed-backend" || captured.Intent != "resume" || captured.Priority != 9 {
+	if captured.WorkspaceID != "ws-typed-backend" || captured.Intent != "resume" {
 		t.Fatalf("captured command = %+v", captured)
 	}
 	if want := "state/workorchd.execution_admission/workspace/ws-typed-backend"; capturedLane != want {

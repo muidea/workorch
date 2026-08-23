@@ -1456,7 +1456,7 @@ func TestRuntimeSemanticRetirementPreservesPriorProviderDocumentOutcome(t *testi
 		MaxOutputTokens:          1024, MaxRecoveryAttempts: 1,
 	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
-	outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+	outcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: expected.Hash,
 		ResponseHash: "provider-response-old", ResponseBytes: 128, Code: "max_output_tokens", Signature: "provider/incomplete",
 	}
@@ -1465,14 +1465,14 @@ func TestRuntimeSemanticRetirementPreservesPriorProviderDocumentOutcome(t *testi
 		ExpectedDocument: &expected, Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-old"},
 		StablePrefixHash: expected.StablePrefixHash, ManifestHash: expected.ManifestHash,
 		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, IncompleteOutcomes: 1,
-		LastDocumentOutcome: &outcome, LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
+		LastDocumentFraming: &outcome, LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
 			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: outcome.Code, Signature: outcome.Signature,
 		},
 	}}
 	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, []RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: prerequisite.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := aggregate.CandidateRequestSessions[0].LastDocumentOutcome; got == nil || got.ResponseHash != outcome.ResponseHash || got.Code != outcome.Code {
+	if got := aggregate.CandidateRequestSessions[0].LastDocumentFraming; got == nil || got.ResponseHash != outcome.ResponseHash || got.Code != outcome.Code {
 		t.Fatalf("retirement discarded prior provider document outcome: %+v", got)
 	}
 	if aggregate.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||

@@ -66,8 +66,8 @@ func TestRuntimeExpectedDocumentHashIsOrderSensitiveAndCloneDetached(t *testing.
 	}
 }
 
-func TestRuntimeProviderDocumentOutcomeIsFactualOnly(t *testing.T) {
-	cases := []RuntimeProviderDocumentOutcome{
+func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
+	cases := []RuntimeProviderDocumentFraming{
 		{Disposition: RuntimeProviderDocumentComplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-1", ResponseBytes: 32},
 		{Disposition: RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "expected-1", ResponseHash: "response-2", ResponseBytes: 16, Code: "max_output_tokens"},
 		{Disposition: RuntimeProviderDocumentInvalid, ExpectedDocumentHash: "expected-1", ResponseHash: "response-3", ResponseBytes: 8, Code: "multiple_json_values"},
@@ -75,12 +75,12 @@ func TestRuntimeProviderDocumentOutcomeIsFactualOnly(t *testing.T) {
 	}
 	for _, outcome := range cases {
 		if err := outcome.Validate(); err != nil {
-			t.Fatalf("valid outcome %+v: %v", outcome, err)
+			t.Fatalf("valid framing %+v: %v", outcome, err)
 		}
 	}
 	invalid := cases[0]
 	invalid.ExpectedDocumentHash = ""
 	if err := invalid.Validate(); err == nil {
-		t.Fatal("provider outcome without expected-document identity accepted")
+		t.Fatal("provider framing without expected-document identity accepted")
 	}
 }

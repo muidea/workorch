@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 组件类型
 
@@ -41,8 +41,8 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   `StoreRuntimeStateRecordResult` 和 `DeleteRunResult` 彼此不可替代，返回实体在离开 owner 前显式深拷贝。
 - 常规命令保持唯一入口 `handleCommand -> executeCommand`，并在同一次 `commandMu` 读锁与 workspace scope
   fence 内，静态穷尽地委派到 Run query、Step query、Checkpoint query、opaque Runtime state store 和 resource
-  cleanup 五个 owner-private handler。公开 EventHub surface 不提供 create/ensure/update topic；`CreateRunCommand` 只供
-  Run owner 内部持久化 helper 与 activation-memory fact 映射使用，不是跨 owner command。
+  cleanup 五个 owner-private handler。公开 EventHub surface 不提供 create/ensure/update topic；Run creation material
+  与 activation-memory handoff 均为 Biz 私有值，不在 `pkg/events` 暴露伪 create command。
 - ordinary Run creation 与 replacement successor materialization 共用唯一 `run.creation` owner-private
   dispatcher。两个入口只提交 immutable creation fact，不携带 `State`/时间戳；Run owner 选择
   initial SM-1 `pending`、initial lineage `active`、封存 `CreatedAt` 并执行唯一 repository Create。
@@ -57,7 +57,12 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   `RuntimeState` 或 lifecycle fence。
 - `WorkspaceExecutionIntentCommand` 的 restart 分支携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、
   ordered focus queue 与 prerequisite requirements，并显式绑定 Workspace owner 封存的 `StartupInputHash`。RequestID 的幂等身份绑定 workspace、Goal、DoD、definition
-  revision、priority、bootstrap hash 与固定 replacement policy；同 ID、不同 sealed payload 必须 conflict。
+  revision、bootstrap hash 与固定 replacement policy；同 ID、不同 sealed payload 必须 conflict。Run 不接受或持久化没有执行消费者的队列优先级输入。
+- file-backed v1 clarification intent 的 immutable hash 曾包含现已退役的 caller `Priority` slot。Run model 只在磁盘
+  解码时验证非零 slot 与既有 `ReplacementIntentHash` 精确匹配后，把它保存在 unexported persistence-only identity
+  slot 中，以维持旧 Decision binding、后续 CAS 和 fresh-process duplicate Restart 的同一 owner identity；篡改或缺失
+  slot 必须 fail closed。该 slot 不进入 command/EventHub result/API projection/调度，新建 intent 始终使用中性 `0`
+  hash slot 且不序列化 `Priority`；只有已经验证的旧记录在持久化 round-trip 时保留原 v1 字段。
 - 当 bootstrap 含有 activation Memory selection 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。它使用稳定的 Run CreatedAt，并透传 sealed candidate/selected/excluded、quota、score/hit 与 byte/token budget；该消息只是不可变 activation audit，Memory owner 独占 create-once RecallTrace 持久化与首次 `MemoryRecallRecorded` 通知。固定 trace ID + 完整内容比较使 exact replay 零写入、内容漂移 conflict；memory observability 失败不得回滚已成功的 Run 创建。Run 启动时会从已持久化 bootstrap 重放该 fact，补偿 Run 提交后、Memory 交接前的崩溃窗口。
 - 生产入口由 application 向 Workspace owner 提交 workspace-scoped resume/restart；Workspace 校验并选择 canonical
   definition 后，只有 `blocks/workspace` 可向 Run owner 发送 `WorkspaceExecutionIntentCommand`。Run Biz 在自身 reducer
@@ -129,7 +134,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   同样只作为opaque aggregate sub-ledger保存。其合法性、去重、deadline/lease与状态迁移只由Orchestrator owner
   reducer/invariant负责，Run不汇总余额、不claim probe也不把wait解释成SM-1 blocked。
 - RuntimeBootstrap 的顶层 definition identity/revision 必须与 Run 的 GoalID、DoDID 和 DefinitionRevision 一致；
-  不一致的 owner-private create/ensure 或 workspace restart selection 必须返回 conflict。RuntimeStateRecord 内部 definition context、facts 与
+  不一致的 owner-private creation fact 或 workspace restart selection 必须返回 conflict。RuntimeStateRecord 内部 definition context、facts 与
   activation 的完整性只由 Orchestrator invariant 校验，Run owner 不据此选择 CAS/recovery/lifecycle 路径。
 - Resume 的状态准入与迁移完全由 Run owner reducer 完成；成功后才发布不可变 Run state fact。不得通过 Run command
   传递 `map[string]any`、指定外部 owner state 或调用 Orchestrator service facade。

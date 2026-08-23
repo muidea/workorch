@@ -12,13 +12,16 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-type Service struct{ approvals repository.ApprovalRepository }
+// mutationService is the Approval owner-private mutation implementation. Its
+// only production callers are the owner Biz EventHub handlers and recovery
+// loops; sibling components cannot construct or retain it.
+type mutationService struct{ approvals repository.ApprovalRepository }
 
-func NewService(approvals repository.ApprovalRepository) *Service {
-	return &Service{approvals: approvals}
+func newMutationService(approvals repository.ApprovalRepository) *mutationService {
+	return &mutationService{approvals: approvals}
 }
 
-func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
+func (s *mutationService) CreateApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
 	if s == nil || s.approvals == nil || cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || strings.TrimSpace(cmd.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -38,7 +41,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.Crea
 	return err
 }
 
-func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
+func (s *mutationService) EnsureApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
 	if cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || strings.TrimSpace(cmd.Reason) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -56,7 +59,7 @@ func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.Crea
 	return s.CreateApproval(ctx, cmd)
 }
 
-func (s *Service) EnsureResolutionProposal(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand, target common.ApprovalState) (*approvalmodel.Approval, *approvalmodel.ResolutionProposal, error) {
+func (s *mutationService) EnsureResolutionProposal(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand, target common.ApprovalState) (*approvalmodel.Approval, *approvalmodel.ResolutionProposal, error) {
 	if s == nil || cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" ||
 		(target != common.ApprovalStateApproved && target != common.ApprovalStateRejected) || cmd.Principal.Validate() != nil {
 		return nil, nil, common.ErrInvalidArgument
@@ -99,7 +102,7 @@ func (s *Service) EnsureResolutionProposal(ctx context.Context, cmd approvalcont
 	return updated, &proposal, nil
 }
 
-func (s *Service) FinalizeResolutionProposal(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand, target common.ApprovalState) (*approvalmodel.Approval, bool, error) {
+func (s *mutationService) FinalizeResolutionProposal(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand, target common.ApprovalState) (*approvalmodel.Approval, bool, error) {
 	item, proposal, err := s.EnsureResolutionProposal(ctx, cmd, target)
 	if err != nil {
 		return nil, false, err
@@ -114,7 +117,7 @@ func (s *Service) FinalizeResolutionProposal(ctx context.Context, cmd approvalco
 	return updated, err == nil, err
 }
 
-func (s *Service) RejectResolutionProposal(ctx context.Context, item *approvalmodel.Approval, failureClass, failureReason string) error {
+func (s *mutationService) RejectResolutionProposal(ctx context.Context, item *approvalmodel.Approval, failureClass, failureReason string) error {
 	if item == nil || item.ResolutionProposal == nil {
 		return common.ErrInvalidArgument
 	}
@@ -128,7 +131,7 @@ func (s *Service) RejectResolutionProposal(ctx context.Context, item *approvalmo
 	return err
 }
 
-func (s *Service) MarkEvidenceRecorded(ctx context.Context, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+func (s *mutationService) MarkEvidenceRecorded(ctx context.Context, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
 	if item == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -138,7 +141,7 @@ func (s *Service) MarkEvidenceRecorded(ctx context.Context, item *approvalmodel.
 	return s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, Kind: lifecycleInternalEventEvidenceRecorded})
 }
 
-func (s *Service) MarkNotificationPublished(ctx context.Context, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+func (s *mutationService) MarkNotificationPublished(ctx context.Context, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
 	if item == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -148,30 +151,30 @@ func (s *Service) MarkNotificationPublished(ctx context.Context, item *approvalm
 	return s.applyLifecycleInternalEvent(ctx, item, lifecycleInternalEvent{ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, Kind: lifecycleInternalEventNotificationPublished})
 }
 
-func (s *Service) Approve(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
+func (s *mutationService) Approve(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	_, err := s.EnsureApprovedAndReturn(ctx, cmd)
 	return err
 }
-func (s *Service) EnsureApproved(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
+func (s *mutationService) EnsureApproved(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	_, err := s.EnsureApprovedAndReturn(ctx, cmd)
 	return err
 }
-func (s *Service) Reject(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
+func (s *mutationService) Reject(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	_, err := s.EnsureRejectedAndReturn(ctx, cmd)
 	return err
 }
-func (s *Service) EnsureRejected(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
+func (s *mutationService) EnsureRejected(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	_, err := s.EnsureRejectedAndReturn(ctx, cmd)
 	return err
 }
 
-func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
+func (s *mutationService) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
 	cmd = normalizeOwnerLocalResolutionCommand(cmd)
 	item, _, err := s.FinalizeResolutionProposal(ctx, cmd, common.ApprovalStateApproved)
 	return item, err
 }
 
-func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
+func (s *mutationService) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
 	cmd = normalizeOwnerLocalResolutionCommand(cmd)
 	item, _, err := s.FinalizeResolutionProposal(ctx, cmd, common.ApprovalStateRejected)
 	return item, err

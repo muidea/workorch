@@ -499,7 +499,7 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 		requestBody <- body
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = fmt.Fprint(w, `{"accepted":true}`)
+		_, _ = fmt.Fprint(w, `{"accepted":true,"state":"accepted","workspaceId":"ws-remote","runId":"run-first-resume","requestId":"request-first-resume","intent":"resume","outcome":"reconciliation_requested","reason":"current_run_continuation_accepted"}`)
 	}))
 	defer server.Close()
 
@@ -514,8 +514,8 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 	if err != nil {
 		t.Fatalf("remote first resume command: %v", err)
 	}
-	if run != nil {
-		t.Fatalf("run = %+v, want accepted-only nil run", run)
+	if run == nil || run.RunID != "run-first-resume" || run.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || run.Reason != runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted {
+		t.Fatalf("run admission = %+v, want exact owner result", run)
 	}
 	select {
 	case body := <-requestBody:
@@ -545,7 +545,7 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 		requestBody <- body
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = fmt.Fprint(w, `{"accepted":true}`)
+		_, _ = fmt.Fprint(w, `{"accepted":true,"state":"accepted","workspaceId":"ws-remote","runId":"run-remote-resume","requestId":"request-remote-resume","intent":"resume","outcome":"reconciliation_requested","reason":"current_run_continuation_accepted"}`)
 	}))
 	defer server.Close()
 
@@ -560,8 +560,8 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote run command: %v", err)
 	}
-	if run != nil {
-		t.Fatalf("run = %+v, want accepted-only nil run", run)
+	if run == nil || run.RunID != "run-remote-resume" || run.RequestID != "request-remote-resume" {
+		t.Fatalf("run admission = %+v, want exact owner result", run)
 	}
 	select {
 	case body := <-requestBody:
@@ -571,7 +571,7 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 			body["source"] != "test" {
 			t.Fatalf("request body = %+v, want workspace-scoped request metadata", body)
 		}
-		for _, field := range []string{"llmTarget", "goalId", "doDId", "soulId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds"} {
+		for _, field := range []string{"priority", "llmTarget", "goalId", "doDId", "soulId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds"} {
 			if _, ok := body[field]; ok {
 				t.Fatalf("resume request body unexpectedly carries activation override %s: %+v", field, body)
 			}
@@ -625,7 +625,11 @@ func TestRemoteRunCommandRestartPostsWorkspaceScopedFreshActivation(t *testing.T
 			t.Fatalf("restart body=%+v, want workspace scoped restart", body)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true, "intent": string(port.RunCommandIntentRestart)})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"accepted": true, "state": "accepted", "workspaceId": "ws-remote-restart", "runId": "run-remote-restart",
+			"requestId": "request-remote-restart", "intent": string(port.RunCommandIntentRestart),
+			"outcome": "reconciliation_requested", "reason": "new_run_activated",
+		})
 	}))
 	defer server.Close()
 
@@ -633,7 +637,7 @@ func TestRemoteRunCommandRestartPostsWorkspaceScopedFreshActivation(t *testing.T
 		WorkspaceID: "ws-remote-restart", Intent: port.RunCommandIntentRestart,
 		RequestID: "request-remote-restart", Reason: "fresh_activation_required", Source: "tui",
 	})
-	if err != nil || run != nil || requests.Load() != 1 {
+	if err != nil || run == nil || run.RunID != "run-remote-restart" || run.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || requests.Load() != 1 {
 		t.Fatalf("run=%+v requests=%d err=%v", run, requests.Load(), err)
 	}
 }

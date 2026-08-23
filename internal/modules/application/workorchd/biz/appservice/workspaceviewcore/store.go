@@ -11,7 +11,7 @@ import (
 
 type Store struct {
 	mu      sync.RWMutex
-	state   string
+	state   projectionLifecycleState
 	errText string
 	// revisionEpoch is a process-local floor for WorkspaceRevision/ActivityRevision.
 	// It is assigned once at NewStore from a high-resolution wall-clock base so that

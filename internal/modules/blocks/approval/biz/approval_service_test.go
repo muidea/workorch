@@ -142,7 +142,7 @@ func (r *countingApprovalRepository) DeleteScoped(ctx context.Context, workspace
 func TestService_CreateApproval_SeedsPendingState(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := newMutationService(repo)
 
 	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:     common.ApprovalID("approval-1"),
@@ -211,7 +211,7 @@ func TestApprovalLifecycleSelectsInitialResolutionProposalState(t *testing.T) {
 
 func TestService_CreateApproval_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewApprovalRepository())
+	service := newMutationService(memory.NewApprovalRepository())
 
 	tests := []approvalservice.CreateApprovalCommand{
 		{ApprovalID: "", RunID: common.RunID("run-1"), Reason: "need human approval"},
@@ -237,7 +237,7 @@ func TestApprovalLifecycleRejectsUnknownFactKind(t *testing.T) {
 func TestApprovalLifecycleDuplicateObservedFactDoesNotMutateOwnerState(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := newMutationService(repo)
 	cmd := approvalservice.CreateApprovalCommand{ApprovalID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", Reason: "review"}
 	if err := service.CreateApproval(ctx, cmd); err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestApprovalLifecycleDuplicateObservedFactDoesNotMutateOwnerState(t *testin
 func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := newMutationService(repo)
 
 	first := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-dup"),
@@ -301,7 +301,7 @@ func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
 func TestService_CreateApproval_AllowsDuplicateApprovalIDAcrossWorkspaces(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := newMutationService(repo)
 
 	first := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-workspace-local"),
@@ -342,7 +342,7 @@ func TestService_CreateApproval_AllowsDuplicateApprovalIDAcrossWorkspaces(t *tes
 func TestService_EnsureApproval_IsIdempotentAndRejectsBindingMismatch(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := newMutationService(repo)
 
 	cmd := approvalservice.CreateApprovalCommand{
 		ApprovalID:  common.ApprovalID("approval-ensure"),
@@ -384,23 +384,23 @@ func TestService_ResolveApproval_PendingTransitions(t *testing.T) {
 
 	for _, tc := range []struct {
 		name      string
-		resolve   func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		resolve   func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) error
 		wantState common.ApprovalState
 	}{
 		{
 			name:      "approve",
-			resolve:   (*Service).Approve,
+			resolve:   (*mutationService).Approve,
 			wantState: common.ApprovalStateApproved,
 		},
 		{
 			name:      "reject",
-			resolve:   (*Service).Reject,
+			resolve:   (*mutationService).Reject,
 			wantState: common.ApprovalStateRejected,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo)
+			service := newMutationService(repo)
 
 			cmd := approvalservice.CreateApprovalCommand{
 				ApprovalID:  common.ApprovalID("approval-" + tc.name),
@@ -441,19 +441,19 @@ func TestService_ResolveApproval_RecordsGovernanceEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		approvalID common.ApprovalID
-		resolve    func(*Service, context.Context, approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error)
+		resolve    func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error)
 		wantState  common.ApprovalState
 	}{
 		{
 			name:       "approved",
 			approvalID: common.ApprovalID("approval-evidence-approved"),
-			resolve:    (*Service).EnsureApprovedAndReturn,
+			resolve:    (*mutationService).EnsureApprovedAndReturn,
 			wantState:  common.ApprovalStateApproved,
 		},
 		{
 			name:       "rejected",
 			approvalID: common.ApprovalID("approval-evidence-rejected"),
-			resolve:    (*Service).EnsureRejectedAndReturn,
+			resolve:    (*mutationService).EnsureRejectedAndReturn,
 			wantState:  common.ApprovalStateRejected,
 		},
 	} {
@@ -537,26 +537,26 @@ func TestService_ResolveApproval_RejectsWhenAlreadyResolved(t *testing.T) {
 
 	for _, tc := range []struct {
 		name          string
-		firstResolve  func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
-		secondResolve func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		firstResolve  func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) error
+		secondResolve func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) error
 		wantState     common.ApprovalState
 	}{
 		{
 			name:          "approved cannot reject",
-			firstResolve:  (*Service).Approve,
-			secondResolve: (*Service).Reject,
+			firstResolve:  (*mutationService).Approve,
+			secondResolve: (*mutationService).Reject,
 			wantState:     common.ApprovalStateApproved,
 		},
 		{
 			name:          "rejected cannot approve",
-			firstResolve:  (*Service).Reject,
-			secondResolve: (*Service).Approve,
+			firstResolve:  (*mutationService).Reject,
+			secondResolve: (*mutationService).Approve,
 			wantState:     common.ApprovalStateRejected,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo)
+			service := newMutationService(repo)
 			approvalID := common.ApprovalID("approval-1")
 
 			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
@@ -593,43 +593,43 @@ func TestService_EnsureApprovalResolution_IsIdempotentAndRejectsOppositeTerminal
 
 	for _, tc := range []struct {
 		name         string
-		firstEnsure  func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
-		secondEnsure func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		firstEnsure  func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) error
+		secondEnsure func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) error
 		wantState    common.ApprovalState
 		wantErr      error
 	}{
 		{
 			name:         "approved idempotent",
-			firstEnsure:  (*Service).EnsureApproved,
-			secondEnsure: (*Service).EnsureApproved,
+			firstEnsure:  (*mutationService).EnsureApproved,
+			secondEnsure: (*mutationService).EnsureApproved,
 			wantState:    common.ApprovalStateApproved,
 			wantErr:      nil,
 		},
 		{
 			name:         "rejected idempotent",
-			firstEnsure:  (*Service).EnsureRejected,
-			secondEnsure: (*Service).EnsureRejected,
+			firstEnsure:  (*mutationService).EnsureRejected,
+			secondEnsure: (*mutationService).EnsureRejected,
 			wantState:    common.ApprovalStateRejected,
 			wantErr:      nil,
 		},
 		{
 			name:         "approved cannot ensure rejected",
-			firstEnsure:  (*Service).EnsureApproved,
-			secondEnsure: (*Service).EnsureRejected,
+			firstEnsure:  (*mutationService).EnsureApproved,
+			secondEnsure: (*mutationService).EnsureRejected,
 			wantState:    common.ApprovalStateApproved,
 			wantErr:      common.ErrConflict,
 		},
 		{
 			name:         "rejected cannot ensure approved",
-			firstEnsure:  (*Service).EnsureRejected,
-			secondEnsure: (*Service).EnsureApproved,
+			firstEnsure:  (*mutationService).EnsureRejected,
+			secondEnsure: (*mutationService).EnsureApproved,
 			wantState:    common.ApprovalStateRejected,
 			wantErr:      common.ErrConflict,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memory.NewApprovalRepository()
-			service := NewService(repo)
+			service := newMutationService(repo)
 			approvalID := common.ApprovalID("approval-" + tc.name)
 
 			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
@@ -667,23 +667,23 @@ func TestService_EnsureApprovalResolutionReturnsLoadedApproval(t *testing.T) {
 
 	for _, tc := range []struct {
 		name      string
-		resolve   func(*Service, context.Context, approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error)
+		resolve   func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error)
 		wantState common.ApprovalState
 	}{
 		{
 			name:      "approved",
-			resolve:   (*Service).EnsureApprovedAndReturn,
+			resolve:   (*mutationService).EnsureApprovedAndReturn,
 			wantState: common.ApprovalStateApproved,
 		},
 		{
 			name:      "rejected",
-			resolve:   (*Service).EnsureRejectedAndReturn,
+			resolve:   (*mutationService).EnsureRejectedAndReturn,
 			wantState: common.ApprovalStateRejected,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newCountingApprovalRepository()
-			service := NewService(repo)
+			service := newMutationService(repo)
 			approvalID := common.ApprovalID("approval-ensure-loaded-" + tc.name)
 			if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
 				ApprovalID:  approvalID,
@@ -711,14 +711,14 @@ func TestService_EnsureApprovalResolutionReturnsLoadedApproval(t *testing.T) {
 
 func TestService_ResolveApproval_ValidateArgumentsAndNotFound(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewApprovalRepository())
+	service := newMutationService(memory.NewApprovalRepository())
 
 	for _, resolve := range []struct {
 		name string
-		fn   func(*Service, context.Context, approvalservice.ResolveApprovalCommand) error
+		fn   func(*mutationService, context.Context, approvalservice.ResolveApprovalCommand) error
 	}{
-		{name: "approve", fn: (*Service).Approve},
-		{name: "reject", fn: (*Service).Reject},
+		{name: "approve", fn: (*mutationService).Approve},
+		{name: "reject", fn: (*mutationService).Reject},
 	} {
 		t.Run(resolve.name, func(t *testing.T) {
 			if err := resolve.fn(service, ctx, approvalservice.ResolveApprovalCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -786,7 +786,7 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 func TestService_ResolveApprovalKeepsAuthorizationContextImmutable(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewApprovalRepository()
-	service := NewService(repo)
+	service := newMutationService(repo)
 
 	approvalID := common.ApprovalID("approval-context")
 	if err := service.CreateApproval(ctx, approvalservice.CreateApprovalCommand{

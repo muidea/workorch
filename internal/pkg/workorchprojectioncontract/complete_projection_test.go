@@ -7,6 +7,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *testing.T) {
@@ -44,8 +45,21 @@ func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *te
 		},
 		Runtime: WorkspaceRuntimeView{
 			Projection: ProjectionStatusFromWorkspaceViewModel(WorkspaceViewModel{StreamGeneration: "generation-1", FailedWorkspaceIds: []string{"workspace-2"}, DegradedSince: "2026-08-04T08:00:00Z"}),
-			RunCommand: &RunCommandStatus{Disposition: "accepted", Diagnostic: "scheduled"},
-			Activity:   WorkspaceActivityFeed{StreamGeneration: "generation-1"},
+			RunCommand: &RunCommandStatus{
+				WorkspaceID:     "workspace-1",
+				RunID:           "run-1",
+				State:           "accepted",
+				Intent:          "resume",
+				RequestID:       "request-1",
+				RequestReason:   "operator_requested",
+				Source:          "http",
+				Outcome:         runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+				AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+				Diagnostic:      "current Run continuation accepted",
+				AcceptedAt:      "2026-08-04T10:00:00Z",
+				Revision:        8,
+			},
+			Activity: WorkspaceActivityFeed{StreamGeneration: "generation-1"},
 		},
 	}
 
@@ -60,6 +74,59 @@ func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *te
 	wantComparable := typeofCompleteProjectionFixture(want)
 	if !reflect.DeepEqual(got, wantComparable) {
 		t.Fatalf("round trip changed projection\nwant=%+v\n got=%+v", wantComparable, got)
+	}
+}
+
+func TestRunCommandStatusJSONExposesOnlyCanonicalAdmissionFields(t *testing.T) {
+	status := RunCommandStatus{
+		WorkspaceID:     "workspace-1",
+		RunID:           "run-1",
+		State:           "accepted",
+		Intent:          "resume",
+		RequestID:       "request-1",
+		RequestReason:   "operator_requested",
+		Source:          "web",
+		Outcome:         runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+		AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+		Diagnostic:      "current Run continuation accepted",
+		AcceptedAt:      "2026-08-23T00:00:00Z",
+		Revision:        9,
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal run command status: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal run command status: %v", err)
+	}
+	want := []string{
+		"workspaceId", "runId", "state", "intent", "requestId", "requestReason", "source", "outcome",
+		"admissionReason", "diagnostic", "acceptedAt", "revision",
+	}
+	if len(fields) != len(want) {
+		t.Fatalf("run command JSON fields = %+v, want exactly %v", fields, want)
+	}
+	for _, name := range want {
+		if _, ok := fields[name]; !ok {
+			t.Fatalf("run command JSON omitted canonical field %q: %+v", name, fields)
+		}
+	}
+	for _, removed := range []string{"reason", "disposition", "error", "definitionRevision", "decisionId", "rejectedAt"} {
+		if _, ok := fields[removed]; ok {
+			t.Fatalf("run command JSON retained removed or mutually exclusive field %q: %+v", removed, fields)
+		}
+	}
+	zeroData, err := json.Marshal(RunCommandStatus{})
+	if err != nil {
+		t.Fatalf("marshal zero run command status: %v", err)
+	}
+	var zeroFields map[string]any
+	if err := json.Unmarshal(zeroData, &zeroFields); err != nil {
+		t.Fatalf("unmarshal zero run command status: %v", err)
+	}
+	if revision, ok := zeroFields["revision"]; !ok || revision != float64(0) {
+		t.Fatalf("run command JSON must always expose revision, got %+v", zeroFields)
 	}
 }
 

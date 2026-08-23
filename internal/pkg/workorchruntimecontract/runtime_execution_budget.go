@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
 const (
@@ -1164,89 +1163,6 @@ func RuntimeBudgetRemaining(ledger RuntimeExecutionBudgetLedger, dimension Runti
 	return dimensionPolicy.Limit - unavailable, nil
 }
 
-type RuntimeProviderConsumptionStatus string
-
-const (
-	RuntimeProviderConsumptionConfirmed RuntimeProviderConsumptionStatus = "confirmed"
-	RuntimeProviderConsumptionUnknown   RuntimeProviderConsumptionStatus = "unknown"
-)
-
-type RuntimeProviderBudgetObservation struct {
-	LogicalRequestID string
-	PhysicalCallID   string
-	Status           RuntimeProviderConsumptionStatus
-	Usage            *llmaudit.ProviderUsage
-	OwnerResultRef   string
-	OwnerResultHash  string
-}
-
-func NewRuntimeProviderBudgetObservation(logicalRequestID, physicalCallID string, status RuntimeProviderConsumptionStatus, usage *llmaudit.ProviderUsage) (RuntimeProviderBudgetObservation, error) {
-	observation := RuntimeProviderBudgetObservation{
-		LogicalRequestID: strings.TrimSpace(logicalRequestID), PhysicalCallID: strings.TrimSpace(physicalCallID), Status: status, Usage: usage,
-	}
-	observation.OwnerResultRef = "llm-provider-result/" + observation.PhysicalCallID
-	observation.OwnerResultHash = StableRuntimeProviderBudgetObservationHash(observation)
-	if err := observation.Validate(); err != nil {
-		return RuntimeProviderBudgetObservation{}, err
-	}
-	return observation.Clone(), nil
-}
-
-func (o RuntimeProviderBudgetObservation) Clone() RuntimeProviderBudgetObservation {
-	o.LogicalRequestID = strings.TrimSpace(o.LogicalRequestID)
-	o.PhysicalCallID = strings.TrimSpace(o.PhysicalCallID)
-	o.Status = RuntimeProviderConsumptionStatus(strings.TrimSpace(string(o.Status)))
-	o.OwnerResultRef = strings.TrimSpace(o.OwnerResultRef)
-	o.OwnerResultHash = strings.TrimSpace(o.OwnerResultHash)
-	if o.Usage != nil {
-		usage := *o.Usage
-		o.Usage = &usage
-	}
-	return o
-}
-
-func (o RuntimeProviderBudgetObservation) Validate() error {
-	o = o.Clone()
-	if o.LogicalRequestID == "" || o.PhysicalCallID == "" || o.OwnerResultRef == "" || o.OwnerResultHash == "" {
-		return common.ErrInvalidArgument
-	}
-	if o.Status != RuntimeProviderConsumptionConfirmed && o.Status != RuntimeProviderConsumptionUnknown {
-		return common.ErrInvalidArgument
-	}
-	if o.Usage != nil {
-		values := []int{o.Usage.InputTokens, o.Usage.OutputTokens, o.Usage.TotalTokens, o.Usage.CacheReadTokens, o.Usage.CacheWriteTokens, o.Usage.CacheCreationTokens, o.Usage.CacheableInputTokens, o.Usage.NonCacheableInputTokens}
-		for _, value := range values {
-			if value < 0 {
-				return common.ErrInvalidArgument
-			}
-		}
-	}
-	if o.OwnerResultHash != StableRuntimeProviderBudgetObservationHash(o) {
-		return fmt.Errorf("runtime provider budget observation hash mismatch")
-	}
-	return nil
-}
-
-func StableRuntimeProviderBudgetObservationHash(observation RuntimeProviderBudgetObservation) string {
-	o := observation.Clone()
-	h := sha256.New()
-	writeHashString(h, "runtime-provider-budget-observation")
-	writeHashString(h, o.LogicalRequestID)
-	writeHashString(h, o.PhysicalCallID)
-	writeHashString(h, string(o.Status))
-	if o.Usage != nil {
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.InputTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.OutputTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.TotalTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.CacheReadTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.CacheWriteTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.CacheCreationTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.CacheableInputTokens))
-		writeHashString(h, fmt.Sprintf("%d", o.Usage.NonCacheableInputTokens))
-	}
-	return "runtime-provider-budget-observation-" + hex.EncodeToString(h.Sum(nil))[:20]
-}
-
 func RuntimeProviderBudgetAllocationSpecs(ledger RuntimeExecutionBudgetLedger, documentKind RuntimeProviderDocumentKind, correctionAttempt, sequence int, logicalRequestID, physicalCallID string) ([]RuntimeBudgetAllocationSpec, error) {
 	if correctionAttempt < 0 || correctionAttempt > 1 || sequence <= 0 || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return nil, common.ErrInvalidArgument
@@ -1281,56 +1197,6 @@ func RuntimeProviderBudgetAllocationSpecs(ledger RuntimeExecutionBudgetLedger, d
 		ret = append(ret, RuntimeBudgetAllocationSpec{Dimension: dimension, LogicalConsumptionID: logicalRequestID, ScopeRef: physicalCallID, ReservedAmount: amount})
 	}
 	return ret, nil
-}
-
-func ApplyRuntimeProviderBudgetObservation(ledger RuntimeExecutionBudgetLedger, observation RuntimeProviderBudgetObservation) (RuntimeExecutionBudgetLedger, bool, error) {
-	observation = observation.Clone()
-	if err := observation.Validate(); err != nil {
-		return RuntimeExecutionBudgetLedger{}, false, err
-	}
-	changed := false
-	matched := 0
-	for _, allocation := range append([]RuntimeBudgetAllocation(nil), ledger.Allocations...) {
-		allocation = allocation.Normalized()
-		if allocation.LogicalConsumptionID != observation.LogicalRequestID || allocation.ScopeRef != observation.PhysicalCallID {
-			continue
-		}
-		matched++
-		confirmed := int64(1)
-		unknown := int64(0)
-		if observation.Status == RuntimeProviderConsumptionUnknown {
-			confirmed, unknown = 0, allocation.ReservedAmount
-		} else {
-			switch allocation.Dimension {
-			case RuntimeBudgetDimensionProviderInputToken:
-				if observation.Usage == nil {
-					confirmed, unknown = 0, allocation.ReservedAmount
-				} else {
-					confirmed = int64(observation.Usage.InputTokens)
-				}
-			case RuntimeBudgetDimensionProviderOutputToken:
-				if observation.Usage == nil {
-					confirmed, unknown = 0, allocation.ReservedAmount
-				} else {
-					confirmed = int64(observation.Usage.OutputTokens)
-				}
-			}
-		}
-		var joined bool
-		var err error
-		ledger, _, joined, err = JoinRuntimeBudgetConsumption(ledger, RuntimeBudgetConsumptionJoin{
-			AllocationID: allocation.AllocationID, Owner: RuntimeModuleLLM, PhysicalConsumptionID: observation.PhysicalCallID,
-			ConfirmedAmount: confirmed, UnknownAmount: unknown, OwnerResultRef: observation.OwnerResultRef, OwnerResultHash: observation.OwnerResultHash,
-		})
-		if err != nil {
-			return RuntimeExecutionBudgetLedger{}, false, err
-		}
-		changed = changed || joined
-	}
-	if matched == 0 {
-		return RuntimeExecutionBudgetLedger{}, false, fmt.Errorf("runtime provider budget observation has no allocation")
-	}
-	return ledger, changed, nil
 }
 
 type RuntimeExecutionBudgetDimensionView struct {

@@ -44,7 +44,7 @@ func TestRequestCandidatePreservesSemanticDocumentKindThroughSingleBoundary(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || response.ExpectedDocumentHash != request.ExpectedDocument.Hash || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
+	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || response.ExpectedDocumentHash != request.ExpectedDocument.Hash || response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != `{"documentKind":"semantic_plan"}` {
 		t.Fatalf("semantic response=%+v providerCalls=%d", response, providerCalls)
 	}
 	request.DocumentKind = ""
@@ -191,7 +191,7 @@ func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 		return generationResult(payload, nil)
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || string(response.DocumentContent) != string(payload) {
+	if err != nil || response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != string(payload) {
 		t.Fatalf("complete alias document was not forwarded unchanged: response=%+v err=%v", response, err)
 	}
 }
@@ -218,7 +218,7 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 				return generationResult([]byte(testCase.payload), nil)
 			})
 			response, err := RequestCandidate(context.Background(), provider, request)
-			if err != nil || calls != 1 || string(response.DocumentContent) != testCase.payload {
+			if err != nil || calls != 1 || response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != testCase.payload {
 				t.Fatalf("schema-invalid complete document was not forwarded: calls=%d response=%+v err=%v", calls, response, err)
 			}
 		})
@@ -231,10 +231,10 @@ func TestRequestCandidateClassifiesProviderProseAsProtocolOutcome(t *testing.T) 
 		return generationResult([]byte("The user wants me to generate a semantic plan."), nil)
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentInvalid || response.DocumentOutcome.Code != "provider_final_output_invalid" {
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentInvalid || response.DocumentOutcome.Framing.Code != "provider_final_output_invalid" {
 		t.Fatalf("provider prose outcome: response=%+v err=%v", response, err)
 	}
-	if len(response.DocumentContent) != 0 {
+	if len(response.DocumentOutcome.Content) != 0 {
 		t.Fatalf("provider prose leaked into candidate response: %+v", response)
 	}
 }
@@ -249,8 +249,8 @@ func TestRequestCandidatePreservesExactOuterJSONFenceForSM3Normalization(t *test
 	if err != nil {
 		t.Fatalf("exact JSON fence was rejected by provider boundary: %v", err)
 	}
-	if string(response.DocumentContent) != string(payload) {
-		t.Fatalf("provider boundary changed raw fenced document: %q", response.DocumentContent)
+	if response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != string(payload) {
+		t.Fatalf("provider boundary changed raw fenced document: %+v", response.DocumentOutcome)
 	}
 }
 
@@ -270,7 +270,7 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Code != "max_output_tokens" || len(response.DocumentContent) != 0 {
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" || len(response.DocumentOutcome.Content) != 0 {
 		t.Fatalf("truncated candidate outcome = %+v", response.DocumentOutcome)
 	}
 }
@@ -288,7 +288,7 @@ func TestRequestCandidateConvertsProviderOutputLimitErrorWithPayloadToContinuati
 	if err != nil {
 		t.Fatalf("output-limit fragment returned error: %v", err)
 	}
-	if response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Code != "max_output_tokens" {
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "max_output_tokens" {
 		t.Fatalf("output-limit response = %+v", response.DocumentOutcome)
 	}
 }
@@ -303,7 +303,7 @@ func TestRequestCandidateDoesNotContinueOutputLimitProviderProse(t *testing.T) {
 		}, errors.New("llm provider response incomplete: max_output_tokens")
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentInvalid {
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentInvalid {
 		t.Fatalf("output-limit provider prose result: response=%+v err=%v", response, err)
 	}
 }
@@ -318,7 +318,7 @@ func TestRequestCandidateClassifiesOutputLimitWithoutFinalText(t *testing.T) {
 		}, errors.New("llm provider response incomplete: max_output_tokens")
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Code != "provider_final_output_missing" {
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Framing.Code != "provider_final_output_missing" {
 		t.Fatalf("missing final output result: response=%+v err=%v", response, err)
 	}
 }
@@ -335,7 +335,7 @@ func TestRequestCandidateClassifiesMidTokenEOFAsIncompleteDocumentWithoutProvide
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Code != "incomplete_json_document" || len(response.DocumentContent) != 0 {
+	if response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || response.DocumentOutcome.Framing.Code != "incomplete_json_document" || len(response.DocumentOutcome.Content) != 0 {
 		t.Fatalf("mid-token candidate outcome = %+v", response.DocumentOutcome)
 	}
 }
@@ -349,11 +349,11 @@ func TestRequestCandidateClassifiesEmptySuccessfulBodyAsProviderOutcome(t *testi
 		}, nil
 	})
 	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Code != "provider_final_output_missing" {
+	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || response.DocumentOutcome.Framing.Code != "provider_final_output_missing" {
 		t.Fatalf("empty provider response outcome = %+v err=%v", response.DocumentOutcome, err)
 	}
-	if len(response.DocumentContent) != 0 {
-		t.Fatalf("empty provider response leaked complete document = %q", response.DocumentContent)
+	if len(response.DocumentOutcome.Content) != 0 {
+		t.Fatalf("empty provider response leaked complete document = %q", response.DocumentOutcome.Content)
 	}
 }
 
@@ -414,7 +414,7 @@ func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(
 	if err == nil {
 		t.Fatal("typed prerequisite stale was converted into a successful candidate")
 	}
-	if response.PrerequisiteStale == nil || response.PrerequisiteStale.ObservationID != observation.ObservationID || len(response.DocumentContent) != 0 {
+	if response.PrerequisiteStale == nil || response.PrerequisiteStale.ObservationID != observation.ObservationID || response.DocumentOutcome != nil {
 		t.Fatalf("candidate response lost stale boundary: %+v", response)
 	}
 	if extracted := CandidatePrerequisiteStaleFromError(err); extracted == nil || extracted.ObservedRevision != "config-v2" {
@@ -435,10 +435,10 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(response.DocumentContent) != string(wantDocument) {
-		t.Fatalf("complete candidate document = %q, want %q", response.DocumentContent, wantDocument)
+	if response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != string(wantDocument) {
+		t.Fatalf("complete candidate document = %+v, want %q", response.DocumentOutcome, wantDocument)
 	}
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(request.CandidateManifest, response.DocumentContent)
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(request.CandidateManifest, response.DocumentOutcome.Content)
 	if err != nil {
 		t.Fatal(err)
 	}

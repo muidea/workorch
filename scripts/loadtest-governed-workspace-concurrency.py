@@ -1288,7 +1288,6 @@ def execute_workspace(seq: int, template_id: str) -> WorkspaceResult:
                     "requestId": f"loadtest-restart-{BATCH_ID}-{seq:04d}",
                     "reason": "governed_workspace_concurrency_loadtest",
                     "source": "loadtest-governed",
-                    "priority": seq % 10,
                 },
             )
         write_json(case_dir / "activation.json", activation)

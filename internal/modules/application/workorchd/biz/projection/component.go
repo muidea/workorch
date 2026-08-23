@@ -13,9 +13,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const rebuildCoalesceDelay = 100 * time.Millisecond
@@ -160,12 +162,8 @@ func (c *Component) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState
 	}
 }
 
-func (c *Component) ApplyRunCommandAccepted(update workspaceviewcore.RunCommandAcceptedUpdate) bool {
-	return c != nil && c.manager != nil && c.manager.ApplyRunCommandAccepted(update)
-}
-
-func (c *Component) ApplyRunCommandRejected(update workspaceviewcore.RunCommandRejectedUpdate) bool {
-	return c != nil && c.manager != nil && c.manager.ApplyRunCommandRejected(update)
+func (c *Component) ApplyWorkspaceExecutionAdmission(command workorchdevents.WorkspaceRunRequestedCommand, admission runtimecontract.RuntimeExecutionIntentAdmission) bool {
+	return c != nil && c.manager != nil && c.manager.ApplyWorkspaceExecutionAdmission(command, admission)
 }
 
 func (c *Component) DeleteWorkspace(workspaceID string) {

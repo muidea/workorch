@@ -284,14 +284,17 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return m.admitRuntimeCompletedSemanticPlanDocument(ctx, aggregate, session)
 	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
+		if !runtime.ProviderRequestTerminalSessionApplied(aggregate, session) {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic provider request is terminal without its coordinated SM-2 failure", common.ErrConflict)
+		}
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_terminal", "semantic provider request terminated without a complete document", nil)
 	}
 	if session.ProviderSubmitted {
-		observation, observationErr := runtimeProviderBudgetObservation(session.LogicalRequestID, session.LastPhysicalCallID, runtimecontract.RuntimeProviderConsumptionUnknown, nil)
-		if observationErr != nil {
-			return runtime.RuntimeAggregate{}, observationErr
+		settlement, settlementErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, session.LastPhysicalCallID, nil, nil)
+		if settlementErr != nil {
+			return runtime.RuntimeAggregate{}, settlementErr
 		}
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_unknown", "semantic provider submission has no durable outcome", nil, observation)
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_unknown", "semantic provider submission has no durable outcome", nil, settlement)
 	}
 
 	if session.ExpectedDocument == nil {
@@ -333,7 +336,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 
 	sequence := session.NextSequence
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, sequence)
-	submitted, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestSubmitted, session.LogicalRequestID, sequence, physicalCallID, nil, nil)
+	submitted, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestSubmitted, session.LogicalRequestID, sequence, physicalCallID, nil)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -349,23 +352,33 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		SemanticCorrectionDirective: correction,
 	})
 	if err != nil {
-		observation, observationErr := runtimeProviderBudgetObservation(session.LogicalRequestID, physicalCallID, runtimecontract.RuntimeProviderConsumptionUnknown, nil)
-		if observationErr != nil {
-			return runtime.RuntimeAggregate{}, observationErr
+		settlement, settlementErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, physicalCallID, nil, nil)
+		if settlementErr != nil {
+			return runtime.RuntimeAggregate{}, settlementErr
 		}
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_contract_error", err.Error(), nil, observation)
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_unknown", "semantic provider submission has no trusted physical outcome", nil, settlement)
 	}
-	observation, observationErr := runtimeProviderBudgetObservation(session.LogicalRequestID, physicalCallID, runtimecontract.RuntimeProviderConsumptionConfirmed, response.Usage)
-	if observationErr != nil {
-		return runtime.RuntimeAggregate{}, observationErr
+	settlement, settlementErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, physicalCallID, response.Audit, response.Usage)
+	if settlementErr != nil || settlement.Status == runtime.RuntimeProviderBudgetSettlementUnknown {
+		unknown, unknownErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, physicalCallID, nil, nil)
+		if unknownErr != nil {
+			return runtime.RuntimeAggregate{}, unknownErr
+		}
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_unknown", "semantic provider submission has no trusted physical outcome", nil, unknown)
 	}
 	if response.Feedback != nil {
-		return m.handleRuntimeSemanticProviderFeedback(ctx, aggregate, session, *response.Feedback, physicalCallID, observation)
+		if response.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderTransient && settlement.Status != runtime.RuntimeProviderBudgetSettlementConfirmed {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_fact_invalid", "unsubmitted semantic provider result cannot request transport recovery", response.Feedback.OriginalDiagnostic, settlement)
+		}
+		return m.handleRuntimeSemanticProviderFeedback(ctx, aggregate, session, *response.Feedback, physicalCallID, settlement)
 	}
 	if response.DocumentOutcome == nil {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_missing", "semantic provider returned no typed document outcome", nil, observation)
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_missing", "semantic provider returned no typed document outcome", nil, settlement)
 	}
-	return m.handleRuntimeSemanticDocumentOutcome(ctx, aggregate, session, response, sequence, physicalCallID, observation)
+	if settlement.Status != runtime.RuntimeProviderBudgetSettlementConfirmed {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_fact_invalid", "unsubmitted semantic provider result cannot carry a provider document", nil, settlement)
+	}
+	return m.handleRuntimeSemanticDocumentOutcome(ctx, aggregate, session, response, sequence, physicalCallID, settlement)
 }
 
 func runtimeSemanticCorrectionContext(ledger runtimecontract.RuntimeSemanticPlanningLedger) (*runtimecontract.RuntimeOriginalDiagnostic, *runtimecontract.RuntimeSemanticCorrectionDirective, error) {
@@ -380,58 +393,47 @@ func runtimeSemanticCorrectionContext(ledger runtimecontract.RuntimeSemanticPlan
 	return previous, &value, nil
 }
 
-func (m *Biz) handleRuntimeSemanticProviderFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, feedback runtimecontract.RuntimeFeedback, physicalCallID string, observation *runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
+func (m *Biz) handleRuntimeSemanticProviderFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, feedback runtimecontract.RuntimeFeedback, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
 	providerFailure := runtimeProviderRequestFailure(feedback)
 	providerDiagnostic := feedback.OriginalDiagnostic.CloneOriginal()
 	if feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryProviderTransient {
-		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, providerDiagnostic, observation)
+		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, providerDiagnostic, settlement)
 	}
 	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient,
 		Code:  firstNonEmptyString(providerFailure.Code, "provider_transient"), Signature: firstNonEmptyString(providerFailure.Signature, "provider-transient"),
 	}
-	updated, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil, observation)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	if providerFailure.Code == "provider_body_idle_timeout" {
-		return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_body_idle_timeout", providerFailure.Reason, providerDiagnostic)
-	}
-	recovered, consumed, err := m.runtimeConsumeRecoveryBudget(ctx, updated, runtimecontract.RuntimeRecoveryBudgetProviderTransport)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	if consumed {
-		return recovered, nil
-	}
-	return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_transport_exhausted", providerFailure.Reason, providerDiagnostic)
+	return m.runtimeCoordinateProviderRequestRecovery(ctx, aggregate, session.LogicalRequestID, physicalCallID, runtime.RuntimeProviderRequestRecoveryInput{
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		TransportOutcome: &outcome, Message: providerFailure.Reason, OriginalDiagnostic: providerDiagnostic,
+	}, settlement)
 }
 
-func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, sequence int, physicalCallID string, observation *runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
-	switch response.DocumentOutcome.Disposition {
+func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, sequence int, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
+	framing := response.DocumentOutcome.Framing
+	switch framing.Disposition {
 	case runtimecontract.RuntimeProviderDocumentIncomplete:
-		updated, recoveryErr := m.runtimeCandidateRequestRecoveryRequired(ctx, aggregate, session.LogicalRequestID, physicalCallID, *response.DocumentOutcome, observation)
+		updated, recoveryErr := m.runtimeCoordinateProviderRequestRecovery(ctx, aggregate, session.LogicalRequestID, physicalCallID, runtime.RuntimeProviderRequestRecoveryInput{
+			DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, DocumentFraming: &framing,
+		}, settlement)
 		if recoveryErr != nil {
 			return runtime.RuntimeAggregate{}, recoveryErr
 		}
-		persisted, ok := runtimeCandidateRequestSession(updated, session.LogicalRequestID)
+		_, ok := runtimeCandidateRequestSession(updated, session.LogicalRequestID)
 		if !ok {
 			return runtime.RuntimeAggregate{}, fmt.Errorf("semantic request session disappeared after recovery fact")
 		}
-		if persisted.ExpectedDocument == nil || persisted.IncompleteOutcomes > persisted.ExpectedDocument.MaxRecoveryAttempts {
-			return m.failRuntimeSemanticContract(ctx, updated, "semantic_document_recovery_exhausted", "semantic document remained incomplete after its sealed whole-document recovery budget", nil)
-		}
 		return updated, nil
 	case runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
-		return m.failRuntimeSemanticContract(ctx, aggregate, response.DocumentOutcome.Code, "semantic provider did not return one complete authority document", nil, observation)
+		return m.failRuntimeSemanticContract(ctx, aggregate, framing.Code, "semantic provider did not return one complete authority document", nil, settlement)
 	case runtimecontract.RuntimeProviderDocumentComplete:
-		if len(response.DocumentContent) == 0 {
-			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "complete semantic outcome did not carry its document", nil, observation)
+		if len(response.DocumentOutcome.Content) == 0 {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "complete semantic outcome did not carry its document", nil, settlement)
 		}
 	default:
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_invalid", "semantic provider returned an unknown document outcome", nil, observation)
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_outcome_invalid", "semantic provider returned an unknown document outcome", nil, settlement)
 	}
-	completed, _, _, err := m.persistAndCompleteRuntimeCandidateRequestDocument(ctx, aggregate, session.LogicalRequestID, sequence, physicalCallID, response.DocumentContent, observation)
+	completed, _, _, err := m.persistAndCompleteRuntimeCandidateRequestDocument(ctx, aggregate, session.LogicalRequestID, sequence, physicalCallID, response.DocumentOutcome.Content, settlement)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -781,25 +783,7 @@ func runtimeSemanticCatalogObservation(aggregate runtime.RuntimeAggregate, catal
 	return nil
 }
 
-func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime.RuntimeAggregate, code, message string, original *runtimecontract.RuntimeOriginalDiagnostic, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
-	// Close the generic provider-I/O ledger before sealing the SM-2 semantic
-	// terminal.  A crash between these two owner-private CAS transitions is
-	// recoverable: the next drive observes the terminal request session and
-	// deterministically seals the same semantic failure.  Leaving an open or
-	// unresolved session beside a semantic terminal would create a second
-	// apparent drive path and can trigger recovery busy-loops.
-	if logicalRequestID := strings.TrimSpace(aggregate.SemanticPlanning.LogicalRequestID); logicalRequestID != "" {
-		if session, found := runtimeCandidateRequestSession(aggregate, logicalRequestID); found &&
-			session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete &&
-			session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal {
-			outcome := runtimeSemanticRequestTerminalOutcome(code)
-			terminated, terminateErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestTerminated, logicalRequestID, 0, "", &outcome, nil, firstRuntimeProviderBudgetObservation(budgetObservation))
-			if terminateErr != nil {
-				return runtime.RuntimeAggregate{}, terminateErr
-			}
-			aggregate = terminated
-		}
-	}
+func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime.RuntimeAggregate, code, message string, original *runtimecontract.RuntimeOriginalDiagnostic, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
 	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
@@ -818,24 +802,34 @@ func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime
 	if diagnostic.OriginalCode == "" || diagnostic.OriginalMessage == "" {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
+	// An open semantic provider request and its semantic-contract successor are
+	// one owner-local SM-3/SM-2 transaction. A fresh reload therefore observes
+	// either the submitted request (and classifies submission-unknown without a
+	// second provider call) or the exact terminal request plus semantic failure.
+	if logicalRequestID := strings.TrimSpace(aggregate.SemanticPlanning.LogicalRequestID); logicalRequestID != "" {
+		if session, found := runtimeCandidateRequestSession(aggregate, logicalRequestID); found {
+			switch session.State {
+			case runtimecontract.RuntimeCandidateRequestSessionDocumentComplete:
+				// The provider transaction is complete; semantic decode/admission may
+				// still seal a semantic-contract failure through the ordinary SM-2 event.
+			case runtimecontract.RuntimeCandidateRequestSessionTerminal:
+				if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed && aggregate.Facts.Failure != nil {
+					return aggregate, nil
+				}
+				return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic provider request is terminal without its coordinated SM-2 failure", common.ErrConflict)
+			default:
+				return m.runtimeCoordinateProviderRequestTerminal(ctx, aggregate, logicalRequestID, runtime.RuntimeProviderRequestTerminalInput{
+					DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
+					TerminalCode: strings.TrimSpace(code), TerminalSignature: "semantic-contract/" + strings.ReplaceAll(strings.TrimSpace(code), "_", "-"),
+					Message: strings.TrimSpace(message), OriginalDiagnostic: &diagnostic,
+				}, firstRuntimeProviderBudgetSettlement(budgetSettlement))
+			}
+		}
+	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventSemanticContractFailed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticFailureCode: strings.TrimSpace(code), SemanticDiagnostic: &diagnostic},
 	})
 	return updated.Aggregate, err
-}
-
-func runtimeSemanticRequestTerminalOutcome(code string) runtimecontract.RuntimeCandidateRequestOutcome {
-	code = strings.TrimSpace(code)
-	class := runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol
-	switch code {
-	case "semantic_provider_submission_unknown":
-		class = runtimecontract.RuntimeCandidateRequestOutcomeProviderSubmissionUnknown
-	case "semantic_document_recovery_exhausted":
-		class = runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted
-	}
-	return runtimecontract.RuntimeCandidateRequestOutcome{
-		Class: class, Code: code, Signature: strings.ReplaceAll(code, "_", "-"),
-	}
 }
 
 func runtimeSemanticPayloadDiagnostic(err error) runtimecontract.RuntimeOriginalDiagnostic {

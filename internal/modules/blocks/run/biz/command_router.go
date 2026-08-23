@@ -69,7 +69,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (any, error) {
 	}
 	m.commandMu.RLock()
 	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil || m.Service == nil {
+	if m.stopping || m.runs == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()

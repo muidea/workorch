@@ -8,11 +8,13 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -423,19 +425,21 @@ func llmUsageEventRecord(t *testing.T, id string, workspaceID common.WorkspaceID
 		RunID:       runID,
 		StepID:      common.StepID(string(runID) + "/step-1"),
 		Payload: mustPortEventPayload(t, map[string]any{
-			"workspaceId":  string(workspaceID),
-			"runId":        string(runID),
-			"stepId":       string(runID) + "/step-1",
-			"providerId":   providerID,
-			"provider":     "compatible",
-			"model":        model,
-			"operation":    "responses",
-			"inputTokens":  10,
-			"outputTokens": 5,
-			"totalTokens":  15,
-			"estimated":    estimated,
-			"usageSource":  "provider_native",
-			"status":       "completed",
+			recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
+			recordpayload.PayloadKeyRunID:                string(runID),
+			recordpayload.PayloadKeyStepID:               string(runID) + "/step-1",
+			recordpayload.PayloadKeyProviderID:           providerID,
+			recordpayload.PayloadKeyProvider:             "compatible",
+			recordpayload.PayloadKeyModel:                model,
+			recordpayload.PayloadKeyOperation:            "responses",
+			recordpayload.PayloadKeyInputTokens:          10,
+			recordpayload.PayloadKeyOutputTokens:         5,
+			recordpayload.PayloadKeyTotalTokens:          15,
+			recordpayload.PayloadKeyEstimated:            estimated,
+			recordpayload.PayloadKeyUsageSource:          "provider_native",
+			recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeNonStreaming),
+			recordpayload.PayloadKeyProviderSubmitted:    true,
+			recordpayload.PayloadKeyStatus:               "completed",
 		}),
 	}
 }

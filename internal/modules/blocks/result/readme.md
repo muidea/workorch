@@ -39,6 +39,8 @@ Result 同 scope 的正式子实体。该 block 负责 identity、持久化状�
 
 - 每个 topic 都有独立 concrete result type；不存在同时承载 Result、Artifact、列表和删除计数的通用 result
   envelope，也不存在 generic entity create/update command。
+- repository helper 与 Result/Artifact mutation method 均为 Biz 包内私有实现；Biz 不导出或嵌入可由其他组件取得的
+  `Service` facade，跨组件写入只能进入 owner typed EventHub handler。
 - 所有 get/list/delete command 都显式携带 `WorkspaceID`。按 Run/Result 查询时也必须绑定相同 workspace context；
   memory 与 file backend 对重复局部 ID 采用相同的 scoped/ambiguous 语义。
 - 所有 list command 使用 ID keyset `Cursor` 和 `Limit`，默认 100、单页上限 200。Application 与 Orchestrator 的

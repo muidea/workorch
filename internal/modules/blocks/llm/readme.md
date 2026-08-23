@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 功能范围与边界
 
@@ -24,11 +24,13 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 1. 内置首选 provider ID 固定为 `ai-proxy`。
 2. activation 与 Runtime 使用完整 `ProviderModelTarget{ProviderID, ModelID}`。
 3. catalog 精确模型容量是能力权威；ai-proxy exact override 是 Responses 容量的唯一替代来源。
-   OpenAI-compatible API surface 或 `/v1/models` 的 `/v1/responses` endpoint 声明不等同于
-   `response_format` 支持；未显式声明 JSON Schema 能力时 adapter 必须省略该字段，并继续由
+   OpenAI-compatible API surface、模型名称或 `/v1/models` 的 `/v1/responses` endpoint 声明不等同于
+   `json_schema` 支持；只有 owner provider profile 显式声明 `JSONSchemaResponse=true` 时 adapter 才能发送
+   `text.format=json_schema`。未显式声明时必须省略该字段，并继续由
    sealed manifest、prompt 与 strict decoder 约束候选输出。catalog cache 只保存目录事实；`fresh | stale |
    unavailable` 是每次读取时纯派生的 readiness observation，不写回 cache、不提供 transition API，也不形成 LLM
-   owner 内的第二个 lifecycle。
+   owner 内的第二个 lifecycle。当前 builtin ai-proxy contract 明确保持 `JSONSchemaResponse=false`；在上游没有提供
+   可验证 capability fact 前不得开启，也不得以失败后的第二次无 format 调用伪造兼容支持。
 4. 能力不完整时 fail-fast，不使用 model pattern 或 conservative default。
 5. `effectiveMaxOutputTokens` 直接采用 selected model 能力；Responses 的 input/output/wire/SSE 上限由 context window、
    输出保留量、利用率和 token/byte 估算派生。Embedding 不使用 chat output ceiling，但必须从 catalog
@@ -42,26 +44,30 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
    后返回 wire-limit error 时，`response_byte_limit_exceeded` 必须先于 partial JSON protocol error。
 6. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
 7. ai-proxy client API key 是可选配置；catalog、Responses、stream、embedding 仅在 key 非空时发送 Bearer header，
-   空 key 不得编码成无效 `Authorization: Bearer `。Responses 与 embedding 只允许同 origin redirect；scheme/host/port
-   漂移必须在重发 prompt/input body 前以 typed protocol failure 拒绝，且最多 10 次 physical submission。注入 client 的
-   redirect callback 只能收窄策略，不能绕过 owner origin/hop guard。2xx Responses/embedding 的实际 `Content-Type`
+   空 key 不得编码成无效 `Authorization: Bearer `。Responses、stream 与 embedding 对任意 redirect 都必须在
+   重发 prompt/input body 前以 typed protocol failure 拒绝；一个 `PhysicalCallID` 恰好只授权一次 physical submission，
+   后续调用必须由 Orchestrator 以新 identity 明确授权。注入 client 的 redirect callback 不能放宽该 owner guard。
+   2xx Responses/embedding 的实际 `Content-Type`
    必须与本次声明模式一致：non-stream/embedding 接受 JSON media type，stream 只接受 `text/event-stream`；mismatch
    只解析/处置当前物理响应并返回 typed protocol failure，禁止切换 parser 后发起第二次 provider call。
 8. Runtime candidate request 只消费 Orchestrator sealed canonical state、authority transaction、manifest、C0～C5
    与可选 sealed correction；不从 action、raw reason、projection 或 provider response 重建 authority。
-9. incomplete/transient/authentication/configuration/protocol/submission-unknown 等只返回本边界 factual category 与
-   safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
-   provider request 的 closed category/class vocabulary 与穷尽映射只在 LLM `pkg/events` 维护；Orchestrator 只验证
-   sealed workspace/run/authority scope，不复制第二套 provider mapping。
+9. incomplete `DocumentOutcome` 与 transient/authentication/configuration/protocol `Feedback` 只返回本边界 factual category
+   与 safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
+   LLM 产生的 closed category/class vocabulary 与穷尽映射只在 LLM `pkg/events` 维护；submitted marker 后无 durable outcome
+   的 `provider_submission_unknown` 由 Orchestrator owner 在 fresh reload 时确定性派生，不伪造成 LLM feedback，也不重调 provider。
    非法 2xx JSON、非法 SSE framing/event、响应超限与跨 origin redirect 属于 `provider_protocol`，不得消费
    Orchestrator transport recovery budget；显式 protocol class 在 feedback 转换中不得改写为 internal。`http.Client.Do`
    返回的 endpoint-bearing `url.Error` 或自定义 transport error 必须先收敛为稳定的 timeout/cancel/DNS/TLS/network code，
    原始 error 文本不得离开 provider adapter。adapter-owned typed error 必须通过 audit-safe identity 保留精确 code
    （例如 `response_byte_limit_exceeded`、transport code 或 safe HTTP status identity）；Runtime boundary 不得从
    `Error()` 文本重新猜测该 identity，也不得以 generic `provider_request_failed` 覆盖它。
-10. complete document 只返回 strict decoded candidate/diagnostic。audit-safe original diagnostic 与 provider-safe
-    field-violation projection 分开生成，任一转换都不得覆盖另一份；raw provider body/prompt/credential/endpoint
-    不进入 Runtime aggregate、eventstream、projection、memory 或后续 request。
+10. `/llm/runtime-candidate/request` 的结果是严格互斥的 `Stale | Feedback | DocumentOutcome`，不存在顶层
+    content-only 兼容面。`DocumentOutcome` 是 LLM owner 事实：`complete_document` 必须携带与 response hash/bytes
+    一致的 opaque content，`incomplete_document | empty_document | invalid_provider_output` 禁止携带 content；共享
+    Runtime package 只保留 owner-neutral framing DTO，不能把 framing 当成 Orchestrator durable authority。
+    audit-safe original diagnostic 与 provider-safe field-violation projection 分开生成，任一转换都不得覆盖另一份；
+    raw provider body/prompt/credential/endpoint 不进入 eventstream、projection、memory 或后续 request。
 11. `Start()` 只读取一次 LLM configuration，并冻结为本 owner 的 active snapshot。配置文件 watcher 与 Web 保存
     只能改变下次进程启动使用的 persisted configuration；它们不得改变运行中的 catalog、Responses、embedding、
     provider ceiling 或 sealed-ceiling revision 校验。typed active-configuration result 同时返回 revision、DefaultChat
@@ -89,7 +95,22 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 17. 每次物理 completion、embedding 与 Runtime candidate 调用都发布一条 bounded `LLMUsageRecordedData`；preflight
     同样发布 `ProviderSubmitted=false` audit。request/response bytes 来自 adapter 实际 wire 计量，失败时不得用 schema
     长度替代。setup draft 可为 process scope，activation embedding 可为 workspace scope，Runtime 为 workspace/run scope；
-    RunID 不得脱离 WorkspaceID。
+    RunID 不得脱离 WorkspaceID。每条 audit 都携带 bounded `physicalResponseMode=streaming|non_streaming`：completion
+    采用本次实际 adapter path，transport/output-limit 也必须保真，embedding/preflight 固定 non-streaming；`streaming`
+    boolean 只能由该 enum 纯派生，下游不得按 provider/model/status 猜测。任何 submission 前的 terminal/guard failure
+    都保留 canonical `non_streaming + ProviderSubmitted=false`，不得用零值 completion 覆盖 sealed audit，也不得把仅选中
+    streaming adapter 误报为已发生物理调用。`ProviderSubmitted` 是 HTTP adapter 在调用 `http.Client.Do` 前立即设置的
+    独立事实：request bytes 只是序列化计量，禁止据此推断 submission；`Do` 一旦被调用，即使返回 transport error，
+    submitted 仍为 true，success、transport、protocol 与 output-limit 都保留 owner 实际 dispatch mode。usage
+    notification 在发布前校验失败必须使同步 command fail-closed，禁止静默丢弃 audit 后继续返回 Runtime factual result。
+    `/llm/runtime-candidate/request` 的每个 result 必须携带 canonical workspace/run echo、logical/physical request identity
+    与非空 audit；`RequestID == PhysicalCallID`，audit 的 scope/identity 必须逐项等于 result，target/context、submitted、
+    usage/actual tokens 与 physical mode 必须一致。terminal/submission 矩阵固定为：`DocumentOutcome=true`、`Stale=false`；
+    transient/authentication feedback=true；configuration feedback=true 或 false；owner-side pre-dispatch protocol guard=false、
+    provider-response protocol=true。所有 false variant 均为 `usage=nil + responseBytes=0 + non_streaming`。Runtime usage
+    notification 继续显式透传 `LogicalRequestID + PhysicalCallID`，其中 `RequestID == PhysicalCallID`；generic
+    completion/embedding 可不携带两级 identity，但禁止只携带其中一级。notification 自身在发布前重复执行同一
+    submitted/mode/bytes/tokens/context 一致性校验，缺失 audit 必须同步 fail-closed，Eventstream 只持久化 owner 已校验事实。
 18. `AcquireProviderCeilingCommand` 的timeout/temporary error只是一项owner factual failure；LLM不自行retry或创建wait。
     Orchestrator若封存bounded recoverable wait，后续probe仍必须使用相同workspace/run/authority、selection、minimum bytes与
     canonical request hash。matching result返回detached ceiling fact；stale selection/revision或非typed diagnostic不能解除wait。
@@ -115,7 +136,7 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 | `application/workorchd` | Application → LLM | active configuration/default targets、catalog、refresh、selection validation、completion/embedding | 完整；setup/activation/embedding 均使用 owner 启动快照 |
 | `kernel/orchestrator` | Orchestrator → LLM | provider ceiling、runtime capabilities/preflight/candidate request | 完整；LLM 不创建 attempt 或 authority |
 | Skill Registry / SkillHub Catalog | 无直接 I/O | Run activation 中已封存的 bounded Skill C3 snapshot/budget | 完整；LLM 不查询或解释 Registry/Catalog |
-| ai-proxy provider | LLM-private adapter | models、Responses、embedding | 完整；同 origin redirect、capacity-derived response guard |
+| ai-proxy provider | LLM-private adapter | models、Responses、embedding | 完整；POST redirect fail-closed、capacity-derived response guard |
 | `blocks/eventstream` | LLM → Eventstream | process/workspace/run scoped typed LLM usage notification | 完整；不含 raw prompt/body/credential，audit 不参与 authority |
 
 ## 非职责
@@ -138,13 +159,18 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
   SSE partial final data line 与 wire byte limit 同时命中时，稳定保留 `response_byte_limit_exceeded`，不被提前 JSON decode 改写。
 - [x] stream/non-stream `Content-Type` 与请求声明模式交叉 mismatch、两种 wire guard failure 都确认只有一次物理
   provider call，不存在 adapter fallback/replay。
-- [x] Responses/stream/embedding 跨 origin 307/308 在重发 body 前拒绝；注入 redirect callback 的同源循环仍由 owner
-  hop limit 有界终止，空 API key 不发送 Authorization。
+- [x] Responses/stream/embedding 任意 3xx 在第二次 physical submission 前拒绝；跨 origin 保留精确 protocol identity，
+  注入 redirect callback 不能放宽 owner at-most-once guard，空 API key 不发送 Authorization。
 - [x] model-derived request/output/response guard、sealed ProviderCeiling、ExpectedDocument token equality 与 catalog
   refresh 后 sealed revision 不漂移。
 - [x] provider-ceiling transient failure的exact recoverable-wait probe、普通drive/伪造lease零额外调用与matching result恢复。
-- [x] C0～C2 stable prefix、C3～C5 volatile tail、未声明 JSON Schema 能力时省略 provider format，以及 strict decoder
-  拒绝非法 complete document。
+- [x] C0～C2 stable prefix、C3～C5 volatile tail；JSON Schema 只受显式 provider capability 控制，模型名不参与推断，
+  未声明时省略 provider format，且任何 structured-output failure 都不触发第二次 provider call。
+- [x] candidate terminal framing 强制 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 hash/bytes
+  一致，所有非 complete outcome 拒绝 content-only/混合 envelope。
+- [x] completion/stream/embedding/preflight 的 physical response mode 在成功、transport failure 与 output-limit audit 中
+  保真；pre-dispatch failure 保留 `non_streaming + submitted=false`，invalid audit publication 显式 fail-closed，并由
+  Eventstream 无损持久化；durable payload 不含 raw body、prompt、credential 或 endpoint。
 - [x] completion、stream、embedding 的 deadline/cancel/DNS/TLS/generic transport，以及 400/401/429/503、malformed 2xx
   矩阵均确认不泄漏 raw body、prompt、credential、endpoint 或 transport detail；redirect protocol identity 保持 typed。
 - [x] completion/stream/embedding usage 的负数与派生 total 溢出均 fail-closed 为 typed protocol fact，结果不携带

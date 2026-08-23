@@ -49,6 +49,7 @@ import (
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -543,11 +544,11 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 				t.Errorf("encode semantic plan: %v", err)
 				return
 			}
-			result.Set(llmevents.RequestRuntimeCandidateResult{
+			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 				DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-				DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload), DocumentContent: payload,
-			}, nil)
+				DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+			}), nil)
 			return
 		}
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations {
@@ -608,9 +609,9 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 			t.Errorf("unexpected action %q for %s", command.Decision.State, focusID)
 			return
 		}
-		response.DocumentContent = runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
-		response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, response.DocumentContent)
-		result.Set(response, nil)
+		document := runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
+		response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
+		result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
 	})
 	t.Cleanup(func() {
 		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
@@ -817,11 +818,11 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 					candidate, err := runtimeGroundedTargetSequenceCandidate(command)
 					if err != nil {
 						t.Errorf("grounded sequence candidate: %v", err)
-						result.Set(llmevents.RequestRuntimeCandidateResult{
+						result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 							Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 							ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 							Feedback:             runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error()}),
-						}, nil)
+						}), nil)
 						return
 					}
 					result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
@@ -1478,9 +1479,9 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "provider must not be called for unresolved target selection",
-		})}, nil)
+		})}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	governanceRequests := 0
@@ -5829,17 +5830,17 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 			response, responseErr := runtimeFileShellGitSemanticResult(command)
 			if responseErr != nil {
 				t.Errorf("semantic candidate: %v", responseErr)
-				result.Set(llmevents.RequestRuntimeCandidateResult{
+				result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 					DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 					ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 					Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 						Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "semantic_fixture_invalid",
 						Signature: "semantic-fixture-invalid", Reason: responseErr.Error(),
 					}),
-				}, nil)
+				}), nil)
 				return
 			}
-			result.Set(response, nil)
+			result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
 			return
 		}
 		focusID, action := command.Decision.Focus.ID, command.Decision.State
@@ -5849,7 +5850,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		if candidateErr != nil {
 			t.Errorf("candidate for %s/%s: %v", focusID, action, candidateErr)
 			failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: candidateErr.Error()}
-			result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
+			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}), nil)
 			return
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
@@ -5902,7 +5903,11 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := newTestBiz(newRuntimeTestOwner(), hub, nil)
+	deliveryOwner := newRuntimeTestOwner()
+	if err := deliveryOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	delivery := newTestBiz(deliveryOwner, hub, nil)
 	if err := delivery.deliverRuntimeTerminal(ctx, aggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -6048,11 +6053,11 @@ func runtimeFileShellGitSemanticResult(command llmevents.RequestRuntimeCandidate
 	if err != nil {
 		return llmevents.RequestRuntimeCandidateResult{}, err
 	}
-	return llmevents.RequestRuntimeCandidateResult{
+	return runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 		DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 		ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload), DocumentContent: payload,
-	}, nil
+		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+	}), nil
 }
 
 func runtimeFileShellGitSemanticProposals(coverageID common.CoverageWorkItemID) ([]runtimecontract.RuntimeSemanticProofProposal, error) {
@@ -7526,7 +7531,11 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	deliveryModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
+	deliveryOwner := newRuntimeTestOwner()
+	if err := deliveryOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: restartedHub}); err != nil {
+		t.Fatal(err)
+	}
+	deliveryModule := newTestBiz(deliveryOwner, restartedHub, nil)
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
 	firstResultOwner := resultmodule.New()
@@ -7580,7 +7589,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatalf("P3/P5 Workspace replay=%+v err=%v", workspace, err)
 	}
 	finalAggregate, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || finalAggregate.StateRevision != terminalAggregate.RuntimeState.StateRevision ||
+	if err != nil || finalAggregate.StateRevision != terminalAggregate.RuntimeState.StateRevision+3 || len(finalAggregate.DeliveryAcknowledgements) != 3 ||
 		len(finalAggregate.OperationReceipts) != 1 || len(finalAggregate.Facts.Evidence.Accepted) != 1 ||
 		providerCalls != 2 || stateChangeCalls != 1 {
 		t.Fatalf("P3/P5 replay rewrote authority=%+v provider=%d stateChanges=%d err=%v", finalAggregate, providerCalls, stateChangeCalls, err)
@@ -8899,17 +8908,17 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 			response, responseErr := runtimeTwoFocusSemanticResult(command)
 			if responseErr != nil {
 				t.Errorf("two-focus semantic candidate: %v", responseErr)
-				result.Set(llmevents.RequestRuntimeCandidateResult{
+				result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 					DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 					ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 					Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 						Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "semantic_fixture_invalid",
 						Signature: "semantic-fixture-invalid", Reason: responseErr.Error(),
 					}),
-				}, nil)
+				}), nil)
 				return
 			}
-			result.Set(response, nil)
+			result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
 			return
 		}
 		focus := command.Decision.Focus
@@ -8920,7 +8929,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		if coverageID == "cwi-2" && command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange && !providerTransientInjected {
 			providerTransientInjected = true
 			response.Feedback = runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Reason: "injected provider transport interruption"})
-			result.Set(response, nil)
+			result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
 			return
 		}
 		switch command.Decision.State {
@@ -8970,9 +8979,9 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 			t.Errorf("unexpected candidate action %s", command.Decision.State)
 			return
 		}
-		response.DocumentContent = runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
-		response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, response.DocumentContent)
-		result.Set(response, nil)
+		document := runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
+		response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
+		result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
@@ -9038,6 +9047,9 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		t.Fatal(err)
 	}
 	deliveryBiz := newRuntimeTestOwner()
+	if err := deliveryBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
 	deliveryModule := newTestBiz(deliveryBiz, hub, nil)
 	if err := deliveryModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("first terminal delivery must fail before Result persistence")
@@ -9131,11 +9143,11 @@ func runtimeTwoFocusSemanticResult(command llmevents.RequestRuntimeCandidateComm
 	if err != nil {
 		return llmevents.RequestRuntimeCandidateResult{}, err
 	}
-	return llmevents.RequestRuntimeCandidateResult{
+	return runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 		DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 		ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload), DocumentContent: payload,
-	}, nil
+		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+	}), nil
 }
 
 func runtimeTwoFocusSemanticSharedTarget(command llmevents.RequestRuntimeCandidateCommand) (string, error) {
@@ -9452,12 +9464,11 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 		requestCount++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		requests = append(requests, command)
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"unexpected":true}`)),
-			DocumentContent:      []byte(`{"unexpected":true}`),
-		}, nil)
+		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
@@ -9514,9 +9525,11 @@ func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithComplete
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument)}
 		if calls == 1 {
-			response.DocumentOutcome = &runtimecontract.RuntimeProviderDocumentOutcome{
-				Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash,
-				ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte(first)), ResponseBytes: int64(len(first)), Code: "max_output_tokens", Signature: "provider-output-limit",
+			response.DocumentOutcome = &llmevents.RuntimeProviderDocumentOutcome{
+				Framing: runtimecontract.RuntimeProviderDocumentFraming{
+					Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash,
+					ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte(first)), ResponseBytes: int64(len(first)), Code: "max_output_tokens", Signature: "provider-output-limit",
+				},
 			}
 		} else {
 			if command.RequestIdentity.Sequence != 2 || command.ExpectedDocument.Hash != response.ExpectedDocumentHash || command.StablePrefixHash != prefix {
@@ -9524,9 +9537,8 @@ func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithComplete
 			}
 			document := []byte(first + second)
 			response.DocumentOutcome = runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)
-			response.DocumentContent = document
 		}
-		result.Set(response, nil)
+		result.Set(runtimeProviderResultWithAuditForTest(command, response), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
@@ -9583,12 +9595,11 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 		} else if len(persisted.CandidateRequestSessions) != 1 || !persisted.CandidateRequestSessions[0].ProviderSubmitted || persisted.CandidateRequestSessions[0].LastPhysicalCallID != command.RequestIdentity.PhysicalCallID || len(persisted.CandidateAttempts) != 0 {
 			t.Errorf("provider call did not observe committed request session without candidate attempt: %+v", persisted)
 		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
-			DocumentContent:      append([]byte(nil), document...),
-		}, nil)
+		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
@@ -9633,27 +9644,93 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 			if loadErr != nil || len(persisted.CandidateAttempts) != 0 || len(persisted.CandidateRequestSessions) != 1 || !persisted.CandidateRequestSessions[0].ProviderSubmitted {
 				t.Errorf("first transport call did not observe prepared/submitted session only: aggregate=%+v err=%v", persisted, loadErr)
 			}
-			result.Set(llmevents.RequestRuntimeCandidateResult{
+			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
-				Feedback:             runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "deadline_exceeded", Signature: "deadline-exceeded", Reason: "provider deadline exceeded"}),
-			}, nil)
+				Feedback:             runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "provider_body_idle_timeout", Signature: "provider-body-idle-timeout/exact", Reason: "provider body became idle"}),
+			}), nil)
 			return
 		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
-			DocumentContent:      append([]byte(nil), document...),
-		}, nil)
+		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 2 || calls[0].RequestIdentity.PhysicalCallID == calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil {
+	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 2 || calls[0].RequestIdentity.PhysicalCallID == calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].TransportOutcomes != 1 {
 		t.Fatalf("transport retry did not preserve request identity and candidate budget: calls=%+v aggregate=%+v", calls, completed)
+	}
+}
+
+func TestRequestAndSealRuntimeCandidateBodyIdleExhaustionReloadsWithoutProviderReplay(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	facts := runtimeAggregate(t, 1).Facts
+	facts.RecoveryPolicy.MaxProviderTransportAttempts = 1
+	state := &inMemoryRuntimeStateRepository{}
+	controller, err := runtime.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
+	continuations := memory.NewArtifactContinuationRepository()
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	if err := owner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "provider_body_idle_timeout",
+				Signature: "provider-body-idle-timeout/exact", Reason: "provider body became idle",
+			}),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	failed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassProviderTransient || failed.Facts.Failure.Code != "provider_transport_exhausted" || failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_body_idle_timeout" || failed.Facts.Failure.OriginalDiagnostic.Signature != "provider-body-idle-timeout/exact" || failed.Facts.Recovery.ProviderTransportAttempts != 1 || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
+		t.Fatalf("body-idle exhaustion did not retain atomic transport authority: calls=%d aggregate=%+v", providerCalls, failed)
+	}
+	session := failed.CandidateRequestSessions[0]
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || session.LastOutcome.Code != "provider_body_idle_timeout" || session.LastOutcome.Signature != "provider-body-idle-timeout/exact" || session.TransportOutcomes != 2 {
+		t.Fatalf("body-idle terminal session rewrote LLM fact: %+v", session)
+	}
+	reloaded, err := state.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Failure == nil || replayed.Facts.Failure.OriginalDiagnostic == nil || replayed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_body_idle_timeout" {
+		t.Fatalf("fresh body-idle terminal reload replayed provider or changed failure: calls=%d aggregate=%+v", providerCalls, replayed)
 	}
 }
 
@@ -9696,11 +9773,23 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
-	incomplete := runtimecontract.RuntimeProviderDocumentOutcome{
+	incomplete := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte(first)), ResponseBytes: int64(len(first)), Code: "max_output_tokens", Signature: "provider-output-limit",
 	}
-	pending, err := module.runtimeCandidateRequestRecoveryRequired(ctx, submitted, session.LogicalRequestID, firstPhysicalID, incomplete)
+	audit := runtimecontract.ProviderRequestAuditView{
+		RequestID: firstPhysicalID, LogicalRequestID: session.LogicalRequestID, PhysicalCallID: firstPhysicalID,
+		WorkspaceID: string(submitted.Facts.WorkspaceID), RunID: string(submitted.Facts.RunID), Status: "failed",
+		ProviderSubmitted: true, PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming, RequestBytes: 1,
+		ContextBudget: llmaudit.ContextBudget{ProviderID: "test-provider", ModelID: "test-model", ProviderSubmitted: true},
+	}
+	settlement, err := runtimeProviderBudgetSettlement(string(submitted.Facts.WorkspaceID), string(submitted.Facts.RunID), session.LogicalRequestID, firstPhysicalID, &audit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := module.runtimeCoordinateProviderRequestRecovery(ctx, submitted, session.LogicalRequestID, firstPhysicalID, runtime.RuntimeProviderRequestRecoveryInput{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, DocumentFraming: &incomplete,
+	}, settlement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9713,7 +9802,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 			t.Fatalf("restart whole-document recovery command = %+v", command)
 		}
 		document := []byte(first + `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, document), DocumentContent: document}, nil)
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, document)}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restarted := newTestBiz(owner, hub, nil)
@@ -9921,12 +10010,11 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 			ID: "prepared-restart-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
 		}}}}}
 		document := runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
-			DocumentContent:      document,
-		}, nil)
+		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
@@ -10193,8 +10281,8 @@ func TestRequestAndSealRuntimeCandidateFailsWhenDocumentRecoveryBudgetExhausted(
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		partial := []byte(`{"operations":[`)
-		outcome := runtimecontract.RuntimeProviderDocumentOutcome{Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash, ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)), Code: "max_output_tokens", Signature: "provider-output-limit"}
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: &outcome}, nil)
+		outcome := llmevents.RuntimeProviderDocumentOutcome{Framing: runtimecontract.RuntimeProviderDocumentFraming{Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: command.ExpectedDocument.Hash, ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)), Code: "max_output_tokens", Signature: "provider-output-limit"}}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: &outcome}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	failed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
@@ -10287,7 +10375,7 @@ func TestRequestAndSealRuntimeCandidateTerminatesUnknownSubmittedRequestWithoutC
 	stored := terminal.CandidateRequestSessions[0]
 	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 		stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderSubmissionUnknown ||
-		!stored.ProviderSubmitted {
+		stored.ProviderSubmitted {
 		t.Fatalf("unknown submission session = %+v", stored)
 	}
 }
@@ -10402,7 +10490,7 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Stale: &stale}, nil)
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Stale: &stale}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	invalidated, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "stable-prefix-provider-config", 0)
@@ -10426,11 +10514,24 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 		terminated.ProviderSubmitted {
 		t.Fatalf("stale request session was not terminalized without candidate debt: %+v", terminated)
 	}
+	released := 0
+	for _, allocation := range invalidated.ExecutionBudget.Allocations {
+		if allocation.LogicalConsumptionID != terminated.LogicalRequestID || allocation.ScopeRef != terminated.LastPhysicalCallID {
+			continue
+		}
+		released++
+		if allocation.State != runtimecontract.RuntimeBudgetAllocationReleased || !strings.HasPrefix(allocation.OwnerFactRef, "llm/provider-request-audit/") {
+			t.Fatalf("unsubmitted stale provider allocation was not released from the exact owner fact: %+v", allocation)
+		}
+	}
+	if released == 0 || len(invalidated.ExecutionBudget.Consumptions) != 0 {
+		t.Fatalf("unsubmitted stale result consumed provider budget: released=%d consumptions=%+v", released, invalidated.ExecutionBudget.Consumptions)
+	}
 	restarted, err := repository.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restarted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(restarted.CandidateAttempts) != 0 ||
+	if restarted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(restarted.CandidateAttempts) != 0 || len(restarted.ExecutionBudget.Consumptions) != 0 ||
 		len(restarted.CandidateRequestSessions) != 1 || restarted.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 		t.Fatalf("reload did not preserve stale session and prerequisite reacquisition: %+v", restarted)
 	}

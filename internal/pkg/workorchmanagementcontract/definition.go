@@ -13,11 +13,11 @@ type WorkspaceCreateRequest struct {
 	TemplateID           string `json:"templateId,omitempty"`
 }
 
-// WorkspaceExecutionCommandRequest contains only user-controlled scheduling
-// inputs. Goal/DoD, provider, soul and capability inputs are compiled from the
-// current Workspace owner state and therefore never enter this wire contract.
+// WorkspaceExecutionCommandRequest contains only user-authored execution
+// intent metadata. Goal/DoD, provider, soul and capability inputs are compiled
+// from the current Workspace owner state and therefore never enter this wire
+// contract.
 type WorkspaceExecutionCommandRequest struct {
-	Priority  int    `json:"priority,omitempty"`
 	RequestID string `json:"requestId,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Source    string `json:"source,omitempty"`

@@ -239,7 +239,6 @@ func TestEventHubRunRestartPublishesWorkspaceScopedFreshActivation(t *testing.T)
 		RequestID:   "request-restart-unified",
 		Reason:      "test_restart_unified",
 		Source:      "test",
-		Priority:    7,
 	}); err != nil {
 		t.Fatalf("restart err=%v", err)
 	}

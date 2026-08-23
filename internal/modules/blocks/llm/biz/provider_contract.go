@@ -7,6 +7,7 @@ import (
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
 type Provider interface {
@@ -52,6 +53,9 @@ func GenerateEmbedding(ctx context.Context, providerID string, config llmmodels.
 		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: llm provider does not implement embeddings", common.ErrInvalidArgument)
 	}
 	result, err := provider.Embed(ctx, llmmodels.ProviderEmbeddingRequest{Input: input, Model: config.Model})
+	if modeErr := validatePhysicalResponseMode(result.PhysicalResponseMode, llmaudit.PhysicalResponseModeNonStreaming); modeErr != nil {
+		return result, modeErr
+	}
 	if err != nil {
 		return result, err
 	}
@@ -60,6 +64,18 @@ func GenerateEmbedding(ctx context.Context, providerID string, config llmmodels.
 		result.Model = config.Model
 	}
 	return result, nil
+}
+
+func validatePhysicalResponseMode(actual, expected llmaudit.PhysicalResponseMode) error {
+	actual = actual.Normalized()
+	expected = expected.Normalized()
+	if err := actual.Validate(); err != nil {
+		return fmt.Errorf("%w: provider returned invalid physical response mode: %v", common.ErrInvalidArgument, err)
+	}
+	if err := expected.Validate(); err != nil || actual != expected {
+		return fmt.Errorf("%w: provider physical response mode %q does not match dispatched mode %q", common.ErrInvalidArgument, actual, expected)
+	}
+	return nil
 }
 
 func providerSupportsNonChatOperation(capabilities llmmodels.ProviderCapabilities, operation string) bool {

@@ -30,7 +30,6 @@ type serverMetrics struct {
 	dodListRequests              atomic.Uint64
 	dodGetRequests               atomic.Uint64
 	goalDoDQualityCheckRequests  atomic.Uint64
-	runCreateRequests            atomic.Uint64
 	runListRequests              atomic.Uint64
 	runGetRequests               atomic.Uint64
 	runSnapshotRequests          atomic.Uint64
@@ -41,8 +40,6 @@ type serverMetrics struct {
 	runContextBundleRequests     atomic.Uint64
 	runTaskDecompositionRequests atomic.Uint64
 	eventListRequests            atomic.Uint64
-	runStartRequests             atomic.Uint64
-	runResumeRequests            atomic.Uint64
 	workspaceActivationRequests  atomic.Uint64
 	decisionListRequests         atomic.Uint64
 	decisionGetRequests          atomic.Uint64
@@ -77,10 +74,8 @@ type serverMetrics struct {
 	runFailed                    atomic.Uint64
 	runRejected                  atomic.Uint64
 	runCanceled                  atomic.Uint64
-	convergenceRepairAttempts    atomic.Uint64
 	runtimeMetricsMu             sync.Mutex
 	observedTerminalStates       map[string]struct{}
-	observedRepairAttempts       map[string]int
 	observedRuntimeDrives        map[string]runtimeDriveMetric
 	executionAdmissionMetrics    *executionAdmissionMetrics
 }
@@ -99,9 +94,9 @@ type runtimeDriveMetric struct {
 }
 
 // observeRunState is an SM-4 observer only. The Run owner/eventstream own the
-// source state; this process-local method deduplicates terminal snapshots and
-// derives monotonic repair deltas without resuming or writing any owner state.
-func (m *serverMetrics) observeRunState(workspaceID, runID, state string, runtimeRevision uint64, repairAttempts int) {
+// source state; this process-local method only deduplicates terminal snapshots.
+// Convergence counters are rendered from the canonical projection snapshot.
+func (m *serverMetrics) observeRunState(workspaceID, runID, state string, runtimeRevision uint64) {
 	if m == nil || strings.TrimSpace(runID) == "" {
 		return
 	}
@@ -111,14 +106,7 @@ func (m *serverMetrics) observeRunState(workspaceID, runID, state string, runtim
 	if m.observedTerminalStates == nil {
 		m.observedTerminalStates = make(map[string]struct{})
 	}
-	if m.observedRepairAttempts == nil {
-		m.observedRepairAttempts = make(map[string]int)
-	}
 	runKey := strings.TrimSpace(workspaceID) + "/" + strings.TrimSpace(runID)
-	if repairAttempts > m.observedRepairAttempts[runKey] {
-		m.convergenceRepairAttempts.Add(uint64(repairAttempts - m.observedRepairAttempts[runKey]))
-		m.observedRepairAttempts[runKey] = repairAttempts
-	}
 	if !terminalRunState(state) {
 		return
 	}

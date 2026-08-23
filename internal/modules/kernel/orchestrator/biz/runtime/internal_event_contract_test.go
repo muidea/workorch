@@ -86,7 +86,7 @@ func TestRuntimeInternalFactsStayWithinStateMachineFences(t *testing.T) {
 			runtimeInternalEventPayloadTransaction: eventcontract.StateMachineSM3,
 			runtimeInternalEventPayloadDelivery:    eventcontract.StateMachineSM4,
 		}[payloadClass]
-		if kind == RuntimeInternalEventCandidateRequestRecoveryRequired {
+		if kind == RuntimeInternalEventProviderRequestRecoveryCoordinated {
 			want = eventcontract.StateMachineSM4
 		}
 		if metadata.StateMachine != want {

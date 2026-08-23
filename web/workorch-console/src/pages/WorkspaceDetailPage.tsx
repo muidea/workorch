@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatButton, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
+import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatButton, Form, Input, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
@@ -21,7 +21,7 @@ const {
   llmContextBudgetCard, llmUsageCard, memoryRecallCard,
   memoryRefIDs, mergeById, metricGrid, numberText, percentText,
   outputText, pendingCount, primaryAcceptedResult, primaryResult,
-  runOutcomeState, runPriority, runRawState, runStateSummary, runtimeArtifactPageLimit,
+	runOutcomeState, runRawState, runStateSummary, runtimeArtifactPageLimit,
   runtimeCapabilityTable, runtimeCheckpointPageLimit, runtimeDetailActions,
   runtimeEventPageLimit, runtimePatchPageLimit, runtimeRawRefActions, runtimeResultPageLimit,
   runtimeStepPageLimit, runtimeTarget, runtimeToolCallPageLimit, runtimeValidationPageLimit,
@@ -850,8 +850,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     activationForm.resetFields();
     message.info(commandIntent === 'restart' ? '正在保存 fresh activation 配置并提交新执行' : '正在提交当前 Run 的恢复意图');
     void prepareOwnerState
-      .then(() => workorchApi.submitWorkspaceExecution(targetWorkspaceId, { intent: commandIntent, priority: request.priority }))
-      .then(async () => {
+		.then(() => workorchApi.submitWorkspaceExecution(targetWorkspaceId, { intent: commandIntent }))
+      .then(async (admission) => {
+        if (!admission.accepted) {
+          await loadWorkspaceContext(targetWorkspaceId);
+          message.error(`Workspace owner 拒绝执行意图：${admission.diagnostic || admission.reason}`);
+          return;
+        }
         setWorkspaceProjection(undefined);
         setRunSnapshot(undefined);
         setRunObservability(undefined);
@@ -881,10 +886,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         setRunArtifactHasMore(false);
         setContextBundle(undefined);
         await loadWorkspaceContext(targetWorkspaceId);
-        message.success(commandIntent === 'restart' ? '新执行意图已进入后台 admission 队列' : '恢复意图已进入后台 admission 队列');
+        message.success(commandIntent === 'restart' ? 'Workspace owner 已受理新执行意图' : 'Workspace owner 已受理恢复意图');
       })
       .catch((error: unknown) => {
-        message.error(errorMessage(error));
+        message.error(`工作空间执行提交失败：${errorMessage(error)}`);
       })
       .finally(() => {
         setActivationLoading(false);
@@ -909,12 +914,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         reasoningEffort,
         llmTargetKey: helpers.providerModelTargetKey(target?.providerId, target?.modelId),
         soulId: soulBindings?.defaultSoulId,
-        soulBindings: { ...(soulBindings?.bindings ?? {}) },
-        intent,
-        priority: 0
-      });
-    } else {
-      activationForm.setFieldsValue({ intent, priority: 0 });
+		soulBindings: { ...(soulBindings?.bindings ?? {}) },
+		intent
+	  });
+	} else {
+	  activationForm.setFieldsValue({ intent });
     }
     setActivationOpen(true);
   };
@@ -964,8 +968,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     { title: '目标', dataIndex: 'goalId', copyable: true },
     { title: '验收标准', dataIndex: 'doDId', copyable: true },
     { title: '封存模型目标', render: (_, item) => providerModelTargetLabel(item.sealedLLMSelection), ellipsis: true },
-    { title: '优先级', render: (_, item) => runPriority(item), width: 100 },
-    { title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+	{ title: '状态', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
     { title: '阻塞工单', dataIndex: 'blockingTicketId', copyable: true },
     {
       title: '操作',
@@ -2383,9 +2386,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               </div>
             </>
           )}
-          <Form.Item name="priority" label="运行队列优先级">
-            <InputNumber style={{ width: '100%' }} placeholder="0 = 队列默认优先级" />
-          </Form.Item>
         </Form>
       </Modal>
       <FloatButton.BackTop className="workspace-back-top" visibilityHeight={240} tooltip="返回顶部" />

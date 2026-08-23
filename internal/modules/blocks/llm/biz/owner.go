@@ -50,9 +50,10 @@ type Dependencies struct {
 }
 
 type providerExecutionMetadata struct {
-	Target    runtimecontract.ProviderModelTarget
-	Profile   llmmodels.ResolvedProviderModelProfile
-	Submitted bool
+	Target               runtimecontract.ProviderModelTarget
+	Profile              llmmodels.ResolvedProviderModelProfile
+	PhysicalResponseMode llmaudit.PhysicalResponseMode
+	Submitted            bool
 }
 
 type providerCommandExecution struct {
@@ -251,7 +252,10 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 			audit.Operation = "runtime_semantic_plan_preflight"
 		}
 	}
-	m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass)
+	if err := m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass); err != nil {
+		setPrerequisiteMagicError(result, err)
+		return
+	}
 	feedback, feedbackErr := runtimeProviderPreflightFeedback(command, preflightErr)
 	if feedbackErr != nil {
 		setPrerequisiteMagicError(result, feedbackErr)
@@ -353,51 +357,81 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 			status = llmmodels.RuntimeCandidateStatusFailed
 		}
 		if stale := llmruntime.CandidatePrerequisiteStaleFromError(err); stale != nil {
-			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
-			result.Set(llmevents.RequestRuntimeCandidateResult{
+			if auditErr := m.publishLLMUsageRecorded(event.Context(), audit, usage, status, ""); auditErr != nil {
+				setPrerequisiteMagicError(result, auditErr)
+				return
+			}
+			candidateResult := llmevents.RequestRuntimeCandidateResult{
+				WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 				Stale:                stale,
 				Audit:                providerRequestAuditView(audit),
 				Usage:                usage,
-			}, nil)
+			}
+			if validateErr := candidateResult.Validate(); validateErr != nil {
+				setPrerequisiteMagicError(result, validateErr)
+				return
+			}
+			result.Set(candidateResult, nil)
 			return
 		}
 		failure := llmruntime.CandidateFailureFromError(err)
-		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
+		if auditErr := m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class)); auditErr != nil {
+			setPrerequisiteMagicError(result, auditErr)
+			return
+		}
 		feedback, feedbackErr := runtimeProviderRequestFeedback(command, failure)
 		if feedbackErr != nil {
 			setPrerequisiteMagicError(result, feedbackErr)
 			return
 		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		candidateResult := llmevents.RequestRuntimeCandidateResult{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			Feedback:             &feedback,
 			Audit:                providerRequestAuditView(audit),
 			Usage:                usage,
-		}, nil)
+		}
+		if validateErr := candidateResult.Validate(); validateErr != nil {
+			setPrerequisiteMagicError(result, validateErr)
+			return
+		}
+		result.Set(candidateResult, nil)
 		return
 	}
 	if status == "" {
 		status = llmmodels.RuntimeCandidateStatusCompleted
 	}
-	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
-	var documentOutcome *runtimecontract.RuntimeProviderDocumentOutcome
+	if auditErr := m.publishLLMUsageRecorded(event.Context(), audit, usage, status, ""); auditErr != nil {
+		setPrerequisiteMagicError(result, auditErr)
+		return
+	}
+	var documentOutcome *llmevents.RuntimeProviderDocumentOutcome
 	if response.DocumentOutcome != nil {
-		value := response.DocumentOutcome.Normalized()
+		observation := response.DocumentOutcome.Normalized()
+		value := llmevents.RuntimeProviderDocumentOutcome{
+			Framing: observation.Framing,
+			Content: append([]byte(nil), observation.Content...),
+		}
 		documentOutcome = &value
 	}
-	result.Set(llmevents.RequestRuntimeCandidateResult{
+	candidateResult := llmevents.RequestRuntimeCandidateResult{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		Transaction:          response.Transaction,
 		DocumentKind:         response.DocumentKind,
 		RequestIdentity:      command.RequestIdentity,
 		ExpectedDocumentHash: response.ExpectedDocumentHash,
-		DocumentContent:      append([]byte(nil), response.DocumentContent...),
 		DocumentOutcome:      documentOutcome,
 		Audit:                providerRequestAuditView(audit),
 		Usage:                usage,
-	}, nil)
+	}
+	if validateErr := candidateResult.Validate(); validateErr != nil {
+		setPrerequisiteMagicError(result, validateErr)
+		return
+	}
+	result.Set(candidateResult, nil)
 }
 
 func cloneRuntimeSemanticCorrectionDirective(value *runtimecontract.RuntimeSemanticCorrectionDirective) *runtimecontract.RuntimeSemanticCorrectionDirective {
@@ -476,9 +510,12 @@ func runtimeCandidateCommandScopeValid(kind runtimecontract.RuntimeProviderDocum
 	}
 }
 
-func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.ProviderRequestAudit, usage *llmaudit.ProviderUsage, status, failureClass string) {
-	if m == nil || m.EventHub() == nil || audit == nil {
-		return
+func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.ProviderRequestAudit, usage *llmaudit.ProviderUsage, status, failureClass string) error {
+	if audit == nil {
+		return fmt.Errorf("%w: LLM usage audit is required", common.ErrInvalidArgument)
+	}
+	if m == nil || m.EventHub() == nil {
+		return fmt.Errorf("%w: LLM usage audit publisher is not configured", common.ErrInvalidArgument)
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -495,6 +532,8 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 	}
 	data := llmevents.LLMUsageRecordedData{
 		RequestID:             audit.RequestID,
+		LogicalRequestID:      audit.LogicalRequestID,
+		PhysicalCallID:        audit.PhysicalCallID,
 		WorkspaceID:           common.WorkspaceID(audit.WorkspaceID),
 		RunID:                 common.RunID(audit.RunID),
 		StepID:                audit.StepID,
@@ -506,6 +545,7 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 		Kind:                  audit.Kind,
 		APISurface:            audit.APISurface,
 		Provider:              audit.Provider,
+		PhysicalResponseMode:  audit.PhysicalResponseMode,
 		ProviderSubmitted:     audit.ProviderSubmitted,
 		Status:                status,
 		FailureClass:          failureClass,
@@ -533,6 +573,9 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 		data.Estimated = true
 		data.UsageSource = modulecommon.UsageSourceEstimated
 	}
+	if err := data.Validate(); err != nil {
+		return fmt.Errorf("%w: invalid LLM usage audit: %v", common.ErrInvalidArgument, err)
+	}
 	event := magicevent.NewEventWithContext(
 		llmevents.TopicLLMUsageRecorded,
 		ModuleID,
@@ -549,6 +592,7 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 		StepID:      audit.StepID,
 	}))
 	m.PostEvent(event)
+	return nil
 }
 
 func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecontract.ProviderRequestAuditView {
@@ -557,6 +601,8 @@ func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecon
 	}
 	return &runtimecontract.ProviderRequestAuditView{
 		RequestID:             audit.RequestID,
+		LogicalRequestID:      audit.LogicalRequestID,
+		PhysicalCallID:        audit.PhysicalCallID,
 		WorkspaceID:           audit.WorkspaceID,
 		RunID:                 audit.RunID,
 		StepID:                audit.StepID,
@@ -568,6 +614,7 @@ func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecon
 		Kind:                  audit.Kind,
 		APISurface:            audit.APISurface,
 		Provider:              audit.Provider,
+		PhysicalResponseMode:  audit.PhysicalResponseMode,
 		ContextBudget:         providerContextBudgetAudit(audit.ContextBudget),
 		ProviderSubmitted:     audit.ProviderSubmitted,
 		Status:                audit.Status,
@@ -826,7 +873,10 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		status = llmmodels.RuntimeCandidateStatusFailed
 		failureClass = string(runtimeCandidateProviderFailureClass(err, execution.Audit != nil && execution.Audit.ProviderSubmitted))
 	}
-	m.publishLLMUsageRecorded(ev.Context(), execution.Audit, execution.Usage, status, failureClass)
+	if auditErr := m.publishLLMUsageRecorded(ev.Context(), execution.Audit, execution.Usage, status, failureClass); auditErr != nil {
+		setLLMMagicError(result, auditErr)
+		return
+	}
 	setLLMMagicResult(result, execution.Result, err)
 }
 
@@ -875,6 +925,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, err
 		startedAt := time.Now().UTC()
 		completion, metadata, err := m.completeProvider(ctx, cmd.Target, request)
 		audit := providerCommandAudit(request, metadata, completion.RequestBytes, completion.ResponseBytes, startedAt, time.Now().UTC(), err)
+		applyProviderUsageToAudit(audit, completion.Usage)
 		execution := providerCommandExecution{
 			Result: llmevents.LLMCommandResult{Target: metadata.Target, Completion: llmCompletionEventData(completion)},
 			Audit:  audit,
@@ -892,6 +943,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, err
 		startedAt := time.Now().UTC()
 		embedding, metadata, err := m.generateEmbedding(ctx, cmd.Target, cmd.Input)
 		audit := providerEmbeddingAudit(cmd, metadata, embedding.RequestBytes, embedding.ResponseBytes, startedAt, time.Now().UTC(), err)
+		applyProviderUsageToAudit(audit, embedding.Usage)
 		execution := providerCommandExecution{
 			Result: llmevents.LLMCommandResult{Target: metadata.Target, Embedding: &embedding},
 			Audit:  audit,
@@ -912,6 +964,13 @@ func cloneProviderUsage(usage *llmaudit.ProviderUsage) *llmaudit.ProviderUsage {
 	}
 	ret := *usage
 	return &ret
+}
+
+func applyProviderUsageToAudit(audit *llmmodels.ProviderRequestAudit, usage *llmaudit.ProviderUsage) {
+	if audit == nil || audit.ContextBudget == nil || usage == nil {
+		return
+	}
+	audit.ContextBudget.ActualTokens = usage.TotalTokens
 }
 
 func providerCommandAudit(request llmmodels.ProviderRequest, metadata providerExecutionMetadata, requestBytes, responseBytes int, startedAt, completedAt time.Time, callErr error) *llmmodels.ProviderRequestAudit {
@@ -935,6 +994,7 @@ func providerCommandAudit(request llmmodels.ProviderRequest, metadata providerEx
 		Kind:                  firstNonEmpty(strings.TrimSpace(request.Kind), "provider_completion"),
 		APISurface:            metadata.Profile.APISurface,
 		Provider:              metadata.Target.ProviderID,
+		PhysicalResponseMode:  canonicalProviderPhysicalResponseMode(metadata),
 		ContextBudget:         budget,
 		ProviderSubmitted:     metadata.Submitted,
 		Status:                status,
@@ -965,6 +1025,7 @@ func providerEmbeddingAudit(command llmevents.GenerateEmbeddingCommand, metadata
 		Kind:                  "provider_embedding",
 		APISurface:            metadata.Profile.APISurface,
 		Provider:              metadata.Target.ProviderID,
+		PhysicalResponseMode:  llmaudit.PhysicalResponseModeNonStreaming,
 		ContextBudget:         budget,
 		ProviderSubmitted:     metadata.Submitted,
 		Status:                status,
@@ -1030,7 +1091,7 @@ func setLLMMagicError(result magicevent.Result, err error) {
 }
 
 func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.ProviderModelTarget, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, providerExecutionMetadata, error) {
-	metadata := providerExecutionMetadata{Target: target.Normalized()}
+	metadata := providerExecutionMetadata{Target: target.Normalized(), PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming}
 	if m == nil {
 		return llmmodels.ProviderCompletionResult{}, metadata, common.ErrInvalidArgument
 	}
@@ -1074,43 +1135,51 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 		if !ok {
 			return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
 		}
+		metadata.PhysicalResponseMode = llmaudit.PhysicalResponseModeStreaming
 		completion, err = streaming.StreamComplete(ctx, request, func(llmmodels.ProviderStreamEvent) error { return nil })
 	} else {
+		metadata.PhysicalResponseMode = llmaudit.PhysicalResponseModeNonStreaming
 		completion, err = provider.Complete(ctx, request)
 	}
-	metadata.Submitted = completion.RequestBytes > 0
+	metadata.Submitted = completion.ProviderSubmitted
+	if modeErr := validatePhysicalResponseMode(completion.PhysicalResponseMode, canonicalProviderPhysicalResponseMode(metadata)); modeErr != nil {
+		return completion, metadata, modeErr
+	}
+	metadata.PhysicalResponseMode = completion.PhysicalResponseMode.Normalized()
 	if err != nil {
 		return completion, metadata, err
 	}
 	return completion, metadata, nil
 }
 
-func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling runtimecontract.ProviderCeiling, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling runtimecontract.ProviderCeiling, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, providerExecutionMetadata, error) {
+	metadata := providerExecutionMetadata{PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming}
 	if m == nil {
-		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
+		return llmmodels.ProviderCompletionResult{}, metadata, common.ErrInvalidArgument
 	}
 	ceiling = ceiling.Normalized()
+	metadata.Target = ceiling.Selection.Target
 	if err := ceiling.Validate(); err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
 	if model := strings.TrimSpace(request.Model); model != "" && model != ceiling.Selection.Target.ModelID {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider request model %q conflicts with sealed ceiling model %q", common.ErrInvalidArgument, model, ceiling.Selection.Target.ModelID)
+		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider request model %q conflicts with sealed ceiling model %q", common.ErrInvalidArgument, model, ceiling.Selection.Target.ModelID)
 	}
 	cfg, err := m.activeConfiguration()
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
 	runtime, profile, err := ResolveProviderClientForSealedCeiling(cfg, ceiling)
 	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, err
+		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
-	_ = profile
+	metadata.Profile = profile
 	if request.MaxOutputTokens > 0 && request.MaxOutputTokens < runtime.InferenceProfile.MaxOutputTokens {
 		runtime.InferenceProfile.MaxOutputTokens = request.MaxOutputTokens
 	}
 	provider := NewProviderFromConfig(runtime)
 	if provider == nil {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
 	}
 	request.Model = ceiling.Selection.Target.ModelID
 	request.ReasoningEffort = ceiling.Selection.ReasoningEffort
@@ -1129,25 +1198,33 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	if runtime.Capabilities.Streaming {
 		streaming, ok := provider.(StreamingProvider)
 		if !ok {
-			return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
+			return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
 		}
+		metadata.PhysicalResponseMode = llmaudit.PhysicalResponseModeStreaming
 		completion, err = streaming.StreamComplete(ctx, request, func(llmmodels.ProviderStreamEvent) error { return nil })
 	} else {
 		completion, err = provider.Complete(ctx, request)
 	}
+	metadata.Submitted = completion.ProviderSubmitted
+	if modeErr := validatePhysicalResponseMode(completion.PhysicalResponseMode, canonicalProviderPhysicalResponseMode(metadata)); modeErr != nil {
+		return completion, metadata, modeErr
+	}
 	if err != nil {
-		return completion, err
+		return completion, metadata, err
+	}
+	if !metadata.Submitted {
+		return completion, metadata, fmt.Errorf("%w: provider completion did not report physical request submission", common.ErrInvalidArgument)
 	}
 	request.ContextBudget.ProviderSubmitted = true
 	if completion.Usage != nil {
 		request.ContextBudget.ActualTokens = completion.Usage.TotalTokens
 	}
-	return completion, nil
+	return completion, metadata, nil
 }
 
 func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.ProviderModelTarget, input string) (llmmodels.ProviderEmbeddingResult, providerExecutionMetadata, error) {
 	target = target.Normalized()
-	metadata := providerExecutionMetadata{Target: target}
+	metadata := providerExecutionMetadata{Target: target, PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming}
 	input = strings.TrimSpace(input)
 	if err := target.Validate(); err != nil || input == "" {
 		return llmmodels.ProviderEmbeddingResult{}, metadata, common.ErrInvalidArgument
@@ -1169,7 +1246,7 @@ func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.Prov
 		return llmmodels.ProviderEmbeddingResult{}, metadata, err
 	}
 	result, err := GenerateEmbedding(ctx, target.ProviderID, runtime, input)
-	metadata.Submitted = result.RequestBytes > 0
+	metadata.Submitted = result.ProviderSubmitted
 	return result, metadata, err
 }
 

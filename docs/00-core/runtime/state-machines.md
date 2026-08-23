@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## 四个协调状态机
 
@@ -19,10 +19,10 @@ active -> completed | failed | cancelled | superseded
   reducer 中决定 `pending -> active` 或匹配 blocker 的 `blocked -> active`，成功后才发布 Run state fact。
 - terminal 不可变。继续未完成工作只能由产品层显式创建新的 typed activation / Run，并保存
   predecessor lineage；不允许自动 successor。
-- `fresh_activation_required` 是 Run owner 对不可读 opaque aggregate 的非终态行政结果。普通 Resume 只返回
-  non-resumable fact，不可 drive；用户明确 restart 时，它只作为 Run-owned replacement/administrative termination 的
-  原因，仍复用 SM-4 `Result -> Workspace -> Run` delivery。Workspace release 前不存在 successor；旧 aggregate 不执行
-  schema migration，新 successor 由 Run owner 从 persisted replacement intent 创建并保存 lineage。
+- 对非 current-baseline、不可读的 opaque aggregate，Resume 只返回 `fresh_activation_required`，Restart 只返回
+  `data_reset_required`；二者都不得 drive 旧 aggregate、创建 `ReplacementIntent`、触发 terminal delivery 或创建 successor。
+  当前开发基线不迁移旧 schema，必须先清理不兼容数据。只有 current-baseline Run 的显式 Restart 才能持久化
+  Run-owned replacement intent，经 SM-4 `Result -> Workspace -> Run` delivery 释放 Workspace 后创建唯一 successor 并保存 lineage。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化
   `RuntimeTerminationRecord`。
@@ -129,9 +129,16 @@ sealed authority + preflight ready
 ```
 
 - request session 必须先绑定 transaction、definition/evidence revision、required-output hash、expected-document
-  identity、stable-prefix hash 和 logical request identity。EOF、output limit、timeout、429/5xx、401/403 与未知提交
-  走 session/provider recovery，不消耗 candidate 或 repair budget。恢复只能重新请求同一有界完整 document；历史 raw
-  output 只作 owner audit，不得拼接成 authority document。
+  identity、stable-prefix hash 和 logical request identity。EOF、output limit、timeout、429/5xx 等允许恢复的事实走
+  session/provider recovery；401/403、configuration/protocol、未知提交和 document recovery 耗尽走 terminal，不消耗 candidate 或
+  repair budget。恢复只能重新请求同一有界完整 document；历史 raw output 只作 owner audit，不得拼接成 authority document。
+- provider terminal 是明确的 SM-3→SM-2 owner-local transaction：唯一 normalized fact 必须在一次 aggregate CAS 中同时
+  关闭 request session 与应用 exact failure。不得恢复“先 terminal session、后 failure”的双 CAS；fresh reload 对缺少
+  matching failure 的 torn terminal fail-closed，对 submitted-without-outcome 只封存 unknown 且零 provider replay。
+- LLM result 的 `providerSubmitted` 是 physical-call 唯一事实，Orchestrator 不从 request bytes/response mode 推断。
+  每个 result 先形成 owner-private budget settlement；stale、document-complete、recoverable 或 terminal transition 必须在其
+  同一次 aggregate CAS 中应用 settlement。recoverable CAS 还原子消费适用的 SM-4 transport guard，并在耗尽时应用 SM-2
+  failure；released/unknown settlement 不能授权下一 physical call。
 - request session、authority transaction、canonical state/required output、`DocumentKind`、ExpectedDocument、provider
   ceiling、reasoning effort、budget和stable-prefix identity共同构成purpose-bound semantic invocation seal。它实现产品层
   semantic activation要求，但不是新owner、第五状态机或`RuntimeBootstrap.Activation`替代物。

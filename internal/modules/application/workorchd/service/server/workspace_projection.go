@@ -140,20 +140,6 @@ func (s *serverState) deleteProjectedWorkspace(workspaceID string) {
 	s.workspaceProjectionWriter.DeleteWorkspace(workspaceID)
 }
 
-func (s *serverState) applyProjectedRunCommandAccepted(update workspaceviewcore.RunCommandAcceptedUpdate) bool {
-	if s == nil || s.workspaceProjectionWriter == nil {
-		return false
-	}
-	return s.workspaceProjectionWriter.ApplyRunCommandAccepted(update)
-}
-
-func (s *serverState) applyProjectedRunCommandRejected(update workspaceviewcore.RunCommandRejectedUpdate) bool {
-	if s == nil || s.workspaceProjectionWriter == nil {
-		return false
-	}
-	return s.workspaceProjectionWriter.ApplyRunCommandRejected(update)
-}
-
 func (s *serverState) rebuildProjectedWorkspace(ctx context.Context, workspaceID string) {
 	if s == nil || s.workspaceProjectionWriter == nil || workspaceID == "" {
 		return

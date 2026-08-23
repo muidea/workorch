@@ -25,7 +25,6 @@ type WorkspaceExecutionIntentCommand struct {
 	DoDID              common.DoDID
 	DefinitionRevision string
 	StartupInputHash   string
-	Priority           int
 	Bootstrap          *runtimecontract.RuntimeBootstrap
 }
 

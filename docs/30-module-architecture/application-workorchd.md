@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -69,15 +69,29 @@ records is bounded read-side behavior, not Orchestrator Runtime or an authority 
 Projection consumes immutable Eventstream/Orchestrator/owner/execution observations。Its cache/store can rebuild, but derived
 writes and deletion remain application-owned and cannot mutate owner aggregates。
 
-Execution admission has no independent lifecycle or queue. HTTP returns `202` only after synchronous Workspace-owner admission;
+Execution admission has no independent lifecycle or queue. HTTP returns `202` only for synchronous Workspace-owner
+`reconciliation_requested|replacement_pending`; the other five canonical results return typed `409` with the same identity、
+exact `outcome` and `admissionReason`.
 owner rejection is returned by that request, and duplicate identity is always delegated to the owner persistence contract. The
 setup-draft response state and terminal acceptance presentation are pure projections of their source facts, never separately
 persisted transition authority. Its only workspace-scoped admission observation is the latest immutable owner outcome in
 `snapshot.runCommand`: `accepted` has only `acceptedAt`, `rejected` has only `rejectedAt`, and both retain exact request/scope
-identity. Replacing this read-side observation when a later command completes does not create an application state machine。
+identity、owner `outcome` 与 `admissionReason`。唯一写入口
+`ApplyWorkspaceExecutionAdmission(command metadata, exact RuntimeExecutionIntentAdmission)` 先校验 exact owner fact，再经共享
+`PresentAdmission` 纯派生 `state`、`diagnostic` 与互斥时间戳；caller 不提供 state 或 revision，Store 在同一锁事务中
+把 `advanceEntryRevision` 结果写入 entry 与 runCommand。canonical 字段仅为
+`workspaceId/runId/state/intent/requestId/requestReason/source/outcome/admissionReason/diagnostic/acceptedAt|rejectedAt/revision`，
+不存在 `disposition`、歧义 `reason`、`error`、`definitionRevision` 或 `decisionId` shadow。transport/context failure 不生成
+runCommand；caller priority 不存在。
+Replacing this read-side observation when a later command completes does not create an application state machine。
 Monotonic accepted/rejected/failure counters may summarize requests, but readyz、metrics and snapshots不得保存可迁移的
 scheduler/admission lifecycle。Workorchd does not expose continuation state、scheduler/watchdog diagnostics、recovery
 readback or a transition from any diagnostic into an owner command。
+LLM usage read model 原样投影 Eventstream 中的 optional `logicalRequestId`/`physicalCallId`，并只消费 bounded
+`physicalResponseMode` 与 `providerSubmitted` owner audit。新 Runtime usage 的两级身份必须完整且
+`physicalCallId=requestId`；历史或 generic 记录允许两者都没有，但不得从 request bytes、streaming 或其他字段推断。
+旧 `streaming` 是 mode 的兼容派生，不是第二份状态。非法或缺失 current physical audit 被拒绝，不能默认为
+non-streaming/unsubmitted。
 
 Lifecycle ordering is:
 

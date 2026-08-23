@@ -925,7 +925,8 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 			Summary:       projectioncontract.AcceptanceSummary{OpenSlices: 1},
 		},
 		RunCommand: &projectioncontract.RunCommandStatus{
-			WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", Reason: "old",
+			WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", RequestReason: "old",
+			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
 		},
 		ConvergenceStatus: &projectioncontract.ConvergenceStatus{
 			WorkspaceID: "ws-fr02", RunID: "run-1", CurrentFocusID: "f1", DecisionCause: "old",
@@ -1008,14 +1009,15 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		t.Fatalf("ConvergenceStatus not applied: %+v", m.convergenceStatus)
 	}
 
-	// Mutate RunCommand.Reason
+	// Mutate RunCommand.RequestReason.
 	m.applyWorkspaceRuntimeView(base, true)
 	rc := base
 	rc.RunCommand = &projectioncontract.RunCommandStatus{
-		WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", Reason: "new-cmd",
+		WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", RequestReason: "new-cmd",
+		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
 	}
 	m.applyWorkspaceRuntimeView(rc, false)
-	if m.runCommand == nil || m.runCommand.Reason != "new-cmd" {
+	if m.runCommand == nil || m.runCommand.RequestReason != "new-cmd" {
 		t.Fatalf("RunCommand not applied: %+v", m.runCommand)
 	}
 

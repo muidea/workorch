@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -43,12 +43,16 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 Acceptance must prove:
 
 - only `resume` and `restart` are admitted; empty intent normalizes to `resume`;
-- body fields are limited to `priority`, `requestId`, `reason`, `source`, `intent`;
+- body fields are limited to `requestId`, `reason`, `source`, `intent`; retired body/query/header Run priority is absent and rejected or ignored as non-authority according to protocol shape;
 - `runId`, Goal/DoD content, provider selection and raw Runtime contract fields are rejected;
-- the handler waits for a concrete, scope-matched Workspace-owner result; only then does `202` carry normalized request metadata;
-- `202` means owner admission, never application-local queue admission; no `queued`/`queuedAt` projection is produced;
+- the handler waits for a concrete, scope-matched Workspace-owner result and returns its exact workspace/run/request/intent/outcome/reason identity;
+- only `reconciliation_requested|replacement_pending` map to `202 accepted`; the other five canonical outcomes map to typed
+  `409 rejected`. A single pure classifier supplies HTTP status and `accepted|rejected` display state to HTTP and projection;
+  client/Web/TUI consume that classification without reinterpreting outcomes;
+- `202` means owner acceptance, never application-local queue admission; no `queued`/`queuedAt` projection is produced;
 - a validated owner rejection outcome is returned synchronously and recorded only as a derived rejected observation, never as an owner state rewrite; context/transport/bootstrap/result-contract failures have no owner outcome and therefore return synchronously without writing `runCommand`;
-- workspace snapshot只投影最新的immutable `runCommand` owner outcome：state恰为`accepted|rejected`，scope/request identity
+- workspace snapshot只投影最新的immutable `runCommand` owner outcome：state恰为`accepted|rejected`，exact
+  `outcome/admissionReason` 与 scope/request identity
   保持一致，且`acceptedAt`/`rejectedAt`互斥；readyz不得暴露另一份 admission/scheduler diagnostic state；
 - server配置必须在active/persisted读取以及任一配置更新前拒绝unknown/retired execution scheduler与stale-dispatch watchdog字段，失败更新不得改写原文件；并发压测只观察客户端并发和owner Run事实，不能读取application run limit；
 - the same workspace/request is submitted to the owner on every call; `requestId` is the carried identity, and Application不得拼装或投影第二份`idempotencyKey`; durable idempotency and payload-conflict detection remain with Workspace/Run;
@@ -85,7 +89,8 @@ The workorchd server package test suite is the in-process HTTP baseline. It cove
 - Workspace/Goal/DoD scope validation and owner-generated identity;
 - pre-seal candidate、all-of admission、两类Definition clarification的scope/action/revision isolation；
 - workspace LLM selection completeness, CAS revision and scope isolation;
-- synchronous execution admission, no pre-owner response/queued projection, request-id projection, owner rejection and restart intent;
+- seven-outcome synchronous execution admission, no pre-owner response/queued projection, exact request/outcome/reason projection,
+  typed `409` owner rejection, local/remote parity and restart intent;
 - Decision/Approval single and batch resolution;
 - 两类Definition clarification ticket在通用Decision resolution中均被拒绝；static corrected admission与Runtime corrected
   Definition + Restart分别走各自专用owner binding；

@@ -63,8 +63,8 @@ func newWorkspaceNotificationRecorder(t *testing.T) (magicevent.Hub, *workspaceN
 	return hub, recorder
 }
 
-func newGoalDoDManagerWithHub(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository, hub magicevent.Hub) *GoalDoDManager {
-	return NewGoalDoDManagerWithPublisher(workspaces, goals, dods, hub.Post)
+func newGoalDoDManagerWithHub(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository, hub magicevent.Hub) *goalDoDManager {
+	return newGoalDoDManagerWithPublisher(workspaces, goals, dods, hub.Post)
 }
 
 func (r *workspaceNotificationRecorder) wait(t *testing.T, count int) []recordedWorkspaceNotification {
@@ -88,7 +88,7 @@ func (r *workspaceNotificationRecorder) wait(t *testing.T, count int) []recorded
 func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository())
+	manager := newGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository())
 
 	cmd := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-1"),
@@ -120,7 +120,7 @@ func TestGoalDoDManager_CreateWorkspace(t *testing.T) {
 
 func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	manager := NewGoalDoDManager(memory.NewWorkspaceRepository(), memory.NewGoalRepository(), memory.NewDoDRepository())
+	manager := newGoalDoDManager(memory.NewWorkspaceRepository(), memory.NewGoalRepository(), memory.NewDoDRepository())
 
 	tests := []workspacecontracts.CreateWorkspaceCommand{
 		{WorkspaceID: "", Title: "ok", DeliverableDirectory: "/tmp/workorch/ws-1"},
@@ -139,7 +139,7 @@ func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 func TestGoalDoDManager_DefineGoalAndDoDRejectBlankText(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(workspaceRepo, memory.NewGoalRepository(), memory.NewDoDRepository())
+	manager := newGoalDoDManager(workspaceRepo, memory.NewGoalRepository(), memory.NewDoDRepository())
 	workspaceID := common.WorkspaceID("ws-blank-definition")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -178,7 +178,7 @@ func TestGoalDoDManager_DefineGoalAndDoDRejectBlankText(t *testing.T) {
 func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository())
+	manager := newGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository())
 
 	cmd := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID("ws-duplicate"),
@@ -212,7 +212,7 @@ func TestGoalDoDManager_DeleteWorkspacePurgesGoalAndDoD(t *testing.T) {
 	workspaceRepo := memory.NewWorkspaceRepository()
 	goalRepo := memory.NewGoalRepository()
 	dodRepo := memory.NewDoDRepository()
-	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+	manager := newGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
 	workspaceID := common.WorkspaceID("ws-delete-cascade")
 	if err := manager.CreateWorkspace(ctx, workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          workspaceID,
@@ -391,7 +391,7 @@ func TestGoalDoDManager_DefinitionRevisionIsMonotonicAcrossContentReversion(t *t
 	workspaceRepo := memory.NewWorkspaceRepository()
 	goalRepo := memory.NewGoalRepository()
 	dodRepo := memory.NewDoDRepository()
-	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+	manager := newGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
 	workspaceID := common.WorkspaceID("ws-definition-revision")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -481,7 +481,7 @@ func TestGoalDoDManager_UsesCanonicalLeafInsteadOfLexicalIDForLineage(t *testing
 	workspaceRepo := memory.NewWorkspaceRepository()
 	goalRepo := memory.NewGoalRepository()
 	dodRepo := memory.NewDoDRepository()
-	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
+	manager := newGoalDoDManager(workspaceRepo, goalRepo, dodRepo)
 	workspaceID := common.WorkspaceID("ws-definition-canonical-lineage")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -555,11 +555,11 @@ func TestGoalDoDManager_DefinitionChangePreservesWorkspaceLifecycleProjection(t 
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name string
-		act  func(*GoalDoDManager, common.WorkspaceID) error
+		act  func(*goalDoDManager, common.WorkspaceID) error
 	}{
 		{
 			name: "define goal",
-			act: func(manager *GoalDoDManager, workspaceID common.WorkspaceID) error {
+			act: func(manager *goalDoDManager, workspaceID common.WorkspaceID) error {
 				return manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{
 					GoalID:      "goal-reopen",
 					WorkspaceID: workspaceID,
@@ -569,7 +569,7 @@ func TestGoalDoDManager_DefinitionChangePreservesWorkspaceLifecycleProjection(t 
 		},
 		{
 			name: "define dod",
-			act: func(manager *GoalDoDManager, workspaceID common.WorkspaceID) error {
+			act: func(manager *goalDoDManager, workspaceID common.WorkspaceID) error {
 				return manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{
 					DoDID:       "dod-reopen",
 					WorkspaceID: workspaceID,

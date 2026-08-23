@@ -15,6 +15,7 @@ import (
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
 func TestHTTPProviderCompleteUsesAIProxyResponses(t *testing.T) {
@@ -52,7 +53,7 @@ func TestHTTPProviderCompleteUsesAIProxyResponses(t *testing.T) {
 	if !strings.Contains(got.Input, "C0.runtime-candidate-contract") || !strings.Contains(got.Input, "C3.runtime-authority") {
 		t.Fatalf("Responses input = %q, want rendered Runtime prompt sections", got.Input)
 	}
-	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
+	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -86,7 +87,7 @@ func TestHTTPProviderStreamUsesAIProxyResponses(t *testing.T) {
 	if !got.Stream {
 		t.Fatal("stream = false, want true")
 	}
-	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
+	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(events) != 3 || events[0].Delta != `{"ok":` || events[2].Type != "done" {
@@ -110,6 +111,9 @@ func TestHTTPProviderOutputLimitPreservesOnlyOutputText(t *testing.T) {
 	}
 	if string(result.Payload) != `{"operations":[` || string(limitErr.Payload) != `{"operations":[` {
 		t.Fatalf("partial payload result=%q error=%q", result.Payload, limitErr.Payload)
+	}
+	if !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeStreaming {
+		t.Fatalf("output-limit physical response mode = %q", result.PhysicalResponseMode)
 	}
 }
 
@@ -135,8 +139,139 @@ func TestHTTPProviderEmbedsThroughAIProxy(t *testing.T) {
 	if gotPath != "/v1/embeddings" || gotAuthorization != "Bearer secret-value" || got.Model != "embedding-model" || got.Input != "workspace goal" {
 		t.Fatalf("request path=%q authorization=%q payload=%+v", gotPath, gotAuthorization, got)
 	}
-	if result.ProviderID != "ai-proxy" || result.Model != "embedding-model" || len(result.Vector) != 3 || result.Usage == nil || result.Usage.InputTokens != 4 || result.Usage.TotalTokens != 4 {
+	if result.ProviderID != "ai-proxy" || result.Model != "embedding-model" || len(result.Vector) != 3 || result.Usage == nil || result.Usage.InputTokens != 4 || result.Usage.TotalTokens != 4 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestHTTPProviderSubmissionFactUsesExactDoBoundary(t *testing.T) {
+	type observation struct {
+		submitted    bool
+		requestBytes int
+		mode         llmaudit.PhysicalResponseMode
+	}
+	operations := []struct {
+		name          string
+		submittedMode llmaudit.PhysicalResponseMode
+		call          func(*HTTPProvider) (observation, error)
+	}{
+		{name: "complete", submittedMode: llmaudit.PhysicalResponseModeNonStreaming, call: func(provider *HTTPProvider) (observation, error) {
+			result, err := provider.Complete(context.Background(), llmProviderRequest())
+			return observation{submitted: result.ProviderSubmitted, requestBytes: result.RequestBytes, mode: result.PhysicalResponseMode}, err
+		}},
+		{name: "stream", submittedMode: llmaudit.PhysicalResponseModeStreaming, call: func(provider *HTTPProvider) (observation, error) {
+			result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+			return observation{submitted: result.ProviderSubmitted, requestBytes: result.RequestBytes, mode: result.PhysicalResponseMode}, err
+		}},
+		{name: "embedding", submittedMode: llmaudit.PhysicalResponseModeNonStreaming, call: func(provider *HTTPProvider) (observation, error) {
+			result, err := provider.Embed(context.Background(), llmmodels.ProviderEmbeddingRequest{Input: "workspace goal", Model: "embedding-model"})
+			return observation{submitted: result.ProviderSubmitted, requestBytes: result.RequestBytes, mode: result.PhysicalResponseMode}, err
+		}},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name+"/before Do", func(t *testing.T) {
+			var calls atomic.Int32
+			config := testAIProxyProviderConfig("://invalid")
+			provider := NewHTTPProviderWithClient(config, &http.Client{Transport: llmRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls.Add(1)
+				return nil, errors.New("transport must not run")
+			})})
+			result, err := operation.call(provider)
+			if err == nil || calls.Load() != 0 || result.submitted || result.mode != llmaudit.PhysicalResponseModeNonStreaming {
+				t.Fatalf("pre-dispatch result=%+v calls=%d error=%v", result, calls.Load(), err)
+			}
+		})
+		t.Run(operation.name+"/Do error", func(t *testing.T) {
+			var calls atomic.Int32
+			config := testAIProxyProviderConfig("http://provider.invalid")
+			provider := NewHTTPProviderWithClient(config, &http.Client{Transport: llmRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls.Add(1)
+				return nil, errors.New("private transport failure")
+			})})
+			result, err := operation.call(provider)
+			if err == nil || calls.Load() != 1 || !result.submitted || result.requestBytes <= 0 || result.mode != operation.submittedMode {
+				t.Fatalf("Do-error result=%+v calls=%d error=%v", result, calls.Load(), err)
+			}
+		})
+		t.Run(operation.name+"/response error", func(t *testing.T) {
+			var calls atomic.Int32
+			config := testAIProxyProviderConfig("http://provider.invalid")
+			provider := NewHTTPProviderWithClient(config, &http.Client{Transport: llmRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				calls.Add(1)
+				return &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("private response")),
+					Request:    request,
+				}, nil
+			})})
+			result, err := operation.call(provider)
+			if err == nil || calls.Load() != 1 || !result.submitted || result.requestBytes <= 0 || result.mode != operation.submittedMode {
+				t.Fatalf("response-error result=%+v calls=%d error=%v", result, calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestResponsesJSONSchemaRequiresExplicitCapability(t *testing.T) {
+	request := llmProviderRequest()
+	request.Model = "json-looking-model-name"
+	request.Schema = `{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`
+
+	if got := responsesTextForRequest(llmmodels.ProviderCapabilities{}, request); got != nil {
+		t.Fatalf("model name enabled JSON schema without capability: %+v", got)
+	}
+	explicit := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: true}, request)
+	if explicit == nil || explicit.Format == nil || explicit.Format.Type != "json_schema" || !explicit.Format.Strict {
+		t.Fatalf("explicit JSON-schema capability was not honored: %+v", explicit)
+	}
+	request.RawTextOutput = true
+	if got := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: true}, request); got != nil {
+		t.Fatalf("raw-text request unexpectedly enabled JSON schema: %+v", got)
+	}
+}
+
+func TestProviderPhysicalResponseModeMustMatchDispatchedPath(t *testing.T) {
+	if err := validatePhysicalResponseMode(llmaudit.PhysicalResponseModeStreaming, llmaudit.PhysicalResponseModeStreaming); err != nil {
+		t.Fatal(err)
+	}
+	for _, actual := range []llmaudit.PhysicalResponseMode{"", llmaudit.PhysicalResponseModeNonStreaming} {
+		if err := validatePhysicalResponseMode(actual, llmaudit.PhysicalResponseModeStreaming); err == nil {
+			t.Fatalf("physical response mode %q unexpectedly matched streaming dispatch", actual)
+		}
+	}
+}
+
+func TestHTTPProviderExplicitJSONSchemaFailureDoesNotFallbackSecondCall(t *testing.T) {
+	var calls atomic.Int32
+	var got responsesRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"completed","output_text":"not-json","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`))
+	}))
+	defer server.Close()
+
+	config := testAIProxyProviderConfig(server.URL)
+	config.Capabilities.Streaming = false
+	config.Capabilities.JSONSchemaResponse = true
+	request := llmProviderRequest()
+	request.Schema = `{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`
+	result, err := NewHTTPProvider(config).Complete(context.Background(), request)
+	if err != nil {
+		t.Fatalf("structured provider response: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("physical provider calls = %d, want exactly one", calls.Load())
+	}
+	if got.Text == nil || got.Text.Format == nil || got.Text.Format.Type != "json_schema" || !got.Text.Format.Strict {
+		t.Fatalf("explicit JSON schema request = %+v", got.Text)
+	}
+	if string(result.Payload) != "not-json" || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
+		t.Fatalf("provider result = %+v", result)
 	}
 }
 
@@ -151,10 +286,13 @@ func TestHTTPProviderOmitsBlankAPIKeyAndRedactsProviderErrors(t *testing.T) {
 
 	config := testAIProxyProviderConfig(server.URL)
 	config.APIKey = "  "
-	_, err := NewHTTPProvider(config).Complete(context.Background(), llmProviderRequest())
+	result, err := NewHTTPProvider(config).Complete(context.Background(), llmProviderRequest())
 	var statusErr *ProviderHTTPStatusError
 	if !errors.Is(err, common.ErrInvalidArgument) || !errors.As(err, &statusErr) || statusErr.Body != http.StatusText(http.StatusUnauthorized) || strings.Contains(err.Error(), "secret-value") {
 		t.Fatalf("error = %v, want status-only provider error", err)
+	}
+	if !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
+		t.Fatalf("transport failure physical response mode = %q", result.PhysicalResponseMode)
 	}
 }
 
@@ -229,7 +367,7 @@ func TestHTTPProviderRejectsCrossOriginRedirectWithoutReplayingBody(t *testing.T
 	}
 }
 
-func TestInjectedRedirectPolicyCannotBypassSameOriginReplayLimit(t *testing.T) {
+func TestHTTPProviderRejectsSameOriginRedirectBeforeSecondPhysicalSubmission(t *testing.T) {
 	operations := []struct {
 		name string
 		call func(context.Context, *HTTPProvider) error
@@ -256,7 +394,13 @@ func TestInjectedRedirectPolicyCannotBypassSameOriginReplayLimit(t *testing.T) {
 			},
 		},
 	}
-	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+	for _, status := range []int{
+		http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusSeeOther,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	} {
 		for _, operation := range operations {
 			t.Run(http.StatusText(status)+"/"+operation.name, func(t *testing.T) {
 				var physicalCalls atomic.Int32
@@ -277,14 +421,14 @@ func TestInjectedRedirectPolicyCannotBypassSameOriginReplayLimit(t *testing.T) {
 				provider := NewHTTPProviderWithClient(config, client)
 				err := operation.call(context.Background(), provider)
 				var protocolErr *ProviderProtocolError
-				if !errors.As(err, &protocolErr) || protocolErr.Code != "redirect_limit_exceeded" {
-					t.Fatalf("redirect error = %#v (%v), want typed hop-limit rejection", protocolErr, err)
+				if !errors.As(err, &protocolErr) || protocolErr.Code != "redirect_rejected" {
+					t.Fatalf("redirect error = %#v (%v), want typed at-most-once rejection", protocolErr, err)
 				}
-				if got := physicalCalls.Load(); got != 10 {
-					t.Fatalf("physical submissions = %d, want bounded 10", got)
+				if got := physicalCalls.Load(); got != 1 {
+					t.Fatalf("physical submissions = %d, want exactly one", got)
 				}
-				if got := callerPolicyCalls.Load(); got != 9 {
-					t.Fatalf("caller redirect policy calls = %d, want 9 before owner guard", got)
+				if got := callerPolicyCalls.Load(); got != 0 {
+					t.Fatalf("caller redirect policy calls = %d, want zero because owner rejects first", got)
 				}
 			})
 		}

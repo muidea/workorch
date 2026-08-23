@@ -17,17 +17,27 @@ type RuntimeInternalTransactionPayload struct {
 	SemanticPlanMergedDocument         *runtimecontract.RuntimeSemanticPlanDocument
 	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
 
-	StablePrefixHash          string
-	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
-	ManifestHash              string
-	CorrectionHash            string
-	LogicalRequestID          string
-	Sequence                  int
-	PhysicalCallID            string
-	RequestOutcome            *runtimecontract.RuntimeCandidateRequestOutcome
-	ProviderDocumentOutcome   *runtimecontract.RuntimeProviderDocumentOutcome
-	ProviderBudgetObservation *runtimecontract.RuntimeProviderBudgetObservation
-	ExpectedDocument          *runtimecontract.RuntimeExpectedDocumentContract
+	StablePrefixHash string
+	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
+	ManifestHash     string
+	CorrectionHash   string
+	LogicalRequestID string
+	Sequence         int
+	PhysicalCallID   string
+	// ProviderRequestTerminal is the single owner-private coordination fact
+	// that atomically closes the SM-3 provider request and applies its already
+	// normalized SM-2 successor failure. It never crosses EventHub.
+	ProviderRequestTerminal *RuntimeProviderRequestTerminalFact
+	// ProviderRequestRecovery is the single owner-private coordination fact
+	// that atomically settles the physical call, advances SM-3 recovery,
+	// consumes the SM-4 transport guard when applicable, and applies an
+	// exhausted SM-2 successor. It never crosses EventHub.
+	ProviderRequestRecovery *RuntimeProviderRequestRecoveryFact
+	// ProviderBudgetSettlement is the exact Orchestrator-private settlement
+	// derived from the LLM audit fact. It is reduced in the same aggregate CAS as
+	// the request outcome and never crosses EventHub.
+	ProviderBudgetSettlement *RuntimeProviderBudgetSettlement
+	ExpectedDocument         *runtimecontract.RuntimeExpectedDocumentContract
 
 	Attempt              int
 	Manifest             *runtimecontract.RuntimeCandidateContractManifest
@@ -63,11 +73,10 @@ const (
 	RuntimeInternalEventSemanticPlanBatchDocumentObserved      RuntimeInternalEventKind = "semantic_plan_batch_document_observed"
 	RuntimeInternalEventSemanticPlanBatchDocumentsMerged       RuntimeInternalEventKind = "semantic_plan_batch_documents_merged"
 	RuntimeInternalEventCandidateRequestSubmitted              RuntimeInternalEventKind = "candidate_request_submitted"
-	RuntimeInternalEventCandidateRequestOutcomeObserved        RuntimeInternalEventKind = "candidate_request_outcome_observed"
-	RuntimeInternalEventCandidateRequestRecoveryRequired       RuntimeInternalEventKind = "candidate_request_recovery_required"
+	RuntimeInternalEventProviderRequestRecoveryCoordinated     RuntimeInternalEventKind = "provider_request_recovery_coordinated"
 	RuntimeInternalEventCandidateDocumentObserved              RuntimeInternalEventKind = "candidate_document_observed"
 	RuntimeInternalEventCandidateRequestStaleObserved          RuntimeInternalEventKind = "candidate_request_stale_observed"
-	RuntimeInternalEventCandidateRequestTerminated             RuntimeInternalEventKind = "candidate_request_terminated"
+	RuntimeInternalEventProviderRequestTerminalCoordinated     RuntimeInternalEventKind = "provider_request_terminal_coordinated"
 	RuntimeInternalEventCandidateAttemptBegun                  RuntimeInternalEventKind = "candidate_attempt_begun"
 	RuntimeInternalEventCandidateDocumentRejected              RuntimeInternalEventKind = "candidate_document_rejected"
 	RuntimeInternalEventCandidateProposalObserved              RuntimeInternalEventKind = "candidate_proposal_observed"

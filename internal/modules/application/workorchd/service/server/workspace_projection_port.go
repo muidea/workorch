@@ -16,8 +16,6 @@ type WorkspaceProjectionWriter interface {
 	UpsertWorkspace(appmodelcore.Workspace)
 	UpsertSnapshot(readmodelcore.WorkspaceSnapshotState)
 	DeleteWorkspace(string)
-	ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate) bool
-	ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate) bool
 	RebuildAll(context.Context) error
 	RebuildWorkspace(context.Context, string) error
 }

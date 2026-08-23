@@ -3,7 +3,9 @@ package run
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -42,7 +44,6 @@ type ReplacementIntent struct {
 	ConflictingReplacementIntentID     string
 	ConflictingReplacementIntentHash   string
 	Bootstrap                          *runtimecontract.RuntimeBootstrap
-	Priority                           int
 	ReconciliationScope                runtimecontract.RuntimeCWIReconciliationScope
 	Kind                               runtimecontract.RuntimeTerminationKind
 	Reason                             string
@@ -54,6 +55,54 @@ type ReplacementIntent struct {
 	RuntimeStateRevision               uint64
 	SuccessorRunID                     common.RunID
 	AcknowledgedAt                     string
+	// legacyIdentityHashSlot is populated only while decoding a persisted v1
+	// clarification intent whose immutable hash included the retired caller
+	// priority slot. It is never accepted from a command, projected, or used to
+	// order execution. Custom JSON round-tripping preserves it solely so an
+	// existing Decision binding keeps the same immutable identity across reloads.
+	legacyIdentityHashSlot string
+}
+
+type replacementIntentJSON ReplacementIntent
+
+func (i *ReplacementIntent) UnmarshalJSON(data []byte) error {
+	if i == nil {
+		return fmt.Errorf("replacement intent decode target is nil")
+	}
+	var wire struct {
+		replacementIntentJSON
+		Priority *int `json:"Priority"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	decoded := ReplacementIntent(wire.replacementIntentJSON)
+	if wire.Priority != nil && *wire.Priority != 0 && strings.TrimSpace(decoded.ReplacementIntentHash) != "" {
+		decoded.legacyIdentityHashSlot = strconv.Itoa(*wire.Priority)
+		if decoded.ReplacementIntentHash != stableReplacementIntentHashWithSlot(decoded, decoded.legacyIdentityHashSlot) {
+			return fmt.Errorf("persisted replacement intent legacy identity hash does not match its sealed payload")
+		}
+	}
+	*i = decoded
+	return nil
+}
+
+func (i ReplacementIntent) MarshalJSON() ([]byte, error) {
+	wire := struct {
+		replacementIntentJSON
+		Priority *int `json:"Priority,omitempty"`
+	}{replacementIntentJSON: replacementIntentJSON(i)}
+	if i.legacyIdentityHashSlot != "" {
+		legacyValue, err := strconv.Atoi(i.legacyIdentityHashSlot)
+		if err != nil || legacyValue == 0 {
+			return nil, fmt.Errorf("replacement intent legacy identity hash slot is invalid")
+		}
+		if strings.TrimSpace(i.ReplacementIntentHash) == "" || i.ReplacementIntentHash != stableReplacementIntentHashWithSlot(i, i.legacyIdentityHashSlot) {
+			return nil, fmt.Errorf("replacement intent legacy identity hash does not match its sealed payload")
+		}
+		wire.Priority = &legacyValue
+	}
+	return json.Marshal(wire)
 }
 
 func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
@@ -107,6 +156,14 @@ func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
 // StableReplacementIntentHash seals immutable restart identity only. Delivery,
 // acknowledgement and recovery progress deliberately do not participate.
 func StableReplacementIntentHash(i ReplacementIntent) string {
+	legacySlot := "0"
+	if i.legacyIdentityHashSlot != "" {
+		legacySlot = i.legacyIdentityHashSlot
+	}
+	return stableReplacementIntentHashWithSlot(i, legacySlot)
+}
+
+func stableReplacementIntentHashWithSlot(i ReplacementIntent, legacySlot string) string {
 	if i.Bootstrap == nil {
 		return ""
 	}
@@ -115,12 +172,36 @@ func StableReplacementIntentHash(i ReplacementIntent) string {
 		"workorch-replacement-intent-v1", i.RequestID, string(i.WorkspaceID), string(i.GoalID), string(i.DoDID),
 		strings.TrimSpace(i.DefinitionRevision), strings.TrimSpace(i.StartupInputHash), strings.TrimSpace(i.ReplacementIntentID),
 		string(i.ClarificationTicketID), strings.TrimSpace(i.PredecessorStartupInputHash), strings.TrimSpace(i.SuccessorStartupInputHash),
-		fmt.Sprintf("%d", i.Priority), string(i.ReconciliationScope), string(i.Kind), strings.TrimSpace(i.Reason),
+		legacySlot, // persisted v1 identity slot; new intents always seal the neutral value "0"
+		string(i.ReconciliationScope), string(i.Kind), strings.TrimSpace(i.Reason),
 		runtimecontract.StableRuntimeBootstrapHash(*i.Bootstrap),
 	} {
 		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)
 	}
 	return "replacement-intent-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// EquivalentReplacementIntentHash accepts an exact current hash or a
+// canonical neutral-slot hash for an already validated persisted v1 intent.
+// This keeps duplicate Restart idempotent after removing caller priority
+// without allowing that retired value to influence any new intent.
+func EquivalentReplacementIntentHash(current, requested ReplacementIntent) bool {
+	currentHash := strings.TrimSpace(current.ReplacementIntentHash)
+	requestedHash := strings.TrimSpace(requested.ReplacementIntentHash)
+	if currentHash == "" || requestedHash == "" {
+		return currentHash == requestedHash
+	}
+	if currentHash != StableReplacementIntentHash(current) || requestedHash != StableReplacementIntentHash(requested) {
+		return false
+	}
+	if currentHash == requestedHash {
+		return true
+	}
+	if current.legacyIdentityHashSlot == "" {
+		return false
+	}
+	current.legacyIdentityHashSlot = ""
+	return requestedHash == StableReplacementIntentHash(current)
 }
 
 type Run struct {
@@ -165,7 +246,6 @@ type Run struct {
 	// It never contains decoded aggregate authority or a requested target state.
 	RuntimeActivationStatus *RuntimeActivationStatus
 	State                   common.RunState
-	Priority                int
 	BlockingTicketID        common.TicketID
 	BlockingApprovalID      common.ApprovalID
 	FailureReason           string

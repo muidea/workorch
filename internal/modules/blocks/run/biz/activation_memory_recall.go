@@ -8,7 +8,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -16,12 +15,18 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type runtimeActivationMemoryRecall struct {
+	RunID            common.RunID
+	WorkspaceID      common.WorkspaceID
+	RuntimeBootstrap *runtimecontract.RuntimeBootstrap
+}
+
 // publishRuntimeActivationMemoryRecall records the memory selection sealed
 // in a newly-created Runtime bootstrap. Run owns the activation handoff;
 // blocks/memory owns RecallTrace persistence and the recorded notification.
 // The operation is intentionally idempotent and best-effort because the Run
 // record is already durable when this cross-owner observability fact is sent.
-func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command runevents.CreateRunCommand, occurredAt string) {
+func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command runtimeActivationMemoryRecall, occurredAt string) {
 	if m == nil || m.EventHub() == nil || command.RuntimeBootstrap == nil {
 		return
 	}

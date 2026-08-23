@@ -33,6 +33,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type managerEventRecordFixture struct {
@@ -1084,7 +1085,7 @@ func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
 	}
 }
 
-func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
+func TestStoreRunCommandAcceptedProjectsStoreTransactionRevision(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
@@ -1092,19 +1093,13 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 		},
 	}, nil)
 
-	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
-		WorkspaceID:        "ws-a",
-		RunID:              "run-a",
-		Intent:             "resume",
-		Reason:             "user_requested",
-		RequestID:          "request-a",
-		Source:             "tui",
-		DefinitionRevision: "rev-a",
-		DecisionID:         "ticket-a",
-		Revision:           42,
-		AcceptedAt:         "2026-06-21T00:00:00Z",
-	}) {
-		t.Fatalf("ApplyRunCommandAccepted returned false")
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", Reason: "user_requested", RequestID: "request-a", Source: "tui"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{
+		WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-a", Kind: runtimecontract.RuntimeExecutionIntentResume,
+		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+	}
+	if !store.ApplyWorkspaceExecutionAdmission(command, admission) {
+		t.Fatalf("ApplyWorkspaceExecutionAdmission returned false")
 	}
 	snapshot, status, err := store.GetSnapshot("ws-a")
 	if err != nil {
@@ -1116,13 +1111,15 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
-		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
-		snapshot.RunCommand.DecisionID != "ticket-a" ||
-		snapshot.RunCommand.Revision != 42 {
+		snapshot.RunCommand.RequestReason != "user_requested" ||
+		snapshot.RunCommand.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested ||
+		snapshot.RunCommand.AdmissionReason != runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted ||
+		snapshot.RunCommand.Diagnostic == "" || snapshot.RunCommand.AcceptedAt == "" || snapshot.RunCommand.RejectedAt != "" ||
+		snapshot.RunCommand.Revision <= 0 || snapshot.RunCommand.Revision != status.WorkspaceRevision {
 		t.Fatalf("RunCommand = %+v, want accepted command projection", snapshot.RunCommand)
 	}
-	if status.SourceEventRevision != 42 || status.ProjectedSourceRevision != 42 {
-		t.Fatalf("status revisions = %+v, want accepted command revision", status)
+	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+		t.Fatalf("status revisions = %+v, want execution observation independent of Eventstream revision", status)
 	}
 }
 
@@ -1130,14 +1127,10 @@ func TestStoreRunCommandAcceptedCreatesDetailPlaceholderForKnownWorkspace(t *tes
 	store := NewStore()
 	store.ReplaceWorkspaceList([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, nil)
 
-	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
-		WorkspaceID: "ws-a",
-		RunID:       "run-a",
-		Intent:      "replan",
-		RequestID:   "request-a",
-		Revision:    42,
-	}) {
-		t.Fatalf("ApplyRunCommandAccepted returned false")
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-a"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-a", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}
+	if !store.ApplyWorkspaceExecutionAdmission(command, admission) {
+		t.Fatalf("ApplyWorkspaceExecutionAdmission returned false")
 	}
 	snapshot, status, err := store.GetSnapshot("ws-a")
 	if err != nil {
@@ -1150,13 +1143,13 @@ func TestStoreRunCommandAcceptedCreatesDetailPlaceholderForKnownWorkspace(t *tes
 		snapshot.RunCommand.WorkspaceID != "ws-a" ||
 		snapshot.RunCommand.RunID != "run-a" ||
 		snapshot.RunCommand.State != "accepted" ||
-		snapshot.RunCommand.Intent != "replan" ||
+		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
-		snapshot.RunCommand.Revision != 42 {
+		snapshot.RunCommand.Revision <= 0 || snapshot.RunCommand.Revision != status.WorkspaceRevision {
 		t.Fatalf("RunCommand = %+v, want accepted command projection", snapshot.RunCommand)
 	}
-	if status.SourceEventRevision != 42 || status.ProjectedSourceRevision != 42 {
-		t.Fatalf("status revisions = %+v, want accepted command revision", status)
+	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+		t.Fatalf("status revisions = %+v, want execution observation independent of Eventstream revision", status)
 	}
 }
 
@@ -1165,13 +1158,18 @@ func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
-	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
-		WorkspaceID: "ws-a",
-		Intent:      "resume",
-		RequestID:   "request-a",
-		Revision:    42,
-	}) {
-		t.Fatalf("ApplyRunCommandAccepted returned false")
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-a"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-a", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}
+	if !store.ApplyWorkspaceExecutionAdmission(command, admission) {
+		t.Fatalf("ApplyWorkspaceExecutionAdmission returned false")
+	}
+	admissionSnapshot, admissionStatus, err := store.GetSnapshot("ws-a")
+	if err != nil || admissionSnapshot.RunCommand == nil {
+		t.Fatalf("get admission snapshot: snapshot=%+v err=%v", admissionSnapshot.RunCommand, err)
+	}
+	admissionRevision := admissionSnapshot.RunCommand.Revision
+	if admissionRevision <= 0 || admissionRevision != admissionStatus.WorkspaceRevision {
+		t.Fatalf("admission revision = %d, status=%+v", admissionRevision, admissionStatus)
 	}
 
 	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
@@ -1185,11 +1183,11 @@ func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
 	if snapshot.RunCommand == nil ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
-		snapshot.RunCommand.Revision != 42 {
+		snapshot.RunCommand.Revision != admissionRevision {
 		t.Fatalf("RunCommand = %+v, want preserved accepted command", snapshot.RunCommand)
 	}
-	if status.SourceEventRevision != 42 {
-		t.Fatalf("status = %+v, want source revision retained", status)
+	if status.WorkspaceRevision <= admissionRevision || status.SourceEventRevision != 0 {
+		t.Fatalf("status = %+v, want later snapshot transaction with unchanged source revision", status)
 	}
 }
 
@@ -1199,10 +1197,9 @@ func TestStoreFullRebuildPreservesLatestRunCommandObservation(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{workspace}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: workspace},
 	}, nil)
-	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
-		WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-latest", Revision: 42,
-		AcceptedAt: "2026-06-21T00:00:00Z",
-	}) {
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-latest"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-latest", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}
+	if !store.ApplyWorkspaceExecutionAdmission(command, admission) {
 		t.Fatal("latest command observation was not applied")
 	}
 
@@ -1226,8 +1223,10 @@ func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
-	if store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
-		t.Fatal("ApplyRunCommandAccepted returned true for unknown workspace")
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-b", Intent: "resume", RequestID: "request-b"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-b", RequestID: "request-b", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentRestartRequired, Reason: runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent}
+	if store.ApplyWorkspaceExecutionAdmission(command, admission) {
+		t.Fatal("ApplyWorkspaceExecutionAdmission returned true for unknown workspace")
 	}
 	snapshot, status, err := store.GetSnapshot("ws-a")
 	if err != nil {
@@ -1241,7 +1240,7 @@ func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
 	}
 }
 
-func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
+func TestStoreRunCommandRejectedProjectsStoreTransactionRevision(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
@@ -1249,20 +1248,13 @@ func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
 		},
 	}, nil)
 
-	if !store.ApplyRunCommandRejected(RunCommandRejectedUpdate{
-		WorkspaceID:        "ws-a",
-		RunID:              "run-a",
-		Intent:             "resume",
-		Reason:             "user_requested",
-		RequestID:          "request-a",
-		Source:             "tui",
-		DefinitionRevision: "rev-a",
-		DecisionID:         "ticket-a",
-		Revision:           43,
-		RejectedAt:         "2026-06-21T00:01:00Z",
-		Error:              "execution admission was not accepted",
-	}) {
-		t.Fatalf("ApplyRunCommandRejected returned false")
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", Reason: "user_requested", RequestID: "request-a", Source: "tui"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{
+		WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-a", Kind: runtimecontract.RuntimeExecutionIntentResume,
+		Outcome: runtimecontract.RuntimeExecutionIntentRestartRequired, Reason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable,
+	}
+	if !store.ApplyWorkspaceExecutionAdmission(command, admission) {
+		t.Fatalf("ApplyWorkspaceExecutionAdmission returned false")
 	}
 	snapshot, status, err := store.GetSnapshot("ws-a")
 	if err != nil {
@@ -1274,15 +1266,89 @@ func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
 		snapshot.RunCommand.State != "rejected" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-a" ||
-		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
-		snapshot.RunCommand.DecisionID != "ticket-a" ||
-		snapshot.RunCommand.RejectedAt != "2026-06-21T00:01:00Z" ||
-		snapshot.RunCommand.Error != "execution admission was not accepted" ||
-		snapshot.RunCommand.Revision != 43 {
+		snapshot.RunCommand.RequestReason != "user_requested" ||
+		snapshot.RunCommand.Outcome != runtimecontract.RuntimeExecutionIntentRestartRequired ||
+		snapshot.RunCommand.AdmissionReason != runtimecontract.RuntimeExecutionIntentReasonRunNotResumable ||
+		snapshot.RunCommand.Diagnostic == "" || snapshot.RunCommand.RejectedAt == "" || snapshot.RunCommand.AcceptedAt != "" ||
+		snapshot.RunCommand.Revision <= 0 || snapshot.RunCommand.Revision != status.WorkspaceRevision {
 		t.Fatalf("RunCommand = %+v, want rejected command projection", snapshot.RunCommand)
 	}
-	if status.SourceEventRevision != 43 || status.ProjectedSourceRevision != 43 {
-		t.Fatalf("status revisions = %+v, want rejected command revision", status)
+	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+		t.Fatalf("status revisions = %+v, want execution observation independent of Eventstream revision", status)
+	}
+}
+
+func TestStoreWorkspaceExecutionAdmissionRejectsIncompleteOwnerFact(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome runtimecontract.RuntimeExecutionIntentOutcome
+		reason  runtimecontract.RuntimeExecutionIntentReason
+	}{
+		{name: "zero outcome", reason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable},
+		{name: "zero reason", outcome: runtimecontract.RuntimeExecutionIntentRestartRequired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewStore()
+			store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+				"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
+			}, nil)
+			command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-invalid"}
+			admission := runtimecontract.RuntimeExecutionIntentAdmission{
+				WorkspaceID: "ws-a", RequestID: "request-invalid", Kind: runtimecontract.RuntimeExecutionIntentResume,
+				Outcome: tc.outcome, Reason: tc.reason,
+			}
+			if store.ApplyWorkspaceExecutionAdmission(command, admission) {
+				t.Fatal("incomplete owner admission was projected")
+			}
+			snapshot, status, err := store.GetSnapshot("ws-a")
+			if err != nil {
+				t.Fatalf("get snapshot: %v", err)
+			}
+			if snapshot.RunCommand != nil || status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+				t.Fatalf("invalid admission changed projection: command=%+v status=%+v", snapshot.RunCommand, status)
+			}
+		})
+	}
+}
+
+func TestStoreWorkspaceExecutionAdmissionDerivesStateOnlyFromOwnerOutcome(t *testing.T) {
+	tests := []struct {
+		name          string
+		requestReason string
+		outcome       runtimecontract.RuntimeExecutionIntentOutcome
+		reason        runtimecontract.RuntimeExecutionIntentReason
+		wantState     string
+	}{
+		{
+			name: "accepted owner fact ignores rejection-like caller text", requestReason: "please_reject",
+			outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted, wantState: "accepted",
+		},
+		{
+			name: "rejected owner fact ignores acceptance-like caller text", requestReason: "force_accept",
+			outcome: runtimecontract.RuntimeExecutionIntentRestartRequired, reason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable, wantState: "rejected",
+		},
+	}
+	for index, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			workspaceID := fmt.Sprintf("ws-state-%d", index)
+			requestID := fmt.Sprintf("request-state-%d", index)
+			store := NewStore()
+			store.ReplaceAll([]appmodelcore.Workspace{{ID: workspaceID, State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
+				workspaceID: {Workspace: appmodelcore.Workspace{ID: workspaceID, State: "active"}},
+			}, nil)
+			command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: common.WorkspaceID(workspaceID), Intent: "resume", Reason: tc.requestReason, RequestID: requestID}
+			admission := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: common.WorkspaceID(workspaceID), RequestID: requestID, Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: tc.outcome, Reason: tc.reason}
+			if !store.ApplyWorkspaceExecutionAdmission(command, admission) {
+				t.Fatal("canonical owner admission was not projected")
+			}
+			snapshot, _, err := store.GetSnapshot(workspaceID)
+			if err != nil {
+				t.Fatalf("get snapshot: %v", err)
+			}
+			if snapshot.RunCommand == nil || snapshot.RunCommand.State != tc.wantState || snapshot.RunCommand.RequestReason != tc.requestReason {
+				t.Fatalf("run command = %+v, want state %q and separate request reason", snapshot.RunCommand, tc.wantState)
+			}
+		})
 	}
 }
 
@@ -1291,20 +1357,17 @@ func TestStoreRunCommandDuplicateRequestIsIdempotentAndCannotRewriteOutcome(t *t
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
-	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
-		WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-duplicate", Revision: 42,
-		AcceptedAt: "2026-06-21T00:00:00Z",
-	}) {
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-a", Intent: "resume", RequestID: "request-duplicate"}
+	accepted := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-duplicate", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}
+	if !store.ApplyWorkspaceExecutionAdmission(command, accepted) {
 		t.Fatal("first command observation was not applied")
 	}
 	before, beforeStatus, err := store.GetSnapshot("ws-a")
 	if err != nil {
 		t.Fatalf("get first snapshot: %v", err)
 	}
-	if store.ApplyRunCommandRejected(RunCommandRejectedUpdate{
-		WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-duplicate", Revision: 99,
-		RejectedAt: "2026-06-21T00:01:00Z", Error: "stale contradictory duplicate",
-	}) {
+	rejected := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-a", RunID: "run-a", RequestID: "request-duplicate", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentRestartRequired, Reason: runtimecontract.RuntimeExecutionIntentReasonRunNotResumable}
+	if store.ApplyWorkspaceExecutionAdmission(command, rejected) {
 		t.Fatal("duplicate request rewrote immutable command observation")
 	}
 	after, afterStatus, err := store.GetSnapshot("ws-a")
@@ -1327,8 +1390,10 @@ func TestStoreRunCommandRejectedRejectsUnknownWorkspace(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
-	if store.ApplyRunCommandRejected(RunCommandRejectedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
-		t.Fatal("ApplyRunCommandRejected returned true for unknown workspace")
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-b", Intent: "resume", RequestID: "request-b"}
+	admission := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws-b", RequestID: "request-b", Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: runtimecontract.RuntimeExecutionIntentRestartRequired, Reason: runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent}
+	if store.ApplyWorkspaceExecutionAdmission(command, admission) {
+		t.Fatal("ApplyWorkspaceExecutionAdmission returned true for unknown workspace")
 	}
 	snapshot, status, err := store.GetSnapshot("ws-a")
 	if err != nil {

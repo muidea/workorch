@@ -96,11 +96,9 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	previousBackend := cliBackend
 	t.Cleanup(func() {
 		cliBackend = previousBackend
-		resetRunActivateFlagsForTest(t)
 	})
 	runBackend := &recordingRunResumeBackend{}
 	cliBackend = cliRunResumeBackend{run: runBackend}
-	_ = runActivateCmd.Flags().Set("priority", "3")
 
 	if err := runActivateCmd.RunE(runActivateCmd, []string{"ws-cli-activate"}); err != nil {
 		t.Fatalf("run activate: %v", err)
@@ -109,7 +107,7 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	if got.WorkspaceID != "ws-cli-activate" ||
 		got.Intent != backend.RunCommandIntentRestart ||
 		got.Reason != "user_requested" ||
-		got.Source != "cli" || got.Priority != 3 {
+		got.Source != "cli" {
 		t.Fatalf("command = %+v, want workspace-scoped restart from cli", got)
 	}
 }
@@ -148,11 +146,4 @@ func (b *recordingRunResumeBackend) List(context.Context, common.WorkspaceID) ([
 
 func (b *recordingRunResumeBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.RunStatus, error) {
 	return nil, common.ErrNotFound
-}
-
-func resetRunActivateFlagsForTest(t *testing.T) {
-	t.Helper()
-	if err := runActivateCmd.Flags().Set("priority", "0"); err != nil {
-		t.Fatalf("reset priority flag: %v", err)
-	}
 }

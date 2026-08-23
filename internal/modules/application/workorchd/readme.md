@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 功能范围与边界
 
@@ -22,6 +22,12 @@ Last Verified: 2026-08-22
   state；重复 request 必须每次交给 Workspace/Run owner 持久化幂等合同裁决，projection Store 只保证同 request identity
   的 immutable observation 不被重复或矛盾回执改写。
 - `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，不存在 `queued` observation 或 `queuedAt`；server 仅接收独立的 monotonic transport metrics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
+- `snapshot.runCommand` 只有 `ApplyWorkspaceExecutionAdmission(command metadata, exact RuntimeExecutionIntentAdmission)` 一个
+  projection mutation。该入口先执行 owner admission `Validate`，再调用共享 `PresentAdmission` 纯派生 `state`、
+  `diagnostic` 与 `acceptedAt|rejectedAt`；caller 无法选择 state 或 revision，Store 在同一个加锁事务中把
+  `advanceEntryRevision` 的结果同时写入 entry 与 runCommand。read DTO 只保留
+  `workspaceId/runId/state/intent/requestId/requestReason/source/outcome/admissionReason/diagnostic/acceptedAt|rejectedAt/revision`，
+  不保留 `disposition/reason/error/definitionRevision/decisionId` shadow。
 - projection Store lifecycle 是 Workorchd-owned 的派生状态机：rebuild requested/completed、mutation applied、degraded、
   failed 与 stopped 只能经过一个 private-event reducer 写入。`stopped` 对 late mutation/completion/failure 保持终态；
   `failed` 只能由成功提交的 owner mutation 或显式 rebuild 恢复。该状态只描述 read-model 健康度，不能反向修复
@@ -101,7 +107,12 @@ Last Verified: 2026-08-22
 - application 不提供 orphan Step、stale dispatched Run 或 runtime-gap 的恢复 API；Runtime 重启推进由 Run owner
   的 SM-1 state + opaque RuntimeStateRecord inventory/notification 触发 Orchestrator internal drive；SM-4 typed load
   aggregate 后 owner-local 分类并幂等恢复。
-- application 不保留 execution queue、pending/started、owner readback retry 或 application recovery map，也不按 intent/workspace 拼装第二份 `idempotencyKey`；owner 使用的 `requestId` 是唯一请求身份。HTTP 只在收到并校验具体 Workspace owner result 后返回 `202`；该状态码表示 owner 已受理 execution intent，不表示 application-local queued state。owner 返回的具体 admission outcome 才按其 disposition 派生 accepted/rejected fact；没有具体 owner result 的同步失败直接映射为当前 HTTP error，不写 `runCommand`。
+- execution admission 已删除 caller-controlled Run priority：HTTP body/query/header、Workorchd command、client/backend、CLI/TUI、Web 与 public Run projection 均不再携带该字段；acceptance slice、context compaction 与 Soul routing priority 保持各自独立语义。
+- application 不保留 execution queue、pending/started、owner readback retry 或 application recovery map，也不按 intent/workspace 拼装第二份 `idempotencyKey`；owner 使用的 `requestId` 是唯一请求身份。HTTP 收到并校验具体 Workspace owner result 后，只有 `reconciliation_requested|replacement_pending` 返回 `202`，其余五类 canonical outcome 返回携带 exact identity/outcome/admissionReason 的 typed `409`。唯一 pure classifier 同时给 HTTP 与 projection 提供 accepted/rejected 分类；client、Web/TUI 只显示该分类，不重判 outcome。没有具体 owner result 的同步失败直接映射为当前 HTTP error，不写 `runCommand`。
+- LLM usage projection 原样保留 Eventstream 的 optional `logicalRequestId`/`physicalCallId` 双层身份，并以
+  `physicalResponseMode=streaming|non_streaming` 与 `providerSubmitted` 为唯一物理调用审计输入。新 Runtime usage 必须
+  同时携带两级身份且 `physicalCallId=requestId`；历史或 generic 记录可以两者都没有，但只出现一级或相关 ID 不一致
+  必须拒绝。`streaming` 只作为 mode 的兼容派生；不得从 request bytes、streaming 或其他展示事实补造身份/提交状态。
 - setup-draft session 只保存 message 与 Draft fact，API `state` 每次从 Draft 纯派生，不持久化第二份 authoring lifecycle。acceptance projection 只从 Runtime aggregate 派生 active slice；已有 sealed terminal 或 canonical terminal state 时不得继续标记 active slice/focus。
 
 ## 测试状态

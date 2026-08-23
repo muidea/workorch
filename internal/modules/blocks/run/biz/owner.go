@@ -33,9 +33,9 @@ type Biz struct {
 	basebiz.Base
 	// commandMu only coordinates in-flight EventHub owner commands with Stop.
 	// Framework serializes Configure/Start/Stop lifecycle calls.
-	commandMu sync.RWMutex
-	stopping  bool
-	*Service
+	commandMu     sync.RWMutex
+	stopping      bool
+	notifier      runStateNotifier
 	runs          repository.RunRepository
 	steps         repository.StepRepository
 	checkpoints   repository.RuntimeCheckpointRepository
@@ -60,11 +60,7 @@ func (m *Biz) Configure(deps Dependencies) error {
 	m.steps = deps.Steps
 	m.checkpoints = deps.Checkpoints
 	m.Base = basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine)
-	m.Service = newServiceWithPorts(
-		deps.Runs,
-		workspaceEventReader{send: m.SendEvent},
-		eventRunStateNotifier{post: m.PostEvent},
-	)
+	m.notifier = eventRunStateNotifier{post: m.PostEvent}
 	// Configure is invoked exclusively from Setup (or explicit test assembly).
 	// Establish the SM-4 downstream read contract before any later module Run.
 	return m.prepareRuntimeRecoveryInventory()
@@ -75,7 +71,7 @@ func (m *Biz) Start() error {
 		return common.ErrInvalidArgument
 	}
 	m.commandMu.Lock()
-	if m.stopping || m.Service == nil || m.EventHub() == nil {
+	if m.stopping || m.runs == nil || m.EventHub() == nil {
 		m.commandMu.Unlock()
 		return common.ErrInvalidArgument
 	}
@@ -121,7 +117,7 @@ func (m *Biz) prepareRuntimeRecoveryInventory() error {
 	}
 	m.commandMu.Lock()
 	defer m.commandMu.Unlock()
-	if m.stopping || m.Service == nil || m.EventHub() == nil {
+	if m.stopping || m.runs == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	return m.ensureRuntimeRecoveryInventoryLocked()
@@ -182,7 +178,7 @@ func (m *Biz) handleRuntimeStateRecordReadiness(_ magicevent.Event, result magic
 	}
 	m.commandMu.RLock()
 	defer m.commandMu.RUnlock()
-	if m.stopping || m.Service == nil || m.EventHub() == nil {
+	if m.stopping || m.runs == nil || m.EventHub() == nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
@@ -335,12 +331,10 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.runs = nil
 	m.steps = nil
 	m.checkpoints = nil
+	m.notifier = nil
 	m.commandMu.Unlock()
 	for idx := len(topics) - 1; idx >= 0; idx-- {
 		m.UnsubscribeFunc(topics[idx])
 	}
-	m.commandMu.Lock()
-	m.Service = nil
-	m.commandMu.Unlock()
 	return nil
 }

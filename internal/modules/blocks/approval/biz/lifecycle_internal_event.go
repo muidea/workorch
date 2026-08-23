@@ -32,7 +32,7 @@ const (
 	lifecycleInternalEventDeletionRequested          lifecycleInternalEventKind = "deletion_requested"
 )
 
-func (s *Service) applyLifecycleInternalEvent(ctx context.Context, current *approvalmodel.Approval, event lifecycleInternalEvent) (*approvalmodel.Approval, error) {
+func (s *mutationService) applyLifecycleInternalEvent(ctx context.Context, current *approvalmodel.Approval, event lifecycleInternalEvent) (*approvalmodel.Approval, error) {
 	if s == nil || s.approvals == nil || event.ApprovalID == "" || event.WorkspaceID == "" || event.RunID == "" {
 		return nil, common.ErrInvalidArgument
 	}

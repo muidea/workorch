@@ -21,11 +21,10 @@ func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, e
 		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
 		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
 		RuntimeInternalEventCandidateRequestSubmitted,
-		RuntimeInternalEventCandidateRequestOutcomeObserved,
-		RuntimeInternalEventCandidateRequestRecoveryRequired,
+		RuntimeInternalEventProviderRequestRecoveryCoordinated,
 		RuntimeInternalEventCandidateDocumentObserved,
 		RuntimeInternalEventCandidateRequestStaleObserved,
-		RuntimeInternalEventCandidateRequestTerminated:
+		RuntimeInternalEventProviderRequestTerminalCoordinated:
 		return c.applyPlanningTransactionInternalEvent(ctx, event)
 	case RuntimeInternalEventCandidateAttemptBegun,
 		RuntimeInternalEventCandidateDocumentRejected,
@@ -123,36 +122,29 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		aggregate, err := c.planning.markCandidateRequestSubmitted(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.Sequence, event.Transaction.PhysicalCallID)
 		result.Aggregate = aggregate
 		return result, err
-	case RuntimeInternalEventCandidateRequestOutcomeObserved:
-		if event.Transaction.RequestOutcome == nil {
+	case RuntimeInternalEventProviderRequestRecoveryCoordinated:
+		if event.Transaction.ProviderRequestRecovery == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.recordCandidateRequestTransportOutcome(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.RequestOutcome, event.Transaction.ProviderBudgetObservation)
-		result.Aggregate = aggregate
-		return result, err
-	case RuntimeInternalEventCandidateRequestRecoveryRequired:
-		if event.Transaction.ProviderDocumentOutcome == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.planning.recordCandidateRequestRecoveryRequired(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.ProviderDocumentOutcome, event.Transaction.ProviderBudgetObservation)
+		aggregate, err := c.planning.coordinateProviderRequestRecovery(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.ProviderRequestRecovery, event.Transaction.ProviderBudgetSettlement)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateDocumentObserved:
-		aggregate, err := c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, event.Transaction.ProviderBudgetObservation)
+		aggregate, err := c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, event.Transaction.ProviderBudgetSettlement)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestStaleObserved:
 		if event.Transaction.Stale == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.Stale, event.Transaction.ProviderBudgetObservation)
+		aggregate, err := c.planning.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.Stale, event.Transaction.ProviderBudgetSettlement)
 		result.Aggregate = aggregate
 		return result, err
-	case RuntimeInternalEventCandidateRequestTerminated:
-		if event.Transaction.RequestOutcome == nil {
+	case RuntimeInternalEventProviderRequestTerminalCoordinated:
+		if event.Transaction.ProviderRequestTerminal == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.terminateCandidateRequestSession(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.RequestOutcome, event.Transaction.ProviderBudgetObservation)
+		aggregate, err := c.planning.coordinateProviderRequestTerminal(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, *event.Transaction.ProviderRequestTerminal, event.Transaction.ProviderBudgetSettlement)
 		result.Aggregate = aggregate
 		return result, err
 	default:

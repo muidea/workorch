@@ -1069,7 +1069,7 @@ activate_workspace_execution() {
 	capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e"}' >"$output_file"
 }
 
 activate_workspace_execution_without_memory() {
@@ -1079,7 +1079,7 @@ activate_workspace_execution_without_memory() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e"}' >"$output_file"
 }
 
 activate_workspace_execution_with_auto_memory() {
@@ -1089,7 +1089,7 @@ activate_workspace_execution_with_auto_memory() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e"}' >"$output_file"
 }
 
 activate_workspace_execution_with_provider() {
@@ -1106,7 +1106,7 @@ activate_workspace_execution_with_provider() {
     -d '{"providerId":"'"$provider_id"'","modelId":"'"$model_id"'","expectedRevision":'"$workspace_revision"'}' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e"}' >"$output_file"
 }
 
 capture_runs_before_activation() {
@@ -1138,8 +1138,18 @@ if data.get("intent") != expected_intent:
     errors.append(f"intent is {data.get('intent')!r}, want {expected_intent}")
 if not str(data.get("requestId") or "").strip():
     errors.append("requestId is empty")
-if data.get("reason") != "e2e_restart":
-    errors.append(f"reason is {data.get('reason')!r}, want e2e_restart")
+valid_admissions = {
+    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
+    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
+}
+outcome = data.get("outcome")
+owner_reason = data.get("reason")
+if owner_reason not in valid_admissions.get(outcome, set()):
+    errors.append(f"owner admission outcome/reason is {outcome!r}/{owner_reason!r}")
+if data.get("state") != "accepted":
+    errors.append(f"state is {data.get('state')!r}, want accepted")
+if data.get("requestReason") != "e2e_restart":
+    errors.append(f"requestReason is {data.get('requestReason')!r}, want e2e_restart")
 if errors:
     raise SystemExit("\n".join(errors))
 PY
@@ -1522,15 +1532,15 @@ PY
 assert_run_llm_usage_semantics() {
   local run_id="$1"
   local expected_usage_source="$2"
-  local expected_streaming="$3"
+  local expected_response_mode="$3"
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/observability" >"$TMP_DIR/$run_id-observability-usage.json"
-  python3 - "$TMP_DIR/$run_id-observability-usage.json" "$expected_usage_source" "$expected_streaming" <<'PY'
+  python3 - "$TMP_DIR/$run_id-observability-usage.json" "$expected_usage_source" "$expected_response_mode" <<'PY'
 import json
 import sys
 
 observability = json.load(open(sys.argv[1], encoding="utf-8")).get("observability") or {}
 expected_source = sys.argv[2]
-expected_streaming = sys.argv[3].lower() == "true"
+expected_response_mode = sys.argv[3]
 traces = observability.get("llmUsageTraces") or []
 
 if not traces:
@@ -1539,10 +1549,18 @@ if not traces:
 matched = [item for item in traces if (item.get("usageSource") or "") == expected_source]
 if not matched:
     raise SystemExit(f"missing usageSource={expected_source!r} in traces: {traces}")
-if not any(bool(item.get("streaming")) == expected_streaming for item in matched):
+physical = [item for item in matched if item.get("physicalResponseMode") == expected_response_mode]
+if not physical:
     raise SystemExit(
-        f"usageSource={expected_source!r} has no trace with streaming={expected_streaming}: {matched}"
+        f"usageSource={expected_source!r} has no trace with physicalResponseMode={expected_response_mode!r}: {matched}"
     )
+for item in physical:
+    logical_id = item.get("logicalRequestId") or ""
+    physical_id = item.get("physicalCallId") or ""
+    if item.get("providerSubmitted") is not True:
+        raise SystemExit(f"provider usage trace is not marked submitted: {item}")
+    if not logical_id or not physical_id:
+        raise SystemExit(f"Runtime provider usage trace is missing two-level request identity: {item}")
 PY
 }
 
@@ -1925,10 +1943,10 @@ activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.js
 stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" ""
-# Runtime candidate dispatch currently uses the sealed non-streaming Complete
-# path. Stream-capable provider adapters remain covered by provider unit tests;
-# this deployed-instance verifier must assert the production path actually used.
-assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "false"
+# Runtime candidate dispatch uses the target's sealed streaming capability.
+# Assert the canonical bounded mode and exact submitted/two-level identity
+# facts rather than the compatibility-only streaming boolean.
+assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "streaming"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "ai-proxy" "verify-stream-estimated-model"
 stream_estimated_run_id="$(wait_activation_run "$TMP_DIR/stream-estimated-activation.json" "$TMP_DIR/stream-estimated-activation-run.json")"
@@ -1937,7 +1955,7 @@ wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated
 # estimated model deliberately omits usage from the completed event, which
 # must leave an auditable estimated fallback rather than inventing native use.
 assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
-assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "false"
+assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "streaming"
 
 assert_workspace_llm_usage_breakdown "$workspace_id"
 assert_workspace_recovery_read_models "final"

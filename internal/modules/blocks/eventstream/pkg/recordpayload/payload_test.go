@@ -103,7 +103,9 @@ func TestTypedPatchAndGovernancePayloadDecodersRoundTrip(t *testing.T) {
 
 func TestLLMUsagePayloadUsesTypedAuditDTOs(t *testing.T) {
 	payload := (LLMUsagePayloadData{
+		RequestID: "physical-call-audit", LogicalRequestID: "logical-request-audit", PhysicalCallID: "physical-call-audit",
 		WorkspaceID: "ws-audit", RunID: "run-audit", Status: "completed",
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeStreaming, ProviderSubmitted: true, RequestBytes: 128,
 		ContextBudget: llmaudit.ContextBudget{
 			ProviderID: "ai-proxy", ModelID: "chat-a", ActualTokens: 321,
 			StablePrefixHash: "stable-audit", ProviderSubmitted: true,
@@ -126,6 +128,26 @@ func TestLLMUsagePayloadUsesTypedAuditDTOs(t *testing.T) {
 	}
 	if read, _ := cache.Int64("cacheReadTokens"); read != 120 {
 		t.Fatalf("cacheReadTokens = %d", read)
+	}
+	if mode, _ := payload.String(PayloadKeyPhysicalResponseMode); mode != string(llmaudit.PhysicalResponseModeStreaming) {
+		t.Fatalf("physicalResponseMode = %q", mode)
+	}
+	if streaming, ok := payload.Bool(PayloadKeyStreaming); !ok || !streaming {
+		t.Fatalf("streaming derivation = %v/%v", streaming, ok)
+	}
+	if submitted, ok := payload.Bool(PayloadKeyProviderSubmitted); !ok || !submitted {
+		t.Fatalf("providerSubmitted fact = %v/%v", submitted, ok)
+	}
+	if logicalRequestID, ok := payload.String(PayloadKeyLogicalRequestID); !ok || logicalRequestID != "logical-request-audit" {
+		t.Fatalf("logicalRequestId = %q/%v", logicalRequestID, ok)
+	}
+	if physicalCallID, ok := payload.String(PayloadKeyPhysicalCallID); !ok || physicalCallID != "physical-call-audit" {
+		t.Fatalf("physicalCallId = %q/%v", physicalCallID, ok)
+	}
+	for _, forbidden := range []string{"rawBody", "content", "prompt", "apiKey", "authorization", "endpoint"} {
+		if _, found := payload.Field(forbidden); found {
+			t.Fatalf("LLM usage payload leaked forbidden field %q", forbidden)
+		}
 	}
 }
 

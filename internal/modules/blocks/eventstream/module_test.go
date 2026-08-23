@@ -184,7 +184,7 @@ func TestPurgeWorkspaceCommandPostedWithoutResultDoesNotDelete(t *testing.T) {
 	}
 
 	rawHub.Post(magicevent.NewEventWithContext(
-		eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "eventstream/module_test",
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "application/workorchd/appservice",
 		eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx,
 		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
 	))

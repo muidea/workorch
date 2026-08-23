@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -28,6 +28,8 @@ focused contract；本页不复制字段级正文。
 - C0～C2 是连续稳定前缀；C3～C5 是 current/volatile tail。意外 stable-prefix 漂移属于 rendering defect。
 - exact Goal/DoD partition、current authority 与 P0～P4 integrity 优先于 cache hit；缺失保护字段必须 fail-closed。
 - raw prompt/body/stream、credential、endpoint 和未脱敏内容不得进入 aggregate、跨 owner diagnostic 或下一次 request。
+- LLM owner result 只允许 `Stale | Feedback | DocumentOutcome` 三者恰好一个；physical response mode 只允许
+  `streaming | non_streaming`，旧 `streaming` 布尔值只能由该 owner fact 派生，不能成为第二份事实。
 - provider physical call的allocation/usage/unknown consumption遵守
   [Execution Budget](runtime/execution-budget.md)；cache hit、whole-document recovery与candidate attempt不能互相借用预算。
 

@@ -49,7 +49,7 @@ func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.Wo
 	}
 	m.commandMu.RLock()
 	defer m.commandMu.RUnlock()
-	if m.runs == nil || m.Service == nil || m.EventHub() == nil {
+	if m.runs == nil || m.EventHub() == nil {
 		return runevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
 	}
 	cmd, ok := ev.Data().(runevents.WorkspaceExecutionIntentCommand)
@@ -145,6 +145,9 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 			return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart), nil
 		}
 		if item != nil && item.ReplacementIntent != nil && item.ReplacementIntent.RequestID == cmd.RequestID {
+			if !item.ReplacementIntent.ValidFor(item) {
+				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: persisted replacement intent is invalid", common.ErrConflict)
+			}
 			expectedIntent := replacementIntentForPredecessor(requestedIntent, item)
 			if !replacementIntentMatches(item.ReplacementIntent, expectedIntent) {
 				return runevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart request identity was reused with different sealed input", common.ErrConflict)
@@ -254,13 +257,12 @@ func replacementIntentMatches(current *runmodel.ReplacementIntent, requested run
 		current.DoDID == requested.DoDID &&
 		strings.TrimSpace(current.DefinitionRevision) == strings.TrimSpace(requested.DefinitionRevision) &&
 		strings.TrimSpace(current.StartupInputHash) == strings.TrimSpace(requested.StartupInputHash) &&
-		current.Priority == requested.Priority &&
 		current.ReconciliationScope == requested.ReconciliationScope &&
 		current.Kind == requested.Kind &&
 		strings.TrimSpace(current.Reason) == strings.TrimSpace(requested.Reason) &&
 		current.ClarificationTicketID == requested.ClarificationTicketID &&
 		strings.TrimSpace(current.ReplacementIntentID) == strings.TrimSpace(requested.ReplacementIntentID) &&
-		strings.TrimSpace(current.ReplacementIntentHash) == strings.TrimSpace(requested.ReplacementIntentHash) &&
+		runmodel.EquivalentReplacementIntentHash(*current, requested) &&
 		strings.TrimSpace(current.PredecessorStartupInputHash) == strings.TrimSpace(requested.PredecessorStartupInputHash) &&
 		strings.TrimSpace(current.SuccessorStartupInputHash) == strings.TrimSpace(requested.SuccessorStartupInputHash) &&
 		runtimecontract.StableRuntimeBootstrapHash(*current.Bootstrap) == runtimecontract.StableRuntimeBootstrapHash(*requested.Bootstrap)
@@ -276,7 +278,6 @@ func replacementRunMatchesIntent(current *runmodel.Run, requested runmodel.Repla
 		current.DoDID == requested.DoDID &&
 		strings.TrimSpace(current.DefinitionRevision) == strings.TrimSpace(requested.DefinitionRevision) &&
 		strings.TrimSpace(current.StartupInputHash) == strings.TrimSpace(requested.StartupInputHash) &&
-		current.Priority == requested.Priority &&
 		current.ReconciliationScope == requested.ReconciliationScope &&
 		runtimecontract.StableRuntimeBootstrapHash(*current.RuntimeBootstrap) == runtimecontract.StableRuntimeBootstrapHash(*requested.Bootstrap)
 }
@@ -285,7 +286,7 @@ func replacementIntentFromCommand(cmd runevents.WorkspaceExecutionIntentCommand)
 	bootstrap := cmd.Bootstrap.Clone()
 	return runmodel.ReplacementIntent{
 		RequestID: cmd.RequestID, WorkspaceID: cmd.WorkspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID,
-		DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash, Bootstrap: &bootstrap, Priority: cmd.Priority,
+		DefinitionRevision: cmd.DefinitionRevision, StartupInputHash: cmd.StartupInputHash, Bootstrap: &bootstrap,
 		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		Kind:                runtimecontract.RuntimeTerminationSuperseded, Reason: "workspace execution restart/" + cmd.RequestID,
 	}
@@ -340,7 +341,7 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 				PredecessorRunID:   predecessorID,
 				DefinitionRevision: intent.DefinitionRevision, StartupInputHash: intent.StartupInputHash,
 				InitialStepKind: llmcommon.StepKindWorkspaceExecution, RuntimeBootstrap: &bootstrap,
-				ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope, Priority: intent.Priority,
+				ActivationRequestID: intent.RequestID, ReconciliationScope: intent.ReconciliationScope,
 			},
 		})
 		if err != nil {
@@ -355,11 +356,8 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent ru
 		// Workspace execution replacement persists the successor and its lineage
 		// inside the Run owner. Hand off the sealed activation-memory fact only
 		// after the Run record is durable.
-		m.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
-			RunID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
-			DefinitionRevision: item.DefinitionRevision, InitialStepKind: item.InitialStepKind,
-			RuntimeBootstrap: item.RuntimeBootstrap, PredecessorRunID: item.Lineage.PredecessorRunID,
-			PredecessorResultID: item.Lineage.PredecessorResultID, Priority: item.Priority,
+		m.publishRuntimeActivationMemoryRecall(ctx, runtimeActivationMemoryRecall{
+			RunID: item.ID, WorkspaceID: item.WorkspaceID, RuntimeBootstrap: item.RuntimeBootstrap,
 		}, item.CreatedAt)
 		return item, nil
 	}
@@ -541,11 +539,8 @@ func (m *Biz) recoverPendingWorkspaceExecutionSuccessors() {
 		// the create-once Memory fact on startup so a crash between Run commit and
 		// the cross-owner handoff cannot permanently lose the recall trace. Exact
 		// replay is zero-write at the Memory owner and never becomes SM authority.
-		m.publishRuntimeActivationMemoryRecall(context.Background(), runevents.CreateRunCommand{
-			RunID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
-			DefinitionRevision: item.DefinitionRevision, RuntimeBootstrap: item.RuntimeBootstrap,
-			PredecessorRunID: item.Lineage.PredecessorRunID, PredecessorResultID: item.Lineage.PredecessorResultID,
-			Priority: item.Priority,
+		m.publishRuntimeActivationMemoryRecall(context.Background(), runtimeActivationMemoryRecall{
+			RunID: item.ID, WorkspaceID: item.WorkspaceID, RuntimeBootstrap: item.RuntimeBootstrap,
 		}, item.CreatedAt)
 		if item.ReplacementIntent == nil {
 			continue

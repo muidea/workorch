@@ -14,7 +14,6 @@ import (
 	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -60,7 +59,7 @@ func TestPublishRuntimeActivationMemoryRecallUsesTypedMemoryOwnerCommand(t *test
 		Memories:        []runtimecontract.RuntimeMemoryContext{{ID: "memory-activation", Summary: "selected project context", VectorScore: 0.91}},
 		MemorySelection: selection,
 	}}
-	biz.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
+	biz.publishRuntimeActivationMemoryRecall(ctx, runtimeActivationMemoryRecall{
 		WorkspaceID: "ws-activation-memory", RunID: "run-activation-memory", RuntimeBootstrap: bootstrap,
 	}, "2026-08-19T00:00:00Z")
 
@@ -95,7 +94,7 @@ func TestRuntimeActivationMemoryRecallSkipsEmptySelection(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert) })
-	biz.publishRuntimeActivationMemoryRecall(context.Background(), runevents.CreateRunCommand{
+	biz.publishRuntimeActivationMemoryRecall(context.Background(), runtimeActivationMemoryRecall{
 		WorkspaceID: "ws-empty-memory", RunID: "run-empty-memory",
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{}},
 	}, "2026-08-19T00:00:00Z")
@@ -127,7 +126,7 @@ func TestPublishRuntimeActivationMemoryRecallPersistsThroughMemoryOwner(t *testi
 	})
 
 	runOwner := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
-	runOwner.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
+	runOwner.publishRuntimeActivationMemoryRecall(ctx, runtimeActivationMemoryRecall{
 		WorkspaceID: "ws-activation-memory-persist", RunID: "run-activation-memory-persist",
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{
 			Memories:        []runtimecontract.RuntimeMemoryContext{{ID: "memory-persist", Summary: "selected", VectorScore: 0.8}},

@@ -53,6 +53,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -198,11 +199,6 @@ func (h recordingEventHub) Send(event magicevent.Event) magicevent.Result {
 	return h.Hub.Send(event)
 }
 
-func skipObsoleteSynchronousExecutionEndpointTest(t *testing.T) {
-	t.Helper()
-	t.Skip("legacy endpoint test expects final Run state inline; current HTTP waits for Workspace-owner admission and final execution state is verified through owner readback/projection tests")
-}
-
 func newTestServerState(t *testing.T, config Config) *serverState {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
@@ -255,7 +251,6 @@ func (p directWorkspaceExecutionSubmitter) SubmitWorkspaceRun(ctx context.Contex
 	intent := workspaceevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID: command.WorkspaceID,
 		RequestID:   command.RequestID,
-		Priority:    command.Priority,
 	}
 	switch command.Intent {
 	case "resume":
@@ -874,71 +869,6 @@ func TestUpdateRuntimeConfigurationEndpointPersistsCanonicalPolicySource(t *test
 	}
 }
 
-func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	mux := newTestMux(t, Config{Backend: "memory"})
-
-	workspace := createWorkspaceForHTTP(t, mux, "memory http", "workspaces/ws-memory-http")
-	workspaceID := workspace.ID
-
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil)
-	listRec := httptest.NewRecorder()
-	mux.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want 200, body = %s", listRec.Code, listRec.Body.String())
-	}
-	if !strings.Contains(listRec.Body.String(), `"id": "`+workspaceID+`"`) {
-		t.Fatalf("list body = %s, want created workspace", listRec.Body.String())
-	}
-
-	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspaceID)
-	createRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs", strings.NewReader(`{"runId":"run-memory-http","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	createRunReq.Header.Set("Content-Type", "application/json")
-	createRunRec := httptest.NewRecorder()
-	mux.ServeHTTP(createRunRec, createRunReq)
-	if createRunRec.Code != http.StatusCreated {
-		t.Fatalf("create run status = %d, want 201, body = %s", createRunRec.Code, createRunRec.Body.String())
-	}
-
-	listRunReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId="+workspaceID, nil)
-	listRunRec := httptest.NewRecorder()
-	mux.ServeHTTP(listRunRec, listRunReq)
-	if listRunRec.Code != http.StatusOK {
-		t.Fatalf("list run status = %d, want 200, body = %s", listRunRec.Code, listRunRec.Body.String())
-	}
-	if !strings.Contains(listRunRec.Body.String(), `"id": "run-memory-http"`) {
-		t.Fatalf("list run body = %s, want created run", listRunRec.Body.String())
-	}
-
-	startRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-memory-http/start", nil)
-	startRunRec := httptest.NewRecorder()
-	mux.ServeHTTP(startRunRec, startRunReq)
-	if startRunRec.Code != http.StatusOK {
-		t.Fatalf("start run status = %d, want 200, body = %s", startRunRec.Code, startRunRec.Body.String())
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-memory-http/status", nil)
-	statusRec := httptest.NewRecorder()
-	mux.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("run status code = %d, want 200, body = %s", statusRec.Code, statusRec.Body.String())
-	}
-	if !strings.Contains(statusRec.Body.String(), `"state": "blocked_on_decision"`) ||
-		!strings.Contains(statusRec.Body.String(), `"blockingTicketId": "run-memory-http-step-1-provider-retry-exhausted-decision"`) {
-		t.Fatalf("run status body = %s, want provider decision blocker without configured LLM provider", statusRec.Body.String())
-	}
-
-	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-memory-http/observability", nil)
-	observabilityRec := httptest.NewRecorder()
-	mux.ServeHTTP(observabilityRec, observabilityReq)
-	if observabilityRec.Code != http.StatusOK {
-		t.Fatalf("run observability code = %d, want 200, body = %s", observabilityRec.Code, observabilityRec.Body.String())
-	}
-	if !strings.Contains(observabilityRec.Body.String(), `"terminal": false`) || !strings.Contains(observabilityRec.Body.String(), `"runtimeCheckpointTotal"`) {
-		t.Fatalf("run observability body = %s, want non-terminal provider blocker and evidence counters", observabilityRec.Body.String())
-	}
-}
-
 func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	mux := newTestMux(t, Config{Backend: "memory"})
 
@@ -1138,86 +1068,6 @@ func TestWorkspaceScopedMemoryItemRoutesBindWorkspaceScope(t *testing.T) {
 	deleteAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusOK)
 	getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusNotFound)
 	getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/memory/"+memoryID, http.StatusOK)
-}
-
-func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	useUnavailableLLMProvider(t)
-	mux := newTestMux(t, Config{Backend: "memory"})
-
-	workspace := createWorkspaceForHTTP(t, mux, "activation http", "workspaces/ws-activation-http")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspace.ID)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{"priority":7}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("activation status = %d, want 200, body = %s", rec.Code, rec.Body.String())
-	}
-	var body workspaceExecutionActivationResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal activation: %v", err)
-	}
-	if !strings.HasPrefix(body.Activation.Run.ID, "run-") ||
-		body.Activation.Run.WorkspaceID != workspace.ID ||
-		body.Activation.Run.GoalID != goalID ||
-		body.Activation.Run.DoDID != dodID ||
-		body.Activation.Run.Priority != 7 ||
-		body.Activation.Run.State != "blocked_on_decision" ||
-		body.Activation.Run.BlockingTicketID == "" {
-		t.Fatalf("activation run = %+v, want generated provider-blocked llm run with definitions", body.Activation.Run)
-	}
-	if body.Activation.Run.FailureReason != "" {
-		t.Fatalf("activation failure reason = %q, want provider blocker without business failure reason", body.Activation.Run.FailureReason)
-	}
-	if len(body.Activation.Snapshot.Runs) != 1 || body.Activation.Snapshot.Runs[0].ID != body.Activation.Run.ID {
-		t.Fatalf("activation snapshot runs = %+v, want created run", body.Activation.Snapshot.Runs)
-	}
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	metricsRec := httptest.NewRecorder()
-	mux.ServeHTTP(metricsRec, metricsReq)
-	if metricsRec.Code != http.StatusOK {
-		t.Fatalf("metrics status = %d, want 200", metricsRec.Code)
-	}
-	for _, want := range []string{
-		`workorch_run_outcomes_total{status="succeeded"} 0`,
-		`workorch_run_outcomes_total{status="failed"} 0`,
-	} {
-		if !strings.Contains(metricsRec.Body.String(), want) {
-			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metricsRec.Body.String())
-		}
-	}
-}
-
-func TestWorkspaceExecutionActivationReportsDisallowedSoulCapability(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	useUnavailableLLMProvider(t)
-	mux := newTestMux(t, Config{Backend: "memory"})
-
-	workspace := createWorkspaceForHTTP(t, mux, "activation soul capability", "workspaces/ws-activation-soul-capability")
-	defineGoalAndDoDForHTTP(t, mux, workspace.ID)
-	postAndExpect(t, mux, "/api/v1/workorch/souls", `{
-		"id":"soul-restricted",
-		"name":"restricted soul",
-		"soulMd":"# Restricted Soul\n\nOnly use explicitly allowed capabilities."
-	}`, http.StatusCreated)
-	postAndExpect(t, mux, "/api/v1/workorch/skills", `{
-		"id":"skill-denied",
-		"name":"denied skill",
-		"version":"v1",
-		"instruction":"This skill is intentionally not allowed by the selected soul."
-	}`, http.StatusCreated)
-
-	body := postAndExpect(t, mux, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", `{
-		"soulId":"soul-restricted",
-		"skillIds":["skill-denied"]
-	}`, http.StatusBadRequest)
-	for _, want := range []string{"invalid argument", "soul-restricted", "skill-denied"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("activation capability error body = %s, want %q", body, want)
-		}
-	}
 }
 
 func useUnavailableLLMProvider(t *testing.T) {
@@ -2246,483 +2096,6 @@ func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
 	return body.String()
 }
 
-func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	/* Legacy synchronous aggregate fixture retained for historical route
-	coverage only. Runtime route contracts are covered by focused tests. */
-	/*
-		state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-		// HTTP handlers must invoke the session-backed use cases without exposing
-		// the application EventHub through their request context. The fixture's
-		// existing assertions compare received context values to this nil sentinel.
-		state.commandHub = nil
-		state.validate = func(context.Context, string, string) error { return nil }
-		state.listWorkspaces = func(ctx context.Context, _, _ string) ([]appmodelcore.Workspace, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace list event hub = %#v, want injected hub", got)
-			}
-			return []appmodelcore.Workspace{{ID: "ws-native-read", Title: "native read"}}, nil
-		}
-		state.listRuns = func(ctx context.Context, _, _, workspaceID string) ([]appmodelcore.Run, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run list event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" {
-				t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-			}
-			return []appmodelcore.Run{{ID: "run-native-read", WorkspaceID: workspaceID, State: "created"}}, nil
-		}
-		state.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appmodelcore.Workspace, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace get event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" {
-				t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-			}
-			return appmodelcore.Workspace{ID: workspaceID, Title: "native read", State: "active"}, nil
-		}
-		state.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace snapshot event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" {
-				t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-			}
-			return readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: workspaceID}}, nil
-		}
-		state.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace soul bindings read event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" {
-				t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-			}
-			return workorchmanagementcontract.WorkspaceSoulBindings{
-				WorkspaceID:   workspaceID,
-				DefaultSoulID: "soul-native",
-				Bindings: map[string]string{
-					"planning": "soul-native",
-				},
-			}, nil
-		}
-		state.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd workorchmanagementcontract.WorkspaceSoulBindings) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace soul bindings update event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" || cmd.DefaultSoulID != "soul-native" || cmd.Bindings["execution"] != "soul-native-execution" {
-				t.Fatalf("soul bindings input = %+v for workspace %q, want native soul bindings", cmd, workspaceID)
-			}
-			cmd.WorkspaceID = workspaceID
-			return cmd, nil
-		}
-		state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd definitionquality.Command) (definitionquality.Check, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("goal/dod quality check event hub = %#v, want injected hub", got)
-			}
-			if cmd.WorkspaceID != "ws-native-read" || cmd.GoalID != "goal-native" || cmd.DoDID != "dod-native" {
-				t.Fatalf("quality check cmd = %+v, want ws-native-read/goal-native/dod-native", cmd)
-			}
-			return definitionquality.Check{
-				WorkspaceID:       cmd.WorkspaceID,
-				GoalID:            cmd.GoalID,
-				DoDID:             cmd.DoDID,
-				Executable:        true,
-				Verifiable:        true,
-				ExecutionScore:    92,
-				VerificationScore: 90,
-				Status:            "ready",
-			}, nil
-		}
-		state.readRun = func(ctx context.Context, _, _, runID string) (appmodelcore.Run, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run get event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
-		}
-		state.readRunSnapshot = func(ctx context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
-			if runID == "run-native-read" {
-				got := appservice.CommandHubFromContext(ctx)
-				if got != nil && got != state.commandHub {
-					t.Fatalf("run snapshot event hub = %#v, want injected hub", got)
-				}
-				state := "created"
-				if got == nil {
-					state = "completed"
-				}
-				return readmodelcore.RunSnapshotState{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: state}}, nil
-			}
-			if runID == "run-native-activation" {
-				return readmodelcore.RunSnapshotState{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}}, nil
-			}
-			t.Fatalf("runID = %q, want run-native-read or run-native-activation", runID)
-			return readmodelcore.RunSnapshotState{}, nil
-		}
-		state.listRunSteps = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run steps event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "step-native-1" || query.Limit != 2 {
-				t.Fatalf("run steps query = %+v, want run-native-read cursor step-native-1 limit 2", query)
-			}
-			return readmodelcore.StepPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "step-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.listRunToolCalls = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run tool calls event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "tool-native-1" || query.Limit != 2 {
-				t.Fatalf("run tool calls query = %+v, want run-native-read cursor tool-native-1 limit 2", query)
-			}
-			return readmodelcore.ToolCallPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "tool-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run runtime checkpoints event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "checkpoint-native-1" || query.Limit != 2 {
-				t.Fatalf("run runtime checkpoints query = %+v, want run-native-read cursor checkpoint-native-1 limit 2", query)
-			}
-			return readmodelcore.RuntimeCheckpointPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "checkpoint-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.listRunResults = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ResultPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run results event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "result-native-1" || query.Limit != 2 {
-				t.Fatalf("run results query = %+v, want run-native-read cursor result-native-1 limit 2", query)
-			}
-			return readmodelcore.ResultPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "result-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.listRunPatches = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.PatchPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run patches event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "patch-native-1" || query.Limit != 2 {
-				t.Fatalf("run patches query = %+v, want run-native-read cursor patch-native-1 limit 2", query)
-			}
-			return readmodelcore.PatchPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "patch-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.listRunValidationResults = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ValidationResultPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run validation results event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "validation-native-1" || query.Limit != 2 {
-				t.Fatalf("run validation results query = %+v, want run-native-read cursor validation-native-1 limit 2", query)
-			}
-			return readmodelcore.ValidationResultPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "validation-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.listRunArtifacts = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ArtifactPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run artifacts event hub = %#v, want injected hub", got)
-			}
-			if query.RunID != "run-native-read" || query.CursorAfterID != "artifact-native-1" || query.Limit != 2 {
-				t.Fatalf("run artifacts query = %+v, want run-native-read cursor artifact-native-1 limit 2", query)
-			}
-			return readmodelcore.ArtifactPage{
-				RunID:             query.RunID,
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "artifact-native-2",
-				HasMore:           true,
-			}, nil
-		}
-		state.readRunStatus = func(ctx context.Context, _, _, runID string) (projectioncontract.RunStatus, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run status event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return projectioncontract.RunStatus{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
-		}
-		state.readRunObservability = func(ctx context.Context, _, _, runID string) (readmodelcore.RunObservabilityState, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run observability event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return readmodelcore.RunObservabilityState{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
-		}
-		state.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (projectioncontract.TaskProgress, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run task progress event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return projectioncontract.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
-		}
-		state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (projectioncontract.ContextBundle, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run context bundle event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return projectioncontract.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
-		}
-		state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]projectioncontract.TaskDecomposition, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run task decomposition event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return []projectioncontract.TaskDecomposition{{ID: "task-native", WorkspaceID: "ws-native-read", RunID: runID, State: "running"}}, nil
-		}
-		state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]projectioncontract.Decision, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("decision list event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" || runID != "run-native-read" {
-				t.Fatalf("decision filters = %q/%q, want ws-native-read/run-native-read", workspaceID, runID)
-			}
-			return []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
-		}
-		state.listDecisionPage = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("decision page event hub = %#v, want injected hub", got)
-			}
-			if query.WorkspaceID != "ws-native-read" || query.RunID != "run-native-read" || query.CursorAfterID != "ticket-native-cursor" || query.Limit != 2 {
-				t.Fatalf("decision page query = %+v, want ws-native-read/run-native-read cursor ticket-native-cursor limit 2", query)
-			}
-			return appmodelcore.DecisionPage{
-				WorkspaceID:       query.WorkspaceID,
-				RunID:             query.RunID,
-				Decisions:         []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "open"}},
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "ticket-native-read",
-			}, nil
-		}
-		state.readDecision = func(ctx context.Context, _, _, ticketID string) (projectioncontract.Decision, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("decision get event hub = %#v, want injected hub", got)
-			}
-			if ticketID != "ticket-native-read" {
-				t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
-			}
-			return projectioncontract.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "open"}, nil
-		}
-		state.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]projectioncontract.Approval, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("approval list event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" || runID != "run-native-read" {
-				t.Fatalf("approval filters = %q/%q, want ws-native-read/run-native-read", workspaceID, runID)
-			}
-			return []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
-		}
-		state.listApprovalPage = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("approval page event hub = %#v, want injected hub", got)
-			}
-			if query.WorkspaceID != "ws-native-read" || query.RunID != "run-native-read" || query.CursorAfterID != "approval-native-cursor" || query.Limit != 2 {
-				t.Fatalf("approval page query = %+v, want ws-native-read/run-native-read cursor approval-native-cursor limit 2", query)
-			}
-			return appmodelcore.ApprovalPage{
-				WorkspaceID:       query.WorkspaceID,
-				RunID:             query.RunID,
-				Approvals:         []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "pending"}},
-				Limit:             query.Limit,
-				CursorAfterID:     query.CursorAfterID,
-				NextCursorAfterID: "approval-native-read",
-			}, nil
-		}
-		state.readApproval = func(ctx context.Context, _, _, approvalID string) (projectioncontract.Approval, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("approval get event hub = %#v, want injected hub", got)
-			}
-			if approvalID != "approval-native-read" {
-				t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
-			}
-			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
-		}
-		state.createWorkspace = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace create event hub = %#v, want injected hub", got)
-			}
-			if cmd.Title != "native write" || cmd.Description != "native description" || cmd.DeliverableDirectory != "workspaces/native-write" || cmd.TemplateID != "template-native" {
-				t.Fatalf("workspace create input = %q/%q/%q/%q, want native write/native description/workspaces/native-write/template-native", cmd.Title, cmd.Description, cmd.DeliverableDirectory, cmd.TemplateID)
-			}
-			return appmodelcore.Workspace{ID: "ws-native-write", Title: cmd.Title, Description: cmd.Description, DeliverableDirectory: cmd.DeliverableDirectory, State: "active"}, nil
-		}
-		state.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.DeleteWorkspaceCommand) error {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace delete event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" || !cmd.Purge {
-				t.Fatalf("workspace delete input = %q/%+v, want ws-native-read purge", workspaceID, cmd)
-			}
-			return nil
-		}
-		state.startRun = func(ctx context.Context, _, _, runID string) (appmodelcore.Run, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run start event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
-		}
-		state.resumeRun = func(ctx context.Context, _, _, runID string) (appmodelcore.Run, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run resume event hub = %#v, want injected hub", got)
-			}
-			if runID != "run-native-read" {
-				t.Fatalf("runID = %q, want run-native-read", runID)
-			}
-			return appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
-		}
-		state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (projectioncontract.Decision, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("decision resolve event hub = %#v, want injected hub", got)
-			}
-			if ticketID != "ticket-native-read" {
-				t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
-			}
-			return projectioncontract.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}, nil
-		}
-		state.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveDecisionCommand) ([]projectioncontract.Decision, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("decision batch resolve event hub = %#v, want injected hub", got)
-			}
-			if !stringSliceEqual(cmd.TicketIDs, []string{"ticket-native-read"}) || cmd.ResolutionType != decisioncommon.ResolutionTypeReplan {
-				t.Fatalf("batch resolve cmd = %+v, want ticket-native-read replan", cmd)
-			}
-			return []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}}, nil
-		}
-		state.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("approval approve event hub = %#v, want injected hub", got)
-			}
-			if approvalID != "approval-native-read" {
-				t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
-			}
-			if cmd.Action != "approve" {
-				t.Fatalf("approval approve action = %q, want approve", cmd.Action)
-			}
-			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}, nil
-		}
-		state.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("approval reject event hub = %#v, want injected hub", got)
-			}
-			if approvalID != "approval-native-read" {
-				t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
-			}
-			if cmd.Action != "reject" {
-				t.Fatalf("approval reject action = %q, want reject", cmd.Action)
-			}
-			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
-		}
-		state.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveApprovalCommand) ([]projectioncontract.Approval, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("approval batch resolve event hub = %#v, want injected hub", got)
-			}
-			if !stringSliceEqual(cmd.ApprovalIDs, []string{"approval-native-read"}) || cmd.Action != "approve" {
-				t.Fatalf("batch approval cmd = %+v, want approval-native-read approve", cmd)
-			}
-			return []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}}, nil
-		}
-		handler := newMuxWithState(state)
-
-		for _, tc := range []struct {
-			method string
-			path   string
-			body   string
-			status int
-		}{
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","deliverableDirectory":"workspaces/native-write","templateId":"template-native"}`, status: http.StatusCreated},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
-			{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", body: `{"defaultSoulId":"soul-native","bindings":{"execution":"soul-native-execution"}}`, status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/goal-dod-quality-check", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
-			{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/snapshot", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/steps?cursorAfterId=step-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/tool-calls?cursorAfterId=tool-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/runtime-checkpoints?cursorAfterId=checkpoint-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/results?cursorAfterId=result-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/patches?cursorAfterId=patch-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/validation-results?cursorAfterId=validation-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/artifacts?cursorAfterId=artifact-native-1&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/status", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/observability", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/task-progress", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/context-bundle", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/task-decompositions", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/start", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/resume", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","llmTarget":{"providerId":"ai-proxy","modelId":"gpt-4o"},"soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9}`, status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=ticket-native-cursor&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/decisions/resolve-batch", body: `{"ticketIds":["ticket-native-read"],"resolutionType":"replan"}`, status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/approvals?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=approval-native-cursor&limit=2", status: http.StatusOK},
-			{method: http.MethodGet, path: "/api/v1/workorch/approvals/approval-native-read", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/reject", status: http.StatusOK},
-			{method: http.MethodPost, path: "/api/v1/workorch/approvals/resolve-batch", body: `{"approvalIds":["approval-native-read"],"action":"approve"}`, status: http.StatusOK},
-			{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
-		} {
-			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-			if tc.body != "" {
-				req.Header.Set("Content-Type", "application/json")
-			}
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != tc.status {
-				t.Fatalf("%s %s status = %d, want %d", tc.method, tc.path, rec.Code, tc.status)
-			}
-		}
-	*/
-}
-
 func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 	handler := newTestMux(t, Config{Backend: "memory"})
 
@@ -3445,272 +2818,6 @@ func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T)
 	}
 	if err := session.Close(ctx); err != nil {
 		t.Fatalf("close session #2: %v", err)
-	}
-}
-
-func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-
-	workspace := createWorkspaceForHTTP(t, handler, "run http workspace", "workspaces/run-http")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-http","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	runReq.Header.Set("Content-Type", "application/json")
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-
-	if runRec.Code != http.StatusCreated {
-		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
-	}
-	var body runInstanceResponse
-	if err := json.Unmarshal(runRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal created run: %v", err)
-	}
-	if body.Run.ID != "run-http" || body.Run.WorkspaceID != workspace.ID || body.Run.State != string(common.RunStatePending) {
-		t.Fatalf("created run = %+v, want run-http/%s/pending", body.Run, workspace.ID)
-	}
-	if body.Run.GoalID != goalID || body.Run.DoDID != dodID {
-		t.Fatalf("created run goal/dod = %+v, want %s/%s", body.Run, goalID, dodID)
-	}
-}
-
-func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-
-	workspaceA := createWorkspaceForHTTP(t, handler, "run workspace a", "workspaces/run-a")
-	workspaceB := createWorkspaceForHTTP(t, handler, "run workspace b", "workspaces/run-b")
-	goalA, dodA := defineGoalAndDoDForHTTP(t, handler, workspaceA.ID)
-	goalB, dodB := defineGoalAndDoDForHTTP(t, handler, workspaceB.ID)
-
-	for _, tc := range []struct {
-		path string
-		body string
-	}{
-		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-b","goalId":"` + goalB + `","doDId":"` + dodB + `"}`},
-		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-a","goalId":"` + goalA + `","doDId":"` + dodA + `"}`},
-	} {
-		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("run create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-		}
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs", nil)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("run list status = %d, want 200, body=%s", listRec.Code, listRec.Body.String())
-	}
-	var listed runsResponse
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("unmarshal run list: %v", err)
-	}
-	if len(listed.Runs) != 2 || listed.Runs[0].ID != "run-a" || listed.Runs[1].ID != "run-b" {
-		t.Fatalf("listed runs = %+v, want run-a/run-b", listed.Runs)
-	}
-	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs?workspaceId="+workspaceB.ID, nil)
-	filteredRec := httptest.NewRecorder()
-	handler.ServeHTTP(filteredRec, filteredReq)
-	if filteredRec.Code != http.StatusOK {
-		t.Fatalf("filtered run list status = %d, want 200, body=%s", filteredRec.Code, filteredRec.Body.String())
-	}
-	var filtered runsResponse
-	if err := json.Unmarshal(filteredRec.Body.Bytes(), &filtered); err != nil {
-		t.Fatalf("unmarshal filtered runs: %v", err)
-	}
-	if len(filtered.Runs) != 1 || filtered.Runs[0].ID != "run-b" {
-		t.Fatalf("filtered runs = %+v, want run-b", filtered.Runs)
-	}
-	workspaceScopedReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/runs", nil)
-	workspaceScopedRec := httptest.NewRecorder()
-	handler.ServeHTTP(workspaceScopedRec, workspaceScopedReq)
-	if workspaceScopedRec.Code != http.StatusOK {
-		t.Fatalf("workspace scoped run list status = %d, want 200, body=%s", workspaceScopedRec.Code, workspaceScopedRec.Body.String())
-	}
-	var workspaceScoped runsResponse
-	if err := json.Unmarshal(workspaceScopedRec.Body.Bytes(), &workspaceScoped); err != nil {
-		t.Fatalf("unmarshal workspace scoped runs: %v", err)
-	}
-	if len(workspaceScoped.Runs) != 1 || workspaceScoped.Runs[0].ID != "run-a" || workspaceScoped.Runs[0].WorkspaceID != workspaceA.ID {
-		t.Fatalf("workspace scoped runs = %+v, want run-a for %s", workspaceScoped.Runs, workspaceA.ID)
-	}
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/runs/run-a", nil)
-	getRec := httptest.NewRecorder()
-	handler.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("run get status = %d, want 200, body=%s", getRec.Code, getRec.Body.String())
-	}
-	var fetched runInstanceResponse
-	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
-		t.Fatalf("unmarshal run get: %v", err)
-	}
-	if fetched.Run.ID != "run-a" || fetched.Run.WorkspaceID != workspaceA.ID {
-		t.Fatalf("fetched run = %+v, want run-a/%s", fetched.Run, workspaceA.ID)
-	}
-}
-
-func TestUnscopedRunGetReturnsWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-
-	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate run workspace a", "workspaces/dup-run-a")
-	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate run workspace b", "workspaces/dup-run-b")
-	goalA, dodA := defineGoalAndDoDForHTTP(t, handler, workspaceA.ID)
-	goalB, dodB := defineGoalAndDoDForHTTP(t, handler, workspaceB.ID)
-
-	for _, tc := range []struct {
-		path string
-		body string
-	}{
-		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalA + `","doDId":"` + dodA + `"}`},
-		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalB + `","doDId":"` + dodB + `"}`},
-	} {
-		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("run create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-		}
-	}
-
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-001", nil)
-	getRec := httptest.NewRecorder()
-	handler.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusNotFound {
-		t.Fatalf("unscoped duplicate run get status = %d, want 404, body=%s", getRec.Code, getRec.Body.String())
-	}
-	if !strings.Contains(getRec.Body.String(), "404 page not found") {
-		t.Fatalf("unscoped duplicate run get body = %s, want not found", getRec.Body.String())
-	}
-
-	scopedReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/runs/run-001", nil)
-	scopedRec := httptest.NewRecorder()
-	handler.ServeHTTP(scopedRec, scopedReq)
-	if scopedRec.Code != http.StatusOK {
-		t.Fatalf("workspace scoped duplicate run get status = %d, want 200, body=%s", scopedRec.Code, scopedRec.Body.String())
-	}
-}
-
-func TestUnscopedRunEndpointsReturnWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-
-	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace a", "workspaces/dup-scoped-run-a")
-	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace b", "workspaces/dup-scoped-run-b")
-	goalA, dodA := defineGoalAndDoDForHTTP(t, handler, workspaceA.ID)
-	goalB, dodB := defineGoalAndDoDForHTTP(t, handler, workspaceB.ID)
-
-	for _, tc := range []struct {
-		path string
-		body string
-	}{
-		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalA + `","doDId":"` + dodA + `"}`},
-		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalB + `","doDId":"` + dodB + `"}`},
-	} {
-		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("run create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-		}
-	}
-
-	for _, tc := range []struct {
-		name   string
-		method string
-		path   string
-	}{
-		{name: "snapshot", method: http.MethodGet, path: "/api/v1/workorch/runs/run-001/snapshot"},
-		{name: "status", method: http.MethodGet, path: "/api/v1/workorch/runs/run-001/status"},
-		{name: "start", method: http.MethodPost, path: "/api/v1/workorch/runs/run-001/start"},
-		{name: "resume", method: http.MethodPost, path: "/api/v1/workorch/runs/run-001/resume"},
-	} {
-		req := httptest.NewRequest(tc.method, tc.path, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s duplicate run endpoint status = %d, want 404, body=%s", tc.name, rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "404 page not found") {
-			t.Fatalf("%s duplicate run endpoint body = %s, want not found", tc.name, rec.Body.String())
-		}
-	}
-}
-
-func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	ctx := context.Background()
-	first := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
-	firstHandler := first.http.Handler
-
-	workspace := createWorkspaceForHTTP(t, firstHandler, "event replay workspace", "workspaces/event-replay")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, firstHandler, workspace.ID)
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-event-replay","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	runReq.Header.Set("Content-Type", "application/json")
-	runRec := httptest.NewRecorder()
-	firstHandler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusCreated {
-		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
-	}
-	if err := first.Shutdown(ctx); err != nil {
-		t.Fatalf("shutdown first server: %v", err)
-	}
-
-	second := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
-	t.Cleanup(func() {
-		if err := second.Shutdown(ctx); err != nil {
-			t.Fatalf("shutdown second server: %v", err)
-		}
-	})
-	secondHandler := second.http.Handler
-
-	workspaceEvents := readEventRecordsForHTTP(t, secondHandler, "/api/v1/workorch/events?workspaceId="+workspace.ID)
-	if !eventRecordsContainTopic(workspaceEvents, workspaceevents.TopicWorkspaceCreated) ||
-		!eventRecordsContainTopic(workspaceEvents, workspaceevents.TopicGoalDefined) ||
-		!eventRecordsContainTopic(workspaceEvents, workspaceevents.TopicDoDDefined) ||
-		!eventRecordsContainTopic(workspaceEvents, runevents.TopicRunCreated) {
-		t.Fatalf("workspace events = %+v, want workspace/goal/dod/run persisted events after restart", workspaceEvents)
-	}
-
-	runEvents := readEventRecordsForHTTP(t, secondHandler, "/api/v1/workorch/events?runId=run-event-replay")
-	if len(runEvents) != 1 || runEvents[0].Topic != runevents.TopicRunCreated || runEvents[0].WorkspaceID != workspace.ID {
-		t.Fatalf("run events = %+v, want replayed run-created event", runEvents)
-	}
-
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-event-replay/snapshot", nil)
-	snapshotRec := httptest.NewRecorder()
-	secondHandler.ServeHTTP(snapshotRec, snapshotReq)
-	if snapshotRec.Code != http.StatusOK {
-		t.Fatalf("snapshot status = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
-	}
-	var snapshotBody runSnapshotResponse
-	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &snapshotBody); err != nil {
-		t.Fatalf("unmarshal run snapshot: %v", err)
-	}
-	if len(snapshotBody.Snapshot.EventRecords) != 1 || snapshotBody.Snapshot.EventRecords[0].Topic != runevents.TopicRunCreated {
-		t.Fatalf("snapshot eventRecords = %+v, want replayed run-created event", snapshotBody.Snapshot.EventRecords)
-	}
-
-	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-event-replay/observability", nil)
-	observabilityRec := httptest.NewRecorder()
-	secondHandler.ServeHTTP(observabilityRec, observabilityReq)
-	if observabilityRec.Code != http.StatusOK {
-		t.Fatalf("observability status = %d, want 200, body=%s", observabilityRec.Code, observabilityRec.Body.String())
-	}
-	var observabilityBody runObservabilityResponse
-	if err := json.Unmarshal(observabilityRec.Body.Bytes(), &observabilityBody); err != nil {
-		t.Fatalf("unmarshal run observability: %v", err)
-	}
-	if !timelineContainsPersistedEvent(observabilityBody.Observability.Timeline, runevents.TopicRunCreated) {
-		t.Fatalf("timeline = %+v, want persisted run event after restart", observabilityBody.Observability.Timeline)
 	}
 }
 
@@ -4542,17 +3649,19 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 			RunID:       runID,
 			StepID:      common.StepID(fmt.Sprintf("%s/step-%02d", runID, idx)),
 			Payload: mustServerEventPayload(t, map[string]any{
-				recordpayload.PayloadKeyWorkspaceID:  string(workspaceID),
-				recordpayload.PayloadKeyRunID:        string(runID),
-				recordpayload.PayloadKeyStepID:       fmt.Sprintf("%s/step-%02d", runID, idx),
-				recordpayload.PayloadKeyProviderID:   "provider-compact",
-				recordpayload.PayloadKeyProvider:     "compatible",
-				recordpayload.PayloadKeyModel:        "model-compact",
-				recordpayload.PayloadKeyOperation:    "responses",
-				recordpayload.PayloadKeyInputTokens:  10 + idx,
-				recordpayload.PayloadKeyOutputTokens: 1,
-				recordpayload.PayloadKeyTotalTokens:  11 + idx,
-				recordpayload.PayloadKeyStatus:       "completed",
+				recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
+				recordpayload.PayloadKeyRunID:                string(runID),
+				recordpayload.PayloadKeyStepID:               fmt.Sprintf("%s/step-%02d", runID, idx),
+				recordpayload.PayloadKeyProviderID:           "provider-compact",
+				recordpayload.PayloadKeyProvider:             "compatible",
+				recordpayload.PayloadKeyModel:                "model-compact",
+				recordpayload.PayloadKeyOperation:            "responses",
+				recordpayload.PayloadKeyInputTokens:          10 + idx,
+				recordpayload.PayloadKeyOutputTokens:         1,
+				recordpayload.PayloadKeyTotalTokens:          11 + idx,
+				recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeNonStreaming),
+				recordpayload.PayloadKeyProviderSubmitted:    true,
+				recordpayload.PayloadKeyStatus:               "completed",
 			}),
 		}); err != nil {
 			t.Fatalf("append usage event %d: %v", idx, err)
@@ -4847,27 +3956,6 @@ func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T
 	}
 }
 
-func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-
-	workspace := createWorkspaceForHTTP(t, handler, "run dup workspace", "workspaces/run-dup")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-
-	for idx := 0; idx < 2; idx++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-dup","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if idx == 0 && rec.Code != http.StatusCreated {
-			t.Fatalf("first run create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-		}
-		if idx == 1 && rec.Code != http.StatusConflict {
-			t.Fatalf("second run create status = %d, want 409, body=%s", rec.Code, rec.Body.String())
-		}
-	}
-}
-
 func TestRunCreateEndpointReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-missing/runs", strings.NewReader(`{"runId":"run-missing","goalId":"goal-missing","doDId":"dod-missing"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -4891,40 +3979,6 @@ func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
-func TestRunStartEndpointReturnsBlockedProviderDecisionRun(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-
-	workspace := createWorkspaceForHTTP(t, handler, "run start http workspace", "workspaces/run-start-http")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-start-http","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	runReq.Header.Set("Content-Type", "application/json")
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusCreated {
-		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
-	}
-
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-start-http/start", nil)
-	startRec := httptest.NewRecorder()
-	handler.ServeHTTP(startRec, startReq)
-
-	if startRec.Code != http.StatusOK {
-		t.Fatalf("start status = %d, want 200, body=%s", startRec.Code, startRec.Body.String())
-	}
-	var body runInstanceResponse
-	if err := json.Unmarshal(startRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal started run: %v", err)
-	}
-	if body.Run.ID != "run-start-http" ||
-		body.Run.State != string(common.RunStateBlockedOnDecision) ||
-		body.Run.BlockingTicketID == "" ||
-		body.Run.FailureReason != "" {
-		t.Fatalf("started run = %+v, want run-start-http blocked on provider decision", body.Run)
-	}
-}
-
 func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
@@ -4944,127 +3998,6 @@ func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 	}
 	if body.Run.State != "blocked_on_decision" || body.Run.BlockingTicketID != seeded.BlockingTicketID {
 		t.Fatalf("run = %+v, want seeded blocked decision", body.Run)
-	}
-}
-
-func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuation(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
-	runID := "run-decision-resume-http"
-
-	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "run resume decision http workspace", runID)
-	if started.State != "blocked_on_decision" || started.BlockingTicketID == "" {
-		t.Fatalf("started run = %+v, want blocked decision with ticket", started)
-	}
-
-	resolveDecisionForHTTP(t, dataRoot, started.BlockingTicketID, false)
-
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-
-	if resumeRec.Code != http.StatusOK {
-		t.Fatalf("resume status = %d, want 200 with terminal failed run, body=%s", resumeRec.Code, resumeRec.Body.String())
-	}
-	var body runInstanceResponse
-	if err := json.Unmarshal(resumeRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal resumed run: %v", err)
-	}
-	if body.Run.State != "failed" || body.Run.BlockingTicketID != "" {
-		t.Fatalf("run = %+v, want failed with cleared decision blocker", body.Run)
-	}
-}
-
-func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuation(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
-	runID := "run-approval-resume-http"
-
-	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval http workspace", runID)
-	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
-		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
-	}
-
-	resolveApprovalForHTTP(t, dataRoot, workspace.ID, runID, started.BlockingApprovalID, false)
-
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-
-	if resumeRec.Code != http.StatusOK {
-		t.Fatalf("resume status = %d, want 200 with terminal failed run, body=%s", resumeRec.Code, resumeRec.Body.String())
-	}
-	var body runInstanceResponse
-	if err := json.Unmarshal(resumeRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal resumed run: %v", err)
-	}
-	if body.Run.State != "failed" || body.Run.BlockingApprovalID != "" {
-		t.Fatalf("run = %+v, want failed with cleared approval blocker", body.Run)
-	}
-}
-
-func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
-	runID := "run-approval-rejected-http"
-
-	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval rejected http workspace", runID)
-	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
-		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
-	}
-
-	resolveApprovalForHTTP(t, dataRoot, workspace.ID, runID, started.BlockingApprovalID, true)
-
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-
-	if resumeRec.Code != http.StatusOK {
-		t.Fatalf("resume status = %d, want 200, body=%s", resumeRec.Code, resumeRec.Body.String())
-	}
-	var body runInstanceResponse
-	if err := json.Unmarshal(resumeRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal resumed rejected approval run: %v", err)
-	}
-	if body.Run.State != "failed" || body.Run.BlockingApprovalID != "" || body.Run.FailureReason == "" {
-		t.Fatalf("run = %+v, want failed with cleared approval and reason", body.Run)
-	}
-}
-
-func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
-	runID := "run-approval-pending-http"
-
-	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume pending http workspace", runID)
-	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
-		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
-	}
-
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("resume status = %d, want 409, body=%s", resumeRec.Code, resumeRec.Body.String())
-	}
-}
-
-func TestRunResumeEndpointReturnsConflictForCreatedRun(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
-	workspace := createWorkspaceAndRunForHTTP(t, handler, "run resume created http workspace", "run-resume-created-http")
-
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-resume-created-http/resume", nil)
-	resumeRec := httptest.NewRecorder()
-	handler.ServeHTTP(resumeRec, resumeReq)
-
-	if resumeRec.Code != http.StatusConflict {
-		t.Fatalf("resume status = %d, want 409, body=%s", resumeRec.Code, resumeRec.Body.String())
 	}
 }
 
@@ -5404,19 +4337,22 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("activation status = %d, want 409, body=%s", rec.Code, rec.Body.String())
 	}
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode activation response: %v", err)
 	}
-	if body["accepted"] != true ||
+	if body["accepted"] != false ||
+		body["state"] != "rejected" ||
 		body["intent"] != "resume" ||
 		body["requestId"] != "request-http-activation" ||
 		body["source"] != "web" ||
-		body["reason"] != "http_test" {
-		t.Fatalf("activation response = %+v, want accepted command metadata", body)
+		body["requestReason"] != "http_test" ||
+		body["outcome"] != "restart_required" ||
+		body["reason"] != "workspace_active_run_absent" {
+		t.Fatalf("activation response = %+v, want exact owner rejection", body)
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
@@ -5424,11 +4360,14 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 	}
 	if snapshot.RunCommand == nil ||
 		snapshot.RunCommand.State != "rejected" ||
-		snapshot.RunCommand.Disposition != "restart_required" ||
+		snapshot.RunCommand.Outcome != runtimecontract.RuntimeExecutionIntentRestartRequired ||
+		snapshot.RunCommand.AdmissionReason != runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent ||
+		snapshot.RunCommand.Diagnostic != "workspace has no active run" ||
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-http-activation" ||
-		snapshot.RunCommand.Reason != "http_test" ||
-		snapshot.RunCommand.Source != "web" {
+		snapshot.RunCommand.RequestReason != "http_test" ||
+		snapshot.RunCommand.Source != "web" ||
+		snapshot.RunCommand.AcceptedAt != "" || snapshot.RunCommand.RejectedAt == "" {
 		t.Fatalf("owner outcome projection = %+v", snapshot.RunCommand)
 	}
 	runs, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
@@ -5661,8 +4600,12 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation
 		snapshot.RunCommand.Intent != "restart" ||
 		snapshot.RunCommand.RunID == "" ||
 		snapshot.RunCommand.RequestID != "request-http-restart" ||
-		snapshot.RunCommand.Reason != "operator_restart" ||
-		snapshot.RunCommand.Source != "web" || snapshot.RunCommand.Error != "" {
+		snapshot.RunCommand.RequestReason != "operator_restart" ||
+		snapshot.RunCommand.Source != "web" ||
+		snapshot.RunCommand.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested ||
+		snapshot.RunCommand.AdmissionReason != runtimecontract.RuntimeExecutionIntentReasonNewRunActivated ||
+		snapshot.RunCommand.Diagnostic != "new Workspace Run activated" ||
+		snapshot.RunCommand.AcceptedAt == "" || snapshot.RunCommand.RejectedAt != "" {
 		t.Fatalf("projected run command = %+v, want accepted HTTP restart metadata", snapshot.RunCommand)
 	}
 }
@@ -5921,119 +4864,6 @@ func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.
 	waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateBlockedOnApproval))
 }
 
-func TestMetricsEndpointReportsCounters(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
-
-	workspace := createWorkspaceForHTTP(t, handler, "metrics workspace", "workspaces/metrics")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-	runCreateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-metrics","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	runCreateReq.Header.Set("Content-Type", "application/json")
-	runCreateRec := httptest.NewRecorder()
-	handler.ServeHTTP(runCreateRec, runCreateReq)
-	if runCreateRec.Code != http.StatusCreated {
-		t.Fatalf("run create status = %d, want 201", runCreateRec.Code)
-	}
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-metrics/start", nil)
-	startRec := httptest.NewRecorder()
-	handler.ServeHTTP(startRec, startReq)
-	if startRec.Code != http.StatusOK {
-		t.Fatalf("run start status = %d, want 200", startRec.Code)
-	}
-
-	blockedRunID := "run-decision-metrics"
-	_, blockedRun := seedBlockedDecisionRunForHTTP(t, dataRoot, "metrics blocked workspace", blockedRunID)
-	resolveDecisionReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+blockedRun.BlockingTicketID+"/resolve", nil)
-	resolveDecisionRec := httptest.NewRecorder()
-	handler.ServeHTTP(resolveDecisionRec, resolveDecisionReq)
-	if resolveDecisionRec.Code != http.StatusOK {
-		t.Fatalf("decision resolve status = %d, want 200", resolveDecisionRec.Code)
-	}
-	waitRunStateForHTTP(t, dataRoot, blockedRunID, string(common.RunStateFailed))
-
-	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/workspaces/" + workspace.ID + "/runs/run-metrics"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want 200", path, rec.Code)
-		}
-	}
-
-	for _, path := range []string{
-		"/api/v1/workorch/workspaces/" + workspace.ID + "/snapshot",
-		"/api/v1/workorch/workspaces/" + workspace.ID + "/runs/run-metrics/snapshot",
-		"/api/v1/workorch/workspaces/" + workspace.ID + "/runs/run-metrics/status",
-	} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want 200", path, rec.Code)
-		}
-	}
-
-	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	metricsRec := httptest.NewRecorder()
-	handler.ServeHTTP(metricsRec, metricsReq)
-
-	if metricsRec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", metricsRec.Code)
-	}
-	if contentType := metricsRec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/plain") {
-		t.Fatalf("content-type = %q, want text/plain", contentType)
-	}
-
-	body := metricsRec.Body.String()
-	for _, want := range []string{
-		`workorch_http_requests_total{endpoint="healthz"} 1`,
-		`workorch_http_requests_total{endpoint="readyz"} 1`,
-		`workorch_http_requests_total{endpoint="metrics"} 1`,
-		`workorch_http_requests_total{endpoint="workspace_create"} 1`,
-		`workorch_http_requests_total{endpoint="workspace_list"} 1`,
-		`workorch_http_requests_total{endpoint="workspace_get"} 1`,
-		`workorch_http_requests_total{endpoint="workspace_snapshot"} 1`,
-		`workorch_http_requests_total{endpoint="run_create"} 1`,
-		`workorch_http_requests_total{endpoint="run_list"} 1`,
-		`workorch_http_requests_total{endpoint="run_get"} 1`,
-		`workorch_http_requests_total{endpoint="run_snapshot"} 1`,
-		`workorch_http_requests_total{endpoint="run_status"} 1`,
-		`workorch_http_requests_total{endpoint="run_start"} 1`,
-		`workorch_http_requests_total{endpoint="run_resume"} 1`,
-		`workorch_http_requests_total{endpoint="decision_list"} 0`,
-		`workorch_http_requests_total{endpoint="decision_get"} 0`,
-		`workorch_http_requests_total{endpoint="decision_resolve"} 1`,
-		`workorch_http_requests_total{endpoint="approval_list"} 0`,
-		`workorch_http_requests_total{endpoint="approval_get"} 0`,
-		`workorch_http_requests_total{endpoint="approval_approve"} 0`,
-		`workorch_http_requests_total{endpoint="approval_reject"} 0`,
-		`workorch_run_outcomes_total{status="succeeded"} 0`,
-		`workorch_run_outcomes_total{status="failed"} 1`,
-		`workorch_run_outcomes_total{status="canceled"} 0`,
-		`workorch_event_record_metadata_scans_total`,
-		`workorch_event_record_metadata_records_scanned_total`,
-		`workorch_event_record_payload_hydrates_total`,
-		`workorch_event_record_payload_hydrate_bytes_total`,
-		`workorch_workspace_projection_rebuild_total{scope="full"}`,
-		`workorch_workspace_projection_pending_rebuilds`,
-		`workorch_workspace_projection_debounced_rebuild_total`,
-		`workorch_workspace_projection_active_run_heartbeats`,
-		`workorch_workspace_projection_active_run_heartbeat_age_seconds_max`,
-		`workorch_workspace_projection_stalled_runs`,
-		`workorch_workspace_projection_ineffective_retry_runs`,
-		`workorch_convergence_active_slices`,
-		`workorch_convergence_open_focuses`,
-		`workorch_convergence_repair_attempts_total`,
-		`workorch_convergence_no_delta_rounds_total`,
-		`workorch_convergence_budget_escalations_total`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)
-		}
-	}
-}
-
 func TestMetricsEndpointReportsExecutionAdmissionCounters(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	state.metrics.executionAdmissionMetrics.recordCommand(executionAdmissionKindWorkspaceRun, "accepted")
@@ -6054,90 +4884,6 @@ func TestMetricsEndpointReportsExecutionAdmissionCounters(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)
 		}
-	}
-}
-
-func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	dataRoot := t.TempDir()
-	useWorkorchRuntimeTestConfig(t, "file", dataRoot)
-	ctx := context.Background()
-	first := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
-	firstHandler := first.http.Handler
-	workspace := createWorkspaceForHTTP(t, firstHandler, "stuck running validation workspace", "workspaces/stuck-running-validation")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, firstHandler, workspace.ID)
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"run-stuck-validation","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	runReq.Header.Set("Content-Type", "application/json")
-	runRec := httptest.NewRecorder()
-	firstHandler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusCreated {
-		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
-	}
-
-	session := newOwnerRuntimeSession(t, "file", dataRoot)
-	var err error
-	exports, err := testSessionExports(session)
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
-	runItem, err := exports.Repositories.Runs.Get(ctx, "run-stuck-validation")
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	runItem.State = common.RunStateActive
-	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
-		t.Fatalf("update run: %v", err)
-	}
-	if err := session.Close(ctx); err != nil {
-		t.Fatalf("close seed session: %v", err)
-	}
-
-	routine := &recordingBackgroundRoutine{}
-	second := newIsolatedTestHTTPServerWithBackground(Config{Backend: "file", DataRoot: dataRoot}, routine)
-	configureIsolatedTestSession(t, second.state, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
-	t.Cleanup(func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := second.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("shutdown second server: %v", err)
-		}
-	})
-	if err := second.Validate(ctx); err != nil {
-		t.Fatalf("validate second server: %v", err)
-	}
-	getRun := func() projectioncontract.Run {
-		t.Helper()
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
-		getRec := httptest.NewRecorder()
-		second.http.Handler.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusOK {
-			t.Fatalf("run get status = %d, want 200, body=%s", getRec.Code, getRec.Body.String())
-		}
-		var body runInstanceResponse
-		if err := json.Unmarshal(getRec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("unmarshal run: %v", err)
-		}
-		return body.Run
-	}
-	if run := getRun(); run.State != string(common.RunStateActive) {
-		t.Fatalf("run state after Validate = %s, want running until explicit recovery", run.State)
-	}
-	if routine.timerTask != nil || routine.timerCalls != 0 {
-		t.Fatalf("startup registered watchdog timer calls=%d task=%v, want Runtime-only startup", routine.timerCalls, routine.timerTask != nil)
-	}
-
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
-	getRec := httptest.NewRecorder()
-	second.http.Handler.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("run get status = %d, want 200, body=%s", getRec.Code, getRec.Body.String())
-	}
-	var body runInstanceResponse
-	if err := json.Unmarshal(getRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal run: %v", err)
-	}
-	if body.Run.State != string(common.RunStateActive) || body.Run.FailureReason != "" {
-		t.Fatalf("run = %+v, want running run preserved for manual recovery", body.Run)
 	}
 }
 

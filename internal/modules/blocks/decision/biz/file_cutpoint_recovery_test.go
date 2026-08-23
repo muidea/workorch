@@ -52,7 +52,7 @@ func TestDecisionFileCutpointHelperProcess(t *testing.T) {
 	}
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-decision-file-cut")
 	tickets, resolutions := decisionFileCutpointRepositories(root)
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	seedDecisionFileCutpointTicket(t, ctx, tickets)
 	command := decisionFileCutpointCommand(t)
 
@@ -144,7 +144,7 @@ func assertDecisionCutpointRecovery(t *testing.T, root string, phase string) {
 	t.Helper()
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-decision-file-cut")
 	tickets, resolutions := decisionFileCutpointRepositories(root)
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	command := decisionFileCutpointCommand(t)
 
 	switch phase {
@@ -239,7 +239,7 @@ func decisionFileCutpointCommand(t *testing.T) decisioncontracts.ResolveTicketCo
 	}
 }
 
-func finalizeDecisionFileCutpointProposal(t *testing.T, ctx context.Context, service *Service, command decisioncontracts.ResolveTicketCommand) *decisionmodel.Ticket {
+func finalizeDecisionFileCutpointProposal(t *testing.T, ctx context.Context, service *mutationService, command decisioncontracts.ResolveTicketCommand) *decisionmodel.Ticket {
 	t.Helper()
 	if _, _, err := service.EnsureRuntimeGovernanceResolutionProposal(ctx, command); err != nil {
 		t.Fatalf("persist pending proposal: %v", err)

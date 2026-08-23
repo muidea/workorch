@@ -46,13 +46,17 @@ type ProviderEmbeddingRequest struct {
 }
 
 type ProviderEmbeddingResult struct {
-	ProviderID    string                  `json:"providerId"`
-	Model         string                  `json:"model"`
-	Input         string                  `json:"input,omitempty"`
-	Vector        []float64               `json:"vector"`
-	Usage         *llmaudit.ProviderUsage `json:"usage,omitempty"`
-	RequestBytes  int                     `json:"-"`
-	ResponseBytes int                     `json:"-"`
+	ProviderID           string                        `json:"providerId"`
+	Model                string                        `json:"model"`
+	Input                string                        `json:"input,omitempty"`
+	Vector               []float64                     `json:"vector"`
+	Usage                *llmaudit.ProviderUsage       `json:"usage,omitempty"`
+	PhysicalResponseMode llmaudit.PhysicalResponseMode `json:"physicalResponseMode"`
+	// ProviderSubmitted is the adapter-owned HTTP dispatch fact. It is
+	// deliberately independent from the serialized request byte count.
+	ProviderSubmitted bool `json:"-"`
+	RequestBytes      int  `json:"-"`
+	ResponseBytes     int  `json:"-"`
 }
 
 type RedactedProviderConfig struct {

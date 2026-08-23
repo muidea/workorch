@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose And Ownership
 
@@ -65,7 +65,6 @@ wait 不定义通用 `ProbeRecoveryCommand`。`ProbeKind` 必须选择 receiving
 
 | ProbeKind | Required owner contract | Recovery meaning |
 | --- | --- | --- |
-| `provider_request_session` | 原 sealed `RequestRuntimeCandidateCommand/Result` 的 request-session recovery/reconciliation | 同一 logical request 的 whole-document、submission 或 outcome recovery |
 | `provider_ceiling` | LLM owner `AcquireProviderCeilingCommand/Result` | exact provider/model ceiling 再确认 |
 | `operation_feasibility` | capability owner `ProbeRuntimeOperationFeasibilityCommand/Result` | 当前 catalog/revision 下 operation 是否可行 |
 | `semantic_proof_feasibility` | capability owner `ProbeRuntimeSemanticProofFeasibilityCommand/Result` | 当前 proof shape 是否可行 |
@@ -76,6 +75,10 @@ wait 不定义通用 `ProbeRecoveryCommand`。`ProbeKind` 必须选择 receiving
 只有实际实现相应 concrete contract 的 owner 才能用于该组合。例如未提供 CWI reconciliation 的 owner 不能声明
 `cwi_reconciliation` wait。owner result 必须携带足以验证 condition 的 typed revision/fence/status；只有 diagnostic message
 或建议稍后重试不构成 recovery condition。
+
+provider whole-document recovery 属于 SM-3 request-session ledger，不是本表的通用 recoverable-wait probe。若进程只看到
+persisted submitted marker 而没有 durable outcome，Orchestrator 必须以同一次 coordinated terminal CAS 封存
+`provider_submission_unknown`，零 provider replay；不得借 `provider_request_session` wait 恢复 submission。
 
 ## Private Events And Legal Transitions
 

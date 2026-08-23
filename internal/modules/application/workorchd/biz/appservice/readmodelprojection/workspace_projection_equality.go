@@ -253,6 +253,8 @@ func llmUsageIdentitiesEqual(a, b []projectioncontract.LLMUsageTrace) bool {
 
 func llmUsageEqual(a, b projectioncontract.LLMUsageTrace) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
+		strings.TrimSpace(a.LogicalRequestID) == strings.TrimSpace(b.LogicalRequestID) &&
+		strings.TrimSpace(a.PhysicalCallID) == strings.TrimSpace(b.PhysicalCallID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
 		strings.TrimSpace(a.StepID) == strings.TrimSpace(b.StepID) &&
@@ -268,6 +270,8 @@ func llmUsageEqual(a, b projectioncontract.LLMUsageTrace) bool {
 		strings.TrimSpace(a.UsageSource) == strings.TrimSpace(b.UsageSource) &&
 		a.RequestBytes == b.RequestBytes &&
 		a.ResponseBytes == b.ResponseBytes &&
+		a.PhysicalResponseMode == b.PhysicalResponseMode &&
+		a.ProviderSubmitted == b.ProviderSubmitted &&
 		a.Streaming == b.Streaming &&
 		a.ContextBudget.Equal(b.ContextBudget) &&
 		a.CacheUsage.Equal(b.CacheUsage) &&

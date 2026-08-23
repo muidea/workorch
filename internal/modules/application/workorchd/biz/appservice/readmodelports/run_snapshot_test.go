@@ -15,6 +15,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -108,16 +109,18 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 		WorkspaceID: workspace.ID,
 		RunID:       run.ID,
 		Payload: mustPortEventPayload(t, map[string]any{
-			recordpayload.PayloadKeyWorkspaceID:  string(workspace.ID),
-			recordpayload.PayloadKeyRunID:        string(run.ID),
-			recordpayload.PayloadKeyStepID:       "run-observability-usage/step-usage",
-			recordpayload.PayloadKeyProviderID:   "provider-observability",
-			recordpayload.PayloadKeyModel:        "model-observability",
-			recordpayload.PayloadKeyOperation:    "responses",
-			recordpayload.PayloadKeyInputTokens:  30,
-			recordpayload.PayloadKeyOutputTokens: 14,
-			recordpayload.PayloadKeyTotalTokens:  44,
-			recordpayload.PayloadKeyStatus:       "completed",
+			recordpayload.PayloadKeyWorkspaceID:          string(workspace.ID),
+			recordpayload.PayloadKeyRunID:                string(run.ID),
+			recordpayload.PayloadKeyStepID:               "run-observability-usage/step-usage",
+			recordpayload.PayloadKeyProviderID:           "provider-observability",
+			recordpayload.PayloadKeyModel:                "model-observability",
+			recordpayload.PayloadKeyOperation:            "responses",
+			recordpayload.PayloadKeyInputTokens:          30,
+			recordpayload.PayloadKeyOutputTokens:         14,
+			recordpayload.PayloadKeyTotalTokens:          44,
+			recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeNonStreaming),
+			recordpayload.PayloadKeyProviderSubmitted:    true,
+			recordpayload.PayloadKeyStatus:               "completed",
 		}),
 	}
 	eventReader := &fakeRunSnapshotEventReader{records: []*eventstreammodel.EventRecord{usage}}

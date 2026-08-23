@@ -30,7 +30,7 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	service                    *Service
+	service                    *service
 	topics                     []string
 	started                    bool
 	notificationRecoveryMu     sync.Mutex
@@ -49,7 +49,7 @@ func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, e
 	if h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: NewService(deps.Results, deps.Artifacts)}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newService(deps.Results, deps.Artifacts)}, nil
 }
 
 func (m *Biz) Start() error {

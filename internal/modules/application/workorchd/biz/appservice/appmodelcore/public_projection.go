@@ -51,7 +51,6 @@ func ProjectRun(item Run) projectioncontract.Run {
 		CurrentStepID:      item.CurrentStepID,
 		CurrentStepKind:    item.CurrentStepKind,
 		CurrentStepState:   item.CurrentStepState,
-		Priority:           item.Priority,
 		BlockingTicketID:   item.BlockingTicketID,
 		BlockingApprovalID: item.BlockingApprovalID,
 		FailureReason:      item.FailureReason,

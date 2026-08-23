@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -39,6 +39,24 @@ detached projection；读取、等待、缓存或 replay 不能修改 owner stat
 `Run` exposes scope、lineage、Definition revision、lifecycle、blocker、timestamps and sealed activation/LLM status。
 It never exposes `ExecutionContext`。Step/checkpoint/nextAction-named compatibility fields are display-only and cannot
 drive scheduling or recovery。
+
+Workspace `snapshot.runCommand` 只保存最新 immutable Workspace-owner admission observation：request/workspace/run/intent
+identity、separate caller `requestReason`、`source`、exact `outcome`、`admissionReason`、derived `diagnostic` 与
+`accepted|rejected`。accepted 只携带 `acceptedAt`，rejected 只携带 `rejectedAt`；字段集合固定为
+`workspaceId/runId/state/intent/requestId/requestReason/source/outcome/admissionReason/diagnostic/acceptedAt|rejectedAt/revision`。
+不暴露重复 `disposition`、歧义 `reason`、`error`、`definitionRevision` 或 `decisionId`。同 request identity 的
+duplicate/stale observation 不改写投影或 revision。transport/context failure 不伪造 owner rejection，read model 不接收
+caller priority，也不从 HTTP status 或 caller reason 反推 owner outcome/state。`revision` 由 projection Store 与该
+runCommand observation 在同一事务中分配，transport/caller 不提供该值。
+
+`llmUsageTraces` 原样暴露 optional `logicalRequestId`/`physicalCallId`，并以
+`physicalResponseMode=streaming|non_streaming` 和 `providerSubmitted` 作为物理调用审计主事实。新 Runtime usage 的
+两级身份必须同时存在，且 `physicalCallId` 等于兼容 correlation `requestId`；generic usage 与引入双层身份前的历史记录
+可以两者都没有。只出现一级、空白或 correlation 不一致的记录不得进入 projection。
+
+当前记录缺少任一 physical fact 或携带非法 mode 时不得静默投影为 `false`；`streaming` 仅为由 canonical mode 计算的
+兼容字段。历史记录只有在显式携带旧 `streaming` 与 `providerSubmitted` 时才允许确定性回填 mode，Web/TUI 不得从
+provider、response bytes、usage、请求大小或 streaming 推断身份、提交或响应模式。
 
 `snapshot` / `runtime-view` / `status`必须能够只读投影：
 

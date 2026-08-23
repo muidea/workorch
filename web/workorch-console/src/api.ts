@@ -1,4 +1,5 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import { parseWorkspaceExecutionAdmission } from './workspaceExecutionAdmission';
 
 const apiBase = '/api/v1/workorch';
 
@@ -100,16 +101,6 @@ function runPath(workspaceId: string, runId: string, action?: string) {
   const suffix = action ? `/${action}` : '';
   return `${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodedRunId}${suffix}`;
 }
-
-type RunCommandAcceptedResponse = {
-  accepted?: boolean;
-  workspaceId?: string;
-  runId?: string;
-  action?: string;
-  intent?: string;
-  requestId?: string;
-  run?: Run;
-};
 
 type WorkspaceSetupDraftGenerationRequest = {
   templateId?: string;
@@ -375,20 +366,34 @@ export const workorchApi = {
   },
   submitWorkspaceExecution: async (workspaceId: string, requestBody: WorkspaceExecutionIntentRequest = {}) => {
     const commandIntent = requestBody.intent ?? 'resume';
+    const commandRequestId = requestBody.requestId?.trim() || runCommandRequestId(commandIntent, workspaceId, 'workspace');
     // The activation endpoint is deliberately intent-only. Configuration must
     // already belong to the Workspace owner; Resume cannot inject a patch.
     const commandRequest: WorkspaceExecutionIntentRequest = {
       intent: commandIntent,
-      requestId: requestBody.requestId || runCommandRequestId(commandIntent, workspaceId, 'workspace'),
-      reason: requestBody.reason || 'user_requested',
-      source: requestBody.source || 'web',
-      ...(requestBody.priority === undefined ? {} : { priority: requestBody.priority })
+      requestId: commandRequestId,
+      reason: requestBody.reason?.trim() || 'user_requested',
+      source: requestBody.source?.trim() || 'web'
     };
-    const body = await request<{ activation?: WorkspaceExecutionActivation } & RunCommandAcceptedResponse>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
+    const response = await fetch(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(commandRequest)
     });
-    return body.activation;
+    const text = await response.text();
+    let body: unknown;
+    try {
+      body = text ? JSON.parse(text) : undefined;
+    } catch {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return parseWorkspaceExecutionAdmission(body, {
+      httpStatus: response.status,
+      httpStatusText: response.statusText,
+      workspaceId,
+      requestId: commandRequestId,
+      intent: commandIntent
+    });
   },
   listSouls: async () => {
     const body = await request<{ souls: Soul[] }>(`${apiBase}/souls`);

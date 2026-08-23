@@ -94,7 +94,10 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 	}
 	record := runtimeStateRecordFromAggregate(aggregate)
 	run.RuntimeState = &record
-	command := storeRuntimeStateRecordCommandFromModel(run)
+	command, err := storeRuntimeStateRecordCommandFromModel(run)
+	if err != nil {
+		return err
+	}
 	command.ExpectedRuntimeStateRevision = &expectedRevision
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandStoreRuntimeStateRecord, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandStoreRuntimeStateRecord, "run", string(run.ID), run.WorkspaceID, run.ID)

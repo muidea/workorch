@@ -10,5 +10,5 @@ import (
 // for workspace resume/restart. It returns only after the Workspace owner has
 // synchronously admitted the normalized immutable command.
 type WorkspaceExecutionAdmission interface {
-	AdmitWorkspaceExecution(context.Context, string, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error)
+	AdmitWorkspaceExecution(context.Context, string, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error)
 }

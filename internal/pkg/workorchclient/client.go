@@ -40,6 +40,17 @@ func (c *Client) BaseURL() string {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
+	resp, err := c.send(ctx, method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, apiErrorFromResponse(resp)
+	}
+	return resp, nil
+}
+
+func (c *Client) send(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	url := c.baseURL + path
 
 	var reqBody io.Reader
@@ -65,19 +76,22 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
 
-	if resp.StatusCode >= 400 {
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		resp.Body.Close()
-		if json.Unmarshal(bodyBytes, &errResp) == nil && errResp.Error != "" {
-			return nil, &APIError{StatusCode: resp.StatusCode, Message: errResp.Error}
-		}
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
-	}
-
 	return resp, nil
+}
+
+func apiErrorFromResponse(resp *http.Response) error {
+	if resp == nil {
+		return &APIError{StatusCode: 0, Message: "empty response"}
+	}
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	resp.Body.Close()
+	if json.Unmarshal(bodyBytes, &errResp) == nil && errResp.Error != "" {
+		return &APIError{StatusCode: resp.StatusCode, Message: errResp.Error}
+	}
+	return &APIError{StatusCode: resp.StatusCode, Message: string(bodyBytes)}
 }
 
 func decodeEnvelope[T any](resp *http.Response, key string) (*T, error) {
@@ -98,15 +112,6 @@ func decodeEnvelope[T any](resp *http.Response, key string) (*T, error) {
 		return nil, fmt.Errorf("decode resource from key %q: %w", key, err)
 	}
 	return &result, nil
-}
-
-func drainAccepted(resp *http.Response) (bool, error) {
-	if resp == nil || resp.StatusCode != http.StatusAccepted {
-		return false, nil
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return true, nil
 }
 
 func decodeEnvelopeSlice[T any](resp *http.Response, key string) ([]T, error) {

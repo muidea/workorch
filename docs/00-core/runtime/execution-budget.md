@@ -152,7 +152,7 @@ usage/receipt或稳定 owner result reference：
 
 | Action | Join source | Required identity |
 | --- | --- | --- |
-| LLM/provider invocation | matching provider request-session result/physical-call ledger | logical request、physical call、provider result/usage hash |
+| LLM/provider invocation | matching LLM-owner request result/audit + provider request-session physical-call ledger | workspace/run、logical request、physical call、explicit providerSubmitted、physical response mode、provider result/usage hash |
 | semantic/candidate document | SM-3 complete-document evaluator fact | transaction、document kind、attempt、document hash |
 | capability operation | matching `ExecuteRuntimeOperation` owner result/receipt | sealed dispatch、operation、ExecutionKey/Fence、receipt hash |
 | feasibility/admissibility/acquisition | matching owner concrete command/result | authority/focus、catalog revision/fence、request hash |
@@ -161,6 +161,10 @@ usage/receipt或稳定 owner result reference：
 Orchestrator private reducer把matching fact规范化为 `RuntimeBudgetConsumptionFact` 并与 authority transition原子CAS。
 owner result若没有足以确认消费的 typed amount/identity，只能产生 `unknown`，不得解析 message、账单页面或 metrics 推测。
 result mismatch、stale、duplicate或来自另一Run/policy的fact只能进入bounded diagnostic，不能消费或释放当前allocation。
+对 provider request，`providerSubmitted=false` 的 exact LLM audit 是 release authority；`providerSubmitted=true` 确认
+physical call，usage 缺失时 token allocations 保守进入 unknown；audit 缺失/不可信则整个 physical settlement 为 unknown。
+请求字节数、response mode、reservation 或 transport error 文本均不能替代 submission fact。settlement 必须与对应
+session/recovery/terminal transition 同一 aggregate CAS，不能先记账再迁移或先迁移再记账。
 
 ## Consumption And Duplicate Semantics
 

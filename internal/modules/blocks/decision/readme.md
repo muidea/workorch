@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 组件类型与职责
 
@@ -99,6 +99,9 @@ Orchestrator 与各资源 owner。
 
 - `owner.go` 只负责 Biz 构造、订阅与生命周期；`command_router.go` 对七个普通 topic 静态穷尽分派，未知 topic
   fail-closed。Runtime governance open/capability ingress 另由专用 adapter 处理并先校验 Orchestrator source。
+- mutation implementation 与 constructor 均为 Decision owner-private；跨 package（包括测试）只能启动 owner Module
+  后发送 `pkg/events` concrete command/result，或消费 owner 已发布的 immutable fact，不得直接构造 mutation service、
+  导入 `biz/contracts` 或注入 Ticket/Resolution repository。
 - `ticket_commands.go` 只实现 scoped query、keyset page 与 workspace aggregate purge；`resolution_commands.go` 只实现
   resolution query/ensure；二者共享 workspace fence，但不形成第二个 owner 或 facade。
 - `lifecycle_internal_event.go` 是 Ticket creation/lifecycle、clarification binding、proposal、delivery marker 和 deletion tombstone 的唯一状态 reducer。

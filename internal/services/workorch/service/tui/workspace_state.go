@@ -1398,14 +1398,14 @@ func runCommandStatusEqual(a, b *projectioncontract.RunCommandStatus) bool {
 		strings.TrimSpace(string(a.RunID)) == strings.TrimSpace(string(b.RunID)) &&
 		strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
 		strings.TrimSpace(a.Intent) == strings.TrimSpace(b.Intent) &&
-		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason) &&
 		strings.TrimSpace(a.RequestID) == strings.TrimSpace(b.RequestID) &&
+		strings.TrimSpace(a.RequestReason) == strings.TrimSpace(b.RequestReason) &&
 		strings.TrimSpace(a.Source) == strings.TrimSpace(b.Source) &&
-		strings.TrimSpace(a.DefinitionRevision) == strings.TrimSpace(b.DefinitionRevision) &&
-		strings.TrimSpace(string(a.DecisionID)) == strings.TrimSpace(string(b.DecisionID)) &&
+		strings.TrimSpace(string(a.Outcome)) == strings.TrimSpace(string(b.Outcome)) &&
+		strings.TrimSpace(string(a.AdmissionReason)) == strings.TrimSpace(string(b.AdmissionReason)) &&
+		strings.TrimSpace(a.Diagnostic) == strings.TrimSpace(b.Diagnostic) &&
 		strings.TrimSpace(a.AcceptedAt) == strings.TrimSpace(b.AcceptedAt) &&
 		strings.TrimSpace(a.RejectedAt) == strings.TrimSpace(b.RejectedAt) &&
-		strings.TrimSpace(a.Error) == strings.TrimSpace(b.Error) &&
 		a.Revision == b.Revision
 }
 
@@ -1982,10 +1982,7 @@ func (m *AppModel) applyRunCommandStatus(status *projectioncontract.RunCommandSt
 
 func runCommandProjectionSettled(status projectioncontract.RunCommandStatus) bool {
 	state := strings.ToLower(strings.TrimSpace(status.State))
-	if state == "accepted" || state == "rejected" {
-		return true
-	}
-	return strings.TrimSpace(status.AcceptedAt) != "" || strings.TrimSpace(status.RejectedAt) != ""
+	return state == "accepted" || state == "rejected"
 }
 
 func (m *AppModel) clearBlockingInputState() {

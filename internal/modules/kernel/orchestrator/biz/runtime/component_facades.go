@@ -186,18 +186,11 @@ func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, w
 	return c.planning.markCandidateRequestSubmitted(ctx, workspaceID, runID, logicalRequestID, sequence, physicalCallID)
 }
 
-func (c *RuntimeController) recordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *RuntimeController) coordinateProviderRequestRecovery(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, fact RuntimeProviderRequestRecoveryFact, budgetSettlement ...*RuntimeProviderBudgetSettlement) (RuntimeAggregate, error) {
 	if c == nil || c.planning == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.planning.recordCandidateRequestTransportOutcome(ctx, workspaceID, runID, logicalRequestID, physicalCallID, outcome)
-}
-
-func (c *RuntimeController) recordCandidateRequestRecoveryRequired(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome) (RuntimeAggregate, error) {
-	if c == nil || c.planning == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.planning.recordCandidateRequestRecoveryRequired(ctx, workspaceID, runID, logicalRequestID, physicalCallID, outcome)
+	return c.planning.coordinateProviderRequestRecovery(ctx, workspaceID, runID, logicalRequestID, physicalCallID, fact, budgetSettlement...)
 }
 
 func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string) (RuntimeAggregate, error) {
@@ -205,13 +198,6 @@ func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return c.planning.completeCandidateRequestDocument(ctx, workspaceID, runID, logicalRequestID, physicalCallID)
-}
-
-func (c *RuntimeController) terminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
-	if c == nil || c.planning == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.planning.terminateCandidateRequestSession(ctx, workspaceID, runID, logicalRequestID, outcome)
 }
 
 func (c *RuntimeController) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {

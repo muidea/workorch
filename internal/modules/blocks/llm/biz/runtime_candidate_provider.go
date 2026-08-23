@@ -74,18 +74,19 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	// Sealed path: never re-resolve catalog/current profile.
 	// Capture a pre-submit audit snapshot; completeProviderWithSealedCeiling mutates a local copy.
 	budgetSnapshot := cloneProviderContextBudget(providerRequest.ContextBudget)
-	completion, err := m.completeProviderWithSealedCeiling(ctx, *ceiling, providerRequest)
+	completion, execution, err := m.completeProviderWithSealedCeiling(ctx, *ceiling, providerRequest)
 	completedAt := time.Now().UTC()
 	if err != nil {
 		var limitErr *ProviderOutputLimitError
 		if errors.As(err, &limitErr) {
 			if budgetSnapshot != nil {
-				budgetSnapshot.ProviderSubmitted = true
+				budgetSnapshot.ProviderSubmitted = execution.Submitted
 				if completion.Usage != nil {
 					budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
 				}
 			}
-			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), completion.ResponseBytes)
+			audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, execution.Submitted, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderProtocol), completion.ResponseBytes)
+			audit.PhysicalResponseMode = canonicalProviderPhysicalResponseMode(execution)
 			audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 			usage := completion.Usage
 			if usage != nil {
@@ -99,15 +100,17 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 			}, err
 		}
 		stale := m.providerCeilingConfigurationStale(request, err)
-		// The protocol adapter records serialized request bytes before http.Client.Do.
-		// That factual marker avoids inferring submission from an error string.
-		submitted := completion.RequestBytes > 0
+		// The protocol adapter reports submission independently at the exact
+		// http.Client.Do boundary; neither request bytes nor error text may be
+		// used to reconstruct this fact.
+		submitted := execution.Submitted
 		if budgetSnapshot != nil {
 			budgetSnapshot.ProviderSubmitted = submitted
 		}
 		failureClass := runtimeCandidateProviderFailureClass(err, submitted)
 		responseBytes := max(completion.ResponseBytes, providerResponseBytesFromError(err))
 		audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, submitted, llmmodels.RuntimeCandidateStatusFailed, string(failureClass), responseBytes)
+		audit.PhysicalResponseMode = canonicalProviderPhysicalResponseMode(execution)
 		audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 		return llmmodels.RuntimeCandidateGenerationResult{
 			RequestID: requestID, Audit: audit, Status: llmmodels.RuntimeCandidateStatusFailed,
@@ -115,13 +118,14 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		}, err
 	}
 	if budgetSnapshot != nil {
-		budgetSnapshot.ProviderSubmitted = true
+		budgetSnapshot.ProviderSubmitted = execution.Submitted
 		if completion.Usage != nil {
 			budgetSnapshot.ActualTokens = completion.Usage.TotalTokens
 		}
 	}
 	responseBytes := completion.ResponseBytes
-	audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, true, llmmodels.RuntimeCandidateStatusCompleted, "", responseBytes)
+	audit := sealedAuditFromRequest(request, requestID, budgetSnapshot, startedAt, completedAt, execution.Submitted, llmmodels.RuntimeCandidateStatusCompleted, "", responseBytes)
+	audit.PhysicalResponseMode = canonicalProviderPhysicalResponseMode(execution)
 	audit.RequestBytes = providerAuditRequestBytes(completion.RequestBytes, budgetSnapshot)
 	var usage *llmaudit.ProviderUsage
 	if completion.Usage != nil {
@@ -135,6 +139,19 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		Audit:     audit,
 		Status:    llmmodels.RuntimeCandidateStatusCompleted,
 	}, nil
+}
+
+// canonicalProviderPhysicalResponseMode keeps the sealed, explicit
+// non-streaming preflight fact when no physical request was submitted. Once
+// the adapter reports the independent client.Do submission fact,
+// providerExecutionMetadata carries the exact dispatch path selected by this
+// owner. This avoids treating serialized bytes or a zero completion returned
+// by an early guard as a physical response observation.
+func canonicalProviderPhysicalResponseMode(execution providerExecutionMetadata) llmaudit.PhysicalResponseMode {
+	if !execution.Submitted {
+		return llmaudit.PhysicalResponseModeNonStreaming
+	}
+	return execution.PhysicalResponseMode
 }
 
 func providerAuditRequestBytes(adapterBytes int, budget *llmmodels.ProviderContextBudget) int {
@@ -272,6 +289,22 @@ func sealedAuditFromRequest(
 			configurationRevision = budget.ConfigurationRevision
 		}
 	}
+	if budget == nil && ceiling != nil {
+		budget = &llmmodels.ProviderContextBudget{
+			ProviderID:               ceiling.Selection.Target.ProviderID,
+			ModelID:                  ceiling.Selection.Target.ModelID,
+			CapabilityRevision:       ceiling.CapabilityRevision,
+			ConfigurationRevision:    ceiling.ConfigurationRevision,
+			ContextWindowTokens:      ceiling.ContextWindowTokens,
+			ProviderMaxOutputTokens:  ceiling.ProviderMaxOutputTokens,
+			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens,
+			MaxBytes:                 ceiling.MaxBytes,
+			MaxTokens:                ceiling.MaxInputTokens,
+			MaxRequestBytes:          ceiling.MaxBytes,
+			ProfileMode:              "runtime_sealed_ceiling",
+			CapabilitySource:         "sealed_ceiling",
+		}
+	}
 	durationMs := int(completedAt.Sub(startedAt).Milliseconds())
 	if durationMs < 0 {
 		durationMs = 0
@@ -281,8 +314,21 @@ func sealedAuditFromRequest(
 		requestBytes = budget.ActualBytes
 	}
 	workspaceID, runID := runtimeRequestScope(request)
+	auditBudget := cloneProviderContextBudget(budget)
+	if auditBudget != nil {
+		auditBudget.ProviderID = target.ProviderID
+		auditBudget.ModelID = target.ModelID
+		auditBudget.CapabilityRevision = capabilityRevision
+		auditBudget.ConfigurationRevision = configurationRevision
+		auditBudget.ProviderSubmitted = submitted
+	}
+	if physicalCallID := strings.TrimSpace(request.RequestIdentity.PhysicalCallID); physicalCallID != "" {
+		requestID = physicalCallID
+	}
 	return &llmmodels.ProviderRequestAudit{
 		RequestID:             requestID,
+		LogicalRequestID:      request.RequestIdentity.LogicalRequestID,
+		PhysicalCallID:        request.RequestIdentity.PhysicalCallID,
 		WorkspaceID:           workspaceID,
 		RunID:                 runID,
 		StepID:                request.Transaction.AuthoritySnapshotID,
@@ -292,7 +338,8 @@ func sealedAuditFromRequest(
 		ConfigurationRevision: configurationRevision,
 		StablePrefixHash:      request.StablePrefixHash,
 		Kind:                  kind,
-		ContextBudget:         cloneProviderContextBudget(budget),
+		PhysicalResponseMode:  llmaudit.PhysicalResponseModeNonStreaming,
+		ContextBudget:         auditBudget,
 		ProviderSubmitted:     submitted,
 		Status:                status,
 		FailureClass:          failureClass,

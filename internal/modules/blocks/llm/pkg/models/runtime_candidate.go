@@ -55,6 +55,8 @@ type RuntimeCandidateGenerationResult struct {
 // ProviderRequestAudit is the sealed, secret-free audit surface for one provider request.
 type ProviderRequestAudit struct {
 	RequestID             string                              `json:"requestId,omitempty"`
+	LogicalRequestID      string                              `json:"logicalRequestId,omitempty"`
+	PhysicalCallID        string                              `json:"physicalCallId,omitempty"`
 	WorkspaceID           string                              `json:"workspaceId,omitempty"`
 	RunID                 string                              `json:"runId,omitempty"`
 	StepID                string                              `json:"stepId,omitempty"`
@@ -66,6 +68,7 @@ type ProviderRequestAudit struct {
 	Kind                  string                              `json:"kind,omitempty"`
 	APISurface            string                              `json:"apiSurface,omitempty"`
 	Provider              string                              `json:"provider,omitempty"`
+	PhysicalResponseMode  llmaudit.PhysicalResponseMode       `json:"physicalResponseMode"`
 	ContextBudget         *ProviderContextBudget              `json:"contextBudget,omitempty"`
 	ProviderSubmitted     bool                                `json:"providerSubmitted"`
 	Status                string                              `json:"status,omitempty"`
@@ -77,22 +80,33 @@ type ProviderRequestAudit struct {
 	ResponseBytes         int                                 `json:"responseBytes,omitempty"`
 }
 
+// RuntimeCandidateDocumentObservation is the provider-boundary observation
+// used inside the LLM owner before it publishes its concrete EventHub fact.
+type RuntimeCandidateDocumentObservation struct {
+	Framing runtimecontract.RuntimeProviderDocumentFraming `json:"framing"`
+	Content []byte                                         `json:"-"`
+}
+
+func (o RuntimeCandidateDocumentObservation) Normalized() RuntimeCandidateDocumentObservation {
+	o.Framing = o.Framing.Normalized()
+	o.Content = append([]byte(nil), o.Content...)
+	return o
+}
+
 // Runtime candidate response returned by the LLM boundary. A complete provider
 // document remains opaque here: only the Orchestrator-owned SM-3 evaluator may
 // decode or admit it after durable persistence.
 type RuntimeCandidateResponse struct {
+	WorkspaceID          string
+	RunID                string
 	Transaction          runtimecontract.AuthorityTransaction
 	DocumentKind         runtimecontract.RuntimeProviderDocumentKind
 	RequestIdentity      runtimecontract.RuntimeCandidateRequestIdentity `json:"requestIdentity"`
 	ExpectedDocumentHash string                                          `json:"expectedDocumentHash,omitempty"`
-	// DocumentContent carries a complete provider document only across the
-	// synchronous LLM-owner EventHub exchange. It is
-	// intentionally excluded from JSON/audit projection; Orchestrator must
-	// durably store it before any session or candidate transition consumes it.
-	DocumentContent []byte `json:"-"`
-	// DocumentOutcome is the LLM owner's bounded framing observation. It does
-	// not select recovery, correction, admission, or any Runtime transition.
-	DocumentOutcome *runtimecontract.RuntimeProviderDocumentOutcome `json:"documentOutcome,omitempty"`
+	// DocumentOutcome is the LLM owner's complete, mutually exclusive response
+	// fact. It does not select recovery, correction, admission, or any Runtime
+	// transition.
+	DocumentOutcome *RuntimeCandidateDocumentObservation `json:"documentOutcome,omitempty"`
 	// Audit is present for successful and failed provider requests when generation ran.
 	Audit *ProviderRequestAudit `json:"audit,omitempty"`
 	// Usage is present when the provider reported token usage.

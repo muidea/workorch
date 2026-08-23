@@ -192,6 +192,30 @@ func TestWorkspaceProjectionChangedSSEFromDataIsStable(t *testing.T) {
 	}
 }
 
+func TestWorkspaceProjectionChangedSSEEncodingDoesNotMutateAdmissionObservation(t *testing.T) {
+	data := workorchdevents.WorkspaceProjectionChangedData{
+		StreamGeneration:  "admission-observation-generation",
+		WorkspaceID:       "ws-admission-observation",
+		GlobalRevision:    17,
+		WorkspaceRevision: 9,
+		ChangeKind:        "run_command_rejected",
+		ChangedSections:   []projectioncontract.WorkspaceProjectionSection{projectioncontract.WorkspaceProjectionSectionOverview},
+		ProjectionState:   "ready",
+	}
+	first := workspaceProjectionChangedSSEFromData(data)
+	if len(first.ChangedSections) != 1 {
+		t.Fatalf("changed sections = %v", first.ChangedSections)
+	}
+	first.ChangedSections[0] = "mutated-by-consumer"
+	second := workspaceProjectionChangedSSEFromData(data)
+	if got := data.ChangedSections[0]; got != projectioncontract.WorkspaceProjectionSectionOverview {
+		t.Fatalf("source admission observation mutated to %q", got)
+	}
+	if got := second.ChangedSections[0]; got != string(projectioncontract.WorkspaceProjectionSectionOverview) {
+		t.Fatalf("later SSE observation = %q, want immutable overview", got)
+	}
+}
+
 // CR06: real server serializer frame must be consumed by production remote decoder.
 // This is the cross-boundary contract evidence — not a server-local DTO copy decode.
 func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {

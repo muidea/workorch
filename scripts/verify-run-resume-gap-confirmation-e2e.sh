@@ -314,8 +314,18 @@ if data.get("intent") != intent:
     raise SystemExit(f"response intent={data.get('intent')!r}, want {intent!r}: {data}")
 if request_id and data.get("requestId") != request_id:
     raise SystemExit(f"response requestId={data.get('requestId')!r}, want {request_id!r}: {data}")
-if reason and data.get("reason") != reason:
-    raise SystemExit(f"response reason={data.get('reason')!r}, want {reason!r}: {data}")
+valid_admissions = {
+    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
+    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
+}
+outcome = data.get("outcome")
+owner_reason = data.get("reason")
+if owner_reason not in valid_admissions.get(outcome, set()):
+    raise SystemExit(f"response owner admission outcome/reason={outcome!r}/{owner_reason!r}: {data}")
+if data.get("state") != "accepted":
+    raise SystemExit(f"response state={data.get('state')!r}, want accepted: {data}")
+if reason and data.get("requestReason") != reason:
+    raise SystemExit(f"response requestReason={data.get('requestReason')!r}, want {reason!r}: {data}")
 if not data.get("source"):
     raise SystemExit(f"response source missing: {data}")
 PY
@@ -368,7 +378,7 @@ DOD_ID="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 REQUEST_ID="verify-resume-$VERIFY_SUFFIX"
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-  '{"intent":"restart","priority":2,"requestId":"'"$REQUEST_ID"'","reason":"e2e_restart"}' \
+  '{"intent":"restart","requestId":"'"$REQUEST_ID"'","reason":"e2e_restart"}' \
   "$TMP_DIR/resume-activation.json"
 grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/resume-activation.json" >/dev/null
 validate_command_response "$TMP_DIR/resume-activation.json" "restart" "$REQUEST_ID" "e2e_restart"
@@ -391,7 +401,7 @@ PY
 if [[ -n "$RUN_ID" ]]; then
   REPEAT_REQUEST_ID="verify-repeat-resume-$VERIFY_SUFFIX"
   post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-    '{"intent":"resume","priority":2,"requestId":"'"$REPEAT_REQUEST_ID"'","reason":"e2e_repeat_resume"}' \
+    '{"intent":"resume","requestId":"'"$REPEAT_REQUEST_ID"'","reason":"e2e_repeat_resume"}' \
     "$TMP_DIR/repeat-resume.json"
   grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/repeat-resume.json" >/dev/null
   validate_command_response "$TMP_DIR/repeat-resume.json" "resume" "$REPEAT_REQUEST_ID" "e2e_repeat_resume"
@@ -403,7 +413,7 @@ if [[ "$MANAGE_INSTANCE" == "1" || "$MANAGE_INSTANCE" == "true" ]]; then
   restart_server
   RESTART_REQUEST_ID="verify-restart-resume-$VERIFY_SUFFIX"
   post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-    '{"intent":"restart","priority":2,"requestId":"'"$RESTART_REQUEST_ID"'","reason":"e2e_service_restart"}' \
+    '{"intent":"restart","requestId":"'"$RESTART_REQUEST_ID"'","reason":"e2e_service_restart"}' \
     "$TMP_DIR/restart-resume.json"
   grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/restart-resume.json" >/dev/null
   validate_command_response "$TMP_DIR/restart-resume.json" "restart" "$RESTART_REQUEST_ID" "e2e_service_restart"

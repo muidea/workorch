@@ -83,8 +83,18 @@ if data.get("intent") != "restart":
     errors.append(f"intent is {data.get('intent')!r}, want restart")
 if data.get("requestId") != expected_request_id:
     errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
-if data.get("reason") != expected_reason:
-    errors.append(f"reason is {data.get('reason')!r}, want {expected_reason!r}")
+valid_admissions = {
+    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
+    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
+}
+outcome = data.get("outcome")
+owner_reason = data.get("reason")
+if owner_reason not in valid_admissions.get(outcome, set()):
+    errors.append(f"owner admission outcome/reason is {outcome!r}/{owner_reason!r}")
+if data.get("state") != "accepted":
+    errors.append(f"state is {data.get('state')!r}, want accepted")
+if data.get("requestReason") != expected_reason:
+    errors.append(f"requestReason is {data.get('requestReason')!r}, want {expected_reason!r}")
 if errors:
     raise SystemExit("\n".join(errors))
 PY
@@ -534,7 +544,7 @@ post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-selection" \
   '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model","expectedRevision":'"$workspace_revision"'}' \
   "$TMP_DIR/llm-selection.json"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"intent":"restart","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","priority":3}' \
+  '{"intent":"restart","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e"}' \
   "$TMP_DIR/activation.json"
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"

@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 功能范围与边界
 
@@ -61,6 +61,9 @@ Orchestrator 创建 Runtime Approval 请求，Approval 在终态落库前将 Run
 
 - `owner.go` 只负责 Biz 构造、typed topic 订阅、reconciliation 生命周期和 teardown；重复 Start/Teardown
   不增加订阅或遗留后台任务。
+- mutation implementation 与 constructor 均为 Approval owner-private；跨 package（包括测试）只能启动 owner Module
+  后发送 `pkg/events` concrete command/result，或消费 owner 已发布的 immutable fact，不得直接构造 mutation service、
+  导入 `biz/contracts` 或注入 Approval repository。
 - `command_router.go` 对 query、resolution、purge 三类 topic 做穷尽分派，未知 topic fail closed。
 - `runtime_governance_adapter.go` 只负责可信 Runtime create ingress；`resolution_commands.go` 负责
   proposal/commit/finalize 协议；private lifecycle reducer 是 creation 与全部聚合变更的唯一入口。

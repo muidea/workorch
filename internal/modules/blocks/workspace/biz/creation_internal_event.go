@@ -31,7 +31,7 @@ type workspaceCreationInternalEvent struct {
 // submitWorkspaceCreationInternalEvent is the sole creation-state dispatcher
 // for Workspace. Protocol adapters and callers may provide descriptive input,
 // but cannot select Workspace.State or any active Run slot.
-func (m *GoalDoDManager) submitWorkspaceCreationInternalEvent(ctx context.Context, event workspaceCreationInternalEvent) (*workspacemodel.Workspace, error) {
+func (m *goalDoDManager) submitWorkspaceCreationInternalEvent(ctx context.Context, event workspaceCreationInternalEvent) (*workspacemodel.Workspace, error) {
 	if m == nil || m.workspaces == nil || event.Kind != workspaceCreationInternalEventRequested || event.Requested == nil {
 		return nil, common.ErrInvalidArgument
 	}

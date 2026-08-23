@@ -318,12 +318,12 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	requestSession.ExpectedDocument = &expected
-	documentOutcome := runtimecontract.RuntimeProviderDocumentOutcome{
+	documentOutcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: expected.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash([]byte("partial")), ResponseBytes: 7,
 		Code: "candidate_output_incomplete", Signature: "candidate-output-incomplete",
 	}
-	requestSession.LastDocumentOutcome = &documentOutcome
+	requestSession.LastDocumentFraming = &documentOutcome
 	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{requestSession}
 	if current, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil || current.RuntimeBootstrap == nil || !runtimecontract.SameRuntimeBootstrap(*current.RuntimeBootstrap, runtimeBootstrap()) {
 		t.Fatalf("persisted bootstrap mismatch current=%+v err=%v", current, err)
@@ -345,13 +345,13 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	// Record conversion must not retain aliases to the caller's nested session
 	// values. A later controller transition must be a new CAS record.
 	record := runtimeStateRecordFromAggregate(aggregate)
-	record.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash = "mutated-record-outcome"
-	if aggregate.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash == "mutated-record-outcome" {
+	record.CandidateRequestSessions[0].LastDocumentFraming.ResponseHash = "mutated-record-outcome"
+	if aggregate.CandidateRequestSessions[0].LastDocumentFraming.ResponseHash == "mutated-record-outcome" {
 		t.Fatalf("record conversion aliased request-session document outcome: %+v", aggregate.CandidateRequestSessions)
 	}
 	reloadedFromRecord := runtimeAggregateFromRecord(record)
-	reloadedFromRecord.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash = "mutated-aggregate-outcome"
-	if record.CandidateRequestSessions[0].LastDocumentOutcome.ResponseHash != "mutated-record-outcome" {
+	reloadedFromRecord.CandidateRequestSessions[0].LastDocumentFraming.ResponseHash = "mutated-aggregate-outcome"
+	if record.CandidateRequestSessions[0].LastDocumentFraming.ResponseHash != "mutated-record-outcome" {
 		t.Fatalf("aggregate conversion aliased request-session document outcome: %+v", record.CandidateRequestSessions)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -3350,12 +3350,11 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		attempts = append(attempts, command)
 		if command.CandidateAttempt == 0 {
-			result.Set(llmevents.RequestRuntimeCandidateResult{
+			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 				DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"unexpected":true}`)),
-				DocumentContent:      []byte(`{"unexpected":true}`),
-			}, nil)
+			}), nil)
 			return
 		}
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -4172,7 +4171,7 @@ func TestRuntimeMainlinePreservesProviderProtocolDiagnosticWithoutCandidateAttem
 			Class: runtimecontract.RuntimeCandidateFailureClassProviderProtocol, Code: "response_byte_limit_exceeded",
 			Signature: "response-byte-limit-exceeded", Reason: "provider response violated the protocol contract",
 		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), Feedback: runtimeProviderFeedbackForTest(t, command, failure)}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	biz := newRuntimeTestOwner()
@@ -4197,7 +4196,7 @@ func TestRuntimeMainlinePreservesProviderProtocolDiagnosticWithoutCandidateAttem
 	session := terminal.CandidateRequestSessions[0]
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol ||
-		session.LastOutcome.Code != "provider_protocol_failure" {
+		session.LastOutcome.Code != "response_byte_limit_exceeded" || session.LastOutcome.Signature != "response-byte-limit-exceeded" || session.ProviderSubmitted {
 		t.Fatalf("provider protocol session = %+v", session)
 	}
 	reloaded, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")

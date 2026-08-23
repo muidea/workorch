@@ -13,19 +13,6 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type CreateRunCommand struct {
-	RunID               common.RunID
-	WorkspaceID         common.WorkspaceID
-	GoalID              common.GoalID
-	DoDID               common.DoDID
-	DefinitionRevision  string
-	InitialStepKind     string
-	RuntimeBootstrap    *runtimecontract.RuntimeBootstrap
-	PredecessorRunID    common.RunID
-	PredecessorResultID common.ResultID
-	Priority            int
-}
-
 type StoreRuntimeStateRecordCommand struct {
 	RunID                        common.RunID
 	WorkspaceID                  common.WorkspaceID

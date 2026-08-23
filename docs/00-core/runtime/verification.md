@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -99,8 +99,24 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 ### Candidate And Request
 
 - incomplete document、fragment/EOF 与 transient transport 只使用 request-session recovery，不创建 attempt；
-- authentication/configuration/protocol/submission-unknown/continuation-exhausted 形成 factual result，不创建
+- authentication/configuration/protocol/submission-unknown/document-recovery-exhausted 形成 factual result，不创建
   candidate attempt；
+- LLM request result 必须是 `Stale | Feedback | DocumentOutcome` exactly-one；complete content 与 framing hash/bytes
+  精确一致，其他 disposition 零 content；physical response mode 是 `streaming | non_streaming` 唯一事实，布尔 streaming
+  仅允许派生；
+- result audit 必须逐项匹配 workspace/run/logical/physical identity、target、kind、stable prefix 与 context budget；覆盖
+  before-Do、Do error、response error、stream/non-stream/embed，并证明 request bytes 不推断 submission；DocumentOutcome、
+  stale、transient/auth/config/protocol 的 submitted 矩阵与 unsubmitted 零 physical fact 必须穷尽；
+- Runtime LLM usage event/read trace 必须无损贯穿 `logicalRequestId`/`physicalCallId`，并验证
+  `physicalCallId=requestId`；generic/legacy trace 允许两者都没有，partial/mismatched identity fail-closed，且不得从
+  request bytes 或 streaming 推断；
+- provider settlement 必须覆盖 confirmed/released/unknown、duplicate/stale/tamper。验证 stale/unsubmitted terminal release
+  全部 reservation；submitted usage 精确 confirm；无可靠 audit 进入 unknown 且零 provider replay；
+- incomplete、transient 与 body-idle 必须覆盖同 CAS 的 physical settlement + SM-3 session + SM-4 transport budget + optional
+  SM-2 terminal，以及 CAS-before/CAS-after/fresh reload；released/unknown 不得进入 recovery；
+- provider terminal 必须用一次 owner-private aggregate CAS 原子完成 SM-3 session close 与 exact SM-2 failure；验证
+  normal、duplicate、stale、CAS-before、CAS-after response loss 与 fresh reload，并断言这些 terminal crash/reload 分支
+  零 provider replay；允许恢复的 incomplete/transient 分支仍以新 `PhysicalCallID` 请求同一完整 document；
 - complete document 只进入一个 evaluator，first-failure 顺序稳定；
 - evaluator 只返回 accepted 或完整 typed rejection，不返回 correction/retry/terminal disposition；
 - SM-3 持久化 rejection 后才可形成 typed terminal 或唯一 `correctable_once` internal result；

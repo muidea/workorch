@@ -286,19 +286,19 @@ func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req port
 		RequestID: req.RequestID,
 		Reason:    req.Reason,
 		Source:    normalizedRunCommandSource(req.Source),
-		Priority:  req.Priority,
 	}
-	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(req.WorkspaceID), payload)
+	admission, err := b.cl.ResumeWorkspaceExecution(ctx, string(req.WorkspaceID), payload)
 	if err != nil {
 		return nil, err
 	}
-	// HTTP activation is asynchronous and returns transport acceptance only.
-	// The typed owner admission is observed later through projection events; do
-	// not synthesize an admission fact from an HTTP 202 response.
-	if act == nil {
-		return nil, nil
+	if admission == nil {
+		return nil, fmt.Errorf("%w: workspace execution admission response is empty", common.ErrConflict)
 	}
-	return nil, fmt.Errorf("%w: synchronous activation response omitted owner admission fact", common.ErrConflict)
+	result := port.RunCommandResult(*admission)
+	if err := result.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: invalid remote workspace execution admission: %v", common.ErrConflict, err)
+	}
+	return &result, nil
 }
 
 func remoteRunProjectionFromClient(r *projectioncontract.Run) *projectioncontract.Run {

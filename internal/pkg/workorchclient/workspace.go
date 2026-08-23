@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/common"
+	executioncontract "github.com/muidea/workorch/internal/pkg/workorchexecutioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -226,20 +229,47 @@ func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string
 	return decodeEnvelope[workorchmanagementcontract.DoD](resp, "dod")
 }
 
-// ResumeWorkspaceExecution submits the workspace-scoped resume command.
-//
-// The REST resource path is still named execution-activations because it
-// returns the execution activation contract used to create or resume the run.
-// Client callers should treat this as command acceptance, not as a local
-// activation state machine.
-func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *workorchmanagementcontract.WorkspaceExecutionCommandRequest) (*workorchprojectioncontract.WorkspaceExecutionActivation, error) {
+// ResumeWorkspaceExecution returns the exact synchronous Workspace-owner
+// admission for either HTTP 202 acceptance or HTTP 409 owner rejection.
+func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *workorchmanagementcontract.WorkspaceExecutionCommandRequest) (*runtimecontract.RuntimeExecutionIntentAdmission, error) {
 	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-activations", escapePath(workspaceID))
-	resp, err := c.do(ctx, "POST", path, req)
+	resp, err := c.send(ctx, http.MethodPost, path, req)
 	if err != nil {
 		return nil, err
 	}
-	if accepted, err := drainAccepted(resp); accepted || err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusConflict {
+		return nil, apiErrorFromResponse(resp)
 	}
-	return decodeEnvelope[workorchprojectioncontract.WorkspaceExecutionActivation](resp, "activation")
+	defer resp.Body.Close()
+	var response executioncontract.WorkspaceExecutionAdmissionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("decode workspace execution admission: %w", err)
+	}
+	admission, err := response.Admission()
+	if err != nil {
+		return nil, fmt.Errorf("%w: decode workspace execution admission: %v", common.ErrConflict, err)
+	}
+	if string(admission.WorkspaceID) != strings.TrimSpace(workspaceID) {
+		return nil, fmt.Errorf("%w: workspace execution admission identity %q does not match request workspace %q", common.ErrConflict, admission.WorkspaceID, strings.TrimSpace(workspaceID))
+	}
+	if req != nil && strings.TrimSpace(req.RequestID) != "" && admission.RequestID != strings.TrimSpace(req.RequestID) {
+		return nil, fmt.Errorf("%w: workspace execution admission request identity %q does not match request %q", common.ErrConflict, admission.RequestID, strings.TrimSpace(req.RequestID))
+	}
+	if req != nil {
+		intent := strings.TrimSpace(req.Intent)
+		if intent == "" {
+			intent = string(runtimecontract.RuntimeExecutionIntentResume)
+		}
+		if string(admission.Kind) != intent {
+			return nil, fmt.Errorf("%w: workspace execution admission intent %q does not match request %q", common.ErrConflict, admission.Kind, intent)
+		}
+	}
+	wantStatus := http.StatusConflict
+	if response.Accepted {
+		wantStatus = http.StatusAccepted
+	}
+	if resp.StatusCode != wantStatus {
+		return nil, fmt.Errorf("%w: workspace execution admission HTTP status %d does not match typed outcome", common.ErrConflict, resp.StatusCode)
+	}
+	return &admission, nil
 }

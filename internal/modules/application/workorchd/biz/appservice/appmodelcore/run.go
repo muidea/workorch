@@ -17,7 +17,6 @@ type Run struct {
 	CurrentStepID      string                        `json:"currentStepId,omitempty"`
 	CurrentStepKind    string                        `json:"currentStepKind,omitempty"`
 	CurrentStepState   string                        `json:"currentStepState,omitempty"`
-	Priority           int                           `json:"priority,omitempty"`
 	BlockingTicketID   string                        `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string                        `json:"blockingApprovalId,omitempty"`
 	FailureReason      string                        `json:"failureReason,omitempty"`

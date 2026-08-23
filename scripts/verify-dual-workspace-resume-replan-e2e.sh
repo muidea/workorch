@@ -196,8 +196,18 @@ if data.get("intent") != intent:
     raise SystemExit(f"response intent={data.get('intent')!r}, want {intent!r}: {data}")
 if data.get("requestId") != request_id:
     raise SystemExit(f"response requestId={data.get('requestId')!r}, want {request_id!r}: {data}")
-if data.get("reason") != reason:
-    raise SystemExit(f"response reason={data.get('reason')!r}, want {reason!r}: {data}")
+valid_admissions = {
+    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
+    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
+}
+outcome = data.get("outcome")
+owner_reason = data.get("reason")
+if owner_reason not in valid_admissions.get(outcome, set()):
+    raise SystemExit(f"response owner admission outcome/reason={outcome!r}/{owner_reason!r}: {data}")
+if data.get("state") != "accepted":
+    raise SystemExit(f"response state={data.get('state')!r}, want accepted: {data}")
+if data.get("requestReason") != reason:
+    raise SystemExit(f"response requestReason={data.get('requestReason')!r}, want {reason!r}: {data}")
 if not data.get("source"):
     raise SystemExit(f"response source missing: {data}")
 PY
@@ -328,11 +338,11 @@ RESUME_REQUEST_2="s11-2-resume-$VERIFY_SUFFIX-2"
 RESUME_REASON="s11_2_dual_workspace_restart"
 
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/execution-activations" \
-  '{"priority":2,"requestId":"'"$RESUME_REQUEST_1"'","reason":"'"$RESUME_REASON"'","intent":"restart"}' \
+  '{"requestId":"'"$RESUME_REQUEST_1"'","reason":"'"$RESUME_REASON"'","intent":"restart"}' \
   "$TMP_DIR/resume-1.json" &
 pid_resume_1=$!
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/execution-activations" \
-  '{"priority":2,"requestId":"'"$RESUME_REQUEST_2"'","reason":"'"$RESUME_REASON"'","intent":"restart"}' \
+  '{"requestId":"'"$RESUME_REQUEST_2"'","reason":"'"$RESUME_REASON"'","intent":"restart"}' \
   "$TMP_DIR/resume-2.json" &
 pid_resume_2=$!
 wait_for_pids "$pid_resume_1" "$pid_resume_2"
@@ -355,11 +365,11 @@ RESUME_AGAIN_REQUEST_2="s11-2-resume-again-$VERIFY_SUFFIX-2"
 RESUME_AGAIN_REASON="s11_2_dual_workspace_resume"
 
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/execution-activations" \
-  '{"intent":"resume","priority":2,"requestId":"'"$RESUME_AGAIN_REQUEST_1"'","reason":"'"$RESUME_AGAIN_REASON"'}' \
+  '{"intent":"resume","requestId":"'"$RESUME_AGAIN_REQUEST_1"'","reason":"'"$RESUME_AGAIN_REASON"'}' \
   "$TMP_DIR/resume-again-1.json" &
 pid_resume_again_1=$!
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/execution-activations" \
-  '{"intent":"resume","priority":2,"requestId":"'"$RESUME_AGAIN_REQUEST_2"'","reason":"'"$RESUME_AGAIN_REASON"'}' \
+  '{"intent":"resume","requestId":"'"$RESUME_AGAIN_REQUEST_2"'","reason":"'"$RESUME_AGAIN_REASON"'}' \
   "$TMP_DIR/resume-again-2.json" &
 pid_resume_again_2=$!
 wait_for_pids "$pid_resume_again_1" "$pid_resume_again_2"

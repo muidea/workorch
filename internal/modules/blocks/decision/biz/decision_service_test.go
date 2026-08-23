@@ -160,7 +160,7 @@ func TestService_CreateTicket_SeedsOpenState(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	cmd := decisionservice.CreateTicketCommand{
 		TicketID:               common.TicketID("ticket-1"),
@@ -236,7 +236,7 @@ func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	if err := tickets.Create(ctx, &decisionModel.Ticket{
 		ID:                     "ticket-runtime-proposal",
 		WorkspaceID:            "ws-runtime-proposal",
@@ -281,7 +281,7 @@ func TestService_RuntimeGovernanceCommittedProposalReplaysExactResolution(t *tes
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	if err := tickets.Create(ctx, &decisionModel.Ticket{
 		ID:                     "ticket-runtime-committed-replay",
 		WorkspaceID:            "ws-runtime-committed-replay",
@@ -331,7 +331,7 @@ func TestService_RuntimeGovernanceCommittedFinalizeReplayIsZeroWrite(t *testing.
 	ctx := context.Background()
 	tickets := newCountingDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	if err := tickets.Create(ctx, &decisionModel.Ticket{
 		ID:                     "ticket-runtime-zero-write",
 		WorkspaceID:            "ws-runtime-zero-write",
@@ -384,7 +384,7 @@ func TestService_OrdinaryResolutionReplayUsesCanonicalSealedFingerprint(t *testi
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	if err := service.CreateTicket(ctx, decisionservice.CreateTicketCommand{
 		TicketID: "ticket-resolution-fingerprint", WorkspaceID: "ws-resolution-fingerprint", RunID: "run-resolution-fingerprint", Reason: "need input",
 	}); err != nil {
@@ -531,7 +531,7 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 	ctx := context.Background()
 	tickets := memory.NewDecisionTicketRepository()
 	resolutions := memory.NewDecisionResolutionRepository()
-	service := NewService(tickets, resolutions)
+	service := newMutationService(tickets, resolutions)
 	if err := tickets.Create(ctx, &decisionModel.Ticket{
 		ID:                     "ticket-runtime-actions",
 		WorkspaceID:            "ws-runtime-actions",
@@ -570,7 +570,7 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 
 func TestService_CreateTicket_ValidateArguments(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository())
+	service := newMutationService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository())
 
 	tests := []decisionservice.CreateTicketCommand{
 		{TicketID: "", RunID: common.RunID("run-1"), Reason: "need operator decision"},
@@ -590,7 +590,7 @@ func TestService_CreateTicket_RejectsDuplicateTicketID(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	first := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-dup"),
@@ -627,7 +627,7 @@ func TestService_CreateTicket_AllowsDuplicateTicketIDAcrossWorkspaces(t *testing
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	first := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-workspace-local"),
@@ -668,7 +668,7 @@ func TestService_CreateTicket_AllowsDuplicateTicketIDAcrossWorkspaces(t *testing
 func TestService_EnsureTicket_IsIdempotentAndRejectsBindingMismatch(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
-	service := NewService(ticketRepo, memory.NewDecisionResolutionRepository())
+	service := newMutationService(ticketRepo, memory.NewDecisionResolutionRepository())
 
 	cmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-ensure"),
@@ -709,7 +709,7 @@ func TestService_ResolveTicket_OpenToResolvedAndPersistsResolution(t *testing.T)
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
@@ -773,7 +773,7 @@ func TestService_ResolveTicket_DoesNotUseEventHub(t *testing.T) {
 		result.Set(decisionevents.RecordDecisionEvidenceResult{EvidenceRecordID: command.EvidenceRecordID}, nil)
 	})
 	defer observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:     common.TicketID("ticket-evidence"),
@@ -815,7 +815,7 @@ func TestService_ResolveTicket_RejectsSecondResolveOnResolvedTicket(t *testing.T
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-1"),
@@ -859,7 +859,7 @@ func TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch(t
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-ensure-resolved"),
@@ -924,7 +924,7 @@ func TestService_EnsureResolvedTicketReusesLoadedTicket(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-ensure-loaded"),
@@ -954,7 +954,7 @@ func TestService_EnsureResolvedTicketAndReturnReturnsResolvedEntitiesWithoutExtr
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := newCountingDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-return-loaded"),
@@ -1001,7 +1001,7 @@ func TestService_EnsureResolvedTicketAndReturnIdempotentReturnsPersistedResoluti
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := newCountingDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-return-idempotent"),
@@ -1051,7 +1051,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	ctx := context.Background()
 	ticketRepo := newCountingDecisionTicketRepository()
 	resolutionRepo := newCountingDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-recover"),
@@ -1115,7 +1115,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDoesNotPublish(t 
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-event"),
@@ -1157,7 +1157,7 @@ func TestService_EnsureResolvedTicketAndReturn_PromotesRecoveryRefsFromPayload(t
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	cmd := decisionservice.CreateTicketCommand{
 		TicketID:    "ticket-resolution-refs",
@@ -1200,7 +1200,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadR
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-payload-mismatch"),
@@ -1252,7 +1252,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturn
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-orphan-id-mismatch"),
@@ -1288,7 +1288,7 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturn
 
 func TestService_ResolveTicket_ValidateArgumentsAndNotFound(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository())
+	service := newMutationService(memory.NewDecisionTicketRepository(), memory.NewDecisionResolutionRepository())
 
 	tests := []decisionservice.ResolveTicketCommand{
 		{ResolutionID: "", TicketID: common.TicketID("ticket-1"), Type: decisioncommon.ResolutionTypeProvideMissingInfo},
@@ -1316,7 +1316,7 @@ func TestService_CreateAndResolveTicket_DoesNotPublishEvents(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-event"),
@@ -1347,7 +1347,7 @@ func TestService_DoesNotPublishConcreteDecisionNotifications(t *testing.T) {
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	hub := newRecordingDecisionHub(t)
-	service := NewService(ticketRepo, resolutionRepo)
+	service := newMutationService(ticketRepo, resolutionRepo)
 
 	createCmd := decisionservice.CreateTicketCommand{
 		TicketID:    common.TicketID("ticket-async"),

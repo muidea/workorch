@@ -294,7 +294,6 @@ func providerHTTPClient(source *http.Client) *http.Client {
 		client = &copy
 	}
 	client.Timeout = 0
-	previous := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req == nil || len(via) == 0 || via[0] == nil || via[0].URL == nil || req.URL == nil {
 			return providerProtocolError("redirect_identity_invalid", 0)
@@ -303,15 +302,11 @@ func providerHTTPClient(source *http.Client) *http.Client {
 		if !strings.EqualFold(origin.Scheme, req.URL.Scheme) || !strings.EqualFold(origin.Host, req.URL.Host) {
 			return providerProtocolError("cross_origin_redirect_rejected", 0)
 		}
-		if len(via) >= 10 {
-			return providerProtocolError("redirect_limit_exceeded", 0)
-		}
-		// Caller policy may narrow redirects further, but it cannot bypass the
-		// owner guard above or authorize an unbounded replay of a POST body.
-		if previous != nil {
-			return previous(req, via)
-		}
-		return nil
+		// A Runtime PhysicalCallID authorizes exactly one provider submission.
+		// Following even a same-origin redirect would replay the POST body under
+		// that identity, so fail closed before net/http performs a second call.
+		// An injected client policy cannot broaden this owner invariant.
+		return providerProtocolError("redirect_rejected", 0)
 	}
 	return client
 }
@@ -364,7 +359,8 @@ func providerRequestError(err error) error {
 	return &ProviderTransportError{Code: "request_failed"}
 }
 
-func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (result llmmodels.ProviderCompletionResult, err error) {
+	defer func() { result.PhysicalResponseMode = llmaudit.PhysicalResponseModeNonStreaming }()
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
@@ -403,7 +399,7 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 	httpReq.Header.Set("Accept", "application/json")
 	setBearerAuthorization(httpReq.Header, p.config.APIKey)
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := dispatchProviderHTTPRequest(p.client, httpReq, &result.ProviderSubmitted)
 	if err != nil {
 		return result, providerRequestError(err)
 	}
@@ -451,7 +447,13 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 	return result, nil
 }
 
-func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
+func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (result llmmodels.ProviderCompletionResult, err error) {
+	defer func() {
+		result.PhysicalResponseMode = llmaudit.PhysicalResponseModeNonStreaming
+		if result.ProviderSubmitted {
+			result.PhysicalResponseMode = llmaudit.PhysicalResponseModeStreaming
+		}
+	}()
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
@@ -491,7 +493,7 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	httpReq.Header.Set("Accept", "text/event-stream")
 	setBearerAuthorization(httpReq.Header, p.config.APIKey)
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := dispatchProviderHTTPRequest(p.client, httpReq, &result.ProviderSubmitted)
 	if err != nil {
 		return result, providerRequestError(err)
 	}
@@ -529,7 +531,8 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	return result, nil
 }
 
-func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
+func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (result llmmodels.ProviderEmbeddingResult, err error) {
+	defer func() { result.PhysicalResponseMode = llmaudit.PhysicalResponseModeNonStreaming }()
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
@@ -556,7 +559,7 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
 	}
-	result := llmmodels.ProviderEmbeddingResult{ProviderID: p.config.ID, Model: model, Input: input, RequestBytes: len(payload)}
+	result = llmmodels.ProviderEmbeddingResult{ProviderID: p.config.ID, Model: model, Input: input, RequestBytes: len(payload)}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -567,7 +570,7 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	httpReq.Header.Set("Accept", "application/json")
 	setBearerAuthorization(httpReq.Header, p.config.APIKey)
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := dispatchProviderHTTPRequest(p.client, httpReq, &result.ProviderSubmitted)
 	if err != nil {
 		return result, providerRequestError(err)
 	}
@@ -598,6 +601,20 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	result.Usage = usage
 	result.Vector = vector
 	return result, nil
+}
+
+// dispatchProviderHTTPRequest is the sole physical HTTP dispatch boundary for
+// completion, streaming completion and embedding. The submitted fact becomes
+// true immediately before invoking client.Do and remains true for every result
+// returned after that invocation, including transport and response failures.
+// Request construction/guard failures never reach this function and therefore
+// remain explicitly unsubmitted even when a serialized payload size is known.
+func dispatchProviderHTTPRequest(client *http.Client, request *http.Request, submitted *bool) (*http.Response, error) {
+	if client == nil || request == nil || submitted == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	*submitted = true
+	return client.Do(request)
 }
 
 func setBearerAuthorization(header http.Header, apiKey string) {

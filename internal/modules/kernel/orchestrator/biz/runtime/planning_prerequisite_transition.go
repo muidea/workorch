@@ -9,7 +9,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale, budgetSettlement ...*RuntimeProviderBudgetSettlement) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -34,16 +34,16 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 	}
 
 	expectedRevision := aggregate.StateRevision
-	var observation *runtimecontract.RuntimeProviderBudgetObservation
+	var settlement *RuntimeProviderBudgetSettlement
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
-		observation, err = candidateRequestBudgetObservationForTransition(session, runtimecontract.RuntimeProviderConsumptionUnknown, budgetObservation...)
+		settlement, err = candidateRequestBudgetSettlementForTransition(session, budgetSettlement...)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
-	} else if firstRuntimeProviderBudgetObservation(budgetObservation) != nil {
+	} else if firstRuntimeProviderBudgetSettlement(budgetSettlement) != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: completed candidate request budget was already settled", common.ErrConflict)
 	}
-	if _, err := applyCandidateRequestBudgetObservation(&aggregate, observation); err != nil {
+	if _, err := applyCandidateRequestBudgetSettlement(&aggregate, settlement); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)

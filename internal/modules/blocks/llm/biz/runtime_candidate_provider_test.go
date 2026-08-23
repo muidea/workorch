@@ -8,13 +8,57 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
+
+func TestRuntimeCandidatePreflightAuditIsExplicitlyNonStreaming(t *testing.T) {
+	now := time.Now().UTC()
+	audit := sealedAuditFromRequest(llmmodels.RuntimeCandidateRequest{}, "preflight-1", nil, now, now, false, llmmodels.RuntimeCandidateStatusCompleted, "", 0)
+	if audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming || audit.ProviderSubmitted {
+		t.Fatalf("preflight audit = %+v", audit)
+	}
+}
+
+func TestRuntimeCandidatePreDispatchFailureRetainsCanonicalNonStreamingAudit(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	generation, err := (&Biz{}).GenerateCandidate(context.Background(), request)
+	if err == nil || !strings.Contains(err.Error(), "configuration is not initialized") {
+		t.Fatalf("pre-dispatch error = %v", err)
+	}
+	if generation.Audit == nil {
+		t.Fatal("pre-dispatch failure lost sealed request audit")
+	}
+	if generation.Audit.ProviderSubmitted || generation.Audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
+		t.Fatalf("pre-dispatch audit = %+v", generation.Audit)
+	}
+	if generation.Audit.ContextBudget == nil || generation.Audit.ContextBudget.ProviderSubmitted {
+		t.Fatalf("pre-dispatch budget audit = %+v", generation.Audit.ContextBudget)
+	}
+	if generation.Audit.RequestID != request.RequestIdentity.PhysicalCallID || generation.Audit.PhysicalCallID != request.RequestIdentity.PhysicalCallID ||
+		generation.Audit.LogicalRequestID != request.RequestIdentity.LogicalRequestID || generation.Audit.WorkspaceID != string(request.SemanticContext.WorkspaceID) ||
+		generation.Audit.RunID != string(request.SemanticContext.RunID) || generation.Audit.FailureClass != string(runtimecontract.RuntimeCandidateFailureClassProviderConfiguration) ||
+		generation.Usage != nil || generation.Audit.ResponseBytes != 0 {
+		t.Fatalf("pre-dispatch exact result audit = %+v usage=%+v", generation.Audit, generation.Usage)
+	}
+}
+
+func TestRuntimeCandidatePhysicalModeUsesDispatchOnlyAfterSubmission(t *testing.T) {
+	streaming := providerExecutionMetadata{PhysicalResponseMode: llmaudit.PhysicalResponseModeStreaming}
+	if got := canonicalProviderPhysicalResponseMode(streaming); got != llmaudit.PhysicalResponseModeNonStreaming {
+		t.Fatalf("unsubmitted streaming selection mode = %q, want explicit non-streaming preflight", got)
+	}
+	streaming.Submitted = true
+	if got := canonicalProviderPhysicalResponseMode(streaming); got != llmaudit.PhysicalResponseModeStreaming {
+		t.Fatalf("submitted streaming dispatch mode = %q", got)
+	}
+}
 
 func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransientFailures(t *testing.T) {
 	if got := runtimeCandidateProviderFailureClass(&ProviderHTTPStatusError{StatusCode: 401, Body: "authentication_failed"}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderAuthentication {

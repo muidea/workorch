@@ -28,7 +28,6 @@ type runCreationRequestedFact struct {
 	RuntimeBootstrap    *runtimecontract.RuntimeBootstrap
 	ActivationRequestID string
 	ReconciliationScope runtimecontract.RuntimeCWIReconciliationScope
-	Priority            int
 }
 
 // runCreationInternalEvent deliberately has no State or timestamps. Those
@@ -39,8 +38,8 @@ type runCreationInternalEvent struct {
 }
 
 // submitRunCreationInternalEvent is the sole Run creation-state dispatcher.
-// It is shared by ordinary CreateRun and replacement materialization inside
-// the same owner; neither caller can select the initial SM-1 state.
+// The Workspace-selected replacement path supplies immutable activation
+// facts; only this Run-owner dispatcher selects the initial SM-1 state.
 func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepository, event runCreationInternalEvent) (*runmodel.Run, error) {
 	if runs == nil || event.Kind != runCreationInternalEventRequested || event.Requested == nil {
 		return nil, common.ErrInvalidArgument
@@ -66,7 +65,6 @@ func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepo
 		ActivationRequestID: strings.TrimSpace(fact.ActivationRequestID),
 		ReconciliationScope: fact.ReconciliationScope,
 		State:               common.RunStatePending,
-		Priority:            fact.Priority,
 		CreatedAt:           time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := runs.Create(bound, run); err != nil {

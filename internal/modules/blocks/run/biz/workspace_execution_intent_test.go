@@ -2,8 +2,14 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +30,7 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 	command := runevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID: "ws-file-replay", RequestID: "restart-file-replay", Kind: runtimecontract.RuntimeExecutionIntentRestart,
 		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test",
-		Priority: 3, Bootstrap: &bootstrap,
+		Bootstrap: &bootstrap,
 	}
 
 	startOwner := func(t *testing.T) (*Biz, *filerepo.RunRepository, magicevent.Hub) {
@@ -70,9 +76,137 @@ func TestWorkspaceExecutionRestartReplaysFromFilePersistenceAfterOwnerRestart(t 
 	}
 
 	conflicting := command
-	conflicting.Priority++
+	changedBootstrap := command.Bootstrap.Clone()
+	changedBootstrap.Activation.ProviderSelection.Target.ModelID = "different-model"
+	conflicting.Bootstrap = &changedBootstrap
 	if _, err := secondOwner.restartWorkspaceExecutionIntent(ctx, conflicting); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("changed payload after owner restart = %v, want ErrConflict", err)
+	}
+}
+
+func TestWorkspaceExecutionClarificationLegacyPriorityIdentitySurvivesFileOwnerRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.json")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-legacy-restart")
+	bootstrap := restartTestBootstrap(t, "ws-legacy-restart")
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: "ws-legacy-restart", RequestID: "restart-legacy", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test",
+		Bootstrap: &bootstrap,
+	}
+	predecessor := &runmodel.Run{
+		Revision: 1, ID: "run-001", WorkspaceID: command.WorkspaceID, GoalID: "goal-old", DoDID: "dod-old",
+		DefinitionRevision: "def-old", StartupInputHash: "startup-old", State: common.RunStateBlockedOnDecision,
+		BlockingTicketID: "runtime-definition-clarification:ticket-legacy",
+	}
+	legacyIntent := replacementIntentForPredecessor(replacementIntentFromCommand(command), predecessor)
+	legacyIntent.State = runmodel.ReplacementIntentPendingClarificationResolution
+	const legacyPriority = 7
+	legacyIntent.ReplacementIntentHash = legacyReplacementIntentHashV1(legacyIntent, legacyPriority)
+	predecessor.ReplacementIntent = &legacyIntent
+	writeLegacyReplacementRunFixture(t, path, predecessor, legacyPriority)
+
+	firstHub := magicevent.NewHub(32)
+	firstRuns := filerepo.NewRunRepository(path)
+	firstOwner := New()
+	if err := firstOwner.Configure(Dependencies{Runs: firstRuns, EventHub: firstHub}); err != nil {
+		t.Fatalf("configure first Run owner: %v", err)
+	}
+	resolutionCalls := 0
+	observedReplacementHash := ""
+	observer := magicevent.NewSimpleObserver(decisionevents.CommandDestination, firstHub)
+	observer.Subscribe(decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement, func(event magicevent.Event, result magicevent.Result) {
+		resolutionCalls++
+		cmd := event.Data().(decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand)
+		observedReplacementHash = cmd.ReplacementIntentHash
+		resolutionID := decisionevents.StableDefinitionClarificationResolutionID(cmd.TicketID, cmd.ReplacementIntentHash)
+		result.Set(decisionevents.ResolveRuntimeDefinitionClarificationByReplacementResult{
+			TicketID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, PredecessorRunID: cmd.PredecessorRunID,
+			ReplacementIntentID: cmd.ReplacementIntentID, ResolutionID: resolutionID,
+			ResolutionType: decisionevents.DefinitionClarificationResolutionReplacementBound,
+			Disposition:    decisionevents.DefinitionClarificationResolved,
+			ConflictKind:   decisionevents.RuntimeDefinitionClarificationNoConflict,
+			ResolutionBindingHash: cmd.BindingHash(
+				resolutionID,
+				decisionevents.DefinitionClarificationResolved,
+				decisionevents.RuntimeDefinitionClarificationNoConflict,
+				"",
+				"",
+			),
+		}, nil)
+	})
+
+	first, err := firstOwner.restartWorkspaceExecutionIntent(ctx, command)
+	if err != nil || first.RunID != predecessor.ID || first.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || first.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
+		t.Fatalf("legacy persisted duplicate admission = %+v, err=%v", first, err)
+	}
+	if resolutionCalls != 1 || observedReplacementHash != legacyIntent.ReplacementIntentHash {
+		t.Fatalf("legacy Decision binding calls=%d hash=%q, want one call with %q", resolutionCalls, observedReplacementHash, legacyIntent.ReplacementIntentHash)
+	}
+	bound, err := firstRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+	if err != nil || bound.ReplacementIntent == nil || bound.ReplacementIntent.State != runmodel.ReplacementIntentClarificationResolutionBound || bound.ReplacementIntent.ReplacementIntentHash != legacyIntent.ReplacementIntentHash || !bound.ReplacementIntent.ValidFor(bound) {
+		t.Fatalf("legacy intent after first owner binding = %+v, err=%v", bound, err)
+	}
+	observer.Unsubscribe(decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement)
+	if err := firstOwner.Stop(context.Background()); err != nil {
+		t.Fatalf("stop first Run owner: %v", err)
+	}
+	firstHub.Terminate(context.Background())
+
+	secondHub := magicevent.NewHub(32)
+	secondRuns := filerepo.NewRunRepository(path)
+	secondOwner := New()
+	if err := secondOwner.Configure(Dependencies{Runs: secondRuns, EventHub: secondHub}); err != nil {
+		t.Fatalf("configure second Run owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = secondOwner.Stop(context.Background())
+		secondHub.Terminate(context.Background())
+	})
+	duplicate, err := secondOwner.restartWorkspaceExecutionIntent(ctx, command)
+	if err != nil || duplicate.RunID != predecessor.ID || duplicate.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
+		t.Fatalf("legacy duplicate after fresh owner = %+v, err=%v", duplicate, err)
+	}
+	items, err := secondRuns.ListByWorkspaceID(ctx, predecessor.WorkspaceID)
+	if err != nil || len(items) != 1 || items[0].ReplacementIntent == nil || items[0].ReplacementIntent.ReplacementIntentHash != legacyIntent.ReplacementIntentHash || !items[0].ReplacementIntent.ValidFor(items[0]) {
+		t.Fatalf("legacy persisted owner identity after duplicate = %+v, err=%v", items, err)
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read legacy Run persistence: %v", err)
+	}
+	if !strings.Contains(string(persisted), `"Priority":7`) {
+		t.Fatalf("validated legacy identity slot was not retained across owner CAS: %s", persisted)
+	}
+}
+
+func TestWorkspaceExecutionRestartRejectsInvalidPersistedDuplicateIntent(t *testing.T) {
+	runs := memory.NewRunRepository()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	biz := New()
+	if err := biz.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-invalid-intent")
+	bootstrap := restartTestBootstrap(t, "ws-invalid-intent")
+	command := runevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: "ws-invalid-intent", RequestID: "restart-invalid", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test",
+		Bootstrap: &bootstrap,
+	}
+	predecessor := &runmodel.Run{
+		ID: "run-001", WorkspaceID: command.WorkspaceID, DefinitionRevision: "def-old", StartupInputHash: "startup-old",
+		State: common.RunStateBlockedOnDecision, BlockingTicketID: "runtime-definition-clarification:ticket-invalid",
+	}
+	invalid := replacementIntentForPredecessor(replacementIntentFromCommand(command), predecessor)
+	invalid.State = runmodel.ReplacementIntentClarificationResolutionBound
+	invalid.ClarificationResolutionID = "resolution-without-binding"
+	predecessor.ReplacementIntent = &invalid
+	if err := runs.Create(ctx, predecessor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := biz.restartWorkspaceExecutionIntent(ctx, command); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("invalid persisted duplicate intent err=%v, want conflict", err)
 	}
 }
 
@@ -83,14 +217,14 @@ func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
 	existing := &runmodel.Run{
 		ID: "run-001", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test",
 		RuntimeBootstrap: &bootstrap, ActivationRequestID: "restart-1", ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
-		State: common.RunStateActive, Priority: 3,
+		State: common.RunStateActive,
 	}
 	if err := runs.Create(ctx, existing); err != nil {
 		t.Fatal(err)
 	}
 	cmd := runevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID: "ws-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
-		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Priority: 3, Bootstrap: &bootstrap,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
 	}
 	duplicate, err := biz.restartWorkspaceExecutionIntent(ctx, cmd)
 	if err != nil || duplicate.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart || duplicate.RunID != existing.ID {
@@ -103,7 +237,6 @@ func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
 		{name: "goal", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.GoalID = "goal-other" }},
 		{name: "dod", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.DoDID = "dod-other" }},
 		{name: "definition revision", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.DefinitionRevision = "def-other" }},
-		{name: "priority", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) { value.Priority++ }},
 		{name: "bootstrap", mutate: func(value *runevents.WorkspaceExecutionIntentCommand) {
 			changed := value.Bootstrap.Clone()
 			changed.Activation.ProviderSelection.Target.ModelID = "different-model"
@@ -119,6 +252,59 @@ func TestWorkspaceExecutionRestartRequestIDBindsSealedPayload(t *testing.T) {
 				t.Fatalf("reused request with changed %s err=%v, want conflict", test.name, err)
 			}
 		})
+	}
+}
+
+func legacyReplacementIntentHashV1(intent runmodel.ReplacementIntent, priority int) string {
+	if intent.Bootstrap == nil {
+		return ""
+	}
+	h := sha256.New()
+	for _, value := range []string{
+		"workorch-replacement-intent-v1", intent.RequestID, string(intent.WorkspaceID), string(intent.GoalID), string(intent.DoDID),
+		strings.TrimSpace(intent.DefinitionRevision), strings.TrimSpace(intent.StartupInputHash), strings.TrimSpace(intent.ReplacementIntentID),
+		string(intent.ClarificationTicketID), strings.TrimSpace(intent.PredecessorStartupInputHash), strings.TrimSpace(intent.SuccessorStartupInputHash),
+		fmt.Sprintf("%d", priority), string(intent.ReconciliationScope), string(intent.Kind), strings.TrimSpace(intent.Reason),
+		runtimecontract.StableRuntimeBootstrapHash(*intent.Bootstrap),
+	} {
+		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)
+	}
+	return "replacement-intent-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func writeLegacyReplacementRunFixture(t *testing.T, path string, item *runmodel.Run, priority int) {
+	t.Helper()
+	runJSON, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal legacy Run base: %v", err)
+	}
+	var runFields map[string]json.RawMessage
+	if err := json.Unmarshal(runJSON, &runFields); err != nil {
+		t.Fatalf("decode legacy Run fields: %v", err)
+	}
+	var intentFields map[string]json.RawMessage
+	if err := json.Unmarshal(runFields["ReplacementIntent"], &intentFields); err != nil {
+		t.Fatalf("decode legacy replacement intent fields: %v", err)
+	}
+	priorityJSON, err := json.Marshal(priority)
+	if err != nil {
+		t.Fatalf("marshal legacy priority slot: %v", err)
+	}
+	intentFields["Priority"] = priorityJSON
+	runFields["ReplacementIntent"], err = json.Marshal(intentFields)
+	if err != nil {
+		t.Fatalf("marshal legacy replacement intent fields: %v", err)
+	}
+	runJSON, err = json.Marshal(runFields)
+	if err != nil {
+		t.Fatalf("marshal legacy Run fields: %v", err)
+	}
+	rootJSON, err := json.Marshal(map[string]json.RawMessage{string(item.ID): runJSON})
+	if err != nil {
+		t.Fatalf("marshal legacy Run repository: %v", err)
+	}
+	if err := os.WriteFile(path, rootJSON, 0o600); err != nil {
+		t.Fatalf("write legacy Run repository: %v", err)
 	}
 }
 
@@ -162,7 +348,7 @@ func TestWorkspaceExecutionDefinitionClarificationBindsPersistedIntentAndReplays
 	bootstrap := restartTestBootstrap(t, "ws-1")
 	cmd := runevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID: "ws-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
-		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Priority: 3, Bootstrap: &bootstrap,
+		GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1", StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
 	}
 	admission, err := biz.restartWorkspaceExecutionIntent(ctx, cmd)
 	if err != nil || admission.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || admission.RunID != predecessor.ID {
@@ -199,7 +385,7 @@ func TestRuntimeClarificationRejectsForgedConflictBindingWithoutStateAdvance(t *
 	}
 	requested := replacementIntentFromCommand(runevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID: "ws-1", RequestID: "restart-1", GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "def-1",
-		StartupInputHash: "startup-input-test", Priority: 3, Bootstrap: &bootstrap,
+		StartupInputHash: "startup-input-test", Bootstrap: &bootstrap,
 	})
 	requested = replacementIntentForPredecessor(requested, predecessor)
 	requested.State = runmodel.ReplacementIntentPendingClarificationResolution

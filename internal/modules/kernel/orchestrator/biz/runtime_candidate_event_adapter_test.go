@@ -29,28 +29,58 @@ func (f eventCandidateProviderFunc) GenerateCandidate(ctx context.Context, reque
 	return f(ctx, request)
 }
 
-func eventGenerationResult(payload []byte, err error) (llmmodels.RuntimeCandidateGenerationResult, error) {
+func eventGenerationAudit(request llmmodels.RuntimeCandidateRequest, submitted bool, status, failureClass string, usage *llmaudit.ProviderUsage) *llmmodels.ProviderRequestAudit {
+	workspaceID := string(request.CandidateContext.WorkspaceID)
+	runID := string(request.CandidateContext.RunID)
+	target := request.CandidateContext.Activation.ProviderSelection.Target.Normalized()
+	kind := "runtime_candidate"
+	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		workspaceID = string(request.SemanticContext.WorkspaceID)
+		runID = string(request.SemanticContext.RunID)
+		target = request.SemanticContext.Activation.ProviderSelection.Target.Normalized()
+		kind = "runtime_semantic_plan"
+	}
+	actualTokens := 0
+	if usage != nil {
+		actualTokens = usage.TotalTokens
+	}
+	audit := &llmmodels.ProviderRequestAudit{
+		RequestID: request.RequestIdentity.PhysicalCallID, LogicalRequestID: request.RequestIdentity.LogicalRequestID,
+		PhysicalCallID: request.RequestIdentity.PhysicalCallID, WorkspaceID: workspaceID, RunID: runID,
+		Status: status, FailureClass: failureClass, ProviderSubmitted: submitted,
+		Target: target, Operation: "responses", StablePrefixHash: request.StablePrefixHash, Kind: kind,
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+		ContextBudget: &llmmodels.ProviderContextBudget{
+			ProviderID: target.ProviderID, ModelID: target.ModelID, ProviderSubmitted: submitted, ActualTokens: actualTokens,
+			CachePlan: &llmmodels.ProviderCachePlan{StablePrefixHash: request.StablePrefixHash},
+		},
+	}
+	if submitted {
+		audit.RequestBytes = 1
+	}
+	return audit
+}
+
+func eventGenerationResult(request llmmodels.RuntimeCandidateRequest, payload []byte, err error) (llmmodels.RuntimeCandidateGenerationResult, error) {
+	requestID := request.RequestIdentity.PhysicalCallID
 	if err != nil {
+		audit := eventGenerationAudit(request, true, llmmodels.RuntimeCandidateStatusFailed, "provider", nil)
 		return llmmodels.RuntimeCandidateGenerationResult{
+			RequestID:     requestID,
 			Status:        llmmodels.RuntimeCandidateStatusFailed,
 			FailureReason: err.Error(),
-			Audit: &llmmodels.ProviderRequestAudit{
-				Status:            llmmodels.RuntimeCandidateStatusFailed,
-				ProviderSubmitted: true,
-				FailureClass:      "provider",
-			},
+			Audit:         audit,
 		}, err
 	}
+	usage := &llmaudit.ProviderUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15}
+	audit := eventGenerationAudit(request, true, llmmodels.RuntimeCandidateStatusCompleted, "", usage)
+	audit.ResponseBytes = len(payload)
 	return llmmodels.RuntimeCandidateGenerationResult{
-		Payload: payload,
-		Status:  llmmodels.RuntimeCandidateStatusCompleted,
-		Usage:   &llmaudit.ProviderUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
-		Audit: &llmmodels.ProviderRequestAudit{
-			Status:            llmmodels.RuntimeCandidateStatusCompleted,
-			ProviderSubmitted: true,
-			Target:            runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
-			Operation:         "responses",
-		},
+		RequestID: requestID,
+		Payload:   payload,
+		Status:    llmmodels.RuntimeCandidateStatusCompleted,
+		Usage:     usage,
+		Audit:     audit,
 	}, nil
 }
 
@@ -68,7 +98,7 @@ func TestRequestRuntimeCandidatePreservesSemanticDocumentKindAcrossEventHub(t *t
 			if request.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
 				t.Fatalf("provider document kind = %q", request.DocumentKind)
 			}
-			return eventGenerationResult([]byte(`{"documentKind":"semantic_plan"}`), nil)
+			return eventGenerationResult(request, []byte(`{"documentKind":"semantic_plan"}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -82,7 +112,7 @@ func TestRequestRuntimeCandidatePreservesSemanticDocumentKindAcrossEventHub(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || response.ExpectedDocumentHash != command.ExpectedDocument.Hash || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
+	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || response.ExpectedDocumentHash != command.ExpectedDocument.Hash || response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != `{"documentKind":"semantic_plan"}` {
 		t.Fatalf("semantic response=%+v providerCalls=%d", response, providerCalls)
 	}
 }
@@ -94,14 +124,16 @@ func TestRequestRuntimeCandidateRejectsExpectedDocumentHashDrift(t *testing.T) {
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		response := runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			ExpectedDocumentHash: "expected-document-other", DocumentContent: []byte(`{"documentKind":"semantic_plan"}`),
-		}, nil)
+			DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, []byte(`{"documentKind":"semantic_plan"}`)),
+		})
+		response.ExpectedDocumentHash = "expected-document-other"
+		result.Set(response, nil)
 	})
 	defer observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	_, err := RequestRuntimeCandidate(ctx, hub, eventSemanticCandidateCommand(t))
-	if err == nil || !strings.Contains(err.Error(), "expected-document identity") {
+	if err == nil || (!strings.Contains(err.Error(), "expected-document identity") && !strings.Contains(err.Error(), "expected hash mismatch")) {
 		t.Fatalf("expected-document hash drift error = %v", err)
 	}
 }
@@ -199,8 +231,8 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-			return eventGenerationResult(nil, errors.New("provider unavailable"))
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+			return eventGenerationResult(request, nil, errors.New("provider unavailable"))
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -220,7 +252,7 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Feedback == nil || response.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainProviderRequest || response.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryProviderProtocol || response.Feedback.OriginalDiagnostic == nil || response.Feedback.OriginalDiagnostic.OriginalClass != string(runtimecontract.RuntimeCandidateFailureClassProvider) || len(response.DocumentContent) != 0 {
+	if response.Feedback == nil || response.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainProviderRequest || response.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryProviderProtocol || response.Feedback.OriginalDiagnostic == nil || response.Feedback.OriginalDiagnostic.OriginalClass != string(runtimecontract.RuntimeCandidateFailureClassProvider) || response.DocumentOutcome != nil {
 		t.Fatalf("response = %+v", response)
 	}
 	if strings.Contains(response.Feedback.OriginalDiagnostic.OriginalMessage, "provider unavailable") {
@@ -281,8 +313,8 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-			return eventGenerationResult(payload, nil)
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+			return eventGenerationResult(request, payload, nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -302,7 +334,7 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Feedback != nil || string(response.DocumentContent) != string(payload) {
+	if response.Feedback != nil || response.DocumentOutcome == nil || string(response.DocumentOutcome.Content) != string(payload) {
 		t.Fatalf("complete schema document handoff = %+v", response)
 	}
 }
@@ -330,9 +362,10 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+			audit := eventGenerationAudit(request, false, llmmodels.RuntimeCandidateStatusFailed, string(runtimecontract.RuntimeCandidateFailureClassProviderConfiguration), nil)
 			return llmmodels.RuntimeCandidateGenerationResult{
-				Status: llmmodels.RuntimeCandidateStatusFailed, PrerequisiteStale: &stale,
+				RequestID: request.RequestIdentity.PhysicalCallID, Status: llmmodels.RuntimeCandidateStatusFailed, PrerequisiteStale: &stale, Audit: audit,
 			}, errors.New("sealed provider configuration drift")
 		}),
 	}); err != nil {
@@ -353,7 +386,7 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Stale == nil || response.Stale.ObservationID != observation.ObservationID || response.Feedback != nil || len(response.DocumentContent) != 0 {
+	if response.Stale == nil || response.Stale.ObservationID != observation.ObservationID || response.Feedback != nil || response.DocumentOutcome != nil {
 		t.Fatalf("candidate response = %+v, want typed stale only", response)
 	}
 }
@@ -373,7 +406,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		LoadLLMConfig: testLLMConfigurationSnapshot,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
-			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
+			return eventGenerationResult(request, []byte(`{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -395,10 +428,13 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(base.CandidateManifest, first.DocumentContent); err != nil {
+	if first.DocumentOutcome == nil {
+		t.Fatal("complete candidate result did not carry a document outcome")
+	}
+	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(base.CandidateManifest, first.DocumentOutcome.Content); err != nil {
 		t.Fatal(err)
 	}
-	if len(first.DocumentContent) == 0 {
+	if len(first.DocumentOutcome.Content) == 0 {
 		t.Fatal("complete candidate result did not carry the synchronous raw document")
 	}
 	retry := base
@@ -417,10 +453,13 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(base.CandidateManifest, second.DocumentContent); err != nil {
+	if second.DocumentOutcome == nil {
+		t.Fatal("complete correction candidate result did not carry a document outcome")
+	}
+	if _, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(base.CandidateManifest, second.DocumentOutcome.Content); err != nil {
 		t.Fatal(err)
 	}
-	if len(second.DocumentContent) == 0 {
+	if len(second.DocumentOutcome.Content) == 0 {
 		t.Fatal("complete correction candidate result did not carry the synchronous raw document")
 	}
 	if first.RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || first.RequestIdentity.Sequence != 1 || first.RequestIdentity.PhysicalCallID != "physical-call-1" || second.RequestIdentity.LogicalRequestID != base.RequestIdentity.LogicalRequestID || second.RequestIdentity.Sequence != 2 || second.RequestIdentity.PhysicalCallID != "physical-call-2" {
@@ -486,9 +525,9 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
-			return eventGenerationResult(nil, errors.New("provider must not be called by preflight"))
+			return eventGenerationResult(request, nil, errors.New("provider must not be called by preflight"))
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -538,9 +577,9 @@ func TestPreflightRuntimeCandidateOverBudgetPublishesSecretFreeAuditWithoutProvi
 	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
-			return eventGenerationResult(nil, errors.New("provider must not be called by preflight"))
+			return eventGenerationResult(request, nil, errors.New("provider must not be called by preflight"))
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -652,8 +691,8 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub:      hub,
 		LoadLLMConfig: testLLMConfigurationSnapshot,
-		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-			return eventGenerationResult([]byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
+		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+			return eventGenerationResult(request, []byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -721,12 +760,15 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(candidateManifestForEventRequest(t, decision, context), response.DocumentContent)
+	if response.DocumentOutcome == nil {
+		t.Fatal("complete MCP validation response did not carry a document outcome")
+	}
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(candidateManifestForEventRequest(t, decision, context), response.DocumentOutcome.Content)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if candidate.Validation == nil || len(candidate.Validation.Operations) != 1 || candidate.Validation.Operations[0].Operation.Kind != runtimecontract.StepKindMCPToolCall {
-		t.Fatalf("read-only MCP validation document = %s", response.DocumentContent)
+		t.Fatalf("read-only MCP validation document = %s", response.DocumentOutcome.Content)
 	}
 }
 

@@ -179,8 +179,13 @@ type ProviderContextProfile struct {
 }
 
 type ProviderCompletionResult struct {
-	Payload       []byte                  `json:"payload,omitempty"`
-	Usage         *llmaudit.ProviderUsage `json:"usage,omitempty"`
-	RequestBytes  int                     `json:"-"`
-	ResponseBytes int                     `json:"-"`
+	Payload              []byte                        `json:"payload,omitempty"`
+	Usage                *llmaudit.ProviderUsage       `json:"usage,omitempty"`
+	PhysicalResponseMode llmaudit.PhysicalResponseMode `json:"physicalResponseMode"`
+	// ProviderSubmitted is set by the protocol adapter exactly when it invokes
+	// the configured HTTP client's Do boundary. RequestBytes is independent
+	// measurement metadata and must never be used to infer this fact.
+	ProviderSubmitted bool `json:"-"`
+	RequestBytes      int  `json:"-"`
+	ResponseBytes     int  `json:"-"`
 }

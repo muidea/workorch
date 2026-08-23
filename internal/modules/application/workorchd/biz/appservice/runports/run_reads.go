@@ -17,10 +17,6 @@ func ListRuns(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) 
 	return ownerreadports.ListRunsByOwnerCommand(ctx, hub)
 }
 
-func ListRecoverableRuntimeGapRunCandidates(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) {
-	return ownerreadports.ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx, hub)
-}
-
 func ListRunsByWorkspace(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	if workspaceID == "" {
 		return ListRuns(ctx, hub)

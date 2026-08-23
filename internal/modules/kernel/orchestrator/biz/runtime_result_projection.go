@@ -24,18 +24,25 @@ import (
 // persisted aggregate remains authority. Result, Workspace and Run receive
 // typed terminal facts and only mutate their own state, in that order.
 func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate) error {
-	if m == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
+	if m == nil || m.runtimeController == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
 		return common.ErrInvalidArgument
 	}
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("persisted Runtime terminal aggregate is invalid: %w", err)
 	}
-	request := terminalDeliveryRequest(aggregate)
+	request, err := terminalDeliveryRequest(aggregate)
+	if err != nil {
+		return err
+	}
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	if !deliveryAcknowledged(aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerResult) {
-		if err := m.deliverRuntimeResult(ctx, request, runtimeResultMaterialFromAggregate(aggregate)); err != nil {
+		material, materialErr := runtimeResultMaterialFromAggregate(aggregate, request.Outcome)
+		if materialErr != nil {
+			return materialErr
+		}
+		if err := m.deliverRuntimeResult(ctx, request, material); err != nil {
 			return err
 		}
 	}
@@ -61,14 +68,20 @@ func deliveryAcknowledged(aggregate runtime.RuntimeAggregate, deliveryID string,
 
 func (m *Biz) persistedDeliveryAcknowledged(ctx context.Context, aggregate runtime.RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
 	if m == nil || m.runtimeController == nil {
-		return deliveryAcknowledged(aggregate, deliveryID, owner)
+		return false
 	}
 	loaded, err := m.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	return err == nil && deliveryAcknowledged(loaded, deliveryID, owner)
 }
 
-func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) orchestratorevents.RuntimeTerminalDeliveryRequestData {
-	outcome := terminalOutcomeForAggregate(aggregate)
+func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) (orchestratorevents.RuntimeTerminalDeliveryRequestData, error) {
+	outcome, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+	if err != nil {
+		return orchestratorevents.RuntimeTerminalDeliveryRequestData{}, err
+	}
+	if !terminal {
+		return orchestratorevents.RuntimeTerminalDeliveryRequestData{}, fmt.Errorf("%w: runtime terminal delivery requires a sealed terminal", common.ErrConflict)
+	}
 	deliveryID := runtimecontract.StableTerminalDeliveryID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthoritySnapshot.ID, outcome)
 	if aggregate.Termination != nil {
 		return orchestratorevents.RuntimeTerminalDeliveryRequestData{
@@ -79,7 +92,7 @@ func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) orchestratoreve
 				Outcome: outcome, TerminalDeliveryID: deliveryID,
 			}, SourceOwner: ModuleID,
 			CausationID: "terminal-delivery/" + deliveryID, StateRevision: aggregate.StateRevision,
-		}
+		}, nil
 	}
 	return orchestratorevents.RuntimeTerminalDeliveryRequestData{
 		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
@@ -90,31 +103,7 @@ func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) orchestratoreve
 		}, SourceOwner: ModuleID,
 		CausationID:   "terminal-delivery/" + deliveryID,
 		StateRevision: aggregate.StateRevision,
-	}
-}
-
-func terminalOutcomeForAggregate(aggregate runtime.RuntimeAggregate) runtimecontract.TerminalOutcome {
-	if aggregate.Termination != nil {
-		kind := runtimecontract.TerminalOutcomeKind("")
-		switch aggregate.Termination.Kind {
-		case runtimecontract.RuntimeTerminationCancelled:
-			kind = runtimecontract.TerminalOutcomeKindCancelled
-		case runtimecontract.RuntimeTerminationSuperseded:
-			kind = runtimecontract.TerminalOutcomeKindSuperseded
-		}
-		return runtimecontract.TerminalOutcome{Kind: kind, Code: "administrative_" + string(aggregate.Termination.Kind), Summary: aggregate.Termination.Reason}.Normalized()
-	}
-	if aggregate.Decision.Terminal == nil {
-		return runtimecontract.TerminalOutcome{}
-	}
-	kind := runtimecontract.TerminalOutcomeKind("")
-	switch aggregate.Decision.State {
-	case runtimecontract.ConvergenceStateComplete:
-		kind = runtimecontract.TerminalOutcomeKindCompleted
-	case runtimecontract.ConvergenceStateFailed:
-		kind = runtimecontract.TerminalOutcomeKindFailed
-	}
-	return runtimecontract.TerminalOutcome{Kind: kind, Code: aggregate.Decision.Terminal.Code, Summary: aggregate.Decision.Terminal.Summary}.Normalized()
+	}, nil
 }
 
 func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, material resultevents.ResultMaterial) error {
@@ -186,11 +175,8 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 	if acknowledgement == nil {
 		return common.ErrInvalidArgument
 	}
-	// Focused owner-boundary tests may construct a delivery Biz without the
-	// Runtime repository; production Configure always installs it. The
-	// resource-owner transition remains fully exercised in that narrow fixture.
-	if m.runtimeController == nil {
-		return nil
+	if m == nil || m.runtimeController == nil {
+		return common.ErrInvalidArgument
 	}
 	_, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventTerminalDeliveryAcknowledged, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{DeliveryAcknowledgement: acknowledgement},
@@ -198,15 +184,17 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 	return err
 }
 
-func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resultevents.ResultMaterial {
-	aggregate.Facts = aggregate.Facts.Normalized()
-	accepted := terminalOutcomeForAggregate(aggregate).Kind == runtimecontract.TerminalOutcomeKindCompleted
-	terminalSummary := ""
-	if aggregate.Termination != nil {
-		terminalSummary = aggregate.Termination.Reason
-	} else {
-		terminalSummary = aggregate.Decision.Terminal.Summary
+func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate, outcome runtimecontract.TerminalOutcome) (resultevents.ResultMaterial, error) {
+	derived, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+	if err != nil {
+		return resultevents.ResultMaterial{}, err
 	}
+	if !terminal || derived != outcome.Normalized() {
+		return resultevents.ResultMaterial{}, fmt.Errorf("%w: result material terminal outcome does not match aggregate", common.ErrConflict)
+	}
+	aggregate.Facts = aggregate.Facts.Normalized()
+	accepted := outcome.Kind == runtimecontract.TerminalOutcomeKindCompleted
+	terminalSummary := outcome.Summary
 	assessment := workorchresultcontract.DoDAssessment{Satisfied: accepted, Summary: terminalSummary}
 	evidenceRefs := runtimeTerminalEvidenceRefs(aggregate.Facts)
 	artifactRefs := runtimeTerminalArtifactRefs(aggregate.Facts)
@@ -248,18 +236,18 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resu
 		EvidenceRefs: evidenceRefs, ArtifactRefs: artifactRefs, DoDAssessment: assessment,
 		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
-	item.RuntimeCloseout = runtimeResultCloseout(aggregate, accepted, evidenceRefs)
-	return item
+	item.RuntimeCloseout = runtimeResultCloseout(aggregate, outcome, accepted, evidenceRefs)
+	return item, nil
 }
 
-func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, accepted bool, evidenceRefs []string) *runtimecontract.RuntimeResultCloseout {
+func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, outcome runtimecontract.TerminalOutcome, accepted bool, evidenceRefs []string) *runtimecontract.RuntimeResultCloseout {
 	closeout := runtimecontract.RuntimeResultCloseout{
 		SchemaVersion:        runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
 		CloseoutID:           runtimeCloseoutID(aggregate),
 		StartupInputHash:     aggregate.Definition.Normalized().StartupInputHash,
 		DefinitionRevision:   aggregate.Facts.DefinitionRevision,
 		RuntimeStateRevision: aggregate.StateRevision,
-		TerminalOutcome:      terminalOutcomeForAggregate(aggregate),
+		TerminalOutcome:      outcome,
 		EvidenceRefs:         append([]string(nil), evidenceRefs...),
 		ArtifactRefs:         runtimeTerminalArtifactRefs(aggregate.Facts),
 		OperationOutcomes:    runtimeOperationCloseouts(aggregate),

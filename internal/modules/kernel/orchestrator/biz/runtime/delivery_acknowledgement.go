@@ -58,29 +58,12 @@ func validateDeliveryAcknowledgementAgainstAggregate(aggregate RuntimeAggregate,
 		return fmt.Errorf("%w: terminal delivery acknowledgement has no sealed terminal", common.ErrConflict)
 	}
 	acknowledgement = acknowledgement.Normalized()
-	outcome := runtimecontract.TerminalOutcome{}
-	if aggregate.Termination != nil {
-		switch aggregate.Termination.Kind {
-		case runtimecontract.RuntimeTerminationCancelled:
-			outcome.Kind = runtimecontract.TerminalOutcomeKindCancelled
-		case runtimecontract.RuntimeTerminationSuperseded:
-			outcome.Kind = runtimecontract.TerminalOutcomeKindSuperseded
-		default:
-			return fmt.Errorf("%w: terminal delivery acknowledgement has invalid administrative kind", common.ErrConflict)
-		}
-		outcome.Code = "administrative_" + string(aggregate.Termination.Kind)
-		outcome.Summary = aggregate.Termination.Reason
-	} else {
-		switch aggregate.Decision.State {
-		case runtimecontract.ConvergenceStateComplete:
-			outcome.Kind = runtimecontract.TerminalOutcomeKindCompleted
-		case runtimecontract.ConvergenceStateFailed:
-			outcome.Kind = runtimecontract.TerminalOutcomeKindFailed
-		default:
-			return fmt.Errorf("%w: terminal delivery acknowledgement has non-terminal convergence state", common.ErrConflict)
-		}
-		outcome.Code = aggregate.Decision.Terminal.Code
-		outcome.Summary = aggregate.Decision.Terminal.Summary
+	outcome, terminal, err := DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+	if err != nil {
+		return err
+	}
+	if !terminal {
+		return fmt.Errorf("%w: terminal delivery acknowledgement has no sealed terminal", common.ErrConflict)
 	}
 	expectedID := runtimecontract.StableTerminalDeliveryID(
 		aggregate.Facts.WorkspaceID,

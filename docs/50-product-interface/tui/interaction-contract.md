@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Mode And Authority
 
@@ -58,6 +58,12 @@ Decision context adds `/decision answer`, `/decision terminate`, `/decision show
 
 `/run resume` requests continuation of the Workspace-selected current Run. `/run restart` requests a fresh definition-bound
 activation; it does not directly create or select a successor.
+
+local/remote backend 共用一个 execution admission classifier：两类 owner outcome 显示 accepted，其他五类显示 rejected，
+并原样显示 `state`、exact `outcome`、`admissionReason` 与 `diagnostic`；caller `requestReason` 只可单列，不能参与分类。
+remote HTTP 409 不得被 TUI 重判为 transport failure 或 governance/progress transition。TUI refresh equality 覆盖
+runCommand 的全部 canonical 字段与互斥时间戳，不因相同 revision 丢失 owner fact 变化。
+TUI 不发送 caller Run priority。
 
 Normal TUI creation uses `/workspace create <title> --template <template-id> [--dir <path>]`. Template is required; when
 `--dir` is omitted, the application resolves and creates the default `.workorch-workspaces/<workspace-id>` directory.

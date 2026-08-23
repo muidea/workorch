@@ -83,18 +83,20 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 // correction after a complete candidate rejection creates a distinct session
 // fingerprint; whole-document recovery keeps the same ID.
 type RuntimeCandidateRequestSession struct {
-	LogicalRequestID    string
-	DocumentKind        RuntimeProviderDocumentKind
-	ExpectedDocument    *RuntimeExpectedDocumentContract
-	Transaction         AuthorityTransaction
-	StablePrefixHash    string
-	ManifestHash        string
-	CorrectionHash      string
-	State               RuntimeCandidateRequestSessionState
-	NextSequence        int
-	IncompleteOutcomes  int
-	TransportOutcomes   int
-	LastDocumentOutcome *RuntimeProviderDocumentOutcome
+	LogicalRequestID   string
+	DocumentKind       RuntimeProviderDocumentKind
+	ExpectedDocument   *RuntimeExpectedDocumentContract
+	Transaction        AuthorityTransaction
+	StablePrefixHash   string
+	ManifestHash       string
+	CorrectionHash     string
+	State              RuntimeCandidateRequestSessionState
+	NextSequence       int
+	IncompleteOutcomes int
+	TransportOutcomes  int
+	// LastDocumentFraming stores only owner-neutral response framing. The
+	// authoritative physical-response fact is emitted by the LLM owner.
+	LastDocumentFraming *RuntimeProviderDocumentFraming
 	LastPhysicalCallID  string
 	ProviderSubmitted   bool
 	LastOutcome         RuntimeCandidateRequestOutcome
@@ -141,9 +143,9 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 		value := s.ExpectedDocument.Normalized()
 		s.ExpectedDocument = &value
 	}
-	if s.LastDocumentOutcome != nil {
-		value := s.LastDocumentOutcome.Normalized()
-		s.LastDocumentOutcome = &value
+	if s.LastDocumentFraming != nil {
+		value := s.LastDocumentFraming.Normalized()
+		s.LastDocumentFraming = &value
 	}
 	return s
 }
@@ -162,11 +164,11 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	}
-	if s.LastDocumentOutcome != nil {
+	if s.LastDocumentFraming != nil {
 		if s.ExpectedDocument == nil {
 			return common.ErrInvalidArgument
 		}
-		if err := s.LastDocumentOutcome.Validate(); err != nil || s.LastDocumentOutcome.ExpectedDocumentHash != s.ExpectedDocument.Hash || s.LastDocumentOutcome.Disposition != RuntimeProviderDocumentIncomplete {
+		if err := s.LastDocumentFraming.Validate(); err != nil || s.LastDocumentFraming.ExpectedDocumentHash != s.ExpectedDocument.Hash || s.LastDocumentFraming.Disposition != RuntimeProviderDocumentIncomplete {
 			return common.ErrInvalidArgument
 		}
 	}
@@ -189,7 +191,7 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionRecoveryPending:
-		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete || s.LastDocumentOutcome == nil {
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentIncomplete || s.LastDocumentFraming == nil {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionTransportPending:
@@ -204,6 +206,7 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 		switch s.LastOutcome.Class {
 		case RuntimeCandidateRequestOutcomeProviderAuthentication,
 			RuntimeCandidateRequestOutcomeProviderConfiguration,
+			RuntimeCandidateRequestOutcomeProviderTransient,
 			RuntimeCandidateRequestOutcomeProviderProtocol,
 			RuntimeCandidateRequestOutcomeProviderSubmissionUnknown,
 			RuntimeCandidateRequestOutcomePrerequisiteStale,
@@ -224,9 +227,9 @@ func (s RuntimeCandidateRequestSession) Clone() RuntimeCandidateRequestSession {
 		value := s.ExpectedDocument.Clone()
 		s.ExpectedDocument = &value
 	}
-	if s.LastDocumentOutcome != nil {
-		value := s.LastDocumentOutcome.Normalized()
-		s.LastDocumentOutcome = &value
+	if s.LastDocumentFraming != nil {
+		value := s.LastDocumentFraming.Normalized()
+		s.LastDocumentFraming = &value
 	}
 	return s
 }

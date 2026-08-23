@@ -10,8 +10,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	executioncontract "github.com/muidea/workorch/internal/pkg/workorchexecutioncontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 var runCmd = &cobra.Command{
@@ -87,15 +89,13 @@ var runActivateCmd = &cobra.Command{
 	Short: "Create a fresh workspace execution from current owner state",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		priority, _ := cmd.Flags().GetInt("priority")
-
-		admission, err := mustBackend().Run().Command(ctx(), backend.WorkspaceRunCommand{
+		request := backend.WorkspaceRunCommand{
 			WorkspaceID: common.WorkspaceID(args[0]),
 			Intent:      backend.RunCommandIntentRestart,
 			Reason:      "user_requested",
 			Source:      "cli",
-			Priority:    priority,
-		})
+		}
+		admission, err := mustBackend().Run().Command(ctx(), request)
 		if err != nil {
 			return fmt.Errorf("activate execution: %w", err)
 		}
@@ -104,14 +104,9 @@ var runActivateCmd = &cobra.Command{
 			return nil
 		}
 		if admission == nil {
-			fmt.Println(styleSuccess.Render("Execution request accepted; awaiting owner admission projection."))
-			return nil
+			return fmt.Errorf("%w: workspace owner admission is missing", common.ErrConflict)
 		}
-		fmt.Println(styleSuccess.Render("Execution request processed."))
-		fmt.Printf("  Run: %s\n", admission.RunID)
-		fmt.Printf("  Outcome: %s\n", admission.Outcome)
-		fmt.Printf("  Reason: %s\n", admission.Reason)
-		return nil
+		return printRunCommandAdmission("Execution request", request.Reason, admission)
 	},
 }
 
@@ -151,25 +146,49 @@ var runResumeCmd = &cobra.Command{
 	Short: "Resume the current workspace run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := mustBackend().Run().Command(runCommandContext(cmd), backend.WorkspaceRunCommand{
+		request := backend.WorkspaceRunCommand{
 			WorkspaceID: common.WorkspaceID(args[0]),
 			Intent:      backend.RunCommandIntentResume,
 			Reason:      "user_requested",
 			Source:      "cli",
-		})
+		}
+		r, err := mustBackend().Run().Command(runCommandContext(cmd), request)
 		if err != nil {
 			return fmt.Errorf("resume run: %w", err)
 		}
 		if r == nil {
-			fmt.Println(styleSuccess.Render("Workspace resume accepted."))
-			fmt.Printf("  Workspace: %s\n", args[0])
-			return nil
+			return fmt.Errorf("%w: workspace owner admission is missing", common.ErrConflict)
 		}
-		fmt.Println(styleSuccess.Render("Run command processed: " + string(r.RunID)))
-		fmt.Printf("  Outcome: %s\n", r.Outcome)
-		fmt.Printf("  Reason: %s\n", r.Reason)
-		return nil
+		return printRunCommandAdmission("Workspace resume", request.Reason, r)
 	},
+}
+
+func printRunCommandAdmission(label, requestReason string, admission *backend.RunCommandResult) error {
+	presentation, err := executioncontract.PresentAdmission(runtimecontract.RuntimeExecutionIntentAdmission(*admission))
+	if err != nil {
+		return fmt.Errorf("%w: %v", common.ErrConflict, err)
+	}
+	heading := label + " accepted by Workspace owner."
+	if !presentation.Accepted {
+		heading = label + " rejected by Workspace owner."
+		fmt.Println(styleError.Render(heading))
+	} else {
+		fmt.Println(styleSuccess.Render(heading))
+	}
+	fmt.Printf("  Workspace: %s\n", admission.WorkspaceID)
+	if admission.RunID != "" {
+		fmt.Printf("  Run: %s\n", admission.RunID)
+	}
+	fmt.Printf("  Request: %s\n", admission.RequestID)
+	if requestReason = strings.TrimSpace(requestReason); requestReason != "" {
+		fmt.Printf("  Request reason: %s\n", requestReason)
+	}
+	fmt.Printf("  Outcome: %s\n", admission.Outcome)
+	fmt.Printf("  Admission reason: %s\n", admission.Reason)
+	if presentation.Diagnostic != "" {
+		fmt.Printf("  Diagnostic: %s\n", presentation.Diagnostic)
+	}
+	return nil
 }
 
 var runObservabilityCmd = &cobra.Command{
@@ -257,8 +276,6 @@ func init() {
 
 	runListCmd.Flags().String("workspace", "", "Filter by workspace ID")
 	runShowCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
-
-	runActivateCmd.Flags().Int("priority", 0, "Run priority")
 
 	runStatusCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 	runStatusCmd.Flags().String("wait", "", "Wait for run to reach this state")

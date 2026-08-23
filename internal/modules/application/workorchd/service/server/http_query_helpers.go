@@ -10,28 +10,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
-	if bodyPriority != 0 {
-		return bodyPriority
-	}
-	if r == nil {
-		return 0
-	}
-	for _, raw := range []string{
-		r.URL.Query().Get("priority"),
-		r.Header.Get("X-Workorch-Run-Priority"),
-	} {
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		priority, err := strconv.Atoi(strings.TrimSpace(raw))
-		if err == nil {
-			return priority
-		}
-	}
-	return 0
-}
-
 func eventRecordQueryFromRequest(r *http.Request) workorchquerycontract.EventRecordQuery {
 	values := r.URL.Query()
 	limit := defaultEventRecordPageLimit

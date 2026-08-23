@@ -126,23 +126,19 @@ func TestNormalizeEventStreamViewDefaultsToProjection(t *testing.T) {
 	}
 }
 
-func TestServerMetricsObserveRunStateIsExactlyOnceAndMonotonic(t *testing.T) {
+func TestServerMetricsObserveRunStateIsExactlyOnce(t *testing.T) {
 	metrics := &serverMetrics{}
-	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateActive), 7, 1)
-	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateActive), 8, 3)
-	// A replayed terminal notification must neither duplicate the outcome nor
-	// regress the persisted repair snapshot after activeRun is released.
-	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateFailed), 9, 3)
-	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateFailed), 9, 1)
+	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateActive), 7)
+	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateActive), 8)
+	// A replayed terminal notification must not duplicate the outcome.
+	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateFailed), 9)
+	metrics.observeRunState("ws-metrics", "run-metrics", string(common.RunStateFailed), 9)
 	if got := metrics.runFailed.Load(); got != 1 {
 		t.Fatalf("failed outcomes = %d, want 1", got)
 	}
-	if got := metrics.convergenceRepairAttempts.Load(); got != 3 {
-		t.Fatalf("repair attempt delta = %d, want 3", got)
-	}
-	metrics.observeRunState("ws-metrics", "run-canceled", string(common.RunStateCancelled), 4, 0)
-	metrics.observeRunState("ws-metrics", "run-superseded", string(common.RunStateSuperseded), 5, 0)
-	metrics.observeRunState("ws-metrics", "run-completed", string(common.RunStateCompleted), 6, 0)
+	metrics.observeRunState("ws-metrics", "run-canceled", string(common.RunStateCancelled), 4)
+	metrics.observeRunState("ws-metrics", "run-superseded", string(common.RunStateSuperseded), 5)
+	metrics.observeRunState("ws-metrics", "run-completed", string(common.RunStateCompleted), 6)
 	if metrics.runCanceled.Load() != 1 || metrics.runRejected.Load() != 1 || metrics.runSucceeded.Load() != 1 {
 		t.Fatalf("terminal mappings = canceled:%d rejected:%d succeeded:%d", metrics.runCanceled.Load(), metrics.runRejected.Load(), metrics.runSucceeded.Load())
 	}
@@ -162,19 +158,12 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 	if got := state.metrics.runFailed.Load(); got != 0 {
 		t.Fatalf("eventstream payload changed terminal metric to %d, want 0", got)
 	}
-	if got := state.metrics.convergenceRepairAttempts.Load(); got != 0 {
-		t.Fatalf("eventstream payload changed repair metric to %d, want 0", got)
-	}
-
 	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
 		WorkspaceID: "ws-metrics", RunID: "run-metrics", State: common.RunStateFailed,
 		RuntimeStateRevision: 9, RuntimeStateRef: "runtime-state/ws-metrics/run-metrics/9",
 	})
 	if got := state.metrics.runFailed.Load(); got != 1 {
 		t.Fatalf("typed run notification terminal metric = %d, want 1", got)
-	}
-	if got := state.metrics.convergenceRepairAttempts.Load(); got != 0 {
-		t.Fatalf("run notification must not carry orchestrator repair state, got %d", got)
 	}
 }
 

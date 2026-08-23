@@ -61,22 +61,6 @@ func ListRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmode
 	return response.Runs, nil
 }
 
-func ListRecoverableRuntimeGapRunCandidatesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) {
-	if hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{
-		States:  []common.RunState{common.RunStateActive},
-		Compact: true,
-	})
-	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "runtime-gap-candidates", "", "", "")
-	response, err := ownerevent.Run[runevents.ListRunsResult](hub.Send(event), runevents.TopicRunCommandList)
-	if err != nil {
-		return nil, err
-	}
-	return response.Runs, nil
-}
-
 func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument

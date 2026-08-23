@@ -31,7 +31,7 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	manager    *GoalDoDManager
+	manager    *goalDoDManager
 	workspaces repository.WorkspaceRepository
 	goals      repository.GoalRepository
 	dods       repository.DoDRepository
@@ -45,7 +45,7 @@ func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, e
 		return nil, common.ErrInvalidArgument
 	}
 	bizPtr := &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), workspaces: deps.Workspaces, goals: deps.Goals, dods: deps.DoDs, templates: deps.Templates}
-	bizPtr.manager = NewGoalDoDManagerWithPublisher(deps.Workspaces, deps.Goals, deps.DoDs, bizPtr.PostEvent)
+	bizPtr.manager = newGoalDoDManagerWithPublisher(deps.Workspaces, deps.Goals, deps.DoDs, bizPtr.PostEvent)
 	return bizPtr, nil
 }
 

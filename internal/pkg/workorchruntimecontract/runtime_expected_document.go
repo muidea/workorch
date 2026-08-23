@@ -133,9 +133,13 @@ const (
 	RuntimeProviderDocumentInvalid    RuntimeProviderDocumentDisposition = "invalid_provider_output"
 )
 
-// RuntimeProviderDocumentOutcome is a bounded LLM-owner observation. It does
-// not admit a candidate, choose recovery, or select a Runtime transition.
-type RuntimeProviderDocumentOutcome struct {
+// RuntimeProviderDocumentFraming is an owner-neutral, pure DTO describing the
+// bounded framing of a physical provider response. Only the LLM owner may
+// produce its disposition from raw provider bytes; shared placement does not
+// authorize downstream reclassification. Framing becomes an LLM fact only
+// inside the concrete LLM EventHub outcome and must not be treated as
+// Orchestrator durable authority by itself.
+type RuntimeProviderDocumentFraming struct {
 	Disposition          RuntimeProviderDocumentDisposition
 	ExpectedDocumentHash string
 	ResponseHash         string
@@ -144,7 +148,7 @@ type RuntimeProviderDocumentOutcome struct {
 	Signature            string
 }
 
-func (o RuntimeProviderDocumentOutcome) Normalized() RuntimeProviderDocumentOutcome {
+func (o RuntimeProviderDocumentFraming) Normalized() RuntimeProviderDocumentFraming {
 	o.Disposition = RuntimeProviderDocumentDisposition(strings.TrimSpace(string(o.Disposition)))
 	o.ExpectedDocumentHash = strings.TrimSpace(o.ExpectedDocumentHash)
 	o.ResponseHash = strings.TrimSpace(o.ResponseHash)
@@ -153,7 +157,7 @@ func (o RuntimeProviderDocumentOutcome) Normalized() RuntimeProviderDocumentOutc
 	return o
 }
 
-func (o RuntimeProviderDocumentOutcome) Validate() error {
+func (o RuntimeProviderDocumentFraming) Validate() error {
 	o = o.Normalized()
 	if o.ExpectedDocumentHash == "" || o.ResponseBytes < 0 {
 		return common.ErrInvalidArgument
@@ -173,6 +177,26 @@ func (o RuntimeProviderDocumentOutcome) Validate() error {
 		}
 	default:
 		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+// ValidateRuntimeProviderDocumentFramingContent validates the owner-neutral
+// relationship between bounded response framing and opaque content. It does
+// not create an LLM fact or select any Runtime transition.
+func ValidateRuntimeProviderDocumentFramingContent(framing RuntimeProviderDocumentFraming, content []byte) error {
+	framing = framing.Normalized()
+	if err := framing.Validate(); err != nil {
+		return fmt.Errorf("invalid provider document framing: %w", err)
+	}
+	if framing.Disposition == RuntimeProviderDocumentComplete {
+		if len(content) == 0 || int64(len(content)) != framing.ResponseBytes || StableRuntimeProviderResponseHash(content) != framing.ResponseHash {
+			return fmt.Errorf("complete provider document requires matching content")
+		}
+		return nil
+	}
+	if content != nil {
+		return fmt.Errorf("non-complete provider document must not carry content")
 	}
 	return nil
 }

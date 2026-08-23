@@ -6,15 +6,12 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type recordingWorkspaceProjectionWriter struct {
 	upserts             int
 	deletes             int
-	accepted            int
-	rejected            int
 	fullRebuilds        int
 	workspaceRebuilds   []string
 	decisionRebuildSets [][]string
@@ -29,16 +26,6 @@ func (w *recordingWorkspaceProjectionWriter) UpsertSnapshot(readmodelcore.Worksp
 
 func (w *recordingWorkspaceProjectionWriter) DeleteWorkspace(string) {
 	w.deletes++
-}
-
-func (w *recordingWorkspaceProjectionWriter) ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate) bool {
-	w.accepted++
-	return true
-}
-
-func (w *recordingWorkspaceProjectionWriter) ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate) bool {
-	w.rejected++
-	return true
 }
 
 func (w *recordingWorkspaceProjectionWriter) RebuildAll(context.Context) error {
@@ -75,16 +62,11 @@ func TestProductionProjectionHelpersPreferBizOwnedWriter(t *testing.T) {
 
 	state.upsertProjectedWorkspace(appmodelcore.Workspace{ID: "ws-writer"})
 	state.deleteProjectedWorkspace("ws-writer")
-	state.applyProjectedRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{WorkspaceID: "ws-writer", RunID: "run-writer", Intent: "resume", RequestID: "req-writer"})
-	state.applyProjectedRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{WorkspaceID: "ws-writer", Intent: "resume", RequestID: "req-writer"})
 	state.rebuildProjectedWorkspacesForDecisions(context.Background(), []projectioncontract.Decision{{WorkspaceID: "ws-writer"}})
 	state.rebuildProjectedWorkspacesForApprovals(context.Background(), []projectioncontract.Approval{{WorkspaceID: "ws-writer"}})
 
 	if writer.upserts != 1 || writer.deletes != 1 {
 		t.Fatalf("workspace writes = upsert %d/delete %d, want 1/1", writer.upserts, writer.deletes)
-	}
-	if writer.accepted != 1 || writer.rejected != 1 {
-		t.Fatalf("execution observation writes = accepted %d/rejected %d, want 1/1", writer.accepted, writer.rejected)
 	}
 	if len(writer.decisionRebuildSets) != 1 || len(writer.approvalRebuildSets) != 1 {
 		t.Fatalf("governance rebuild calls = decisions %d/approvals %d, want 1/1", len(writer.decisionRebuildSets), len(writer.approvalRebuildSets))

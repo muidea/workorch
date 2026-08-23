@@ -20,6 +20,11 @@ const (
 	StateStopped  = "stopped"
 )
 
+// projectionLifecycleState is the Workorchd-owned stored lifecycle for its
+// derived workspace projection. Public State* strings remain protocol values;
+// only this private type may enter the projection lifecycle reducer.
+type projectionLifecycleState string
+
 // ProjectionFailure is a current-generation projection health fact.
 // Cumulative metrics counters must not decide ready/degraded.
 type ProjectionFailure struct {
@@ -52,37 +57,6 @@ type WorkspaceRebuildMetrics struct {
 	RebuildTotal    uint64
 	FailedTotal     uint64
 	DurationMsTotal int64
-}
-
-type RunCommandAcceptedUpdate struct {
-	WorkspaceID        string
-	RunID              string
-	Intent             string
-	Reason             string
-	Disposition        string
-	Diagnostic         string
-	RequestID          string
-	Source             string
-	DefinitionRevision string
-	DecisionID         string
-	Revision           int64
-	AcceptedAt         string
-}
-
-type RunCommandRejectedUpdate struct {
-	WorkspaceID        string
-	RunID              string
-	Intent             string
-	Reason             string
-	Disposition        string
-	Diagnostic         string
-	RequestID          string
-	Source             string
-	DefinitionRevision string
-	DecisionID         string
-	Revision           int64
-	RejectedAt         string
-	Error              string
 }
 
 type Loader interface {

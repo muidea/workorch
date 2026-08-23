@@ -9,7 +9,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
+	executioncontract "github.com/muidea/workorch/internal/pkg/workorchexecutioncontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (e *workspaceProjectionEntry) syncSnapshotWorkspace() {
@@ -245,17 +249,37 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	s.updatedAt = now
 }
 
-func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
-	if s == nil || strings.TrimSpace(update.WorkspaceID) == "" {
+// ApplyWorkspaceExecutionAdmission is the only runCommand mutation. It accepts
+// command metadata plus the exact Workspace-owner admission, validates their
+// shared identity, and derives display state/diagnostic/timestamp through the
+// shared pure presenter. Callers cannot select accepted/rejected state or a
+// projection revision; Store assigns both the entry and runCommand revision in
+// this same locked transaction.
+func (s *Store) ApplyWorkspaceExecutionAdmission(command workorchdevents.WorkspaceRunRequestedCommand, admission runtimecontract.RuntimeExecutionIntentAdmission) bool {
+	if s == nil {
 		return false
 	}
+	command.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(command.WorkspaceID)))
+	command.Intent = strings.TrimSpace(command.Intent)
+	command.Reason = strings.TrimSpace(command.Reason)
+	command.RequestID = strings.TrimSpace(command.RequestID)
+	command.Source = strings.TrimSpace(command.Source)
+	admission = admission.Normalized()
+	if err := admission.Validate(); err != nil || admission.WorkspaceID != command.WorkspaceID || admission.RequestID != command.RequestID || string(admission.Kind) != command.Intent {
+		return false
+	}
+	presentation, err := executioncontract.PresentAdmission(admission)
+	if err != nil {
+		return false
+	}
+	workspaceID := strings.TrimSpace(string(admission.WorkspaceID))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry := s.workspaces[update.WorkspaceID]
+	entry := s.workspaces[workspaceID]
 	if entry == nil || !entry.HasWorkspace {
 		return false
 	}
-	if runCommandRequestAlreadyProjected(entry, update.RequestID) {
+	if runCommandRequestAlreadyProjected(entry, admission.RequestID) {
 		return false
 	}
 	now := time.Now().UTC()
@@ -263,95 +287,30 @@ func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
 	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
 		snapshot.Workspace = cloneWorkspace(entry.Workspace)
 	}
-	acceptedAt := strings.TrimSpace(update.AcceptedAt)
-	if acceptedAt == "" {
-		acceptedAt = formatProjectionTime(now)
-	}
 	snapshot.RunCommand = &projectioncontract.RunCommandStatus{
-		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
-		RunID:              strings.TrimSpace(update.RunID),
-		State:              "accepted",
-		Intent:             strings.TrimSpace(update.Intent),
-		Reason:             strings.TrimSpace(update.Reason),
-		Disposition:        strings.TrimSpace(update.Disposition),
-		Diagnostic:         strings.TrimSpace(update.Diagnostic),
-		RequestID:          strings.TrimSpace(update.RequestID),
-		Source:             strings.TrimSpace(update.Source),
-		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
-		DecisionID:         strings.TrimSpace(update.DecisionID),
-		AcceptedAt:         acceptedAt,
-		Revision:           update.Revision,
+		WorkspaceID:     workspaceID,
+		RunID:           strings.TrimSpace(string(admission.RunID)),
+		State:           presentation.Display,
+		Intent:          string(admission.Kind),
+		RequestID:       admission.RequestID,
+		RequestReason:   command.Reason,
+		Source:          command.Source,
+		Outcome:         admission.Outcome,
+		AdmissionReason: admission.Reason,
+		Diagnostic:      presentation.Diagnostic,
+	}
+	observedAt := formatProjectionTime(now)
+	if presentation.Accepted {
+		snapshot.RunCommand.AcceptedAt = observedAt
+	} else {
+		snapshot.RunCommand.RejectedAt = observedAt
 	}
 	entry.Snapshot = snapshot
 	entry.Workspace = cloneWorkspace(snapshot.Workspace)
 	entry.HasWorkspace = true
 	entry.HasSnapshot = true
-	s.advanceEntryRevision(entry)
+	entry.Snapshot.RunCommand.Revision = s.advanceEntryRevision(entry)
 	s.advanceGlobalRevision()
-	if update.Revision > entry.SourceRevision {
-		entry.SourceRevision = update.Revision
-	}
-	entry.ProjectedSourceRevision = entry.SourceRevision
-	entry.RebuiltAt = now
-	entry.Stale = false
-	entry.StaleReason = ""
-	entry.Error = ""
-	s.refreshProjectedSourceRevisionLocked()
-	s.globalStale = false
-	s.globalStaleReason = ""
-	_ = s.submitProjectionLifecycleInternalEventLocked(projectionLifecycleInternalEvent{Kind: projectionLifecycleMutationApplied})
-	s.errText = ""
-	s.updatedAt = now
-	return true
-}
-
-func (s *Store) ApplyRunCommandRejected(update RunCommandRejectedUpdate) bool {
-	if s == nil || strings.TrimSpace(update.WorkspaceID) == "" {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry := s.workspaces[update.WorkspaceID]
-	if entry == nil || !entry.HasWorkspace {
-		return false
-	}
-	if runCommandRequestAlreadyProjected(entry, update.RequestID) {
-		return false
-	}
-	now := time.Now().UTC()
-	snapshot := entry.Snapshot
-	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
-		snapshot.Workspace = cloneWorkspace(entry.Workspace)
-	}
-	rejectedAt := strings.TrimSpace(update.RejectedAt)
-	if rejectedAt == "" {
-		rejectedAt = formatProjectionTime(now)
-	}
-	snapshot.RunCommand = &projectioncontract.RunCommandStatus{
-		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
-		RunID:              strings.TrimSpace(update.RunID),
-		State:              "rejected",
-		Intent:             strings.TrimSpace(update.Intent),
-		Reason:             strings.TrimSpace(update.Reason),
-		Disposition:        strings.TrimSpace(update.Disposition),
-		Diagnostic:         strings.TrimSpace(update.Diagnostic),
-		RequestID:          strings.TrimSpace(update.RequestID),
-		Source:             strings.TrimSpace(update.Source),
-		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
-		DecisionID:         strings.TrimSpace(update.DecisionID),
-		RejectedAt:         rejectedAt,
-		Error:              strings.TrimSpace(update.Error),
-		Revision:           update.Revision,
-	}
-	entry.Snapshot = snapshot
-	entry.Workspace = cloneWorkspace(snapshot.Workspace)
-	entry.HasWorkspace = true
-	entry.HasSnapshot = true
-	s.advanceEntryRevision(entry)
-	s.advanceGlobalRevision()
-	if update.Revision > entry.SourceRevision {
-		entry.SourceRevision = update.Revision
-	}
 	entry.ProjectedSourceRevision = entry.SourceRevision
 	entry.RebuiltAt = now
 	entry.Stale = false

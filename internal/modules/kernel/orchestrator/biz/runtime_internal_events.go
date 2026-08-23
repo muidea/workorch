@@ -94,27 +94,47 @@ func (m *Biz) runtimeEnsureCandidateRequestWithExpected(ctx context.Context, agg
 	return terminal.Aggregate, runtimecontract.RuntimeCandidateRequestSession{}, terminalErr
 }
 
-func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, outcome *runtimecontract.RuntimeCandidateRequestOutcome, stale *runtimecontract.RuntimePrerequisiteStale, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, RequestOutcome: outcome, Stale: stale, ProviderBudgetObservation: firstRuntimeProviderBudgetObservation(budgetObservation)}})
+func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, stale *runtimecontract.RuntimePrerequisiteStale, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, Stale: stale, ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement)}})
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeCandidateRequestRecoveryRequired(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, physicalCallID string, outcome runtimecontract.RuntimeProviderDocumentOutcome, budgetObservation ...*runtimecontract.RuntimeProviderBudgetObservation) (runtime.RuntimeAggregate, error) {
+func (m *Biz) runtimeCoordinateProviderRequestTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, input runtime.RuntimeProviderRequestTerminalInput, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
+	fact, err := runtime.NormalizeRuntimeProviderRequestTerminal(input)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidateRequestRecoveryRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderDocumentOutcome: &outcome, ProviderBudgetObservation: firstRuntimeProviderBudgetObservation(budgetObservation)},
+		Kind:  runtime.RuntimeInternalEventProviderRequestTerminalCoordinated,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Transaction: &runtime.RuntimeInternalTransactionPayload{
+			LogicalRequestID: logicalRequestID, ProviderRequestTerminal: &fact,
+			ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement),
+		},
 	})
 	return result.Aggregate, err
 }
 
-func firstRuntimeProviderBudgetObservation(values []*runtimecontract.RuntimeProviderBudgetObservation) *runtimecontract.RuntimeProviderBudgetObservation {
+func (m *Biz) runtimeCoordinateProviderRequestRecovery(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID, physicalCallID string, input runtime.RuntimeProviderRequestRecoveryInput, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
+	fact, err := runtime.NormalizeRuntimeProviderRequestRecovery(input)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventProviderRequestRecoveryCoordinated, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, PhysicalCallID: physicalCallID, ProviderRequestRecovery: &fact, ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement)},
+	})
+	return result.Aggregate, err
+}
+
+func firstRuntimeProviderBudgetSettlement(values []*runtime.RuntimeProviderBudgetSettlement) *runtime.RuntimeProviderBudgetSettlement {
 	if len(values) == 0 {
 		return nil
 	}
 	return values[0]
 }
 
-func runtimeProviderBudgetObservation(logicalRequestID, physicalCallID string, status runtimecontract.RuntimeProviderConsumptionStatus, usage *llmaudit.ProviderUsage) (*runtimecontract.RuntimeProviderBudgetObservation, error) {
-	value, err := runtimecontract.NewRuntimeProviderBudgetObservation(logicalRequestID, physicalCallID, status, usage)
+func runtimeProviderBudgetSettlement(workspaceID, runID, logicalRequestID, physicalCallID string, audit *runtimecontract.ProviderRequestAuditView, usage *llmaudit.ProviderUsage) (*runtime.RuntimeProviderBudgetSettlement, error) {
+	value, err := runtime.NewRuntimeProviderBudgetSettlementFromAudit(workspaceID, runID, logicalRequestID, physicalCallID, audit, usage)
 	if err != nil {
 		return nil, err
 	}

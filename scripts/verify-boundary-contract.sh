@@ -273,7 +273,7 @@ EOF
 fi
 
 retired_application_state_surface_matches="$({
-  source_matches 'workorchd\.scheduler|WatchdogDiagnostics|ContinuationReadbackDiagnostic|LatestContinuation|RecentContinuations|schedulerDiagnosticState(NotScheduled|Accepted|Running|Failed|Completed|NoActionNeeded)|recordWatchdog|recordStaleRuntimeGapRecovery|MaxConcurrentRuns|StaleDispatchedStepMinAge|runInFlight|worker_lifecycle|worker_lost|workorch_run_requests_in_flight|workorch_server_max_concurrent_runs|workorch_stale_dispatched_step_min_age_seconds|workorch_runtime_event_publish_failures_total|workorch_runtime_heartbeat_timer_start_failures_total|workorch_scheduler_continuation_|workorch_watchdog_' \
+  source_matches 'workorchd\.scheduler|WatchdogDiagnostics|ContinuationReadbackDiagnostic|LatestContinuation|RecentContinuations|schedulerDiagnosticState(NotScheduled|Accepted|Running|Failed|Completed|NoActionNeeded)|recordWatchdog|recordStaleRuntimeGapRecovery|ListRecoverableRuntimeGapRunCandidates|IsRecoverableRunningRun|LatestRuntimeCheckpointModel|TerminalStepModel|PreviousStepModelID|ResolvedDecisionBlockerContext|ApprovedApprovalBlockerContext|BlockedRunResumeCompressedContext|NextAction:[[:space:]]*"resume_run"|MaxConcurrentRuns|StaleDispatchedStepMinAge|runInFlight|runCreateRequests|runStartRequests|runResumeRequests|observedRepairAttempts|convergenceRepairAttempts|worker_lifecycle|worker_lost|workorch_run_requests_in_flight|workorch_server_max_concurrent_runs|workorch_stale_dispatched_step_min_age_seconds|workorch_runtime_event_publish_failures_total|workorch_runtime_heartbeat_timer_start_failures_total|workorch_scheduler_continuation_|workorch_watchdog_' \
     internal/modules/application/workorchd \
     internal/pkg/workorchconfig \
     internal/pkg/workorchconfigurationcontract \
@@ -532,6 +532,91 @@ EOF
   exit 1
 fi
 
+# Resource-owner Biz packages must not export or embed a generic mutation
+# service. Cross-owner callers use typed EventHub commands; owner-local code
+# reaches private helpers and private internal-event dispatchers only.
+owner_mutation_facade_matches="$({
+  source_matches '^type Service struct|^[[:space:]]*\*Service$|func \([^)]*\) (CreateRun|EnsureRun)\(' \
+    internal/modules/blocks/run/biz internal/modules/blocks/result/biz || true
+  source_matches '^type GoalDoDManager struct|^func NewGoalDoDManager' \
+    internal/modules/blocks/workspace/biz || true
+  source_matches '^type ([A-Z][A-Za-z0-9]*)?Service[[:space:]]+(struct|interface)|^func New([A-Z][A-Za-z0-9]*)?Service\(' \
+    internal/modules/blocks/approval/biz internal/modules/blocks/decision/biz || true
+  source_matches '^type ([A-Z][A-Za-z0-9]*)?Service[[:space:]]+(struct|interface)|^func New([A-Z][A-Za-z0-9]*)?Service\(|PurgeWorkspaceEvents' \
+    internal/modules/blocks/eventstream/biz || true
+  source_matches 'eventstreambiz\.Service|eventstreambiz\.New([A-Z][A-Za-z0-9]*)?Service' \
+    internal/modules/blocks/eventstream/module.go || true
+  grep -R -n -E --include='*.go' -- \
+    'github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts' internal \
+    | grep -v -E '^internal/modules/blocks/approval/' || true
+  grep -R -n -E --include='*.go' -- \
+    'github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts' internal \
+    | grep -v -E '^internal/modules/blocks/decision/' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$owner_mutation_facade_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a resource owner exposes a generic mutation
+service/facade, Eventstream exposes direct purge, or a sibling imports
+Approval/Decision owner-private use-case contracts, bypassing typed EventHub
+ingress and the owner-private reducer.
+
+$owner_mutation_facade_matches
+EOF
+  exit 1
+fi
+
+# Eventstream purge is one owner-private implementation reachable only from its
+# concrete synchronous EventHub command handler. A second call site would
+# recreate a direct mutation facade even if the helper remained unexported.
+eventstream_purge_file="internal/modules/blocks/eventstream/biz/event_stream_service.go"
+eventstream_exported_biz_surface_matches="$({
+  source_matches '^func[[:space:]]+[A-Z][A-Za-z0-9_]*([[:space:]]*\[[^]]+\])?[[:space:]]*\(' internal/modules/blocks/eventstream/biz |
+    grep -v -E -- ':func[[:space:]]+New\(' || true
+  source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+[A-Z][A-Za-z0-9_]*\(' internal/modules/blocks/eventstream/biz |
+    grep -v -E -- ':func[[:space:]]+\([^)]*\*?Biz\)[[:space:]]+(Start|Stop)\(' || true
+} | sed '/^[[:space:]]*$/d')"
+eventstream_purge_implementation_matches="$(source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+purgeWorkspaceEvents\(' internal/modules/blocks/eventstream/biz)"
+eventstream_purge_call_matches="$(source_matches '\.purgeWorkspaceEvents([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
+eventstream_repository_purge_matches="$(source_matches '\.PurgeWorkspace([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
+eventstream_cross_owner_repository_purge_matches="$({
+  source_matches '\.PurgeWorkspace([[:space:]]|\(|$)' internal |
+    grep -v -F -- 'internal/modules/blocks/eventstream/biz/event_stream_service.go:' |
+    grep -v -F -- 'internal/pkg/workorchrepo/workspace_scoped_repositories.go:' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$eventstream_exported_biz_surface_matches" ]] ||
+   ! grep -q -F -- 'func New(deps Dependencies) *Biz' "$eventstream_purge_file" ||
+   ! grep -q -F -- 'func (s *Biz) Start() error' "$eventstream_purge_file" ||
+   ! grep -q -F -- 'func (s *Biz) Stop()' "$eventstream_purge_file" ||
+   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_purge_implementation_matches")" -ne 1 ]] ||
+   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_purge_call_matches")" -ne 1 ]] ||
+   [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$eventstream_repository_purge_matches")" -ne 1 ]] ||
+   [[ -n "$eventstream_cross_owner_repository_purge_matches" ]] ||
+   ! grep -q -F -- 'case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:' "$eventstream_purge_file" ||
+   ! grep -q -F -- 'cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)' "$eventstream_purge_file" ||
+   ! grep -q -F -- 'ev.Source() != eventstreamApplicationCommandSource' "$eventstream_purge_file"; then
+  echo "boundary contract violation: Eventstream Biz may export only New/Start/Stop and purge must have exactly one typed EventHub command ingress" >&2
+  if [[ -n "$eventstream_exported_biz_surface_matches" ]]; then
+    echo "$eventstream_exported_biz_surface_matches" >&2
+  fi
+  if [[ -n "$eventstream_cross_owner_repository_purge_matches" ]]; then
+    echo "$eventstream_cross_owner_repository_purge_matches" >&2
+  fi
+  exit 1
+fi
+
+# A Runtime PhysicalCallID reserves exactly one provider submission. The LLM
+# HTTP owner must reject every redirect before net/http can replay a POST body;
+# an injected CheckRedirect callback cannot authorize a second call.
+provider_http_client_shape="$(sed -n '/^func providerHTTPClient(/,/^}/p' internal/modules/blocks/llm/biz/http_provider.go)"
+if ! grep -q -F -- 'return providerProtocolError("redirect_rejected", 0)' <<<"$provider_http_client_shape" ||
+   grep -q -E -- '(redirect_limit_exceeded|return previous\(|return nil)' <<<"$provider_http_client_shape"; then
+  cat >&2 <<EOF
+Boundary contract violation: the LLM provider HTTP client must reject every
+redirect before a second physical submission under the same PhysicalCallID.
+EOF
+  exit 1
+fi
+
 # Application execution admission is synchronous with Workspace owner. Keep
 # deleted application-local queue/state-owner surfaces from returning under a
 # different call site, and keep setup draft state a response-only derivation.
@@ -542,6 +627,10 @@ application_execution_state_bypass_matches="$({
     grep -v -F -- 'scripts/verify-boundary-contract.sh' || true
   source_matches 'session\.State[[:space:]]*=|State:[[:space:]]*workspaceSetupDraftState' \
     internal/modules/application/workorchd/service/server/workspace_setup_draft.go || true
+  source_matches '(ApplyWorkspaceExecutionAdmission|applyProjectedWorkspaceExecutionAdmission)' \
+    internal/modules/application/workorchd/service/server || true
+  source_matches 'ApplyWorkspaceExecutionAdmission.*int64' \
+    internal/modules/application/workorchd/biz || true
   source_matches 'IdempotencyKey|idempotencyKey[[:space:]]*[?=:]|idempotency[_-]key[[:space:]]*[:=]' \
     internal/modules/application/workorchd \
     internal/pkg/workorchprojectioncontract \
@@ -555,10 +644,52 @@ application_execution_state_bypass_matches="$({
 if [[ -n "$application_execution_state_bypass_matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: Application owns an execution queue/state,
-fabricates a run-command idempotency identity, or persists a setup-draft state
-that must remain derived.
+fabricates a run-command idempotency identity, lets transport write the
+execution observation, lets a caller select its projection revision, or
+persists a setup-draft state that must remain derived.
 
 $application_execution_state_bypass_matches
+EOF
+  exit 1
+fi
+
+# Execution admission has no scheduler and therefore accepts no Run priority.
+# Keep the retired caller field out of every cross-owner command and persisted
+# Run identity while allowing independent acceptance/context/Soul priorities.
+execution_priority_contract_matches="$({
+  {
+    sed -n '/^type WorkspaceExecutionCommandRequest struct {/,/^}/p' internal/pkg/workorchmanagementcontract/definition.go
+    sed -n '/^type WorkspaceRunCommand struct {/,/^}/p' internal/pkg/workorchport/run.go
+    sed -n '/^type WorkspaceRunRequestedCommand struct {/,/^}/p' internal/modules/application/workorchd/pkg/events/messages.go
+    sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/lifecycle_messages.go
+    sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' internal/modules/blocks/run/pkg/events/lifecycle_messages.go
+    sed -n '/^type ReplacementIntent struct {/,/^}/p' internal/modules/blocks/run/pkg/models/run.go
+    sed -n '/^type Run struct {/,/^}/p' internal/modules/blocks/run/pkg/models/run.go
+    sed -n '/^type Run struct {/,/^}/p' internal/pkg/workorchprojectioncontract/resource.go
+  } | grep -n -E -- 'Priority|json:"priority' || true
+  source_matches 'runPriorityFromRequest|X-Workorch-Run-Priority|Flags\(\)\.Int\("priority"|requestBody\.priority' \
+    internal/modules/application/workorchd \
+    internal/services/workorch \
+    web/workorch-console/src || true
+  while IFS= read -r script_file; do
+    awk '
+      /\/execution-activations/ { remaining = 20 }
+      remaining > 0 {
+        if ($0 ~ /"priority"[[:space:]]*:/) {
+          print FILENAME ":" FNR ":" $0
+        }
+        remaining--
+      }
+    ' "$script_file"
+  done < <(find scripts -type f \( -name '*.sh' -o -name '*.py' \) | sort)
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$execution_priority_contract_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: retired caller-controlled Run priority returned
+to an execution admission, cross-owner command, persisted Run, verifier, load
+test, or UI surface.
+
+$execution_priority_contract_matches
 EOF
   exit 1
 fi
@@ -753,7 +884,6 @@ done < <(find internal/modules -type f ! -name '*_test.go' \( -name '*_internal_
 owner_secondary_ingress_dispatcher_assertions=(
   "internal/modules/blocks/workspace/biz/goal_dod_manager.go:submitWorkspaceCreationInternalEvent"
   "internal/modules/blocks/workspace/biz/definition_admission.go:submitDefinitionAdmissionInternalEvent"
-  "internal/modules/blocks/run/biz/run_service.go:submitRunCreationInternalEvent"
   "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitRunCreationInternalEvent"
   "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitReplacementInternalEvent"
   "internal/modules/blocks/decision/biz/decision_service.go:applyLifecycleInternalEvent"
@@ -2246,8 +2376,30 @@ fi
 # Orchestrator SM-3 authority and must never reappear on the EventHub Result.
 llm_candidate_result_shape="$(sed -n '/^type RequestRuntimeCandidateResult struct {/,/^}/p' internal/modules/blocks/llm/pkg/events/messages.go)"
 if ! grep -q -E -- 'Feedback[[:space:]]+\*runtimecontract\.RuntimeFeedback' <<<"$llm_candidate_result_shape" ||
+   ! grep -q -E -- 'Stale[[:space:]]+\*runtimecontract\.RuntimePrerequisiteStale' <<<"$llm_candidate_result_shape" ||
+   ! grep -q -E -- 'DocumentOutcome[[:space:]]+\*RuntimeProviderDocumentOutcome' <<<"$llm_candidate_result_shape" ||
+   grep -q -E -- 'DocumentContent[[:space:]]+\[\]byte' <<<"$llm_candidate_result_shape" ||
    grep -q -E -- '(^|[[:space:]])(Failure[[:space:]]+\*runtimecontract\.RuntimeCandidateFailure|RequestID[[:space:]]+string|Status[[:space:]]+string)' <<<"$llm_candidate_result_shape"; then
-  echo "boundary contract violation: LLM provider Result must carry RuntimeFeedback without candidate failure or duplicate audit authority" >&2
+  echo "boundary contract violation: LLM provider Result must be the concrete Stale|Feedback|DocumentOutcome union without content-only fallback, candidate failure, or duplicate audit authority" >&2
+  exit 1
+fi
+if ! grep -q -F -- 'result requires exactly one of stale, feedback, or document outcome' internal/modules/blocks/llm/pkg/events/messages.go; then
+  echo "boundary contract violation: LLM provider Result no longer enforces its exactly-one factual union" >&2
+  exit 1
+fi
+raw_provider_framing_reclassifiers="$({
+  find internal/modules internal/services internal/initiators \
+    -type f -name '*.go' ! -name '*_test.go' \
+    ! -path 'internal/modules/blocks/llm/*' -print0 |
+    xargs -0 -r grep -n -E -- 'InspectRuntimeCandidateDocumentFraming|RuntimeCandidateDocumentDispositionForError' || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$raw_provider_framing_reclassifiers" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a downstream component reclassifies raw provider
+document framing owned by the LLM block.
+
+$raw_provider_framing_reclassifiers
+EOF
   exit 1
 fi
 llm_candidate_command_shape="$(sed -n '/^type RequestRuntimeCandidateCommand struct {/,/^}/p' internal/modules/blocks/llm/pkg/events/messages.go)"
@@ -2737,17 +2889,6 @@ EOF
 	exit 1
 fi
 
-run_create_shape="$(sed -n '/^type CreateRunCommand struct {/,/^}/p' internal/modules/blocks/run/pkg/events/messages.go)"
-if grep -q -E -- 'runmodel\.RunLineage|^[[:space:]]*Lineage[[:space:]]' <<<"$run_create_shape"; then
-	echo "boundary contract violation: Run create command exposes owner lineage state" >&2
-	exit 1
-fi
-for required_field in PredecessorRunID PredecessorResultID; do
-	if ! grep -q -E -- "^[[:space:]]*${required_field}[[:space:]]" <<<"$run_create_shape"; then
-		echo "boundary contract violation: Run create command is missing lineage intent ${required_field}" >&2
-		exit 1
-	fi
-done
 if ! grep -q -F -- 'ev.Source() != "kernel/orchestrator"' internal/modules/blocks/run/biz/runtime_state_commands.go; then
 	echo "boundary contract violation: opaque Runtime aggregate updates must authenticate the Orchestrator source" >&2
 	exit 1
@@ -3052,6 +3193,76 @@ governance_continuation_matches="$(
 if [[ -n "$governance_continuation_matches" ]]; then
 	echo "boundary contract violation: governance resolution directly creates or continues Runtime work" >&2
 	echo "$governance_continuation_matches" >&2
+	exit 1
+fi
+
+# Provider budget settlement is Orchestrator owner-private. The retired shared
+# observation API duplicated that reducer and would restore a second
+# cross-owner budget transition surface.
+runtime_provider_budget_shadow_matches="$(
+	grep -R -Hn -E --include='*.go' -- \
+		'RuntimeProviderBudgetObservation|RuntimeProviderConsumptionStatus|ApplyRuntimeProviderBudgetObservation' \
+		internal/pkg/workorchruntimecontract || true
+)"
+if [[ -n "$runtime_provider_budget_shadow_matches" ]]; then
+	echo "boundary contract violation: shared Runtime provider budget observation shadow returned" >&2
+	echo "$runtime_provider_budget_shadow_matches" >&2
+	exit 1
+fi
+
+# LLM physical transport observability carries the exact two-level request
+# identity and has one bounded enum source. The legacy streaming boolean may
+# remain in the public DTO only as a pure derivation and must not become the Web
+# display or identity source again.
+if ! grep -q -F 'PhysicalResponseMode llmaudit.PhysicalResponseMode `json:"physicalResponseMode"`' \
+	internal/pkg/workorchprojectioncontract/llm_observability.go ||
+	! grep -q -F 'ProviderSubmitted    bool                          `json:"providerSubmitted"`' \
+		internal/pkg/workorchprojectioncontract/llm_observability.go ||
+	! grep -q -E 'LogicalRequestID[[:space:]]+string `json:"logicalRequestId,omitempty"`' \
+		internal/pkg/workorchprojectioncontract/llm_observability.go ||
+	! grep -q -E 'PhysicalCallID[[:space:]]+string `json:"physicalCallId,omitempty"`' \
+		internal/pkg/workorchprojectioncontract/llm_observability.go ||
+	! grep -q -F 'PayloadKeyLogicalRequestID        = "logicalRequestId"' \
+		internal/modules/blocks/eventstream/pkg/recordpayload/payload.go ||
+	! grep -q -F 'PayloadKeyPhysicalCallID          = "physicalCallId"' \
+		internal/modules/blocks/eventstream/pkg/recordpayload/payload.go ||
+	! grep -q -F 'LogicalRequestID:      data.LogicalRequestID' \
+		internal/modules/blocks/eventstream/biz/event_stream_service.go ||
+	! grep -q -F 'PhysicalCallID:        data.PhysicalCallID' \
+		internal/modules/blocks/eventstream/biz/event_stream_service.go ||
+	! grep -q -F 'LogicalRequestID:     logicalRequestID' \
+		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go ||
+	! grep -q -F 'PhysicalCallID:       physicalCallID' \
+		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go ||
+	! grep -q -F 'PhysicalResponseMode: physicalResponseMode' \
+		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go ||
+	! grep -q -F 'Streaming:            physicalResponseMode.Streaming()' \
+		internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_contract_sections.go; then
+	echo "boundary contract violation: LLM usage projection lost canonical physical response/submission facts" >&2
+	exit 1
+fi
+if grep -q -E 'PayloadKey(RequestBytes|Streaming)' \
+	internal/modules/application/workorchd/biz/appservice/readmodelprojection/llm_usage_trace_identity.go; then
+	echo "boundary contract violation: LLM usage request identity is inferred from bytes or streaming" >&2
+	exit 1
+fi
+if ! grep -q -F 'item.logicalRequestId' web/workorch-console/src/components/cards/LLMUsageCard.tsx ||
+	! grep -q -F 'item.physicalCallId' web/workorch-console/src/components/cards/LLMUsageCard.tsx ||
+	! grep -q -F 'item.logicalRequestId' web/workorch-console/src/helpers.tsx ||
+	! grep -q -F 'item.physicalCallId' web/workorch-console/src/helpers.tsx; then
+	echo "boundary contract violation: Web console no longer displays both LLM request identities" >&2
+	exit 1
+fi
+llm_streaming_ui_matches="$(
+	grep -R -Hn -E --include='*.ts' --include='*.tsx' -- "\\.streaming([^[:alnum:]_]|$)|dataIndex:[[:space:]]*['\"]streaming['\"]" web/workorch-console/src || true
+)"
+if [[ -n "$llm_streaming_ui_matches" ]]; then
+	echo "boundary contract violation: Web console reads the compatibility streaming boolean instead of physicalResponseMode" >&2
+	echo "$llm_streaming_ui_matches" >&2
+	exit 1
+fi
+if grep -q -E -- 'expected_streaming|item\.get\("streaming"\)' scripts/verify-llm-workspace-execution.sh; then
+	echo "boundary contract violation: deployed LLM verifier reads the compatibility streaming boolean" >&2
 	exit 1
 fi
 

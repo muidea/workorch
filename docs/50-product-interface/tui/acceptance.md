@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Scope
 
@@ -40,6 +40,9 @@ Tests must cover:
 - local EventHub notifications and remote SSE cause equivalent scoped refresh;
 - reconnect/gap reads current projection instead of replaying events into business state;
 - concurrent commands correlate by request/workspace/run identity;
+- local/remote execution admission对七类owner outcome使用同一accepted/rejected分类，显示exact outcome、
+  admissionReason、diagnostic与独立requestReason；caller reason不能重判state，409与真正transport failure分离，payload无
+  caller Run priority；
 - Decision/Approval resolution uses typed owner APIs and does not auto-Resume;
 - runtime-definition clarification不会调用通用Decision resolution；TUI不代发replacement-resolution command；
 - subscription/session cleanup occurs on shutdown.
@@ -69,6 +72,7 @@ tested revision/config.
 | goal | bare text with selected Workspace/no active Run submits a Goal |
 | resume | bare text or `/run resume` requests current Run continuation without context patch |
 | restart | `/run restart` sends workspace intent; UI does not choose successor |
+| admission | accepted/rejected只来自shared owner-outcome classifier；exact outcome/admissionReason/diagnostic不丢失，409不触发client-side重判 |
 | governance | active blocker controls prompt; resolution clears prompt and waits for owner facts |
 | definition clarification | static ticket只接受corrected candidate；Runtime ticket只引导revise-and-restart，零one-of confirm、generic answer、Resume或client-built replacement binding |
 | recoverable wait | status shows typed reason/condition/deadline/budget; no Decision prompt、auto-Resume、force retry or local countdown authority |

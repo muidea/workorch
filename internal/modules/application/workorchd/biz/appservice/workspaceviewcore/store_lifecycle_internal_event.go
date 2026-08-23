@@ -24,7 +24,7 @@ type projectionLifecycleInternalEvent struct {
 // reduceProjectionLifecycleState is the sole lifecycle transition table for
 // the derived workspace projection. It does not rebuild or mutate Runtime
 // authority; Workorchd owns this state only for read readiness and health.
-func reduceProjectionLifecycleState(current string, event projectionLifecycleInternalEvent) (string, error) {
+func reduceProjectionLifecycleState(current projectionLifecycleState, event projectionLifecycleInternalEvent) (projectionLifecycleState, error) {
 	switch current {
 	case StateBuilding, StateReady, StateStale, StateFailed, StateStopped:
 		// Stored lifecycle states. StateDegraded is derived at read time.

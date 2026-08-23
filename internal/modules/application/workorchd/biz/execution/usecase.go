@@ -58,49 +58,40 @@ func NewWithClock(submitter Submitter, observation Observation, clock func() tim
 	}
 }
 
-// AdmitWorkspaceExecution returns the normalized command only after the
-// Workspace owner has admitted it. HTTP may still encode the successful
-// response as 202, but 202 never represents an application-local queue entry.
-func (u *UseCase) AdmitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error) {
-	command, _, err := u.submitWorkspaceExecution(ctx, topic, command)
-	return command, err
-}
-
 // SubmitWorkspaceExecution is the typed EventHub counterpart. HTTP and
 // EventHub ingress share this same synchronous owner admission path.
 func (u *UseCase) SubmitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
-	_, outcome, err := u.submitWorkspaceExecution(ctx, topic, command)
-	return outcome, err
+	return u.submitWorkspaceExecution(ctx, topic, command)
 }
 
-func (u *UseCase) submitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, workorchdevents.WorkspaceRunRequestedResult, error) {
+func (u *UseCase) submitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	if u == nil || ctx == nil || u.submitter == nil || u.observation == nil {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	topic = strings.TrimSpace(topic)
 	if topic != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	command, err := u.normalize(topic, command)
 	if err != nil {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, workorchdevents.WorkspaceRunRequestedResult{}, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	ownerCtx, err := common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
 	if err != nil {
 		u.observation.RecordWorkspaceExecutionFailure(topic, command, err)
-		return command, workorchdevents.WorkspaceRunRequestedResult{}, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	outcome, err := u.submitter.SubmitWorkspaceRun(ownerCtx, command)
 	if err != nil {
 		u.observation.RecordWorkspaceExecutionFailure(topic, command, err)
-		return command, workorchdevents.WorkspaceRunRequestedResult{}, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	if err := validateOwnerOutcome(command, outcome); err != nil {
 		u.observation.RecordWorkspaceExecutionFailure(topic, command, err)
-		return command, workorchdevents.WorkspaceRunRequestedResult{}, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	u.observation.RecordWorkspaceExecutionOutcome(topic, command, outcome)
-	return command, outcome, nil
+	return outcome, nil
 }
 
 func (u *UseCase) normalize(topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error) {

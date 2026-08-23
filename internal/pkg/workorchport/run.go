@@ -52,7 +52,6 @@ type WorkspaceRunCommand struct {
 	Reason      string
 	Source      string
 	RequestID   string
-	Priority    int
 }
 
 // RunCommandResult is the process-facing projection of the Workspace owner's

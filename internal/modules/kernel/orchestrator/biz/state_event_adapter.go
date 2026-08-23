@@ -13,6 +13,7 @@ import (
 	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -293,9 +294,9 @@ func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.
 	return err
 }
 
-func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) runevents.StoreRuntimeStateRecordCommand {
+func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) (runevents.StoreRuntimeStateRecordCommand, error) {
 	if item == nil {
-		return runevents.StoreRuntimeStateRecordCommand{}
+		return runevents.StoreRuntimeStateRecordCommand{}, nil
 	}
 	ret := runevents.StoreRuntimeStateRecordCommand{
 		RunID:        item.ID,
@@ -305,14 +306,18 @@ func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) runevents.Store
 	if item.RuntimeState != nil {
 		revision := item.RuntimeState.StateRevision
 		ret.ExpectedRuntimeStateRevision = &revision
-		ret.LifecycleFence = runtimeLifecycleFenceFromModel(item)
+		fence, err := runtimeLifecycleFenceFromModel(item)
+		if err != nil {
+			return runevents.StoreRuntimeStateRecordCommand{}, err
+		}
+		ret.LifecycleFence = fence
 	}
-	return ret
+	return ret, nil
 }
 
-func runtimeLifecycleFenceFromModel(item *runmodel.Run) *runtimecontract.RuntimeOpaqueLifecycleFence {
+func runtimeLifecycleFenceFromModel(item *runmodel.Run) (*runtimecontract.RuntimeOpaqueLifecycleFence, error) {
 	if item == nil || item.RuntimeState == nil || item.RuntimeBootstrap == nil {
-		return nil
+		return nil, nil
 	}
 	state := item.RuntimeState
 	fence := runtimecontract.RuntimeOpaqueLifecycleFence{
@@ -328,40 +333,21 @@ func runtimeLifecycleFenceFromModel(item *runmodel.Run) *runtimecontract.Runtime
 		value := state.GovernanceRequests[count-1]
 		fence.GovernanceFenceID = runtimeGovernanceLifecycleFenceID(value.AuthoritySnapshotID, value.DispatchID)
 	}
-	if outcome, ok := runtimeTerminalOutcomeFromState(state); ok {
+	outcome, terminal, err := runtime.DeriveTerminalOutcome(state.Decision, state.Termination)
+	if err != nil {
+		return nil, err
+	}
+	if terminal {
 		fence.TerminalFenceID = runtimecontract.StableTerminalDeliveryID(item.WorkspaceID, item.ID, state.Decision.AuthoritySnapshot.ID, outcome)
 	}
 	if fence.GovernanceFenceID == "" && fence.TerminalFenceID == "" {
-		return nil
+		return nil, nil
 	}
-	return &fence
+	return &fence, nil
 }
 
 func runtimeGovernanceLifecycleFenceID(authoritySnapshotID, dispatchID string) string {
 	return "runtime-governance/" + authoritySnapshotID + "/" + dispatchID
-}
-
-func runtimeTerminalOutcomeFromState(state *runtimecontract.RuntimeStateRecord) (runtimecontract.TerminalOutcome, bool) {
-	if state == nil {
-		return runtimecontract.TerminalOutcome{}, false
-	}
-	if state.Termination != nil {
-		kind := runtimecontract.TerminalOutcomeKindCancelled
-		if state.Termination.Kind == runtimecontract.RuntimeTerminationSuperseded {
-			kind = runtimecontract.TerminalOutcomeKindSuperseded
-		}
-		return runtimecontract.TerminalOutcome{Kind: kind, Code: "administrative_" + string(state.Termination.Kind), Summary: state.Termination.Reason}.Normalized(), true
-	}
-	if state.Decision.Terminal == nil {
-		return runtimecontract.TerminalOutcome{}, false
-	}
-	kind := runtimecontract.TerminalOutcomeKindFailed
-	if state.Decision.State == runtimecontract.ConvergenceStateComplete {
-		kind = runtimecontract.TerminalOutcomeKindCompleted
-	} else if state.Decision.State != runtimecontract.ConvergenceStateFailed {
-		return runtimecontract.TerminalOutcome{}, false
-	}
-	return runtimecontract.TerminalOutcome{Kind: kind, Code: state.Decision.Terminal.Code, Summary: state.Decision.Terminal.Summary}.Normalized(), true
 }
 
 func cloneRuntimeStateRecord(value *runtimecontract.RuntimeStateRecord) *runtimecontract.RuntimeStateRecord {

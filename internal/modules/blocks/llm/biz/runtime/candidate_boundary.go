@@ -45,6 +45,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid LLM prerequisite stale: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
 			}
 			return llmmodels.RuntimeCandidateResponse{
+				WorkspaceID: runtimeCandidateRequestWorkspaceID(request), RunID: runtimeCandidateRequestRunID(request),
 				Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 				Audit: generation.Audit, Usage: generation.Usage,
 				PrerequisiteStale: &staleCopy,
@@ -56,6 +57,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		}
 		code, signature := providerFailureIdentity(err)
 		return llmmodels.RuntimeCandidateResponse{
+			WorkspaceID: runtimeCandidateRequestWorkspaceID(request), RunID: runtimeCandidateRequestRunID(request),
 			Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 			Audit: generation.Audit,
 			Usage: generation.Usage,
@@ -67,58 +69,58 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 func providerDocumentResponse(request llmmodels.RuntimeCandidateRequest, generation llmmodels.RuntimeCandidateGenerationResult) llmmodels.RuntimeCandidateResponse {
 	payload := append([]byte(nil), generation.Payload...)
 	disposition := inspectProviderCandidateDocumentFraming(payload)
-	outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+	outcome := llmmodels.RuntimeCandidateDocumentObservation{Framing: runtimecontract.RuntimeProviderDocumentFraming{
 		ExpectedDocumentHash: request.ExpectedDocument.Normalized().Hash,
 		ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(payload),
 		ResponseBytes:        int64(len(payload)),
-	}
+	}}
 	response := llmmodels.RuntimeCandidateResponse{
+		WorkspaceID: runtimeCandidateRequestWorkspaceID(request), RunID: runtimeCandidateRequestRunID(request),
 		Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 		Audit: generation.Audit, Usage: generation.Usage,
 	}
 	switch disposition {
 	case runtimecontract.RuntimeCandidateDocumentComplete:
-		outcome.Disposition = runtimecontract.RuntimeProviderDocumentComplete
-		response.DocumentContent = payload
+		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentComplete
+		outcome.Content = payload
 	case runtimecontract.RuntimeCandidateDocumentIncomplete:
-		outcome.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
-		outcome.Code = "incomplete_json_document"
-		outcome.Signature = "provider-document-incomplete"
+		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentIncomplete
+		outcome.Framing.Code = "incomplete_json_document"
+		outcome.Framing.Signature = "provider-document-incomplete"
 		if generation.ReachedProviderLimit || candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF) {
-			outcome.Code = "max_output_tokens"
-			outcome.Signature = "provider-output-limit"
+			outcome.Framing.Code = "max_output_tokens"
+			outcome.Framing.Signature = "provider-output-limit"
 		}
 	case runtimecontract.RuntimeCandidateDocumentEmpty:
-		outcome.Disposition = runtimecontract.RuntimeProviderDocumentEmpty
-		outcome.Code = "provider_final_output_missing"
-		outcome.Signature = "provider-final-output-missing"
+		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentEmpty
+		outcome.Framing.Code = "provider_final_output_missing"
+		outcome.Framing.Signature = "provider-final-output-missing"
 	case runtimecontract.RuntimeCandidateDocumentInvalid:
-		outcome.Disposition = runtimecontract.RuntimeProviderDocumentInvalid
-		outcome.Code = "provider_final_output_invalid"
-		outcome.Signature = "provider-final-output-invalid"
+		outcome.Framing.Disposition = runtimecontract.RuntimeProviderDocumentInvalid
+		outcome.Framing.Code = "provider_final_output_invalid"
+		outcome.Framing.Signature = "provider-final-output-invalid"
 	}
 	response.DocumentOutcome = &outcome
 	return response
 }
 
+func runtimeCandidateRequestWorkspaceID(request llmmodels.RuntimeCandidateRequest) string {
+	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		return string(request.SemanticContext.WorkspaceID)
+	}
+	return string(request.CandidateContext.WorkspaceID)
+}
+
+func runtimeCandidateRequestRunID(request llmmodels.RuntimeCandidateRequest) string {
+	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		return string(request.SemanticContext.RunID)
+	}
+	return string(request.CandidateContext.RunID)
+}
+
 func inspectProviderCandidateDocumentFraming(payload []byte) runtimecontract.RuntimeCandidateDocumentDisposition {
 	normalized, _ := runtimecontract.NormalizeRuntimeCandidatePayloadDocument(payload)
 	return runtimecontract.InspectRuntimeCandidateDocumentFraming(normalized)
-}
-
-// providerFinalOutputInvalidError keeps a provider-declared final output that
-// is not JSON out of SM-3 correction and continuation. The raw text remains
-// provider-owned and is deliberately not copied into cross-owner feedback.
-func providerFinalOutputInvalidError(generation llmmodels.RuntimeCandidateGenerationResult) error {
-	return candidateRequestErrorWithIdentity(
-		CandidateFailureClassProvider,
-		"provider_final_output_invalid",
-		"provider-final-output-invalid",
-		fmt.Errorf("provider final output is not a JSON document"),
-		generation.Audit,
-		generation.RequestID,
-		generation.Status,
-	)
 }
 
 func providerFailureIdentity(err error) (string, string) {

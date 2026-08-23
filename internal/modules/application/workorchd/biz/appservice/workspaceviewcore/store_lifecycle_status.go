@@ -85,7 +85,7 @@ func (s *Store) statusLocked() projectioncontract.ProjectionStatus {
 		errText = latestError
 	}
 	return projectioncontract.ProjectionStatus{
-		State:                   state,
+		State:                   string(state),
 		StreamGeneration:        s.streamGeneration,
 		GlobalRevision:          s.globalRevision,
 		SourceEventRevision:     s.sourceRevision,
@@ -153,7 +153,7 @@ func (s *Store) statusForWorkspaceLocked(workspaceID string) projectioncontract.
 		}
 	}
 	return projectioncontract.ProjectionStatus{
-		State:                   state,
+		State:                   string(state),
 		StreamGeneration:        s.streamGeneration,
 		GlobalRevision:          s.globalRevision,
 		WorkspaceRevision:       workspaceRevision,

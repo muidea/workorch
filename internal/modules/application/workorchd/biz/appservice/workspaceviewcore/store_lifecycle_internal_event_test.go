@@ -5,9 +5,9 @@ import "testing"
 func TestReduceProjectionLifecycleStateOwnsTransitions(t *testing.T) {
 	tests := []struct {
 		name    string
-		current string
+		current projectionLifecycleState
 		event   projectionLifecycleInternalEvent
-		want    string
+		want    projectionLifecycleState
 	}{
 		{
 			name:    "initial rebuild remains building",

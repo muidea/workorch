@@ -24,6 +24,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	workorcheventpayload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -363,9 +364,12 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if !ok || response.Feedback != nil {
 		t.Fatalf("LLM candidate response = %#v", requestData)
 	}
-	decodedCandidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentContent)
+	if response.DocumentOutcome == nil {
+		t.Fatal("LLM candidate response did not carry a document outcome")
+	}
+	decodedCandidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentOutcome.Content)
 	if err != nil || decodedCandidate.StateChange == nil {
-		t.Fatalf("LLM candidate document = %q err=%v", response.DocumentContent, err)
+		t.Fatalf("LLM candidate document = %q err=%v", response.DocumentOutcome.Content, err)
 	}
 	if len(provider.requests) != 1 {
 		t.Fatalf("LLM provider calls = %d, want 1", len(provider.requests))
@@ -885,8 +889,25 @@ func (p *runtimeCapturedCandidateProvider) GenerateCandidate(_ context.Context, 
 	if p.payloadFor != nil {
 		payload = p.payloadFor(request)
 	}
+	target := request.CandidateContext.Activation.ProviderSelection.Target.Normalized()
+	workspaceID, runID, kind := string(request.CandidateContext.WorkspaceID), string(request.CandidateContext.RunID), "runtime_candidate"
+	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		target = request.SemanticContext.Activation.ProviderSelection.Target.Normalized()
+		workspaceID, runID, kind = string(request.SemanticContext.WorkspaceID), string(request.SemanticContext.RunID), "runtime_semantic_plan"
+	}
 	return llmmodels.RuntimeCandidateGenerationResult{
-		Payload: append([]byte(nil), payload...), Status: llmmodels.RuntimeCandidateStatusCompleted,
+		RequestID: request.RequestIdentity.PhysicalCallID, Payload: append([]byte(nil), payload...), Status: llmmodels.RuntimeCandidateStatusCompleted,
+		Audit: &llmmodels.ProviderRequestAudit{
+			RequestID: request.RequestIdentity.PhysicalCallID, LogicalRequestID: request.RequestIdentity.LogicalRequestID,
+			PhysicalCallID: request.RequestIdentity.PhysicalCallID, WorkspaceID: workspaceID, RunID: runID,
+			Target: target, Operation: "responses", StablePrefixHash: request.StablePrefixHash, Kind: kind,
+			PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming, ProviderSubmitted: true,
+			Status: llmmodels.RuntimeCandidateStatusCompleted, RequestBytes: 1, ResponseBytes: len(payload),
+			ContextBudget: &llmmodels.ProviderContextBudget{
+				ProviderID: target.ProviderID, ModelID: target.ModelID, ProviderSubmitted: true,
+				CachePlan: &llmmodels.ProviderCachePlan{StablePrefixHash: request.StablePrefixHash},
+			},
+		},
 	}, nil
 }
 
@@ -970,7 +991,10 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if !ok || response.Feedback != nil {
 		t.Fatalf("candidate response = %#v", data)
 	}
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentContent)
+	if response.DocumentOutcome == nil {
+		t.Fatal("LLM candidate response did not carry a document outcome")
+	}
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentOutcome.Content)
 	if err != nil {
 		t.Fatal(err)
 	}

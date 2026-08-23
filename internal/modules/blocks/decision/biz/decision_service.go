@@ -18,24 +18,26 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-type Service struct {
+// mutationService is the Decision owner-private mutation implementation. Its
+// only production callers are the owner Biz EventHub handlers and recovery
+// loops; sibling components cannot construct or retain it.
+type mutationService struct {
 	tickets     repository.DecisionTicketRepository
 	resolutions repository.DecisionResolutionRepository
 }
 
-// NewService only retains Decision owner repositories.
-func NewService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository) *Service {
-	return &Service{tickets: tickets, resolutions: resolutions}
+func newMutationService(tickets repository.DecisionTicketRepository, resolutions repository.DecisionResolutionRepository) *mutationService {
+	return &mutationService{tickets: tickets, resolutions: resolutions}
 }
 
-func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
+func (s *mutationService) CreateTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
 	_, err := s.CreateTicketAndReturn(ctx, cmd)
 	return err
 }
 
 // CreateTicketAndReturn persists a new ticket. Event publication is owned by
 // Biz so this repository service remains independent of framework resources.
-func (s *Service) CreateTicketAndReturn(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) (*decisionModel.Ticket, error) {
+func (s *mutationService) CreateTicketAndReturn(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) (*decisionModel.Ticket, error) {
 	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -59,13 +61,13 @@ func (s *Service) CreateTicketAndReturn(ctx context.Context, cmd decisioncontrac
 	})
 }
 
-func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
+func (s *mutationService) EnsureTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
 	_, _, err := s.EnsureTicketAndReturn(ctx, cmd)
 	return err
 }
 
 // EnsureTicketAndReturn reports whether this invocation created the ticket.
-func (s *Service) EnsureTicketAndReturn(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) (*decisionModel.Ticket, bool, error) {
+func (s *mutationService) EnsureTicketAndReturn(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) (*decisionModel.Ticket, bool, error) {
 	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return nil, false, common.ErrInvalidArgument
 	}
@@ -97,12 +99,12 @@ func (s *Service) EnsureTicketAndReturn(ctx context.Context, cmd decisioncontrac
 	return item, err == nil, err
 }
 
-func (s *Service) ResolveTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
+func (s *mutationService) ResolveTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
 	_, _, err := s.ResolveTicketAndReturn(ctx, cmd)
 	return err
 }
 
-func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+func (s *mutationService) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, common.ErrInvalidArgument
 	}
@@ -138,7 +140,7 @@ func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontra
 	return ticket, resolution, err
 }
 
-func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Resolution, error) {
+func (s *mutationService) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Resolution, error) {
 	if ticket == nil || ticket.ID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -170,12 +172,12 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 	return resolution, nil
 }
 
-func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
+func (s *mutationService) EnsureResolvedTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
 	_, _, err := s.EnsureResolvedTicketAndReturn(ctx, cmd)
 	return err
 }
 
-func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+func (s *mutationService) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	ticket, resolution, _, err := s.EnsureResolvedTicketAndReturnWithTransition(ctx, cmd)
 	return ticket, resolution, err
 }
@@ -183,7 +185,7 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 // EnsureResolvedTicketAndReturnWithTransition reports whether the ticket
 // transitioned to resolved. Evidence is required for every successful call,
 // while the resolved notification is emitted only for a transition.
-func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, bool, error) {
+func (s *mutationService) EnsureResolvedTicketAndReturnWithTransition(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, bool, error) {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, false, common.ErrInvalidArgument
 	}
@@ -363,7 +365,7 @@ func validateResolutionTypeForTicket(ticket *decisionModel.Ticket, resolutionTyp
 // owner may have durably finalized its ticket while the caller still needs to
 // join Orchestrator's persisted, idempotent continuation lane. It must not
 // create a second Decision resolution or accept changed user input.
-func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.RuntimeGovernanceResolutionProposal, error) {
+func (s *mutationService) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.RuntimeGovernanceResolutionProposal, error) {
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, common.ErrInvalidArgument
 	}
@@ -434,14 +436,14 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 // FinalizeRuntimeGovernanceResolutionProposal creates the public resolution
 // and marks its ticket resolved only after the matching Runtime aggregate
 // has committed. It is safe to retry after any owner-local write failure.
-func (s *Service) FinalizeRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+func (s *mutationService) FinalizeRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	ticket, resolution, _, err := s.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, cmd)
 	return ticket, resolution, err
 }
 
 // FinalizeRuntimeGovernanceResolutionProposalWithTransition reports whether
 // the public ticket moved from open to resolved during this invocation.
-func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, bool, error) {
+func (s *mutationService) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, bool, error) {
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, false, common.ErrInvalidArgument
 	}
@@ -501,7 +503,7 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 	return ticket, resolution, transitioned, nil
 }
 
-func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand, failureClass string, failureReason string) error {
+func (s *mutationService) RejectRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand, failureClass string, failureReason string) error {
 	if s == nil || cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return common.ErrInvalidArgument
 	}
@@ -604,7 +606,7 @@ func resolutionMatchesCommand(existing *decisionModel.Resolution, cmd decisionco
 		existing.SuccessorRunID == expected.SuccessorRunID
 }
 
-func (s *Service) MarkTicketCreatedNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+func (s *mutationService) MarkTicketCreatedNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
 	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -622,15 +624,15 @@ func (s *Service) MarkTicketCreatedNotificationPublished(ctx context.Context, ti
 	return s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventCreatedNotificationPublished, TicketID: current.ID})
 }
 
-func (s *Service) MarkRuntimeGovernanceEvidenceRecorded(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+func (s *mutationService) MarkRuntimeGovernanceEvidenceRecorded(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
 	return s.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalEvidenceRecorded)
 }
 
-func (s *Service) MarkRuntimeGovernanceNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+func (s *mutationService) MarkRuntimeGovernanceNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
 	return s.markRuntimeGovernanceDelivery(ctx, ticket, lifecycleInternalEventProposalNotificationPublished)
 }
 
-func (s *Service) MarkResolutionNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
+func (s *mutationService) MarkResolutionNotificationPublished(ctx context.Context, ticket *decisionModel.Ticket) (*decisionModel.Ticket, error) {
 	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" || ticket.DecisionKind == "runtime_governance" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -648,7 +650,7 @@ func (s *Service) MarkResolutionNotificationPublished(ctx context.Context, ticke
 	return s.applyLifecycleInternalEvent(ctx, current, lifecycleInternalEvent{Kind: lifecycleInternalEventResolutionNotificationPublished, TicketID: current.ID})
 }
 
-func (s *Service) markRuntimeGovernanceDelivery(ctx context.Context, ticket *decisionModel.Ticket, kind lifecycleInternalEventKind) (*decisionModel.Ticket, error) {
+func (s *mutationService) markRuntimeGovernanceDelivery(ctx context.Context, ticket *decisionModel.Ticket, kind lifecycleInternalEventKind) (*decisionModel.Ticket, error) {
 	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -682,7 +684,7 @@ func (s *Service) markRuntimeGovernanceDelivery(ctx context.Context, ticket *dec
 // Resolution. A persisted deletion marker hides the aggregate from public
 // reads before either repository item is removed, so a crash can only leave a
 // recoverable owner-private tombstone, never a visible orphan.
-func (s *Service) PurgeDecisionAggregate(ctx context.Context, ticket *decisionModel.Ticket) error {
+func (s *mutationService) PurgeDecisionAggregate(ctx context.Context, ticket *decisionModel.Ticket) error {
 	if s == nil || ticket == nil || ticket.ID == "" || ticket.WorkspaceID == "" {
 		return common.ErrInvalidArgument
 	}

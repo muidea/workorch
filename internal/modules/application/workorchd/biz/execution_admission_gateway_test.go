@@ -27,6 +27,15 @@ func (s *laneOrderingSubmitter) SubmitWorkspaceRun(_ context.Context, command wo
 		<-s.releaseFirst
 	case "request-new":
 		close(s.secondEntered)
+	case "request-rejected":
+		return workorchdevents.WorkspaceRunRequestedResult{
+			WorkspaceID: command.WorkspaceID,
+			RunID:       "run-rejected",
+			RequestID:   command.RequestID,
+			Kind:        runtimecontract.RuntimeExecutionIntentKind(command.Intent),
+			Outcome:     runtimecontract.RuntimeExecutionIntentGovernanceRequired,
+			Reason:      runtimecontract.RuntimeExecutionIntentReasonGovernancePending,
+		}, nil
 	}
 	return workorchdevents.WorkspaceRunRequestedResult{
 		WorkspaceID: command.WorkspaceID,
@@ -121,11 +130,20 @@ func TestExecutionAdmissionGatewaySerializesOwnerAdmissionAndProjectionByWorkspa
 			t.Fatalf("admission did not complete: %v", ctx.Err())
 		}
 	}
+	rejected, err := gateway.AdmitWorkspaceExecution(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+		WorkspaceID: "ws-lane-order", Intent: "resume", RequestID: "request-rejected", Source: "http",
+	})
+	if err != nil {
+		t.Fatalf("rejected owner admission transport: %v", err)
+	}
+	if rejected.RunID != "run-rejected" || rejected.Outcome != runtimecontract.RuntimeExecutionIntentGovernanceRequired || rejected.Reason != runtimecontract.RuntimeExecutionIntentReasonGovernancePending {
+		t.Fatalf("gateway owner result = %+v, want exact rejection", rejected)
+	}
 
 	projection.mu.Lock()
 	defer projection.mu.Unlock()
-	if len(projection.requests) != 2 || projection.requests[0] != "request-old" || projection.requests[1] != "request-new" {
-		t.Fatalf("projection commit order = %v, want [request-old request-new]", projection.requests)
+	if len(projection.requests) != 3 || projection.requests[0] != "request-old" || projection.requests[1] != "request-new" || projection.requests[2] != "request-rejected" {
+		t.Fatalf("projection commit order = %v, want [request-old request-new request-rejected]", projection.requests)
 	}
 }
 

@@ -106,7 +106,6 @@ func compactRunListItem(item *runmodel.Run) *runmodel.Run {
 		InitialStepKind:         item.InitialStepKind,
 		RuntimeActivationStatus: item.RuntimeActivationStatus.Clone(),
 		State:                   item.State,
-		Priority:                item.Priority,
 		BlockingTicketID:        item.BlockingTicketID,
 		BlockingApprovalID:      item.BlockingApprovalID,
 		FailureReason:           item.FailureReason,

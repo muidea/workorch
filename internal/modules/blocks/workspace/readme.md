@@ -37,6 +37,8 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 - 外部定义命令保持唯一入口 `handleCommand -> executeCommand`；Owner 内部按 Workspace、Goal、DoD、Template
   四个命令族做穷尽且 fail-closed 的静态分派。各 handler 只是同一 Biz 内的职责切片，不是新的 Owner、状态机、
   repository/CAS 边界或 EventHub facade。
+- Goal/DoD/Workspace repository 协调器是 Biz 包内私有实现；本 block 不导出可绕过 EventHub ingress 的 manager 或
+  CRUD service facade。
 
 ## 交互合同完整性
 

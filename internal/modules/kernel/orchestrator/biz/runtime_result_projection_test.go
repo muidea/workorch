@@ -15,18 +15,63 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func mustRuntimeLifecycleFence(t *testing.T, run *runmodel.Run) *runtimecontract.RuntimeOpaqueLifecycleFence {
+	t.Helper()
+	fence, err := runtimeLifecycleFenceFromModel(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fence
+}
+
+func mustTerminalDeliveryRequest(t *testing.T, aggregate runtime.RuntimeAggregate) orchestratorevents.RuntimeTerminalDeliveryRequestData {
+	t.Helper()
+	request, err := terminalDeliveryRequest(aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func mustRuntimeResultMaterial(t *testing.T, aggregate runtime.RuntimeAggregate) resultevents.ResultMaterial {
+	t.Helper()
+	outcome, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !terminal {
+		t.Fatal("aggregate is not terminal")
+	}
+	material, err := runtimeResultMaterialFromAggregate(aggregate, outcome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return material
+}
+
+func newRuntimeProjectionTestModule(t *testing.T, hub magicevent.Hub) *Biz {
+	t.Helper()
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	return newTestBiz(owner, hub, nil)
+}
 
 // failAfterResultCreateRepository simulates a process/transport interruption
 // after Result durability but before the owner can acknowledge the command.
@@ -221,7 +266,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 	record := runtimeStateRecordFromAggregate(aggregate)
 	runFixture := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
 	runFixture.RuntimeState = &record
-	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
@@ -244,8 +289,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	biz := newRuntimeTestOwner()
-	module := newTestBiz(biz, hub, nil)
+	module := newRuntimeProjectionTestModule(t, hub)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := module.deliverRuntimeTerminal(ctx, aggregate); err != nil {
 			t.Fatalf("delivery attempt %d: %v", attempt, err)
@@ -270,13 +314,24 @@ func TestAdministrativeTerminationDeliveryRequestUsesSealedFailureIdentity(t *te
 	aggregate.Termination = &runtimecontract.RuntimeTerminationRecord{
 		Kind: runtimecontract.RuntimeTerminationSuperseded, RequestedBy: "application/workorchd", Reason: "replacement requested", Revision: 8, RequestedAt: "2026-07-27T00:00:00Z",
 	}
-	request := terminalDeliveryRequest(aggregate)
+	request := mustTerminalDeliveryRequest(t, aggregate)
 	if err := request.Validate(); err != nil {
 		t.Fatalf("administrative request: %v", err)
 	}
 	if request.Outcome.Kind != runtimecontract.TerminalOutcomeKindSuperseded || request.Outcome.Code != "administrative_superseded" ||
 		request.Outcome.Summary != "replacement requested" || request.CausationID == "" {
 		t.Fatalf("administrative request = %+v", request)
+	}
+}
+
+func TestRecordRuntimeDeliveryAcknowledgementRejectsMissingRuntimeController(t *testing.T) {
+	acknowledgement := &runtimecontract.RuntimeDeliveryAcknowledgement{
+		WorkspaceID: "ws-v2", RunID: "run-v2", TerminalDeliveryID: "delivery-v2",
+		Owner: runtimecontract.RuntimeDeliveryOwnerResult,
+	}
+	module := newRuntimeTestOwner()
+	if err := module.recordRuntimeDeliveryAcknowledgement(context.Background(), acknowledgement); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("missing runtime controller acknowledgement err = %v, want invalid argument", err)
 	}
 }
 
@@ -1040,7 +1095,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 		ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &record,
 	}
-	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
@@ -1048,7 +1103,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 		t.Fatal(err)
 	}
 
-	module := newTestBiz(newRuntimeTestOwner(), hub, nil)
+	module := newRuntimeProjectionTestModule(t, hub)
 	if err := module.deliverRuntimeTerminal(ctx, aggregate); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("recoverable refresh terminal delivery error = %v, want invalid argument", err)
 	}
@@ -1094,14 +1149,14 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
 	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}
-	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(newRuntimeTestOwner(), firstHub, nil)
+	firstModule := newRuntimeProjectionTestModule(t, firstHub)
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected Result-persisted delivery interruption")
 	}
@@ -1147,7 +1202,7 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
+	restartedModule := newRuntimeProjectionTestModule(t, restartedHub)
 	if err := restartedModule.deliverRuntimeTerminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -1253,7 +1308,7 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 		t.Fatalf("reloaded administrative aggregate: %v", err)
 	}
 	assertAdministrativeSupersedeAuthority(t, restartedAggregate)
-	restartedModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
+	restartedModule := newRuntimeProjectionTestModule(t, restartedHub)
 	if err := restartedModule.deliverRuntimeTerminal(ctx, restartedAggregate); err != nil {
 		t.Fatalf("restart administrative delivery: %v", err)
 	}
@@ -1291,7 +1346,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	record := runtimeStateRecordFromAggregate(aggregate)
 	bootstrap := runtimeBootstrap()
 	runFixture := &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", State: common.RunStateActive, RuntimeBootstrap: &bootstrap, RuntimeState: &record}
-	runFixture.RuntimeLifecycleFence = runtimeLifecycleFenceFromModel(runFixture)
+	runFixture.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, runFixture)
 	if err := runs.Create(ctx, runFixture); err != nil {
 		t.Fatal(err)
 	}
@@ -1310,7 +1365,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	if err := firstOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(newRuntimeTestOwner(), firstHub, nil)
+	firstModule := newRuntimeProjectionTestModule(t, firstHub)
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected terminal delivery interruption before Result persistence")
 	}
@@ -1354,7 +1409,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
+	restartedModule := newRuntimeProjectionTestModule(t, restartedHub)
 	if err := restartedModule.deliverRuntimeTerminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -1394,7 +1449,7 @@ func TestRuntimeResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 			Terminal:          &runtimecontract.RuntimeTerminalDecision{Code: "coverage_satisfied", Summary: "coverage satisfied"},
 		},
 	}
-	item := runtimeResultMaterialFromAggregate(aggregate)
+	item := mustRuntimeResultMaterial(t, aggregate)
 	if item.WorkspaceID != "ws-1" || item.RunID != "run-1" || !item.DoDAssessment.Satisfied ||
 		len(item.DoDAssessment.Items) != 1 || item.DoDAssessment.Items[0].Item != "行为已验证" || len(item.EvidenceRefs) != 1 {
 		t.Fatalf("runtime result = %+v", item)
@@ -1454,7 +1509,7 @@ func TestRuntimeResultProjectionBuildsStructuredRejectedCloseout(t *testing.T) {
 			Terminal:          &runtimecontract.RuntimeTerminalDecision{Code: "no_progress_exhausted", Summary: "repair budget exhausted"},
 		},
 	}
-	item := runtimeResultMaterialFromAggregate(aggregate)
+	item := mustRuntimeResultMaterial(t, aggregate)
 	if item.RuntimeCloseout == nil {
 		t.Fatalf("rejected result = %+v", item)
 	}
@@ -1508,7 +1563,7 @@ func TestRuntimeResultProjectionExcludesSettledClaimedGapFromTerminalFailure(t *
 			Terminal: &runtimecontract.RuntimeTerminalDecision{Code: "semantic_contract_failed", Summary: "semantic feasibility exhausted"},
 		},
 	}
-	closeout := runtimeResultMaterialFromAggregate(aggregate).RuntimeCloseout
+	closeout := mustRuntimeResultMaterial(t, aggregate).RuntimeCloseout
 	if closeout == nil || closeout.FailureClass != runtimecontract.FailureClassCandidateInfeasible || closeout.FailureCode != "validation_recipe_unavailable" || closeout.FailureSignature != "cwi-029-validation-recipe-unavailable" {
 		t.Fatalf("terminal failure did not use current authority: %+v", closeout)
 	}
@@ -1546,7 +1601,7 @@ func TestRuntimeResultProjectionPackagesLedgerEvidenceBeforeAssessment(t *testin
 		},
 		Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateFailed, AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"}, Terminal: &runtimecontract.RuntimeTerminalDecision{Code: "candidate_retry_exhausted", Summary: "candidate exhausted"}},
 	}
-	item := runtimeResultMaterialFromAggregate(aggregate)
+	item := mustRuntimeResultMaterial(t, aggregate)
 	for _, ref := range []string{"accepted-1", "workorch://accepted", "accepted-detail", "rejected-1", "workorch://rejected", "rejected-detail"} {
 		if !containsResultEvidenceRef(item.EvidenceRefs, ref) {
 			t.Fatalf("result evidence refs = %v, missing %q", item.EvidenceRefs, ref)

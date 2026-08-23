@@ -1,5 +1,7 @@
 package workorchprojectioncontract
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
 type WorkspaceViewModel struct {
 	WorkspaceID             string                               `json:"workspaceId,omitempty"`
 	State                   string                               `json:"state,omitempty"`
@@ -86,21 +88,19 @@ func CloneWorkspaceActivityFeed(item WorkspaceActivityFeed) WorkspaceActivityFee
 }
 
 type RunCommandStatus struct {
-	WorkspaceID        string `json:"workspaceId,omitempty"`
-	RunID              string `json:"runId,omitempty"`
-	State              string `json:"state,omitempty"`
-	Intent             string `json:"intent,omitempty"`
-	Reason             string `json:"reason,omitempty"`
-	Disposition        string `json:"disposition,omitempty"`
-	Diagnostic         string `json:"diagnostic,omitempty"`
-	RequestID          string `json:"requestId,omitempty"`
-	Source             string `json:"source,omitempty"`
-	DefinitionRevision string `json:"definitionRevision,omitempty"`
-	DecisionID         string `json:"decisionId,omitempty"`
-	AcceptedAt         string `json:"acceptedAt,omitempty"`
-	RejectedAt         string `json:"rejectedAt,omitempty"`
-	Error              string `json:"error,omitempty"`
-	Revision           int64  `json:"revision,omitempty"`
+	WorkspaceID     string                                        `json:"workspaceId,omitempty"`
+	RunID           string                                        `json:"runId,omitempty"`
+	State           string                                        `json:"state,omitempty"`
+	Intent          string                                        `json:"intent,omitempty"`
+	RequestID       string                                        `json:"requestId,omitempty"`
+	RequestReason   string                                        `json:"requestReason,omitempty"`
+	Source          string                                        `json:"source,omitempty"`
+	Outcome         runtimecontract.RuntimeExecutionIntentOutcome `json:"outcome,omitempty"`
+	AdmissionReason runtimecontract.RuntimeExecutionIntentReason  `json:"admissionReason,omitempty"`
+	Diagnostic      string                                        `json:"diagnostic,omitempty"`
+	AcceptedAt      string                                        `json:"acceptedAt,omitempty"`
+	RejectedAt      string                                        `json:"rejectedAt,omitempty"`
+	Revision        int64                                         `json:"revision"`
 }
 
 type WorkspaceRuntimeView struct {

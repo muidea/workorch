@@ -44,7 +44,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-type Service struct {
+// Biz is the Eventstream Block lifecycle owner. Repository-facing operations
+// remain private; callers interact only through concrete pkg/events contracts.
+type Biz struct {
 	basebiz.Base
 	repo          repository.EventRecordRepository
 	unsubscribers []func()
@@ -65,15 +67,11 @@ type Dependencies struct {
 
 var eventRecordIDSequence atomic.Uint64
 
-func NewService(repo repository.EventRecordRepository, hub magicevent.Hub, background magictask.BackgroundRoutine) *Service {
-	return &Service{Base: basebiz.New(modulecommon.ModuleID, hub, background), repo: repo}
+func New(deps Dependencies) *Biz {
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine), repo: deps.EventRecords}
 }
 
-func NewServiceWithDependencies(deps Dependencies) *Service {
-	return NewService(deps.EventRecords, deps.EventHub, deps.BackgroundRoutine)
-}
-
-func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
+func (s *Biz) highWatermarks(ctx context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
 	if s == nil || s.repo == nil || len(workspaceIDs) == 0 || len(workspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
 		return nil, common.ErrInvalidArgument
 	}
@@ -108,7 +106,7 @@ func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.Work
 	return ret, nil
 }
 
-func (s *Service) Start() error {
+func (s *Biz) Start() error {
 	if s == nil || s.repo == nil || s.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
@@ -135,7 +133,7 @@ func (s *Service) Start() error {
 	return nil
 }
 
-func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
+func (s *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	// Every subscribed command is request/response. Reject Post delivery before
 	// executing reads or strong writes so purge/record commands cannot mutate
 	// state without an acknowledgement channel.
@@ -159,7 +157,7 @@ func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
 	result.Set(response, nil)
 }
 
-func (s *Service) executeRecordApprovalResolution(ev magicevent.Event) (approvalevents.RecordApprovalResolutionResult, error) {
+func (s *Biz) executeRecordApprovalResolution(ev magicevent.Event) (approvalevents.RecordApprovalResolutionResult, error) {
 	if s == nil || s.repo == nil || ev == nil || ev.Source() != approvalcommon.ModuleID {
 		return approvalevents.RecordApprovalResolutionResult{}, common.ErrInvalidArgument
 	}
@@ -184,7 +182,7 @@ func (s *Service) executeRecordApprovalResolution(ev magicevent.Event) (approval
 	}, nil
 }
 
-func (s *Service) samePersistedApprovalResolution(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
+func (s *Biz) samePersistedApprovalResolution(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
 	if s == nil || s.repo == nil || expected == nil || expected.ID == "" {
 		return false
 	}
@@ -197,7 +195,7 @@ func (s *Service) samePersistedApprovalResolution(ctx context.Context, expected 
 		current.RunID == expected.RunID && current.StepID == expected.StepID && current.Payload.Equal(expected.Payload)
 }
 
-func (s *Service) executeCommand(ev magicevent.Event) (any, error) {
+func (s *Biz) executeCommand(ev magicevent.Event) (any, error) {
 	if s == nil || s.repo == nil || ev == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -220,7 +218,7 @@ func (s *Service) executeCommand(ev magicevent.Event) (any, error) {
 				return nil, err
 			}
 		}
-		items, err := s.ListEvents(ctx, query)
+		items, err := s.listEvents(ctx, query)
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +236,7 @@ func (s *Service) executeCommand(ev magicevent.Event) (any, error) {
 		if !ok || len(cmd.WorkspaceIDs) == 0 || len(cmd.WorkspaceIDs) > eventstreamevents.MaxHighWatermarkScopes {
 			return nil, common.ErrInvalidArgument
 		}
-		items, err := s.HighWatermarks(ev.Context(), cmd.WorkspaceIDs)
+		items, err := s.highWatermarks(ev.Context(), cmd.WorkspaceIDs)
 		return eventstreamevents.HighWatermarksResult{HighWatermarks: items}, err
 	case eventstreamevents.TopicEventStreamCommandPurgeWorkspace:
 		cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)
@@ -249,7 +247,7 @@ func (s *Service) executeCommand(ev magicevent.Event) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		deleted, err := s.PurgeWorkspaceEvents(ctx, cmd.WorkspaceID)
+		deleted, err := s.purgeWorkspaceEvents(ctx, cmd.WorkspaceID)
 		return eventstreamevents.PurgeWorkspaceResult{DeletedCount: deleted}, err
 	default:
 		return nil, common.ErrInvalidArgument
@@ -265,7 +263,7 @@ func repositoryEventRecordQuery(query eventstreamevents.EventQuery) workorchquer
 	}
 }
 
-func (s *Service) subscribeMemoryNotifications() {
+func (s *Biz) subscribeMemoryNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -298,7 +296,7 @@ func (s *Service) subscribeMemoryNotifications() {
 	})
 }
 
-func (s *Service) subscribeLLMNotifications() {
+func (s *Biz) subscribeLLMNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -316,7 +314,7 @@ func (s *Service) subscribeLLMNotifications() {
 	})
 }
 
-func (s *Service) subscribeResultNotifications() {
+func (s *Biz) subscribeResultNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -349,7 +347,7 @@ func (s *Service) subscribeResultNotifications() {
 	})
 }
 
-func (s *Service) subscribeWorkspaceNotifications() {
+func (s *Biz) subscribeWorkspaceNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -395,7 +393,7 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	})
 }
 
-func (s *Service) subscribeRunStateNotifications() {
+func (s *Biz) subscribeRunStateNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -429,7 +427,7 @@ func (s *Service) subscribeRunStateNotifications() {
 	})
 }
 
-func (s *Service) subscribeGovernanceNotifications() {
+func (s *Biz) subscribeGovernanceNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -458,7 +456,7 @@ func (s *Service) subscribeGovernanceNotifications() {
 	})
 }
 
-func (s *Service) subscribeApprovalNotifications() {
+func (s *Biz) subscribeApprovalNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -484,7 +482,7 @@ func (s *Service) subscribeApprovalNotifications() {
 	})
 }
 
-func (s *Service) subscribeDecisionNotifications() {
+func (s *Biz) subscribeDecisionNotifications() {
 	if s == nil || s.EventHub() == nil {
 		return
 	}
@@ -534,13 +532,7 @@ func validMemoryRecallRecordedData(data memoryevents.MemoryRecallRecordedData) b
 }
 
 func validLLMUsageRecordedData(data llmevents.LLMUsageRecordedData) bool {
-	if strings.TrimSpace(data.RequestID) == "" || strings.TrimSpace(data.Status) == "" {
-		return false
-	}
-	// Setup-draft completions are process-scoped before a Workspace exists;
-	// activation-time embeddings are Workspace-scoped before a Run exists.
-	// A Run without its owning Workspace is the only invalid scope shape.
-	return data.RunID == "" || data.WorkspaceID != ""
+	return data.Validate() == nil
 }
 
 func validResultChangedData(data resultevents.ResultChangedData) bool {
@@ -572,7 +564,7 @@ func validTicketResolvedData(data decisionevents.TicketResolvedData) bool {
 	return strings.TrimSpace(data.NotificationID) != "" && validTicketChangedData(data.Ticket) && data.ResolutionID != "" && strings.TrimSpace(data.ResolutionType) != ""
 }
 
-func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) {
+func (s *Biz) finishRecordAppend(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) {
 	err := inputErr
 	if err == nil {
 		for attempt := 0; attempt < 3; attempt++ {
@@ -598,7 +590,7 @@ func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstream
 	}
 }
 
-func (s *Service) samePersistedRecord(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
+func (s *Biz) samePersistedRecord(ctx context.Context, expected *eventstreammodel.EventRecord) bool {
 	if s == nil || s.repo == nil || expected == nil || expected.ID == "" {
 		return false
 	}
@@ -619,7 +611,7 @@ func (s *Service) samePersistedRecord(ctx context.Context, expected *eventstream
 		current.Payload.Equal(expected.Payload)
 }
 
-func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
+func (s *Biz) appendRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
 	if s == nil || s.repo == nil || record == nil || record.Topic == "" {
 		return common.ErrInvalidArgument
 	}
@@ -655,14 +647,14 @@ func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.Eve
 	return s.publishRecordAppended(ctx, record)
 }
 
-func (s *Service) reserveStreamPosition(ctx context.Context) (int64, error) {
+func (s *Biz) reserveStreamPosition(ctx context.Context) (int64, error) {
 	if s == nil || s.repo == nil {
 		return 0, common.ErrInvalidArgument
 	}
 	return s.repo.ReserveEventRecordStreamPosition(ctx)
 }
 
-func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
+func (s *Biz) appendWorkspaceRecord(ctx context.Context, record *eventstreammodel.EventRecord) error {
 	if s == nil || s.repo == nil || record == nil || record.WorkspaceID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -883,6 +875,8 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 		OccurredAt:   data.OccurredAt,
 		Payload: (recordpayload.LLMUsagePayloadData{
 			RequestID:             data.RequestID,
+			LogicalRequestID:      data.LogicalRequestID,
+			PhysicalCallID:        data.PhysicalCallID,
 			WorkspaceID:           string(data.WorkspaceID),
 			RunID:                 string(data.RunID),
 			StepID:                data.StepID,
@@ -902,6 +896,7 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 			UsageSource:           data.UsageSource,
 			RequestBytes:          data.RequestBytes,
 			ResponseBytes:         data.ResponseBytes,
+			PhysicalResponseMode:  data.PhysicalResponseMode,
 			ContextBudget:         data.ContextBudget,
 			CacheUsage:            data.CacheUsage,
 			StartedAt:             data.StartedAt,
@@ -935,7 +930,7 @@ func decisionResolvedRecord(topic string, data decisionevents.TicketResolvedData
 	return ret
 }
 
-func (s *Service) publishRecordAppended(ctx context.Context, record *eventstreammodel.EventRecord) error {
+func (s *Biz) publishRecordAppended(ctx context.Context, record *eventstreammodel.EventRecord) error {
 	if s == nil || s.EventHub() == nil || record == nil {
 		return common.ErrInvalidArgument
 	}
@@ -962,7 +957,7 @@ func (s *Service) publishRecordAppended(ctx context.Context, record *eventstream
 	return nil
 }
 
-func (s *Service) Stop() {
+func (s *Biz) Stop() {
 	if s == nil {
 		return
 	}
@@ -979,14 +974,14 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) ListEvents(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (s *Biz) listEvents(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if s == nil || s.repo == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return s.repo.List(ctx, query)
 }
 
-func (s *Service) PurgeWorkspaceEvents(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
+func (s *Biz) purgeWorkspaceEvents(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
 	if s == nil || s.repo == nil || workspaceID == "" {
 		return 0, common.ErrInvalidArgument
 	}
@@ -999,7 +994,7 @@ func (s *Service) PurgeWorkspaceEvents(ctx context.Context, workspaceID common.W
 	return deleted, err
 }
 
-func (s *Service) forgetWorkspaceRevision(workspaceID common.WorkspaceID) {
+func (s *Biz) forgetWorkspaceRevision(workspaceID common.WorkspaceID) {
 	if s == nil || workspaceID == "" {
 		return
 	}

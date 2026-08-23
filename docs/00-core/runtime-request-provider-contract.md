@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Typed Request Binding
 
@@ -68,17 +68,40 @@ media type 在读取 body 前校验。bounded reader 只多探测一个 byte 以
 都形成 typed provider-protocol fact；LLM owner保留原始 guard code/response-byte audit，Orchestrator不得从错误文本改写
 其 factual identity。
 
-Responses/stream/embedding redirect 只允许同源且最多 10 次 physical submission（包含初始请求）。注入 client 的
-`CheckRedirect` 只能进一步收窄策略，不能绕过 owner 的 origin/hop guard 或授权无界 307/308 POST body replay。
+Responses/stream/embedding 对任意 redirect 都在第二次网络提交前 fail-closed：一个 `PhysicalCallID` 恰好只授权
+一次 physical submission；任何后续 provider 调用都必须由 Orchestrator 以新的 physical identity 和预算 reservation
+明确授权。注入 client 的 `CheckRedirect` 不能放宽该 owner at-most-once guard；跨 origin redirect 仍保留精确 typed
+protocol identity。
 
 ## Whole-Document Transaction
 
-semantic-plan 与 operations 均要求一次 response 返回恰好一个完整、紧凑 JSON object：无 Markdown fence、解释、
-前后缀或重复输入；object `additionalProperties=false`，renderer、schema、strict decoder 与 evaluator 共用同一
-vocabulary、shape 和 sealed limit。
+semantic-plan 与 operations 均要求 wire normalization 后的 canonical document 是恰好一个完整、紧凑 JSON object：
+无 Markdown fence、解释、前后缀或重复输入；object `additionalProperties=false`，renderer、schema、strict decoder 与
+evaluator 共用同一 vocabulary、shape 和 sealed limit。
+
+provider-facing instruction 仍严格要求裸 JSON。兼容边界最多只可移除一层完整、独占响应的精确 JSON code fence；
+raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺失 closing fence、多 fence 或
+多 JSON value 都不得由该 normalization 放宽。
 
 - incomplete/EOF、output limit、timeout、429/5xx 与允许恢复的 transport failure 只进入 request-session recovery；
-- 401/403、configuration/protocol failure、submission-unknown 和 recovery exhausted 形成 typed request fact；
+- 401/403、configuration/protocol failure、submission-unknown 和 document recovery exhausted 形成 typed request fact；
+- LLM EventHub result 必须是 `Stale | Feedback | DocumentOutcome` exactly-one。complete `DocumentOutcome` 才能携带
+  与 framing hash/bytes 精确匹配的 opaque document content；incomplete/empty/invalid outcome 禁止携带 content，旧
+  顶层 content fallback 不存在；
+- 每个 result 必须携带 LLM-owner sealed audit，并逐项匹配 workspace/run、logical request、physical call、document kind、
+  target、stable prefix 与 context budget。`providerSubmitted` 只由 protocol adapter 在调用 physical client 的边界写入；
+  `requestBytes` 只是序列化计量，不能推断 submission。`DocumentOutcome` 必须 submitted，stale 必须 unsubmitted，
+  transient/authentication 必须 submitted；unsubmitted fact 禁止 response bytes、usage/actual tokens，并固定 non-streaming；
+- Orchestrator 把 audit 归一为 owner-private `confirmed | released | unknown` settlement，并在同一次 aggregate CAS 中与
+  request-session transition 一起结算全部 physical-call allocations。unsubmitted exact fact 才 release；submitted fact
+  confirm physical call，缺失/不可信 fact 只能 unknown 并封存 submission-unknown，不能重放；
+- recoverable incomplete/transient observation 必须在一次 Orchestrator CAS 中同时完成 settlement、SM-3 session推进、
+  必要的 SM-4 transport budget 消费与耗尽时的 SM-2 failure。body-idle 使用同一 transient path；只有 confirmed
+  submission 可恢复，released/unknown 均不得进入 retry；
+- authentication/configuration/protocol/submission-unknown/document-recovery-exhausted 先归一为一个 Orchestrator owner-private
+  terminal fact，再在同一次 aggregate CAS 中同时关闭 SM-3 request session 并应用其确定性的 SM-2 failure。CAS 写入前
+  中断只留下 submitted marker，fresh reload 必须封存 submission-unknown 且零 provider replay；CAS 已写入但响应丢失时
+  fresh reload 复用 exact terminal/failure，duplicate 零写入；
 - request failure 不创建 candidate attempt；不得跨 physical call 拼接 partial output 或把 raw suffix 注入下一次 prompt；
 - 每个 retry 使用新的 `PhysicalCallID`，但保持 logical request、ExpectedDocument、C0～C3、transaction、batch 与 stable prefix；
 - complete document 只进入一个 evaluator；candidate attempt 0/1 与 physical-call recovery 是独立预算。
@@ -90,7 +113,8 @@ vocabulary、shape 和 sealed limit。
 每次 logical request 至少持久化：
 
 - `LogicalRequestID`、每次 `PhysicalCallID`、recovery generation；
-- document kind、expected-document hash、response hash/bytes、document disposition、`providerSubmitted`；
+- document kind、expected-document hash、response hash/bytes、document disposition、`providerSubmitted`、
+  `PhysicalResponseMode=streaming|non_streaming`；任何旧 `streaming` 布尔投影只能由该 mode 派生；
 - `StablePrefixHash`、各 section hash、`WorkspaceDefinitionHash`、`CapabilityContractHash`；
 - current focus/required-output bundle hash、volatile-tail hash、Definition revision/change impact；
 - included、normalized、compressed、omitted、redacted sections；
@@ -99,6 +123,11 @@ vocabulary、shape 和 sealed limit。
 历史字段名 `stageBundleHash` 可以作为存储兼容名存在，但其语义只能是 current focus/required-output bundle，
 不能恢复 StagePacket/NextAction。raw request/response body、credential、endpoint 与未脱敏内容只记录允许的 hash、
 bytes、disposition 和 redacted/omitted metadata。
+
+LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId`/`physicalCallId`（Runtime request）、
+`providerSubmitted` 与 `physicalResponseMode`；Runtime usage 的两级 identity 必须同时非空且
+`physicalCallId=requestId`。generic usage 与引入双层 identity 前的 persisted trace 可以两者都没有，但任何 consumer
+不得从 `RequestID`、request bytes 或 streaming 隐含/补造 logical identity。
 
 attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestrator-sealed `CorrectionDirective`。若修正需要
 改变 operation authorization、target policy、allowed targets、manifest 或 C0～C3，则必须终止 current transaction，

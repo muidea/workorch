@@ -5,10 +5,9 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
-func TestRuntimeExecutionBudgetReserveObserveAndProject(t *testing.T) {
+func TestRuntimeProviderBudgetAllocationSpecsReserveJoinAndProject(t *testing.T) {
 	ledger, err := NewRuntimeExecutionBudgetLedger(DefaultRuntimeExecutionBudgetPolicy())
 	if err != nil {
 		t.Fatal(err)
@@ -25,17 +24,37 @@ func TestRuntimeExecutionBudgetReserveObserveAndProject(t *testing.T) {
 	if err != nil || !duplicate || len(replayed.Allocations) != len(reserved.Allocations) {
 		t.Fatalf("duplicate reserve duplicate=%t err=%v", duplicate, err)
 	}
-	observation, err := NewRuntimeProviderBudgetObservation("logical-1", "physical-1", RuntimeProviderConsumptionConfirmed, &llmaudit.ProviderUsage{InputTokens: 17, OutputTokens: 9, TotalTokens: 26})
-	if err != nil {
-		t.Fatal(err)
+	confirmed := reserved
+	joins := make([]RuntimeBudgetConsumptionJoin, 0, len(allocations))
+	for _, allocation := range allocations {
+		amount := int64(1)
+		switch allocation.Dimension {
+		case RuntimeBudgetDimensionProviderInputToken:
+			amount = 17
+		case RuntimeBudgetDimensionProviderOutputToken:
+			amount = 9
+		}
+		join := RuntimeBudgetConsumptionJoin{
+			AllocationID: allocation.AllocationID, Owner: RuntimeModuleLLM, PhysicalConsumptionID: "physical-1",
+			ConfirmedAmount: amount, OwnerResultRef: "llm/provider-request-audit/physical-1", OwnerResultHash: "audit-hash-1",
+		}
+		var changed bool
+		confirmed, _, changed, err = JoinRuntimeBudgetConsumption(confirmed, join)
+		if err != nil || !changed {
+			t.Fatalf("join dimension=%s changed=%t err=%v", allocation.Dimension, changed, err)
+		}
+		joins = append(joins, join)
 	}
-	confirmed, changed, err := ApplyRuntimeProviderBudgetObservation(reserved, observation)
-	if err != nil || !changed {
-		t.Fatalf("confirm changed=%t err=%v", changed, err)
+	duplicateConfirmed := confirmed
+	for _, join := range joins {
+		var changed bool
+		duplicateConfirmed, _, changed, err = JoinRuntimeBudgetConsumption(duplicateConfirmed, join)
+		if err != nil || changed {
+			t.Fatalf("duplicate join allocation=%s changed=%t err=%v", join.AllocationID, changed, err)
+		}
 	}
-	duplicateConfirmed, changed, err := ApplyRuntimeProviderBudgetObservation(confirmed, observation)
-	if err != nil || changed || len(duplicateConfirmed.Consumptions) != len(confirmed.Consumptions) {
-		t.Fatalf("duplicate observation changed=%t err=%v", changed, err)
+	if len(duplicateConfirmed.Consumptions) != len(confirmed.Consumptions) {
+		t.Fatalf("duplicate join changed consumption count: got=%d want=%d", len(duplicateConfirmed.Consumptions), len(confirmed.Consumptions))
 	}
 	view, err := BuildRuntimeExecutionBudgetView("ws-1", "run-1", 7, confirmed, "", "")
 	if err != nil {
@@ -44,38 +63,6 @@ func TestRuntimeExecutionBudgetReserveObserveAndProject(t *testing.T) {
 	assertRuntimeBudgetDimensionView(t, view, RuntimeBudgetDimensionProviderCall, 1, 0, 0)
 	assertRuntimeBudgetDimensionView(t, view, RuntimeBudgetDimensionProviderInputToken, 17, 0, 0)
 	assertRuntimeBudgetDimensionView(t, view, RuntimeBudgetDimensionProviderOutputToken, 9, 0, 0)
-}
-
-func TestRuntimeExecutionBudgetUnknownIsNotZeroAndExactReconciliationCanConfirm(t *testing.T) {
-	ledger, err := NewRuntimeExecutionBudgetLedger(DefaultRuntimeExecutionBudgetPolicy())
-	if err != nil {
-		t.Fatal(err)
-	}
-	specs, _ := RuntimeProviderBudgetAllocationSpecs(ledger, RuntimeProviderDocumentOperations, 0, 1, "logical-unknown", "physical-unknown")
-	ledger, _, _, err = ReserveRuntimeBudgetAllocations(ledger, specs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown, _ := NewRuntimeProviderBudgetObservation("logical-unknown", "physical-unknown", RuntimeProviderConsumptionUnknown, nil)
-	ledger, changed, err := ApplyRuntimeProviderBudgetObservation(ledger, unknown)
-	if err != nil || !changed {
-		t.Fatalf("unknown observation changed=%t err=%v", changed, err)
-	}
-	view, err := BuildRuntimeExecutionBudgetView("ws-1", "run-1", 2, ledger, "wait-1", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertRuntimeBudgetDimensionView(t, view, RuntimeBudgetDimensionProviderCall, 0, 0, 1)
-	confirmed, _ := NewRuntimeProviderBudgetObservation("logical-unknown", "physical-unknown", RuntimeProviderConsumptionConfirmed, &llmaudit.ProviderUsage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5})
-	ledger, changed, err = ApplyRuntimeProviderBudgetObservation(ledger, confirmed)
-	if err != nil || !changed {
-		t.Fatalf("exact reconciliation changed=%t err=%v", changed, err)
-	}
-	view, err = BuildRuntimeExecutionBudgetView("ws-1", "run-1", 3, ledger, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertRuntimeBudgetDimensionView(t, view, RuntimeBudgetDimensionProviderCall, 1, 0, 0)
 }
 
 func TestRuntimeExecutionBudgetExhaustionIsTypedAndDoesNotMutateLedger(t *testing.T) {

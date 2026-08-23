@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## 规范化候选合同
 
@@ -134,11 +134,15 @@ provider dependency/governance 在进入 candidate pipeline 前单独处理。�
 
 | 结果 | 来源 | 状态机行为 |
 | --- | --- | --- |
-| `request_recoverable` | EOF、output limit、timeout、429/5xx、未完成 document | 同一 sealed expected-document 的 whole-document 有界恢复；不创建 attempt、不拼接 raw suffix |
-| `request_terminal` | provider authentication/configuration/protocol/submission unknown、request recovery exhausted 或 prerequisite stale | 先持久化 safe original diagnostic；转为 SM-3 internal event，再按 typed dependency、freshness 或 terminal 合同处理；不创建 attempt |
+| `request_recoverable` | EOF、output limit、timeout、429/5xx、未完成 document | 仅接受 LLM owner 已确认 physical submission 的 fact；同一次 Orchestrator CAS 结算本次调用、推进 SM-3 session、消费适用的 SM-4 transport budget，并在耗尽时应用 SM-2 failure；随后才可用新 PhysicalCallID 做同一 sealed expected-document 的 whole-document 有界恢复；不创建 attempt、不拼接 raw suffix |
+| `request_terminal` | provider authentication/configuration/protocol/submission unknown 或 document recovery exhausted | 归一为唯一 owner-private fact，在同一次 Orchestrator aggregate CAS 中关闭 SM-3 session 并应用 exact SM-2 failure；CAS-before fresh reload 只从 submitted marker 封存 unknown，CAS-after/duplicate 复用 exact terminal；不创建 attempt、不重调 provider |
 | `candidate_rejection` | CandidateEvaluator 的 complete typed rejection | 先持久化 original diagnostic；由 SM-3 owner-local reducer 决定唯一 correction 或 typed terminal |
-| `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由SM-2退休prerequisite、取得新authority；只有独立typed recovery condition/trigger/deadline/budget完整时形成recoverable wait，否则typed terminal；零correction attempt |
+| `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由SM-2退休prerequisite、取得新authority；只有独立typed recovery condition/trigger/deadline/budget完整时形成recoverable wait，否则typed terminal；零correction attempt。它不与 provider request terminal 共用结果或 transition |
 | `accepted` | evaluator 接受且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
+
+`requestBytes>0`、selected streaming mode、错误文本或 reservation 都不证明 physical submission。exact unsubmitted audit
+必须在对应 session transition CAS 中 release reservations；缺失/篡改 audit 只能结算为 unknown 并终止当前 request，禁止
+以 application retry、transport fallback 或 fresh reload 再次提交。
 
 sealed execute adapter必须把完整operation payload、catalog/policy revision、exact owner subject、effect/replay class、
 ExecutionKey/Fence和适用governance grant绑定到receiving-owner concrete command。owner在任何call/effect前重新验证producer、

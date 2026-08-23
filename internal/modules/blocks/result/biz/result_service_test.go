@@ -27,7 +27,7 @@ func (r *failOnceArtifactDeleteRepository) Delete(ctx context.Context, id common
 
 func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewResultRepository(), memory.NewArtifactRepository())
+	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
 	if err := service.CreateResult(ctx, &resultmodel.Result{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("CreateResult err = %v, want invalid argument", err)
 	}
@@ -43,7 +43,7 @@ func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 
 func TestServiceCRUD(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewResultRepository(), memory.NewArtifactRepository())
+	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
 	result := validTestResult()
 	if err := service.CreateResult(ctx, result); err != nil {
 		t.Fatalf("CreateResult: %v", err)
@@ -85,7 +85,7 @@ func TestServiceEnforcesArtifactParentScopeAndDeleteOrder(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()
 	artifactRepo := memory.NewArtifactRepository()
-	service := NewService(resultRepo, artifactRepo)
+	service := newService(resultRepo, artifactRepo)
 	result := validTestResult()
 	if err := service.CreateResult(ctx, result); err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestServiceEnforcesArtifactParentScopeAndDeleteOrder(t *testing.T) {
 
 func TestResultTransitionMatrixRejectsTerminalRegression(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewResultRepository(), memory.NewArtifactRepository())
+	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
 	result := validTestResult()
 	if err := service.CreateResult(ctx, result); err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestResultTransitionMatrixRejectsTerminalRegression(t *testing.T) {
 
 func TestServiceRejectsTerminalMaterialMutation(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(memory.NewResultRepository(), memory.NewArtifactRepository())
+	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
 	item := validTestResult()
 	item.TerminalMaterialHash = "result-material-sha256:immutable"
 	item.TerminalDelivery = &runtimecontract.RuntimeTerminalDeliveryIdentity{TerminalDeliveryID: "delivery-immutable"}
@@ -171,7 +171,7 @@ func TestResultAggregateDeleteResumesOrphanCleanupAfterInterruption(t *testing.T
 	results := memory.NewResultRepository()
 	baseArtifacts := memory.NewArtifactRepository()
 	artifacts := &failOnceArtifactDeleteRepository{ArtifactRepository: baseArtifacts}
-	service := NewService(results, artifacts)
+	service := newService(results, artifacts)
 	item := validTestResult()
 	if err := service.CreateResult(ctx, item); err != nil {
 		t.Fatal(err)

@@ -19,7 +19,6 @@ func TestRunViewProjectsRunModel(t *testing.T) {
 		DefinitionRevision: "goal:goal-run-view|dod:dod-run-view",
 		InitialStepKind:    "llm/workspace_execution",
 		State:              common.RunStateActive,
-		Priority:           7,
 		BlockingTicketID:   "ticket-run-view",
 		BlockingApprovalID: "approval-run-view",
 		FailureReason:      "seeded failure",
@@ -35,8 +34,8 @@ func TestRunViewProjectsRunModel(t *testing.T) {
 	if got.DefinitionRevision != item.DefinitionRevision {
 		t.Fatalf("definitionRevision = %q, want %q", got.DefinitionRevision, item.DefinitionRevision)
 	}
-	if got.State != string(item.State) || got.Priority != item.Priority {
-		t.Fatalf("state/priority = %q/%d, want %q/%d", got.State, got.Priority, item.State, item.Priority)
+	if got.State != string(item.State) {
+		t.Fatalf("state = %q, want %q", got.State, item.State)
 	}
 	if got.BlockingTicketID != string(item.BlockingTicketID) || got.BlockingApprovalID != string(item.BlockingApprovalID) {
 		t.Fatalf("blocking IDs = ticket:%q approval:%q, want seeded IDs", got.BlockingTicketID, got.BlockingApprovalID)

@@ -26,7 +26,7 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	service         *Service
+	service         *mutationService
 	tickets         repository.DecisionTicketRepository
 	resolutions     repository.DecisionResolutionRepository
 	topics          []string
@@ -40,7 +40,7 @@ func New(h magicevent.Hub, background magictask.BackgroundRoutine, deps Dependen
 	if deps.Tickets == nil || deps.Resolutions == nil || deps.EventHub == nil || h == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, background), service: NewService(deps.Tickets, deps.Resolutions), tickets: deps.Tickets, resolutions: deps.Resolutions}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, background), service: newMutationService(deps.Tickets, deps.Resolutions), tickets: deps.Tickets, resolutions: deps.Resolutions}, nil
 }
 
 func (m *Biz) Start() error {

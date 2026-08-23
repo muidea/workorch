@@ -4,7 +4,7 @@ Status: normative
 
 Type: domain-model
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Ownership Map
 
@@ -23,7 +23,8 @@ Last Verified: 2026-08-21
 当前 Run owner model 的稳定字段组包括：
 
 - owner-local `Revision`、Run/Workspace/Goal/DoD identity、`DefinitionRevision` 与 immutable `StartupInputHash`；
-- `RuntimeBootstrap`、`ActivationRequestID`、priority 与 lineage；
+- `RuntimeBootstrap`、`ActivationRequestID` 与 lineage；caller-controlled Run priority 不属于 activation、replacement 或
+  persisted Run identity，acceptance/context/Soul 等独立业务排序也不能成为执行调度权威；
 - `RuntimeState` 和 opaque lifecycle fence；
 - `ReconciliationRequestID` 与 reconciliation scope；
 - `RuntimeActivationStatus`、SM-1 `State`、blocking ticket/approval；

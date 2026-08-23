@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Purpose And Authority
 
@@ -26,7 +26,6 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 ```json
 {
   "intent": "resume",
-  "priority": 0,
   "requestId": "optional-request-id",
   "reason": "optional-reason",
   "source": "optional-source"
@@ -34,13 +33,20 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 ```
 
 - `intent` 空值规范化为 `resume`，只允许 `resume|restart`；
+- execution admission 不接受 body/query/header priority；Run 顺序与 owner activation identity 不由 caller priority 控制；
 - caller 不能注入 RunID、Goal/DoD、provider/Soul/Skill/MCP/Memory selection、Runtime context、target state 或 successor identity；
 - fresh Start/Restart 必须绑定 exact `WorkspaceActivationAdmission=eligible`；pending/missing/mismatch 返回
   `definition_clarification_pending`，零 Run/replacement intent；
 - Resume 只复用 existing Run 的 original sealed startup input，不吸收 newer candidate/revision；
 - Restart 使用 fresh eligible bootstrap；Run owner先 seal predecessor `ReplacementIntent`，terminal delivery 完成后才创建 successor；
-- handler 同步等待并校验 Workspace owner result；only owner-admitted intent 返回 `202`，不存在
-  application-local queue/queued acknowledgement；owner 拒绝在当前请求返回，non-current predecessor 返回 `data_reset_required`。
+- handler 同步等待并校验 exact Workspace owner result。只有 `reconciliation_requested|replacement_pending` 返回
+  `202`；`restart_required|fresh_activation_required|definition_changed_requires_restart|governance_required|data_reset_required`
+  返回 typed `409`。两类响应都原样携带 `workspaceId/runId/requestId/intent/outcome/reason`，不存在
+  application-local queue/queued acknowledgement；`requestReason` 与 owner-authored `reason` 分离。
+
+响应中的 `accepted`、`state=accepted|rejected`、HTTP status 和 display diagnostic 只由共享 pure admission classifier
+从已校验 owner outcome 生成。HTTP、projection、client、Web/TUI 不得各自重判 outcome；projection 还保留 exact
+`outcome/admissionReason`，SSE 只发布 immutable projection invalidation。
 
 以下 mutation 永久不属于当前 API：run-addressed create/start/resume、`execution-restarts`、
 `ExecutionContextPatch`、caller-selected target state 或 successor。

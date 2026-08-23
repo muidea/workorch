@@ -31,7 +31,6 @@ type WorkspaceRunRequestedCommand struct {
 	Reason      string
 	RequestID   string
 	Source      string
-	Priority    int
 }
 
 // WorkspaceRunRequestedResult is the unmodified admission outcome produced by

@@ -224,8 +224,18 @@ if data.get("intent") != "restart":
     errors.append(f"intent is {data.get('intent')!r}, want restart")
 if not str(data.get("requestId") or "").strip():
     errors.append("requestId is empty")
-if data.get("reason") != "e2e_restart":
-    errors.append(f"reason is {data.get('reason')!r}, want e2e_restart")
+valid_admissions = {
+    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
+    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
+}
+outcome = data.get("outcome")
+owner_reason = data.get("reason")
+if owner_reason not in valid_admissions.get(outcome, set()):
+    errors.append(f"owner admission outcome/reason is {outcome!r}/{owner_reason!r}")
+if data.get("state") != "accepted":
+    errors.append(f"state is {data.get('state')!r}, want accepted")
+if data.get("requestReason") != "e2e_restart":
+    errors.append(f"requestReason is {data.get('requestReason')!r}, want e2e_restart")
 if errors:
     raise SystemExit("\n".join(errors))
 PY

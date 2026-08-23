@@ -440,7 +440,6 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 		ID:          "run-compact-running",
 		WorkspaceID: "ws-run-compact",
 		State:       common.RunStateActive,
-		Priority:    3,
 	}); err != nil {
 		t.Fatalf("create running run: %v", err)
 	}
@@ -476,7 +475,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	if len(items) != 1 || items[0].ID != "run-compact-running" {
 		t.Fatalf("items = %+v, want only running run", items)
 	}
-	if items[0].Priority != 3 || items[0].WorkspaceID != "ws-run-compact" {
+	if items[0].WorkspaceID != "ws-run-compact" || items[0].State != common.RunStateActive {
 		t.Fatalf("compact item = %+v, want metadata", items[0])
 	}
 }

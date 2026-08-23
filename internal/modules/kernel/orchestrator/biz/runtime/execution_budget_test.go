@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -32,11 +33,8 @@ func TestCandidateProviderBudgetIsReservedBeforeSubmissionAndConfirmedWithOutcom
 		t.Fatal(err)
 	}
 	assertRuntimeExecutionDimension(t, view, runtimecontract.RuntimeBudgetDimensionProviderCall, 0, 1, 0)
-	observation, err := runtimecontract.NewRuntimeProviderBudgetObservation(session.LogicalRequestID, physicalCallID, runtimecontract.RuntimeProviderConsumptionConfirmed, &llmaudit.ProviderUsage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18})
-	if err != nil {
-		t.Fatal(err)
-	}
-	completed, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, &observation)
+	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalCallID, &llmaudit.ProviderUsage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18})
+	completed, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, settlement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,17 +63,153 @@ func TestCandidateProviderBudgetObservationMustMatchSubmittedPhysicalCall(t *tes
 	if _, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID); err != nil {
 		t.Fatal(err)
 	}
-	drifted, err := runtimecontract.NewRuntimeProviderBudgetObservation(session.LogicalRequestID, "physical-other", runtimecontract.RuntimeProviderConsumptionConfirmed, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	drifted := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-other", nil)
 	saves := repository.saves
-	if _, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, &drifted); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.planning.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID, drifted); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("drifted provider budget observation err=%v, want conflict", err)
 	}
 	stored := repository.aggregate.CandidateRequestSessions[0]
 	if repository.saves != saves || !stored.ProviderSubmitted || stored.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		t.Fatalf("drifted observation changed request session: saves=%d/%d session=%+v", repository.saves, saves, stored)
+	}
+}
+
+func TestProviderBudgetReleaseCoordinatesOperationsAndSemanticTerminalInOneCAS(t *testing.T) {
+	ctx := context.Background()
+	for _, kind := range []runtimecontract.RuntimeProviderDocumentKind{
+		runtimecontract.RuntimeProviderDocumentOperations,
+		runtimecontract.RuntimeProviderDocumentSemanticPlan,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			var aggregate RuntimeAggregate
+			var session runtimecontract.RuntimeCandidateRequestSession
+			if kind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+				aggregate, session = preparedSemanticProviderTerminalSession(t)
+			} else {
+				aggregate, session = preparedOperationsProviderTerminalSession(t)
+			}
+			repository := &providerTerminalCASRepository{aggregate: aggregate, mode: providerTerminalCASNormal}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit := runtimecontract.ProviderRequestAuditView{
+				RequestID: session.LastPhysicalCallID, LogicalRequestID: session.LogicalRequestID, PhysicalCallID: session.LastPhysicalCallID,
+				WorkspaceID: string(aggregate.Facts.WorkspaceID), RunID: string(aggregate.Facts.RunID),
+				Status: "failed", ProviderSubmitted: false, PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+				ContextBudget: llmaudit.ContextBudget{ProviderID: "test-provider", ModelID: "test-model"},
+				// Serialized request bytes are not a submission fact. A nonzero value
+				// must therefore not prevent exact release.
+				RequestBytes: 137,
+			}
+			settlement, err := NewRuntimeProviderBudgetSettlementFromAudit(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, session.LastPhysicalCallID, &audit, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if settlement.Status != RuntimeProviderBudgetSettlementReleased {
+				t.Fatalf("unsubmitted audit settlement=%+v", settlement)
+			}
+			diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+				OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+				OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderConfiguration),
+				OriginalCode:  "provider_configuration_unavailable", OriginalMessage: "provider configuration unavailable before submit", Signature: "provider-configuration-unavailable/exact",
+			}
+			terminalCode := "provider_configuration"
+			if kind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+				terminalCode = "semantic_provider_configuration"
+			}
+			terminal, err := NormalizeRuntimeProviderRequestTerminal(RuntimeProviderRequestTerminalInput{
+				DocumentKind: kind, OutcomeClass: runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration,
+				TerminalCode: terminalCode, TerminalSignature: strings.ReplaceAll(terminalCode, "_", "-"),
+				Message: diagnostic.OriginalMessage, OriginalDiagnostic: &diagnostic,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			persisted, err := controller.planning.coordinateProviderRequestTerminal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, terminal, &settlement)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if repository.saves != 1 || persisted.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal || persisted.Facts.Failure == nil {
+				t.Fatalf("release terminal was not one CAS: saves=%d aggregate=%+v", repository.saves, persisted)
+			}
+			matched := 0
+			for _, allocation := range persisted.ExecutionBudget.Allocations {
+				if allocation.LogicalConsumptionID != session.LogicalRequestID || allocation.ScopeRef != session.LastPhysicalCallID {
+					continue
+				}
+				matched++
+				if allocation.State != runtimecontract.RuntimeBudgetAllocationReleased || allocation.OwnerFactRef != settlement.OwnerFactRef {
+					t.Fatalf("unsubmitted allocation was not exactly released: %+v", allocation)
+				}
+			}
+			if matched == 0 || len(persisted.ExecutionBudget.Consumptions) != 0 {
+				t.Fatalf("release consumed provider budget: matched=%d consumptions=%+v", matched, persisted.ExecutionBudget.Consumptions)
+			}
+			fresh, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed, err := fresh.planning.coordinateProviderRequestTerminal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, terminal, &settlement)
+			if err != nil || replayed.StateRevision != persisted.StateRevision || repository.saves != 1 {
+				t.Fatalf("fresh release replay changed state: saves=%d aggregate=%+v err=%v", repository.saves, replayed, err)
+			}
+		})
+	}
+}
+
+func TestProviderBudgetSettlementRejectsUntrustedSubmissionFacts(t *testing.T) {
+	audit := runtimecontract.ProviderRequestAuditView{
+		RequestID: "physical-1", LogicalRequestID: "logical-1", PhysicalCallID: "physical-1",
+		WorkspaceID: "ws-1", RunID: "run-1", Status: "failed",
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+		ContextBudget:        llmaudit.ContextBudget{ProviderID: "test-provider", ModelID: "test-model"},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage
+	}{
+		{name: "physical_identity", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.RequestID = "physical-other"
+			return nil
+		}},
+		{name: "logical_identity", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.LogicalRequestID = "logical-other"
+			return nil
+		}},
+		{name: "physical_call_identity", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.PhysicalCallID = "physical-other"
+			return nil
+		}},
+		{name: "workspace_scope", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.WorkspaceID = "ws-other"
+			return nil
+		}},
+		{name: "run_scope", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.RunID = "run-other"
+			return nil
+		}},
+		{name: "response_mode", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.PhysicalResponseMode = "stream"
+			return nil
+		}},
+		{name: "unsubmitted_usage", mutate: func(*runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			return &llmaudit.ProviderUsage{TotalTokens: 1}
+		}},
+		{name: "context_submission", mutate: func(a *runtimecontract.ProviderRequestAuditView) *llmaudit.ProviderUsage {
+			a.ContextBudget.ProviderSubmitted = true
+			return nil
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			value := audit
+			usage := tc.mutate(&value)
+			if _, err := NewRuntimeProviderBudgetSettlementFromAudit("ws-1", "run-1", "logical-1", "physical-1", &value, usage); err == nil {
+				t.Fatal("untrusted provider submission fact was accepted")
+			}
+		})
 	}
 }
 
@@ -95,9 +229,17 @@ func TestCandidateProviderTransportRetryUsesDistinctPhysicalAllocation(t *testin
 	if _, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, firstPhysicalCallID); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := controller.recordCandidateRequestTransportOutcome(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, firstPhysicalCallID, runtimecontract.RuntimeCandidateRequestOutcome{
+	transportOutcome := runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: "provider_timeout", Signature: "provider-timeout",
-	})
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderTransient),
+		OriginalCode:  transportOutcome.Code, OriginalMessage: "provider timed out", Signature: transportOutcome.Signature,
+	}
+	recovery := runtimeProviderTransportRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, transportOutcome, diagnostic.OriginalMessage, &diagnostic)
+	pending, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, firstPhysicalCallID, recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, firstPhysicalCallID, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

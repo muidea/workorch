@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 组件类型
 
@@ -38,6 +38,11 @@ Eventstream 正式拥有两个不同的顺序身份：
 
 查询命令不暴露 repository query 或 entity。`EventQuery` 在 owner 内完成 trim、去重、limit 校验和 repository query 映射；list、high-watermark 与 purge 分别使用不可混淆的具体 result，不使用可空字段联合 envelope。
 
+`biz.Biz` 只向 `module.go` 暴露标准构造与 Start/Stop 生命周期；repository-facing list/high-watermark/purge 实现均为
+owner-private helper，不存在可被 sibling 直接调用的 `Service/NewService*` 或 `PurgeWorkspaceEvents` facade。purge 的唯一
+执行入口是 `TopicEventStreamCommandPurgeWorkspace` concrete handler，经 source、typed payload、scope 与同步 result 校验后
+才调用私有实现。
+
 所有命令 handler 都先要求非空同步 result，再执行读取或写入。因而误用 `PostEvent` 不会执行 purge，也不会执行 Approval 的同步审计 checkpoint。Purge 与 append 串行，memory backend 物理移除目标记录；file backend 压缩 Eventstream 自有的 `events/payloads/ids/deleted` 数据，同时保留同目录下其他 owner 状态和全局 stream-position 计数。重复 purge 返回 0。
 
 ## 来源、payload 与实时输出边界
@@ -45,6 +50,11 @@ Eventstream 正式拥有两个不同的顺序身份：
 - 每个订阅同时校验 topic、具体 data 类型、必要 typed identity/`Validate()` 与精确 `event.Source()`；Eventstream 不把来路不明的同形 DTO 改写成正式 owner 记录。
 - stable Result、Decision、Approval notification 以 owner 派生的 `NotificationID` 作为 EventRecord ID。相同 ID 仅在持久化记录与预期 topic/source/scope/payload 完全一致时视为 exact replay；内容漂移仍是 conflict。
 - typed payload encoder 不保存 Memory 正文、Goal/DoD 原文、Decision resolution material 或 Approval context 原文；这些材料只保存 hash、bytes、count 等审计摘要。
+- LLM usage payload 无损保存 owner 提供的 `logicalRequestId`/`physicalCallId`（Runtime usage 两者必须完整且
+  `physicalCallId=requestId`）、bounded `physicalResponseMode=streaming|non_streaming` 与 exact
+  `providerSubmitted`；generic usage 可以不携带双层身份，Eventstream 不补造。兼容展示所需的 `streaming` 只能由
+  mode 纯派生。Eventstream 不按 request bytes、streaming、provider/model/status 推测身份、提交或模式，也不保存 provider raw body、
+  prompt、credential、Authorization 或 endpoint。
 - `SanitizeAuditPayload` 是追加前和 owner 读出前的双重 guard：递归脱敏 secret-like key，并限制 payload 为 16 KiB、最多 32 个字段/数组项、单字符串 512 bytes、最大深度 4；无法安全容纳的内容退化为确定性 hash/size 摘要。旧版本已落库的 payload 也必须经过读边界清洗后才能进入 EventHub/SSE。
 - file repository 只在持久化读取边界兼容旧版大 payload 占位格式：`Payload:null` 必须同时具有非空 `PayloadRef`，随后按该 locator 读取对象形态的外置 payload；读取过程不改写历史 JSONL。无引用的 `null`、数组或标量仍以 invalid payload fail-closed。
 - `EventRecordData.Validate()` 要求完整 immutable identity/source、正 `StreamPosition`、workspace-local 正 revision，以及已经清洗且有界的 payload；Application 消费者还校验发布 source 必须是 `blocks/eventstream`。
@@ -62,6 +72,8 @@ Eventstream 正式拥有两个不同的顺序身份：
 - topic/data/source/identity 校验、伪造 producer 拒绝与订阅释放；
 - concrete result、默认/最大 limit、high-watermark 范围和 Post 强写拒绝；
 - payload 脱敏、深度/长度/总量边界、旧记录读边界清洗；
+- LLM physical response mode 在 streaming/non-streaming、失败/output-limit 与 embedding/preflight 场景下 round-trip，
+  `streaming` boolean 仅为派生值，且 raw provider request/response material 不落盘；
 - legacy `Payload:null + PayloadRef` 外置对象的只读回填与历史 JSONL 不改写；inline `null`、数组、标量继续拒绝；
 - stable notification exact replay、conflicting/failed append 不发布虚假记录、瞬时失败重试；
 - workspace revision 单调、跨 workspace clock skew、全局 `StreamPosition` cursor、重启与 purge 后计数语义；

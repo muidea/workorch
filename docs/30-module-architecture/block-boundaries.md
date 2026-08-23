@@ -4,7 +4,7 @@ Status: normative
 
 Type: module-architecture
 
-Last Verified: 2026-08-21
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -39,6 +39,11 @@ module.go
 - `service/` 只做本 Block 的协议适配，不接收 EventHub，不访问其它 owner repository/service；
 - `pkg/events` 由接收 owner 定义 concrete topic、Command/Data/Result；调用方不得复制或建立共享 alias；
 - owner-private entity/repository/mapper 留在 Block 内部，不通过 `pkg/models` 泄漏可变资源。
+- resource owner 的 repository-facing mutation implementation、constructor 与非 EventHub use-case input 均留在 `biz/`
+  私有范围；sibling production 与跨 owner 测试不得调用 `Service/NewService` 或导入 `biz/contracts`，只能经 owner `pkg/events` concrete
+  command/result 交互，或构造 immutable fact fixture 验证 consumer。
+- Eventstream 也不例外：workspace purge 的 repository helper 为 owner-private，唯一入口是其 concrete synchronous
+  `PurgeWorkspaceCommand`；module bridge 只持有标准 `biz.Biz` 生命周期对象。
 
 ## Resource Owner Responsibilities
 
@@ -56,7 +61,9 @@ module.go
 
 Resource owner只修改自己的 repository/aggregate。它可以验证 caller 提交的 intent/fact，但不能读取 sibling owner
 repository 来补全跨 owner transaction。Application Module 负责有序编排多个 concrete Send；每一步仍由接收 owner
-独立校验并持久化。
+独立校验并持久化。Decision/Approval 的 lifecycle transition 只能由各自 EventHub handler 归约为 owner-private event 后
+触发；它们参与 Runtime SM-2 governance 与 SM-4 delivery，但不向 Orchestrator 暴露第二条 mutation ingress，也不拥有
+SM-2/SM-4 authority。
 
 ## Capability Owner Responsibilities
 

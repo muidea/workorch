@@ -124,10 +124,32 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 	if isTerminalConvergenceState(aggregate.Decision.State) {
 		return aggregate, nil
 	}
+	expectedRevision := aggregate.StateRevision
+	aggregate, err = applyFailureFactToAggregate(aggregate, fact, closeActiveDispatch)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// applyFailureFactToAggregate is the pure SM-2 half of failure persistence.
+// Keeping repository/CAS work outside lets the owner-private provider-terminal
+// coordinator apply this successor together with the SM-3 request close in one
+// aggregate CAS without introducing a second mutation entry point.
+func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontract.FailureFact, closeActiveDispatch bool) (RuntimeAggregate, error) {
+	if isTerminalConvergenceState(aggregate.Decision.State) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept another failure fact", common.ErrConflict)
+	}
 	if aggregate.ActiveDispatch != nil && !closeActiveDispatch {
 		return RuntimeAggregate{}, fmt.Errorf("%w: active dispatch failures require a dispatch/receipt-specific transition", common.ErrConflict)
 	}
-	expectedRevision := aggregate.StateRevision
 	fact.Code = strings.TrimSpace(fact.Code)
 	fact.Signature = strings.TrimSpace(fact.Signature)
 	fact.Message = strings.TrimSpace(fact.Message)
@@ -153,13 +175,6 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	closePendingCandidateAttemptsForTerminal(&aggregate, fact)
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	return aggregate, nil
 }
 

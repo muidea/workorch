@@ -33,12 +33,14 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 		t.Fatal(err)
 	}
 	partial := []byte(`{"operations":[`)
-	outcome := runtimecontract.RuntimeProviderDocumentOutcome{
+	outcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
 		Code: "provider_output_incomplete", Signature: "provider-output-incomplete",
 	}
-	continued, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", outcome)
+	recovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, outcome)
+	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-1", nil)
+	continued, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", recovery, settlement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,16 +48,17 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 		t.Fatalf("incomplete outcome consumed candidate/repair/dispatch state: %+v", continued)
 	}
 	stored := continued.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || stored.NextSequence != 2 || stored.IncompleteOutcomes != 1 || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete || stored.LastDocumentOutcome == nil {
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || stored.NextSequence != 2 || stored.IncompleteOutcomes != 1 || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete || stored.LastDocumentFraming == nil {
 		t.Fatalf("recovery session = %+v", stored)
 	}
-	duplicateOutcome, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", outcome)
+	duplicateOutcome, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", recovery, settlement)
 	if err != nil || duplicateOutcome.StateRevision != continued.StateRevision {
 		t.Fatalf("duplicate incomplete outcome = %+v err=%v", duplicateOutcome, err)
 	}
 	conflict := outcome
 	conflict.ResponseHash = runtimecontract.StableRuntimeProviderResponseHash([]byte("different"))
-	_, err = controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", conflict)
+	conflictingRecovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, conflict)
+	_, err = controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", conflictingRecovery, settlement)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("conflicting incomplete outcome err = %v, want conflict", err)
 	}
@@ -71,7 +74,7 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete || len(completed.CandidateAttempts) != 0 {
 		t.Fatalf("complete document session = %+v aggregate=%+v", stored, completed)
 	}
-	if _, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-2", outcome); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-2", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-2", nil)); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("incomplete outcome after complete err = %v, want conflict", err)
 	}
 }
@@ -203,21 +206,36 @@ func TestRuntimeCandidateRequestSessionTransportAndTerminalOutcomesAreAttemptFre
 		t.Fatal(err)
 	}
 	transient := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: "provider_timeout", Signature: "timeout"}
-	pending, err := controller.recordCandidateRequestTransportOutcome(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-timeout", transient)
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderTransient),
+		OriginalCode:  transient.Code, OriginalMessage: "provider transport timed out", Signature: transient.Signature,
+	}
+	transport := runtimeProviderTransportRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, transient, diagnostic.OriginalMessage, &diagnostic)
+	pending, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-timeout", transport, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-timeout", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].NextSequence != 2 || pending.CandidateRequestSessions[0].TransportOutcomes != 1 || len(pending.CandidateAttempts) != 0 || pending.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("transport pending aggregate = %+v", pending)
 	}
-	duplicate, err := controller.recordCandidateRequestTransportOutcome(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-timeout", transient)
+	duplicate, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-timeout", transport, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-timeout", nil))
 	if err != nil || duplicate.StateRevision != pending.StateRevision {
 		t.Fatalf("duplicate transport = %+v err=%v", duplicate, err)
 	}
 	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-auth"); err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication, Code: "authentication_failed", Signature: "auth"})
+	fact, err := NormalizeRuntimeProviderRequestTerminal(RuntimeProviderRequestTerminalInput{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		OutcomeClass: runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication,
+		TerminalCode: "authentication_failed", TerminalSignature: "auth", Message: "provider authentication failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +243,7 @@ func TestRuntimeCandidateRequestSessionTransportAndTerminalOutcomesAreAttemptFre
 	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil {
 		t.Fatalf("terminal session aggregate = %+v", terminal)
 	}
-	duplicateTerminal, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, stored.LastOutcome)
+	duplicateTerminal, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
 	if err != nil || duplicateTerminal.StateRevision != terminal.StateRevision {
 		t.Fatalf("duplicate terminal = %+v err=%v", duplicateTerminal, err)
 	}
@@ -246,29 +264,35 @@ func TestRuntimeCandidateRequestSessionDocumentRecoveryExhaustedTerminalIsAttemp
 		t.Fatal(err)
 	}
 	partial := []byte(`{"operations":[`)
-	documentOutcome := runtimecontract.RuntimeProviderDocumentOutcome{
+	documentOutcome := runtimecontract.RuntimeProviderDocumentFraming{
 		Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		ResponseHash: runtimecontract.StableRuntimeProviderResponseHash(partial), ResponseBytes: int64(len(partial)),
 		Code: "provider_output_incomplete", Signature: "provider-output-incomplete",
 	}
-	if _, err := controller.recordCandidateRequestRecoveryRequired(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", documentOutcome); err != nil {
+	documentRecovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, documentOutcome)
+	if _, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", documentRecovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-1", nil)); err != nil {
 		t.Fatal(err)
 	}
-	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
-		Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted,
-		Code:  "candidate_document_recovery_exhausted", Signature: "candidate-document-recovery-exhausted",
+	fact, err := NormalizeRuntimeProviderRequestTerminal(RuntimeProviderRequestTerminalInput{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		OutcomeClass: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted,
+		TerminalCode: "candidate_document_recovery_exhausted", TerminalSignature: "candidate-document-recovery-exhausted",
+		Message: "provider document recovery budget exhausted",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	terminal, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, outcome)
+	terminal, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stored := terminal.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome != outcome ||
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome != fact.RequestOutcome ||
 		stored.IncompleteOutcomes != 1 || len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil ||
 		terminal.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("document recovery exhaustion terminal aggregate = %+v", terminal)
 	}
-	duplicate, err := controller.terminateCandidateRequestSession(ctx, "ws-1", "run-1", session.LogicalRequestID, outcome)
+	duplicate, err := controller.planning.coordinateProviderRequestTerminal(ctx, "ws-1", "run-1", session.LogicalRequestID, fact)
 	if err != nil || duplicate.StateRevision != terminal.StateRevision {
 		t.Fatalf("duplicate document recovery exhaustion terminal = %+v err=%v", duplicate, err)
 	}

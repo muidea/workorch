@@ -268,10 +268,10 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && command.CandidateAttempt == 0 {
 			payload = []byte(strings.Replace(string(payload), `"prospectiveTargetRef":"new-target.txt"`, `"prospectiveTargetRef":"target.txt"`, 1))
 		}
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
-			ExpectedDocumentHash: command.ExpectedDocument.Hash, DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload), DocumentContent: payload,
-		}, nil)
+			ExpectedDocumentHash: command.ExpectedDocument.Hash, DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
@@ -340,17 +340,19 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	repository.aggregate = aggregate
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
-		result.Set(llmevents.RequestRuntimeCandidateResult{
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: command.ExpectedDocument.Hash,
 			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "semantic_provider_protocol_invalid",
 				Signature: "semantic-provider-protocol-invalid", Reason: "provider returned an invalid semantic envelope",
 			}),
-		}, nil)
+		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
@@ -362,12 +364,102 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.Terminal == nil || len(failed.CandidateRequestSessions) != 1 {
+	if providerCalls != 1 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.Terminal == nil || len(failed.CandidateRequestSessions) != 1 {
 		t.Fatalf("semantic provider failure did not seal one terminal lineage: %+v", failed)
 	}
 	session := failed.CandidateRequestSessions[0]
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderProtocol || session.LastOutcome.Code != "semantic_provider_protocol_invalid" || session.LastOutcome.Signature != "semantic-provider-protocol-invalid" || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
 		t.Fatalf("semantic terminal retained open provider or operation work: session=%+v aggregate=%+v", session, failed)
+	}
+	reloaded, err := repository.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	replayed, err := restarted.driveRuntimeSemanticPlanning(ctx, reloaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Failure == nil || replayed.Facts.Failure.OriginalDiagnostic == nil || replayed.Facts.Failure.OriginalDiagnostic.OriginalCode != "semantic_provider_protocol_invalid" || replayed.Facts.Failure.OriginalDiagnostic.Signature != "semantic-provider-protocol-invalid" {
+		t.Fatalf("semantic fresh reload changed exact failure or replayed provider: providerCalls=%d aggregate=%+v", providerCalls, replayed)
+	}
+}
+
+func TestRuntimeSemanticDriveBodyIdleExhaustionReloadsWithoutProviderReplay(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	bootstrap := runtimeBootstrap()
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.RecoveryPolicy.MaxProviderTransportAttempts = 1
+	repository := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: aggregate.Facts.Activation.ProviderSelection.Target},
+		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-revision-1"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	repository.aggregate = aggregate
+	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	providerCalls := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: command.ExpectedDocument.Hash,
+			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "provider_body_idle_timeout",
+				Signature: "semantic-provider-body-idle/exact", Reason: "semantic provider body became idle",
+			}),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := module.driveRuntimeSemanticPlanning(ctx, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || pending.Facts.Recovery.ProviderTransportAttempts != 1 || len(pending.CandidateRequestSessions) != 1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.Facts.Failure != nil {
+		t.Fatalf("semantic body-idle did not consume one atomic recovery allowance: calls=%d aggregate=%+v", providerCalls, pending)
+	}
+	failed, err := module.driveRuntimeSemanticPlanning(ctx, pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := failed.CandidateRequestSessions[0]
+	if providerCalls != 2 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Facts.Failure == nil || failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_body_idle_timeout" || failed.Facts.Failure.OriginalDiagnostic.Signature != "semantic-provider-body-idle/exact" || session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || session.LastOutcome.Code != "provider_body_idle_timeout" || session.LastOutcome.Signature != "semantic-provider-body-idle/exact" || session.TransportOutcomes != 2 || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
+		t.Fatalf("semantic body-idle exhaustion lost exact atomic terminal: calls=%d aggregate=%+v", providerCalls, failed)
+	}
+	reloaded, err := repository.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	replayed, err := restarted.driveRuntimeSemanticPlanning(ctx, reloaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || replayed.StateRevision != failed.StateRevision || replayed.Facts.Failure == nil || replayed.Facts.Failure.OriginalDiagnostic == nil || replayed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_body_idle_timeout" {
+		t.Fatalf("semantic body-idle fresh reload replayed provider or changed failure: calls=%d aggregate=%+v", providerCalls, replayed)
 	}
 }
 

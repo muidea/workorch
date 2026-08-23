@@ -13,6 +13,7 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -46,6 +47,66 @@ func runtimeProviderFeedbackForTest(t *testing.T, command llmevents.RequestRunti
 		t.Fatal(err)
 	}
 	return &feedback
+}
+
+// runtimeProviderResultAuditForTest builds the same exact, secret-free
+// producer fact required from the LLM EventHub result contract. Scripted
+// provider results represent a physical call unless they explicitly report a
+// pre-dispatch stale fact; focused release tests construct no-submit audits
+// directly instead of weakening this common fixture.
+func runtimeProviderResultAuditForTest(command llmevents.RequestRuntimeCandidateCommand, result llmevents.RequestRuntimeCandidateResult) *runtimecontract.ProviderRequestAuditView {
+	submitted := result.Stale == nil
+	status := "completed"
+	failureClass := ""
+	if result.Feedback != nil {
+		status = "failed"
+		if result.Feedback.OriginalDiagnostic != nil {
+			failureClass = result.Feedback.OriginalDiagnostic.OriginalClass
+		}
+	}
+	if result.Stale != nil {
+		status = "failed"
+		failureClass = string(runtimecontract.RuntimeCandidateFailureClassProviderConfiguration)
+	}
+	target := command.CandidateContext.Activation.ProviderSelection.Target.Normalized()
+	kind := "runtime_candidate"
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		target = command.SemanticContext.Activation.ProviderSelection.Target.Normalized()
+		kind = "runtime_semantic_plan"
+	}
+	if target.ProviderID == "" || target.ModelID == "" {
+		target = runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}
+	}
+	actualTokens := 0
+	if result.Usage != nil {
+		actualTokens = result.Usage.TotalTokens
+	}
+	audit := &runtimecontract.ProviderRequestAuditView{
+		RequestID: command.RequestIdentity.PhysicalCallID, LogicalRequestID: command.RequestIdentity.LogicalRequestID,
+		PhysicalCallID: command.RequestIdentity.PhysicalCallID, WorkspaceID: string(command.WorkspaceID), RunID: string(command.RunID),
+		Target: target, Operation: "responses", StablePrefixHash: command.StablePrefixHash, Kind: kind,
+		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming,
+		ContextBudget: llmaudit.ContextBudget{
+			ProviderID: target.ProviderID, ModelID: target.ModelID, ProviderSubmitted: submitted,
+			ActualTokens: actualTokens, StablePrefixHash: command.StablePrefixHash,
+		},
+		ProviderSubmitted: submitted, Status: status, FailureClass: failureClass,
+	}
+	if submitted {
+		audit.RequestBytes = 1
+	}
+	return audit
+}
+
+func runtimeProviderResultWithAuditForTest(command llmevents.RequestRuntimeCandidateCommand, result llmevents.RequestRuntimeCandidateResult) llmevents.RequestRuntimeCandidateResult {
+	result.WorkspaceID = command.WorkspaceID
+	result.RunID = command.RunID
+	result.Transaction = command.Transaction
+	result.DocumentKind = command.DocumentKind
+	result.RequestIdentity = command.RequestIdentity
+	result.ExpectedDocumentHash = runtimeExpectedDocumentHash(command.ExpectedDocument)
+	result.Audit = runtimeProviderResultAuditForTest(command, result)
+	return result
 }
 
 func runtimePreflightFeedbackForTest(t *testing.T, command llmevents.PreflightRuntimeCandidateCommand, reason string) runtimecontract.RuntimeFeedback {
@@ -1148,7 +1209,7 @@ func newTestBiz(owner *Biz, hub magicevent.Hub, background magictask.BackgroundR
 // builder for the orchestrator package. It deliberately encodes the provider
 // wire schema, rather than marshaling RuntimeCandidate: RuntimeCandidate is
 // an internal DTO and its field layout is not the provider response contract.
-// C5 must consume DocumentContent just like production does; Candidate remains
+// C5 must consume DocumentOutcome.Content just like production does; Candidate remains
 // only as an optional assertion aid for test bodies.
 func runtimeCandidateResultForTest(t *testing.T, command llmevents.RequestRuntimeCandidateCommand, candidate runtimecontract.RuntimeCandidate) llmevents.RequestRuntimeCandidateResult {
 	t.Helper()
@@ -1157,28 +1218,30 @@ func runtimeCandidateResultForTest(t *testing.T, command llmevents.RequestRuntim
 	if err != nil {
 		// Never Fatal inside an EventHub observer: that leaves hub.Send blocked.
 		// Surface the encode/membership failure as a typed complete rejection.
-		return llmevents.RequestRuntimeCandidateResult{
+		return runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid",
 				Signature: "candidate-contract-invalid", Reason: err.Error(),
 			}),
-		}
+		})
 	}
-	return llmevents.RequestRuntimeCandidateResult{
+	return runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
 		Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 		ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
 		DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
-		DocumentContent:      document,
-	}
+	})
 }
 
-func runtimeCompleteDocumentOutcome(expected *runtimecontract.RuntimeExpectedDocumentContract, document []byte) *runtimecontract.RuntimeProviderDocumentOutcome {
-	return &runtimecontract.RuntimeProviderDocumentOutcome{
-		Disposition:          runtimecontract.RuntimeProviderDocumentComplete,
-		ExpectedDocumentHash: runtimeExpectedDocumentHash(expected),
-		ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(document), ResponseBytes: int64(len(document)),
+func runtimeCompleteDocumentOutcome(expected *runtimecontract.RuntimeExpectedDocumentContract, document []byte) *llmevents.RuntimeProviderDocumentOutcome {
+	return &llmevents.RuntimeProviderDocumentOutcome{
+		Framing: runtimecontract.RuntimeProviderDocumentFraming{
+			Disposition:          runtimecontract.RuntimeProviderDocumentComplete,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(expected),
+			ResponseHash:         runtimecontract.StableRuntimeProviderResponseHash(document), ResponseBytes: int64(len(document)),
+		},
+		Content: append([]byte(nil), document...),
 	}
 }
 

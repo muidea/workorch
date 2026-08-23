@@ -174,7 +174,6 @@ func (p preparedWorkspaceExecutionIntent) runCommand() runevents.WorkspaceExecut
 		WorkspaceID: p.workspace.ID,
 		RequestID:   p.command.RequestID,
 		Kind:        runKind,
-		Priority:    p.command.Priority,
 	}
 	if runKind == runtimecontract.RuntimeExecutionIntentResume {
 		forward.RunID = p.workspace.ActiveRunID

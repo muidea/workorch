@@ -53,12 +53,18 @@ func TestWorkspaceSnapshotProjectionPreservesTypedProjectionFields(t *testing.T)
 			IneffectiveRetry:     true,
 		},
 		RunCommand: &projectioncontract.RunCommandStatus{
-			WorkspaceID: "ws-map",
-			RunID:       "run-map",
-			State:       "accepted",
-			Intent:      "replan",
-			DecisionID:  "ticket-map",
-			Revision:    9,
+			WorkspaceID:     "ws-map",
+			RunID:           "run-map",
+			State:           "accepted",
+			Intent:          "resume",
+			RequestID:       "request-map",
+			RequestReason:   "operator_requested",
+			Source:          "http",
+			Outcome:         runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+			AdmissionReason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+			Diagnostic:      "current Run continuation accepted",
+			AcceptedAt:      "2026-08-23T00:00:00Z",
+			Revision:        9,
 		},
 		GapBaseline: &projectioncontract.GapBaseline{
 			WorkspaceID:          "ws-map",
@@ -103,8 +109,8 @@ func TestWorkspaceSnapshotProjectionPreservesTypedProjectionFields(t *testing.T)
 	if got.ConvergenceStatus == nil || got.ConvergenceStatus.ConvergenceState != "need_state_change" || !got.ConvergenceStatus.IneffectiveRetry {
 		t.Fatalf("convergence = %+v, want convergence fields", got.ConvergenceStatus)
 	}
-	if got.RunCommand == nil || got.RunCommand.DecisionID != "ticket-map" || got.RunCommand.Revision != 9 {
-		t.Fatalf("runCommand = %+v, want decision command metadata", got.RunCommand)
+	if got.RunCommand == nil || got.RunCommand.RequestID != "request-map" || got.RunCommand.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || got.RunCommand.AdmissionReason != runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted || got.RunCommand.Revision != 9 {
+		t.Fatalf("runCommand = %+v, want exact owner admission metadata", got.RunCommand)
 	}
 	if got.GapBaseline == nil || got.GapBaseline.AcceptedEvidenceRefs[0] != "evidence-a" {
 		t.Fatalf("gapBaseline = %+v, want evidence refs", got.GapBaseline)

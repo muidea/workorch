@@ -4,7 +4,7 @@ Status: normative
 
 Type: design-baseline
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## Purpose
 
@@ -84,11 +84,22 @@ Governance trace progress follow the same owner-local rule. Cross-owner I/O uses
 EventHub `StateMachine` metadata means participation, while `ReducerOwner + MachineRole` fixes SM-1 to Run and SM-2～SM-4 to
 Orchestrator; participant and opaque-persistence contracts never acquire reducer authority.
 
+- 同一 Orchestrator owner 内需要跨 SM 协调的 provider terminal，只能先归一为一个 private fact，再由一次 aggregate CAS
+  同时关闭 SM-3 request session 并应用 exact SM-2 failure；不存在可被重启观察到的双写中间态。
+- LLM adapter 是 `providerSubmitted` 的唯一 producer；Orchestrator 只把 exact owner audit 归一为 private
+  confirmed/released/unknown settlement，并在同一 CAS 中与 SM-3 session、适用的 SM-4 recovery budget、可选 SM-2
+  terminal 一起提交。request bytes、projection 或错误文本不能证明调用发生，也不能授权重放。
+- Workorchd execution admission 只同步转发并投影 Workspace owner 的 typed result；transport/context failure 不得伪造成
+  owner rejection，调用方 priority、application recovery selector 和 process-local repair counter 均不属于执行状态。
+
 ## Request And Capability Facts
 
 - provider-facing context is partitioned C0–C5; stable system/contracts, Definition, declarative capability policy and volatile
   Runtime facts have distinct cache/budget treatment;
 - LLM owner interprets provider/model capabilities and `ProviderCeiling`; Orchestrator validates sealed typed facts;
+- LLM candidate result严格为`Stale | Feedback | DocumentOutcome` exactly-one；complete content只属于LLM owner factual
+  outcome并与framing hash/bytes一致，其他disposition禁止携带content。物理响应模式只以
+  `streaming | non_streaming`记录，旧布尔字段只能派生；
 - capability feasibility/readiness is separate from Definition completion: multiple operation variants for one fixed CWI do not
   create a terminal `one_of`;
 - File write is create-only; existing targets require a current revision/base-hash-bound replacement operation;

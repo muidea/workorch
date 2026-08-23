@@ -533,7 +533,6 @@ func registerWorkspaceExecutionWriteRoute(router engine.RouteRegistry, state *se
 			return
 		}
 		state.metrics.workspaceActivationRequests.Add(1)
-		priority := runPriorityFromRequest(r, req.Priority)
 		topic := workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested
 		intent := strings.TrimSpace(req.Intent)
 		if intent == "" {
@@ -546,18 +545,23 @@ func registerWorkspaceExecutionWriteRoute(router engine.RouteRegistry, state *se
 			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume or restart intent, got %q", common.ErrInvalidArgument, intent))
 			return
 		}
-		command, commandErr := workspaceExecutionCommand(workspaceID, req, priority)
+		command, commandErr := workspaceExecutionCommand(workspaceID, req)
 		if commandErr != nil {
 			writeBusinessError(w, commandErr)
 			return
 		}
 		command.Intent = intent
-		command, commandErr = state.admitWorkspaceExecution(r.Context(), topic, command)
+		result, commandErr := state.admitWorkspaceExecution(r.Context(), topic, command)
 		if commandErr != nil {
 			writeBusinessError(w, commandErr)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, executionAdmissionAcceptedHTTPBody(state.config, "execution-activation", command))
+		response, statusCode, responseErr := executionAdmissionHTTPResponse(state.config, "execution-activation", command, result)
+		if responseErr != nil {
+			writeBusinessError(w, fmt.Errorf("%w: %v", common.ErrConflict, responseErr))
+			return
+		}
+		writeJSON(w, statusCode, response)
 	})
 }
 
@@ -741,13 +745,12 @@ func registerWorkspaceDefinitionWriteRoutes(router engine.RouteRegistry, state *
 	})
 }
 
-func workspaceExecutionCommand(workspaceID string, req workorchmanagementcontract.WorkspaceExecutionCommandRequest, priority int) (workorchdevents.WorkspaceRunRequestedCommand, error) {
+func workspaceExecutionCommand(workspaceID string, req workorchmanagementcontract.WorkspaceExecutionCommandRequest) (workorchdevents.WorkspaceRunRequestedCommand, error) {
 	return workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
 		Reason:      req.Reason,
 		Source:      req.Source,
 		RequestID:   req.RequestID,
-		Priority:    priority,
 	}, nil
 }
 

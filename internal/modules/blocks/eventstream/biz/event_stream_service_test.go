@@ -31,6 +31,7 @@ import (
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -118,11 +119,38 @@ func (r *countingEventRecordRepository) AppendCount() int {
 	return r.appendCount
 }
 
-func newEventStreamTestService(t *testing.T, repo repository.EventRecordRepository) (*Service, magicevent.Hub) {
+func newEventStreamTestService(t *testing.T, repo repository.EventRecordRepository) (*Biz, magicevent.Hub) {
 	t.Helper()
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	return NewService(repo, rawHub, nil), rawHub
+	return New(Dependencies{EventRecords: repo, EventHub: rawHub}), rawHub
+}
+
+func sendPurgeWorkspaceCommand(ctx context.Context, rawHub magicevent.Hub, workspaceID common.WorkspaceID) (eventstreamevents.PurgeWorkspaceResult, error) {
+	if rawHub == nil || workspaceID == "" {
+		return eventstreamevents.PurgeWorkspaceResult{}, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(
+		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
+		eventstreamApplicationCommandSource,
+		eventstreamevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID},
+	)
+	result := rawHub.Send(event)
+	if result == nil {
+		return eventstreamevents.PurgeWorkspaceResult{}, common.ErrInvalidArgument
+	}
+	data, err := result.Get()
+	if err != nil {
+		return eventstreamevents.PurgeWorkspaceResult{}, err
+	}
+	response, ok := data.(eventstreamevents.PurgeWorkspaceResult)
+	if !ok {
+		return eventstreamevents.PurgeWorkspaceResult{}, common.ErrInvalidArgument
+	}
+	return response, nil
 }
 
 func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
@@ -654,10 +682,14 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 	}
 }
 
-func TestServicePurgeWorkspaceEventsDeletesOnlyWorkspaceRecords(t *testing.T) {
+func TestPurgeWorkspaceCommandDeletesOnlyWorkspaceRecords(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()
-	service, _ := newEventStreamTestService(t, repo)
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatalf("start eventstream Biz: %v", err)
+	}
+	t.Cleanup(service.Stop)
 	for _, record := range []*eventstreammodel.EventRecord{
 		{ID: "event-purge-1", Topic: runevents.TopicRunCreated, WorkspaceID: "ws-purge", RunID: "run-purge"},
 		{ID: "event-purge-2", Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-purge", RunID: "run-purge"},
@@ -668,12 +700,12 @@ func TestServicePurgeWorkspaceEventsDeletesOnlyWorkspaceRecords(t *testing.T) {
 		}
 	}
 
-	deleted, err := service.PurgeWorkspaceEvents(ctx, "ws-purge")
+	response, err := sendPurgeWorkspaceCommand(ctx, rawHub, "ws-purge")
 	if err != nil {
 		t.Fatalf("purge workspace events: %v", err)
 	}
-	if deleted != 2 {
-		t.Fatalf("deleted = %d, want 2", deleted)
+	if response.DeletedCount != 2 {
+		t.Fatalf("deleted = %d, want 2", response.DeletedCount)
 	}
 	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{})
 	if err != nil {
@@ -882,7 +914,11 @@ func TestServiceIssuesGlobalAppendOrderAcrossWorkspaceClockSkew(t *testing.T) {
 func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewEventRecordRepository()
-	service, _ := newEventStreamTestService(t, repo)
+	service, rawHub := newEventStreamTestService(t, repo)
+	if err := service.Start(); err != nil {
+		t.Fatalf("start eventstream Biz: %v", err)
+	}
+	defer service.Stop()
 	appendWorkspaceRecord := func(id string) {
 		if err := service.appendRecord(ctx, &eventstreammodel.EventRecord{
 			ID: common.EventRecordID(id), Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: id, WorkspaceID: "ws-revision-reset",
@@ -892,14 +928,16 @@ func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
 	}
 	appendWorkspaceRecord("event-reset-1")
 	appendWorkspaceRecord("event-reset-2")
-	if deleted, err := service.PurgeWorkspaceEvents(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "ws-revision-reset"); err != nil || deleted != 2 {
-		t.Fatalf("purge deleted=%d err=%v", deleted, err)
+	response, err := sendPurgeWorkspaceCommand(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), rawHub, "ws-revision-reset")
+	if err != nil || response.DeletedCount != 2 {
+		t.Fatalf("purge deleted=%d err=%v", response.DeletedCount, err)
 	}
 	appendWorkspaceRecord("event-reset-3")
 	item, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, "ws-revision-reset"), "event-reset-3")
 	if err != nil || item.Revision != 1 || item.StreamPosition != 3 {
 		t.Fatalf("post-purge record = %+v err=%v, want revision 1/stream position 3", item, err)
 	}
+	service.Stop()
 	restarted, _ := newEventStreamTestService(t, repo)
 	if err := restarted.appendRecord(ctx, &eventstreammodel.EventRecord{
 		ID: "event-reset-4", Topic: "/test", SourceModule: "blocks/test", SubjectType: "test", SubjectID: "event-reset-4", WorkspaceID: "ws-revision-reset",
@@ -914,15 +952,15 @@ func TestServicePurgeResetsRevisionFloorConsistentlyWithRestart(t *testing.T) {
 
 func TestLLMUsageScopeAllowsProcessAndWorkspaceBeforeRun(t *testing.T) {
 	for _, data := range []llmevents.LLMUsageRecordedData{
-		{RequestID: "setup-call", Status: "completed"},
-		{RequestID: "embedding-call", WorkspaceID: "workspace-1", Status: "completed"},
-		{RequestID: "runtime-call", WorkspaceID: "workspace-1", RunID: "run-1", Status: "completed"},
+		{RequestID: "setup-call", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming},
+		{RequestID: "embedding-call", WorkspaceID: "workspace-1", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming},
+		{RequestID: "runtime-call", LogicalRequestID: "runtime-logical", PhysicalCallID: "runtime-call", WorkspaceID: "workspace-1", RunID: "run-1", Kind: "runtime_candidate", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeStreaming, ProviderSubmitted: true, RequestBytes: 1},
 	} {
 		if !validLLMUsageRecordedData(data) {
 			t.Fatalf("valid LLM usage scope rejected: %+v", data)
 		}
 	}
-	if validLLMUsageRecordedData(llmevents.LLMUsageRecordedData{RequestID: "orphan-run", RunID: "run-1", Status: "completed"}) {
+	if validLLMUsageRecordedData(llmevents.LLMUsageRecordedData{RequestID: "orphan-run", RunID: "run-1", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming}) {
 		t.Fatal("LLM usage accepted Run scope without Workspace")
 	}
 }
@@ -937,20 +975,40 @@ func TestServicePersistsProcessAndWorkspaceScopedLLMUsage(t *testing.T) {
 	defer service.Stop()
 
 	for _, data := range []llmevents.LLMUsageRecordedData{
-		{RequestID: "setup-call", Operation: "responses", Status: "completed", OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
-		{RequestID: "embedding-call", WorkspaceID: "workspace-1", Operation: "embeddings", Status: "completed", OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
+		{RequestID: "setup-call", Operation: "responses", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeStreaming, ProviderSubmitted: true, RequestBytes: 1, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
+		{RequestID: "embedding-call", WorkspaceID: "workspace-1", Operation: "embeddings", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming, ProviderSubmitted: true, RequestBytes: 1, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
+		{RequestID: "runtime-call", LogicalRequestID: "runtime-logical", PhysicalCallID: "runtime-call", WorkspaceID: "workspace-1", RunID: "run-1", Kind: "runtime_candidate", Operation: "responses", Status: "completed", PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming, ProviderSubmitted: true, RequestBytes: 1, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano)},
 	} {
 		rawHub.Post(magicevent.NewEventWithContext(
 			llmevents.TopicLLMUsageRecorded, llmcommon.ModuleID, llmevents.NotificationDestination,
 			magicevent.NewHeader(), ctx, data,
 		))
 	}
-	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{SubjectType: "llm_usage"}, 2)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{SubjectType: "llm_usage", IncludePayload: true}, 3)
 	scopes := map[string]common.WorkspaceID{}
+	modes := map[string]string{}
 	for _, record := range records {
 		scopes[record.SubjectID] = record.WorkspaceID
+		modes[record.SubjectID], _ = record.Payload.String(recordpayload.PayloadKeyPhysicalResponseMode)
+		logicalRequestID, logicalPresent := record.Payload.String(recordpayload.PayloadKeyLogicalRequestID)
+		physicalCallID, physicalPresent := record.Payload.String(recordpayload.PayloadKeyPhysicalCallID)
+		if record.SubjectID == "runtime-call" {
+			if !logicalPresent || logicalRequestID != "runtime-logical" || !physicalPresent || physicalCallID != "runtime-call" {
+				t.Fatalf("runtime request identity = %q/%v %q/%v", logicalRequestID, logicalPresent, physicalCallID, physicalPresent)
+			}
+		} else if logicalPresent || physicalPresent {
+			t.Fatalf("generic usage unexpectedly gained runtime request identity: %+v", record.Payload)
+		}
+		for _, forbidden := range []string{"rawBody", "content", "prompt", "apiKey", "authorization", "endpoint"} {
+			if _, found := record.Payload.Field(forbidden); found {
+				t.Fatalf("durable LLM usage record leaked forbidden field %q: %+v", forbidden, record.Payload)
+			}
+		}
 	}
-	if scopes["setup-call"] != "" || scopes["embedding-call"] != "workspace-1" {
+	if scopes["setup-call"] != "" || scopes["embedding-call"] != "workspace-1" || scopes["runtime-call"] != "workspace-1" {
 		t.Fatalf("persisted LLM usage scopes = %+v", scopes)
+	}
+	if modes["setup-call"] != string(llmaudit.PhysicalResponseModeStreaming) || modes["embedding-call"] != string(llmaudit.PhysicalResponseModeNonStreaming) || modes["runtime-call"] != string(llmaudit.PhysicalResponseModeNonStreaming) {
+		t.Fatalf("persisted LLM response modes = %+v", modes)
 	}
 }

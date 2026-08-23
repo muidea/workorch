@@ -32,13 +32,13 @@ func newExecutionAdmissionGateway(owner *Biz) *executionAdmissionGateway {
 	return &executionAdmissionGateway{owner: owner, clock: func() time.Time { return time.Now().UTC() }}
 }
 
-func (g *executionAdmissionGateway) AdmitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedCommand, error) {
+func (g *executionAdmissionGateway) AdmitWorkspaceExecution(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	if g == nil || g.owner == nil || g.owner.EventHub() == nil || ctx == nil {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	topic = strings.TrimSpace(topic)
 	if topic != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	now := time.Now().UTC()
 	if g.clock != nil {
@@ -48,33 +48,33 @@ func (g *executionAdmissionGateway) AdmitWorkspaceExecution(ctx context.Context,
 	command.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(command.WorkspaceID)))
 	command.Intent = strings.TrimSpace(command.Intent)
 	if command.WorkspaceID == "" {
-		return workorchdevents.WorkspaceRunRequestedCommand{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 
 	event := magicevent.NewEventWithContext(topic, ModuleID, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(executionAdmissionLaneKey(topic, command.WorkspaceID))
 	response := g.owner.SendEvent(event)
 	if response == nil {
-		return command, fmt.Errorf("%w: workspace execution admission returned no result", common.ErrConflict)
+		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: workspace execution admission returned no result", common.ErrConflict)
 	}
 	if err := response.Error(); err != nil {
 		if err.Cause != nil {
-			return command, err.Cause
+			return workorchdevents.WorkspaceRunRequestedResult{}, err.Cause
 		}
-		return command, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	data, err := response.Get()
 	if err != nil {
-		return command, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
 	if !ok || result.WorkspaceID != command.WorkspaceID || strings.TrimSpace(result.RequestID) != strings.TrimSpace(command.RequestID) || string(result.Kind) != command.Intent {
-		return command, fmt.Errorf("%w: workspace execution admission returned an invalid owner outcome", common.ErrConflict)
+		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: workspace execution admission returned an invalid owner outcome", common.ErrConflict)
 	}
 	if err := result.Validate(); err != nil {
-		return command, fmt.Errorf("%w: workspace execution admission returned an invalid owner outcome: %v", common.ErrConflict, err)
+		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: workspace execution admission returned an invalid owner outcome: %v", common.ErrConflict, err)
 	}
-	return command, nil
+	return result, nil
 }
 
 func executionAdmissionLaneKey(topic string, workspaceID common.WorkspaceID) string {

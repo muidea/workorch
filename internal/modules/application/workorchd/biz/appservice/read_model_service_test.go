@@ -33,6 +33,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -403,16 +404,18 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 		if i == readModelEventRecordLimit+20 {
 			topic = "/run/llm_usage/recorded"
 			payload = map[string]any{
-				recordpayload.PayloadKeyWorkspaceID:  string(workspaceID),
-				recordpayload.PayloadKeyRunID:        string(runID),
-				recordpayload.PayloadKeyStepID:       "run-bounded-events/step-usage",
-				recordpayload.PayloadKeyProviderID:   "provider-a",
-				recordpayload.PayloadKeyModel:        "model-a",
-				recordpayload.PayloadKeyOperation:    "responses",
-				recordpayload.PayloadKeyInputTokens:  30,
-				recordpayload.PayloadKeyOutputTokens: 14,
-				recordpayload.PayloadKeyTotalTokens:  44,
-				recordpayload.PayloadKeyStatus:       "completed",
+				recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
+				recordpayload.PayloadKeyRunID:                string(runID),
+				recordpayload.PayloadKeyStepID:               "run-bounded-events/step-usage",
+				recordpayload.PayloadKeyProviderID:           "provider-a",
+				recordpayload.PayloadKeyModel:                "model-a",
+				recordpayload.PayloadKeyOperation:            "responses",
+				recordpayload.PayloadKeyInputTokens:          30,
+				recordpayload.PayloadKeyOutputTokens:         14,
+				recordpayload.PayloadKeyTotalTokens:          44,
+				recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeNonStreaming),
+				recordpayload.PayloadKeyProviderSubmitted:    true,
+				recordpayload.PayloadKeyStatus:               "completed",
 			}
 		}
 		if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
@@ -2478,7 +2481,9 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 					"cacheableInputTokens":    90,
 					"nonCacheableInputTokens": 30,
 				},
-				recordpayload.PayloadKeyStatus: "completed",
+				recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeNonStreaming),
+				recordpayload.PayloadKeyProviderSubmitted:    true,
+				recordpayload.PayloadKeyStatus:               "completed",
 			}),
 		},
 		{
@@ -2506,7 +2511,9 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 					"cacheWriteTokens":    8,
 					"cacheCreationTokens": 8,
 				},
-				recordpayload.PayloadKeyStatus: "completed",
+				recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeNonStreaming),
+				recordpayload.PayloadKeyProviderSubmitted:    true,
+				recordpayload.PayloadKeyStatus:               "completed",
 			}),
 		},
 	}
@@ -3669,19 +3676,21 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 		RunID:       runID,
 		StepID:      "run-scoped-llm-usage/step-1",
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
-			recordpayload.PayloadKeyWorkspaceID:  string(workspaceID),
-			recordpayload.PayloadKeyRunID:        string(runID),
-			recordpayload.PayloadKeyStepID:       "run-scoped-llm-usage/step-1",
-			recordpayload.PayloadKeyProviderID:   "provider-run-scoped",
-			recordpayload.PayloadKeyProvider:     "compatible",
-			recordpayload.PayloadKeyModel:        "model-run-scoped",
-			recordpayload.PayloadKeyOperation:    "responses",
-			recordpayload.PayloadKeyInputTokens:  32,
-			recordpayload.PayloadKeyOutputTokens: 8,
-			recordpayload.PayloadKeyTotalTokens:  40,
-			recordpayload.PayloadKeyEstimated:    true,
-			recordpayload.PayloadKeyUsageSource:  "stream_estimated",
-			recordpayload.PayloadKeyStatus:       "completed",
+			recordpayload.PayloadKeyWorkspaceID:          string(workspaceID),
+			recordpayload.PayloadKeyRunID:                string(runID),
+			recordpayload.PayloadKeyStepID:               "run-scoped-llm-usage/step-1",
+			recordpayload.PayloadKeyProviderID:           "provider-run-scoped",
+			recordpayload.PayloadKeyProvider:             "compatible",
+			recordpayload.PayloadKeyModel:                "model-run-scoped",
+			recordpayload.PayloadKeyOperation:            "responses",
+			recordpayload.PayloadKeyInputTokens:          32,
+			recordpayload.PayloadKeyOutputTokens:         8,
+			recordpayload.PayloadKeyTotalTokens:          40,
+			recordpayload.PayloadKeyEstimated:            true,
+			recordpayload.PayloadKeyUsageSource:          "stream_estimated",
+			recordpayload.PayloadKeyPhysicalResponseMode: string(llmaudit.PhysicalResponseModeStreaming),
+			recordpayload.PayloadKeyProviderSubmitted:    true,
+			recordpayload.PayloadKeyStatus:               "completed",
 		}),
 	}); err != nil {
 		t.Fatalf("append run scoped llm usage event: %v", err)

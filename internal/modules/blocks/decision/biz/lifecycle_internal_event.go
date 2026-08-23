@@ -53,7 +53,7 @@ const (
 	lifecycleInternalEventAggregateDeletionRequested      lifecycleInternalEventKind = "aggregate_deletion_requested"
 )
 
-func (s *Service) applyLifecycleInternalEvent(ctx context.Context, current *decisionModel.Ticket, event lifecycleInternalEvent) (*decisionModel.Ticket, error) {
+func (s *mutationService) applyLifecycleInternalEvent(ctx context.Context, current *decisionModel.Ticket, event lifecycleInternalEvent) (*decisionModel.Ticket, error) {
 	if s == nil || s.tickets == nil || event.TicketID == "" {
 		return nil, common.ErrInvalidArgument
 	}

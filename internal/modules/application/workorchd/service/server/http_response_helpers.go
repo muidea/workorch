@@ -36,7 +36,6 @@ func (m *serverMetrics) render(projection WorkspaceProjection) string {
 			"workorch_http_requests_total{endpoint=\"dod_define\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"dod_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"dod_get\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"run_create\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_get\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_snapshot\"} %d\n"+
@@ -46,8 +45,6 @@ func (m *serverMetrics) render(projection WorkspaceProjection) string {
 			"workorch_http_requests_total{endpoint=\"run_task_progress\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_context_bundle\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_task_decomposition\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"run_start\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"run_resume\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_execution_activation\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"decision_list\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"decision_get\"} %d\n"+
@@ -77,7 +74,6 @@ func (m *serverMetrics) render(projection WorkspaceProjection) string {
 		m.dodDefineRequests.Load(),
 		m.dodListRequests.Load(),
 		m.dodGetRequests.Load(),
-		m.runCreateRequests.Load(),
 		m.runListRequests.Load(),
 		m.runGetRequests.Load(),
 		m.runSnapshotRequests.Load(),
@@ -87,8 +83,6 @@ func (m *serverMetrics) render(projection WorkspaceProjection) string {
 		m.runTaskProgressRequests.Load(),
 		m.runContextBundleRequests.Load(),
 		m.runTaskDecompositionRequests.Load(),
-		m.runStartRequests.Load(),
-		m.runResumeRequests.Load(),
 		m.workspaceActivationRequests.Load(),
 		m.decisionListRequests.Load(),
 		m.decisionGetRequests.Load(),
@@ -108,7 +102,7 @@ func (m *serverMetrics) render(projection WorkspaceProjection) string {
 		body += m.executionAdmissionMetrics.render()
 		body += m.renderRuntimeDriveMetrics()
 	}
-	return body + renderWorkspaceProjectionMetrics(projection, m)
+	return body + renderWorkspaceProjectionMetrics(projection)
 }
 
 func (m *serverMetrics) renderRuntimeDriveMetrics() string {
@@ -141,7 +135,7 @@ func (m *serverMetrics) renderRuntimeDriveMetrics() string {
 	return b.String()
 }
 
-func renderWorkspaceProjectionMetrics(projection WorkspaceProjection, serverMetrics *serverMetrics) string {
+func renderWorkspaceProjectionMetrics(projection WorkspaceProjection) string {
 	var metrics workspaceviewcore.Metrics
 	if projection != nil {
 		metrics = projection.Metrics()
@@ -181,11 +175,7 @@ func renderWorkspaceProjectionMetrics(projection WorkspaceProjection, serverMetr
 	b.WriteString("# TYPE workorch_convergence_open_focuses gauge\n")
 	b.WriteString(fmt.Sprintf("workorch_convergence_open_focuses %d\n", metrics.ConvergenceOpenFocuses))
 	b.WriteString("# TYPE workorch_convergence_repair_attempts_total counter\n")
-	repairAttempts := uint64(metrics.ConvergenceRepairAttemptsTotal)
-	if serverMetrics != nil {
-		repairAttempts = serverMetrics.convergenceRepairAttempts.Load()
-	}
-	b.WriteString(fmt.Sprintf("workorch_convergence_repair_attempts_total %d\n", repairAttempts))
+	b.WriteString(fmt.Sprintf("workorch_convergence_repair_attempts_total %d\n", metrics.ConvergenceRepairAttemptsTotal))
 	b.WriteString("# TYPE workorch_convergence_no_delta_rounds_total counter\n")
 	b.WriteString(fmt.Sprintf("workorch_convergence_no_delta_rounds_total %d\n", metrics.ConvergenceNoDeltaRoundsTotal))
 	b.WriteString("# TYPE workorch_convergence_budget_escalations_total counter\n")

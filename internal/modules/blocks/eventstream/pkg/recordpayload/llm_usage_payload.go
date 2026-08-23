@@ -9,6 +9,8 @@ import (
 // It carries sealed provider/model target, revisions, budget and usage for one request.
 type LLMUsagePayloadData struct {
 	RequestID             string
+	LogicalRequestID      string
+	PhysicalCallID        string
 	WorkspaceID           string
 	RunID                 string
 	StepID                string
@@ -28,7 +30,7 @@ type LLMUsagePayloadData struct {
 	UsageSource           string
 	RequestBytes          int
 	ResponseBytes         int
-	Streaming             bool
+	PhysicalResponseMode  llmaudit.PhysicalResponseMode
 	ContextBudget         llmaudit.ContextBudget
 	CacheUsage            llmaudit.CacheUsage
 	StartedAt             string
@@ -45,8 +47,9 @@ func (data LLMUsagePayloadData) EventPayload() workorcheventpayload.Payload {
 		workorcheventpayload.StringField(PayloadKeyRunID, data.RunID),
 		workorcheventpayload.StringField(PayloadKeyStatus, data.Status),
 		workorcheventpayload.BoolField(PayloadKeyEstimated, data.Estimated),
-		workorcheventpayload.BoolField(PayloadKeyStreaming, data.Streaming),
-		workorcheventpayload.BoolField("providerSubmitted", data.ProviderSubmitted),
+		workorcheventpayload.StringField(PayloadKeyPhysicalResponseMode, string(data.PhysicalResponseMode.Normalized())),
+		workorcheventpayload.BoolField(PayloadKeyStreaming, data.PhysicalResponseMode.Streaming()),
+		workorcheventpayload.BoolField(PayloadKeyProviderSubmitted, data.ProviderSubmitted),
 		workorcheventpayload.IntField(PayloadKeyInputTokens, int64(data.InputTokens)),
 		workorcheventpayload.IntField(PayloadKeyOutputTokens, int64(data.OutputTokens)),
 		workorcheventpayload.IntField(PayloadKeyTotalTokens, int64(data.TotalTokens)),
@@ -55,6 +58,8 @@ func (data LLMUsagePayloadData) EventPayload() workorcheventpayload.Payload {
 		workorcheventpayload.IntField(PayloadKeyDurationMs, int64(data.DurationMs)),
 	}
 	fields = appendOptionalPayloadString(fields, PayloadKeyRequestID, data.RequestID)
+	fields = appendOptionalPayloadString(fields, PayloadKeyLogicalRequestID, data.LogicalRequestID)
+	fields = appendOptionalPayloadString(fields, PayloadKeyPhysicalCallID, data.PhysicalCallID)
 	fields = appendOptionalPayloadString(fields, PayloadKeyStepID, data.StepID)
 	fields = appendOptionalPayloadString(fields, PayloadKeyProviderID, data.ProviderID)
 	fields = appendOptionalPayloadString(fields, PayloadKeyProvider, data.Provider)

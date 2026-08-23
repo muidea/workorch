@@ -34,7 +34,7 @@ func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchde
 	if err != nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
-	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Priority: command.Priority}
+	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID}
 	switch command.Intent {
 	case "resume":
 		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
