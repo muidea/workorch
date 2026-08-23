@@ -9,6 +9,7 @@ type AcceptanceProjection struct {
 	Slices           []AcceptanceSlice                           `json:"slices,omitempty"`
 	CurrentFocus     *CoverageFocus                              `json:"currentFocus,omitempty"`
 	Budget           *ConvergenceBudget                          `json:"budget,omitempty"`
+	RecoveryBudget   *RuntimeRecoveryBudget                      `json:"recoveryBudget,omitempty"`
 	ExecutionBudget  *runtimecontract.RuntimeExecutionBudgetView `json:"executionBudget,omitempty"`
 	RecoverableWait  *runtimecontract.RuntimeRecoverableWaitView `json:"recoverableWait,omitempty"`
 	RepairDirective  *RuntimeRepairDirective                     `json:"repairDirective,omitempty"`
@@ -62,36 +63,42 @@ type AcceptanceSummary struct {
 	FailedSlices   int `json:"failedSlices"`
 }
 
-// ConvergenceBudget is the complete read projection of Runtime convergence
-// and recovery budgets. It is observational and carries no retry authority.
+// ConvergenceBudget is the bounded SM-2 convergence projection. It is
+// observational and carries no retry authority.
 type ConvergenceBudget struct {
-	FocusID                      string `json:"focusId,omitempty"`
-	SliceID                      string `json:"sliceId,omitempty"`
-	State                        string `json:"state,omitempty"`
-	Decision                     string `json:"decision,omitempty"`
-	MaxRepairAttemptsPerFocus    int    `json:"maxRepairAttemptsPerFocus,omitempty"`
-	MaxLLMRoundsPerSlice         int    `json:"maxLLMRoundsPerSlice,omitempty"`
-	MaxRepeatedFailureSignature  int    `json:"maxRepeatedFailureSignature,omitempty"`
-	MaxValidationOnlyRetries     int    `json:"maxValidationOnlyRetries,omitempty"`
-	MaxNoCoverageDeltaRounds     int    `json:"maxNoCoverageDeltaRounds,omitempty"`
-	MaxContextBytesPerRepair     int    `json:"maxContextBytesPerRepair,omitempty"`
-	RepairAttempts               int    `json:"repairAttempts,omitempty"`
-	LLMRounds                    int    `json:"llmRounds,omitempty"`
-	RepeatedFailureSignatures    int    `json:"repeatedFailureSignatures,omitempty"`
-	ValidationOnlyRetries        int    `json:"validationOnlyRetries,omitempty"`
-	NoCoverageDeltaRounds        int    `json:"noCoverageDeltaRounds,omitempty"`
-	LastNoDeltaReason            string `json:"lastNoDeltaReason,omitempty"`
-	LastDecisionReason           string `json:"lastDecisionReason,omitempty"`
-	MaxProviderTransportAttempts int    `json:"maxProviderTransportAttempts,omitempty"`
-	ProviderTransportAttempts    int    `json:"providerTransportAttempts,omitempty"`
-	MaxOperationRecoveryAttempts int    `json:"maxOperationRecoveryAttempts,omitempty"`
-	OperationRecoveryAttempts    int    `json:"operationRecoveryAttempts,omitempty"`
-	MaxCASReloadAttempts         int    `json:"maxCasReloadAttempts,omitempty"`
-	CASReloadAttempts            int    `json:"casReloadAttempts,omitempty"`
-	MaxTerminalDeliveryAttempts  int    `json:"maxTerminalDeliveryAttempts,omitempty"`
-	TerminalDeliveryAttempts     int    `json:"terminalDeliveryAttempts,omitempty"`
-	MaxPrerequisiteRefreshes     int    `json:"maxPrerequisiteRefreshes,omitempty"`
-	PrerequisiteRefreshes        int    `json:"prerequisiteRefreshes,omitempty"`
+	FocusID                     string `json:"focusId,omitempty"`
+	SliceID                     string `json:"sliceId,omitempty"`
+	State                       string `json:"state,omitempty"`
+	Decision                    string `json:"decision,omitempty"`
+	MaxRepairAttemptsPerFocus   int    `json:"maxRepairAttemptsPerFocus,omitempty"`
+	MaxLLMRoundsPerSlice        int    `json:"maxLLMRoundsPerSlice,omitempty"`
+	MaxRepeatedFailureSignature int    `json:"maxRepeatedFailureSignature,omitempty"`
+	MaxValidationOnlyRetries    int    `json:"maxValidationOnlyRetries,omitempty"`
+	MaxNoCoverageDeltaRounds    int    `json:"maxNoCoverageDeltaRounds,omitempty"`
+	MaxContextBytesPerRepair    int    `json:"maxContextBytesPerRepair,omitempty"`
+	RepairAttempts              int    `json:"repairAttempts,omitempty"`
+	LLMRounds                   int    `json:"llmRounds,omitempty"`
+	RepeatedFailureSignatures   int    `json:"repeatedFailureSignatures,omitempty"`
+	ValidationOnlyRetries       int    `json:"validationOnlyRetries,omitempty"`
+	NoCoverageDeltaRounds       int    `json:"noCoverageDeltaRounds,omitempty"`
+	LastNoDeltaReason           string `json:"lastNoDeltaReason,omitempty"`
+	LastDecisionReason          string `json:"lastDecisionReason,omitempty"`
+	MaxPrerequisiteRefreshes    int    `json:"maxPrerequisiteRefreshes,omitempty"`
+	PrerequisiteRefreshes       int    `json:"prerequisiteRefreshes,omitempty"`
+}
+
+// RuntimeRecoveryBudget is the bounded SM-4 transport, operation recovery,
+// CAS reload and terminal delivery projection. It reports owner facts only;
+// consumers must not use it to schedule or retry Runtime work.
+type RuntimeRecoveryBudget struct {
+	MaxProviderTransportAttempts int `json:"maxProviderTransportAttempts,omitempty"`
+	ProviderTransportAttempts    int `json:"providerTransportAttempts,omitempty"`
+	MaxOperationRecoveryAttempts int `json:"maxOperationRecoveryAttempts,omitempty"`
+	OperationRecoveryAttempts    int `json:"operationRecoveryAttempts,omitempty"`
+	MaxCASReloadAttempts         int `json:"maxCasReloadAttempts,omitempty"`
+	CASReloadAttempts            int `json:"casReloadAttempts,omitempty"`
+	MaxTerminalDeliveryAttempts  int `json:"maxTerminalDeliveryAttempts,omitempty"`
+	TerminalDeliveryAttempts     int `json:"terminalDeliveryAttempts,omitempty"`
 }
 
 // RuntimeSemanticPlanning is a run-scoped, display-only projection of the

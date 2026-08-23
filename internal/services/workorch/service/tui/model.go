@@ -3572,9 +3572,6 @@ func repairLoopSummary(progress projectioncontract.TaskProgress) string {
 	if loop.RepeatedFailureReason != "" {
 		parts = append(parts, loop.RepeatedFailureReason)
 	}
-	if loop.NextAction != "" {
-		parts = append(parts, loop.NextAction)
-	}
 	if loop.Escalated {
 		parts = append(parts, "escalated")
 	}

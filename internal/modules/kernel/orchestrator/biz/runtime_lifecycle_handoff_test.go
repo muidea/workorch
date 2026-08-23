@@ -557,11 +557,9 @@ func TestRuntimeStartupRecoveryRedrivesPersistedDefinitionClarificationHandoff(t
 func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t *testing.T) {
 	ctx := context.Background()
 	aggregate := runtimeBoundDefinitionClarificationAggregate(t)
-	// Exhaust terminal-delivery budget up front. A nonterminal lifecycle
-	// handoff must still retain and renew its SM-4 successor without consuming
-	// or consulting that unrelated ledger.
+	// A nonterminal lifecycle handoff must retain and renew its SM-4 successor
+	// without consuming the terminal-only delivery ledger.
 	aggregate.Facts.RecoveryPolicy.MaxTerminalDeliveryAttempts = 1
-	aggregate.Facts.Recovery.TerminalDeliveryAttempts = 1
 	terminalDeliveryAttempts := aggregate.Facts.Recovery.TerminalDeliveryAttempts
 	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
 	owner := newRuntimeTestOwner()

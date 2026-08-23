@@ -33,9 +33,8 @@ func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *te
 			Blockers:     []ProgressBlocker{{ID: "decision-1", Kind: "decision", Reason: "missing input"}},
 			EvidenceRefs: []string{"evidence-1"},
 			RepairLoop: RepairLoop{
-				MissingDoDItems:      []map[string]any{{"id": "dod-1"}},
-				RecentAttempts:       []map[string]any{{"attempt": float64(2)}},
-				RecommendedNextSteps: []string{"change operation shape"},
+				MissingDoDItems: []map[string]any{{"id": "dod-1"}},
+				RecentAttempts:  []map[string]any{{"attempt": float64(2)}},
 			},
 		},
 		Memory: MemoryRecallTrace{
@@ -181,6 +180,8 @@ func TestPublicSnapshotContractsRoundTripResourceAndObservabilityFields(t *testi
 
 func TestCloneContextBundleDetachesNestedProtocolCollections(t *testing.T) {
 	want := &ContextBundle{
+		Recovery:              RecoveryPlan{BlockingResource: &BlockingResourceRef{AllowedUserActions: []string{"restart"}}},
+		TaskProgress:          TaskProgress{Recovery: RecoveryPlan{BlockingResource: &BlockingResourceRef{AllowedUserActions: []string{"revise"}}}},
 		Sections:              []ContextSection{{EvidenceRefs: []string{"evidence-1"}, Data: map[string]any{"state": "accepted"}}},
 		RecentEvidence:        []ContextEvidence{{EvidenceRefs: []string{"evidence-2"}, Data: map[string]any{"kind": "validation"}}},
 		CompressionCandidates: []ContextCompressionCandidate{{SourceRefs: []string{"section-1"}}},
@@ -191,9 +192,13 @@ func TestCloneContextBundleDetachesNestedProtocolCollections(t *testing.T) {
 	got.RecentEvidence[0].EvidenceRefs[0] = "changed"
 	got.RecentEvidence[0].Data["kind"] = "changed"
 	got.CompressionCandidates[0].SourceRefs[0] = "changed"
+	got.Recovery.BlockingResource.AllowedUserActions[0] = "changed"
+	got.TaskProgress.Recovery.BlockingResource.AllowedUserActions[0] = "changed"
 	if want.Sections[0].EvidenceRefs[0] != "evidence-1" || want.Sections[0].Data["state"] != "accepted" ||
 		want.RecentEvidence[0].EvidenceRefs[0] != "evidence-2" || want.RecentEvidence[0].Data["kind"] != "validation" ||
-		want.CompressionCandidates[0].SourceRefs[0] != "section-1" {
+		want.CompressionCandidates[0].SourceRefs[0] != "section-1" ||
+		want.Recovery.BlockingResource.AllowedUserActions[0] != "restart" ||
+		want.TaskProgress.Recovery.BlockingResource.AllowedUserActions[0] != "revise" {
 		t.Fatalf("clone shares nested collections with input: %+v", want)
 	}
 }

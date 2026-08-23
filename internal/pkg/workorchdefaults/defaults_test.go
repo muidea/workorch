@@ -895,6 +895,14 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			if !ok || ownerFact["ownerModuleId"] != "blocks/shell" || ownerFact["factKind"] != "selectable_validation_surface" || ownerFact["operationKind"] != "validation/managed_session" {
 				t.Fatalf("validation_preparation requiredOwnerFacts = %+v, want selectable Shell managed-validation surface", ownerFacts)
 			}
+			convergences, ok := item["ownerFactConvergences"].([]any)
+			if !ok || len(convergences) != 1 {
+				t.Fatalf("validation_preparation ownerFactConvergences = %+v, want one bounded acquisition", item["ownerFactConvergences"])
+			}
+			convergence, ok := convergences[0].(map[string]any)
+			if !ok || convergence["missingTrigger"] != "owner_fact_missing" || convergence["acquisitionOwnerModuleId"] != "blocks/file" || convergence["acquisitionOperationKind"] != "file/write" || convergence["reobserveOwnerModuleId"] != "blocks/shell" || convergence["maxAcquisitionAttempts"] != float64(1) {
+				t.Fatalf("validation_preparation ownerFactConvergences = %+v, want File acquisition then Shell re-observation", convergences)
+			}
 			validationPreparationEvidenceFound = true
 			continue
 		}

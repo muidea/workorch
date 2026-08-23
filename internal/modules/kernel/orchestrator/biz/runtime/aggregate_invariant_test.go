@@ -60,6 +60,13 @@ func TestRuntimeAggregateValidationPhasesRejectOwnedInvalidState(t *testing.T) {
 			validate: validateRuntimeAggregateSM4DeliveryAcknowledgements,
 		},
 		{
+			name: "sm4 non-terminal delivery budget",
+			mutate: func(value *RuntimeAggregate) {
+				value.Facts.Recovery.TerminalDeliveryAttempts = 1
+			},
+			validate: validateRuntimeAggregateSM4DeliveryAcknowledgements,
+		},
+		{
 			name: "sm2 repair ledger",
 			mutate: func(value *RuntimeAggregate) {
 				value.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{{}}

@@ -72,15 +72,18 @@ func mapAcceptanceProjection(run *runmodel.Run) projectioncontract.AcceptancePro
 		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
 		RepairAttempts:            facts.Repair.RepairAttempts, ValidationOnlyRetries: facts.Repair.ValidationOnlyRetries,
 		RepeatedFailureSignatures: len(facts.Repair.SignatureCounts), NoCoverageDeltaRounds: facts.Repair.NoProgressCount,
+		MaxPrerequisiteRefreshes: facts.RecoveryPolicy.MaxPrerequisiteRefreshes,
+		PrerequisiteRefreshes:    facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
+	}
+	projection.RecoveryBudget = &projectioncontract.RuntimeRecoveryBudget{
 		MaxProviderTransportAttempts: facts.RecoveryPolicy.MaxProviderTransportAttempts,
 		ProviderTransportAttempts:    facts.Recovery.ProviderTransportAttempts,
 		MaxOperationRecoveryAttempts: facts.RecoveryPolicy.MaxOperationRecoveryAttempts,
 		OperationRecoveryAttempts:    facts.Recovery.OperationRecoveryAttempts,
-		MaxCASReloadAttempts:         facts.RecoveryPolicy.MaxCASReloadAttempts, CASReloadAttempts: facts.Recovery.CASReloadAttempts,
-		MaxTerminalDeliveryAttempts: facts.RecoveryPolicy.MaxTerminalDeliveryAttempts,
-		TerminalDeliveryAttempts:    facts.Recovery.TerminalDeliveryAttempts,
-		MaxPrerequisiteRefreshes:    facts.RecoveryPolicy.MaxPrerequisiteRefreshes,
-		PrerequisiteRefreshes:       facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
+		MaxCASReloadAttempts:         facts.RecoveryPolicy.MaxCASReloadAttempts,
+		CASReloadAttempts:            facts.Recovery.CASReloadAttempts,
+		MaxTerminalDeliveryAttempts:  facts.RecoveryPolicy.MaxTerminalDeliveryAttempts,
+		TerminalDeliveryAttempts:     facts.Recovery.TerminalDeliveryAttempts,
 	}
 	if state.ExecutionBudget.Policy.PolicyRevision != "" {
 		activeWaitID := ""
@@ -370,33 +373,25 @@ func decodeConvergenceBudget(value any) projectioncontract.ConvergenceBudget {
 		return typed
 	case map[string]any:
 		return projectioncontract.ConvergenceBudget{
-			FocusID:                      stringValue(typed, "focusId", "focusID", "FocusID"),
-			SliceID:                      stringValue(typed, "sliceId", "sliceID", "SliceID"),
-			State:                        stringValue(typed, "state", "State"),
-			Decision:                     stringValue(typed, "decision", "Decision"),
-			MaxRepairAttemptsPerFocus:    readModelIntValue(valueByKey(typed, "maxRepairAttemptsPerFocus", "MaxRepairAttemptsPerFocus")),
-			MaxLLMRoundsPerSlice:         readModelIntValue(valueByKey(typed, "maxLLMRoundsPerSlice", "MaxLLMRoundsPerSlice")),
-			MaxRepeatedFailureSignature:  readModelIntValue(valueByKey(typed, "maxRepeatedFailureSignature", "MaxRepeatedFailureSignature")),
-			MaxValidationOnlyRetries:     readModelIntValue(valueByKey(typed, "maxValidationOnlyRetries", "MaxValidationOnlyRetries")),
-			MaxNoCoverageDeltaRounds:     readModelIntValue(valueByKey(typed, "maxNoCoverageDeltaRounds", "MaxNoCoverageDeltaRounds")),
-			MaxContextBytesPerRepair:     readModelIntValue(valueByKey(typed, "maxContextBytesPerRepair", "MaxContextBytesPerRepair")),
-			RepairAttempts:               readModelIntValue(valueByKey(typed, "repairAttempts", "RepairAttempts")),
-			LLMRounds:                    readModelIntValue(valueByKey(typed, "llmRounds", "LLMRounds")),
-			RepeatedFailureSignatures:    readModelIntValue(valueByKey(typed, "repeatedFailureSignatures", "RepeatedFailureSignatures")),
-			ValidationOnlyRetries:        readModelIntValue(valueByKey(typed, "validationOnlyRetries", "ValidationOnlyRetries")),
-			NoCoverageDeltaRounds:        readModelIntValue(valueByKey(typed, "noCoverageDeltaRounds", "NoCoverageDeltaRounds")),
-			LastNoDeltaReason:            stringValue(typed, "lastNoDeltaReason", "LastNoDeltaReason"),
-			LastDecisionReason:           stringValue(typed, "lastDecisionReason", "LastDecisionReason"),
-			MaxProviderTransportAttempts: readModelIntValue(valueByKey(typed, "maxProviderTransportAttempts", "MaxProviderTransportAttempts")),
-			ProviderTransportAttempts:    readModelIntValue(valueByKey(typed, "providerTransportAttempts", "ProviderTransportAttempts")),
-			MaxOperationRecoveryAttempts: readModelIntValue(valueByKey(typed, "maxOperationRecoveryAttempts", "MaxOperationRecoveryAttempts")),
-			OperationRecoveryAttempts:    readModelIntValue(valueByKey(typed, "operationRecoveryAttempts", "OperationRecoveryAttempts")),
-			MaxCASReloadAttempts:         readModelIntValue(valueByKey(typed, "maxCasReloadAttempts", "MaxCASReloadAttempts")),
-			CASReloadAttempts:            readModelIntValue(valueByKey(typed, "casReloadAttempts", "CASReloadAttempts")),
-			MaxTerminalDeliveryAttempts:  readModelIntValue(valueByKey(typed, "maxTerminalDeliveryAttempts", "MaxTerminalDeliveryAttempts")),
-			TerminalDeliveryAttempts:     readModelIntValue(valueByKey(typed, "terminalDeliveryAttempts", "TerminalDeliveryAttempts")),
-			MaxPrerequisiteRefreshes:     readModelIntValue(valueByKey(typed, "maxPrerequisiteRefreshes", "MaxPrerequisiteRefreshes")),
-			PrerequisiteRefreshes:        readModelIntValue(valueByKey(typed, "prerequisiteRefreshes", "PrerequisiteRefreshes")),
+			FocusID:                     stringValue(typed, "focusId", "focusID", "FocusID"),
+			SliceID:                     stringValue(typed, "sliceId", "sliceID", "SliceID"),
+			State:                       stringValue(typed, "state", "State"),
+			Decision:                    stringValue(typed, "decision", "Decision"),
+			MaxRepairAttemptsPerFocus:   readModelIntValue(valueByKey(typed, "maxRepairAttemptsPerFocus", "MaxRepairAttemptsPerFocus")),
+			MaxLLMRoundsPerSlice:        readModelIntValue(valueByKey(typed, "maxLLMRoundsPerSlice", "MaxLLMRoundsPerSlice")),
+			MaxRepeatedFailureSignature: readModelIntValue(valueByKey(typed, "maxRepeatedFailureSignature", "MaxRepeatedFailureSignature")),
+			MaxValidationOnlyRetries:    readModelIntValue(valueByKey(typed, "maxValidationOnlyRetries", "MaxValidationOnlyRetries")),
+			MaxNoCoverageDeltaRounds:    readModelIntValue(valueByKey(typed, "maxNoCoverageDeltaRounds", "MaxNoCoverageDeltaRounds")),
+			MaxContextBytesPerRepair:    readModelIntValue(valueByKey(typed, "maxContextBytesPerRepair", "MaxContextBytesPerRepair")),
+			RepairAttempts:              readModelIntValue(valueByKey(typed, "repairAttempts", "RepairAttempts")),
+			LLMRounds:                   readModelIntValue(valueByKey(typed, "llmRounds", "LLMRounds")),
+			RepeatedFailureSignatures:   readModelIntValue(valueByKey(typed, "repeatedFailureSignatures", "RepeatedFailureSignatures")),
+			ValidationOnlyRetries:       readModelIntValue(valueByKey(typed, "validationOnlyRetries", "ValidationOnlyRetries")),
+			NoCoverageDeltaRounds:       readModelIntValue(valueByKey(typed, "noCoverageDeltaRounds", "NoCoverageDeltaRounds")),
+			LastNoDeltaReason:           stringValue(typed, "lastNoDeltaReason", "LastNoDeltaReason"),
+			LastDecisionReason:          stringValue(typed, "lastDecisionReason", "LastDecisionReason"),
+			MaxPrerequisiteRefreshes:    readModelIntValue(valueByKey(typed, "maxPrerequisiteRefreshes", "MaxPrerequisiteRefreshes")),
+			PrerequisiteRefreshes:       readModelIntValue(valueByKey(typed, "prerequisiteRefreshes", "PrerequisiteRefreshes")),
 		}
 	default:
 		return projectioncontract.ConvergenceBudget{}
@@ -443,14 +438,6 @@ func isEmptyConvergenceBudget(item projectioncontract.ConvergenceBudget) bool {
 		item.NoCoverageDeltaRounds == 0 &&
 		strings.TrimSpace(item.LastNoDeltaReason) == "" &&
 		strings.TrimSpace(item.LastDecisionReason) == "" &&
-		item.MaxProviderTransportAttempts == 0 &&
-		item.ProviderTransportAttempts == 0 &&
-		item.MaxOperationRecoveryAttempts == 0 &&
-		item.OperationRecoveryAttempts == 0 &&
-		item.MaxCASReloadAttempts == 0 &&
-		item.CASReloadAttempts == 0 &&
-		item.MaxTerminalDeliveryAttempts == 0 &&
-		item.TerminalDeliveryAttempts == 0 &&
 		item.MaxPrerequisiteRefreshes == 0 &&
 		item.PrerequisiteRefreshes == 0
 }

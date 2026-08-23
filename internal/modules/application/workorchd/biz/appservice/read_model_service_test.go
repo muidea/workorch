@@ -2021,9 +2021,8 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 			CurrentMilestone: "formal_result",
 			EvidenceRefs:     []string{"cached-progress-evidence"},
 			Recovery: projectioncontract.RecoveryPlan{
-				Mode:       "complete",
-				NextAction: "inspect_result",
-				RunID:      "run-context-progress-reuse",
+				Mode:  "complete",
+				RunID: "run-context-progress-reuse",
 			},
 		},
 	}
@@ -2421,8 +2420,8 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if progress.WorkspaceID != string(workspaceID) || progress.RunID != string(runID) || progress.State != "completed" {
 		t.Fatalf("progress identity = %+v, want completed run progress", progress)
 	}
-	if progress.Recovery.Mode != "none" || progress.Recovery.NextAction != "inspect_result" {
-		t.Fatalf("recovery = %+v, want inspect completed result", progress.Recovery)
+	if progress.Recovery.Mode != "none" {
+		t.Fatalf("recovery = %+v, want completed factual mode", progress.Recovery)
 	}
 	if progress.Summary != "formal task outcome" {
 		t.Fatalf("summary = %q, want formal task outcome", progress.Summary)
@@ -2888,11 +2887,10 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 		progress.RepairLoop.LastFailureClass != "shell_command_failed" ||
 		progress.RepairLoop.LastFailureSignature != "kind=shell/command" ||
 		progress.RepairLoop.LastFailureStepID != "run-repair-loop/block/run-tests" ||
-		progress.RepairLoop.NextAction != "resume_run" ||
 		progress.RepairLoop.LastFailureTargetScope != "target.txt" ||
 		progress.RepairLoop.RepeatedFailureReason != "same_target_scope_repeated_failure" ||
 		progress.RepairLoop.LastRepairInputBytes == 0 {
-		t.Fatalf("repairLoop = %+v, want repairing projection with attempts/failure/next action", progress.RepairLoop)
+		t.Fatalf("repairLoop = %+v, want factual repairing projection", progress.RepairLoop)
 	}
 	if len(progress.RepairLoop.StructuredFailureSignals) == 0 || len(progress.RepairLoop.RepairInputCompaction) == 0 {
 		t.Fatalf("repairLoop = %+v, want repair grounding observability", progress.RepairLoop)
@@ -3026,8 +3024,7 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 		!progress.RepairLoop.Escalated ||
 		progress.RepairLoop.EscalationTicketID != "ticket-repair-exhausted" ||
 		progress.RepairLoop.EscalationReason == "" ||
-		progress.RepairLoop.AttemptCount != 2 ||
-		progress.RepairLoop.NextAction != "resolve_decision_ticket" {
+		progress.RepairLoop.AttemptCount != 2 {
 		t.Fatalf("repairLoop = %+v, want escalated decision projection", progress.RepairLoop)
 	}
 }

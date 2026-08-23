@@ -47,8 +47,8 @@ func gapBaselineDTO(item *projectioncontract.GapBaseline) (*workorchdevents.CLIG
 	ret := &workorchdevents.CLIGapBaselineInfo{
 		WorkspaceID: item.WorkspaceID, RunID: item.RunID, DefinitionRevision: item.DefinitionRevision, BaselineRevision: item.BaselineRevision,
 		CurrentFocus: focus, OpenCoverageWorkItems: coverage, AcceptedEvidenceRefs: append([]string(nil), item.AcceptedEvidenceRefs...),
-		RejectedEvidenceRefs: append([]string(nil), item.RejectedEvidenceRefs...), NextAction: item.NextAction,
-		Diagnostics: projectioncontract.CloneGapDiagnostics(item.Diagnostics),
+		RejectedEvidenceRefs: append([]string(nil), item.RejectedEvidenceRefs...),
+		Diagnostics:          projectioncontract.CloneGapDiagnostics(item.Diagnostics),
 	}
 	if item.TodoItems != nil {
 		ret.TodoItems = make([]workorchdevents.CLIGapTodoItemInfo, 0, len(item.TodoItems))
@@ -75,7 +75,7 @@ func gapBaselineProjection(item *workorchdevents.CLIGapBaselineInfo) *projection
 		WorkspaceID: item.WorkspaceID, RunID: item.RunID, DefinitionRevision: item.DefinitionRevision, BaselineRevision: item.BaselineRevision,
 		CurrentFocus: item.CurrentFocus.Map(), OpenCoverageWorkItems: workorcheventpayload.MapSlice(item.OpenCoverageWorkItems),
 		AcceptedEvidenceRefs: append([]string(nil), item.AcceptedEvidenceRefs...), RejectedEvidenceRefs: append([]string(nil), item.RejectedEvidenceRefs...),
-		NextAction: item.NextAction, Diagnostics: projectioncontract.CloneGapDiagnostics(item.Diagnostics),
+		Diagnostics: projectioncontract.CloneGapDiagnostics(item.Diagnostics),
 	}
 	if item.TodoItems != nil {
 		ret.TodoItems = make([]projectioncontract.GapTodoItem, 0, len(item.TodoItems))

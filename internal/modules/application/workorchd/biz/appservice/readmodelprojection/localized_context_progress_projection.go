@@ -36,12 +36,11 @@ func mapLocalizedWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotS
 func mapLocalizedTaskProgress(snapshot readmodelcore.RunSnapshotState) projectioncontract.TaskProgress {
 	language := snapshotLanguage(snapshot)
 	return mapTaskProgress(snapshot, runTaskProgressLabels{
-		RecoveryNextAction: localizationcore.RecoveryNextAction(language),
-		RunCreated:         localizationcore.MilestoneTitle(language, "run_created"),
-		ExecutionSteps:     localizationcore.MilestoneTitle(language, "execution_steps"),
-		Governance:         localizationcore.MilestoneTitle(language, "governance"),
-		Validation:         localizationcore.MilestoneTitle(language, "validation"),
-		FormalResult:       localizationcore.MilestoneTitle(language, "formal_result"),
+		RunCreated:     localizationcore.MilestoneTitle(language, "run_created"),
+		ExecutionSteps: localizationcore.MilestoneTitle(language, "execution_steps"),
+		Governance:     localizationcore.MilestoneTitle(language, "governance"),
+		Validation:     localizationcore.MilestoneTitle(language, "validation"),
+		FormalResult:   localizationcore.MilestoneTitle(language, "formal_result"),
 	})
 }
 

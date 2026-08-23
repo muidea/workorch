@@ -43,6 +43,9 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	if cycle := hardDependencyCycle(candidate.ProposedRelationInputs); len(cycle) > 0 {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionPrerequisiteUnresolved, cycle, "hard_dependency_cycle"), nil
 	}
+	if unresolved := unresolvedOwnerFactConvergence(candidate); len(unresolved) > 0 {
+		return clarification(candidate, workspacemodel.DefinitionAdmissionPrerequisiteUnresolved, unresolved, "owner_fact_convergence_incomplete"), nil
+	}
 	result := workspacemodel.DefinitionAdmissionResult{
 		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,
 		CandidateHash: candidate.CandidateHash, Disposition: workspacemodel.DefinitionAdmissionAdmittedAllOf,
@@ -50,6 +53,92 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 		CanonicalAdmittedInputHash: stableHash("admitted_all_of", candidate.CandidateHash, candidate.AdmissionCompilerVersion),
 	}.WithHash()
 	return result, result.ValidateFor(candidate)
+}
+
+func unresolvedOwnerFactConvergence(candidate workspacemodel.DefinitionAdmissionCandidate) []string {
+	candidate = candidate.Normalized()
+	required := make(map[string]workspacemodel.DefinitionRequiredOwnerFactBinding, len(candidate.RequiredOwnerFactBindings))
+	unresolved := make([]string, 0)
+	for _, binding := range candidate.RequiredOwnerFactBindings {
+		key := definitionOwnerFactBindingKey(binding.SourceRef, binding.Requirement.OwnerModuleID, string(binding.Requirement.FactKind), binding.Requirement.OperationKind)
+		if _, duplicate := required[key]; duplicate {
+			unresolved = append(unresolved, binding.SourceRef)
+			continue
+		}
+		required[key] = binding
+	}
+	counts := make(map[string]int, len(candidate.OwnerFactConvergenceBindings))
+	convergenceBySource := make(map[string]workspacemodel.DefinitionOwnerFactConvergenceBinding, len(candidate.OwnerFactConvergenceBindings))
+	for _, binding := range candidate.OwnerFactConvergenceBindings {
+		value := binding.Convergence.Normalized()
+		key := definitionOwnerFactBindingKey(binding.SourceRef, value.Requirement.OwnerModuleID, string(value.Requirement.FactKind), value.Requirement.OperationKind)
+		counts[key]++
+		if _, ok := required[key]; !ok || value.Validate() != nil {
+			unresolved = append(unresolved, binding.SourceRef)
+		}
+		if _, duplicate := convergenceBySource[binding.SourceRef]; duplicate {
+			unresolved = append(unresolved, binding.SourceRef)
+		} else {
+			convergenceBySource[binding.SourceRef] = binding
+		}
+	}
+	for key, binding := range required {
+		if counts[key] != 1 {
+			unresolved = append(unresolved, binding.SourceRef)
+		}
+	}
+	if cycle := ownerFactConvergenceCycle(convergenceBySource); len(cycle) > 0 {
+		unresolved = append(unresolved, cycle...)
+	}
+	return normalizeStrings(unresolved)
+}
+
+func definitionOwnerFactBindingKey(sourceRef, owner, kind, operation string) string {
+	return strings.Join([]string{strings.TrimSpace(sourceRef), strings.TrimSpace(owner), strings.TrimSpace(kind), strings.TrimSpace(operation)}, "|")
+}
+
+func ownerFactConvergenceCycle(values map[string]workspacemodel.DefinitionOwnerFactConvergenceBinding) []string {
+	state := make(map[string]uint8, len(values))
+	stack := make([]string, 0, len(values))
+	var visit func(string) []string
+	visit = func(ref string) []string {
+		switch state[ref] {
+		case 1:
+			for idx := range stack {
+				if stack[idx] == ref {
+					return append([]string(nil), stack[idx:]...)
+				}
+			}
+			return []string{ref}
+		case 2:
+			return nil
+		}
+		value, ok := values[ref]
+		if !ok {
+			return []string{ref}
+		}
+		state[ref] = 1
+		stack = append(stack, ref)
+		for _, dependency := range value.Convergence.Normalized().DependsOnRequirementRefs {
+			if cycle := visit(dependency); len(cycle) > 0 {
+				return cycle
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[ref] = 2
+		return nil
+	}
+	refs := make([]string, 0, len(values))
+	for ref := range values {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	for _, ref := range refs {
+		if cycle := visit(ref); len(cycle) > 0 {
+			return normalizeStrings(cycle)
+		}
+	}
+	return nil
 }
 
 func clarification(candidate workspacemodel.DefinitionAdmissionCandidate, code string, refs []string, signature string) workspacemodel.DefinitionAdmissionResult {

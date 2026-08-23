@@ -24,6 +24,10 @@ Last Verified: 2026-08-23
 - `biz/projection.Component` 构造并拥有唯一 `workspaceviewcore.Manager`/Store 的 Start、Close 和后台任务生命周期。它只消费 Eventstream 的 `EventRecordAppendedData`、Orchestrator 的 immutable drive observation、owner snapshot 和 execution observation；server 只通过无生命周期的 `WorkspaceProjection` reader 与 derived-write port 输出 HTTP/SSE/metrics 或显式 rebuild 请求。生产 execution observation 的派生 accepted/rejected/rebuild/delete 全部由 Biz-owned projection component 写入，不存在 `queued` observation 或 `queuedAt`；server 仅接收独立的 monotonic transport metrics；`WorkspaceProjectionChangedData` 仍由 Biz 发布。
 - opaque `RuntimeStateRecord` 只允许作为一次 projector 调用的瞬时输入；`workspaceviewcore` Store、application read model 与 HTTP cache 只能保存 bounded immutable public DTO，不能保存 aggregate、其指针或可用于 re-drive 的 authority-shaped 副本。
 - Workspace/Run projection 原样保留各 owner 的 canonical `state`、Workspace `activeRunId` 与 Run `blockingTicketId|blockingApprovalId`。Workspace DTO 不暴露 blocker 字段；Decision/Approval 的跨 owner 关联只进入 `governanceDisplay`，不一致只进入 `consistencyDiagnostic`。`displayOutcome` 是非权威展示摘要，formal output 始终是独立 `result/results`；三类 display/diagnostic 字段均不能生成、阻断或选择 `Drive/Resume/Restart` mutation intent，也不能伪造、隐藏或选择治理 resolution target。`WorkspaceRuntimeView.blockingDecision|blockingApproval` 只有在 canonical active Run 已进入匹配 blocked state、其 exact blocker ref 命中同 Workspace/Run scope 的真实 open/pending owner resource 时才可出现；同 Run 的其他未决资源和 `governanceDisplay` ID 均不能替代该引用。
+- `TaskProgress.recovery`、ContextBundle 与 compressed context 复用同一 factual `BlockingResourceRef`。它只在上述 exact
+  canonical 交集成立时出现，并逐字段复制 owner/resource/scope/state 及 owner 提供的 `requiredAction/allowedUserActions`；
+  `suggestedNavigation` 是独立 display hint。它们不构造 mutation。SM-2 repair 只投影在 `RepairLoop`/convergence budget，
+  SM-4 transport、operation、CAS 与 terminal delivery 只投影在独立 recovery budget/terminal audit，禁止互相镜像。
 - Decision owner 的`DefinitionClarification`只经bounded typed `Decision.definitionClarification`投影，完整保留class、binding、
   required action、gap/offending refs与candidate/runtime/resolution lineage identity，并deep-clone `offendingRefs`。该DTO仅供
   Queue/Workspace Detail/TUI展示和workspace-scoped Definition修订导航；Workorchd不从Goal/DoD、SSE或display字段推导
@@ -48,15 +52,18 @@ Last Verified: 2026-08-23
 - workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`，并将它封装进 workspace-scoped restart intent；Workspace owner 校验 definition/scope 后再把 typed intent 交给 Run owner，Application 不直接发送 Run create command。
 - RuntimeBootstrap 编译前，application 先把 exact Goal、DoD、Template snapshot 与 resolved workspace directory 组装为
   Workspace-owned immutable `DefinitionAdmissionCandidate`。pure compiler 不调用 LLM/capability，只接受完整 `all_of`；
-  `one_of/any_of/quorum/threshold/first_success` 或 unresolved declared prerequisite 通过 Decision owner 专用 typed ticket
+  candidate 同步封存 required owner-fact binding、唯一 one-shot acquisition/reobserve closure 及 Profile contract hash；
+  `one_of/any_of/quorum/threshold/first_success`、缺失/重复/成环的 owner-fact closure 或其他 unresolved declared prerequisite
+  通过 Decision owner 专用 typed ticket
   fail-closed。新 invalid revision（包括既有 eligible revision 之后的 authoring attempt）使用 reconcile-candidate；新 admitted revision严格执行 Workspace promotion(pending) →
   Decision resolution → Workspace acknowledgement(eligible)，之后仍需用户显式 Restart。
 - activation 可以把 profile 显式声明的 `targetSelectorOwnerRef + targetSelectorSubjectRef` 封存为 File target-selection scope。空 workspace 的 scope 只表示该 profile 已授权 File owner 接受一个后续的具体 workspace-relative 创建目标；它不从 Goal/DoD 或目录名猜文件路径，且不绕过 File owner 的 operation admissibility/feasibility。
 - activation 将每个 DoD item 标记为需要 typed assessment，并按 profile contract 的 required acceptance dimension/deliverable expectation 追加稳定 focus；primary state-change 优先于 supplemental evidence，同一 `scope + id` 只生成一个 baseline item。
 - activation 可以把 profile 的 `RuntimeOwnerFactRequirement` 编译进 immutable DefinitionFocus；例如 software-dev
   `validation_preparation` 要求 `blocks/shell` 当前发布 selectable `validation/managed_session` surface。Workorchd 只做
-  typed parsing、normalization 与 bootstrap propagation，不读取 capability repository/catalog、不判断事实是否满足，也
-  不触发 CWI/semantic state transition。
+  typed parsing、normalization、pre-seal closure 验证与 bootstrap propagation，不读取 capability repository/catalog、不判断
+  事实是否满足，也不触发 CWI/semantic state transition。默认 software profile 封存一次 `blocks/file file/write`
+  acquisition 后由 `blocks/shell` reobserve 的 typed 合同；SM-2 只能消费该合同，不能在 kernel 中硬编码 Go 或测试文件。
 - RuntimeBootstrap 的 typed activation context 直接保存 dialog language、默认及 stage Soul 内容快照、Skill、MCP server/capability 选择、Memory、evidence policy，以及 state-change、capability-usage、typed validation、profile acceptance/deliverable/evidence、acceptance-slice、template stage policy execution contract。Skill 明确区分 WorkOrch Registry 与外部 SkillHub Catalog provenance，并在进入 Run bootstrap 前封存最多 5 项、单项 instruction 8 KiB、instruction 总计 24 KiB、metadata 总计 16 KiB 的 C3 byte budget；只有 instruction 可做确定性 UTF-8 裁剪，来源身份与原始长度随 snapshot 保存。Memory 同时封存 bounded candidate/selected/excluded、quota、score/hit 与 byte/token budget provenance；这些 provenance 只解释 context selection，不参与 SM-2 credit。application 将系统 repair limit 和 matched validation retry limit 封存进新 Run convergence policy，Orchestrator 不读取 template map。
 - acceptance compiler 对 focus 总数执行中立上限门禁。software-dev profile 的 `direct_validation` 分组每个 slice 最多 4 个 work item，全部 focus 最多 64 个；slice 只约束 presentation/candidate context，每个 CWI 仍生成独立 focus，不能据此声称减少 assessment 循环。
 - RuntimeBootstrap 的 typed definition context 保存 definition change impact，包括累积 Goal/DoD identity、原位修订记录、pre-execution assessment 要求与中立 strategy requirements；该快照直接进入 LLM C1。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -81,6 +82,9 @@ func TestPersistReplacementIntentRetiresOnlyRejectedClarificationOnExplicitNewRe
 	first.State = runmodel.ReplacementIntentClarificationResolutionRejected
 	first.ClarificationResolutionBindingHash = "scope-mismatch-binding"
 	first.ClarificationConflictKind = "scope_mismatch"
+	first.Recovery = newReplacementRecoveryLease(first, runmodel.ReplacementRecoveryClarificationResolution, 1, time.Now().UTC().Format(time.RFC3339Nano))
+	first.Recovery.State = runmodel.ReplacementRecoveryCompleted
+	first.Recovery.DueAt = ""
 	predecessor.ReplacementIntent = &first
 	if err := runs.Create(ctx, predecessor); err != nil {
 		t.Fatal(err)
@@ -103,6 +107,7 @@ func TestPersistReplacementIntentRetiresOnlyRejectedClarificationOnExplicitNewRe
 	}
 	reusedRetired := first
 	reusedRetired.State = ""
+	reusedRetired.Recovery = runmodel.ReplacementRecoveryLease{}
 	reusedRetired.ClarificationResolutionBindingHash = ""
 	reusedRetired.ClarificationConflictKind = ""
 	if err := biz.persistReplacementIntent(ctx, stored, reusedRetired); !errors.Is(err, common.ErrConflict) {
@@ -132,6 +137,9 @@ func TestPersistReplacementIntentRetiresOnlyRejectedClarificationOnExplicitNewRe
 	boundConflict.ClarificationConflictKind = "ticket_already_bound"
 	boundConflict.ConflictingReplacementIntentID = "runtime-definition-replacement/restart-original"
 	boundConflict.ConflictingReplacementIntentHash = "replacement-hash-original"
+	boundConflict.Recovery = newReplacementRecoveryLease(boundConflict, runmodel.ReplacementRecoveryClarificationResolution, 1, time.Now().UTC().Format(time.RFC3339Nano))
+	boundConflict.Recovery.State = runmodel.ReplacementRecoveryCompleted
+	boundConflict.Recovery.DueAt = ""
 	boundPredecessor.ReplacementIntent = &boundConflict
 	if err := runs.Create(boundCtx, boundPredecessor); err != nil {
 		t.Fatal(err)
@@ -156,6 +164,7 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 		Bootstrap:        &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		Kind: runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: runmodel.ReplacementIntentPending,
 	}
+	intent.Recovery = newReplacementRecoveryLease(intent, runmodel.ReplacementRecoveryAdministrativeTermination, 1, time.Now().UTC().Format(time.RFC3339Nano))
 	predecessor := &runmodel.Run{
 		ID: "run-001", WorkspaceID: "ws-restart", GoalID: "goal-old", DoDID: "dod-old", DefinitionRevision: "def-old",
 		State: common.RunStateActive, ReplacementIntent: &intent,
@@ -185,6 +194,13 @@ func TestMaterializeReplacementRequiresTerminalPredecessorAndIsIdempotent(t *tes
 	predecessor.State = common.RunStateSuperseded
 	terminal := runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, TerminalDeliveryID: "terminal-1"}
 	predecessor.TerminalDelivery = &terminal
+	predecessor.Lineage.LineageState = "superseded"
+	predecessor.ReplacementIntent.State = runmodel.ReplacementIntentTerminationAcknowledged
+	predecessor.ReplacementIntent.TerminalDeliveryID = terminal.TerminalDeliveryID
+	predecessor.ReplacementIntent.RuntimeStateRevision = 18
+	predecessor.ReplacementIntent.Recovery = nextReplacementRecoveryStage(*predecessor.ReplacementIntent, runmodel.ReplacementRecoverySuccessorMaterialization, time.Now().UTC().Format(time.RFC3339Nano))
+	predecessor.ReplacementIntent.Recovery.State = runmodel.ReplacementRecoveryRunning
+	predecessor.ReplacementIntent.Recovery.DueAt = ""
 	if err := runs.Update(ctx, predecessor); err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,6 @@ type GapBaseline struct {
 	AcceptedEvidenceRefs  []string         `json:"acceptedEvidenceRefs,omitempty"`
 	RejectedEvidenceRefs  []string         `json:"rejectedEvidenceRefs,omitempty"`
 	TodoItems             []GapTodoItem    `json:"todoItems,omitempty"`
-	NextAction            GapNextAction    `json:"nextAction,omitempty"`
 	Diagnostics           []GapDiagnostic  `json:"diagnostics,omitempty"`
 }
 
@@ -28,13 +27,6 @@ type GapTodoItem struct {
 	Priority              int            `json:"priority,omitempty"`
 	Reason                string         `json:"reason,omitempty"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
-}
-
-// GapNextAction reports the action label already selected by the Runtime
-// owner. It is display data, not a command or reducer input.
-type GapNextAction struct {
-	Kind   string `json:"kind,omitempty"`
-	Reason string `json:"reason,omitempty"`
 }
 
 type GapDiagnostic struct {

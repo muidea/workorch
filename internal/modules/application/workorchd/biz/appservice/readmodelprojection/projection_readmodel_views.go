@@ -402,9 +402,8 @@ func mapTaskProgress(snapshot readmodelcore.RunSnapshotState, labels runTaskProg
 		RunID:       snapshot.Run.ID,
 		State:       snapshot.Run.State,
 		Recovery: projectioncontract.RecoveryPlan{
-			Mode:       "resume",
-			NextAction: labels.RecoveryNextAction,
-			RunID:      snapshot.Run.ID,
+			Mode:  "resume",
+			RunID: snapshot.Run.ID,
 		},
 	}
 	applyTaskProgressCurrentStep(&ret, snapshot)
@@ -431,19 +430,16 @@ func mapTaskProgress(snapshot readmodelcore.RunSnapshotState, labels runTaskProg
 func taskProgressRecovery(snapshot readmodelcore.RunSnapshotState, latestCheckpoint *projectioncontract.RuntimeCheckpoint, blockers []projectioncontract.ProgressBlocker, fallback projectioncontract.RecoveryPlan) projectioncontract.RecoveryPlan {
 	ret := fallback
 	ret.RunID = snapshot.Run.ID
-	if hasOpenDecisionBlocker(snapshot.Decisions, snapshot.Run.WorkspaceID, snapshot.Run.ID, snapshot.Run.BlockingTicketID) {
-		ret.BlockingTicketID = snapshot.Run.BlockingTicketID
-	}
-	if hasOpenApprovalBlocker(snapshot.Approvals, snapshot.Run.WorkspaceID, snapshot.Run.ID, snapshot.Run.BlockingApprovalID) {
-		ret.BlockingApprovalID = snapshot.Run.BlockingApprovalID
+	ret.BlockingTicketID = ""
+	ret.BlockingApprovalID = ""
+	ret.BlockingResource = nil
+	ret.SuggestedNavigation = ""
+	if item := selectRunBlockingDecision(snapshot.Run, snapshot.Decisions); item != nil {
+		applyDecisionRecoveryBlocker(&ret, item)
+	} else if item := selectRunBlockingApproval(snapshot.Run, snapshot.Approvals); item != nil {
+		applyApprovalRecoveryBlocker(&ret, item)
 	}
 	applyRecoveryCheckpoint(&ret, latestCheckpoint)
-	if !hasOpenDecisionBlocker(snapshot.Decisions, snapshot.Run.WorkspaceID, snapshot.Run.ID, ret.BlockingTicketID) {
-		ret.BlockingTicketID = ""
-	}
-	if !hasOpenApprovalBlocker(snapshot.Approvals, snapshot.Run.WorkspaceID, snapshot.Run.ID, ret.BlockingApprovalID) {
-		ret.BlockingApprovalID = ""
-	}
 	if applyBlockingRecovery(&ret, blockers) {
 		return ret
 	}
@@ -489,9 +485,6 @@ func mapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState, lab
 	}
 	ret := newWorkspaceTaskProgressBase(snapshot, labels)
 	applyWorkspaceProgressCurrentStep(&ret, snapshot)
-	if ret.CurrentActionLabel == "" {
-		ret.CurrentActionLabel = currentActionLabelFromWorkspaceSnapshot(snapshot)
-	}
 	applyWorkspaceProgressBlockers(&ret, snapshot)
 	ret.Milestones = workspaceProgressMilestones(snapshot, labels)
 	ret.Items = workspaceProgressItems(snapshot, labels)
@@ -509,9 +502,8 @@ func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshotState,
 		WorkspaceID: snapshot.Workspace.ID,
 		State:       snapshot.Workspace.State,
 		Recovery: projectioncontract.RecoveryPlan{
-			Mode:       "idle",
-			NextAction: "start_workspace_execution",
-			Reason:     labels.NoActiveRun,
+			Mode:   "idle",
+			Reason: labels.NoActiveRun,
 		},
 		RepairLoop: projectioncontract.RepairLoop{
 			State: "inactive",
@@ -521,7 +513,6 @@ func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshotState,
 		ret.RunID = snapshot.Workspace.ActiveRunID
 		ret.Recovery.RunID = snapshot.Workspace.ActiveRunID
 		ret.Recovery.Mode = "resume"
-		ret.Recovery.NextAction = "inspect_active_run"
 		ret.Recovery.Reason = labels.ActiveRun
 	}
 	return ret
@@ -553,8 +544,7 @@ func applyRepairGroundingStructuredSignals(ret *projectioncontract.RepairLoop, s
 
 func mapTaskProgressRepairLoop(snapshot readmodelcore.RunSnapshotState, recovery projectioncontract.RecoveryPlan) projectioncontract.RepairLoop {
 	ret := projectioncontract.RepairLoop{
-		State:      "inactive",
-		NextAction: recovery.NextAction,
+		State: "inactive",
 	}
 	attemptCount, lastAttempt, lastRepairStepID := repairAttemptProjection(snapshot.Steps)
 	ret.AttemptCount = attemptCount

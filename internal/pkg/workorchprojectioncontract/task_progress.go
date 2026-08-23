@@ -8,7 +8,6 @@ type TaskProgress struct {
 	CurrentStepID      string              `json:"currentStepId,omitempty"`
 	CurrentStepKind    string              `json:"currentStepKind,omitempty"`
 	CurrentStepState   string              `json:"currentStepState,omitempty"`
-	CurrentActionLabel string              `json:"currentActionLabel,omitempty"`
 	DiagnosticLineage  string              `json:"diagnosticLineage,omitempty"`
 	CurrentMilestone   string              `json:"currentMilestone,omitempty"`
 	BlockingTicketID   string              `json:"blockingTicketId,omitempty"`
@@ -55,8 +54,6 @@ type RepairLoop struct {
 	RepeatedFailureReason    string           `json:"repeatedFailureReason,omitempty"`
 	MissingDoDItems          []map[string]any `json:"missingDoDItems,omitempty"`
 	RecentAttempts           []map[string]any `json:"recentAttempts,omitempty"`
-	RecommendedNextSteps     []string         `json:"recommendedNextSteps,omitempty"`
-	NextAction               string           `json:"nextAction,omitempty"`
 	Escalated                bool             `json:"escalated"`
 	EscalationReason         string           `json:"escalationReason,omitempty"`
 	EscalationTicketID       string           `json:"escalationTicketId,omitempty"`
@@ -67,6 +64,7 @@ func CloneTaskProgress(item TaskProgress) TaskProgress {
 	item.Milestones = cloneProgressMilestones(item.Milestones)
 	item.Items = cloneProgressItems(item.Items)
 	item.Blockers = append([]ProgressBlocker(nil), item.Blockers...)
+	item.Recovery = CloneRecoveryPlan(item.Recovery)
 	item.RepairLoop = CloneRepairLoop(item.RepairLoop)
 	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
 	item.Runtime = CloneRuntimeProgress(item.Runtime)
@@ -78,7 +76,6 @@ func CloneRepairLoop(item RepairLoop) RepairLoop {
 	item.RepairInputCompaction = cloneJSONMap(item.RepairInputCompaction)
 	item.MissingDoDItems = cloneJSONMaps(item.MissingDoDItems)
 	item.RecentAttempts = cloneJSONMaps(item.RecentAttempts)
-	item.RecommendedNextSteps = append([]string(nil), item.RecommendedNextSteps...)
 	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
 	return item
 }

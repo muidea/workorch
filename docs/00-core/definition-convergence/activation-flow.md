@@ -16,7 +16,7 @@ drive。它绑定 SM-1、SM-2 与 SM-4，但不另立状态迁移。
 ```text
 fresh Start/Restart authoring submits DefinitionAdmissionCandidate
   -> Workspace owner normalizes and CAS-persists immutable candidate
-  -> workorchd pure admission compiler checks complete all-of semantics
+  -> workorchd pure admission compiler checks complete all-of semantics and typed owner-fact closure
        invalid/ambiguous -> Decision owner blocking clarification ticket; no formal Definition or Run
        admitted          -> Workspace owner promotes formal Definition + StartupInputContract
        corrected ticket  -> promotion remains pending until Decision resolution acknowledgement
@@ -48,6 +48,7 @@ A fresh bootstrap requires an admitted and activation-eligible startup input con
 - one Workspace and its resolved project workspace directory plus internal boundary;
 - exact Goal and DoD item set with stable definition revision/lineage and `StartupInputHash`;
 - exact Workspace Template snapshot and any independently bound Profile/policy snapshot;
+- exact normalized Profile contract hash plus every required owner fact's preexisting or unique acquisition/reobserve declaration;
 - Workspace canonical provider selection and referenced Soul/Skill/MCP/Memory resources;
 - template/profile/capability/evidence policy declarations;
 - bounded convergence/recovery policy.

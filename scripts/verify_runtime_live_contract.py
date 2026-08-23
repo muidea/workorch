@@ -376,9 +376,11 @@ def runtime_audit_errors(
             errors.append("audit provider ceiling input plus output exceeds context window")
 
     repair = audit.get("repair") or {}
-    for field in ("repairAttempts", "validationOnlyRetries", "noProgressCount", "terminalDeliveryAttempts"):
+    for field in ("repairAttempts", "validationOnlyRetries", "noProgressCount"):
         if not isinstance(repair.get(field), int) or repair.get(field) < 0:
             errors.append(f"audit repair counter {field} is invalid")
+    if "terminalDeliveryAttempts" in repair:
+        errors.append("audit repair contains SM-4 terminal delivery state")
 
     if require_terminal:
         terminal = audit.get("terminal")
@@ -386,6 +388,8 @@ def runtime_audit_errors(
             errors.append("completed Run lacks terminal audit record")
         elif not terminal.get("code"):
             errors.append("terminal audit lacks terminal code")
+        elif not isinstance(terminal.get("terminalDeliveryAttempts", 0), int) or terminal.get("terminalDeliveryAttempts", 0) < 0:
+            errors.append("terminal audit delivery attempts are invalid")
         assessments = audit.get("assessments") or []
         if not assessments:
             errors.append("completed Run lacks assessment audit lineage")
@@ -516,7 +520,7 @@ def _self_test() -> None:
             {"id": "validate-1", "kind": "shell/command", "executionKey": "exec/ws-1/run-1/dispatch-1/validate-1", "fence": 1, "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
         ]}],
         "grounding": {"prerequisiteObservations": [{"prerequisiteId": "manifest", "ownerModuleId": "blocks/file", "observationId": "obs-1", "dependencies": [{"domain": "workspace_tree", "ownerModuleId": "blocks/file", "subjectRef": "workspace", "revision": "tree-1"}]}], "providerCeiling": {"providerId": "ai-proxy", "modelId": "model-1", "contextWindowTokens": 128000, "providerMaxOutputTokens": 16384, "effectiveMaxOutputTokens": 16384, "maxInputTokens": 111616, "maxBytes": 446464, "capabilityRevision": "capability-1", "configurationRevision": "configuration-1"}},
-        "repair": {"repairAttempts": 0, "validationOnlyRetries": 0, "noProgressCount": 0, "terminalDeliveryAttempts": 0},
+        "repair": {"repairAttempts": 0, "validationOnlyRetries": 0, "noProgressCount": 0},
         "assessments": [{"id": "assessment-1", "claimedDisposition": "satisfied", "canonicalDisposition": "satisfied"}],
         "acceptedEvidence": [
             {"id": "evidence-write", "kind": "state_change", "dispatchId": "dispatch-1", "operationId": "write-1", "bindingRefs": ["binding/coverage-1"], "coverageWorkItemIds": ["coverage-1"], "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/write"]},
@@ -526,7 +530,7 @@ def _self_test() -> None:
             {"executionKey": "exec/ws-1/run-1/dispatch-1/write-1", "fence": 1, "operationId": "write-1", "outcome": "accepted", "observedEffectScope": "workspace_durable", "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/write"]},
             {"executionKey": "exec/ws-1/run-1/dispatch-1/validate-1", "fence": 1, "operationId": "validate-1", "outcome": "accepted", "observedEffectScope": "none", "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/validate"], "validationRecipeId": "recipe-1", "passedChecks": ["check-1"]},
         ],
-        "terminal": {"code": "runtime_completed"},
+        "terminal": {"code": "runtime_completed", "terminalDeliveryAttempts": 0},
     }
     if errors := runtime_audit_errors(valid_audit, "ws-1", "run-1", True):
         raise AssertionError(f"valid Runtime audit rejected: {errors}")

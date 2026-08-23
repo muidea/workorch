@@ -1546,7 +1546,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <ProCard
             title="GapBaseline"
             className="workorch-section"
-            extra={<Tag>{runSnapshot?.gapBaseline?.nextAction?.kind ?? snapshot.gapBaseline?.nextAction?.kind ?? '未生成'}</Tag>}
+			extra={<Tag>open {(runSnapshot?.gapBaseline?.todoItems ?? snapshot.gapBaseline?.todoItems)?.length ?? 0}</Tag>}
           >
             {gapBaselineCard(runSnapshot?.gapBaseline ?? snapshot.gapBaseline)}
           </ProCard>

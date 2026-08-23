@@ -52,8 +52,10 @@ func TestTaskProgressProjectionDeepClonesNestedFacts(t *testing.T) {
 		RepairLoop: projectioncontract.RepairLoop{
 			StructuredFailureSignals: map[string]any{"code": "contract"},
 			MissingDoDItems:          []map[string]any{{"id": "dod-1"}},
-			RecommendedNextSteps:     []string{"repair"},
 		},
+		Recovery: projectioncontract.RecoveryPlan{BlockingResource: &projectioncontract.BlockingResourceRef{
+			OwnerKind: "decision", ResourceID: "ticket-1", AllowedUserActions: []string{"revise_definition_and_restart"},
+		}},
 		Runtime: &projectioncontract.RuntimeProgress{
 			MissingEvidenceKinds: []string{"validation"},
 			PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
@@ -66,9 +68,9 @@ func TestTaskProgressProjectionDeepClonesNestedFacts(t *testing.T) {
 	got := projectioncontract.CloneTaskProgress(input)
 	input.Milestones[0].EvidenceRefs[0] = "mutated"
 	input.Items[0].EvidenceRefs[0] = "mutated"
-	input.RepairLoop.RecommendedNextSteps[0] = "mutated"
 	input.RepairLoop.StructuredFailureSignals["code"] = "mutated"
 	input.RepairLoop.MissingDoDItems[0]["id"] = "mutated"
+	input.Recovery.BlockingResource.AllowedUserActions[0] = "mutated"
 	input.Runtime.MissingEvidenceKinds[0] = "mutated"
 	input.Runtime.PrerequisiteInvalidations[0].PrerequisiteIDs[0] = "mutated"
 	input.Runtime.PrerequisiteInvalidations[0].ResourceChanges[0].SubjectRef = "mutated.go"
@@ -76,7 +78,7 @@ func TestTaskProgressProjectionDeepClonesNestedFacts(t *testing.T) {
 	if got.Milestones[0].EvidenceRefs[0] != "milestone-evidence" || got.Items[0].EvidenceRefs[0] != "item-evidence" {
 		t.Fatalf("progress projection shares nested evidence refs: %+v", got)
 	}
-	if got.RepairLoop.RecommendedNextSteps[0] != "repair" || got.Runtime.MissingEvidenceKinds[0] != "validation" {
+	if got.Recovery.BlockingResource == nil || got.Recovery.BlockingResource.AllowedUserActions[0] != "revise_definition_and_restart" || got.Runtime.MissingEvidenceKinds[0] != "validation" {
 		t.Fatalf("progress projection shares source slices: %+v", got)
 	}
 	invalidation := got.Runtime.PrerequisiteInvalidations[0]

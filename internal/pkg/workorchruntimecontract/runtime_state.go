@@ -195,8 +195,9 @@ var ErrRuntimeStateIncompatible = errors.New("runtime state incompatible")
 type RuntimeStateIncompatibilityReason string
 
 const (
-	RuntimeStateIncompatibilityReasonSchemaUnsupported RuntimeStateIncompatibilityReason = "schema_unsupported"
-	RuntimeStateIncompatibilityReasonCWILedgerInvalid  RuntimeStateIncompatibilityReason = "cwi_ledger_invalid"
+	RuntimeStateIncompatibilityReasonSchemaUnsupported     RuntimeStateIncompatibilityReason = "schema_unsupported"
+	RuntimeStateIncompatibilityReasonCWILedgerInvalid      RuntimeStateIncompatibilityReason = "cwi_ledger_invalid"
+	RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid RuntimeStateIncompatibilityReason = "recovery_ledger_invalid"
 )
 
 // RuntimeStateIncompatibility is the owner-neutral identity of one
@@ -221,9 +222,9 @@ func (v RuntimeStateIncompatibility) Validate() error {
 		if v.ActualSchemaVersion == 0 || v.SupportedSchemaVersion == 0 || v.ActualSchemaVersion == v.SupportedSchemaVersion {
 			return fmt.Errorf("runtime state schema incompatibility requires distinct actual and supported versions")
 		}
-	case RuntimeStateIncompatibilityReasonCWILedgerInvalid:
+	case RuntimeStateIncompatibilityReasonCWILedgerInvalid, RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid:
 		if v.ActualSchemaVersion != RuntimeStateSchemaVersionCurrent || v.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent {
-			return fmt.Errorf("runtime state CWI ledger incompatibility requires current schema identity")
+			return fmt.Errorf("runtime state current-schema incompatibility requires current schema identity")
 		}
 	default:
 		return fmt.Errorf("runtime state incompatibility has unsupported reason %q", v.Reason)
@@ -269,6 +270,21 @@ func NewRuntimeStateCWILedgerIncompatibilityError(cause error) *RuntimeStateInco
 	return &RuntimeStateIncompatibilityError{
 		Incompatibility: RuntimeStateIncompatibility{
 			Reason:                 RuntimeStateIncompatibilityReasonCWILedgerInvalid,
+			ActualSchemaVersion:    RuntimeStateSchemaVersionCurrent,
+			SupportedSchemaVersion: RuntimeStateSchemaVersionCurrent,
+		},
+		Cause: cause,
+	}
+}
+
+// NewRuntimeStateRecoveryLedgerIncompatibilityError classifies a persisted
+// SM-4 ledger that cannot belong to the aggregate's current terminal lineage.
+// It never repairs or resets the ledger; the Run owner receives only the
+// immutable incompatibility fact and decides its own activation disposition.
+func NewRuntimeStateRecoveryLedgerIncompatibilityError(cause error) *RuntimeStateIncompatibilityError {
+	return &RuntimeStateIncompatibilityError{
+		Incompatibility: RuntimeStateIncompatibility{
+			Reason:                 RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid,
 			ActualSchemaVersion:    RuntimeStateSchemaVersionCurrent,
 			SupportedSchemaVersion: RuntimeStateSchemaVersionCurrent,
 		},
@@ -583,6 +599,9 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime state termination: %w", err)
 		}
 	}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(r.Decision, r.Termination, r.DeliveryAcknowledgements, r.Facts.Recovery); err != nil {
+		return NewRuntimeStateRecoveryLedgerIncompatibilityError(err)
+	}
 	if r.ActiveDispatch != nil {
 		if err := ValidateRuntimeOperationExecutionRecords(r.ActiveDispatch.OperationExecutions); err != nil {
 			return fmt.Errorf("runtime state active dispatch executions: %w", err)
@@ -591,6 +610,34 @@ func (r RuntimeStateRecord) Validate() error {
 	for idx, dispatch := range r.CompletedDispatches {
 		if err := ValidateRuntimeOperationExecutionRecords(dispatch.OperationExecutions); err != nil {
 			return fmt.Errorf("runtime state completed dispatch[%d] executions: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+// ValidateRuntimeStateTerminalDeliveryLedger binds terminal-delivery recovery
+// facts to an already sealed convergence terminal or administrative
+// termination. A non-terminal aggregate cannot carry delivery attempts or
+// acknowledgements left by an older lifecycle-handoff implementation.
+func ValidateRuntimeStateTerminalDeliveryLedger(
+	decision RuntimeDecision,
+	termination *RuntimeTerminationRecord,
+	acknowledgements []RuntimeDeliveryAcknowledgement,
+	recovery RuntimeRecoveryLedger,
+) error {
+	terminal := isTerminalRuntimeDecision(decision) || termination != nil
+	if !terminal {
+		if recovery.Normalized().TerminalDeliveryAttempts != 0 {
+			return fmt.Errorf("non-terminal runtime state cannot consume terminal delivery budget")
+		}
+		if len(acknowledgements) != 0 {
+			return fmt.Errorf("non-terminal runtime state cannot retain terminal delivery acknowledgements")
+		}
+		return nil
+	}
+	for _, acknowledgement := range acknowledgements {
+		if err := acknowledgement.Validate(); err != nil {
+			return fmt.Errorf("terminal delivery acknowledgement: %w", err)
 		}
 	}
 	return nil

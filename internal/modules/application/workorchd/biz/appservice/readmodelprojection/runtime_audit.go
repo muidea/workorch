@@ -413,7 +413,7 @@ func runtimeAuditRepair(facts runtimecontract.RuntimeFacts) projectioncontract.R
 		FocusID: ledger.FocusID, SliceID: ledger.SliceID, RepairAttempts: ledger.RepairAttempts,
 		ValidationOnlyRetries: ledger.ValidationOnlyRetries, NoProgressCount: ledger.NoProgressCount,
 		NoProgressOperationShapeCount: len(ledger.NoProgressOperationShapes), LastProgressRevision: ledger.LastProgressRevision,
-		Exhausted: ledger.Exhausted, TerminalDeliveryAttempts: facts.Recovery.Normalized().TerminalDeliveryAttempts,
+		Exhausted: ledger.Exhausted,
 	}
 	if ledger.ActiveGap != nil {
 		gap := ledger.ActiveGap.Normalized()

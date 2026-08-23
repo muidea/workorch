@@ -57,6 +57,7 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: RuntimeBlockKindManagedValidationSession,
 	}}
+	source.OwnerFactConvergences = []RuntimeOwnerFactConvergence{{Requirement: source.RequiredOwnerFacts[0], RequirePreexisting: true}}
 	source.MetricConstraints = []string{"metric/latency"}
 	source.ArtifactRefs = []string{"workorch://artifact/validation-report"}
 	focuses, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, facts, []CoverageFocus{source})
@@ -77,6 +78,66 @@ func TestCompileRuntimeSemanticBindingsSealsSourceProofRequirementsOnUniqueValid
 	}
 	if !sameRuntimeOwnerFactRequirements(focuses[0].RequiredOwnerFacts, source.RequiredOwnerFacts) {
 		t.Fatalf("compiled focus lost source owner-fact postconditions: %+v", focuses[0])
+	}
+	if !SameRuntimeOwnerFactConvergences(focuses[0].OwnerFactConvergences, source.OwnerFactConvergences) {
+		t.Fatalf("compiled focus lost source owner-fact convergence: %+v", focuses[0])
+	}
+}
+
+func TestSemanticBindingMissingOwnerFactRequiresExactSealedAcquisition(t *testing.T) {
+	manifest, document, _, source := semanticIndependentProofSetFixture(t)
+	requirement := RuntimeOwnerFactRequirement{
+		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+	}
+	const selector = "file/workspace-relative-create"
+	convergence := RuntimeOwnerFactConvergence{
+		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
+		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+		TargetSelectorRef: selector, TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
+		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,
+		MaxAcquisitionAttempts: 1,
+	}
+	source.RequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	source.AcceptedStepKinds = []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession}
+	source.RequiredOwnerFacts = []RuntimeOwnerFactRequirement{requirement}
+	source.OwnerFactConvergences = []RuntimeOwnerFactConvergence{convergence}
+	source.TargetSelectorRef = selector
+	source.TargetSelectorOwnerRef = convergence.TargetSelectorOwnerRef
+	source.TargetSelectorSubjectRef = convergence.TargetSelectorSubjectRef
+
+	for index := range manifest.OwnerCatalogs {
+		if manifest.OwnerCatalogs[index].OwnerModuleID != RuntimeModuleShell {
+			continue
+		}
+		manifest.OwnerCatalogs[index].ValidationRecipeRefs = nil
+		for surfaceIndex := range manifest.OwnerCatalogs[index].ValidationSurfaces {
+			surface := &manifest.OwnerCatalogs[index].ValidationSurfaces[surfaceIndex]
+			surface.Readiness = RuntimeValidationSurfacePrerequisiteRequired
+			surface.ReadinessReason = "validation input is not present"
+			surface.InputBindingRef = ""
+			surface.PrerequisiteRef = "workspace/validation-input"
+		}
+		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
+	}
+	manifest = sealSemanticTestManifest(t, manifest)
+	proposal := document.Proposals[0].Clone()
+	proposal.Target = RuntimeOperationTargetAuthorization{
+		Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"main.go"}, OwnerSelectorRefs: []string{selector},
+	}
+	document.ManifestHash = manifest.Hash
+	document.Proposals = []RuntimeSemanticProofProposal{proposal}
+	fact := semanticFeasibilityForTest(t, manifest, proposal, []string{"main.go"}, "", nil)
+	if _, _, err := CompileRuntimeSemanticBindingsWithSourceFocuses(manifest, runtimeSemanticBindingTestRequestID, document, []RuntimeSemanticProofFeasibility{fact}, []CoverageFocus{source}); err != nil {
+		t.Fatalf("exact sealed owner-fact acquisition was rejected: %v", err)
+	}
+
+	parallel := document.Clone()
+	second := proposal.Clone()
+	second.Target.OwnerScopeTargetRefs = []string{"other.go"}
+	parallel.Proposals = append(parallel.Proposals, second)
+	if err := ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(parallel, []CoverageFocus{source}, manifest.OwnerCatalogs); err == nil || !strings.Contains(err.Error(), "exactly one sealed owner-fact acquisition") {
+		t.Fatalf("parallel/unsealed owner-fact acquisition was accepted: %v", err)
 	}
 }
 

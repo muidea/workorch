@@ -21,7 +21,7 @@ Last Verified: 2026-08-21
 | smaller numeric ID is dependent | prerequisite仍先执行 |
 | clarify same semantic item | 保留 ItemRef、创建新 Definition revision；既有 Run 不漂移 |
 | materially replace/delete item | old ItemRef retired且不复用；fresh activation使用新 mapping |
-| pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
+| pre-seal candidate | exact proposed Goal/DoD、Template snapshot、transitively sealed Profile/policy bindings、required owner-fact/convergence bindings、Profile contract hash、compiler version、resolved directory 与 admission-only relation input 产生稳定 versioned `CandidateHash`；仍无 Definition revision/startup-input/Run |
 | candidate lineage/revision | exact normalized duplicate 返回原 CandidateID/revision/hash；materially changed input 只以 next revision CAS 新增；stale expected revision 零覆盖/零 promotion |
 | invalid candidate | 只持久化 candidate/violation/ticket lineage；零 canonical item/relation、`StartupInputHash`、Runtime/provider/capability work |
 | admitted candidate promotion | exact-current candidate + `admitted_all_of` result 由 Workspace owner 一次 CAS 产生正式 Definition revision/startup input 与 activation-admission fact；无 static ticket 时直接 eligible，corrected ticket lineage 必须 pending；duplicate 返回同一 identity，stale/mismatch 零部分写 |
@@ -29,7 +29,8 @@ Last Verified: 2026-08-21
 | change any startup input | 新 owner-sealed startup-input snapshot/hash；Goal/DoD/关系变化另产生新 Definition revision；当前 Run/bootstrap/graph 不变 |
 | required item has no CWI / CWI has two primary items | static mapping validation fail-closed before Run creation |
 | constraint has no consumer / all-of aggregation has no gate | static disposition validation fail-closed |
-| declared prerequisite has no provider | candidate promotion 前 `declared_prerequisite_unresolved + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
+| required owner fact has no unique acquisition/reobserve closure | candidate promotion 前 `declared_prerequisite_unresolved + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
+| required owner fact declares exact one-shot acquisition | candidate封存missing trigger、acquisition owner/kind/selector、reobserve owner/fact与max=1；promotion/startup hash稳定；missing 时 semantic proof 只能封存该 exact acquisition，accepted operation 后 reobserve 仍缺失则零第二次 acquisition并 typed exhausted |
 | free text may imply an undeclared prerequisite | static compiler 不做领域猜测或伪报完备；执行期只能走 typed semantic-gap lane |
 | dangling/self dependency | fail-closed before Run creation |
 | hard/reopen cycle | exact typed cycle path；零 Runtime work |

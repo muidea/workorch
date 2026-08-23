@@ -9,6 +9,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestDefinitionAdmissionInternalEventRequiresExactlyOneFact(t *testing.T) {
@@ -26,10 +27,11 @@ func TestDefinitionAdmissionInternalEventRequiresExactlyOneFact(t *testing.T) {
 func testAdmissionCandidate() workspacemodel.DefinitionAdmissionCandidate {
 	return (workspacemodel.DefinitionAdmissionCandidate{
 		SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: "workspace-1", CandidateID: "candidate-1", CandidateRevision: 1,
-		GoalInput:                 workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal", Text: "goal", SourceIdentity: "user"},
-		DoDInputs:                 []workspacemodel.DefinitionCandidateItem{{CandidateItemRef: "dod", Text: "done", SourceIdentity: "user"}},
-		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{TemplateRef: "template", Revision: "r1", SnapshotHash: "template-hash"},
-		AdmissionCompilerVersion:  workspacemodel.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: "/tmp/workspace-1",
+		GoalInput:                   workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal", Text: "goal", SourceIdentity: "user"},
+		DoDInputs:                   []workspacemodel.DefinitionCandidateItem{{CandidateItemRef: "dod", Text: "done", SourceIdentity: "user"}},
+		WorkspaceTemplateSnapshot:   workspacemodel.DefinitionTemplateSnapshot{TemplateRef: "template", Revision: "r1", SnapshotHash: "template-hash"},
+		RuntimeProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(nil),
+		AdmissionCompilerVersion:    workspacemodel.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: "/tmp/workspace-1",
 		ProposedRelationInputs: []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "all", RelationKind: "all_of", SourceItemRefs: []string{"dod"}, TargetItemRefs: []string{"goal"}}},
 	}).WithHash()
 }

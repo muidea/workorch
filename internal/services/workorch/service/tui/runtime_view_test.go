@@ -1097,7 +1097,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	repair.TaskProgress.RepairLoop.AttemptCount = 2
 	repair.TaskProgress.RepairLoop.LastAttempt = 2
 	repair.TaskProgress.RepairLoop.LastFailureClass = "provider_retry"
-	repair.TaskProgress.RepairLoop.NextAction = "retry"
+	repair.TaskProgress.RepairLoop.RepeatedFailureReason = "retry diagnostic"
 	m.applyWorkspaceRuntimeView(repair, false)
 	if !strings.Contains(m.repairLoop, "repair #2") || !strings.Contains(m.repairLoop, "provider_retry") {
 		t.Fatalf("RepairLoop-only mutation treated as no-op: %q", m.repairLoop)

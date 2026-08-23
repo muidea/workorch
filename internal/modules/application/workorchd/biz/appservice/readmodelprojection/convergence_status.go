@@ -31,7 +31,6 @@ func applyGapBaselineConvergenceStatus(ret *projectioncontract.ConvergenceStatus
 		return
 	}
 	ret.CurrentFocusID = focusIDFromMap(baseline.CurrentFocus)
-	ret.SuggestedNextAction = strings.TrimSpace(baseline.NextAction.Kind)
 	ret.CurrentGap = firstNonEmptyString(ret.CurrentGap, currentGapFromTodoItems(baseline.TodoItems))
 	ret.MissingEvidenceKinds = compactUniqueStrings(requiredEvidenceKindsFromTodoItems(baseline.TodoItems))
 	ret.AcceptedEvidenceCount = len(compactUniqueStrings(baseline.AcceptedEvidenceRefs))
@@ -42,9 +41,7 @@ func applyGapBaselineConvergenceStatus(ret *projectioncontract.ConvergenceStatus
 	if open := len(baseline.OpenCoverageWorkItems); open > 0 {
 		ret.RemainingCoverageItemCount = open
 	}
-	if reason := strings.TrimSpace(baseline.NextAction.Reason); reason != "" {
-		ret.GapSummary = reason
-	}
+	ret.GapSummary = firstNonEmptyString(ret.GapSummary, ret.CurrentGap)
 }
 
 func applyAcceptanceConvergenceStatus(ret *projectioncontract.ConvergenceStatus, acceptance projectioncontract.AcceptanceProjection) {

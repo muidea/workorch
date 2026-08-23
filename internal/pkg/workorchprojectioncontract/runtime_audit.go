@@ -281,7 +281,6 @@ type RuntimeAuditRepair struct {
 	ActiveGapFailureSignature     string   `json:"activeGapFailureSignature,omitempty"`
 	LastProgressRevision          string   `json:"lastProgressRevision,omitempty"`
 	Exhausted                     bool     `json:"exhausted,omitempty"`
-	TerminalDeliveryAttempts      int      `json:"terminalDeliveryAttempts"`
 }
 
 // RuntimeAuditAssessment preserves the producer observation independently of

@@ -42,6 +42,15 @@ type Biz struct {
 	topics        []string
 	recoveryReady bool
 	started       bool
+	// replacementRecoveryTasks is process-local wakeup deduplication only. The
+	// exact stage/generation/due time authority remains persisted inside the
+	// Run-owned ReplacementIntent recovery lease.
+	replacementRecoveryMu     sync.Mutex
+	replacementRecoveryTasks  map[string]uint64
+	replacementRecoveryCtx    context.Context
+	replacementRecoveryCancel context.CancelFunc
+	replacementRecoveryEpoch  uint64
+	replacementRecoveryWG     sync.WaitGroup
 }
 
 func New() *Biz { return &Biz{} }
@@ -61,6 +70,14 @@ func (m *Biz) Configure(deps Dependencies) error {
 	m.checkpoints = deps.Checkpoints
 	m.Base = basebiz.New(modulecommon.ModuleID, deps.EventHub, deps.BackgroundRoutine)
 	m.notifier = eventRunStateNotifier{post: m.PostEvent}
+	m.replacementRecoveryMu.Lock()
+	if m.replacementRecoveryCancel != nil {
+		m.replacementRecoveryCancel()
+	}
+	m.replacementRecoveryEpoch++
+	m.replacementRecoveryCtx, m.replacementRecoveryCancel = context.WithCancel(context.Background())
+	m.replacementRecoveryTasks = make(map[string]uint64)
+	m.replacementRecoveryMu.Unlock()
 	// Configure is invoked exclusively from Setup (or explicit test assembly).
 	// Establish the SM-4 downstream read contract before any later module Run.
 	return m.prepareRuntimeRecoveryInventory()
@@ -328,13 +345,32 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.topics = nil
 	m.recoveryReady = false
 	m.started = false
+	m.commandMu.Unlock()
+
+	m.replacementRecoveryMu.Lock()
+	cancelReplacementRecovery := m.replacementRecoveryCancel
+	m.replacementRecoveryCancel = nil
+	m.replacementRecoveryCtx = nil
+	m.replacementRecoveryEpoch++
+	m.replacementRecoveryTasks = nil
+	m.replacementRecoveryMu.Unlock()
+	if cancelReplacementRecovery != nil {
+		cancelReplacementRecovery()
+	}
+	// A process-local wakeup may already be reducing a persisted Run-owned
+	// recovery generation. Drain that owner-local work before dependencies are
+	// cleared; canceled timers never enter the reducer, while an already claimed
+	// generation completes or leaves its durable running lease for startup
+	// recovery.
+	m.replacementRecoveryWG.Wait()
+	for idx := len(topics) - 1; idx >= 0; idx-- {
+		m.UnsubscribeFunc(topics[idx])
+	}
+	m.commandMu.Lock()
 	m.runs = nil
 	m.steps = nil
 	m.checkpoints = nil
 	m.notifier = nil
 	m.commandMu.Unlock()
-	for idx := len(topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(topics[idx])
-	}
 	return nil
 }

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-18
+Last Verified: 2026-08-23
 
 ## 仅允许 all-of terminal 语义
 
@@ -44,6 +44,9 @@ DefinitionAdmissionCandidate
   DoDInputs[]                   CandidateItemRef + exact proposed item + source identity
   WorkspaceTemplateSnapshot    ref + revision + exact snapshot hash
   AdmissionPolicyBindings[]    exact Profile/policy ref + revision + snapshot hash
+  RequiredOwnerFactBindings[]  exact Profile requirement ref + owner/fact/operation
+  OwnerFactConvergenceBindings[] exact missing trigger + one acquisition + reobserve contract
+  RuntimeProfileContractsHash  hash of the exact normalized Profile contracts
   AdmissionCompilerVersion
   ResolvedProjectWorkspaceDirectory
   ProposedRelationInputs[]      admission-only typed inputs
@@ -67,6 +70,12 @@ DefinitionAdmissionCandidate
   lineage，不授予 candidate 任何 canonical/restart authority，且 promotion 必须验证二者仍属于同一 Workspace sealed input；
 - `WorkspaceTemplateSnapshot` 必须传递性封存其选择的 exact Profile/policy snapshot；若 Profile 是独立资源，则使用
   `AdmissionPolicyBindings` 显式携带 ref/revision/hash。不得根据 candidate 提交后的 live Profile 重新解释同一 candidate；
+- 每个 required owner fact 必须在 candidate 中恰好绑定一次。它要么声明为 activation 前必须已存在，要么封存唯一
+  `owner_fact_missing` acquisition：接收 owner、operation kind、selector identity、reobserve owner/fact 与
+  `MaxAcquisitionAttempts=1`。缺失、重复、多 provider、依赖悬空或依赖环统一返回
+  `declared_prerequisite_unresolved`；compiler 不读取 live catalog，也不猜测 File/Shell 领域动作；
+- `RuntimeProfileContractsHash` 同时进入 candidate 与 promoted startup input。Start/Restart 编译出的 normalized
+  Profile contract hash 必须与 Workspace owner 封存值精确一致；Profile 后续漂移不能改变已封存 candidate/Run；
 - 同一 candidate 内容 permutation 后必须得到同一 `CandidateHash`；candidate identity/hash 的 schema version、compiler version、
   canonical bytes、base input identity、exact text、Template/Profile policy snapshot 和 resolved directory 均进入 admission/ticket
   stale 与 duplicate 校验；
@@ -110,6 +119,7 @@ WorkspaceStartupInputContract
   GoalDefinitionRef + exact text hash
   DoDDefinitionRefs[] + exact item-set hash
   WorkspaceTemplateRef + TemplateRevision + TemplateSnapshotHash
+  RuntimeProfileContractsHash
   ResolvedProjectWorkspaceDirectory
   StartupInputHash
 ```

@@ -23,8 +23,6 @@ type CLIRepairLoopInfo struct {
 	RepeatedFailureReason    string
 	MissingDoDItems          []workorcheventpayload.Payload
 	RecentAttempts           []workorcheventpayload.Payload
-	RecommendedNextSteps     []string
-	NextAction               string
 	Escalated                bool
 	EscalationReason         string
 	EscalationTicketID       string
@@ -39,7 +37,6 @@ type CLITaskProgressInfo struct {
 	CurrentStepID      string
 	CurrentStepKind    string
 	CurrentStepState   string
-	CurrentActionLabel string
 	DiagnosticLineage  string
 	CurrentMilestone   string
 	BlockingTicketID   string

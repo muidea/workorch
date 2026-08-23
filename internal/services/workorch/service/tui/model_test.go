@@ -769,8 +769,7 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 			RunID:       "run-failed",
 			State:       string(common.RunStateFailed),
 			Recovery: projectioncontract.RecoveryPlan{
-				Reason:     "stuck running run recovered: no active execution, blocker, or continuation checkpoint",
-				NextAction: "inspect_failure_reason_and_evidence",
+				Reason: "stuck running run recovered: no active execution, blocker, or continuation checkpoint",
 			},
 		},
 		Runs: []projectioncontract.Run{{
@@ -3585,14 +3584,12 @@ Docker version 29.2.1, build a5c7197
 			TaskProgress: projectioncontract.TaskProgress{
 				State: "running",
 				Recovery: projectioncontract.RecoveryPlan{
-					Mode:       "resume",
-					NextAction: "resume_run",
+					Mode: "resume",
 				},
 				RepairLoop: projectioncontract.RepairLoop{
 					State:        "repairing",
 					AttemptCount: 2,
 					LastAttempt:  2,
-					NextAction:   "resume_run",
 				},
 			},
 			Runs:    []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateCompleted)}},

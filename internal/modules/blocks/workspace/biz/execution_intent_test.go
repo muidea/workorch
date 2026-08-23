@@ -76,6 +76,7 @@ func (f *workspaceExecutionIntentFixture) seedWorkspace(t *testing.T, workspaceI
 		WorkspaceID: workspaceID, DefinitionRevision: definitionRevision,
 		GoalDefinitionRef: string(goal.ID), GoalTextHash: "goal-hash", DoDDefinitionRefs: []string{string(dod.ID)}, DoDItemSetHash: "dod-hash",
 		WorkspaceTemplateRef: "template-1", TemplateRevision: "template-r1", TemplateSnapshotHash: "template-hash",
+		RuntimeProfileContractsHash:       runtimecontract.StableRuntimeProfileContractsHash(nil),
 		ResolvedProjectWorkspaceDirectory: "/workspace/" + string(workspaceID),
 		CandidateItemToItemRefMappings:    []workspacemodel.CandidateItemToItemRefMapping{{CandidateItemRef: "goal", ItemRef: string(goal.ID)}, {CandidateItemRef: "dod", ItemRef: string(dod.ID)}},
 	}).WithHash()

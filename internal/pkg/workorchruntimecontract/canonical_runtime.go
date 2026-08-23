@@ -65,11 +65,12 @@ type CoverageFocus struct {
 	// RequiredOwnerFacts are profile-declared postconditions evaluated only
 	// from current capability-owner catalogs when SM-2 commits assessment.
 	// They do not grant an operation or let another component mutate owner state.
-	RequiredOwnerFacts []RuntimeOwnerFactRequirement
-	ValidationRecipeID string
-	RequiredCheckRefs  []string
-	MetricConstraints  []string
-	ArtifactRefs       []string
+	RequiredOwnerFacts    []RuntimeOwnerFactRequirement
+	OwnerFactConvergences []RuntimeOwnerFactConvergence
+	ValidationRecipeID    string
+	RequiredCheckRefs     []string
+	MetricConstraints     []string
+	ArtifactRefs          []string
 }
 
 type EvidenceLedger struct {
@@ -1571,6 +1572,9 @@ func (f RuntimeFacts) Validate() error {
 		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
 			return fmt.Errorf("runtime focus %q owner facts: %w", focus.ID, err)
 		}
+		if err := ValidateRuntimeOwnerFactConvergences(focus.RequiredOwnerFacts, focus.OwnerFactConvergences); err != nil {
+			return fmt.Errorf("runtime focus %q owner-fact convergence: %w", focus.ID, err)
+		}
 	}
 	if err := f.Activation.Validate(); err != nil {
 		return err
@@ -1801,6 +1805,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
 	f.ProspectiveTargetRef = strings.TrimSpace(f.ProspectiveTargetRef)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
+	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
 	f.RequiredCheckRefs = normalizeStrings(f.RequiredCheckRefs)
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)

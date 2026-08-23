@@ -46,29 +46,33 @@ func compressedContextSourceEvidenceRefs(progress projectioncontract.TaskProgres
 // source: context_recovery_section.go
 
 func contextRecoverySection(recovery projectioncontract.RecoveryPlan) projectioncontract.ContextSection {
+	data := map[string]any{
+		"mode":                recovery.Mode,
+		"runId":               recovery.RunID,
+		"stepId":              recovery.StepID,
+		"blockingTicketId":    recovery.BlockingTicketID,
+		"blockingApprovalId":  recovery.BlockingApprovalID,
+		"checkpointId":        recovery.CheckpointID,
+		"reason":              recovery.Reason,
+		"suggestedNavigation": recovery.SuggestedNavigation,
+	}
+	if recovery.BlockingResource != nil {
+		data["blockingResource"] = *recovery.BlockingResource
+	}
 	return projectioncontract.ContextSection{
 		ID:       "recovery",
 		Kind:     "recovery",
 		Title:    "Recovery recommendation",
 		Priority: 100,
 		State:    recovery.Mode,
-		Summary:  recovery.NextAction,
+		Summary:  recovery.Reason,
 		EvidenceRefs: compactUniqueStrings([]string{
 			recovery.StepID,
 			recovery.BlockingTicketID,
 			recovery.BlockingApprovalID,
 			recovery.CheckpointID,
 		}),
-		Data: map[string]any{
-			"mode":               recovery.Mode,
-			"nextAction":         recovery.NextAction,
-			"runId":              recovery.RunID,
-			"stepId":             recovery.StepID,
-			"blockingTicketId":   recovery.BlockingTicketID,
-			"blockingApprovalId": recovery.BlockingApprovalID,
-			"checkpointId":       recovery.CheckpointID,
-			"reason":             recovery.Reason,
-		},
+		Data: data,
 	}
 }
 
@@ -346,19 +350,21 @@ func applyBlockingRecovery(recovery *projectioncontract.RecoveryPlan, blockers [
 	if recovery == nil {
 		return false
 	}
-	if recovery.BlockingTicketID != "" {
+	if recovery.BlockingResource == nil {
+		return false
+	}
+	switch recovery.BlockingResource.OwnerKind {
+	case "decision":
 		recovery.Mode = "wait_decision"
-		recovery.NextAction = "resolve_decision_ticket"
-		recovery.Reason = blockerReason(blockers, "decision", recovery.BlockingTicketID)
+		recovery.Reason = blockerReason(blockers, "decision", recovery.BlockingResource.ResourceID)
 		return true
-	}
-	if recovery.BlockingApprovalID != "" {
+	case "approval":
 		recovery.Mode = "wait_approval"
-		recovery.NextAction = "resolve_approval"
-		recovery.Reason = blockerReason(blockers, "approval", recovery.BlockingApprovalID)
+		recovery.Reason = blockerReason(blockers, "approval", recovery.BlockingResource.ResourceID)
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // source: progress_runtime_items.go

@@ -771,7 +771,7 @@ func (c *planningTransactionComponent) observeSemanticPlanBatchDocument(ctx cont
 		}
 		if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 			sourceFocuses := aggregate.Facts.DefinitionFocuses
-			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, sourceFocuses); err != nil {
+			if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, sourceFocuses, ledger.Manifest.OwnerCatalogs); err != nil {
 				return false, err
 			}
 		}
@@ -1047,7 +1047,7 @@ func evaluateSemanticPlanMutation(aggregate RuntimeAggregate, ledger *runtimecon
 		return false, err
 	}
 	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-		if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarations(document, aggregate.Facts.DefinitionFocuses); err != nil {
+		if err := runtimecontract.ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, aggregate.Facts.DefinitionFocuses, ledger.Manifest.OwnerCatalogs); err != nil {
 			return false, err
 		}
 	}

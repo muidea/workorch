@@ -93,6 +93,12 @@ func TestRuntimeProfileOwnerFactRequirementIsNormalizedBoundedAndCompared(t *tes
 			ID: "validation_preparation", Scope: "deliverable",
 			AcceptedStepKinds:  []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession},
 			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement, requirement},
+			OwnerFactConvergences: []RuntimeOwnerFactConvergence{{
+				Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
+				AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+				TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
+				ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface, MaxAcquisitionAttempts: 1,
+			}},
 		}},
 	}
 	if err := ValidateRuntimeProfileContracts([]RuntimeProfileContract{valid}); err != nil {

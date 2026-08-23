@@ -717,7 +717,7 @@ func convergenceStatusText(item *projectioncontract.ConvergenceStatus) string {
 	parts := compactStrings([]string{
 		convergenceSliceText(item),
 		convergenceFocusText(item),
-		convergenceNextActionText(item),
+		convergenceStateText(item),
 		convergenceCoverageText(item),
 		convergenceDispositionText(item),
 		convergenceRepairText(item),
@@ -744,15 +744,12 @@ func convergenceFocusText(item *projectioncontract.ConvergenceStatus) string {
 	return "focus " + strings.TrimSpace(item.CurrentFocusID)
 }
 
-func convergenceNextActionText(item *projectioncontract.ConvergenceStatus) string {
+func convergenceStateText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
 	if state := strings.TrimSpace(item.ConvergenceState); state != "" {
 		return "convergence " + state
-	}
-	if suggestion := strings.TrimSpace(item.SuggestedNextAction); suggestion != "" {
-		return "suggested " + suggestion
 	}
 	return ""
 }

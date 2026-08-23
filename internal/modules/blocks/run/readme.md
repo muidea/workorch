@@ -121,6 +121,13 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   materialization 与 lineage/activation 全部经同一 CAS reducer 推进，禁止 generic mutate callback。
   successor create、predecessor lineage CAS 和 successor activation 是可独立重放的持久化切点；任一切点后重启都只
   收敛到同一 successor。非当前 development baseline 返回 `data_reset_required`，且不持久化 replacement intent。
+- `ReplacementIntent.Recovery` 是 Run owner-private durable successor：stage 只允许 clarification resolution、administrative
+  termination 与 successor materialization，state 只允许 scheduled/running/exhausted/completed，并绑定 exact intent hash、
+  generation、attempt、dueAt。每次 side-effect 前先 CAS claim；失败在同一 owner reducer 中续排下一 generation。进程内
+  BackgroundRoutine 只唤醒 persisted lease，不保存权威 attempt/target。每个唤醒都绑定 Run owner lifecycle context/epoch；
+  `Stop` 必须先禁止新挂载、取消并排空旧 epoch 的 callback，再解除 topic 和 repository 依赖。fresh owner 只能从 Run repository
+  重挂同一 persisted lease，旧 callback 不能跨生命周期执行或删除新实例的 wakeup。
+  其他组件不得替 Run 建 retry timer、补 successor 或按投影状态重放 replacement。
 - 不允许形成 active Run 无合法 wait、无 scheduled drive 且 Runtime aggregate 非终态的悬挂状态；该恢复分类来自
   Orchestrator/Run 的 typed inventory，不从 Step/nextAction 推断。
 - Step 合同失败不得先记录 completed 再回滚为 failed。
@@ -132,6 +139,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   revision 整体 CAS，不能降级为无记录或
   覆盖为更低 revision；blocker 字段必须与 SM-1 RunState 一致。Run 不检查 RuntimeStateRecord 内部 definition、
   activation 或 decision 语义。
+- Orchestrator opaque record 的 terminal-delivery counter/ack 只在 sealed terminal 或 administrative termination 合法；
+  nonterminal aggregate 携带该 ledger 时必须以 typed `recovery_ledger_invalid` 进入 current-schema incompatibility/data-reset
+  路径，Run/Workorchd 不得归零、隐藏或把它当 repair budget。
 - candidate attempt、sealed dispatch、governance binding/resolution、focus/evidence 等均作为 opaque RuntimeStateRecord
   payload 原样 CAS 持久化；execution-budget allocation/consumption、SM-2 repair、SM-4 recovery和bounded recoverable wait
   同样只作为opaque aggregate sub-ledger保存。其合法性、去重、deadline/lease与状态迁移只由Orchestrator owner

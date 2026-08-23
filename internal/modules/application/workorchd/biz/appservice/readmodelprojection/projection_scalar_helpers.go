@@ -158,12 +158,11 @@ type workspaceTaskProgressLabels struct {
 }
 
 type runTaskProgressLabels struct {
-	RecoveryNextAction string
-	RunCreated         string
-	ExecutionSteps     string
-	Governance         string
-	Validation         string
-	FormalResult       string
+	RunCreated     string
+	ExecutionSteps string
+	Governance     string
+	Validation     string
+	FormalResult   string
 }
 
 // source: readmodel_float_values.go
@@ -459,7 +458,6 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		}
 		if readModelStringValue(source["schemaVersion"]) == "workorch.step_contract_audit" ||
 			len(readModelMapValue(source["requiredOutput"])) > 0 ||
-			readModelStringValue(source["currentActionKind"]) != "" ||
 			readModelStringValue(source["currentFocusId"]) != "" {
 			if len(input) == 0 {
 				input = source
@@ -492,12 +490,6 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		readModelMapValue(coverageContext["currentFocus"]),
 		readModelMapValue(authority["currentFocus"]),
 	)
-	nextAction := firstNonEmptyMap(
-		readModelMapValue(currentActionContract["nextAction"]),
-		readModelMapValue(currentActionContract["prerequisite"]),
-		readModelMapValue(authority["nextAction"]),
-	)
-
 	ret := map[string]any{
 		"schemaVersion": "workorch.step_contract_audit",
 	}
@@ -506,14 +498,6 @@ func projectStepContractAudit(sources ...map[string]any) map[string]any {
 		readModelStringValue(currentActionContract["runtimeStage"]),
 	); stage != "" {
 		ret["runtimeStage"] = stage
-	}
-	if kind := firstNonEmptyString(
-		readModelStringValue(nextAction["kind"]),
-		readModelStringValue(nextAction["type"]),
-		readModelStringValue(requiredOutput["nextActionKind"]),
-		readModelStringValue(requiredOutput["actionKind"]),
-	); kind != "" {
-		ret["currentActionKind"] = kind
 	}
 	if focusID := firstNonEmptyString(
 		focusIDFromMap(currentFocus),
@@ -622,8 +606,6 @@ func compactStepRequiredOutputForAudit(input map[string]any) map[string]any {
 		"currentState",
 		"coverageFocusId",
 		"focusId",
-		"nextActionKind",
-		"actionKind",
 	} {
 		if value := readModelStringValue(input[key]); value != "" {
 			ret[key] = value

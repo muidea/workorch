@@ -67,6 +67,8 @@ func CloneContextBundle(input *ContextBundle) *ContextBundle {
 		return nil
 	}
 	ret := *input
+	ret.Recovery = CloneRecoveryPlan(input.Recovery)
+	ret.TaskProgress = CloneTaskProgress(input.TaskProgress)
 	ret.Sections = append([]ContextSection(nil), input.Sections...)
 	for index := range ret.Sections {
 		ret.Sections[index].EvidenceRefs = append([]string(nil), input.Sections[index].EvidenceRefs...)
@@ -80,6 +82,7 @@ func CloneContextBundle(input *ContextBundle) *ContextBundle {
 	}
 	ret.CompressedContext.Milestones = append([]ProgressMilestone(nil), input.CompressedContext.Milestones...)
 	ret.CompressedContext.Blockers = append([]ProgressBlocker(nil), input.CompressedContext.Blockers...)
+	ret.CompressedContext.Recovery = CloneRecoveryPlan(input.CompressedContext.Recovery)
 	ret.CompressedContext.RecentEvidence = append([]ContextEvidence(nil), input.CompressedContext.RecentEvidence...)
 	cloneContextEvidence(ret.CompressedContext.RecentEvidence, input.CompressedContext.RecentEvidence)
 	ret.CompressedContext.ResultRefs = append([]string(nil), input.CompressedContext.ResultRefs...)

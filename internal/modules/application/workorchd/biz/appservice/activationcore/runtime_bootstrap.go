@@ -176,6 +176,7 @@ func runtimeBootstrapFocusSeeds(values []runtimecontract.CoverageFocus) []runtim
 			RequiredEvidenceKinds: append([]string(nil), value.RequiredEvidenceKinds...),
 			RequireAssessment:     value.RequireAssessment,
 			RequiredOwnerFacts:    append([]runtimecontract.RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
+			OwnerFactConvergences: runtimecontract.CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
 		}.Normalized())
 	}
 	return ret

@@ -429,9 +429,9 @@ func TestCanonicalAcceptanceProjectionSeparatesDirectiveFromAssessmentObservatio
 	got := projectioncontract.CloneAcceptanceProjection(projectioncontract.AcceptanceProjection{
 		Budget: &projectioncontract.ConvergenceBudget{
 			FocusID: "focus-remote", SliceID: "slice-remote", LastNoDeltaReason: "no durable effect",
-			MaxProviderTransportAttempts: 3, ProviderTransportAttempts: 1,
 			MaxPrerequisiteRefreshes: 2, PrerequisiteRefreshes: 1,
 		},
+		RecoveryBudget:  &projectioncontract.RuntimeRecoveryBudget{MaxProviderTransportAttempts: 3, ProviderTransportAttempts: 1},
 		RepairDirective: &projectioncontract.RuntimeRepairDirective{ID: "repair-remote", FocusID: "focus-remote", RequiredAction: "need_validation", Closure: &projectioncontract.RuntimeRepairClosure{ID: "closure-remote"}},
 		SemanticPlanning: &projectioncontract.RuntimeSemanticPlanning{
 			WorkspaceID: "ws-remote", RunID: "run-remote", Phase: "feasibility_pending",
@@ -464,7 +464,7 @@ func TestCanonicalAcceptanceProjectionSeparatesDirectiveFromAssessmentObservatio
 		t.Fatalf("remote acceptance mapping = %+v", got)
 	}
 	if got.Budget == nil || got.Budget.FocusID != "focus-remote" || got.Budget.LastNoDeltaReason != "no durable effect" ||
-		got.Budget.ProviderTransportAttempts != 1 || got.Budget.PrerequisiteRefreshes != 1 ||
+		got.RecoveryBudget == nil || got.RecoveryBudget.ProviderTransportAttempts != 1 || got.Budget.PrerequisiteRefreshes != 1 ||
 		got.SemanticPlanning == nil || got.SemanticPlanning.WorkspaceID != "ws-remote" || len(got.SemanticPlanning.Items) != 1 {
 		t.Fatalf("remote acceptance canonical projections = %+v", got)
 	}

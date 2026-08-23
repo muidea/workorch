@@ -78,9 +78,9 @@ all-of admission/promotion 且 activation admission eligible 后才能启用执�
 predecessor，也不构造replacement-resolution payload。Board遇到exact canonical Definition blocker时始终只导航到该
 Workspace的Definition修订入口，绝不直接发送Resume或Restart。
 
-`steps`、`runtime-checkpoints`、`nextAction`-named fields、`taskProgress`、`taskDecompositions` 和
-`artifactContinuations` 若仍出现在 projection/type 中，只是历史/诊断兼容数据。它们不能驱动按钮可用性、恢复
-Runtime authority 或替代 formal Result/evidence。
+`steps`、`runtime-checkpoints`、`taskProgress`、`taskDecompositions` 和 `artifactContinuations` 是历史/诊断或事实展示数据。
+Runtime `nextAction` 兼容字段已删除。TaskProgress/ContextBundle 只展示 exact blocker、owner 要求/允许动作与独立导航提示；
+它们不能驱动按钮可用性、恢复 Runtime authority 或替代 formal Result/evidence。
 
 详情页明确把 Workspace/Run owner `state`、Workspace `activeRunId` 与 Run blocker refs 标为 canonical；Workspace 没有
 blocker 字段。`governanceDisplay` 是只读 lifecycle handoff，`consistencyDiagnostic` 是只读偏差，`displayOutcome` 是非 owner

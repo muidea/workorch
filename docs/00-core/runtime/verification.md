@@ -207,6 +207,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - CAS 前/后 crash、owner commit 前/后 crash、response 丢失、duplicate/stale/乱序均零重复副作用；
 - bound governance request 已持久化、Run wait fact 尚未送达这一 cut point 重启后必须自动收敛到 exact blocked Run；不得
   依赖人工 Resume，且整个非终态 handoff 的 `TerminalDeliveryAttempts` 保持不变；
+- 任意非终态 aggregate 携带非零 `TerminalDeliveryAttempts` 或 terminal acknowledgement 必须以
+  `recovery_ledger_invalid` fail-closed，不能继续挂 lifecycle lease、由projection归零或伪装成SM-2 repair；
 - governance resolution CAS 已成功但 continuation fact 尚未提交时，fresh startup 必须识别
   `blocked + persisted resolution` 并重投 exact continuation；continuation owner commit 后响应丢失必须作为 duplicate 收敛。
   同一 lifecycle lease 连续失败必须证明 running generation 原子续排为新 scheduled generation、`dueAt` 退避、旧 release
@@ -217,6 +219,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 不出现 `active + nonterminal + no scheduled drive`，也不使用人工 Resume 作为恢复机制。
 - current-baseline Restart 必须先 CAS predecessor `ReplacementIntent`，再完成 Result→Workspace→Run terminal delivery，
   最后由 Run-private reducer 幂等创建/激活唯一 successor；其他组件不能提前创建或链接；
+- replacement 的 clarification resolution、administrative termination、successor materialization 使用 Run-owned persisted
+  stage/state/generation/attempt/dueAt lease；每一步先claim、failure续排、Stop/fresh restart恢复。进程内task不得成为唯一后继，
+  duplicate/stale generation不得重复Decision/Orchestrator call或successor create；
 - terminal delivery 已提交、successor 已创建但 lineage 未提交、lineage 已提交但 successor 尚未激活三个 restart cut point
   均必须在进程重启后收敛到同一 successor，重复 recovery 不得再次创建或激活；
 - non-current predecessor 返回 `data_reset_required`，不写 replacement intent、不调用 provider/capability；

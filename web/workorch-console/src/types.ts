@@ -329,7 +329,6 @@ export type ConvergenceStatus = {
   currentSliceId?: string;
   currentFocusId?: string;
   convergenceState?: string;
-  suggestedNextAction?: string;
   currentGap?: string;
   missingEvidenceKinds?: string[];
   acceptedEvidenceCount?: number;
@@ -1187,12 +1186,24 @@ export type AcceptanceProjection = {
   slices?: AcceptanceSlice[];
   currentFocus?: CoverageFocus;
   budget?: ConvergenceBudget;
+  recoveryBudget?: RuntimeRecoveryBudget;
   // Persisted SM-2 authority. This is the only displayed source for the
   // current Runtime action; assessment audit observations are non-authoritative.
   repairDirective?: RuntimeRepairDirective;
   semanticPlanning?: RuntimeSemanticPlanning;
   audit?: RuntimeAudit;
   summary: AcceptanceSummary;
+};
+
+export type RuntimeRecoveryBudget = {
+  maxProviderTransportAttempts?: number;
+  providerTransportAttempts?: number;
+  maxOperationRecoveryAttempts?: number;
+  operationRecoveryAttempts?: number;
+  maxCASReloadAttempts?: number;
+  casReloadAttempts?: number;
+  maxTerminalDeliveryAttempts?: number;
+  terminalDeliveryAttempts?: number;
 };
 
 export type RuntimeSemanticPlanning = {
@@ -1472,7 +1483,6 @@ export type RuntimeAuditRepair = {
   activeGapFailureSignature?: string;
   lastProgressRevision?: string;
   exhausted?: boolean;
-  terminalDeliveryAttempts: number;
 };
 
 export type RuntimeAuditAssessment = {
@@ -1534,11 +1544,6 @@ export type GapTodoItem = {
   metadata?: Record<string, unknown>;
 };
 
-export type GapNextAction = {
-  kind?: string;
-  reason?: string;
-};
-
 export type GapBaseline = {
   workspaceId?: string;
   runId?: string;
@@ -1549,7 +1554,6 @@ export type GapBaseline = {
   acceptedEvidenceRefs?: string[];
   rejectedEvidenceRefs?: string[];
   todoItems?: GapTodoItem[];
-  nextAction?: GapNextAction;
 };
 
 export type TaskProgress = {
@@ -1736,7 +1740,6 @@ export type ProgressBlocker = {
 
 export type RecoveryPlan = {
   mode: string;
-  nextAction?: string;
   runId?: string;
   stepId?: string;
   blockingTicketId?: string;
@@ -1745,6 +1748,18 @@ export type RecoveryPlan = {
   failureClass?: string;
   failureSignature?: string;
   reason?: string;
+  blockingResource?: BlockingResourceRef;
+  suggestedNavigation?: string;
+};
+
+export type BlockingResourceRef = {
+  ownerKind: string;
+  resourceId: string;
+  workspaceId: string;
+  runId: string;
+  state: string;
+  requiredAction?: string;
+  allowedUserActions?: string[];
 };
 
 export type RepairLoop = {
@@ -1761,7 +1776,6 @@ export type RepairLoop = {
   repairInputCompaction?: Record<string, unknown>;
   lastRepairInputBytes?: number;
   repeatedFailureReason?: string;
-  nextAction?: string;
   escalated: boolean;
   escalationReason?: string;
   escalationTicketId?: string;

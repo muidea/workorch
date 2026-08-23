@@ -16,8 +16,7 @@ func TestCLITaskProgressRoundTripDetachesRepairDiagnostics(t *testing.T) {
 			StructuredFailureSignals: map[string]any{"nested": map[string]any{"code": "contract"}},
 			RepairInputCompaction:    map[string]any{"kept": true},
 			MissingDoDItems:          []map[string]any{{"id": "dod-1"}},
-			RecentAttempts:           []map[string]any{{"attempt": float64(1)}},
-			RecommendedNextSteps:     []string{"repair"}, EvidenceRefs: []string{"repair-evidence"},
+			RecentAttempts:           []map[string]any{{"attempt": float64(1)}}, EvidenceRefs: []string{"repair-evidence"},
 		},
 		EvidenceRefs: []string{"progress-evidence"},
 		Runtime:      &projectioncontract.RuntimeProgress{MissingEvidenceKinds: []string{"validation"}},
@@ -40,8 +39,7 @@ func TestCLITaskProgressRoundTripDetachesRepairDiagnostics(t *testing.T) {
 			StructuredFailureSignals: map[string]any{"nested": map[string]any{"code": "contract"}},
 			RepairInputCompaction:    map[string]any{"kept": true},
 			MissingDoDItems:          []map[string]any{{"id": "dod-1"}},
-			RecentAttempts:           []map[string]any{{"attempt": float64(1)}},
-			RecommendedNextSteps:     []string{"repair"}, EvidenceRefs: []string{"repair-evidence"},
+			RecentAttempts:           []map[string]any{{"attempt": float64(1)}}, EvidenceRefs: []string{"repair-evidence"},
 		},
 		EvidenceRefs: []string{"progress-evidence"},
 		Runtime:      &projectioncontract.RuntimeProgress{MissingEvidenceKinds: []string{"validation"}},
@@ -51,9 +49,9 @@ func TestCLITaskProgressRoundTripDetachesRepairDiagnostics(t *testing.T) {
 	}
 
 	dto.Milestones[0].EvidenceRefs[0] = "dto-mutated"
-	dto.RepairLoop.RecommendedNextSteps[0] = "dto-mutated"
+	dto.RepairLoop.EvidenceRefs[0] = "dto-mutated"
 	dto.Runtime.MissingEvidenceKinds[0] = "dto-mutated"
-	if got.Milestones[0].EvidenceRefs[0] != "milestone-evidence" || got.RepairLoop.RecommendedNextSteps[0] != "repair" || got.Runtime.MissingEvidenceKinds[0] != "validation" {
+	if got.Milestones[0].EvidenceRefs[0] != "milestone-evidence" || got.RepairLoop.EvidenceRefs[0] != "repair-evidence" || got.Runtime.MissingEvidenceKinds[0] != "validation" {
 		t.Fatalf("task progress projection shares DTO storage: %#v", got)
 	}
 }

@@ -36,6 +36,5 @@ type CLIGapBaselineInfo struct {
 	AcceptedEvidenceRefs  []string
 	RejectedEvidenceRefs  []string
 	TodoItems             []CLIGapTodoItemInfo
-	NextAction            projectioncontract.GapNextAction
 	Diagnostics           []projectioncontract.GapDiagnostic
 }

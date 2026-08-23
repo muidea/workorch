@@ -239,7 +239,6 @@ func runStatusFromWorkspaceSnapshot(snapshot *projectioncontract.WorkspaceSnapsh
 	}
 	if snapshot.TaskProgress.RunID == "" || snapshot.TaskProgress.RunID == string(run.ID) {
 		status.CurrentStepID = snapshot.TaskProgress.Recovery.StepID
-		status.CurrentActionLabel = snapshot.TaskProgress.CurrentActionLabel
 		status.DiagnosticLineage = snapshot.TaskProgress.DiagnosticLineage
 		if status.FailureReason == "" {
 			status.FailureReason = snapshot.TaskProgress.Recovery.Reason

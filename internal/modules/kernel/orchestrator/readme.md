@@ -371,11 +371,14 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   Workorchd 只编译声明，Shell/MCP 等 owner 只通过 current typed admissibility catalog 发布事实；SM-2 assessment gate
   在 sealed binding 的其余 proof 全部成立后，才检查指定 owner/operation 是否存在匹配的 `ready + direct` selectable
   validation surface。assessment claim、成功 operation、旧 catalog 或历史 recipe 均不能替代该 current owner fact。
-- owner fact 是唯一缺口时，assessment commit 在同一 Orchestrator CAS 中提交 dispatch/audit、把 current bound CWI
-  转为 `reopened`、清除 current binding、更新 reconciliation，并以 `assessment_owner_fact_postcondition_unmet` lineage
-  退休当前 semantic generation；SM-4 只从该 aggregate 幂等 re-drive。若 sealed proof 本身仍缺失，则保持普通
-  evidence/repair 主线，不得误触发 semantic replan。同 CWI owner-fact replan 由 `MaxRepairAttemptsPerFocus` 有界，耗尽
-  后 deterministic `owner_fact_convergence_exhausted`；duplicate/restart 不产生第二次 reopen/CAS/request/effect。CWI 重开后
+- semantic proof admission 发现 current owner fact 缺失时，只允许 pre-seal Profile contract 中当前 all-of dependency
+  已就绪的 exact acquisition owner/kind/selector；proof batch 必须恰含这一项，不能让 LLM、Shell 或 File另选动作。
+  若历史/旧 generation 先执行了非 acquisition proof，assessment commit 可在同一 Orchestrator CAS 中提交 audit、把
+  current bound CWI 转为 `reopened`、清除 current binding、更新 reconciliation，并以
+  `assessment_owner_fact_postcondition_unmet` lineage 退休该 generation；SM-4 只从 aggregate 幂等 re-drive。真正的
+  acquisition receipt/assessment 计入封存的 `MaxAcquisitionAttempts=1`；reobserve 后 fact 仍缺失即 deterministic
+  `owner_fact_convergence_exhausted`，不得以 semantic replan 形成第二次 acquisition。duplicate/restart 不产生第二次
+  reopen/CAS/request/effect。若 sealed proof 本身仍缺失，则保持普通 evidence/repair 主线。CWI 重开后
   固定回到 `semantic-pending/<cwi>`；若该 current-focus prerequisite ID 已由上一 semantic generation 退休，SM-2 必须在
   重新排入 acquisition 前原子移出同 ID 的 retired prerequisite 及其旧 observation，只保留无关 retired lineage。旧
   observation 不得复用为当前 authority，审计继续由 CWI reopen lineage 与 semantic generation history 承载，且
@@ -385,6 +388,9 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   绝不能重新成为 current。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active Runtime Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
+- aggregate invariant 要求非终态 Decision 且无 administrative termination 时
+  `TerminalDeliveryAttempts=0` 且无 terminal acknowledgement。旧数据违反时返回 typed
+  `recovery_ledger_invalid`，由 Run owner形成current-schema incompatibility/data-reset；projection不得修复或隐藏。
 - drive failure 经 `classifyRuntimeDriveFailure` 分类：只有携带 expected/observed revision 的 `RuntimeCASConflictError` 才进入 CAS reload；owner-transient/projection 不终态化业务 Run，语义 conflict 不得消耗 CAS budget。
 
 ## 组件交互及合同

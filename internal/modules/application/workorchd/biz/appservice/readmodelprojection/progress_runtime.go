@@ -235,7 +235,6 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 	loop.LastFailureClass = ""
 	loop.LastFailureSignature = ""
 	loop.RepeatedFailureReason = ""
-	loop.RecommendedNextSteps = nil
 	loop.Escalated = false
 	switch {
 	case progress.State == string(common.RunStateFailed):
@@ -265,7 +264,6 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 	if strings.TrimSpace(summary.FailureMessage) != "" {
 		loop.RepeatedFailureReason = summary.FailureMessage
 	}
-	loop.RecommendedNextSteps = compactUniqueStrings(summary.RepairHintCodes)
 	progress.RepairLoop = loop
 }
 
@@ -303,9 +301,6 @@ func applyRuntimeProgressToCurrentStep(progress *projectioncontract.TaskProgress
 				progress.CurrentStepState = "running"
 			}
 		}
-	}
-	if progress.CurrentActionLabel == "" && summary.ConvergenceState != "" {
-		progress.CurrentActionLabel = "convergence " + summary.ConvergenceState
 	}
 }
 

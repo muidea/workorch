@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-22
+Last Verified: 2026-08-23
 
 ## 功能范围与边界
 
@@ -12,7 +12,9 @@ Last Verified: 2026-08-22
 
 Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted `WorkspaceStartupInputContract` 与
 `WorkspaceActivationAdmission`。candidate 可以保存尚未获准的 relation input；正式 startup input 只允许 pure compiler
-确认的完整 `all_of`，并以 `StartupInputHash` 封存 Definition、Template snapshot、目录和 candidate-item mapping。
+确认的完整 `all_of`，并以 `StartupInputHash` 封存 Definition、Template/Profile contract hash、目录和 candidate-item mapping。
+candidate 还封存 required owner-fact binding 与唯一 acquisition/reobserve closure；Workspace 只持久化/校验该事实，
+不读取 capability catalog 或选择运行期动作。
 
 ## 组件交互及合同
 
@@ -73,6 +75,9 @@ Workspace 还独占 immutable pre-seal `DefinitionAdmissionCandidate`、promoted
 - `fresh_activation_required` 只是 Run owner 的不可继续 disposition；普通 Run notification 不释放 Workspace slot。
   对不兼容 development data 的 restart，Run owner返回 `data_reset_required`，Workspace 不代替 Run 创建 successor、
   不读取旧 aggregate，也不通过旁路 fact 清除 active slot。
+- Start/Restart 必须逐字段匹配 promoted `RuntimeProfileContractsHash`；required owner fact 缺少 preexisting 声明或 exact
+  one-shot acquisition/reobserve closure 时，pure admission 在 promotion 前返回 `declared_prerequisite_unresolved`。
+  Workspace 不得用 live owner 事实、LLM 文本或默认动作修补 candidate。
 - 默认 WorkspaceTemplate 是可由用户编辑的首次启动种子；普通 ensure 不得覆盖内置 ID 上的当前对象。嵌入默认值变更若需迁移，必须使用独立的显式迁移合同。
 - file repository 只在 Workspace 持久化读边界把旧版零值 `ContextHints:null` 解释为空对象，且不得因此改写历史文件；数组、标量等非对象值仍 fail-closed。该兼容不放宽 EventHub、HTTP 或 Runtime payload 合同。
 

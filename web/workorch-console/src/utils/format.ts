@@ -2,7 +2,6 @@ import {
   stateLabels,
   progressKindLabels,
   recoveryModeLabels,
-  recoveryActionLabels,
   repairLoopStateLabels,
   soulBindingStageLabels
 } from './constants';
@@ -34,14 +33,6 @@ export function recoveryModeLabel(mode?: string): string {
     return '未知';
   }
   return recoveryModeLabels[mode] ? `${recoveryModeLabels[mode]} (${mode})` : mode;
-}
-
-// 恢复操作标签
-export function recoveryActionLabel(action?: string): string {
-  if (!action) {
-    return '-';
-  }
-  return recoveryActionLabels[action] ?? action;
 }
 
 // 修复循环状态标签

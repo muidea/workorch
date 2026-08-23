@@ -956,6 +956,22 @@
                   "operationKind": "validation/managed_session"
                 }
               ],
+              "ownerFactConvergences": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session",
+                  "missingTrigger": "owner_fact_missing",
+                  "acquisitionOwnerModuleId": "blocks/file",
+                  "acquisitionOperationKind": "file/write",
+                  "targetSelectorRef": "file/workspace_deliverable",
+                  "targetSelectorOwnerRef": "software-dev",
+                  "targetSelectorSubjectRef": "validation_readiness",
+                  "reobserveOwnerModuleId": "blocks/shell",
+                  "reobserveFactKind": "selectable_validation_surface",
+                  "maxAcquisitionAttempts": 1
+                }
+              ],
               "rejectedStepKinds": [
                 "file/read",
                 "file/list",

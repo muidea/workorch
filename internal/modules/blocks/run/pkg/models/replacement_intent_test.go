@@ -21,6 +21,7 @@ func TestReplacementIntentPreservesValidatedLegacyIdentitySlotWithoutRestoringPr
 		legacyIdentityHashSlot: "7",
 	}
 	legacy.ReplacementIntentHash = StableReplacementIntentHash(legacy)
+	legacy.Recovery = replacementRecoveryFixture(legacy, ReplacementRecoveryClarificationResolution, ReplacementRecoveryScheduled)
 	encoded, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +85,7 @@ func TestReplacementIntentValidForPredecessorAndCloneDetachesBootstrap(t *testin
 		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
 		Kind:                runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: ReplacementIntentPending,
 	}}
+	predecessor.ReplacementIntent.Recovery = replacementRecoveryFixture(*predecessor.ReplacementIntent, ReplacementRecoveryAdministrativeTermination, ReplacementRecoveryScheduled)
 	if !predecessor.ReplacementIntent.ValidFor(predecessor) {
 		t.Fatalf("valid predecessor intent rejected: %+v", predecessor.ReplacementIntent)
 	}
@@ -117,6 +119,7 @@ func TestClarificationReplacementIntentRequiresResolutionThroughTerminalStates(t
 		Kind:                runtimecontract.RuntimeTerminationSuperseded, Reason: "restart", State: ReplacementIntentPendingClarificationResolution,
 	}
 	pending.ReplacementIntentHash = StableReplacementIntentHash(pending)
+	pending.Recovery = replacementRecoveryFixture(pending, ReplacementRecoveryClarificationResolution, ReplacementRecoveryScheduled)
 	if !pending.ValidFor(predecessor) {
 		t.Fatalf("valid pending clarification intent rejected: %+v", pending)
 	}
@@ -135,6 +138,7 @@ func TestClarificationReplacementIntentRequiresResolutionThroughTerminalStates(t
 	bound.State = ReplacementIntentClarificationResolutionBound
 	bound.ClarificationResolutionID = "resolution-1"
 	bound.ClarificationResolutionBindingHash = "resolution-binding-1"
+	bound.Recovery = replacementRecoveryFixture(bound, ReplacementRecoveryAdministrativeTermination, ReplacementRecoveryScheduled)
 	if !bound.ValidFor(predecessor) {
 		t.Fatalf("valid bound clarification intent rejected: %+v", bound)
 	}
@@ -144,6 +148,10 @@ func TestClarificationReplacementIntentRequiresResolutionThroughTerminalStates(t
 	completed.TerminalDeliveryID = "terminal-1"
 	completed.RuntimeStateRevision = 7
 	completed.AcknowledgedAt = "2026-08-21T00:00:00Z"
+	completed.Recovery = replacementRecoveryFixture(completed, ReplacementRecoverySuccessorMaterialization, ReplacementRecoveryCompleted)
+	predecessor.State = common.RunStateSuperseded
+	predecessor.TerminalDelivery = &runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, TerminalDeliveryID: completed.TerminalDeliveryID}
+	predecessor.Lineage.SuccessorRunID = completed.SuccessorRunID
 	if !completed.ValidFor(predecessor) {
 		t.Fatalf("valid completed clarification intent rejected: %+v", completed)
 	}
@@ -155,6 +163,7 @@ func TestClarificationReplacementIntentRequiresResolutionThroughTerminalStates(t
 	rejected.State = ReplacementIntentClarificationResolutionRejected
 	rejected.ClarificationResolutionBindingHash = "stale-binding"
 	rejected.ClarificationConflictKind = "ticket_already_bound"
+	rejected.Recovery = replacementRecoveryFixture(rejected, ReplacementRecoveryClarificationResolution, ReplacementRecoveryCompleted)
 	if rejected.ValidFor(predecessor) {
 		t.Fatal("ticket-already-bound rejection omitted conflicting intent identity")
 	}
@@ -162,5 +171,16 @@ func TestClarificationReplacementIntentRequiresResolutionThroughTerminalStates(t
 	rejected.ConflictingReplacementIntentHash = "replacement-hash-current"
 	if !rejected.ValidFor(predecessor) {
 		t.Fatalf("valid ticket-already-bound rejection was rejected: %+v", rejected)
+	}
+}
+
+func replacementRecoveryFixture(intent ReplacementIntent, stage ReplacementRecoveryStage, state ReplacementRecoveryState) ReplacementRecoveryLease {
+	dueAt := ""
+	if state == ReplacementRecoveryScheduled {
+		dueAt = "2026-08-23T00:00:00Z"
+	}
+	return ReplacementRecoveryLease{
+		RequestID: intent.RequestID, IntentHash: StableReplacementIntentHash(intent), Stage: stage, State: state,
+		Generation: 1, MaxAttempts: 8, DueAt: dueAt,
 	}
 }

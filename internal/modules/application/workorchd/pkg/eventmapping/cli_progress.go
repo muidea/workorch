@@ -30,7 +30,6 @@ func repairLoopDTO(item projectioncontract.RepairLoop) (workorchdevents.CLIRepai
 		LastFailureTargetScope: item.LastFailureTargetScope, LastFailureAt: item.LastFailureAt,
 		StructuredFailureSignals: signals, RepairInputCompaction: compaction, LastRepairInputBytes: item.LastRepairInputBytes,
 		RepeatedFailureReason: item.RepeatedFailureReason, MissingDoDItems: missing, RecentAttempts: attempts,
-		RecommendedNextSteps: append([]string(nil), item.RecommendedNextSteps...), NextAction: item.NextAction,
 		Escalated: item.Escalated, EscalationReason: item.EscalationReason, EscalationTicketID: item.EscalationTicketID,
 		EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 	}, nil
@@ -45,7 +44,6 @@ func repairLoopProjection(item workorchdevents.CLIRepairLoopInfo) projectioncont
 		StructuredFailureSignals: item.StructuredFailureSignals.Map(), RepairInputCompaction: item.RepairInputCompaction.Map(),
 		LastRepairInputBytes: item.LastRepairInputBytes, RepeatedFailureReason: item.RepeatedFailureReason,
 		MissingDoDItems: workorcheventpayload.MapSlice(item.MissingDoDItems), RecentAttempts: workorcheventpayload.MapSlice(item.RecentAttempts),
-		RecommendedNextSteps: append([]string(nil), item.RecommendedNextSteps...), NextAction: item.NextAction,
 		Escalated: item.Escalated, EscalationReason: item.EscalationReason, EscalationTicketID: item.EscalationTicketID,
 		EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 	}
@@ -60,7 +58,7 @@ func taskProgressDTO(item projectioncontract.TaskProgress) (workorchdevents.CLIT
 	return workorchdevents.CLITaskProgressInfo{
 		WorkspaceID: item.WorkspaceID, RunID: item.RunID, State: item.State, Summary: item.Summary,
 		CurrentStepID: item.CurrentStepID, CurrentStepKind: item.CurrentStepKind, CurrentStepState: item.CurrentStepState,
-		CurrentActionLabel: item.CurrentActionLabel, DiagnosticLineage: item.DiagnosticLineage, CurrentMilestone: item.CurrentMilestone,
+		DiagnosticLineage: item.DiagnosticLineage, CurrentMilestone: item.CurrentMilestone,
 		BlockingTicketID: item.BlockingTicketID, BlockingApprovalID: item.BlockingApprovalID,
 		Milestones: item.Milestones, Items: item.Items, Blockers: item.Blockers, Recovery: item.Recovery,
 		RepairLoop: repair, AssessmentOutcome: item.AssessmentOutcome, EvidenceRefs: item.EvidenceRefs, Runtime: item.Runtime,
@@ -71,7 +69,7 @@ func taskProgressProjection(item workorchdevents.CLITaskProgressInfo) projection
 	return projectioncontract.CloneTaskProgress(projectioncontract.TaskProgress{
 		WorkspaceID: item.WorkspaceID, RunID: item.RunID, State: item.State, Summary: item.Summary,
 		CurrentStepID: item.CurrentStepID, CurrentStepKind: item.CurrentStepKind, CurrentStepState: item.CurrentStepState,
-		CurrentActionLabel: item.CurrentActionLabel, DiagnosticLineage: item.DiagnosticLineage, CurrentMilestone: item.CurrentMilestone,
+		DiagnosticLineage: item.DiagnosticLineage, CurrentMilestone: item.CurrentMilestone,
 		BlockingTicketID: item.BlockingTicketID, BlockingApprovalID: item.BlockingApprovalID,
 		Milestones: item.Milestones, Items: item.Items, Blockers: item.Blockers, Recovery: item.Recovery,
 		RepairLoop: repairLoopProjection(item.RepairLoop), AssessmentOutcome: item.AssessmentOutcome,

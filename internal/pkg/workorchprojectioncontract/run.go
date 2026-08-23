@@ -26,7 +26,6 @@ type RunStatus struct {
 	CurrentStepID      string               `json:"currentStepId,omitempty"`
 	CurrentStepKind    string               `json:"currentStepKind,omitempty"`
 	CurrentStepState   string               `json:"currentStepState,omitempty"`
-	CurrentActionLabel string               `json:"currentActionLabel,omitempty"`
 	DiagnosticLineage  string               `json:"diagnosticLineage,omitempty"`
 	StepCount          int                  `json:"stepCount"`
 	DecisionCount      int                  `json:"decisionCount"`
@@ -38,9 +37,8 @@ type RunStatus struct {
 	Acceptance         AcceptanceProjection `json:"acceptance"`
 }
 
-// ConvergenceStatus preserves the complete Runtime convergence diagnosis for
-// display. SuggestedNextAction is an observed label and never Runtime
-// authority, a command, or an activation decision.
+// ConvergenceStatus preserves bounded Runtime convergence observations for
+// display. It deliberately contains no transition or next-action suggestion.
 type ConvergenceStatus struct {
 	WorkspaceID                   string   `json:"workspaceId,omitempty"`
 	RunID                         string   `json:"runId,omitempty"`
@@ -48,7 +46,6 @@ type ConvergenceStatus struct {
 	CurrentSliceID                string   `json:"currentSliceId,omitempty"`
 	CurrentFocusID                string   `json:"currentFocusId,omitempty"`
 	ConvergenceState              string   `json:"convergenceState,omitempty"`
-	SuggestedNextAction           string   `json:"suggestedNextAction,omitempty"`
 	CurrentGap                    string   `json:"currentGap,omitempty"`
 	MissingEvidenceKinds          []string `json:"missingEvidenceKinds,omitempty"`
 	AcceptedEvidenceCount         int      `json:"acceptedEvidenceCount,omitempty"`

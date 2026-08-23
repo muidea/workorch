@@ -68,6 +68,8 @@ HTTP/owner integration acceptance必须证明：
 - Workspace owner先持久化exact pre-seal candidate；只有pure `admitted_all_of` result可以promotion；
 - one-of/any-of/threshold、未声明替代分支或无法确定唯一required relation返回稳定violation与`BlockingTicketID`，且零
   promotion/Run/provider/dispatch/effect；
+- required owner fact 缺少 exact preexisting 或唯一 one-shot acquisition/reobserve closure、存在重复/悬空/环时返回
+  `declared_prerequisite_unresolved + BlockingTicketID`；Profile contract hash permutation稳定且漂移必须在Start/Restart前拒绝；
 - corrected static candidate经过promotion、专用Decision resolution与Workspace acknowledgement后才eligible；response loss、
   duplicate或stale binding不能产生第二ticket/revision或运行窗口；
 - Run-scoped runtime-definition clarification只投影`revise_definition_and_restart`；通用Decision single/batch resolve与Resume
@@ -98,6 +100,8 @@ The workorchd server package test suite is the in-process HTTP baseline. It cove
 - workspace-scoped Run reads and child-resource pagination;
 - status wait, terminal snapshot cache and typed owner-notification invalidation;
 - runtime-view三轴coverage/assessment/evidence、recoverable-wait reason/condition/deadline和execution-budget摘要；
+- TaskProgress/runtime-view/context-bundle对exact canonical blocker输出同一`BlockingResourceRef`与owner-copied required/allowed
+  action；same-run extra resource、GovernanceDisplay或字符串不能影响recovery；SM-2 budget与SM-4 recovery budget/audit分离；
 - SSE filters, projection-only default, replay by `Last-Event-ID`, persisted replay after restart and bounded buffering;
 - Artifact URI / Runtime raw-ref allowlisting and content response headers;
 - file-backed persistence, long safe IDs and workspace isolation;
@@ -153,6 +157,9 @@ Required guards:
 - duplicate inventory/notification/re-drive is idempotent;
 - non-current baseline fails closed with typed disposition and performs no provider/capability call;
 - current-baseline Restart preserves `ReplacementIntent` and terminal delivery ordering before successor creation;
+- replacement owner-private persisted stage/generation lease survives every resolution/termination/materialization cut point；
+  process-local task loss、Stop/fresh restart只恢复同一 successor；
+- nonterminal Runtime terminal-delivery ledger pollution fails closed as `recovery_ledger_invalid`，projection不得修复；
 - repeated restart/resume cannot create duplicate successor, attempt, evidence or terminal delivery.
 
 Exact restart/recovery target names and their environment inputs are owned by the Makefile and scripts. This contract owns the

@@ -208,6 +208,11 @@ func (m *Biz) applyRunRuntimeStateIncompatible(
 		originalClass = "runtime_cwi_ledger"
 		originalCode = "invalid_runtime_cwi_ledger"
 		originalMessage = "runtime state CWI ledger is invalid and cannot be resumed"
+	} else if incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid {
+		category = runtimecontract.RuntimeFeedbackCategoryStateRecoveryLedgerInvalid
+		originalClass = "runtime_recovery_ledger"
+		originalCode = "invalid_runtime_recovery_ledger"
+		originalMessage = "runtime state recovery ledger is invalid and cannot be resumed"
 	}
 	if diagnostic != nil {
 		originalMessage = diagnostic.Error()

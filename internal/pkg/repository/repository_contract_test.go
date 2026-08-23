@@ -1964,13 +1964,13 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	got.ReplacementIntent.LastError = "mutated clone"
-	got.RetiredReplacementIntents[0].LastError = "mutated retired clone"
+	got.ReplacementIntent.Recovery.LastError = "mutated clone"
+	got.RetiredReplacementIntents[0].Recovery.LastError = "mutated retired clone"
 	unchanged, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get unchanged run: %v", err)
 	}
-	if unchanged.ReplacementIntent == nil || unchanged.ReplacementIntent.LastError != "" || len(unchanged.RetiredReplacementIntents) != 1 || unchanged.RetiredReplacementIntents[0].LastError != "" {
+	if unchanged.ReplacementIntent == nil || unchanged.ReplacementIntent.Recovery.LastError != "" || len(unchanged.RetiredReplacementIntents) != 1 || unchanged.RetiredReplacementIntents[0].Recovery.LastError != "" {
 		t.Fatalf("repository leaked replacement intent pointer: active=%+v retired=%+v", unchanged.ReplacementIntent, unchanged.RetiredReplacementIntents)
 	}
 	got.State = common.RunStateCompleted

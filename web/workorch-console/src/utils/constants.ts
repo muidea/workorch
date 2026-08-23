@@ -62,19 +62,6 @@ export const recoveryModeLabels: Record<string, string> = {
   none: '无需恢复'
 };
 
-// 恢复操作标签
-export const recoveryActionLabels: Record<string, string> = {
-  start_workspace_execution: '提交工作空间执行',
-  inspect_active_run: '查看活跃运行',
-  resume_run: '恢复运行',
-  resume_validation: '恢复验收',
-  resolve_decision_ticket: '补充或处理决策工单',
-  resolve_approval: '处理审批工单',
-  inspect_result: '查看结果（Result）/交付物（Artifact）',
-  inspect_failure_reason_and_evidence: '查看失败原因和运行证据',
-  start_new_run: '启动新的运行'
-};
-
 // 修复循环状态标签
 export const repairLoopStateLabels: Record<string, string> = {
   inactive: '未进入修复',

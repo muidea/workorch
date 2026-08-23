@@ -21,6 +21,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type workspaceCommandTestHub struct {
@@ -91,6 +92,7 @@ func TestSubmitDefinitionAdmissionCandidateUsesRuntimeAuthoritySource(t *testing
 		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{
 			TemplateRef: "template-source", Revision: "template:revision-1", SnapshotHash: "template-hash",
 		},
+		RuntimeProfileContractsHash:       runtimecontract.StableRuntimeProfileContractsHash(nil),
 		AdmissionCompilerVersion:          workspacemodel.DefinitionAdmissionCompilerVersionCurrent,
 		ResolvedProjectWorkspaceDirectory: "/tmp/workorch/ws-definition-admission-source",
 		ProposedRelationInputs: []workspacemodel.DefinitionProposedRelationInput{{

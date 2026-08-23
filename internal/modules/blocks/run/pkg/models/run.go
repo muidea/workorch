@@ -19,9 +19,43 @@ const (
 	ReplacementIntentPendingClarificationResolution  ReplacementIntentState = "pending_clarification_resolution"
 	ReplacementIntentClarificationResolutionBound    ReplacementIntentState = "clarification_resolution_bound"
 	ReplacementIntentClarificationResolutionRejected ReplacementIntentState = "clarification_resolution_rejected"
+	ReplacementIntentTerminationAcknowledged         ReplacementIntentState = "termination_acknowledged"
 	ReplacementIntentSuccessorCreated                ReplacementIntentState = "successor_created"
 	ReplacementIntentCompleted                       ReplacementIntentState = "completed"
 )
+
+type ReplacementRecoveryStage string
+
+const (
+	ReplacementRecoveryClarificationResolution   ReplacementRecoveryStage = "clarification_resolution"
+	ReplacementRecoveryAdministrativeTermination ReplacementRecoveryStage = "administrative_termination"
+	ReplacementRecoverySuccessorMaterialization  ReplacementRecoveryStage = "successor_materialization"
+)
+
+type ReplacementRecoveryState string
+
+const (
+	ReplacementRecoveryScheduled ReplacementRecoveryState = "scheduled"
+	ReplacementRecoveryRunning   ReplacementRecoveryState = "running"
+	ReplacementRecoveryExhausted ReplacementRecoveryState = "exhausted"
+	ReplacementRecoveryCompleted ReplacementRecoveryState = "completed"
+)
+
+// ReplacementRecoveryLease is the Run-owned durable successor for one
+// replacement transaction. Process-local tasks may wake its exact generation,
+// but only the replacement private reducer may claim, renew, advance or close
+// the lease.
+type ReplacementRecoveryLease struct {
+	RequestID   string
+	IntentHash  string
+	Stage       ReplacementRecoveryStage
+	State       ReplacementRecoveryState
+	Generation  uint64
+	Attempt     uint64
+	MaxAttempts uint64
+	DueAt       string
+	LastError   string
+}
 
 // ReplacementIntent is the predecessor Run's durable restart intent. It
 // contains immutable successor activation input and delivery progress, but no
@@ -48,9 +82,7 @@ type ReplacementIntent struct {
 	Kind                               runtimecontract.RuntimeTerminationKind
 	Reason                             string
 	State                              ReplacementIntentState
-	AttemptCount                       uint64
-	LastAttemptAt                      string
-	LastError                          string
+	Recovery                           ReplacementRecoveryLease
 	TerminalDeliveryID                 string
 	RuntimeStateRevision               uint64
 	SuccessorRunID                     common.RunID
@@ -125,15 +157,21 @@ func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
 	} else if i.ReplacementIntentID != "" || i.ReplacementIntentHash != "" || i.PredecessorStartupInputHash != "" || i.SuccessorStartupInputHash != "" || i.ClarificationResolutionID != "" || i.ClarificationResolutionBindingHash != "" || i.ClarificationConflictKind != "" || i.ConflictingReplacementIntentID != "" || i.ConflictingReplacementIntentHash != "" {
 		return false
 	}
+	if !i.Recovery.validFor(i) {
+		return false
+	}
 	switch i.State {
 	case ReplacementIntentPending:
-		return !clarification && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+		return !clarification && i.Recovery.Stage == ReplacementRecoveryAdministrativeTermination && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentPendingClarificationResolution:
-		return clarification && predecessor.State == common.RunStateBlockedOnDecision && predecessor.BlockingTicketID == i.ClarificationTicketID && i.ClarificationResolutionID == "" && i.ClarificationResolutionBindingHash == "" && i.ClarificationConflictKind == "" && i.ConflictingReplacementIntentID == "" && i.ConflictingReplacementIntentHash == "" && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+		return clarification && i.Recovery.Stage == ReplacementRecoveryClarificationResolution && replacementRecoveryOpen(i.Recovery.State) && predecessor.State == common.RunStateBlockedOnDecision && predecessor.BlockingTicketID == i.ClarificationTicketID && i.ClarificationResolutionID == "" && i.ClarificationResolutionBindingHash == "" && i.ClarificationConflictKind == "" && i.ConflictingReplacementIntentID == "" && i.ConflictingReplacementIntentHash == "" && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentClarificationResolutionBound:
-		return clarificationBound && clarification && i.ConflictingReplacementIntentID == "" && i.ConflictingReplacementIntentHash == "" && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+		return clarificationBound && clarification && i.Recovery.Stage == ReplacementRecoveryAdministrativeTermination && replacementRecoveryOpen(i.Recovery.State) && i.ConflictingReplacementIntentID == "" && i.ConflictingReplacementIntentHash == "" && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) == "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentClarificationResolutionRejected:
 		if !clarification || i.ClarificationResolutionID != "" || i.ClarificationResolutionBindingHash == "" || i.SuccessorRunID != "" || strings.TrimSpace(i.TerminalDeliveryID) != "" || i.RuntimeStateRevision != 0 || strings.TrimSpace(i.AcknowledgedAt) != "" {
+			return false
+		}
+		if i.Recovery.Stage != ReplacementRecoveryClarificationResolution || i.Recovery.State != ReplacementRecoveryCompleted {
 			return false
 		}
 		switch i.ClarificationConflictKind {
@@ -144,10 +182,43 @@ func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
 		default:
 			return false
 		}
+	case ReplacementIntentTerminationAcknowledged:
+		return clarificationBound && predecessor.State == common.RunStateSuperseded && predecessor.TerminalDelivery != nil && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID == "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentSuccessorCreated:
-		return clarificationBound && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision == 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
+		return clarificationBound && predecessor.State == common.RunStateSuperseded && predecessor.TerminalDelivery != nil && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && replacementRecoveryOpen(i.Recovery.State) && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) == ""
 	case ReplacementIntentCompleted:
-		return clarificationBound && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) != ""
+		return clarificationBound && predecessor.State == common.RunStateSuperseded && predecessor.TerminalDelivery != nil && predecessor.TerminalDelivery.TerminalDeliveryID == i.TerminalDeliveryID && i.Recovery.Stage == ReplacementRecoverySuccessorMaterialization && i.Recovery.State == ReplacementRecoveryCompleted && i.SuccessorRunID != "" && strings.TrimSpace(i.TerminalDeliveryID) != "" && i.RuntimeStateRevision > 0 && strings.TrimSpace(i.AcknowledgedAt) != "" && predecessor.Lineage.SuccessorRunID == i.SuccessorRunID
+	default:
+		return false
+	}
+}
+
+func replacementRecoveryOpen(state ReplacementRecoveryState) bool {
+	return state == ReplacementRecoveryScheduled || state == ReplacementRecoveryRunning || state == ReplacementRecoveryExhausted
+}
+
+func (r ReplacementRecoveryLease) validFor(intent ReplacementIntent) bool {
+	r.RequestID = strings.TrimSpace(r.RequestID)
+	r.IntentHash = strings.TrimSpace(r.IntentHash)
+	r.DueAt = strings.TrimSpace(r.DueAt)
+	r.LastError = strings.TrimSpace(r.LastError)
+	if r.RequestID == "" || r.RequestID != intent.RequestID || r.IntentHash == "" || r.IntentHash != StableReplacementIntentHash(intent) || r.Generation == 0 || r.MaxAttempts == 0 || r.Attempt > r.MaxAttempts {
+		return false
+	}
+	switch r.Stage {
+	case ReplacementRecoveryClarificationResolution, ReplacementRecoveryAdministrativeTermination, ReplacementRecoverySuccessorMaterialization:
+	default:
+		return false
+	}
+	switch r.State {
+	case ReplacementRecoveryScheduled:
+		return r.DueAt != "" && r.Attempt < r.MaxAttempts
+	case ReplacementRecoveryRunning:
+		return r.DueAt == "" && r.Attempt < r.MaxAttempts && r.LastError == ""
+	case ReplacementRecoveryExhausted:
+		return r.DueAt == "" && r.Attempt == r.MaxAttempts && r.LastError != ""
+	case ReplacementRecoveryCompleted:
+		return r.DueAt == "" && r.LastError == ""
 	default:
 		return false
 	}

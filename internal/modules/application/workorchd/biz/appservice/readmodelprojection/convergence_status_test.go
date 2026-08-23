@@ -22,7 +22,6 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 				Reason:                "missing accepted evidence",
 				RequiredEvidenceKinds: []string{"validation", "state_change", "validation"},
 			}},
-			NextAction: projectioncontract.GapNextAction{Kind: "validate"},
 		},
 		Steps: []projectioncontract.StepView{
 			{
@@ -48,8 +47,8 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	if got.WorkspaceID != "ws-a" || got.RunID != "run-a" || got.RunState != "running" {
 		t.Fatalf("identity = %+v, want ws-a/run-a/running", got)
 	}
-	if got.CurrentFocusID != "focus-a" || got.SuggestedNextAction != "validate" || got.CurrentGap != "missing accepted evidence" {
-		t.Fatalf("focus/action/gap = %+v, want compact gap status", got)
+	if got.CurrentFocusID != "focus-a" || got.CurrentGap != "missing accepted evidence" {
+		t.Fatalf("focus/gap = %+v, want compact factual gap status", got)
 	}
 	if len(got.MissingEvidenceKinds) != 2 || got.MissingEvidenceKinds[0] != "validation" || got.MissingEvidenceKinds[1] != "state_change" {
 		t.Fatalf("MissingEvidenceKinds = %+v, want compact unique evidence kinds", got.MissingEvidenceKinds)

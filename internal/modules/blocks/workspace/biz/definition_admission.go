@@ -132,6 +132,7 @@ func startupInputFromCandidate(candidate workspacemodel.DefinitionAdmissionCandi
 		WorkspaceTemplateRef:              candidate.WorkspaceTemplateSnapshot.TemplateRef,
 		TemplateRevision:                  candidate.WorkspaceTemplateSnapshot.Revision,
 		TemplateSnapshotHash:              candidate.WorkspaceTemplateSnapshot.SnapshotHash,
+		RuntimeProfileContractsHash:       candidate.RuntimeProfileContractsHash,
 		ResolvedProjectWorkspaceDirectory: candidate.ResolvedProjectWorkspaceDirectory,
 		CandidateItemToItemRefMappings:    mappings,
 	}).WithHash()

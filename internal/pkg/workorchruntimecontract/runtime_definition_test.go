@@ -74,6 +74,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 			ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write", RuntimeBlockKindManagedValidationSession},
 			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}},
 			RequiredOwnerFacts:        []RuntimeOwnerFactRequirement{{OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface, OperationKind: RuntimeBlockKindManagedValidationSession}},
+			OwnerFactConvergences:     []RuntimeOwnerFactConvergence{{Requirement: RuntimeOwnerFactRequirement{OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface, OperationKind: RuntimeBlockKindManagedValidationSession}, RequirePreexisting: true}},
 		}},
 	}}}
 	changed := base
@@ -87,6 +88,7 @@ func TestRuntimeCandidatePrefixChangesWithProfileContract(t *testing.T) {
 	}
 	withoutOwnerFact := base.Normalized()
 	withoutOwnerFact.ProfileContracts[0].EvidenceRequirements[0].RequiredOwnerFacts = nil
+	withoutOwnerFact.ProfileContracts[0].EvidenceRequirements[0].OwnerFactConvergences = nil
 	if baseHash == StableRuntimeCandidatePrefixHashWithExecutionContract(definition, withoutOwnerFact) {
 		t.Fatal("candidate prefix did not change with profile owner-fact declaration")
 	}

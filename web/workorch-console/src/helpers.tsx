@@ -3,13 +3,13 @@ import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, S
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
 import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionIntent, WorkspaceExecutionIntentRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
-import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
+import { modelLabels, progressKindLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
 import { stateTag as canonicalStateTag } from './utils/ui';
 import { presentWorkspaceRunCommand } from './workspaceRunCommand';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceBoardExecutionIntentAllowed, workspaceDefinitionClarification } from './governanceMutationTarget';
 
-export { progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
+export { progressKindLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
 
 export type ViewKey = 'board' | 'workspaceDetail' | 'governance' | 'runtimeControl' | 'configuration' | 'service';
 
@@ -61,13 +61,6 @@ export function recoveryModeLabel(mode?: string) {
     return '未知';
   }
   return recoveryModeLabels[mode] ? `${recoveryModeLabels[mode]} (${mode})` : mode;
-}
-
-export function recoveryActionLabel(action?: string) {
-  if (!action) {
-    return '-';
-  }
-  return recoveryActionLabels[action] ?? action;
 }
 
 export function repairLoopStateLabel(state?: string) {
@@ -187,7 +180,7 @@ export function runHeartbeatDescriptions(heartbeat?: RunHeartbeat) {
 }
 
 export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
-  if (!status || (!status.runId && !status.currentFocusId && !status.convergenceState && !status.suggestedNextAction && !status.currentGap && !status.gapSummary && !status.latestContractViolationRule && !status.assessmentDisposition && !status.currentSliceId)) {
+  if (!status || (!status.runId && !status.currentFocusId && !status.convergenceState && !status.currentGap && !status.gapSummary && !status.latestContractViolationRule && !status.assessmentDisposition && !status.currentSliceId)) {
     return [{ key: 'convergenceStatus', label: '收敛状态', children: '-' }];
   }
   const repairLabel = status.maxRepairAttempts
@@ -200,7 +193,6 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
     { key: 'slice', label: '当前 Slice', children: status.currentSliceId || '-' },
     { key: 'focus', label: '当前 Focus', children: status.currentFocusId || '-' },
     { key: 'convergenceState', label: '收敛状态', children: status.convergenceState ? <Tag color="blue">{status.convergenceState}</Tag> : '-' },
-    { key: 'suggestedNextAction', label: '展示建议', children: status.suggestedNextAction ? <Tag>{status.suggestedNextAction}</Tag> : '-' },
     { key: 'coverage', label: 'Coverage', children: <Space wrap><Tag color="green">closed {status.closedCoverageItemCount ?? 0}</Tag><Tag color="gold">remaining {status.remainingCoverageItemCount ?? 0}</Tag></Space> },
     { key: 'disposition', label: 'Assessment Disposition', children: status.assessmentDisposition ? <Tag color="purple">{status.assessmentDisposition}</Tag> : '-' },
     { key: 'repair', label: 'Repair / Budget', children: <Space wrap>{repairLabel ? <Tag>repair {repairLabel}</Tag> : null}{status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount ? <Tag color="gold">repeat {status.repeatedFailureSignatureCount ?? status.retrySignatureRepeatCount}</Tag> : null}{!repairLabel && !(status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount) ? '-' : null}</Space> },
@@ -604,7 +596,6 @@ export function gapBaselineCard(gap?: GapBaseline) {
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Space wrap>
-        {gap.nextAction?.kind ? <Tag color="blue">next: {gap.nextAction.kind}</Tag> : null}
         <Tag>todo {todoCount}</Tag>
         <Tag>open {openCount}</Tag>
         <Tag color="green">accepted evidence {gap.acceptedEvidenceRefs?.length ?? 0}</Tag>
@@ -617,7 +608,6 @@ export function gapBaselineCard(gap?: GapBaseline) {
           { key: 'baselineRevision', label: 'Baseline Revision', children: gap.baselineRevision || '-' },
           { key: 'definitionRevision', label: 'Definition Revision', children: gap.definitionRevision || '-' },
           { key: 'run', label: 'Run', children: gap.runId || '-' },
-          { key: 'nextReason', label: 'Next Reason', children: gap.nextAction?.reason || '-' },
           { key: 'currentFocus', label: 'Current Focus', children: focusId || '-' },
           { key: 'focusState', label: 'Focus State', children: focusState ? stateTag(focusState) : '-' },
           { key: 'acceptedEvidence', label: 'Accepted Evidence', children: compactTags(gap.acceptedEvidenceRefs ?? [], 4) },
@@ -650,7 +640,6 @@ export function gapBaselineCard(gap?: GapBaseline) {
 function gapBaselineEmpty(gap: GapBaseline) {
   return !gap.baselineRevision &&
     !gap.definitionRevision &&
-    !gap.nextAction?.kind &&
     !gap.currentFocus &&
     !(gap.openCoverageWorkItems?.length) &&
     !(gap.todoItems?.length) &&
@@ -717,17 +706,19 @@ export function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: R
           { key: 'currentMilestone', label: '当前里程碑', children: progress.currentMilestone || '-' },
           { key: 'summary', label: '进度摘要', children: boundedParagraph(progress.summary, { rows: 2 }) },
           { key: 'recoveryMode', label: '恢复模式', children: recoveryModeLabel(recovery.mode) },
-          { key: 'nextAction', label: '建议动作', children: recoveryActionLabel(recovery.nextAction) },
           { key: 'checkpoint', label: '恢复检查点', children: recovery.checkpointId ? boundedParagraph(recovery.checkpointId, { rows: 1, copyText: recovery.checkpointId }) : '-' },
           { key: 'blockingTicket', label: '阻塞决策', children: recovery.blockingTicketId || '-' },
           { key: 'blockingApproval', label: '阻塞审批', children: recovery.blockingApprovalId || '-' },
+          { key: 'blockingOwner', label: '阻塞资源', children: recovery.blockingResource ? `${recovery.blockingResource.ownerKind}:${recovery.blockingResource.resourceId}` : '-' },
+          { key: 'requiredAction', label: 'Owner 要求', children: recovery.blockingResource?.requiredAction || '-' },
+          { key: 'allowedActions', label: '允许的用户动作', children: compactTags(recovery.blockingResource?.allowedUserActions ?? [], 4) },
+          { key: 'navigation', label: '建议导航', children: recovery.suggestedNavigation || '-' },
           { key: 'repairState', label: '修复状态', children: repairLoop ? repairLoopStateLabel(repairLoop.state) : '-' },
           { key: 'repairAttempt', label: '修复轮次', children: repairAttempt || '-' },
           { key: 'repairFailure', label: '最近失败', children: repairFailure || '-' },
           { key: 'repairTargetScope', label: '失败目标', children: repairLoop?.lastFailureTargetScope || '-' },
           { key: 'repairInputBytes', label: '修复输入字节', children: repairLoop?.lastRepairInputBytes ? numberText(repairLoop.lastRepairInputBytes) : '-' },
           { key: 'repairRepeatedReason', label: '重复失败原因', children: repairLoop?.repeatedFailureReason || '-' },
-          { key: 'repairNextAction', label: '修复下一步', children: repairLoop?.nextAction || '-' },
           { key: 'repairEscalation', label: '升级信息', children: repairEscalation },
           { key: 'repairSignalTargets', label: '失败信号目标', children: compactTags(repairSignalTargets, 4) },
           { key: 'repairSignalIdentifiers', label: '失败信号标识符', children: compactTags(repairSignalIdentifiers, 4) },
@@ -1452,7 +1443,7 @@ export function contextBundleCard(bundle?: ContextBundle) {
           { key: 'compressedMode', label: '压缩模式', children: bundle.compressedContext?.mode || '-' },
           { key: 'run', label: `关联${modelLabels.run}`, children: bundle.runId || '-' },
           { key: 'summary', label: '摘要', children: boundedParagraph(bundle.summary, { rows: 2 }) },
-          { key: 'recovery', label: '恢复建议', children: recoveryActionLabel(bundle.recovery?.nextAction) },
+		  { key: 'recovery', label: '恢复状态', children: bundle.recovery?.mode || '-' },
           { key: 'checkpoint', label: '恢复检查点', children: bundle.latestCheckpoint?.id ? boundedParagraph(bundle.latestCheckpoint.id, { rows: 1, copyText: bundle.latestCheckpoint.id }) : '-' },
           { key: 'compression', label: '压缩候选', children: `${bundle.compressionCandidates?.length ?? 0} 项` }
         ]}

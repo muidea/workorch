@@ -172,8 +172,9 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
    Workspace/Candidate revision scope；
 2. 无空 identity、悬空引用、自依赖或重复冲突关系；
 3. hard dependency 与 reopen graph 分别无 cycle；
-4. 每个 `RequiresRef` 恰好由初始事实或一个唯一 provider item 满足；确实要求多个输入时必须拆成不同 required ref 并由
-   显式 all-of aggregation 汇合；
+4. 每个 `RequiresRef` 恰好由初始事实或一个唯一 provider item 满足；每个 required owner fact 也必须恰有一个
+   sealed convergence declaration：preexisting，或 exact missing trigger + 唯一 acquisition owner/kind/selector +
+   reobserve owner/fact + `MaxAcquisitionAttempts=1`；确实要求多个输入时必须拆成不同 required ref 并由显式 all-of 汇合；
 5. 多 provider、`one_of/any_of/any_settled`、quorum/threshold/first-success relation 或其他可替代分支语义一律拒绝；
 6. 不存在 `indeterminate_as_success`、unknown-pass、assessment threshold 或其它降低 all-of terminal completeness 的策略；
 7. 每个 disposition 与 Definition→CWI mapping 满足本文的 mapping cardinality；
@@ -182,7 +183,9 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
 10. immutable Definition partition 完整覆盖 active item，每个 CWI 绑定一个 home partition，partition 无超限或正文摘要；
 11. Definition item、edge、gate、gate membership、partition 和总字节数符合彼此独立的容量预算；
 12. 不因 context budget 较小而裁剪 authority inventory；
-13. admission result 在输入 slice/map permutation 后保持同一 candidate/admission-result hash。
+13. Profile requirement/convergence declaration 无悬空 dependency 或 cycle，normalized profile-contract hash 与 candidate
+    中封存值一致；
+14. admission result 在输入 slice/map permutation 后保持同一 candidate/admission-result hash。
 
 只有上述检查返回 `admitted_all_of` 后，Workspace owner 才可 promotion。随后 activation compiler 必须从正式
 `WorkspaceStartupInputContract` 重新验证 candidate/admission-result lineage，编译 Definition→CWI mapping、graph、gate、partition
@@ -190,7 +193,8 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
 stale/conflict，不得复用旧 admission result 或部分编译物。
 
 Static completeness 只检查**已声明合同**。稳定错误码 `declared_prerequisite_unresolved` 表示一个显式 `RequiresRef`、
-`DependsOnItemRef` 或 Profile relation 没有合法 source/provider；它不宣称发现 Goal/DoD 自由文本中从未声明的业务前置项。
+`DependsOnItemRef`、Profile relation 或 required owner fact 没有唯一 source/provider/acquisition/reobserve closure；它不宣称
+发现 Goal/DoD 自由文本中从未声明的业务前置项。
 Workorchd 不使用关键词、文本相似度或领域规则补写 relation。Template/Profile 可以在自己的领域层确定性声明关系；可选
 setup draft 只有用户采用后才成为 Workspace owner candidate；只有 admitted promotion 后才成为 definition-confirmed input。
 

@@ -13,6 +13,15 @@ func StableRuntimeCandidatePrefixHash(definition RuntimeDefinitionContext) strin
 	return StableRuntimeCandidatePrefixHashWithExecutionContract(definition, RuntimeExecutionContract{})
 }
 
+// StableRuntimeProfileContractsHash seals the normalized profile policy set
+// independently from live capability catalogs. Workspace Definition admission
+// uses it to prove that the Runtime bootstrap consumes the exact pre-seal
+// profile snapshot rather than a later application-side reinterpretation.
+func StableRuntimeProfileContractsHash(profiles []RuntimeProfileContract) string {
+	hash := StableRuntimeCandidatePrefixHashWithExecutionContract(RuntimeDefinitionContext{}, RuntimeExecutionContract{ProfileContracts: profiles})
+	return "runtime-profile-contracts:" + hash
+}
+
 func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDefinitionContext, execution RuntimeExecutionContract) string {
 	definition = definition.Normalized()
 	execution = execution.Normalized()
@@ -103,6 +112,23 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 				writeHashString(h, ownerFact.OwnerModuleID)
 				writeHashString(h, string(ownerFact.FactKind))
 				writeHashString(h, ownerFact.OperationKind)
+			}
+			writeHashString(h, fmt.Sprintf("%d", len(requirement.OwnerFactConvergences)))
+			for _, convergence := range requirement.OwnerFactConvergences {
+				writeHashString(h, convergence.Requirement.OwnerModuleID)
+				writeHashString(h, string(convergence.Requirement.FactKind))
+				writeHashString(h, convergence.Requirement.OperationKind)
+				writeHashString(h, fmt.Sprintf("%t", convergence.RequirePreexisting))
+				writeHashString(h, convergence.MissingTrigger)
+				writeHashString(h, convergence.AcquisitionOwnerModuleID)
+				writeHashString(h, convergence.AcquisitionOperationKind)
+				writeHashString(h, convergence.TargetSelectorRef)
+				writeHashString(h, convergence.TargetSelectorOwnerRef)
+				writeHashString(h, convergence.TargetSelectorSubjectRef)
+				writeHashString(h, convergence.ReobserveOwnerModuleID)
+				writeHashString(h, string(convergence.ReobserveFactKind))
+				writeHashString(h, fmt.Sprintf("%d", convergence.MaxAcquisitionAttempts))
+				writeHashStrings(h, convergence.DependsOnRequirementRefs)
 			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)

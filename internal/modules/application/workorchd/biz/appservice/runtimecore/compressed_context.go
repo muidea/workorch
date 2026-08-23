@@ -53,18 +53,30 @@ func progressBlockerMaps(items []projectioncontract.ProgressBlocker) []any {
 }
 
 func recoveryPlanMap(item projectioncontract.RecoveryPlan) map[string]any {
-	return map[string]any{
-		"mode":               item.Mode,
-		"nextAction":         item.NextAction,
-		"runId":              item.RunID,
-		"stepId":             item.StepID,
-		"blockingTicketId":   item.BlockingTicketID,
-		"blockingApprovalId": item.BlockingApprovalID,
-		"checkpointId":       item.CheckpointID,
-		"failureClass":       item.FailureClass,
-		"failureSignature":   item.FailureSignature,
-		"reason":             item.Reason,
+	ret := map[string]any{
+		"mode":                item.Mode,
+		"runId":               item.RunID,
+		"stepId":              item.StepID,
+		"blockingTicketId":    item.BlockingTicketID,
+		"blockingApprovalId":  item.BlockingApprovalID,
+		"checkpointId":        item.CheckpointID,
+		"failureClass":        item.FailureClass,
+		"failureSignature":    item.FailureSignature,
+		"reason":              item.Reason,
+		"suggestedNavigation": item.SuggestedNavigation,
 	}
+	if item.BlockingResource != nil {
+		ret["blockingResource"] = map[string]any{
+			"ownerKind":          item.BlockingResource.OwnerKind,
+			"resourceId":         item.BlockingResource.ResourceID,
+			"workspaceId":        item.BlockingResource.WorkspaceID,
+			"runId":              item.BlockingResource.RunID,
+			"state":              item.BlockingResource.State,
+			"requiredAction":     item.BlockingResource.RequiredAction,
+			"allowedUserActions": stringAnySlice(item.BlockingResource.AllowedUserActions),
+		}
+	}
+	return ret
 }
 
 func contextEvidenceMaps(items []projectioncontract.ContextEvidence) []any {

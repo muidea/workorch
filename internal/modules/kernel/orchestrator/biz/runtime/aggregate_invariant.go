@@ -283,6 +283,9 @@ func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate) error {
 }
 
 func validateRuntimeAggregateSM4DeliveryAcknowledgements(a RuntimeAggregate) error {
+	if err := runtimecontract.ValidateRuntimeStateTerminalDeliveryLedger(a.Decision, a.Termination, a.DeliveryAcknowledgements, a.Facts.Recovery); err != nil {
+		return runtimecontract.NewRuntimeStateRecoveryLedgerIncompatibilityError(err)
+	}
 	for _, acknowledgement := range a.DeliveryAcknowledgements {
 		if err := acknowledgement.Validate(); err != nil {
 			return err

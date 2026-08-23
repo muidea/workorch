@@ -1089,6 +1089,9 @@ func acceptanceProjectionEqual(a, b projectioncontract.AcceptanceProjection) boo
 	if !convergenceBudgetEqual(a.Budget, b.Budget) {
 		return false
 	}
+	if !runtimeRecoveryBudgetEqual(a.RecoveryBudget, b.RecoveryBudget) {
+		return false
+	}
 	if len(a.Slices) != len(b.Slices) {
 		return false
 	}
@@ -1150,7 +1153,7 @@ func runtimeAuditEqual(a, b *projectioncontract.RuntimeAudit) bool {
 		a.Repair.NoProgressCount != b.Repair.NoProgressCount || a.Repair.NoProgressOperationShapeCount != b.Repair.NoProgressOperationShapeCount ||
 		a.Repair.ActiveGapFailureClass != b.Repair.ActiveGapFailureClass || a.Repair.ActiveGapFailureCode != b.Repair.ActiveGapFailureCode ||
 		a.Repair.ActiveGapFailureSignature != b.Repair.ActiveGapFailureSignature || a.Repair.LastProgressRevision != b.Repair.LastProgressRevision ||
-		a.Repair.Exhausted != b.Repair.Exhausted || a.Repair.TerminalDeliveryAttempts != b.Repair.TerminalDeliveryAttempts ||
+		a.Repair.Exhausted != b.Repair.Exhausted ||
 		!stringSliceEqualDisplay(a.Repair.ActiveGapCoverageWorkItemIDs, b.Repair.ActiveGapCoverageWorkItemIDs) ||
 		!runtimeAuditFailureEqual(a.Failure, b.Failure) || len(a.Assessments) != len(b.Assessments) ||
 		len(a.CoverageBindings) != len(b.CoverageBindings) || len(a.Dispatches) != len(b.Dispatches) || len(a.AcceptedEvidence) != len(b.AcceptedEvidence) ||
@@ -1333,16 +1336,25 @@ func convergenceBudgetEqual(a, b *projectioncontract.ConvergenceBudget) bool {
 		a.NoCoverageDeltaRounds == b.NoCoverageDeltaRounds &&
 		strings.TrimSpace(a.LastNoDeltaReason) == strings.TrimSpace(b.LastNoDeltaReason) &&
 		strings.TrimSpace(a.LastDecisionReason) == strings.TrimSpace(b.LastDecisionReason) &&
-		a.MaxProviderTransportAttempts == b.MaxProviderTransportAttempts &&
+		a.MaxPrerequisiteRefreshes == b.MaxPrerequisiteRefreshes &&
+		a.PrerequisiteRefreshes == b.PrerequisiteRefreshes
+}
+
+func runtimeRecoveryBudgetEqual(a, b *projectioncontract.RuntimeRecoveryBudget) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.MaxProviderTransportAttempts == b.MaxProviderTransportAttempts &&
 		a.ProviderTransportAttempts == b.ProviderTransportAttempts &&
 		a.MaxOperationRecoveryAttempts == b.MaxOperationRecoveryAttempts &&
 		a.OperationRecoveryAttempts == b.OperationRecoveryAttempts &&
 		a.MaxCASReloadAttempts == b.MaxCASReloadAttempts &&
 		a.CASReloadAttempts == b.CASReloadAttempts &&
 		a.MaxTerminalDeliveryAttempts == b.MaxTerminalDeliveryAttempts &&
-		a.TerminalDeliveryAttempts == b.TerminalDeliveryAttempts &&
-		a.MaxPrerequisiteRefreshes == b.MaxPrerequisiteRefreshes &&
-		a.PrerequisiteRefreshes == b.PrerequisiteRefreshes
+		a.TerminalDeliveryAttempts == b.TerminalDeliveryAttempts
 }
 
 func runHeartbeatEqual(a, b projectioncontract.RunHeartbeat) bool {
@@ -1380,7 +1392,6 @@ func convergenceStatusEqual(a, b *projectioncontract.ConvergenceStatus) bool {
 		strings.TrimSpace(a.CurrentSliceID) == strings.TrimSpace(b.CurrentSliceID) &&
 		strings.TrimSpace(a.CurrentFocusID) == strings.TrimSpace(b.CurrentFocusID) &&
 		strings.TrimSpace(a.ConvergenceState) == strings.TrimSpace(b.ConvergenceState) &&
-		strings.TrimSpace(a.SuggestedNextAction) == strings.TrimSpace(b.SuggestedNextAction) &&
 		strings.TrimSpace(a.CurrentGap) == strings.TrimSpace(b.CurrentGap) &&
 		a.AcceptedEvidenceCount == b.AcceptedEvidenceCount &&
 		a.RejectedEvidenceCount == b.RejectedEvidenceCount &&

@@ -14,8 +14,8 @@ projection 都只能消费 typed snapshot 或提交命令，不能直接更新�
 ## Definition Admission Candidate
 
 Workspace owner 在正式 Definition 封存前持久化不可变的 `DefinitionAdmissionCandidate`。它绑定候选 Goal/DoD、
-Template/Profile policy snapshot、resolved project directory、compiler version 与 candidate hash；候选 revision 只表示一次
-authoring/admission 尝试，不是正式 `DefinitionRevision`。
+Template/Profile policy snapshot、required owner-fact/convergence bindings、Profile contract hash、resolved project directory、
+compiler version 与 candidate hash；候选 revision 只表示一次 authoring/admission 尝试，不是正式 `DefinitionRevision`。
 
 纯 admission compiler 只接受可完整编译为 `all_of` 的 Definition。显式 `one_of`、`any_of`、threshold 或无法确定唯一
 required relation 的候选不能被自动择支、LLM 改写或提升，必须创建阻塞 clarification ticket。完整字段、promotion CAS 与
@@ -70,8 +70,10 @@ CWI 的 Orchestrator assessment/terminal closeout 结论；Result 只保存已�
 
 ## Startup Input And Activation Admission
 
-一次正式启动输入只由四项组成：Goal/DoD Definition、Workspace Template snapshot、resolved project workspace directory，
-以及它们共同产生的 `StartupInputHash`。封存后，执行期可以在不修改这些输入的前提下调用 LLM 做语义规划、诊断与候选提议。
+一次正式启动输入只由四类输入组成：Goal/DoD Definition、Workspace Template/Profile contract snapshot、resolved project
+workspace directory，以及它们共同产生的 `StartupInputHash`。Profile contract snapshot包含required owner-fact的唯一
+acquisition/reobserve closure并以`RuntimeProfileContractsHash`封存。执行期可以在不修改这些输入的前提下调用 LLM 做语义规划、
+诊断与候选提议。
 
 Workspace owner 为每次 promotion 另存 `WorkspaceActivationAdmission`。普通 admitted candidate 在同一 CAS 中进入 `eligible`；
 纠正 clarification ticket 的 candidate 先进入 `pending_clarification_resolution`，只有 Decision resolution 被 Workspace owner

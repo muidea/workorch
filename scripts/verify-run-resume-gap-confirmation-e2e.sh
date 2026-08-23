@@ -283,8 +283,8 @@ if gap.get("workspaceId") != workspace_id:
     raise SystemExit(f"gap workspace mismatch: {gap}")
 if not gap.get("baselineRevision"):
     raise SystemExit(f"gap baseline revision missing: {gap}")
-if not (gap.get("todoItems") or gap.get("openCoverageWorkItems") or (gap.get("nextAction") or {}).get("kind")):
-    raise SystemExit(f"gap baseline lacks actionable content: {gap}")
+if not (gap.get("todoItems") or gap.get("openCoverageWorkItems")):
+    raise SystemExit(f"gap baseline lacks factual open work: {gap}")
 PY
       then
         return
@@ -347,8 +347,6 @@ if command.get("intent") == "continue":
     raise SystemExit(f"unexpected continue command projection: {command}")
 if recovery.get("mode") == "continue":
     raise SystemExit(f"unexpected continue recovery mode: {recovery}")
-if recovery.get("nextAction") in {"continue_run", "continue_validation"}:
-    raise SystemExit(f"unexpected continue recovery action: {recovery}")
 PY
 }
 

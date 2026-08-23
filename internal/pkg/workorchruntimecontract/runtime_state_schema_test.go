@@ -55,6 +55,41 @@ func TestRuntimeStateJSONNonCurrentSchemaFailsWithTypedError(t *testing.T) {
 	}
 }
 
+func TestRuntimeStateTerminalDeliveryLedgerRejectsNonTerminalPollution(t *testing.T) {
+	decision := RuntimeDecision{State: ConvergenceStateNeedGovernance}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, nil, RuntimeRecoveryLedger{}); err != nil {
+		t.Fatalf("clean non-terminal ledger rejected: %v", err)
+	}
+	err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, nil, RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1})
+	if err == nil {
+		t.Fatal("non-terminal terminal-delivery consumption was accepted")
+	}
+	typed := NewRuntimeStateRecoveryLedgerIncompatibilityError(err)
+	value, ok := RuntimeStateIncompatibilityFromError(typed)
+	if !ok || value.Reason != RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid ||
+		value.ActualSchemaVersion != RuntimeStateSchemaVersionCurrent || value.SupportedSchemaVersion != RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("recovery-ledger incompatibility = %+v, ok=%t", value, ok)
+	}
+	ack := RuntimeDeliveryAcknowledgement{}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, []RuntimeDeliveryAcknowledgement{ack}, RuntimeRecoveryLedger{}); err == nil {
+		t.Fatal("non-terminal terminal-delivery acknowledgement was accepted")
+	}
+}
+
+func TestRuntimeStateTerminalDeliveryLedgerAllowsSealedTerminalRetry(t *testing.T) {
+	decision := RuntimeDecision{
+		State:    ConvergenceStateFailed,
+		Terminal: &RuntimeTerminalDecision{Code: "terminal", Summary: "sealed"},
+	}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, nil, nil, RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1}); err != nil {
+		t.Fatalf("sealed terminal retry rejected: %v", err)
+	}
+	termination := &RuntimeTerminationRecord{Kind: RuntimeTerminationSuperseded, RequestedBy: "blocks/run", Reason: "replacement", Revision: 2, RequestedAt: "2026-08-23T00:00:00Z"}
+	if err := ValidateRuntimeStateTerminalDeliveryLedger(RuntimeDecision{State: ConvergenceStateNeedGovernance}, termination, nil, RuntimeRecoveryLedger{TerminalDeliveryAttempts: 1}); err != nil {
+		t.Fatalf("administrative terminal retry rejected: %v", err)
+	}
+}
+
 func runtimeStateJSONField(t *testing.T, object map[string]json.RawMessage, name string) map[string]json.RawMessage {
 	t.Helper()
 	raw, found := object[name]

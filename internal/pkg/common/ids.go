@@ -17,7 +17,6 @@ type ArtifactID string
 type ArtifactContinuationID string
 type CoverageWorkItemID string
 type EvidenceRecordID string
-type NextActionID string
 type EventRecordID string
 type SoulID string
 type MemoryID string

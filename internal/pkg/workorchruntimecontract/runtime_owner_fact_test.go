@@ -91,3 +91,43 @@ func TestRuntimeMissingOwnerFactRequirementsRequiresReadyDirectPublishedSurface(
 		t.Fatalf("unpublished direct surface satisfied owner fact: %+v", missing)
 	}
 }
+
+func TestResolveRuntimeOwnerFactAcquisitionUsesOnlySealedMissingFactClosure(t *testing.T) {
+	requirement := RuntimeOwnerFactRequirement{
+		OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+	}
+	convergence := RuntimeOwnerFactConvergence{
+		Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
+		AcquisitionOwnerModuleID: RuntimeModuleFile, AcquisitionOperationKind: StepKindFileWrite,
+		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "validation_preparation",
+		ReobserveOwnerModuleID: RuntimeModuleShell, ReobserveFactKind: RuntimeOwnerFactSelectableValidationSurface,
+		MaxAcquisitionAttempts: 1,
+	}
+	selected, found := ResolveRuntimeOwnerFactAcquisition([]RuntimeOwnerFactRequirement{requirement}, []RuntimeOwnerFactConvergence{convergence}, nil)
+	if !found || selected.AcquisitionOwnerModuleID != RuntimeModuleFile || selected.AcquisitionOperationKind != StepKindFileWrite || selected.TargetSelectorRef != convergence.TargetSelectorRef {
+		t.Fatalf("missing owner fact acquisition = %+v found=%t", selected, found)
+	}
+
+	preexisting := convergence
+	preexisting = RuntimeOwnerFactConvergence{Requirement: requirement, RequirePreexisting: true}
+	if _, found := ResolveRuntimeOwnerFactAcquisition([]RuntimeOwnerFactRequirement{requirement}, []RuntimeOwnerFactConvergence{preexisting}, nil); found {
+		t.Fatal("missing preexisting-only owner fact granted acquisition authority")
+	}
+
+	readyCatalog := RuntimeOperationAdmissibility{
+		PrerequisiteID: "shell-ready", OwnerModuleID: RuntimeModuleShell,
+		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeRefs: []string{"recipe/ready"},
+		ValidationSurfaces: []RuntimeValidationSurface{{
+			ID: "recipe/ready", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+			Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "schema/ready", InputBindingRef: "input/ready",
+			CheckRefs: []string{"check/ready"}, ProofApplicability: RuntimeValidationProofDirect,
+			EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+		}},
+		ObservedRevision: "shell-ready-v1",
+	}
+	readyCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(readyCatalog)
+	if _, found := ResolveRuntimeOwnerFactAcquisition([]RuntimeOwnerFactRequirement{requirement}, []RuntimeOwnerFactConvergence{convergence}, []RuntimeOperationAdmissibility{readyCatalog}); found {
+		t.Fatal("already satisfied owner fact retained acquisition authority")
+	}
+}

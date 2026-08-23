@@ -4,15 +4,10 @@ import { ProTable } from '../proCompat';
 import type { ContextBundle, ContextSection, ContextEvidence, ContextCompressionCandidate } from '../../types';
 import { compactJSON } from '../../utils';
 import { StateTag, BoundedParagraph, CompactTags } from '../common';
-import { modelLabels, recoveryActionLabels } from '../../utils/constants';
+import { modelLabels } from '../../utils/constants';
 
 interface ContextBundleCardProps {
   bundle?: ContextBundle;
-}
-
-function recoveryActionLabel(action?: string) {
-  if (!action) return '-';
-  return recoveryActionLabels[action] || action;
 }
 
 export const ContextBundleCard = React.memo(function ContextBundleCard({ bundle }: ContextBundleCardProps) {
@@ -30,7 +25,9 @@ export const ContextBundleCard = React.memo(function ContextBundleCard({ bundle 
           { key: 'compressedMode', label: '压缩模式', children: bundle.compressedContext?.mode || '-' },
           { key: 'run', label: `关联${modelLabels.run}`, children: bundle.runId || '-' },
           { key: 'summary', label: '摘要', children: <BoundedParagraph text={bundle.summary} rows={2} /> },
-          { key: 'recovery', label: '恢复建议', children: recoveryActionLabel(bundle.recovery?.nextAction) },
+		  { key: 'recovery', label: '恢复状态', children: bundle.recovery?.mode || '-' },
+          { key: 'blockingResource', label: '阻塞资源', children: bundle.recovery?.blockingResource ? `${bundle.recovery.blockingResource.ownerKind}:${bundle.recovery.blockingResource.resourceId}` : '-' },
+          { key: 'requiredAction', label: 'Owner 要求', children: bundle.recovery?.blockingResource?.requiredAction || '-' },
           { key: 'checkpoint', label: '恢复检查点', children: bundle.latestCheckpoint?.id ? <BoundedParagraph text={bundle.latestCheckpoint.id} rows={1} copyText={bundle.latestCheckpoint.id} /> : '-' },
           { key: 'compression', label: '压缩候选', children: `${bundle.compressionCandidates?.length ?? 0} 项` }
         ]}

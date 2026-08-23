@@ -210,7 +210,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 	}
 }
 
-func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
+func TestGapBaselinePreservesMissingStateChangeEvidenceWithoutActionProjection(t *testing.T) {
 	t.Parallel()
 
 	got := gapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
@@ -236,12 +236,12 @@ func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
 	if got == nil {
 		t.Fatal("GapBaseline = nil, want derived baseline")
 	}
-	if got.NextAction.Kind != "produce_state_change" {
-		t.Fatalf("NextAction = %+v, want produce_state_change for missing state_change evidence", got.NextAction)
+	if len(got.TodoItems) != 1 || len(got.TodoItems[0].RequiredEvidenceKinds) != 2 || got.TodoItems[0].RequiredEvidenceKinds[0] != "state_change" {
+		t.Fatalf("GapBaseline = %+v, want factual missing evidence", got)
 	}
 }
 
-func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testing.T) {
+func TestGapBaselinePreservesMissingValidationWithoutActionProjection(t *testing.T) {
 	t.Parallel()
 
 	got := gapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
@@ -267,8 +267,8 @@ func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testi
 	if got == nil {
 		t.Fatal("GapBaseline = nil, want derived baseline")
 	}
-	if got.NextAction.Kind != "produce_validation_evidence" {
-		t.Fatalf("NextAction = %+v, want produce_validation_evidence for missing validation evidence", got.NextAction)
+	if len(got.TodoItems) != 1 || len(got.TodoItems[0].RequiredEvidenceKinds) != 1 || got.TodoItems[0].RequiredEvidenceKinds[0] != "validation" {
+		t.Fatalf("GapBaseline = %+v, want factual missing validation", got)
 	}
 }
 
@@ -308,7 +308,6 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 	audit := projected.ContractAudit
 	if audit["schemaVersion"] != "workorch.step_contract_audit" ||
 		audit["runtimeStage"] != "repair" ||
-		audit["currentActionKind"] != "state_change" ||
 		audit["currentFocusId"] != "cwi-101" ||
 		audit["requiredOutputSource"] != "currentActionContract.requiredOutput" {
 		t.Fatalf("ContractAudit = %+v, want compact current contract fields", audit)
@@ -379,9 +378,8 @@ func TestProjectStepViewPrefersValidationCurrentActionOverStaleRepairPackage(t *
 	})
 
 	audit := projected.ContractAudit
-	if audit["currentActionKind"] != "validate" ||
-		audit["requiredOutputSource"] != "currentActionContract.requiredOutput" {
-		t.Fatalf("ContractAudit = %+v, want current validation action as authority", audit)
+	if audit["currentActionKind"] != nil || audit["requiredOutputSource"] != "currentActionContract.requiredOutput" {
+		t.Fatalf("ContractAudit = %+v, want bounded factual output without action authority", audit)
 	}
 	required := readModelMapValue(audit["requiredOutput"])
 	if required["mustIncludeStateChangingNode"] == true ||

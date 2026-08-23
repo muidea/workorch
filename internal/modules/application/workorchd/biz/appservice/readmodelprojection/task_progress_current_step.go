@@ -19,7 +19,6 @@ func applyTaskProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot
 		ret.CurrentStepState = snapshot.Step.State
 		ret.Recovery.StepID = snapshot.Step.ID
 	}
-	ret.CurrentActionLabel = currentActionLabelFromRunSnapshot(snapshot)
 	ret.DiagnosticLineage = ret.CurrentStepID
 	if result := terminalTaskProgressResult(snapshot); result != nil {
 		ret.CurrentStepID = firstNonEmptyTimelineString(result.SourceRef, result.ID)
@@ -27,30 +26,6 @@ func applyTaskProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot
 		ret.CurrentStepState = result.State
 		ret.Recovery.StepID = ret.CurrentStepID
 		ret.DiagnosticLineage = ret.CurrentStepID
-	}
-}
-
-func currentActionLabelFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) string {
-	action := ""
-	if snapshot.GapBaseline != nil {
-		action = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
-	}
-	focus := ""
-	if snapshot.Acceptance.CurrentFocus != nil {
-		focus = strings.TrimSpace(snapshot.Acceptance.CurrentFocus.ID)
-	}
-	if focus == "" && snapshot.GapBaseline != nil {
-		focus = strings.TrimSpace(stringValue(snapshot.GapBaseline.CurrentFocus, "id"))
-	}
-	switch {
-	case action != "" && focus != "":
-		return action + " " + focus
-	case action != "":
-		return action
-	case focus != "":
-		return "focus " + focus
-	default:
-		return ""
 	}
 }
 
@@ -63,33 +38,8 @@ func applyWorkspaceProgressCurrentStep(ret *projectioncontract.TaskProgress, sna
 	ret.CurrentStepID = snapshot.Step.ID
 	ret.CurrentStepKind = llmcommon.CanonicalRuntimeBlockKind(snapshot.Step.Kind)
 	ret.CurrentStepState = snapshot.Step.State
-	ret.CurrentActionLabel = currentActionLabelFromWorkspaceSnapshot(snapshot)
 	ret.DiagnosticLineage = ret.CurrentStepID
 	if ret.Recovery.StepID == "" {
 		ret.Recovery.StepID = snapshot.Step.ID
-	}
-}
-
-func currentActionLabelFromWorkspaceSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) string {
-	action := ""
-	if snapshot.GapBaseline != nil {
-		action = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
-	}
-	focus := ""
-	if snapshot.Acceptance.CurrentFocus != nil {
-		focus = strings.TrimSpace(snapshot.Acceptance.CurrentFocus.ID)
-	}
-	if focus == "" && snapshot.GapBaseline != nil {
-		focus = strings.TrimSpace(stringValue(snapshot.GapBaseline.CurrentFocus, "id"))
-	}
-	switch {
-	case action != "" && focus != "":
-		return action + " " + focus
-	case action != "":
-		return action
-	case focus != "":
-		return "focus " + focus
-	default:
-		return ""
 	}
 }

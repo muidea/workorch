@@ -90,8 +90,10 @@ load facts
   只有“其余 proof 全部成立、owner fact 是唯一缺口”时，SM-2 才能在提交 assessment dispatch 的同一 CAS 中把 current
   bound CWI 记为 `reopened`、清除 current binding、更新 reconciliation contract，并以 typed reopen lineage 退休当前
   semantic generation。旧 binding/receipt/evidence/assessment 只保留 audit；SM-4 随后从同一 aggregate 幂等驱动新
-  semantic generation。普通 evidence gap 不得伪装为 owner-fact gap；同 CWI 重规划次数使用封存的
-  `MaxRepairAttemptsPerFocus` 有界，耗尽后以 `owner_fact_convergence_exhausted` fail-closed。duplicate/restart 不重复
+  semantic generation。普通 evidence gap 不得伪装为 owner-fact gap；新 semantic proof admission 只能接受 pre-seal
+  closure 中 current all-of dependency 已就绪的 exact acquisition owner/kind/selector，且 batch 恰含一项。预算按实际
+  accepted acquisition operation 记账而不是按 provider replan 次数记账；当前 `MaxAcquisitionAttempts=1`，reobserve 后仍
+  缺失即以 `owner_fact_convergence_exhausted` fail-closed。duplicate/restart 不重复
   reopen、request、effect 或预算扣减。重开 CWI 固定返回 `semantic-pending/<cwi>`；当新的 current-focus acquisition 与
   上一 generation 已退休 prerequisite 使用同一 canonical ID 时，SM-2 必须在排入 pending 前原子移出该 retired ID 及其
   旧 observation，且不得复用旧 observation。无关 retired lineage 必须保留，审计由 CWI reopen lineage 与 semantic
@@ -200,6 +202,8 @@ sealed authority + preflight ready
   发现 persisted `need_governance` aggregate 但 Run 仍为 pending/active 时，必须重新驱动该 lifecycle handoff；已经匹配
   blocked 且 aggregate 仍为 `need_governance` 的 Run 保持真实治理等待。若 resolution 已 CAS 持久化而 Run 仍 blocked，startup
   必须把它分类为 continuation delivery cut point，从 persisted resolution 重投 exact continuation，不能先推进 execution。
+- 非终态 aggregate 不得携带 `TerminalDeliveryAttempts` 或 terminal acknowledgement；该组合是
+  `recovery_ledger_invalid` current-schema incompatibility，必须 data reset/fresh activation，不能由 projection 归零。
 - governance `continue|fail` resolution 的 owner-private CAS 必须同时替换任意旧 lease并封存 exact `scheduled`
   successor；新 private event 不接受 nil/wrong lease template。`continue` 的 successor 先围住 run gate 和 exact
   Run-owner resolution acknowledgement，再由同一 claimed generation 继续；`fail` 的 successor 只授权既有
@@ -234,6 +238,9 @@ sealed authority + preflight ready
   同一owner-local handoff一次，不能重复drive或跳过inventory completeness。
 - reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
   owner acknowledgement。projection health 不参与 reducer，也不是 runtime blocker。
+- current-baseline Restart 的 SM-1 replacement 使用 Run-owned persisted stage/generation lease。clarification resolution、
+  administrative termination、successor materialization 每一步都先由 Run private event claim，再由 exact result/ack 推进；
+  process-local task 只唤醒 lease，失败/重启不能退化为 application/Orchestrator 第二份 scheduler。
 
 禁止：重启重新 initialize 已有 aggregate、watcher/projection/TUI/Web 驱动 reducer、无 revision 进展的循环、
 projection failure 覆盖既有 terminal、重放已知 provider/durable effect。

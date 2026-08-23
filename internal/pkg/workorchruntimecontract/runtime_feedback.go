@@ -45,17 +45,18 @@ const (
 type RuntimeFeedbackCategory string
 
 const (
-	RuntimeFeedbackCategoryAccepted                  RuntimeFeedbackCategory = "accepted"
-	RuntimeFeedbackCategoryStateSchemaUnsupported    RuntimeFeedbackCategory = "state_schema_unsupported"
-	RuntimeFeedbackCategoryStateCWILedgerInvalid     RuntimeFeedbackCategory = "state_cwi_ledger_invalid"
-	RuntimeFeedbackCategoryAggregateRevisionMismatch RuntimeFeedbackCategory = "aggregate_revision_mismatch"
-	RuntimeFeedbackCategorySemanticRejection         RuntimeFeedbackCategory = "semantic_rejection"
-	RuntimeFeedbackCategoryOwnerTransient            RuntimeFeedbackCategory = "owner_transient"
-	RuntimeFeedbackCategoryProviderAuthentication    RuntimeFeedbackCategory = "provider_authentication"
-	RuntimeFeedbackCategoryProviderConfiguration     RuntimeFeedbackCategory = "provider_configuration"
-	RuntimeFeedbackCategoryProviderTransient         RuntimeFeedbackCategory = "provider_transient"
-	RuntimeFeedbackCategoryProviderProtocol          RuntimeFeedbackCategory = "provider_protocol"
-	RuntimeFeedbackCategoryContextIntegrity          RuntimeFeedbackCategory = "context_integrity"
+	RuntimeFeedbackCategoryAccepted                   RuntimeFeedbackCategory = "accepted"
+	RuntimeFeedbackCategoryStateSchemaUnsupported     RuntimeFeedbackCategory = "state_schema_unsupported"
+	RuntimeFeedbackCategoryStateCWILedgerInvalid      RuntimeFeedbackCategory = "state_cwi_ledger_invalid"
+	RuntimeFeedbackCategoryStateRecoveryLedgerInvalid RuntimeFeedbackCategory = "state_recovery_ledger_invalid"
+	RuntimeFeedbackCategoryAggregateRevisionMismatch  RuntimeFeedbackCategory = "aggregate_revision_mismatch"
+	RuntimeFeedbackCategorySemanticRejection          RuntimeFeedbackCategory = "semantic_rejection"
+	RuntimeFeedbackCategoryOwnerTransient             RuntimeFeedbackCategory = "owner_transient"
+	RuntimeFeedbackCategoryProviderAuthentication     RuntimeFeedbackCategory = "provider_authentication"
+	RuntimeFeedbackCategoryProviderConfiguration      RuntimeFeedbackCategory = "provider_configuration"
+	RuntimeFeedbackCategoryProviderTransient          RuntimeFeedbackCategory = "provider_transient"
+	RuntimeFeedbackCategoryProviderProtocol           RuntimeFeedbackCategory = "provider_protocol"
+	RuntimeFeedbackCategoryContextIntegrity           RuntimeFeedbackCategory = "context_integrity"
 )
 
 // RuntimeFeedback carries a bounded factual result across owner, aggregate,

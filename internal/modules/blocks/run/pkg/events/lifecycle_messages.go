@@ -221,6 +221,8 @@ func (c RuntimeStateIncompatibleFact) Validate() error {
 	category := runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported
 	if c.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonCWILedgerInvalid {
 		category = runtimecontract.RuntimeFeedbackCategoryStateCWILedgerInvalid
+	} else if c.Incompatibility.Reason == runtimecontract.RuntimeStateIncompatibilityReasonRecoveryLedgerInvalid {
+		category = runtimecontract.RuntimeFeedbackCategoryStateRecoveryLedgerInvalid
 	}
 	if c.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || c.Feedback.StableCategory != category ||
 		c.Feedback.WorkspaceID != c.WorkspaceID || c.Feedback.RunID != c.RunID || c.Feedback.OriginalDiagnostic == nil {

@@ -8,11 +8,12 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const DefinitionAdmissionCandidateSchemaVersionCurrent uint32 = 1
+const DefinitionAdmissionCandidateSchemaVersionCurrent uint32 = 2
 
-const DefinitionAdmissionCompilerVersionCurrent = "workorch-definition-admission-v1"
+const DefinitionAdmissionCompilerVersionCurrent = "workorch-definition-admission-v2"
 
 type DefinitionAdmissionDisposition string
 
@@ -42,6 +43,22 @@ type DefinitionAdmissionPolicyBinding struct {
 	SnapshotHash string
 }
 
+// DefinitionRequiredOwnerFactBinding is the exact pre-seal declaration of a
+// profile-required capability-owner fact. SourceRef binds it to one immutable
+// profile evidence requirement; it does not represent a live owner reading.
+type DefinitionRequiredOwnerFactBinding struct {
+	SourceRef   string
+	Requirement runtimecontract.RuntimeOwnerFactRequirement
+}
+
+// DefinitionOwnerFactConvergenceBinding binds the static closure declaration
+// for one required fact. The Workspace owner persists it as candidate input;
+// only the pure compiler decides whether the declaration is complete.
+type DefinitionOwnerFactConvergenceBinding struct {
+	SourceRef   string
+	Convergence runtimecontract.RuntimeOwnerFactConvergence
+}
+
 type DefinitionProposedRelationInput struct {
 	RelationRef    string
 	RelationKind   string
@@ -64,6 +81,9 @@ type DefinitionAdmissionCandidate struct {
 	DoDInputs                         []DefinitionCandidateItem
 	WorkspaceTemplateSnapshot         DefinitionTemplateSnapshot
 	AdmissionPolicyBindings           []DefinitionAdmissionPolicyBinding
+	RequiredOwnerFactBindings         []DefinitionRequiredOwnerFactBinding
+	OwnerFactConvergenceBindings      []DefinitionOwnerFactConvergenceBinding
+	RuntimeProfileContractsHash       string
 	AdmissionCompilerVersion          string
 	ResolvedProjectWorkspaceDirectory string
 	ProposedRelationInputs            []DefinitionProposedRelationInput
@@ -100,6 +120,7 @@ type WorkspaceStartupInputContract struct {
 	WorkspaceTemplateRef              string
 	TemplateRevision                  string
 	TemplateSnapshotHash              string
+	RuntimeProfileContractsHash       string
 	ResolvedProjectWorkspaceDirectory string
 	CandidateItemToItemRefMappings    []CandidateItemToItemRefMapping
 	CandidateItemToItemRefMappingHash string
@@ -136,6 +157,9 @@ func (c DefinitionAdmissionCandidate) Normalized() DefinitionAdmissionCandidate 
 	c.WorkspaceTemplateSnapshot.Revision = strings.TrimSpace(c.WorkspaceTemplateSnapshot.Revision)
 	c.WorkspaceTemplateSnapshot.SnapshotHash = strings.TrimSpace(c.WorkspaceTemplateSnapshot.SnapshotHash)
 	c.AdmissionPolicyBindings = normalizeAdmissionPolicyBindings(c.AdmissionPolicyBindings)
+	c.RequiredOwnerFactBindings = normalizeDefinitionRequiredOwnerFactBindings(c.RequiredOwnerFactBindings)
+	c.OwnerFactConvergenceBindings = normalizeDefinitionOwnerFactConvergenceBindings(c.OwnerFactConvergenceBindings)
+	c.RuntimeProfileContractsHash = strings.TrimSpace(c.RuntimeProfileContractsHash)
 	c.AdmissionCompilerVersion = strings.TrimSpace(c.AdmissionCompilerVersion)
 	c.ResolvedProjectWorkspaceDirectory = strings.TrimSpace(c.ResolvedProjectWorkspaceDirectory)
 	c.ProposedRelationInputs = normalizeProposedRelations(c.ProposedRelationInputs)
@@ -164,8 +188,34 @@ func (c DefinitionAdmissionCandidate) Validate() error {
 		}
 		seen[item.CandidateItemRef] = struct{}{}
 	}
-	if c.WorkspaceTemplateSnapshot.TemplateRef == "" || c.WorkspaceTemplateSnapshot.Revision == "" || c.WorkspaceTemplateSnapshot.SnapshotHash == "" || c.AdmissionCompilerVersion == "" || c.ResolvedProjectWorkspaceDirectory == "" {
+	if c.WorkspaceTemplateSnapshot.TemplateRef == "" || c.WorkspaceTemplateSnapshot.Revision == "" || c.WorkspaceTemplateSnapshot.SnapshotHash == "" || c.RuntimeProfileContractsHash == "" || c.AdmissionCompilerVersion == "" || c.ResolvedProjectWorkspaceDirectory == "" {
 		return fmt.Errorf("definition admission candidate requires template snapshot, compiler and resolved directory")
+	}
+	policyRefs := map[string]struct{}{}
+	for _, binding := range c.AdmissionPolicyBindings {
+		if binding.PolicyRef == "" || binding.Revision == "" || binding.SnapshotHash == "" {
+			return fmt.Errorf("definition admission policy binding is incomplete")
+		}
+		if _, duplicate := policyRefs[binding.PolicyRef]; duplicate {
+			return fmt.Errorf("definition admission policy binding %q is duplicated", binding.PolicyRef)
+		}
+		policyRefs[binding.PolicyRef] = struct{}{}
+	}
+	for _, binding := range c.RequiredOwnerFactBindings {
+		if binding.SourceRef == "" {
+			return fmt.Errorf("definition required owner fact requires source ref")
+		}
+		if err := binding.Requirement.Validate(); err != nil {
+			return fmt.Errorf("definition required owner fact %q: %w", binding.SourceRef, err)
+		}
+	}
+	for _, binding := range c.OwnerFactConvergenceBindings {
+		if binding.SourceRef == "" {
+			return fmt.Errorf("definition owner-fact convergence requires source ref")
+		}
+		if err := binding.Convergence.Requirement.Validate(); err != nil {
+			return fmt.Errorf("definition owner-fact convergence %q: %w", binding.SourceRef, err)
+		}
 	}
 	for _, relation := range c.ProposedRelationInputs {
 		if relation.RelationRef == "" || relation.RelationKind == "" || len(relation.SourceItemRefs) == 0 || len(relation.TargetItemRefs) == 0 {
@@ -194,6 +244,11 @@ func (c DefinitionAdmissionCandidate) Clone() DefinitionAdmissionCandidate {
 	c = c.Normalized()
 	c.DoDInputs = append([]DefinitionCandidateItem(nil), c.DoDInputs...)
 	c.AdmissionPolicyBindings = append([]DefinitionAdmissionPolicyBinding(nil), c.AdmissionPolicyBindings...)
+	c.RequiredOwnerFactBindings = append([]DefinitionRequiredOwnerFactBinding(nil), c.RequiredOwnerFactBindings...)
+	c.OwnerFactConvergenceBindings = append([]DefinitionOwnerFactConvergenceBinding(nil), c.OwnerFactConvergenceBindings...)
+	for idx := range c.OwnerFactConvergenceBindings {
+		c.OwnerFactConvergenceBindings[idx].Convergence.DependsOnRequirementRefs = append([]string(nil), c.OwnerFactConvergenceBindings[idx].Convergence.DependsOnRequirementRefs...)
+	}
 	c.ProposedRelationInputs = append([]DefinitionProposedRelationInput(nil), c.ProposedRelationInputs...)
 	for idx := range c.ProposedRelationInputs {
 		c.ProposedRelationInputs[idx].SourceItemRefs = append([]string(nil), c.ProposedRelationInputs[idx].SourceItemRefs...)
@@ -210,9 +265,20 @@ func (c DefinitionAdmissionCandidate) computeHash() string {
 	for _, item := range c.DoDInputs {
 		writeDefinitionHash(h, item.CandidateItemRef, item.Text, item.SourceIdentity)
 	}
-	writeDefinitionHash(h, c.WorkspaceTemplateSnapshot.TemplateRef, c.WorkspaceTemplateSnapshot.Revision, c.WorkspaceTemplateSnapshot.SnapshotHash, c.AdmissionCompilerVersion, c.ResolvedProjectWorkspaceDirectory)
+	writeDefinitionHash(h, c.WorkspaceTemplateSnapshot.TemplateRef, c.WorkspaceTemplateSnapshot.Revision, c.WorkspaceTemplateSnapshot.SnapshotHash, c.RuntimeProfileContractsHash, c.AdmissionCompilerVersion, c.ResolvedProjectWorkspaceDirectory)
 	for _, binding := range c.AdmissionPolicyBindings {
 		writeDefinitionHash(h, binding.PolicyRef, binding.Revision, binding.SnapshotHash)
+	}
+	for _, binding := range c.RequiredOwnerFactBindings {
+		writeDefinitionHash(h, binding.SourceRef, binding.Requirement.OwnerModuleID, string(binding.Requirement.FactKind), binding.Requirement.OperationKind)
+	}
+	for _, binding := range c.OwnerFactConvergenceBindings {
+		value := binding.Convergence
+		writeDefinitionHash(h, binding.SourceRef, value.Requirement.OwnerModuleID, string(value.Requirement.FactKind), value.Requirement.OperationKind,
+			fmt.Sprintf("%t", value.RequirePreexisting), value.MissingTrigger, value.AcquisitionOwnerModuleID, value.AcquisitionOperationKind,
+			value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef, value.ReobserveOwnerModuleID,
+			string(value.ReobserveFactKind), fmt.Sprintf("%d", value.MaxAcquisitionAttempts))
+		writeDefinitionHash(h, value.DependsOnRequirementRefs...)
 	}
 	for _, relation := range c.ProposedRelationInputs {
 		writeDefinitionHash(h, relation.RelationRef, relation.RelationKind)
@@ -287,6 +353,7 @@ func (s WorkspaceStartupInputContract) Normalized() WorkspaceStartupInputContrac
 	s.WorkspaceTemplateRef = strings.TrimSpace(s.WorkspaceTemplateRef)
 	s.TemplateRevision = strings.TrimSpace(s.TemplateRevision)
 	s.TemplateSnapshotHash = strings.TrimSpace(s.TemplateSnapshotHash)
+	s.RuntimeProfileContractsHash = strings.TrimSpace(s.RuntimeProfileContractsHash)
 	s.ResolvedProjectWorkspaceDirectory = strings.TrimSpace(s.ResolvedProjectWorkspaceDirectory)
 	s.CandidateItemToItemRefMappings = normalizeItemMappings(s.CandidateItemToItemRefMappings)
 	s.CandidateItemToItemRefMappingHash = strings.TrimSpace(s.CandidateItemToItemRefMappingHash)
@@ -296,7 +363,7 @@ func (s WorkspaceStartupInputContract) Normalized() WorkspaceStartupInputContrac
 
 func (s WorkspaceStartupInputContract) Validate() error {
 	s = s.Normalized()
-	if s.WorkspaceID == "" || s.DefinitionRevision == "" || s.GoalDefinitionRef == "" || s.GoalTextHash == "" || len(s.DoDDefinitionRefs) == 0 || s.DoDItemSetHash == "" || s.WorkspaceTemplateRef == "" || s.TemplateRevision == "" || s.TemplateSnapshotHash == "" || s.ResolvedProjectWorkspaceDirectory == "" || len(s.CandidateItemToItemRefMappings) == 0 {
+	if s.WorkspaceID == "" || s.DefinitionRevision == "" || s.GoalDefinitionRef == "" || s.GoalTextHash == "" || len(s.DoDDefinitionRefs) == 0 || s.DoDItemSetHash == "" || s.WorkspaceTemplateRef == "" || s.TemplateRevision == "" || s.TemplateSnapshotHash == "" || s.RuntimeProfileContractsHash == "" || s.ResolvedProjectWorkspaceDirectory == "" || len(s.CandidateItemToItemRefMappings) == 0 {
 		return fmt.Errorf("workspace startup input contract is incomplete")
 	}
 	if s.CandidateItemToItemRefMappingHash != stableItemMappingHash(s.CandidateItemToItemRefMappings) {
@@ -327,7 +394,7 @@ func (s WorkspaceStartupInputContract) computeHash() string {
 	h := sha256.New()
 	writeDefinitionHash(h, string(s.WorkspaceID), s.DefinitionRevision, s.GoalDefinitionRef, s.GoalTextHash)
 	writeDefinitionHash(h, s.DoDDefinitionRefs...)
-	writeDefinitionHash(h, s.DoDItemSetHash, s.WorkspaceTemplateRef, s.TemplateRevision, s.TemplateSnapshotHash, s.ResolvedProjectWorkspaceDirectory, s.CandidateItemToItemRefMappingHash)
+	writeDefinitionHash(h, s.DoDItemSetHash, s.WorkspaceTemplateRef, s.TemplateRevision, s.TemplateSnapshotHash, s.RuntimeProfileContractsHash, s.ResolvedProjectWorkspaceDirectory, s.CandidateItemToItemRefMappingHash)
 	return "workspace-startup-input-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -386,6 +453,40 @@ func normalizeAdmissionPolicyBindings(values []DefinitionAdmissionPolicyBinding)
 		ret[idx].SnapshotHash = strings.TrimSpace(ret[idx].SnapshotHash)
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].PolicyRef < ret[j].PolicyRef })
+	return ret
+}
+
+func normalizeDefinitionRequiredOwnerFactBindings(values []DefinitionRequiredOwnerFactBinding) []DefinitionRequiredOwnerFactBinding {
+	ret := append([]DefinitionRequiredOwnerFactBinding(nil), values...)
+	for idx := range ret {
+		ret[idx].SourceRef = strings.TrimSpace(ret[idx].SourceRef)
+		ret[idx].Requirement = ret[idx].Requirement.Normalized()
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].SourceRef != ret[j].SourceRef {
+			return ret[i].SourceRef < ret[j].SourceRef
+		}
+		left := ret[i].Requirement
+		right := ret[j].Requirement
+		return left.OwnerModuleID+"|"+string(left.FactKind)+"|"+left.OperationKind < right.OwnerModuleID+"|"+string(right.FactKind)+"|"+right.OperationKind
+	})
+	return ret
+}
+
+func normalizeDefinitionOwnerFactConvergenceBindings(values []DefinitionOwnerFactConvergenceBinding) []DefinitionOwnerFactConvergenceBinding {
+	ret := append([]DefinitionOwnerFactConvergenceBinding(nil), values...)
+	for idx := range ret {
+		ret[idx].SourceRef = strings.TrimSpace(ret[idx].SourceRef)
+		ret[idx].Convergence = ret[idx].Convergence.Normalized()
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].SourceRef != ret[j].SourceRef {
+			return ret[i].SourceRef < ret[j].SourceRef
+		}
+		left := ret[i].Convergence.Requirement
+		right := ret[j].Convergence.Requirement
+		return left.OwnerModuleID+"|"+string(left.FactKind)+"|"+left.OperationKind < right.OwnerModuleID+"|"+string(right.FactKind)+"|"+right.OperationKind
+	})
 	return ret
 }
 

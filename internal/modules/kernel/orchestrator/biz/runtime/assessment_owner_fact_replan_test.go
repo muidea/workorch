@@ -29,7 +29,7 @@ func TestCanonicalAssessmentOwnerFactCannotOverrideOrHideProofQuality(t *testing
 }
 
 func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
-	controller, repository, bootstrapFacts := prepareOwnerFactAssessment(t, false)
+	controller, repository, bootstrapFacts := prepareOwnerFactAssessment(t, false, runtimecontract.RuntimeBlockKindPatchApply)
 	savesBefore := repository.saves
 
 	progressed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
@@ -113,25 +113,43 @@ func TestCommitAssessmentCompletesAfterOwnerPublishesSelectableValidationSurface
 	}
 }
 
+func TestCommitAssessmentFailsClosedAfterSingleSealedOwnerFactAcquisition(t *testing.T) {
+	controller, _, _ := prepareOwnerFactAssessment(t, false)
+	failed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "owner_fact_convergence_exhausted" {
+		t.Fatalf("one-shot owner-fact acquisition did not fail closed: %+v", failed.Decision)
+	}
+	if len(failed.Facts.Coverage[0].ReopenLineage) != 0 || len(failed.Facts.Repair.NoProgressOperationShapes) != 1 ||
+		failed.Facts.Repair.NoProgressOperationShapes[0].Operation.Kind != runtimecontract.StepKindFileWrite {
+		t.Fatalf("one-shot acquisition created a second generation or lost its exact attempt: %+v", failed.Facts)
+	}
+}
+
 func TestOwnerFactSemanticReplanBudgetCountsOnlyItsOwnBoundedLineage(t *testing.T) {
 	facts := controllerFacts()
 	facts.Focus.RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{runtimeTestSelectableValidationOwnerFact()}
-	facts.ConvergencePolicy.MaxRepairAttemptsPerFocus = 2
+	facts.Focus.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{runtimeTestSelectableValidationOwnerFactConvergence()}
+	acquisition := facts.Focus.OwnerFactConvergences[0]
 	facts.Coverage[0].ReopenLineage = []runtimecontract.RuntimeCWIReopenLineage{
 		{Reason: "dependency_invalidated"},
-		{Reason: runtimeCWIReopenReasonOwnerFactPostcondition},
 	}
-	if runtimeOwnerFactReplanBudgetExhausted(facts) {
+	if runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
 		t.Fatal("unrelated CWI reopen lineage consumed the owner-fact replan budget")
 	}
-	facts.Coverage[0].ReopenLineage = append(facts.Coverage[0].ReopenLineage, runtimecontract.RuntimeCWIReopenLineage{Reason: runtimeCWIReopenReasonOwnerFactPostcondition})
-	if !runtimeOwnerFactReplanBudgetExhausted(facts) {
+	facts.Repair.NoProgressOperationShapes = []runtimecontract.RuntimeRejectedOperationShape{{
+		Operation:        runtimecontract.RuntimeOperation{ID: "owner-fact-acquisition", Kind: acquisition.AcquisitionOperationKind},
+		FailureSignature: runtimeOwnerFactAcquisitionFailureSignature(acquisition.Requirement),
+	}}
+	if !runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
 		t.Fatal("owner-fact replan budget did not fail closed at the declared limit")
 	}
 }
 
 func TestCommitAssessmentFailsClosedAfterOwnerFactReplanBudget(t *testing.T) {
-	controller, repository, _ := prepareOwnerFactAssessment(t, false)
+	controller, repository, _ := prepareOwnerFactAssessment(t, false, runtimecontract.RuntimeBlockKindPatchApply)
 	item := &repository.aggregate.Facts.Coverage[0]
 	if item.CurrentBindingRef == nil {
 		t.Fatal("owner-fact budget fixture has no current binding")
@@ -144,6 +162,11 @@ func TestCommitAssessmentFailsClosedAfterOwnerFactReplanBudget(t *testing.T) {
 	item.ReopenLineage = []runtimecontract.RuntimeCWIReopenLineage{{
 		PreviousBindingRef: prior, TriggerRef: "assessment/prior-owner-fact-generation",
 		Reason: runtimeCWIReopenReasonOwnerFactPostcondition,
+	}}
+	acquisition := repository.aggregate.Facts.Focus.OwnerFactConvergences[0]
+	repository.aggregate.Facts.Repair.NoProgressOperationShapes = []runtimecontract.RuntimeRejectedOperationShape{{
+		Operation:        runtimecontract.RuntimeOperation{ID: "prior-owner-fact-acquisition", Kind: acquisition.AcquisitionOperationKind},
+		FailureSignature: runtimeOwnerFactAcquisitionFailureSignature(acquisition.Requirement),
 	}}
 	repository.aggregate.Facts.ConvergencePolicy.MaxRepairAttemptsPerFocus = 1
 	policy := runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(repository.aggregate.Facts.ConvergencePolicy, repository.aggregate.Facts.RecoveryPolicy)
@@ -165,7 +188,7 @@ func TestCommitAssessmentFailsClosedAfterOwnerFactReplanBudget(t *testing.T) {
 	}
 }
 
-func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
+func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
 	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -174,8 +197,14 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool) (*RuntimeCont
 	}
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
-	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Capabilities.StateChangeKinds = append(facts.Capabilities.StateChangeKinds, runtimecontract.RuntimeBlockKindPatchApply)
 	facts.Focus.RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{runtimeTestSelectableValidationOwnerFact()}
+	convergence := runtimeTestSelectableValidationOwnerFactConvergence()
+	if len(operationKinds) > 0 {
+		convergence.AcquisitionOperationKind = runtimecontract.CanonicalRuntimeBlockKind(operationKinds[0])
+	}
+	facts.Focus.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{convergence}
 	if ownerFactReady {
 		facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, runtimeTestSelectableValidationCatalog(t))
 	}
@@ -228,6 +257,16 @@ func runtimeTestSelectableValidationOwnerFact() runtimecontract.RuntimeOwnerFact
 	return runtimecontract.RuntimeOwnerFactRequirement{
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+}
+
+func runtimeTestSelectableValidationOwnerFactConvergence() runtimecontract.RuntimeOwnerFactConvergence {
+	return runtimecontract.RuntimeOwnerFactConvergence{
+		Requirement: runtimeTestSelectableValidationOwnerFact(), MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
+		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
+		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "test-profile", TargetSelectorSubjectRef: "validation_preparation",
+		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		MaxAcquisitionAttempts: 1,
 	}
 }
 

@@ -145,7 +145,7 @@ func (p preparedWorkspaceExecutionIntent) ownerAdmission() (workspaceevents.Work
 			}, true
 		}
 		definition := p.command.Bootstrap.Definition.Normalized()
-		if startup.Validate() != nil || admission.Validate(startup) != nil || admission.State != workspacemodel.WorkspaceActivationEligible || definition.Revision != startup.DefinitionRevision || definition.StartupInputHash != startup.StartupInputHash {
+		if startup.Validate() != nil || admission.Validate(startup) != nil || admission.State != workspacemodel.WorkspaceActivationEligible || definition.Revision != startup.DefinitionRevision || definition.StartupInputHash != startup.StartupInputHash || runtimecontract.StableRuntimeProfileContractsHash(p.command.Bootstrap.Activation.ExecutionContract.ProfileContracts) != startup.RuntimeProfileContractsHash {
 			return workspaceevents.WorkspaceExecutionIntentResult{
 				WorkspaceID: p.workspace.ID, RequestID: p.command.RequestID, Kind: p.command.Kind,
 				Outcome: runtimecontract.RuntimeExecutionIntentFreshActivationRequired,

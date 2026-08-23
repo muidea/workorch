@@ -10,6 +10,8 @@ internal/modules/blocks/decision/pkg/models/runtime_governance_proposal.go|Runti
 internal/modules/blocks/llm/pkg/models/provider_model_catalog.go|ProviderCatalogState|derived_projection|internal/modules/blocks/llm|-
 internal/modules/blocks/memory/pkg/events/messages.go|MemoryRecallTraceWriteDisposition|immutable_outcome|internal/modules/blocks/memory|-
 internal/modules/blocks/run/pkg/models/run.go|ReplacementIntentState|owner_private_state|internal/modules/blocks/run|run.replacement
+internal/modules/blocks/run/pkg/models/run.go|ReplacementRecoveryStage|owner_private_state|internal/modules/blocks/run|run.replacement
+internal/modules/blocks/run/pkg/models/run.go|ReplacementRecoveryState|owner_private_state|internal/modules/blocks/run|run.replacement
 internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionCandidateDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/definition_admission.go|DefinitionAdmissionDisposition|pure_disposition|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/definition_admission.go|WorkspaceActivationAdmissionState|owner_private_state|internal/modules/blocks/workspace|workspace.definition_admission

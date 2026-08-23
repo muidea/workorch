@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func candidateWithRelation(kind string) workspacemodel.DefinitionAdmissionCandidate {
@@ -13,6 +14,7 @@ func candidateWithRelation(kind string) workspacemodel.DefinitionAdmissionCandid
 		GoalInput:                         workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal", Text: "ship the outcome", SourceIdentity: "user"},
 		DoDInputs:                         []workspacemodel.DefinitionCandidateItem{{CandidateItemRef: "dod-1", Text: "evidence exists", SourceIdentity: "user"}},
 		WorkspaceTemplateSnapshot:         workspacemodel.DefinitionTemplateSnapshot{TemplateRef: "generic", Revision: "template-r1", SnapshotHash: "template-hash"},
+		RuntimeProfileContractsHash:       runtimecontract.StableRuntimeProfileContractsHash(nil),
 		AdmissionCompilerVersion:          workspacemodel.DefinitionAdmissionCompilerVersionCurrent,
 		ResolvedProjectWorkspaceDirectory: "/tmp/workspace-1",
 		ProposedRelationInputs:            []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "relation-1", RelationKind: kind, SourceItemRefs: []string{"dod-1"}, TargetItemRefs: []string{"goal"}}},
@@ -45,5 +47,47 @@ func TestCompileAdmitsAllOfDeterministically(t *testing.T) {
 	}
 	if first.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf || first.AdmissionResultHash != second.AdmissionResultHash {
 		t.Fatalf("non-deterministic admission: %+v / %+v", first, second)
+	}
+}
+
+func TestCompileRequiresExactStaticOwnerFactConvergenceBeforeAdmission(t *testing.T) {
+	requirement := runtimecontract.RuntimeOwnerFactRequirement{
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	candidate := candidateWithRelation("all_of")
+	candidate.RequiredOwnerFactBindings = []workspacemodel.DefinitionRequiredOwnerFactBinding{{SourceRef: "profile/software-dev/validation-preparation", Requirement: requirement}}
+	candidate = candidate.WithHash()
+
+	missing, err := Compile(candidate)
+	if err != nil {
+		t.Fatalf("compile missing convergence: %v", err)
+	}
+	if missing.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || missing.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved || len(missing.OffendingRefs) != 1 {
+		t.Fatalf("missing convergence result = %+v", missing)
+	}
+
+	convergence := runtimecontract.RuntimeOwnerFactConvergence{
+		Requirement: requirement, MissingTrigger: runtimecontract.RuntimeOwnerFactMissingTrigger,
+		AcquisitionOwnerModuleID: runtimecontract.RuntimeModuleFile, AcquisitionOperationKind: runtimecontract.StepKindFileWrite,
+		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation-preparation",
+		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		MaxAcquisitionAttempts: 1,
+	}
+	candidate.OwnerFactConvergenceBindings = []workspacemodel.DefinitionOwnerFactConvergenceBinding{{SourceRef: candidate.RequiredOwnerFactBindings[0].SourceRef, Convergence: convergence}}
+	candidate = candidate.WithHash()
+	admitted, err := Compile(candidate)
+	if err != nil || admitted.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		t.Fatalf("exact convergence admission = %+v err=%v", admitted, err)
+	}
+
+	candidate.OwnerFactConvergenceBindings = append(candidate.OwnerFactConvergenceBindings, candidate.OwnerFactConvergenceBindings[0])
+	candidate = candidate.WithHash()
+	duplicate, err := Compile(candidate)
+	if err != nil {
+		t.Fatalf("compile duplicate convergence: %v", err)
+	}
+	if duplicate.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired || duplicate.ViolationCode != workspacemodel.DefinitionAdmissionPrerequisiteUnresolved {
+		t.Fatalf("duplicate convergence result = %+v", duplicate)
 	}
 }

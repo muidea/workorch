@@ -129,11 +129,6 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	if err != nil {
 		return runevents.RunLifecycleCommandResult{}, err
 	}
-	if internal.TerminalDelivery != nil && internal.TerminalDelivery.Outcome.Kind == runtimecontract.TerminalOutcomeKindSuperseded && response.Run != nil && response.Run.ReplacementIntent != nil {
-		if _, err := m.materializeReplacementAfterTerminalDelivery(boundCtx, response.Run, internal.TerminalDelivery.TerminalDeliveryID); err != nil {
-			return runevents.RunLifecycleCommandResult{}, err
-		}
-	}
 	return response, nil
 }
 

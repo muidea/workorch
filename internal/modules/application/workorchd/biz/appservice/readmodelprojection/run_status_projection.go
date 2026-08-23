@@ -25,7 +25,6 @@ func mapRunStatus(snapshot readmodelcore.RunSnapshotState) projectioncontract.Ru
 		ret.CurrentStepState = snapshot.Step.State
 		ret.DiagnosticLineage = snapshot.Step.ID
 	}
-	ret.CurrentActionLabel = currentActionLabelFromRunSnapshot(snapshot)
 	ret.ConvergenceStatus = mapConvergenceStatus(snapshot)
 	ret.Acceptance = projectioncontract.CloneAcceptanceProjection(snapshot.Acceptance)
 	return ret

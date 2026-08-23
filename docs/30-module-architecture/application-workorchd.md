@@ -34,7 +34,7 @@ are unavailable. Server-local execution queue、scheduler authority、projection
 Fresh execution follows one application sequence:
 
 1. submit the exact setup input as a Workspace-owner `DefinitionAdmissionCandidate`;
-2. run pure admission and promote only exact-current `admitted_all_of`;
+2. run pure admission over all-of relations plus required owner-fact acquisition/reobserve closure, and promote only exact-current `admitted_all_of`;
 3. when admission reports unsupported relation or ambiguity, open/reconcile the pre-Run blocking clarification ticket and stop;
 4. read activation-eligible Workspace startup input plus referenced Template/Profile、provider、Soul、Skill、MCP and Memory facts;
 5. build a typed `RuntimeBootstrap` from those owner snapshots and process defaults;
@@ -77,6 +77,12 @@ cache 不保存完整 aggregate。公开 Workspace/Run 的 canonical `state`、W
 snapshot 原样一致，不能由 Decision/Approval、TaskProgress 或 terminal display 合成覆盖。Workspace DTO 本身没有 blocker refs。
 跨 owner 治理关联只写入 read-only `governanceDisplay`，偏差写入 `consistencyDiagnostic`；`displayOutcome` 只描述展示结果，
 formal output 仍由独立 `result/results` 原样投影。这些字段不得进入或决定 Drive、Resume、Restart 或任何 owner mutation。
+
+`TaskProgress.recovery`、ContextBundle 与 compressed context 复用同一个 factual `BlockingResourceRef`。该引用只在 canonical
+active Run blocked state/ref 与同 scope owner resource 精确相交时存在，包含 owner kind/resource/scope/state 以及 owner 原样
+提供的 `requiredAction/allowedUserActions`；`suggestedNavigation` 是独立 display hint。它们均不构造 execution 或 governance
+mutation。SM-2 repair 只留在 `RepairLoop`/convergence budget；SM-4 transport/operation/CAS/terminal delivery 只留在
+`recoveryBudget` 与 terminal audit，二者不能互相镜像。
 
 Run lifecycle cache invalidation/metrics 只消费 `source=blocks/run` 且通过 `RunStateChangedData.Validate` 的 typed notification；
 Eventstream replay 与 source-forged/invalid notification 只能被忽略。

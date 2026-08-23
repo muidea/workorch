@@ -1096,7 +1096,8 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 	policy := facts.ConvergencePolicy.Normalized()
 	ledger := facts.Repair.Normalized()
 	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities)) != 0 {
-		if runtimeOwnerFactReplanBudgetExhausted(facts) {
+		acquisition, acquisitionReady := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
+		if !acquisitionReady || runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "owner_fact_convergence_exhausted", "required capability-owner fact remained unavailable after the bounded semantic replan budget"), nil
 		}
 		// Production assessment commit normally reopens the CWI and retires its

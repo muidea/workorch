@@ -6,6 +6,7 @@ func CloneAcceptanceProjection(item AcceptanceProjection) AcceptanceProjection {
 	item.Slices = cloneAcceptanceSlices(item.Slices)
 	item.CurrentFocus = cloneCoverageFocus(item.CurrentFocus)
 	item.Budget = cloneConvergenceBudget(item.Budget)
+	item.RecoveryBudget = cloneRuntimeRecoveryBudget(item.RecoveryBudget)
 	if item.ExecutionBudget != nil {
 		value := item.ExecutionBudget.Clone()
 		item.ExecutionBudget = &value
@@ -153,6 +154,14 @@ func cloneCoverageFocus(item *CoverageFocus) *CoverageFocus {
 }
 
 func cloneConvergenceBudget(item *ConvergenceBudget) *ConvergenceBudget {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	return &ret
+}
+
+func cloneRuntimeRecoveryBudget(item *RuntimeRecoveryBudget) *RuntimeRecoveryBudget {
 	if item == nil {
 		return nil
 	}

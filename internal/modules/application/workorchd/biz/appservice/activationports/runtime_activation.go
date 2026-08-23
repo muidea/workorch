@@ -198,6 +198,27 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 					OperationKind: runtimeString(ownerFact["operationKind"]),
 				})
 			}
+			ownerFactConvergences := make([]runtimecontract.RuntimeOwnerFactConvergence, 0)
+			for _, convergence := range runtimeMapSlice(item["ownerFactConvergences"]) {
+				ownerFactConvergences = append(ownerFactConvergences, runtimecontract.RuntimeOwnerFactConvergence{
+					Requirement: runtimecontract.RuntimeOwnerFactRequirement{
+						OwnerModuleID: runtimeString(convergence["ownerModuleId"]),
+						FactKind:      runtimecontract.RuntimeOwnerFactKind(runtimeString(convergence["factKind"])),
+						OperationKind: runtimeString(convergence["operationKind"]),
+					},
+					RequirePreexisting:       runtimeBool(convergence["requirePreexisting"]),
+					MissingTrigger:           runtimeString(convergence["missingTrigger"]),
+					AcquisitionOwnerModuleID: runtimeString(convergence["acquisitionOwnerModuleId"]),
+					AcquisitionOperationKind: runtimeString(convergence["acquisitionOperationKind"]),
+					TargetSelectorRef:        runtimeString(convergence["targetSelectorRef"]),
+					TargetSelectorOwnerRef:   runtimeString(convergence["targetSelectorOwnerRef"]),
+					TargetSelectorSubjectRef: runtimeString(convergence["targetSelectorSubjectRef"]),
+					ReobserveOwnerModuleID:   runtimeString(convergence["reobserveOwnerModuleId"]),
+					ReobserveFactKind:        runtimecontract.RuntimeOwnerFactKind(runtimeString(convergence["reobserveFactKind"])),
+					MaxAcquisitionAttempts:   runtimeInt(convergence["maxAcquisitionAttempts"]),
+					DependsOnRequirementRefs: runtimeStrings(convergence["dependsOnRequirementRefs"]),
+				})
+			}
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]), EvidenceRole: runtimeString(item["evidenceRole"]),
 				TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
@@ -212,6 +233,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 				MetricConstraints:           runtimeStrings(item["metricConstraints"]),
 				ArtifactRefs:                runtimeStrings(item["artifactRefs"]),
 				RequiredOwnerFacts:          ownerFacts,
+				OwnerFactConvergences:       ownerFactConvergences,
 				CapabilityStateRequirements: stateRequirements,
 				RejectedStepKinds:           runtimeStrings(item["rejectedStepKinds"]), Description: runtimeString(item["description"]),
 			})

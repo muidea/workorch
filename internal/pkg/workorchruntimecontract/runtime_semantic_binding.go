@@ -53,6 +53,9 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
+	if err := ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, sourceFocuses, manifest.OwnerCatalogs); err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, err
+	}
 	focuses := make([]CoverageFocus, 0, len(proofSets))
 	for _, proofSet := range proofSets {
 		item, found := items[string(proofSet.CoverageWorkItemID)]
@@ -97,6 +100,14 @@ func CompileRuntimeSemanticBindingsWithSourceFocuses(manifest RuntimeSemanticPla
 // request is issued. It is the same pure source check used by final binding
 // compilation and owns no correction or state transition.
 func ValidateRuntimeSemanticPlanSourceDeclarations(document RuntimeSemanticPlanDocument, sourceFocuses []CoverageFocus) error {
+	return ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document, sourceFocuses, nil)
+}
+
+// ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts additionally
+// constrains a proof batch to the exact one-shot acquisition sealed for the
+// first missing all-of owner fact. Capability catalogs remain immutable input;
+// this pure check cannot perform the acquisition or advance Runtime.
+func ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts(document RuntimeSemanticPlanDocument, sourceFocuses []CoverageFocus, catalogs []RuntimeOperationAdmissibility) error {
 	document = document.Normalized()
 	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
 	if err != nil {
@@ -115,6 +126,41 @@ func ValidateRuntimeSemanticPlanSourceDeclarations(document RuntimeSemanticPlanD
 		if err := validateRuntimeSemanticProofSetSource(proofSet, source); err != nil {
 			return err
 		}
+		if err := validateRuntimeSemanticOwnerFactAcquisition(proofSet, source, catalogs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProofSet, source *CoverageFocus, catalogs []RuntimeOperationAdmissibility) error {
+	if source == nil || catalogs == nil {
+		return nil
+	}
+	declaration := source.Normalized()
+	missing := RuntimeMissingOwnerFactRequirements(declaration.RequiredOwnerFacts, catalogs)
+	if len(missing) == 0 {
+		return nil
+	}
+	acquisition, required := ResolveRuntimeOwnerFactAcquisition(declaration.RequiredOwnerFacts, declaration.OwnerFactConvergences, catalogs)
+	if !required {
+		return fmt.Errorf("runtime semantic proof for coverage %q has a missing owner fact without ready acquisition authority", proofSet.CoverageWorkItemID)
+	}
+	if len(proofSet.Proposals) != 1 {
+		return fmt.Errorf("runtime semantic proof for coverage %q must contain exactly one sealed owner-fact acquisition", proofSet.CoverageWorkItemID)
+	}
+	proposal := proofSet.Proposals[0].Normalized()
+	if proposal.OwnerModuleID != acquisition.AcquisitionOwnerModuleID || proposal.OperationKind != acquisition.AcquisitionOperationKind {
+		return fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition owner/kind", proofSet.CoverageWorkItemID)
+	}
+	if len(proposal.RequiredEvidenceKinds) != 1 || proposal.RequiredEvidenceKinds[0] != EvidenceKindStateChange {
+		return fmt.Errorf("runtime semantic proof for coverage %q owner-fact acquisition must produce state-change evidence", proofSet.CoverageWorkItemID)
+	}
+	if len(proposal.Target.OwnerSelectorRefs) != 1 || proposal.Target.OwnerSelectorRefs[0] != acquisition.TargetSelectorRef {
+		return fmt.Errorf("runtime semantic proof for coverage %q does not match sealed owner-fact acquisition selector", proofSet.CoverageWorkItemID)
+	}
+	if declaration.TargetSelectorRef != acquisition.TargetSelectorRef || declaration.TargetSelectorOwnerRef != acquisition.TargetSelectorOwnerRef || declaration.TargetSelectorSubjectRef != acquisition.TargetSelectorSubjectRef {
+		return fmt.Errorf("runtime semantic source for coverage %q does not match sealed owner-fact acquisition target binding", proofSet.CoverageWorkItemID)
 	}
 	return nil
 }
@@ -308,6 +354,7 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	if source != nil {
 		declaration := source.Normalized()
 		focus.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), declaration.RequiredOwnerFacts...)
+		focus.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(declaration.OwnerFactConvergences)
 		focus.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
 		focus.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
 	}

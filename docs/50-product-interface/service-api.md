@@ -93,6 +93,11 @@ Goal/DoD mutation先提交 immutable `DefinitionAdmissionCandidate` 并执行 pu
 可以 promotion；`definition_one_of_unsupported` 或 declared ambiguity 返回 typed `BlockingTicketID`。Corrected
 candidate 仍需 Decision resolution 与 Workspace acknowledgement 才能变为 eligible。
 
+candidate 还必须封存 exact Profile/policy snapshot、`RuntimeProfileContractsHash`、required owner-fact bindings 与唯一
+one-shot acquisition/reobserve bindings。缺失、重复、悬空或成环的 closure 返回
+`declared_prerequisite_unresolved + BlockingTicketID`，且在 promotion/Run/provider/dispatch/effect 前停止。HTTP/Application
+不得查询 live catalog 代替该静态合同，也不得接受 caller 提供的 acquisition action。
+
 必须区分两类 Definition clarification：
 
 - pre-seal ticket由新candidate的all-of admission、专用Decision resolution和Workspace acknowledgement收口；不存在

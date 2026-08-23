@@ -106,7 +106,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	}
 	if projection.RepairDirective == nil || projection.RepairDirective.RequiredAction != string(runtimecontract.ConvergenceStateNeedValidation) ||
 		len(projection.Operations) != 1 || projection.Operations[0].Fence != 1 || projection.Operations[0].Outcome != string(runtimecontract.RuntimeOperationOutcomeAccepted) ||
-		projection.Budget.CASReloadAttempts != 1 || projection.Operations[0].Kind != runtimecontract.StepKindGitRead || projection.Operations[0].VariantID != "status" ||
+		projection.RecoveryBudget == nil || projection.RecoveryBudget.CASReloadAttempts != 1 || projection.Operations[0].Kind != runtimecontract.StepKindGitRead || projection.Operations[0].VariantID != "status" ||
 		projection.Operations[0].CapabilityStateHash != "capability-state-hash" || len(projection.CapabilityStates) != 1 ||
 		len(projection.CapabilityStates[0].RequiredOperationSequence) != 1 || len(projection.Governance) != 1 || projection.Governance[0].ResolutionID != "resolution-1" {
 		t.Fatalf("runtime remediation projection = %+v", projection)
@@ -168,10 +168,13 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtime audit repair = %#v, want object", auditWire["repair"])
 	}
-	for _, field := range []string{"repairAttempts", "validationOnlyRetries", "noProgressCount", "terminalDeliveryAttempts"} {
+	for _, field := range []string{"repairAttempts", "validationOnlyRetries", "noProgressCount"} {
 		if _, ok := repair[field]; !ok {
 			t.Fatalf("runtime audit repair omits zero-safe counter %q: %s", field, raw)
 		}
+	}
+	if _, leaked := repair["terminalDeliveryAttempts"]; leaked {
+		t.Fatalf("runtime audit repair leaks SM-4 terminal delivery accounting: %s", raw)
 	}
 }
 

@@ -91,6 +91,7 @@ type RuntimeProfileEvidenceRequirement struct {
 	MetricConstraints           []string
 	ArtifactRefs                []string
 	RequiredOwnerFacts          []RuntimeOwnerFactRequirement
+	OwnerFactConvergences       []RuntimeOwnerFactConvergence
 	CapabilityStateRequirements []RuntimeProfileCapabilityStateRequirement
 	RejectedStepKinds           []string
 	Description                 string
@@ -188,9 +189,17 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if err := ValidateRuntimeOwnerFactRequirements(item.RequiredOwnerFacts); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
+			if err := ValidateRuntimeOwnerFactConvergences(item.RequiredOwnerFacts, item.OwnerFactConvergences); err != nil {
+				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+			}
 			for _, ownerFact := range item.RequiredOwnerFacts {
 				if !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, ownerFact.OperationKind) {
 					return fmt.Errorf("runtime profile evidence requirement %q owner fact operation %q is outside accepted operation kinds", item.ID, ownerFact.OperationKind)
+				}
+			}
+			for _, convergence := range item.OwnerFactConvergences {
+				if !convergence.RequirePreexisting && !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, convergence.AcquisitionOperationKind) {
+					return fmt.Errorf("runtime profile evidence requirement %q owner-fact acquisition %q is outside accepted operation kinds", item.ID, convergence.AcquisitionOperationKind)
 				}
 			}
 		}
@@ -448,6 +457,7 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		value.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(value.RequiredOwnerFacts)
+		value.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(value.OwnerFactConvergences)
 		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
@@ -524,7 +534,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
-			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 		if len(l.CapabilityStateRequirements) != len(r.CapabilityStateRequirements) {

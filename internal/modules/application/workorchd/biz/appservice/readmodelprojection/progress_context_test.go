@@ -51,8 +51,8 @@ func TestWorkspaceTaskProgressIgnoresHistoricalBlockersWithoutActiveRun(t *testi
 		}},
 	})
 
-	if got.Recovery.Mode != "idle" || got.Recovery.NextAction != "start_workspace_execution" {
-		t.Fatalf("recovery = %+v, want idle start action", got.Recovery)
+	if got.Recovery.Mode != "idle" {
+		t.Fatalf("recovery = %+v, want factual idle mode", got.Recovery)
 	}
 	if len(got.Blockers) != 0 {
 		t.Fatalf("blockers = %+v, want no current blockers without active run", got.Blockers)
@@ -67,6 +67,9 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 			ID:          "ws-active-blocker",
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-current",
+		},
+		Run: &appmodelcore.Run{
+			ID: "run-current", WorkspaceID: "ws-active-blocker", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-current",
 		},
 		Decisions: []projectioncontract.Decision{
 			{
@@ -84,11 +87,24 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 				Question:    "dismissed decision",
 			},
 			{
-				ID:          "ticket-current",
+				ID:          "ticket-extra",
 				WorkspaceID: "ws-active-blocker",
 				RunID:       "run-current",
 				State:       "open",
-				Question:    "current decision",
+				Question:    "noncanonical same-run decision",
+			},
+			{
+				ID:                     "ticket-current",
+				WorkspaceID:            "ws-active-blocker",
+				RunID:                  "run-current",
+				State:                  "open",
+				Question:               "current decision",
+				AllowedRecoveryActions: []string{"revise_definition_and_restart"},
+				DefinitionClarification: &projectioncontract.DefinitionClarification{
+					Class:          "runtime",
+					BindingState:   "open",
+					RequiredAction: "revise_definition_and_restart",
+				},
 			},
 		},
 	})
@@ -98,6 +114,16 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 	}
 	if len(got.Blockers) != 1 || got.Blockers[0].ID != "ticket-current" {
 		t.Fatalf("blockers = %+v, want only current active run blocker", got.Blockers)
+	}
+	if got.Recovery.BlockingResource == nil ||
+		got.Recovery.BlockingResource.OwnerKind != "decision" ||
+		got.Recovery.BlockingResource.ResourceID != "ticket-current" ||
+		got.Recovery.BlockingResource.WorkspaceID != "ws-active-blocker" ||
+		got.Recovery.BlockingResource.RunID != "run-current" ||
+		got.Recovery.BlockingResource.RequiredAction != "revise_definition_and_restart" ||
+		len(got.Recovery.BlockingResource.AllowedUserActions) != 1 ||
+		got.Recovery.SuggestedNavigation != "workspace_definition" {
+		t.Fatalf("recovery blocker = %+v, want exact Decision-owned definition binding", got.Recovery)
 	}
 }
 
@@ -169,7 +195,6 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 			BlockingTicketID: "ticket-resolved",
 			Recovery: projectioncontract.RecoveryPlan{
 				Mode:             "wait_decision",
-				NextAction:       "resolve_decision_ticket",
 				BlockingTicketID: "ticket-resolved",
 			},
 		},

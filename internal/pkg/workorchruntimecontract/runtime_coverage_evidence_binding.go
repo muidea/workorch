@@ -352,6 +352,9 @@ func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
 	if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
 		return fmt.Errorf("coverage focus %q owner facts: %w", focus.ID, err)
 	}
+	if err := ValidateRuntimeOwnerFactConvergences(focus.RequiredOwnerFacts, focus.OwnerFactConvergences); err != nil {
+		return fmt.Errorf("coverage focus %q owner-fact convergence: %w", focus.ID, err)
+	}
 	if !RuntimeFocusRequiresIndependentEvidenceBinding(focus) {
 		return nil
 	}

@@ -85,6 +85,14 @@ Workorchd 只把 profile 声明编译进 bootstrap/DefinitionFocus；capability 
 可在 assessment commit 中读取该事实并决定 CWI credit。LLM assessment、operation 成功、文件变化或历史 recipe 均不能
 代替当前 owner fact。
 
+每个 required owner fact 在 pre-seal candidate 中还必须封存 preexisting，或唯一的
+`owner_fact_missing -> acquisition owner/kind/selector -> reobserve owner/fact` closure，且
+`MaxAcquisitionAttempts=1`。缺失、重复、依赖悬空/成环在 Run 前返回 `declared_prerequisite_unresolved`。SM-2 只消费这条
+sealed declaration：current catalog 缺 fact 时，semantic proof batch 必须恰好匹配当前 all-of dependency 已就绪的
+acquisition owner/kind/selector；owner feasibility 与 receipt 后只重获声明的 owner/fact。一次 acquisition 已形成 accepted
+operation/evidence 但 reobserve 仍缺失时直接耗尽，不能再生成第二个 semantic acquisition。Shell 不选择 File 操作，File
+不解释 Shell fact，kernel 不硬编码语言/测试框架。
+
 同一 proposal 的 operation kind、concrete variant 与 target policy 必须来自同一条 owner catalog fact；catalog
 已列出的现有目标不得使用仅允许 prospective target 的 create-only fact。若相同 evidence kind 与 target policy
 在同一 owner snapshot 中存在合法 replacement kind/variant，strict evaluator 与同-manifest correction 只能返回该

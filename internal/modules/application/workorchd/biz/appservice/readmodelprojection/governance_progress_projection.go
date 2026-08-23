@@ -68,28 +68,14 @@ func applyWorkspaceProgressApprovalBlockers(progress *projectioncontract.TaskPro
 	if workspaceID == "" || activeRunID == "" {
 		return
 	}
-	for _, item := range snapshot.Approvals {
-		if strings.TrimSpace(string(item.WorkspaceID)) != workspaceID || strings.TrimSpace(item.RunID) != activeRunID {
-			continue
-		}
-		if strings.TrimSpace(item.State) != string(common.ApprovalStatePending) {
-			continue
-		}
-		progress.Blockers = append(progress.Blockers, projectioncontract.ProgressBlocker{
-			ID:          item.ID,
-			Kind:        "approval",
-			State:       item.State,
-			Reason:      item.Reason,
-			EvidenceRef: item.StepID,
-		})
-		if progress.Recovery.BlockingApprovalID == "" && progress.Recovery.BlockingTicketID == "" {
-			progress.Recovery.Mode = "wait_approval"
-			progress.Recovery.NextAction = "resolve_approval"
-			progress.Recovery.BlockingApprovalID = item.ID
-			progress.Recovery.StepID = item.StepID
-			progress.Recovery.Reason = item.Reason
-		}
+	item := selectBlockingApproval(snapshot, activeRunID)
+	if item == nil {
+		return
 	}
+	progress.Blockers = append(progress.Blockers, projectioncontract.ProgressBlocker{
+		ID: item.ID, Kind: "approval", State: item.State, Reason: item.Reason, EvidenceRef: item.StepID,
+	})
+	applyApprovalRecoveryBlocker(&progress.Recovery, item)
 }
 
 // source: progress_workspace_blockers.go
@@ -100,13 +86,7 @@ func applyWorkspaceProgressBlockers(progress *projectioncontract.TaskProgress, s
 	if workspaceID == "" || activeRunID == "" {
 		return
 	}
-	for _, item := range snapshot.Decisions {
-		if strings.TrimSpace(item.WorkspaceID) != workspaceID || strings.TrimSpace(item.RunID) != activeRunID {
-			continue
-		}
-		if strings.TrimSpace(item.State) != string(common.DecisionTicketStateOpen) {
-			continue
-		}
+	if item := selectBlockingDecision(snapshot, activeRunID); item != nil {
 		progress.Blockers = append(progress.Blockers, projectioncontract.ProgressBlocker{
 			ID:          item.ID,
 			Kind:        "decision",
@@ -114,15 +94,53 @@ func applyWorkspaceProgressBlockers(progress *projectioncontract.TaskProgress, s
 			Reason:      firstNonEmptyTimelineString(item.Question, item.Reason),
 			EvidenceRef: item.StepID,
 		})
-		if progress.Recovery.BlockingTicketID == "" {
-			progress.Recovery.Mode = "wait_decision"
-			progress.Recovery.NextAction = "resolve_decision_ticket"
-			progress.Recovery.BlockingTicketID = item.ID
-			progress.Recovery.StepID = item.StepID
-			progress.Recovery.Reason = firstNonEmptyTimelineString(item.Question, item.Reason)
-		}
+		applyDecisionRecoveryBlocker(&progress.Recovery, item)
 	}
 	applyWorkspaceProgressApprovalBlockers(progress, snapshot)
+}
+
+func applyDecisionRecoveryBlocker(recovery *projectioncontract.RecoveryPlan, item *projectioncontract.Decision) {
+	if recovery == nil || item == nil {
+		return
+	}
+	recovery.Mode = "wait_decision"
+	recovery.BlockingTicketID = item.ID
+	recovery.BlockingApprovalID = ""
+	recovery.StepID = item.StepID
+	recovery.Reason = firstNonEmptyTimelineString(item.Question, item.Reason)
+	recovery.BlockingResource = &projectioncontract.BlockingResourceRef{
+		OwnerKind:          "decision",
+		ResourceID:         item.ID,
+		WorkspaceID:        item.WorkspaceID,
+		RunID:              item.RunID,
+		State:              item.State,
+		AllowedUserActions: append([]string(nil), item.AllowedRecoveryActions...),
+	}
+	recovery.SuggestedNavigation = "governance_decision"
+	if item.DefinitionClarification != nil {
+		recovery.BlockingResource.RequiredAction = item.DefinitionClarification.RequiredAction
+		recovery.SuggestedNavigation = "workspace_definition"
+	}
+}
+
+func applyApprovalRecoveryBlocker(recovery *projectioncontract.RecoveryPlan, item *projectioncontract.Approval) {
+	if recovery == nil || item == nil {
+		return
+	}
+	recovery.Mode = "wait_approval"
+	recovery.BlockingTicketID = ""
+	recovery.BlockingApprovalID = item.ID
+	recovery.StepID = item.StepID
+	recovery.Reason = item.Reason
+	recovery.BlockingResource = &projectioncontract.BlockingResourceRef{
+		OwnerKind:      "approval",
+		ResourceID:     item.ID,
+		WorkspaceID:    item.WorkspaceID,
+		RunID:          item.RunID,
+		State:          item.State,
+		RequiredAction: item.Action,
+	}
+	recovery.SuggestedNavigation = "governance_approval"
 }
 
 // source: task_lifecycle_metadata.go

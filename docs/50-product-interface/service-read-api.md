@@ -37,8 +37,8 @@ detached projection；读取、等待、缓存或 replay 不能修改 owner stat
 | `GET` | `/workspaces/:workspaceId/runs/:runId/{memory-recalls,task-progress,context-bundle}` | recall/progress/context projections |
 
 `Run` exposes scope、lineage、Definition revision、lifecycle、blocker、timestamps and sealed activation/LLM status。
-It never exposes `ExecutionContext`。Step/checkpoint/nextAction-named compatibility fields are display-only and cannot
-drive scheduling or recovery。
+It never exposes `ExecutionContext`。Step/checkpoint are diagnostic only；Runtime read DTOs no longer expose a compatibility
+`nextAction` authority。
 
 Workspace list/detail 的 `state` 与 `activeRunId` 是 Workspace owner canonical fact；Workspace JSON 不含
 `blockingTicketId|blockingApprovalId`。Run 的 `state` 和 blocker refs 只来自 Run owner，TaskProgress、Decision/Approval 或
@@ -48,6 +48,14 @@ terminal presentation 都不得覆盖它们。`snapshot`、Run snapshot/observab
 handoff 偏差。三者均不能生成、阻断或选择 Resume、Restart、Drive、resolution target 或任何 mutation。
 `runtime-view.blockingDecision|blockingApproval` 只在 canonical active Run 的 matching blocked state 与 exact blocker ref
 命中同 scope 的真实 open/pending owner resource 时返回；同 Run 的另一个未决资源与 `governanceDisplay` ID 均不能替代该 ref。
+TaskProgress、ContextBundle 与 compressed context 共享同一个 `RecoveryPlan.blockingResource` 事实引用，逐字段包含 owner、
+resource、workspace/run scope、state 及 owner 原样提供的 `requiredAction/allowedUserActions`。`suggestedNavigation` 只供展示；
+上述字段与兼容 blocking ID 不得进入 mutation constructor。没有 exact canonical 交集时只能输出 diagnostic，不能给出 action。
+
+Acceptance 的 `budget` 只包含 SM-2 convergence/repair 与 prerequisite refresh；SM-4 provider transport、operation recovery、
+CAS reload 和 terminal delivery 计数只在独立 `recoveryBudget`。`RuntimeAuditRepair` 不得包含
+`terminalDeliveryAttempts`；该计数仅在 sealed terminal audit 中出现。nonterminal aggregate 携带 terminal delivery 计数属于
+owner schema incompatibility，不由 projection 清零或隐藏。
 
 Workspace `snapshot.runCommand` 只保存最新 immutable Workspace-owner admission observation：request/workspace/run/intent
 identity、separate caller `requestReason`、`source`、exact `outcome`、`admissionReason`、derived `diagnostic` 与

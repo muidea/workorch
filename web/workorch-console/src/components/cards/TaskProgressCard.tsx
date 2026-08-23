@@ -27,17 +27,6 @@ function recoveryModeLabel(mode?: string) {
   return labels[mode || ''] || mode || '-';
 }
 
-function recoveryActionLabel(action?: string) {
-  const labels: Record<string, string> = {
-    retry: '重试',
-    rollback: '回滚',
-    escalate: '升级',
-    wait: '等待',
-    unknown: '未知'
-  };
-  return labels[action || ''] || action || '-';
-}
-
 function repairLoopStateLabel(state?: string) {
   const labels: Record<string, string> = {
     active: '活跃',
@@ -102,17 +91,19 @@ export const TaskProgressCard = React.memo(function TaskProgressCard({ progress,
           { key: 'currentMilestone', label: '当前里程碑', children: progress.currentMilestone || '-' },
           { key: 'summary', label: '进度摘要', children: <BoundedParagraph text={progress.summary} rows={2} /> },
           { key: 'recoveryMode', label: '恢复模式', children: recoveryModeLabel(recovery.mode) },
-          { key: 'nextAction', label: '建议动作', children: recoveryActionLabel(recovery.nextAction) },
           { key: 'checkpoint', label: '恢复检查点', children: recovery.checkpointId ? <BoundedParagraph text={recovery.checkpointId} rows={1} copyText={recovery.checkpointId} /> : '-' },
           { key: 'blockingTicket', label: '阻塞决策', children: recovery.blockingTicketId || '-' },
           { key: 'blockingApproval', label: '阻塞审批', children: recovery.blockingApprovalId || '-' },
+          { key: 'blockingOwner', label: '阻塞资源', children: recovery.blockingResource ? `${recovery.blockingResource.ownerKind}:${recovery.blockingResource.resourceId}` : '-' },
+          { key: 'requiredAction', label: 'Owner 要求', children: recovery.blockingResource?.requiredAction || '-' },
+          { key: 'allowedActions', label: '允许的用户动作', children: <CompactTags tags={recovery.blockingResource?.allowedUserActions ?? []} maxVisible={4} /> },
+          { key: 'navigation', label: '建议导航', children: recovery.suggestedNavigation || '-' },
           { key: 'repairState', label: '修复状态', children: repairLoop ? repairLoopStateLabel(repairLoop.state) : '-' },
           { key: 'repairAttempt', label: '修复轮次', children: repairAttempt || '-' },
           { key: 'repairFailure', label: '最近失败', children: repairFailure || '-' },
           { key: 'repairTargetScope', label: '失败目标', children: repairLoop?.lastFailureTargetScope || '-' },
           { key: 'repairInputBytes', label: '修复输入字节', children: repairLoop?.lastRepairInputBytes ? numberText(repairLoop.lastRepairInputBytes) : '-' },
           { key: 'repairRepeatedReason', label: '重复失败原因', children: repairLoop?.repeatedFailureReason || '-' },
-          { key: 'repairNextAction', label: '修复下一步', children: repairLoop?.nextAction || '-' },
           { key: 'repairEscalation', label: '升级信息', children: repairEscalation },
           { key: 'repairSignalTargets', label: '失败信号目标', children: <CompactTags tags={repairSignalTargets} maxVisible={4} /> },
           { key: 'repairSignalIdentifiers', label: '失败信号标识符', children: <CompactTags tags={repairSignalIdentifiers} maxVisible={4} /> },

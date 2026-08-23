@@ -115,9 +115,6 @@ func applyRepairEscalationProjection(ret *projectioncontract.RepairLoop, ticketI
 	if attempts := payloadObjectMapSlice(escalationContext, "recentRepairAttempts"); len(attempts) > 0 {
 		ret.RecentAttempts = attempts
 	}
-	if suggestions, ok := escalationContext.StringSlice("recommendedNextActions"); ok && len(suggestions) > 0 {
-		ret.RecommendedNextSteps = suggestions
-	}
 }
 
 func payloadObjectMapSlice(payload workorcheventpayload.Payload, name string) []map[string]any {

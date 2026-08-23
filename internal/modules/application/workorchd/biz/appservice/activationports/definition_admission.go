@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionadmissioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
@@ -16,6 +18,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // EnsureWorkspaceDefinitionAdmission converges current owner snapshots into an
@@ -50,7 +53,10 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if err != nil {
 		return nil, fmt.Errorf("%w: Workspace Template snapshot is required for Definition admission: %v", common.ErrConflict, err)
 	}
-	candidate := definitionAdmissionCandidate(workspace, goal, dod, template)
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if err != nil {
+		return nil, err
+	}
 	result, err := workspaceports.SubmitDefinitionAdmissionCandidate(ctx, hub, candidate, candidate.CandidateRevision-1)
 	if err != nil {
 		return nil, err
@@ -121,7 +127,7 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	return updated, nil
 }
 
-func definitionAdmissionCandidate(workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, template *workspacemodel.WorkspaceTemplate) workspacemodel.DefinitionAdmissionCandidate {
+func definitionAdmissionCandidate(workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, template *workspacemodel.WorkspaceTemplate) (workspacemodel.DefinitionAdmissionCandidate, error) {
 	revision := uint64(1)
 	for _, existing := range workspace.DefinitionAdmissionCandidates {
 		if existing.CandidateID == "workspace-definition" && existing.CandidateRevision >= revision {
@@ -133,6 +139,10 @@ func definitionAdmissionCandidate(workspace *workspacemodel.Workspace, goal *wor
 		baseRevision, baseHash = workspace.StartupInput.DefinitionRevision, workspace.StartupInput.StartupInputHash
 	}
 	templateHash := workspaceTemplateSnapshotHash(template)
+	policyBindings, requiredOwnerFacts, ownerFactConvergences, profileContractsHash, err := definitionAdmissionProfileBindings(workspace, template)
+	if err != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, err
+	}
 	dodInputs := make([]workspacemodel.DefinitionCandidateItem, 0, len(dod.Items))
 	dodRefs := make([]string, 0, len(dod.Items))
 	for idx, item := range dod.Items {
@@ -143,7 +153,9 @@ func definitionAdmissionCandidate(workspace *workspacemodel.Workspace, goal *wor
 	candidate := workspacemodel.DefinitionAdmissionCandidate{SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: workspace.ID, CandidateID: "workspace-definition", CandidateRevision: revision, BaseDefinitionRevision: baseRevision, BaseStartupInputHash: baseHash,
 		GoalInput: workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal:" + string(goal.ID), Text: goal.Text, SourceIdentity: "goal:" + string(goal.ID) + "@" + goal.DefinitionRevision}, DoDInputs: dodInputs,
 		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{TemplateRef: template.ID, Revision: "template:" + templateHash, SnapshotHash: templateHash}, AdmissionCompilerVersion: workspacemodel.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: workspace.DeliverableDirectory,
-		ProposedRelationInputs: []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "terminal-all-of", RelationKind: "all_of", SourceItemRefs: dodRefs, TargetItemRefs: []string{"goal:" + string(goal.ID)}}}}
+		AdmissionPolicyBindings: policyBindings, RequiredOwnerFactBindings: requiredOwnerFacts, OwnerFactConvergenceBindings: ownerFactConvergences,
+		RuntimeProfileContractsHash: profileContractsHash,
+		ProposedRelationInputs:      []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "terminal-all-of", RelationKind: "all_of", SourceItemRefs: dodRefs, TargetItemRefs: []string{"goal:" + string(goal.ID)}}}}
 	candidate = candidate.WithHash()
 	for idx := len(workspace.DefinitionAdmissionCandidates) - 1; idx >= 0; idx-- {
 		existing := workspace.DefinitionAdmissionCandidates[idx]
@@ -154,11 +166,60 @@ func definitionAdmissionCandidate(workspace *workspacemodel.Workspace, goal *wor
 		equivalent.CandidateRevision = existing.CandidateRevision
 		equivalent = equivalent.WithHash()
 		if equivalent.CandidateHash == existing.CandidateHash {
-			return existing.Clone()
+			return existing.Clone(), nil
 		}
 		break
 	}
-	return candidate
+	return candidate, nil
+}
+
+func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) ([]workspacemodel.DefinitionAdmissionPolicyBinding, []workspacemodel.DefinitionRequiredOwnerFactBinding, []workspacemodel.DefinitionOwnerFactConvergenceBinding, string, error) {
+	if workspace == nil || template == nil {
+		return nil, nil, nil, "", common.ErrInvalidArgument
+	}
+	effective := activationcore.MergeTemplateWorkspaceContextHintsForExecutionContract(template.ContextHints.Map(), workspace.ContextHints.Map())
+	rawProfiles := runtimeMap(effective["profileContracts"])
+	contract := runtimeExecutionContract(map[string]any{"profileContracts": rawProfiles})
+	profiles := runtimecontract.NormalizeRuntimeProfileContracts(contract.ProfileContracts)
+	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles))
+	required := make([]workspacemodel.DefinitionRequiredOwnerFactBinding, 0)
+	convergences := make([]workspacemodel.DefinitionOwnerFactConvergenceBinding, 0)
+	for _, profile := range profiles {
+		encoded, err := json.Marshal(rawProfiles[profile.ID])
+		if err != nil {
+			return nil, nil, nil, "", fmt.Errorf("%w: profile %q cannot be canonically sealed", common.ErrConflict, profile.ID)
+		}
+		h := sha256.New()
+		_, _ = fmt.Fprintf(h, "%08x%s%08x%s", len(profile.ID), profile.ID, len(encoded), encoded)
+		policies = append(policies, workspacemodel.DefinitionAdmissionPolicyBinding{
+			PolicyRef: "profile:" + profile.ID, Revision: "runtime-profile-contract-v1",
+			SnapshotHash: "profile-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil)),
+		})
+		for _, evidence := range profile.EvidenceRequirements {
+			sourceByRequirement := make(map[string]string, len(evidence.RequiredOwnerFacts))
+			for _, fact := range evidence.RequiredOwnerFacts {
+				sourceRef := definitionOwnerFactSourceRef(profile.ID, evidence.Scope, evidence.ID, fact)
+				required = append(required, workspacemodel.DefinitionRequiredOwnerFactBinding{SourceRef: sourceRef, Requirement: fact})
+				sourceByRequirement[runtimecontract.RuntimeOwnerFactRequirementRef(fact)] = sourceRef
+			}
+			for _, convergence := range evidence.OwnerFactConvergences {
+				sourceRef := definitionOwnerFactSourceRef(profile.ID, evidence.Scope, evidence.ID, convergence.Requirement)
+				convergence = convergence.Normalized()
+				for idx, dependency := range convergence.DependsOnRequirementRefs {
+					if mapped := sourceByRequirement[dependency]; mapped != "" {
+						convergence.DependsOnRequirementRefs[idx] = mapped
+					}
+				}
+				convergences = append(convergences, workspacemodel.DefinitionOwnerFactConvergenceBinding{SourceRef: sourceRef, Convergence: convergence})
+			}
+		}
+	}
+	return policies, required, convergences, runtimecontract.StableRuntimeProfileContractsHash(profiles), nil
+}
+
+func definitionOwnerFactSourceRef(profileID, scope, requirementID string, fact runtimecontract.RuntimeOwnerFactRequirement) string {
+	fact = fact.Normalized()
+	return strings.Join([]string{"profile", strings.TrimSpace(profileID), strings.TrimSpace(scope), strings.TrimSpace(requirementID), fact.OwnerModuleID, string(fact.FactKind), fact.OperationKind}, "/")
 }
 
 func latestPriorInvalidDefinitionCandidate(workspace *workspacemodel.Workspace, current workspacemodel.DefinitionAdmissionCandidate) (workspacemodel.DefinitionAdmissionCandidate, workspacemodel.DefinitionAdmissionResult, bool) {

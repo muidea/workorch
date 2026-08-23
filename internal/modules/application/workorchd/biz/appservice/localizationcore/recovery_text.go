@@ -1,9 +1,5 @@
 package localizationcore
 
-func RecoveryNextAction(language string) string {
-	return "resume_run"
-}
-
 func BlockerReason(language string, kind string, state string) string {
 	if PrefersChinese(language) {
 		switch {

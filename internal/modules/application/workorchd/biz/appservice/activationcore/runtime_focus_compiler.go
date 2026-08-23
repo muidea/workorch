@@ -61,6 +61,7 @@ type compiledEvidencePolicy struct {
 	RequireCoverageTargets            bool
 	RequireAssessment                 bool
 	RequiredOwnerFacts                []runtimecontract.RuntimeOwnerFactRequirement
+	OwnerFactConvergences             []runtimecontract.RuntimeOwnerFactConvergence
 	ValidationRecipeID                string
 	RequiredCheckRefs                 []string
 	MetricConstraints                 []string
@@ -336,7 +337,7 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 		AcceptedOperationVariants: policy.AcceptedOperationVariants, RejectedStepKinds: policy.RejectedStepKinds,
 		RequireDirectEvidence: policy.RequireDirectEvidence, RequireClaimEvidence: policy.RequireClaimEvidence,
 		RequireExecutableBehaviorEvidence: policy.RequireExecutableBehaviorEvidence, RequireCoverageTargets: policy.RequireCoverageTargets,
-		RequireAssessment: policy.RequireAssessment, RequiredOwnerFacts: policy.RequiredOwnerFacts, ValidationRecipeID: policy.ValidationRecipeID,
+		RequireAssessment: policy.RequireAssessment, RequiredOwnerFacts: policy.RequiredOwnerFacts, OwnerFactConvergences: policy.OwnerFactConvergences, ValidationRecipeID: policy.ValidationRecipeID,
 		RequiredCheckRefs: policy.RequiredCheckRefs, MetricConstraints: policy.MetricConstraints, ArtifactRefs: policy.ArtifactRefs,
 		EvidenceDeclarationRef: policy.SemanticProofDeclarationRef,
 	}.Normalized()
@@ -781,6 +782,7 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		base.MetricConstraints = stableStringUnion(base.MetricConstraints, requirement.MetricConstraints)
 		base.ArtifactRefs = stableStringUnion(base.ArtifactRefs, requirement.ArtifactRefs)
 		base.RequiredOwnerFacts = runtimecontract.NormalizeRuntimeOwnerFactRequirements(append(base.RequiredOwnerFacts, requirement.RequiredOwnerFacts...))
+		base.OwnerFactConvergences = runtimecontract.NormalizeRuntimeOwnerFactConvergences(append(base.OwnerFactConvergences, requirement.OwnerFactConvergences...))
 		// Profile explicit primary_state_change implies state-change evidence.
 		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 			base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange})
@@ -815,6 +817,7 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	focus.MetricConstraints = append([]string(nil), policy.MetricConstraints...)
 	focus.ArtifactRefs = append([]string(nil), policy.ArtifactRefs...)
 	focus.RequiredOwnerFacts = append([]runtimecontract.RuntimeOwnerFactRequirement(nil), policy.RequiredOwnerFacts...)
+	focus.OwnerFactConvergences = runtimecontract.CloneRuntimeOwnerFactConvergences(policy.OwnerFactConvergences)
 	focus.RequireAssessment = policy.RequireAssessment || focus.RequireAssessment
 	return focus.Normalized()
 }

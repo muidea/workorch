@@ -33,7 +33,18 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities)) == 0 {
 		return false, nil
 	}
-	if runtimeOwnerFactReplanBudgetExhausted(facts) {
+	acquisition, acquisitionReady := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
+	if !acquisitionReady || runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
+		return false, nil
+	}
+	// Account the operation that produced the just-committed assessment before
+	// deciding whether another semantic generation is authorized. The sealed
+	// max is an acquisition-attempt bound, not a count of provider replans.
+	carriedRepair := recordAcceptedNoProgressShapes(*aggregate, facts.Repair, runtimeOwnerFactAcquisitionFailureSignature(acquisition.Requirement))
+	factsWithCurrentAttempt := facts
+	factsWithCurrentAttempt.Repair = carriedRepair
+	if runtimeOwnerFactReplanBudgetExhausted(factsWithCurrentAttempt, acquisition) {
+		aggregate.Facts.Repair = carriedRepair
 		return false, nil
 	}
 	if len(facts.Focus.CoverageWorkItemIDs) != 1 {
@@ -64,7 +75,6 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	// not close this CWI. Preserve only those exact shapes across the successor
 	// semantic focus; attempts, gap text and directives remain focus-local and
 	// are reset by the canonical projection transition.
-	carriedRepair := recordAcceptedNoProgressShapes(*aggregate, facts.Repair, runtimeCWIReopenReasonOwnerFactPostcondition)
 	item.ReopenLineage = append(item.ReopenLineage, lineage)
 	item.CurrentBindingRef = nil
 	item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateReopened
@@ -93,24 +103,24 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	return true, nil
 }
 
-func runtimeOwnerFactReplanBudgetExhausted(facts runtimecontract.RuntimeFacts) bool {
+func runtimeOwnerFactReplanBudgetExhausted(facts runtimecontract.RuntimeFacts, acquisition runtimecontract.RuntimeOwnerFactConvergence) bool {
 	facts = facts.Normalized()
-	policy := facts.ConvergencePolicy.Normalized()
-	if len(facts.Focus.CoverageWorkItemIDs) != 1 {
+	acquisition = acquisition.Normalized()
+	if acquisition.Validate() != nil || acquisition.RequirePreexisting || acquisition.MaxAcquisitionAttempts != 1 || len(facts.Focus.CoverageWorkItemIDs) != 1 {
 		return true
 	}
-	coverageID := facts.Focus.CoverageWorkItemIDs[0]
-	for _, item := range facts.Coverage {
-		if item.ID != coverageID {
-			continue
+	signature := runtimeOwnerFactAcquisitionFailureSignature(acquisition.Requirement)
+	for _, shape := range facts.Repair.NoProgressOperationShapes {
+		operation := shape.Operation.Normalized()
+		failureSignature := strings.TrimSpace(shape.FailureSignature)
+		if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) == acquisition.AcquisitionOperationKind &&
+			(failureSignature == signature || failureSignature == runtimeCWIReopenReasonOwnerFactPostcondition) {
+			return true
 		}
-		count := 0
-		for _, lineage := range item.ReopenLineage {
-			if lineage.Normalized().Reason == runtimeCWIReopenReasonOwnerFactPostcondition {
-				count++
-			}
-		}
-		return count >= policy.MaxRepairAttemptsPerFocus
 	}
-	return true
+	return false
+}
+
+func runtimeOwnerFactAcquisitionFailureSignature(requirement runtimecontract.RuntimeOwnerFactRequirement) string {
+	return runtimeCWIReopenReasonOwnerFactPostcondition + "/" + runtimecontract.RuntimeOwnerFactRequirementRef(requirement)
 }

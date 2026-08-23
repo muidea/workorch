@@ -102,6 +102,11 @@ func TestWorkspaceExecutionClarificationLegacyPriorityIdentitySurvivesFileOwnerR
 	legacyIntent.State = runmodel.ReplacementIntentPendingClarificationResolution
 	const legacyPriority = 7
 	legacyIntent.ReplacementIntentHash = legacyReplacementIntentHashV1(legacyIntent, legacyPriority)
+	legacyIntent.Recovery = runmodel.ReplacementRecoveryLease{
+		RequestID: legacyIntent.RequestID, IntentHash: legacyIntent.ReplacementIntentHash,
+		Stage: runmodel.ReplacementRecoveryClarificationResolution, State: runmodel.ReplacementRecoveryScheduled,
+		Generation: 1, MaxAttempts: replacementRecoveryMaxAttempts, DueAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
 	predecessor.ReplacementIntent = &legacyIntent
 	writeLegacyReplacementRunFixture(t, path, predecessor, legacyPriority)
 
@@ -138,6 +143,13 @@ func TestWorkspaceExecutionClarificationLegacyPriorityIdentitySurvivesFileOwnerR
 	first, err := firstOwner.restartWorkspaceExecutionIntent(ctx, command)
 	if err != nil || first.RunID != predecessor.ID || first.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || first.Reason != runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart {
 		t.Fatalf("legacy persisted duplicate admission = %+v, err=%v", first, err)
+	}
+	legacyStored, err := firstRuns.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := firstOwner.driveReplacementRecoveryGeneration(predecessor.WorkspaceID, predecessor.ID, legacyStored.ReplacementIntent.Recovery.Generation); err != nil {
+		t.Fatalf("drive legacy clarification recovery: %v", err)
 	}
 	if resolutionCalls != 1 || observedReplacementHash != legacyIntent.ReplacementIntentHash {
 		t.Fatalf("legacy Decision binding calls=%d hash=%q, want one call with %q", resolutionCalls, observedReplacementHash, legacyIntent.ReplacementIntentHash)
@@ -354,6 +366,13 @@ func TestWorkspaceExecutionDefinitionClarificationBindsPersistedIntentAndReplays
 	if err != nil || admission.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || admission.RunID != predecessor.ID {
 		t.Fatalf("clarification restart admission=%+v err=%v", admission, err)
 	}
+	pending, err := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := biz.driveReplacementRecoveryGeneration(predecessor.WorkspaceID, predecessor.ID, pending.ReplacementIntent.Recovery.Generation); err != nil {
+		t.Fatalf("drive clarification recovery: %v", err)
+	}
 	stored, err := runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -389,6 +408,7 @@ func TestRuntimeClarificationRejectsForgedConflictBindingWithoutStateAdvance(t *
 	})
 	requested = replacementIntentForPredecessor(requested, predecessor)
 	requested.State = runmodel.ReplacementIntentPendingClarificationResolution
+	requested.Recovery = newReplacementRecoveryLease(requested, runmodel.ReplacementRecoveryClarificationResolution, 1, time.Now().UTC().Format(time.RFC3339Nano))
 	predecessor.ReplacementIntent = &requested
 	if err := runs.Create(ctx, predecessor); err != nil {
 		t.Fatal(err)
@@ -419,8 +439,13 @@ func TestRuntimeClarificationRejectsForgedConflictBindingWithoutStateAdvance(t *
 		t.Fatalf("forged binding advanced intent: %+v err=%v", stored.ReplacementIntent, err)
 	}
 	exact = true
-	if err := biz.bindRuntimeClarificationReplacement(ctx, stored); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("exact scope mismatch err=%v, want typed conflict", err)
+	time.Sleep(replacementRecoveryInitialBackoff + 10*time.Millisecond)
+	stored, err = runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := biz.bindRuntimeClarificationReplacement(ctx, stored); err != nil {
+		t.Fatalf("exact owner-adjudicated scope mismatch was not persisted: %v", err)
 	}
 	stored, err = runs.GetByWorkspaceID(ctx, predecessor.WorkspaceID, predecessor.ID)
 	if err != nil || stored.ReplacementIntent.State != runmodel.ReplacementIntentClarificationResolutionRejected {

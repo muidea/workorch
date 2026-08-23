@@ -2285,8 +2285,8 @@ fi
 # RUNTIME-SMO C6: projections are observers.  A presentation surface must not
 # retain a second Runtime action authority, parse text into a Runtime choice,
 # or call a Runtime drive/continuation path.  Runtime exposes the canonical
-# convergence state as display-only data; legacy suggestion fields are marked
-# separately and cannot be used as a drive input.
+# convergence state and exact owner blocker as display-only data. Navigation is
+# kept separate from owner-required actions and cannot be used as a drive input.
 projection_runtime_alias_pattern='CurrentAction[[:space:]]+string|NextActionKind[[:space:]]+string|RuntimeAuditAuthority[[:space:]]*struct[[:space:]]*\{[^}]*Action'
 matches="$(source_matches "$projection_runtime_alias_pattern" \
   internal/modules/application/workorchd/biz/appservice/readmodelcore \
@@ -2299,9 +2299,9 @@ Boundary contract violation: projection surface retains a duplicate Runtime acti
 
 $matches
 
-Project Runtime only as canonical convergenceState. A historical display
-hint, if still required, must be named suggestedNextAction and must never be
-used to select, resume, ticket, or drive Runtime work.
+Project Runtime only as canonical convergenceState plus the exact factual
+blocker. A display navigation hint must never be used to select, resume,
+ticket, or drive Runtime work.
 EOF
   exit 1
 fi
@@ -2796,10 +2796,10 @@ duplicate_owner_dto_matches="$({
 	grep -Hn -E '^type RunHeartbeat struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
-	grep -Hn -E '^type (RecoveryPlan|AssessmentOutcome|ProgressMilestone) struct' \
+	grep -Hn -E '^type (BlockingResourceRef|RecoveryPlan|AssessmentOutcome|ProgressMilestone) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
-	grep -Hn -E '^type (AcceptanceProjection|EventRecord|GapBaseline|GapTodoItem|GapNextAction|GapDiagnostic|MemoryRecallHit|RunStatus|ConvergenceStatus|RuntimeAudit|RuntimeAuditFocus|RuntimeAuditCoverage|RuntimeAuditGrounding|RuntimeAuditPrerequisite|RuntimeAuditProviderCeiling|RuntimeAuditTargetSelection|RuntimeAuditFailureTarget|RuntimeAuditTargetSnapshot|RuntimeAuditPrerequisiteObservation|RuntimeAuditFreshnessDependency|RuntimeAuditOperationAdmissibility|RuntimeAuditAuthority|RuntimeAuditCandidateAttempt|RuntimeAuditTerminal) struct' \
+	grep -Hn -E '^type (AcceptanceProjection|RuntimeRecoveryBudget|EventRecord|GapBaseline|GapTodoItem|GapDiagnostic|MemoryRecallHit|RunStatus|ConvergenceStatus|RuntimeAudit|RuntimeAuditFocus|RuntimeAuditCoverage|RuntimeAuditGrounding|RuntimeAuditPrerequisite|RuntimeAuditProviderCeiling|RuntimeAuditTargetSelection|RuntimeAuditFailureTarget|RuntimeAuditTargetSnapshot|RuntimeAuditPrerequisiteObservation|RuntimeAuditFreshnessDependency|RuntimeAuditOperationAdmissibility|RuntimeAuditAuthority|RuntimeAuditCandidateAttempt|RuntimeAuditTerminal) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/pkg/workorchport/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
@@ -3124,27 +3124,25 @@ if [[ -n "$legacy_script_contract_matches" ]]; then
 	exit 1
 fi
 
-# GapNextAction remains a read-only compatibility projection. It must never
-# enter an owner aggregate, reducer, capability command, or provider request.
-gap_next_action_authority_matches="$(
-	grep -R -Hn -E --include='*.go' --exclude='*_test.go' -- '\bGapNextAction\b' \
-		internal/pkg/workorchruntimecontract \
-		internal/modules/kernel/orchestrator \
-		internal/modules/kernel/governance \
-		internal/modules/blocks/run \
-		internal/modules/blocks/llm || true
+# Runtime read projections carry factual blockers and display-only navigation,
+# never a compatibility action object or a repair-loop command mirror.
+projection_next_action_matches="$(
+	grep -R -Hn -E --include='*.go' --include='*.ts' --include='*.tsx' --exclude='*_test.go' -- \
+		'\bGapNextAction\b|[Nn]extAction[[:space:]]*[:?]|RecommendedNextSteps|RuntimeAuditRepair[^}]*TerminalDeliveryAttempts' \
+		internal/pkg/workorchprojectioncontract \
+		internal/modules/application/workorchd/biz/appservice/readmodelprojection \
+		internal/modules/application/workorchd/biz/appservice/runtimecore \
+		web/workorch-console/src || true
 )"
-if [[ -n "$gap_next_action_authority_matches" ]]; then
-	echo "boundary contract violation: display-only GapNextAction leaked into Runtime authority" >&2
-	echo "$gap_next_action_authority_matches" >&2
+if [[ -n "$projection_next_action_matches" ]]; then
+	echo "boundary contract violation: a Runtime read projection retains action or terminal-delivery shadow state" >&2
+	echo "$projection_next_action_matches" >&2
 	exit 1
 fi
 
 script_next_action_matches="$(
 	find scripts -maxdepth 1 -type f -name '*.sh' \
 		! -name 'verify-boundary-contract.sh' \
-		! -name 'verify-dual-workspace-resume-replan-e2e.sh' \
-		! -name 'verify-run-resume-gap-confirmation-e2e.sh' \
 		-print0 |
 		xargs -0 -r grep -Hn -E -- 'nextAction|NextAction' || true
 )"
@@ -3429,8 +3427,7 @@ fi
 # GovernanceDisplay and a first-open resource from the same Run are not target
 # authority.
 workorchd_governance_resource_selection="$({
-	sed -n '/^func selectBlockingDecision(/,/^}/p' internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go
-	sed -n '/^func selectBlockingApproval(/,/^}/p' internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go
+	sed -n '/^func selectBlockingDecision(/,$p' internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go
 })"
 if grep -q -E -- 'GovernanceDisplay|isOpenGovernanceState' <<<"$workorchd_governance_resource_selection" ||
 	! grep -q -F 'canonicalActiveRun(snapshot, activeRunID)' <<<"$workorchd_governance_resource_selection" ||
@@ -3441,6 +3438,75 @@ if grep -q -E -- 'GovernanceDisplay|isOpenGovernanceState' <<<"$workorchd_govern
 	! grep -q -F 'DecisionTicketStateOpen' <<<"$workorchd_governance_resource_selection" ||
 	! grep -q -F 'ApprovalStatePending' <<<"$workorchd_governance_resource_selection"; then
 	echo "boundary contract violation: Workorchd RuntimeView governance resource is not selected from the canonical Run blocker reference" >&2
+	exit 1
+fi
+
+recovery_blocker_contract="$(cat \
+	internal/pkg/workorchprojectioncontract/progress.go \
+	internal/modules/application/workorchd/biz/appservice/readmodelprojection/governance_progress_projection.go \
+	internal/modules/application/workorchd/biz/appservice/readmodelprojection/projection_readmodel_views.go)"
+if ! grep -q -F 'type BlockingResourceRef struct' <<<"$recovery_blocker_contract" ||
+	! grep -q -F 'AllowedUserActions: append([]string(nil), item.AllowedRecoveryActions...)' <<<"$recovery_blocker_contract" ||
+	! grep -q -F 'selectRunBlockingDecision(snapshot.Run, snapshot.Decisions)' <<<"$recovery_blocker_contract" ||
+	! grep -q -F 'selectRunBlockingApproval(snapshot.Run, snapshot.Approvals)' <<<"$recovery_blocker_contract" ||
+	! grep -q -F 'SuggestedNavigation is display-only' <<<"$recovery_blocker_contract"; then
+	echo "boundary contract violation: factual recovery blocker lost canonical owner selection or display-only navigation separation" >&2
+	exit 1
+fi
+
+# Pre-seal admission must prove a complete owner-fact acquisition/reobserve
+# closure; Runtime may consume that sealed fact but no application/capability
+# projection may invent an action after Run creation.
+definition_owner_fact_contract="$(cat \
+	internal/modules/blocks/workspace/pkg/models/definition_admission.go \
+	internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go \
+	internal/pkg/workorchruntimecontract/runtime_owner_fact.go)"
+for marker in RequiredOwnerFactBindings OwnerFactConvergenceBindings RuntimeProfileContractsHash RuntimeOwnerFactMissingTrigger MaxAcquisitionAttempts; do
+	if ! grep -q -F "$marker" <<<"$definition_owner_fact_contract"; then
+		echo "boundary contract violation: Definition owner-fact closure lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'declared_prerequisite_unresolved' <<<"$definition_owner_fact_contract"; then
+	echo "boundary contract violation: incomplete owner-fact closure no longer fails before Run creation" >&2
+	exit 1
+fi
+runtime_owner_fact_consumption="$(cat \
+	internal/pkg/workorchruntimecontract/runtime_semantic_binding.go \
+	internal/modules/kernel/orchestrator/biz/runtime/semantic_planning.go \
+	internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan.go)"
+for marker in ResolveRuntimeOwnerFactAcquisition ValidateRuntimeSemanticPlanSourceDeclarationsWithOwnerFacts runtimeOwnerFactAcquisitionFailureSignature; do
+	if ! grep -q -F "$marker" <<<"$runtime_owner_fact_consumption"; then
+		echo "boundary contract violation: SM-2 owner-fact acquisition lost exact sealed selection or one-shot accounting ($marker)" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'TestCommitAssessmentFailsClosedAfterSingleSealedOwnerFactAcquisition' internal/modules/kernel/orchestrator/biz/runtime/assessment_owner_fact_replan_test.go; then
+	echo "boundary contract violation: one-shot owner-fact acquisition exhaustion regression is missing" >&2
+	exit 1
+fi
+
+# Run replacement recovery is one owner-private durable stage/generation
+# ledger. Process-local tasks may only wake the persisted lease.
+run_replacement_recovery_contract="$(cat \
+	internal/modules/blocks/run/pkg/models/run.go \
+	internal/modules/blocks/run/biz/owner.go \
+	internal/modules/blocks/run/biz/replacement_internal_event.go \
+	internal/modules/blocks/run/biz/workspace_execution_intent.go)"
+for marker in ReplacementRecoveryLease ReplacementRecoveryClarificationResolution ReplacementRecoveryAdministrativeTermination ReplacementRecoverySuccessorMaterialization ReplacementRecoveryScheduled ReplacementRecoveryRunning; do
+	if ! grep -q -F "$marker" <<<"$run_replacement_recovery_contract"; then
+		echo "boundary contract violation: Run-owned replacement recovery lost $marker" >&2
+		exit 1
+	fi
+done
+for marker in replacementRecoveryCtx replacementRecoveryCancel replacementRecoveryWG beginReplacementRecoveryGeneration; do
+	if ! grep -q -F "$marker" <<<"$run_replacement_recovery_contract"; then
+		echo "boundary contract violation: Run replacement wakeup is not bound to owner Stop/drain ($marker)" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'TestReplacementRecoveryStopCancelsWakeupAndFreshOwnerRemountsPersistedLease' internal/modules/blocks/run/biz/replacement_termination_delivery_test.go; then
+	echo "boundary contract violation: Run replacement Stop/restart wakeup regression is missing" >&2
 	exit 1
 fi
 
