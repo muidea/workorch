@@ -1564,6 +1564,11 @@ fi
 # reduction may compare only its opaque lifecycle fence and envelope revision;
 # decoding these aggregate fields would let SM-1 select transitions from
 # SM-2/SM-3/SM-4 state.
+if ! grep -q -F -- 'const RuntimeStateSchemaVersionCurrent uint32 = 2' internal/pkg/workorchruntimecontract/runtime_state.go ||
+   ! grep -q -F -- 'TestGMMR2StartupPriorOwnerFactContractSchemaMarksRunFreshActivationWithoutDrive' internal/modules/kernel/orchestrator/biz/owner_test.go; then
+  echo "boundary contract violation: owner-fact convergence schema bump/startup incompatibility regression is missing" >&2
+  exit 1
+fi
 run_runtime_decode_matches="$(source_matches 'RuntimeState\.(Facts|Decision|SemanticPlanning|Reconciliation|CandidateAttempts|ActiveDispatch|CompletedDispatches|GovernanceRequests|GovernanceResolutions|OperationReceipts|DeliveryAcknowledgements|DriveLease|Termination)' internal/modules/blocks/run/biz/lifecycle_reducer.go)"
 if [[ -n "$run_runtime_decode_matches" ]]; then
   cat >&2 <<EOF

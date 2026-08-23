@@ -82,7 +82,8 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   schema 和 safe original diagnostic 的 `RuntimeStateIncompatibleFact`。Run reducer 将它持久化为
   `fresh_activation_required`；该 Run 的 workspace resume admission 返回 typed non-resumable disposition，既不发 continuation
   fact，也不触发 drive。开发基线不兼容时必须清理旧数据，再由用户提交显式 fresh activation；
-  不能用对不兼容 predecessor 的 restart 做 schema 迁移。
+  不能用对不兼容 predecessor 的 restart 做 schema 迁移。当前 Runtime aggregate schema 为 `v2`；`v1` 未封存
+  owner-fact convergence，Run 必须保持其 opaque bytes 原样并只接收 Orchestrator 的 incompatibility fact。
 - governed blocker 与 continuation 必须各自恰好携带一个 DecisionTicket 或 Approval identity，并匹配已持久化的
   opaque governance fence；wait fence 的 resolution slot 必须为空，continuation 的 typed fact、Run-private reducer 与同步
   acknowledgement 必须匹配 fence 中 exact `ResolutionID`，即使 Run 已经 active 也要先完成该比较；opaque fence 的

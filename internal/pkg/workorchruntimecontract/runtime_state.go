@@ -176,9 +176,12 @@ type RuntimeStateRecord struct {
 // RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
 // During development only the current implementation baseline is maintained;
 // incompatible development data is discarded instead of accumulating migration
-// branches. ProviderCeiling remains the sole persisted model capability fact
-// and ExpectedDocument the sole resolved request budget.
-const RuntimeStateSchemaVersionCurrent uint32 = 1
+// branches. Version 2 seals the per-focus owner-fact convergence declarations;
+// a version-1 record cannot safely reconstruct that authority and must enter
+// fresh activation through the typed schema-incompatibility boundary.
+// ProviderCeiling remains the sole persisted model capability fact and
+// ExpectedDocument the sole resolved request budget.
+const RuntimeStateSchemaVersionCurrent uint32 = 2
 
 // ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")

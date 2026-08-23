@@ -21,7 +21,8 @@ active -> completed | failed | cancelled | superseded
   predecessor lineage；不允许自动 successor。
 - 对非 current-baseline、不可读的 opaque aggregate，Resume 只返回 `fresh_activation_required`，Restart 只返回
   `data_reset_required`；二者都不得 drive 旧 aggregate、创建 `ReplacementIntent`、触发 terminal delivery 或创建 successor。
-  当前开发基线不迁移旧 schema，必须先清理不兼容数据。只有 current-baseline Run 的显式 Restart 才能持久化
+  当前开发基线为 Runtime aggregate schema `v2`，其 DefinitionFocus 必须封存 required owner fact 的 convergence；
+  `v1` 不迁移、不补默认声明，必须先清理不兼容数据。只有 current-baseline Run 的显式 Restart 才能持久化
   Run-owned replacement intent，经 SM-4 `Result -> Workspace -> Run` delivery 释放 Workspace 后创建唯一 successor 并保存 lineage。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化

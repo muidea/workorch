@@ -51,8 +51,10 @@ non-transient contract failure分别封存 typed expired/exhausted terminal，�
 
 ### Current development baseline 与 provider output contract
 
-当前 Runtime schema 只维护一个无版本号的开发基线。开发调试阶段不维护历史 schema migration 或多版本 reducer；不兼容变化直接更新
-当前代码/fixture baseline，并要求清理既有运行数据。activation/execution contract、config、runtime policy 与 stable-prefix hash 不携带
+当前 Runtime schema 只维护一个带明确版本号的开发基线；当前 `v2` 首次要求每个 required owner fact 封存完整
+convergence declaration。开发调试阶段不维护历史 schema migration 或多版本 reducer；不兼容变化必须提升 schema、更新
+当前代码/fixture baseline，并要求清理既有运行数据。不得在 load 时为旧记录补 convergence 或重建 authority。
+activation/execution contract、config、runtime policy 与 stable-prefix hash 不携带
 semantic-plan/candidate stage token limit。LLM owner 是 model capability 的唯一解释者；Orchestrator 只消费针对当前
 workspace/run/authority、sealed selection 及 capability/configuration revision 的 detached persisted
 `ProviderCeiling`，不得按 model name 分支或应用 token override。
@@ -666,7 +668,8 @@ deployed run ID 只属于 archive regression evidence，不定义当前候选、
   `/run/command/get`。
 - typed record load 返回 `RuntimeStateSchemaVersionError` 时，SM-4 只发送 immutable non-current-schema fact 给 Run owner；它不提交 drive
   failure aggregate、不请求 LLM/operation、不创建 governance ticket，且 Run owner 的
-  `fresh_activation_required` notification 不再进入 drive scheduling。
+  `fresh_activation_required` notification 不再进入 drive scheduling。特别是缺少 owner-fact convergence 的 `v1`
+  record 必须在 schema gate 被归类，不能继续到 DefinitionFocus 深层校验并阻断整个进程启动。
 - Run owner opaque aggregate update 返回 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或
   `owner_transient` concrete result。仅 `aggregate_revision_mismatch` 的实际 revision mismatch 可构造
   `RuntimeCASConflictError`；Orchestrator 禁止用泛化 `errors.Is(err, common.ErrConflict)` 推断 CAS retry。

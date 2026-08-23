@@ -182,9 +182,9 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
 
-		RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: 7},
+		RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 1, StateRevision: 7},
 	}
-	cmd := schemaIncompatibleFact("ws-1", "run-1", 7, 2)
+	cmd := schemaIncompatibleFact("ws-1", "run-1", 7, 1)
 	transition, err := reduceRuntimeStateIncompatible(current, cmd)
 	if err != nil || transition.Noop || transition.Target != common.RunStateActive || transition.RuntimeActivationStatus == nil {
 		t.Fatalf("transition=%+v err=%v", transition, err)
@@ -192,7 +192,7 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 	next := applyLifecycleTransition(current, transition)
 	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
 		next.RuntimeActivationStatus.Incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported ||
-		next.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion != 2 || next.RuntimeActivationStatus.Feedback == nil ||
+		next.RuntimeActivationStatus.Incompatibility.ActualSchemaVersion != 1 || next.RuntimeActivationStatus.Feedback == nil ||
 		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil || next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-state-schema/fixture" {
 		t.Fatalf("fresh-activation status=%+v", next.RuntimeActivationStatus)
 	}
@@ -246,14 +246,14 @@ func TestReduceRuntimeStateIncompatiblePreservesCurrentSchemaCWILedgerReason(t *
 func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 	biz, runs, _ := newLifecycleTestBiz(t)
 	seed := seedRun(t, runs, common.RunStateActive)
-	seed.RuntimeState = &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: 4}
+	seed.RuntimeState = &runtimecontract.RuntimeStateRecord{SchemaVersion: 1, StateRevision: 4}
 	if err := runs.Update(context.Background(), seed); err != nil {
 		t.Fatalf("seed incompatible run: %v", err)
 	}
 	ctx := context.Background()
 	response, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		runevents.TopicRunFactRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		schemaIncompatibleFact("ws-1", "run-1", 4, 2),
+		schemaIncompatibleFact("ws-1", "run-1", 4, 1),
 	))
 	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		t.Fatalf("incompatible response=%+v err=%v", response, err)

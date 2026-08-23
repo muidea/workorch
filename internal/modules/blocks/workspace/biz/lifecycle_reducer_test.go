@@ -98,7 +98,7 @@ func TestWorkspaceRunNotificationsNeverReleaseActiveSlot(t *testing.T) {
 			CausationID: "run-state/run-old/7/fresh_activation_required", RuntimeStateRevision: 7, RuntimeStateRef: "runtime-state/ws-1/run-old/7",
 			RuntimeActivationDisposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 			RuntimeStateIncompatibility: runtimecontract.RuntimeStateIncompatibility{
-				Reason: runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported, ActualSchemaVersion: 2, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+				Reason: runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported, ActualSchemaVersion: 1, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 			},
 		}},
 	}

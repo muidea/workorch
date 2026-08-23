@@ -198,22 +198,38 @@ func TestGMMR3StartupRecoveryWaitsForRunCommandsReady(t *testing.T) {
 	}
 }
 
-func TestGMMR2StartupPreCWILedgerSchemaMarksRunFreshActivationWithoutDrive(t *testing.T) {
+func TestGMMR2StartupPriorOwnerFactContractSchemaMarksRunFreshActivationWithoutDrive(t *testing.T) {
 	deps := moduleContractDependencies()
 	background := &recordingBackgroundRoutine{}
 	deps.BackgroundRoutine = background
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
 	llmCalls := observeRuntimeLLMCalls(t, deps.CommandHub)
 	fileCalls := observeRuntimeFileCalls(t, deps.CommandHub)
+	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 11))
+	record.Facts.DefinitionFocuses[0].RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{{
+		OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}}
+	record.Facts.DefinitionFocuses[0].OwnerFactConvergences = nil
+	// This is the exact persisted shape produced before owner-fact convergence
+	// became part of the sealed Runtime schema. Prove that the fixture would
+	// fail the new deep contract if the schema gate incorrectly admitted it.
+	currentSchema := record.Clone()
+	currentSchema.SchemaVersion = runtimecontract.RuntimeStateSchemaVersionCurrent
+	if err := currentSchema.Validate(); err == nil {
+		t.Fatal("prior owner-fact record unexpectedly satisfies the current Runtime schema")
+	}
+	record.SchemaVersion = 1
 	item := runevents.RuntimeRecoveryInventoryItem{
-		WorkspaceID:               "ws-schema-unsupported",
-		RunID:                     "run-schema-unsupported",
+		WorkspaceID:               record.Facts.WorkspaceID,
+		RunID:                     record.Facts.RunID,
 		State:                     common.RunStateActive,
 		HasRuntimeBootstrap:       true,
 		HasRuntimeState:           true,
-		RuntimeStateRevision:      11,
-		RuntimeStateSchemaVersion: 3,
-		RuntimeStateRef:           "runtime-state/ws-schema-unsupported/run-schema-unsupported/11",
+		RuntimeStateRevision:      record.StateRevision,
+		RuntimeStateSchemaVersion: record.SchemaVersion,
+		RuntimeStateRef:           runevents.RuntimeStateRef(record.Facts.WorkspaceID, record.Facts.RunID, record.StateRevision),
 	}
 	var received *runevents.RuntimeStateIncompatibleFact
 	observer.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
@@ -226,9 +242,7 @@ func TestGMMR2StartupPreCWILedgerSchemaMarksRunFreshActivationWithoutDrive(t *te
 			result.Set(runevents.QueryRuntimeStateRecordResult{
 				WorkspaceID: item.WorkspaceID, RunID: item.RunID, StatePresent: true,
 				RuntimeStateRef: item.RuntimeStateRef, RuntimeStateRevision: item.RuntimeStateRevision,
-				// The audit marker is intentionally blank: schema gate must still
-				// create the Run-owned fresh-activation outcome.
-				RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 3, StateRevision: item.RuntimeStateRevision},
+				RuntimeState: &record,
 			}, nil)
 		}
 	})
@@ -274,7 +288,7 @@ func TestGMMR2StartupPreCWILedgerSchemaMarksRunFreshActivationWithoutDrive(t *te
 	if received == nil || received.WorkspaceID != item.WorkspaceID || received.RunID != item.RunID ||
 		received.RuntimeStateRef != item.RuntimeStateRef ||
 		received.Incompatibility.Reason != runtimecontract.RuntimeStateIncompatibilityReasonSchemaUnsupported ||
-		received.Incompatibility.ActualSchemaVersion != 3 ||
+		received.Incompatibility.ActualSchemaVersion != 1 ||
 		received.Incompatibility.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
 		received.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || received.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported ||
 		received.Feedback.OriginalDiagnostic == nil {
